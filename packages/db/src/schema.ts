@@ -28,6 +28,9 @@ import type {
   InboxOption,
   InboxState,
   InboxTarget,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   McpVerdict,
   ModelPin,
   ModelProfileId,
@@ -782,3 +785,28 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * Every question 10db asked a fast model through OpenRouter, and what came of it. `state` and
+ * `question` are the text 10db built (task text and a capped diff), never a secret. The outcome is
+ * written when the call is logged and may be replaced once by the decision that acted on the answer.
+ */
+export const judgeCalls = sqliteTable(
+  'judge_calls',
+  {
+    id: text('id').$type<JudgeCallId>().primaryKey(),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    model: text('model').notNull(),
+    state: text('state').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    confidence: real('confidence'),
+    outcome: text('outcome').$type<JudgeOutcome>().notNull(),
+    latencyMs: integer('latency_ms'),
+    costUsd: real('cost_usd'),
+    workstreamId: text('workstream_id').$type<WorkstreamId>(),
+    taskId: text('task_id').$type<TaskId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+);

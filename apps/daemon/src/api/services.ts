@@ -30,6 +30,11 @@ import type {
   InboxItemDto,
   InboxItemId,
   InboxState,
+  JudgeCallDto,
+  JudgeConfigPatch,
+  JudgeKeyInput,
+  JudgeStatusDto,
+  JudgeTestResultDto,
   KeepAwakeMode,
   KeepAwakeStatus,
   McpServerStatusDto,
@@ -103,6 +108,15 @@ export interface TaskLookupServices {
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
+  /** The judge's status, key, connection test and call log. */
+  judgeStatus(): Promise<JudgeStatusDto>;
+  patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
+  /** Write-only: the key goes to the Keychain and is never answered, logged or stored elsewhere. */
+  setJudgeKey(input: JudgeKeyInput): Promise<JudgeStatusDto>;
+  removeJudgeKey(): Promise<JudgeStatusDto>;
+  testJudge(): Promise<JudgeTestResultDto>;
+  /** The most recent calls, newest first. */
+  listJudgeCalls(limit: number): JudgeCallDto[];
   listProjects(): ProjectViewDto[];
   /** Registers the project and allows the registries its package files name. */
   createProject(input: ProjectInput): Promise<ProjectDto>;

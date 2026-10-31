@@ -14,6 +14,8 @@ export TENDB_DEV_UI_TOKEN="$token" VITE_DAEMON_TOKEN="$token"
 export TENDB_DEV_UI_ORIGIN=http://localhost:1420
 # Only the installed app calls Artificial Analysis; this daemon restarts on every file change.
 export TENDB_BENCHMARKS=off
+# Nor does it spend the builder's OpenRouter key on decisions.
+export TENDB_JUDGE=off
 export TENDB_DATA_DIR="${TENDB_DATA_DIR:-$PWD/.dev/data}"
 export VITE_DAEMON_URL="${VITE_DAEMON_URL:-http://127.0.0.1:${TENDB_PORT:-4317}}"
 exec pnpm -r --parallel --if-present run dev

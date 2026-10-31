@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^jdg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "review_size"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "question": {
+      "type": "string"
+    },
+    "answer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "confidence": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "outcome": {
+      "type": "string",
+      "enum": [
+        "acted",
+        "below_floor",
+        "fallback_off",
+        "fallback_no_key",
+        "fallback_timeout",
+        "fallback_error"
+      ]
+    },
+    "latencyMs": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "costUsd": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "workstreamId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "taskId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+    }
+  },
+  "required": [
+    "id",
+    "decision",
+    "model",
+    "question",
+    "answer",
+    "confidence",
+    "outcome",
+    "latencyMs",
+    "costUsd",
+    "workstreamId",
+    "taskId",
+    "createdAt"
+  ]
+}

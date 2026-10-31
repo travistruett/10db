@@ -28,6 +28,9 @@ import {
   getWorkstreamRow,
   insertBatch,
   insertInboxItem,
+  insertJudgeCall,
+  listJudgeCalls,
+  patchJudgeConfig,
   listEventsAfter,
   listBoardColumns,
   listEvidence,
@@ -54,7 +57,8 @@ import {
 import { createLauncher, KeychainError } from '../environment';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { DEFAULT_RUNNER_LIMITS } from '../runner';
-import { createGit } from '../git';
+import { createGit, type Git } from '../git';
+import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
 import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
@@ -5260,5 +5264,377 @@ describe('without a gate command', () => {
       expect(ws(workstream.id).state).toBe('DONE');
       expect(engine.adapter.prompts).toHaveLength(sessions);
     });
+  });
+});
+
+describe('the review size decision', () => {
+  const approve = (opId: string) => ({
+    do: 'mcp' as const,
+    tool: 'complete_step',
+    args: { opId, summary: 'Looks right.', verdict: 'approve' },
+  });
+  const implement = (opId: string, content = opId) => [
+    write('src/api/a.txt', content),
+    commit(opId, ['src/api/a.txt']),
+    turn,
+  ];
+  const planStep = (opId: string) => [
+    {
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId, summary: '1. Write src/api/a.txt.', verdict: null },
+    },
+    turn,
+  ];
+  const until = async (id: WorkstreamId, done: (state: string) => boolean) => {
+    for (let i = 0; i < 10 && !done(ws(id).state); i += 1) {
+      engine.launch(id);
+      await engine.runner.idle();
+    }
+  };
+
+  type Scripted =
+    | { kind: 'answered'; choice: 'review' | 'skip'; confidence: number }
+    | { kind: 'fallback'; reason: 'off' | 'no_key' | 'timeout' | 'error' };
+
+  /** A judge that logs each call the way the real one does, then answers as scripted. */
+  function scriptedJudge(script: Scripted): { judge: Judge; asked: JudgeRequest[] } {
+    const asked: JudgeRequest[] = [];
+    const judge: Judge = {
+      off: false,
+      choose: (req) => {
+        asked.push(req);
+        const answered = script.kind === 'answered';
+        const callId = engine.state.write((ctx) =>
+          insertJudgeCall(ctx, {
+            decision: req.decision,
+            model: 'typesafe/jev-1.13',
+            state: req.state,
+            question: req.question,
+            answer: answered ? script.choice : null,
+            confidence: answered ? script.confidence : null,
+            outcome: answered ? 'acted' : `fallback_${script.reason}`,
+            latencyMs: 50,
+            costUsd: null,
+            workstreamId: req.workstreamId ?? null,
+            taskId: req.taskId ?? null,
+          }),
+        );
+        const answer: JudgeAnswer =
+          script.kind === 'answered'
+            ? {
+                kind: 'answered' as const,
+                choice: script.choice,
+                confidence: script.confidence,
+                model: 'typesafe/jev-1.13',
+                latencyMs: 50,
+                costUsd: null,
+                callId,
+              }
+            : { kind: 'fallback' as const, reason: script.reason, detail: 'scripted', callId };
+        return Promise.resolve(answer);
+      },
+    };
+    return { judge, asked };
+  }
+  const outcomes = () => listJudgeCalls(engine.store.db, 10).map((c) => c.outcome);
+  const reasons = (id: WorkstreamId) =>
+    listEventsAfter(engine.store.db, 0, 1000)
+      .filter((e) => e.type === 'workstream.changed' && e.entityId === id)
+      .map((e) => e.data['reason']);
+
+  it('skips the review at or above the floor and finishes, recording that it acted', async () => {
+    const { judge, asked } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.9 });
+    engine = await createTestEngine({ Alpha: [implement('op-size-0001')] }, {}, { judge });
+    const { workstream, task } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement', 'review']);
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['implement']);
+    expect(engine.adapter.prompts).toHaveLength(1);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({
+      decision: 'review_size',
+      options: ['review', 'skip'],
+      workstreamId: workstream.id,
+      taskId: task.id,
+    });
+    expect(asked[0]?.state).toContain(`Task: ${task.title}`);
+    expect(asked[0]?.state).toContain('src/api/a.txt');
+    expect(asked[0]?.state).toContain('Gate result: gate passed (exit 0)');
+    expect(outcomes()).toEqual(['acted']);
+    expect(
+      reasons(workstream.id).some(
+        (r) => typeof r === 'string' && r.includes('review skipped by typesafe/jev-1.13 (0.9)'),
+      ),
+    ).toBe(true);
+  });
+
+  it('goes on to the step after a skipped review', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.95 });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          planStep('op-size-0011'),
+          implement('op-size-0012'),
+          [approve('op-size-0013'), turn],
+        ],
+      },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+      'plan',
+      'implement',
+      'review',
+      'qa',
+    ]);
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'qa']);
+    expect(ws(workstream.id).steps.map((s) => s.status)).toEqual(['done', 'done', 'done']);
+    expect(engine.adapter.prompts[2]?.prompt).toContain('qa');
+  });
+
+  it('still skips QA for a change of Markdown alone after the judge skipped the review', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.95 });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          planStep('op-size-0111'),
+          [write('src/api/a.md', '# A design'), commit('op-size-0112', ['src/api/a.md']), turn],
+        ],
+      },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement']);
+    // The plan and implement sessions only: neither the review nor QA ran.
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual(['acted']);
+  });
+
+  it('keeps QA when the changed-file list cannot be read after the judge skipped the review', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.95 });
+    const git: Git = {
+      ...createGit(),
+      filesChangedBetween: () => Promise.reject(new Error('index.lock exists')),
+    };
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          planStep('op-size-0121'),
+          [write('src/api/a.md', '# A design'), commit('op-size-0122', ['src/api/a.md']), turn],
+          [
+            {
+              do: 'mcp' as const,
+              tool: 'complete_step',
+              args: { opId: 'op-size-0123', summary: 'Works.', verdict: 'approve' },
+            },
+            turn,
+          ],
+        ],
+      },
+      {},
+      { judge, git },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+    await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'qa']);
+    expect(engine.adapter.prompts).toHaveLength(3);
+  });
+
+  it('runs the review below the floor, recording that', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.5 });
+    engine = await createTestEngine(
+      { Alpha: [implement('op-size-0021'), [approve('op-size-0022'), turn]] },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual(['below_floor']);
+  });
+
+  it('runs the review when the model answers review, recording that it acted', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'review', confidence: 0.99 });
+    engine = await createTestEngine(
+      { Alpha: [implement('op-size-0031'), [approve('op-size-0032'), turn]] },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual(['acted']);
+  });
+
+  it('honours a floor the builder changed', async () => {
+    const { judge } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.9 });
+    engine = await createTestEngine(
+      { Alpha: [implement('op-size-0041'), [approve('op-size-0042'), turn]] },
+      {},
+      { judge },
+    );
+    engine.state.write((ctx) =>
+      patchJudgeConfig(ctx, { decisions: { review_size: { floor: 0.95 } } }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual(['below_floor']);
+  });
+
+  it.each(['off', 'no_key', 'timeout', 'error'] as const)(
+    'runs the review when the judge falls back (%s)',
+    async (reason) => {
+      const { judge, asked } = scriptedJudge({ kind: 'fallback', reason });
+      engine = await createTestEngine(
+        { Alpha: [implement('op-size-0051'), [approve('op-size-0052'), turn]] },
+        {},
+        { judge },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE');
+      expect(asked).toHaveLength(1);
+      expect(engine.adapter.prompts).toHaveLength(2);
+      expect(outcomes()).toEqual([`fallback_${reason}`]);
+    },
+  );
+
+  it('makes no call and logs no row when the daemon was started with the judge off', async () => {
+    const { judge, asked } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.99 });
+    engine = await createTestEngine(
+      { Alpha: [implement('op-size-0081'), [approve('op-size-0082'), turn]] },
+      {},
+      { judge: { ...judge, off: true } },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(asked).toHaveLength(0);
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual([]);
+  });
+
+  it.each([
+    ['a cancel', 'CANCELLED'],
+    ['a shutdown', 'VERIFYING'],
+  ] as const)(
+    'cuts the judge call short on %s: the review neither runs nor is skipped',
+    async (_name, finalState) => {
+      let reached: () => void = () => undefined;
+      const inCall = new Promise<void>((resolve) => {
+        reached = resolve;
+      });
+      const signals: AbortSignal[] = [];
+      // Like the real judge, it answers only when its signal aborts: no model is asked, no clock moves.
+      const judge: Judge = {
+        off: false,
+        choose: (req) =>
+          new Promise<JudgeAnswer>((resolve) => {
+            const signal = req.signal;
+            if (!signal) throw new Error('the runner passed no signal');
+            signals.push(signal);
+            reached();
+            signal.addEventListener('abort', () => {
+              resolve({
+                kind: 'fallback',
+                reason: 'error',
+                detail: 'aborted',
+                callId: mintId('JudgeCall'),
+              });
+            });
+          }),
+      };
+      engine = await createTestEngine(
+        { Alpha: [implement('op-size-0091'), [approve('op-size-0092'), turn]] },
+        {},
+        { judge },
+      );
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      engine.launch(workstream.id);
+      await inCall;
+      if (finalState === 'CANCELLED') await engine.runner.cancel(workstream.id);
+      else await engine.runner.stop(workstream.id, 'shutdown');
+      await engine.runner.idle();
+      expect(signals[0]?.aborted).toBe(true);
+      expect(ws(workstream.id).state).toBe(finalState);
+      // Only the implement session ran; the review was neither run nor dropped from the plan.
+      expect(engine.adapter.prompts).toHaveLength(1);
+      expect(ws(workstream.id).steps.map((x) => x.role)).toEqual(['implement', 'review']);
+    },
+  );
+
+  const forcing: {
+    name: string;
+    riskTags?: ('security' | 'auth' | 'migration' | 'dependency')[];
+    config?: Parameters<typeof patchJudgeConfig>[1];
+    content?: string;
+  }[] = [
+    { name: 'a security risk tag', riskTags: ['security'] },
+    { name: 'an auth risk tag', riskTags: ['auth'] },
+    { name: 'a migration risk tag', riskTags: ['migration'] },
+    { name: 'a dependency risk tag', riskTags: ['dependency'] },
+    { name: 'the judge switched off', config: { enabled: false } },
+    {
+      name: 'the decision switched off',
+      config: { decisions: { review_size: { enabled: false } } },
+    },
+    { name: 'a diff over 400 lines', content: 'line\n'.repeat(401) },
+  ];
+  it.each(forcing)('runs the review with no call for $name', async (row) => {
+    const { judge, asked } = scriptedJudge({ kind: 'answered', choice: 'skip', confidence: 0.99 });
+    engine = await createTestEngine(
+      {
+        Alpha: [implement('op-size-0061', row.content), [approve('op-size-0062'), turn]],
+      },
+      {},
+      { judge },
+    );
+    if (row.config) {
+      const config = row.config;
+      engine.state.write((ctx) => patchJudgeConfig(ctx, config));
+    }
+    const { workstream } = engine.addTask('Alpha', ['api'], [], {
+      flow: 'standard',
+      ...(row.riskTags ? { riskTags: row.riskTags } : {}),
+    });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(asked).toHaveLength(0);
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(outcomes()).toEqual([]);
+  });
+
+  it('reads the review again after it sent the work back, with no call', async () => {
+    const { judge, asked } = scriptedJudge({ kind: 'answered', choice: 'review', confidence: 0.1 });
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          implement('op-size-0071'),
+          [
+            {
+              do: 'mcp' as const,
+              tool: 'complete_step',
+              args: { opId: 'op-size-0072', summary: '1. Add a test.', verdict: 'reject' },
+            },
+            turn,
+          ],
+          implement('op-size-0073', 'second'),
+          [approve('op-size-0074'), turn],
+        ],
+      },
+      {},
+      { judge },
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    // Asked once, before the first review; the re-review after the rework is forced.
+    expect(asked).toHaveLength(1);
+    expect(engine.adapter.prompts).toHaveLength(4);
   });
 });
