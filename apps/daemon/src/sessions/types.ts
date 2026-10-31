@@ -85,6 +85,8 @@ export type SessionEvent =
       readonly type: 'turn_complete';
       /** How the turn ended; absent counts as `success`. */
       readonly result?: TurnResult;
+      /** What the model wrote in the turn's last message, when it wrote any (capped by the adapter). */
+      readonly text?: string;
       readonly inputTokens: number;
       readonly outputTokens: number;
       readonly cachedTokens: number;

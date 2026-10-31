@@ -119,6 +119,8 @@ export function resultMessage(opts: {
   cacheRead?: number;
   cacheCreation?: number;
   costUsd: number;
+  /** The last message the model wrote in the turn; none by default. */
+  text?: string;
 }): SDKResultSuccess {
   return {
     type: 'result',
@@ -127,7 +129,7 @@ export function resultMessage(opts: {
     duration_api_ms: 900,
     is_error: false,
     num_turns: 1,
-    result: 'done',
+    result: opts.text ?? '',
     stop_reason: 'end_turn',
     total_cost_usd: opts.costUsd,
     usage: usage(opts.input, opts.output, opts.cacheRead ?? 0, opts.cacheCreation ?? 0),

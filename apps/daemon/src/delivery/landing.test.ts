@@ -152,14 +152,52 @@ describe('when GitHub refuses to turn auto-merge on', () => {
     h = createDeliveryHarness();
     h.gh.failNext.set(
       'prAutoMerge',
-      new GhError('failed', 'gh pr merge failed (exit 1): Pull request is in clean status'),
+      new GhError('failed', 'gh pr merge failed (exit 1): Pull request is in draft status'),
     );
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
     const card = h.only(h.cards());
     expect(card.title).toContain('not set to merge by itself');
     expect(card.body).toContain(shipped.prUrl ?? '');
-    expect(card.body).toContain('clean status');
+    expect(card.body).toContain('draft status');
+    expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
+  });
+});
+
+describe('when the base branch has no required checks', () => {
+  it('squash-merges the pull request right after it opens, with no card', async () => {
+    h = createDeliveryHarness();
+    h.gh.noRequiredChecks = true;
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.merged).toEqual([shipped.prUrl]);
+    expect(h.cards()).toEqual([]);
+    // What the pull request watch reads next, which puts the task in Done.
+    const read = await h.gh.prView({ repo: 'acme/widgets', ref: shipped.prUrl ?? '' });
+    expect(read?.state).toBe('MERGED');
+  });
+
+  it('tells the builder why, with the link, when the immediate merge fails', async () => {
+    h = createDeliveryHarness();
+    h.gh.noRequiredChecks = true;
+    h.gh.failNext.set(
+      'prMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): Pull request has a merge conflict'),
+    );
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.merged).toEqual([]);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('not merged');
+    expect(card.body).toContain('merge conflict');
+    expect(card.body).toContain(shipped.prUrl ?? '');
+  });
+
+  it('never merges a pull request held for the builder', async () => {
+    h = createDeliveryHarness({ landing: 'hold' });
+    h.gh.noRequiredChecks = true;
+    await ship(await start('One', h.addTask('Alpha')));
+    expect(h.gh.calls.some((c) => c.method === 'prMerge')).toBe(false);
   });
 });
 

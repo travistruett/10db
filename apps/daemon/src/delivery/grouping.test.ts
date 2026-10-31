@@ -26,6 +26,8 @@ function tasksNamed(deps: Record<string, readonly string[]>): Map<string, TaskDt
         riskTags: [],
         flowId: null,
         landing: { kind: 'base' },
+        workspaceMode: 'worktree',
+        placementReason: null,
         status: 'open',
         boardOrder: 0,
         boardColumnId: null,

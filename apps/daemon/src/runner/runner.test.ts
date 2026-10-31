@@ -2661,6 +2661,62 @@ describe('flows', () => {
     expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
   });
 
+  it('records a verdict whose opId an earlier session of the task already used', async () => {
+    // Two incident reviews reused one readable opId: the daemon answered "Recorded" from the first
+    // session's reply and wrote nothing, so the step failed for a verdict the reviewer had given.
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0033'),
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, reject('op-review-same'), turn],
+        implement('op-flow-0034'),
+        [turn, { do: 'await_message', contains: RESULT_NUDGE }, approve('op-review-same'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(step(workstream.id, 1)?.result?.verdict).toBe('approve');
+  });
+
+  describe('a review that wrote its findings as text and never recorded them', () => {
+    const FINDINGS = '1. BLOCKING src/api/a.txt:3 the empty state has no test.\n   Add one.';
+    const wrote = (text: string) => [
+      { do: 'turn_complete' as const, text },
+      { do: 'await_message' as const, contains: RESULT_NUDGE },
+      { do: 'turn_complete' as const, text: 'The findings are above.' },
+    ];
+
+    it('fails with a card that carries what it wrote, so the builder can act on it', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0035'), wrote(FINDINGS), wrote(FINDINGS)],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      expect(ws(workstream.id).failureReason).toBe(
+        'The review step ended without calling complete_step: its last turn ended normally. What it wrote is on the card.',
+      );
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      const detail = ReviewCardDetail.parse(card?.detail?.['reviewRejection']);
+      expect(detail).toMatchObject({
+        role: 'review',
+        personaName: 'Reviewer',
+        summary: FINDINGS,
+        findings: [{ severity: 'BLOCKING', location: 'src/api/a.txt:3' }],
+      });
+      expect(card?.body).toContain('What it wrote is on the card.');
+    });
+
+    it('keeps the failure as before when the review wrote nothing', async () => {
+      engine = await createTestEngine({
+        Alpha: [implement('op-flow-0036'), noVerdict, noVerdict],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'FAILED', 2);
+      const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
+      expect(card?.detail?.['reviewRejection']).toBeUndefined();
+    });
+  });
+
   describe('when the reviewer keeps rejecting', () => {
     const FINAL =
       '1. BLOCKING src/api/a.txt:3 the card hides what the reviewer found.\n   Show it.';

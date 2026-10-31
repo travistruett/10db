@@ -286,6 +286,8 @@ type Outcome =
       readonly withoutHandoff: boolean;
       /** How the session ended, in a plain clause: what a step that records no result is failed with. */
       readonly ending: string;
+      /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
+      readonly wrote: string;
     }
   | {
       readonly kind: 'parked';
@@ -418,6 +420,12 @@ interface SessionState {
   resultNudged: boolean;
   /** How the session's last turn ended; null before any turn did. */
   lastTurn: TurnResult | null;
+  /**
+   * The longest last message any turn of the session wrote ('' when none did). A review that ends
+   * without recording a verdict has usually written its findings here, and the failure card shows them;
+   * the longest, because the turn after a nudge only says "done".
+   */
+  wrote: string;
   /** The share of its context window the session last reported using. */
   contextPct: number | null;
   parkedFor: InboxItemId | null;
@@ -687,6 +695,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl: Control,
     started: WorkstreamRow,
     ending: string,
+    wrote: string,
   ): Promise<'next' | 'stop'> {
     const step = currentStep(started);
     const row = await withoutDocsOnlyQa(id, started, step);
@@ -720,7 +729,23 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'next';
         }
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
+        // A review that wrote its findings but never recorded them: the card carries what it wrote, so
+        // the builder can judge the work on it instead of rerunning the review.
+        const gave = REVIEW_ROLES.includes(step.role) && wrote !== '';
+        fail(
+          id,
+          ctl.fence,
+          `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          gave
+            ? {
+                role: step.role,
+                personaName: step.personaName,
+                at: opts.clock.now().toISOString(),
+                findings: parseFindings(wrote),
+                summary: wrote,
+              }
+            : undefined,
+        );
         return 'stop';
       }
       case 'done': {
@@ -1303,6 +1328,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       firmSent: false,
       resultNudged: false,
       lastTurn: null,
+      wrote: '',
       contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
@@ -1561,6 +1587,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            if (event.text && event.text.length > st.wrote.length) st.wrote = event.text;
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1590,6 +1617,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 kind: 'step_done',
                 withoutHandoff: st.handoffRequested,
                 ending: describeEnding(st),
+                wrote: st.wrote,
               };
               await handle.stop();
             }
@@ -1668,6 +1696,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     kind: 'step_done',
                     withoutHandoff: st.handoffRequested,
                     ending: describeEnding(st),
+                    wrote: st.wrote,
                   };
                   break;
               }
@@ -2145,7 +2174,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
+            if (
+              (await finishReadOnlyStep(id, ctl, finished, outcome.ending, outcome.wrote)) ===
+              'next'
+            )
+              continue;
             return;
           }
           if (outcome.withoutHandoff) {
