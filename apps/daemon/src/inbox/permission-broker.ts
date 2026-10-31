@@ -15,9 +15,16 @@ import { z } from 'zod';
 import type { StateStore } from '../events';
 import { firstUnread, hazardHit, stringField } from '../guard';
 import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
-import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
+import {
+  isOwnTaskOutputPath,
+  readAccess,
+  readPathsOf,
+  writeAccess,
+  type FileAccessContext,
+} from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
+import { readsOnlyOwnFiles } from './monitor-command';
 import { ParkedError, type InboxService } from './service';
 
 export interface WaitObserver {
@@ -302,6 +309,23 @@ export function createPermissionBroker(
       : { summary: command };
   }
 
+  /**
+   * A sandboxed Monitor call that only waits on and reads files in the session's own task output
+   * directory runs without a card. It passes the checks a Bash command does, and then its own: a
+   * short grammar of reading programs over those files. Anything else is asked about.
+   */
+  function judgeMonitor(
+    req: ToolRequest,
+    sandbox: NonNullable<BrokerContext['sandbox']>,
+  ): ToolDecision | null {
+    const command = req.input['command'];
+    if (typeof command !== 'string') return null;
+    const bash = judgeBash(req, sandbox);
+    if (!isDecision(bash) || bash.behavior !== 'allow') return null;
+    const own = (path: string): boolean => isOwnTaskOutputPath(path, sandbox.fileAccess);
+    return readsOnlyOwnFiles(command, own) ? { behavior: 'allow' } : null;
+  }
+
   /** A read tool: protected paths are refused, the checkout and the read list are open, the rest is asked about by real path. */
   function judgeRead(
     req: ToolRequest,
@@ -359,6 +383,7 @@ export function createPermissionBroker(
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);
     let verdict: ToolDecision | Ask | null = null;
     if (req.toolName === 'Bash') verdict = judgeBash(req, sandbox);
+    else if (req.toolName === 'Monitor') verdict = judgeMonitor(req, sandbox);
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);
     if (verdict === null) return askPermission(req);

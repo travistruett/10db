@@ -315,6 +315,49 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
   };
 }
 
+/**
+ * True only for a file directly in this session's own Claude Code task output directory:
+ * `<own temp dir>/claude-<uid>/<slug>/<providerSessionId>/tasks/<file>`. The file need not exist yet.
+ */
+function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
+  if (ctx.providerSessionId === null) return false;
+  const sessionId = foldPathCase(ctx.providerSessionId);
+  const folded = foldPathCase(realPath);
+  for (const own of spellings(ctx.sandboxTemp.own)) {
+    const base = foldPathCase(own);
+    if (!folded.startsWith(`${base}/`)) continue;
+    const [claude, slug, id, tasks, file, ...rest] = folded.slice(base.length + 1).split('/');
+    if (
+      claude?.startsWith('claude-') === true &&
+      slug !== undefined &&
+      slug !== '' &&
+      id === sessionId &&
+      tasks === 'tasks' &&
+      file !== undefined &&
+      file !== '' &&
+      rest.length === 0
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether an absolute path names a file in this session's own task output directory, read both as
+ * written and as the kernel opens it. A link that leads out, a `..` that climbs out and a path that
+ * cannot be resolved are not.
+ */
+export function isOwnTaskOutputPath(path: string, ctx: FileAccessContext): boolean {
+  if (!isAbsolute(path)) return false;
+  try {
+    return candidates(path, ctx).every((real) => isOwnTaskOutput(real, ctx));
+  } catch (error) {
+    if (error instanceof PathResolutionError) return false;
+    throw error;
+  }
+}
+
 /** An unexpected failure while judging is a refusal, never an error thrown into the hook. */
 function refusalFor(path: string, cause: unknown): string {
   return new FileAccessError(`${path} could not be judged; 10db refuses it.`, { cause }).message;
