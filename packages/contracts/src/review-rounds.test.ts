@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
-import { findingBody, findingNotes, parseFindings, rejectionsSentBack, reviewRounds } from './review-rounds';
+import {
+  findingBody,
+  findingNotes,
+  parseFindings,
+  rejectionsSentBack,
+  reviewRounds,
+} from './review-rounds';
 import { FOLLOW_UPS_HEADING, type WorkstreamStep } from './steps';
 
 describe('findingNotes', () => {
