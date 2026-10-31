@@ -1114,6 +1114,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       priorResults,
       previousResult: readOnly ? step.result : null,
+      earlierResults: step.earlier,
       revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
       evidence,
       recovery:

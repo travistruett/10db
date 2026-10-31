@@ -28,7 +28,9 @@ import {
   insertBatch,
   insertInboxItem,
   listEventsAfter,
+  listBoardColumns,
   listEvidence,
+  listTasks,
   listInbox,
   listSessions,
   patchAccount,
@@ -2469,6 +2471,55 @@ describe('flows', () => {
     engine.launch(workstream.id); // the second gate passed; review again
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('briefs the second review with the first one’s findings, and files what it finds beyond them as a follow-up task', async () => {
+    const followUp = {
+      title: 'Make errors name the file',
+      description: 'The upload error says nothing about which file failed.',
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        implement('op-flow-0061'),
+        [reject('op-flow-0062'), turn],
+        implement('op-flow-0063'),
+        [
+          {
+            do: 'mcp' as const,
+            tool: 'complete_step',
+            args: {
+              opId: 'op-flow-0064',
+              summary: 'Fixed.',
+              verdict: 'approve',
+              followUps: [followUp],
+            },
+          },
+          turn,
+        ],
+      ],
+    });
+    const { workstream, task } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    await until(workstream.id, (s) => s === 'DONE');
+    const first = engine.adapter.prompts[1]?.prompt ?? '';
+    expect(first).toContain('This is round 1');
+    const second = engine.adapter.prompts[3]?.prompt ?? '';
+    expect(second).toContain('This is round 2');
+    expect(second).toContain(
+      'Findings from your earlier rounds (check only these):\n1. The empty state has no test.',
+    );
+    const filed = listTasks(engine.store.db, engine.project.id).filter((t) => t.id !== task.id);
+    expect(filed).toMatchObject([
+      {
+        title: followUp.title,
+        status: 'open',
+        boardColumnId: listBoardColumns(engine.store.db, engine.project.id)[0]?.id,
+        landing: task.landing,
+      },
+    ]);
+    expect(filed[0]?.description).toContain(task.id);
+    expect(step(workstream.id, 1)?.result?.summary).toContain(
+      `${filed[0]?.id ?? ''} ${followUp.title}`,
+    );
   });
 
   const noVerdict = [turn, { do: 'await_message' as const, contains: RESULT_NUDGE }, turn];

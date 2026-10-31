@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { StepRole } from './states';
-import type { StepResult, WorkstreamStep } from './steps';
+import { FOLLOW_UPS_HEADING, type StepResult, type WorkstreamStep } from './steps';
 
 /** Times the work may be sent back, by a reviewer, a gate or the builder, before the workstream fails. */
 export const FIX_ATTEMPT_LIMIT = 3;
@@ -56,13 +56,15 @@ function findingOf(lines: readonly string[]): Finding {
  */
 export function parseFindings(summary: string): Finding[] {
   const items: string[][] = [];
-  for (const line of summary.split('\n')) {
+  // 10db's own list of the follow-up tasks the review filed comes last and holds no finding.
+  const notes = summary.split(`\n${FOLLOW_UPS_HEADING}`)[0] ?? summary;
+  for (const line of notes.split('\n')) {
     const start = NUMBERED.exec(line);
     if (start) items.push([start[1] ?? '']);
     else items.at(-1)?.push(line);
   }
   if (items.length === 0) {
-    const lines = summary.split('\n').filter((l) => l.trim() !== '');
+    const lines = notes.split('\n').filter((l) => l.trim() !== '');
     return lines.length === 0 ? [] : [findingOf(lines)];
   }
   return items.map(findingOf);

@@ -10,6 +10,7 @@ import {
   type StepResult,
   type StepRole,
   type TaskDto,
+  Verdict,
 } from '@10db/contracts';
 import { failedSteps } from './failed-steps';
 
@@ -46,6 +47,8 @@ export interface PromptInput {
   readonly priorResults: readonly PriorResult[];
   /** A read-only step sent back sees the result it gave before. */
   readonly previousResult: StepResult | null;
+  /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
+  readonly earlierResults: readonly StepResult[];
   readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
   /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
   readonly sandboxed?: boolean;
@@ -261,6 +264,35 @@ function actionSection(input: PromptInput): string {
   }
 }
 
+const FOLLOW_UP_HOW =
+  'Title each follow-up as an outcome (what is true when it is done) and describe what you saw and where; 10db files it as a task in the Icebox column and names it in your result.';
+
+/**
+ * What a review role is told about its round. The first round lists every blocking finding at once;
+ * a later round checks only the newest rejection (it already holds the older findings that were
+ * still open) plus what the fix broke, and files anything else it sees as a follow-up task.
+ */
+function roundSection(step: StepBrief, earlierResults: readonly StepResult[]): string[] {
+  if (!REVIEW_ROLES.includes(step.role)) return [];
+  const rejections = earlierResults.filter((r) => r.verdict === Verdict.Reject);
+  const latest = rejections.at(-1);
+  if (!latest) {
+    return [
+      '',
+      `This is round 1 of your step. If you reject, list every blocking finding you can see in one rejection, as numbered notes, so the fix can address them together. A real problem that does not block goes in the followUps list of mcp__10db__complete_step instead, not in the rejection. ${FOLLOW_UP_HOW}`,
+    ];
+  }
+  return [
+    '',
+    `This is round ${String(rejections.length + 1)} of your step: the work was sent back after your last rejection. Check only whether each earlier finding is fixed, and what the fix's own changes broke. Do not read the whole change again for new problems.`,
+    '',
+    'Findings from your earlier rounds (check only these):',
+    latest.summary,
+    '',
+    `Reject only for an earlier finding that is still not fixed or for something the fix's own changes broke, and number each one. A finding that is new and that the fix did not cause does not reject the work: put it in the followUps list of mcp__10db__complete_step. ${FOLLOW_UP_HOW} If every earlier finding is fixed and the fix broke nothing, approve.`,
+  ];
+}
+
 function stepSection(input: PromptInput): string[] {
   const { step } = input;
   const lines = [
@@ -281,6 +313,7 @@ function stepSection(input: PromptInput): string[] {
       : '';
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
+  lines.push(...roundSection(step, input.earlierResults));
   return lines;
 }
 
