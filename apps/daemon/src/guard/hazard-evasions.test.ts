@@ -29,6 +29,9 @@ describe('a hazard spelled around a redirection is still that hazard', () => {
     ['a redirection to a file', 'pnpm >/dev/null add x'],
     ['a separate target', 'pnpm > /dev/null add x'],
     ['a migration', 'pnpm 2>/dev/null db:migrate'],
+    ['a quoted word that looks like a redirection', "pnpm add '2>/dev/null' x"],
+    ['a quoted operator before the subcommand', 'pnpm ">" add x'],
+    ['a quoted redirection before the subcommand', "pnpm '2>/dev/null' add x"],
   ])('%s: %s', (_name, command) => {
     expect(guard(command, false).decision).toBe('deny');
     expect(guard(command, true).decision).toBe('allow');
@@ -51,6 +54,19 @@ describe('a hazard program with a word 10db cannot read asks', () => {
   ])('%s', (command) => {
     expect(hook(command)?.decision).toBe('ask');
     expect(hook(command, 'Monitor')?.decision).toBe('ask');
+  });
+});
+
+describe('a wrapper does not hide the program that feeds a hazard its arguments', () => {
+  it.each([
+    'nice xargs pnpm',
+    'timeout 5 xargs pnpm',
+    'env xargs pnpm',
+    'command xargs pnpm',
+    'echo x | parallel pnpm',
+    'parallel pnpm ::: add',
+  ])('%s', (command) => {
+    expect(hook(command)?.decision).toBe('ask');
   });
 });
 

@@ -358,6 +358,20 @@ export function withoutRedirections(words: readonly string[]): string[] {
   return kept;
 }
 
+/**
+ * The readings of a command's words a matcher must try. The parser keeps no mark of a quoted word,
+ * so a quoted `'>'` is an argument the stripped reading would lose: the words as written, with each
+ * redirection and its target dropped, and with only the operator words dropped. A match in any
+ * reading counts.
+ */
+export function redirectionReadings(words: readonly string[]): string[][] {
+  const operatorsOnly = words.filter((_, i) => {
+    const before = i > 0 && redirectionSpan(words, i - 1) === 2;
+    return redirectionSpan(words, i) === 0 || before;
+  });
+  return [[...words], withoutRedirections(words), operatorsOnly];
+}
+
 /** The command a segment runs, past reserved words, assignments and wrappers. */
 export function commandOf(segment: ShellSegment): {
   readonly words: string[];
@@ -604,13 +618,15 @@ function judgeShell(
       // After `! cd`, what follows `&&` runs when the cd failed.
       chained = negated ? union(dirs, moved) : moved;
     }
-    const forms = commandForms(withoutRedirections(words));
-    if (DEPLOY.some((re) => forms.lines.some((l) => re.test(l))))
+    const readings = redirectionReadings(words).map((reading) => commandForms(reading));
+    if (DEPLOY.some((re) => readings.some((forms) => forms.lines.some((l) => re.test(l)))))
       return deny('Deploy and publish commands are never run by agents.');
     const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
-        hazard.commands.some((c) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))) &&
+        hazard.commands.some((c) =>
+          readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
+        ) &&
         !claimed(input, ClaimKind.Hazard, hazard.name)
       ) {
         return deny(

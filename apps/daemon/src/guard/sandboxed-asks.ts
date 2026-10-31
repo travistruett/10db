@@ -5,6 +5,7 @@ import { hazardHit } from './hazards';
 import {
   shellScripts,
   withoutRedirections,
+  redirectionReadings,
   stringField,
   type FileAccessJudge,
   type GuardVerdict,
@@ -62,11 +63,37 @@ const EXPANDING = /[$`*?[~{}]/;
 /** A program name written out in plain text. */
 const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_@+%,:./-]+|\[\[?)$/;
 /** Programs whose arguments come from their input, so a hazard program behind them has its words unread. */
-const FEEDS_ARGUMENTS: ReadonlySet<string> = new Set(['xargs']);
+const FEEDS_ARGUMENTS: ReadonlySet<string> = new Set(['xargs', 'parallel']);
 const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh']);
 const MAX_DEPTH = 3;
 
 const baseName = (word: string): string => word.slice(word.lastIndexOf('/') + 1);
+
+/** The fail-closed checks on one reading of a segment's words. */
+function readingAsk(words: readonly string[], hazardPrograms: ReadonlySet<string>): string | null {
+  const program = programOf(words);
+  const line = words.slice(words.indexOf(program));
+  if (program !== '' && !PLAIN_PROGRAM.test(program)) {
+    return `The program "${program}" is not written out, so 10db cannot tell what it runs.`;
+  }
+  // A hazard program anywhere in the command line (behind env, command, nice...) with a word the
+  // shell expands after it: the expansion could select a hazard form.
+  const at = line.findIndex((word) => hazardPrograms.has(baseName(word)));
+  if (at >= 0 && line.slice(at + 1).some((word) => EXPANDING.test(word))) {
+    return 'A program with hazard forms is followed by a word the shell expands.';
+  }
+  // A feeder anywhere before the hazard program, however many wrappers stand between them.
+  const feeder = line.findIndex((word) => FEEDS_ARGUMENTS.has(baseName(word)));
+  if (feeder >= 0 && line.slice(feeder + 1).some((word) => hazardPrograms.has(baseName(word)))) {
+    return `"${baseName(line[feeder] ?? '')}" feeds a program with hazard forms its arguments.`;
+  }
+  return null;
+}
+
+/** The program a segment runs: its first word that is not an assignment. */
+function programOf(words: readonly string[]): string {
+  return words.find((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word)) ?? '';
+}
 
 /**
  * A fail-closed reading of one command: a program that is not plain text, a hazard program followed
@@ -79,25 +106,15 @@ function unreadableHazard(
   depth = 0,
 ): string | null {
   for (const segment of parseShell(command).segments) {
-    const words = withoutRedirections(leadingWords(segment.words).command);
+    const written = leadingWords(segment.words).command;
+    // The parser keeps no mark of a quoted word, so every reading of the redirections is checked.
+    for (const reading of redirectionReadings(written)) {
+      const found = readingAsk(reading, hazardPrograms);
+      if (found !== null) return found;
+    }
+    const words = withoutRedirections(written);
     const [head = ''] = words;
-    // Assignments before the program are not the program.
-    const at = words.findIndex((word) => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(word));
-    const program = at < 0 ? '' : (words[at] ?? '');
-    const rest = at < 0 ? [] : words.slice(at + 1);
-    if (program !== '' && !PLAIN_PROGRAM.test(program)) {
-      return `The program "${program}" is not written out, so 10db cannot tell what it runs.`;
-    }
-    const name = baseName(program);
-    // A hazard program anywhere in the command line (behind env, command, nice...) with a word the
-    // shell expands after it: the expansion could select a hazard form.
-    const at2 = [program, ...rest].findIndex((word) => hazardPrograms.has(baseName(word)));
-    if (at2 >= 0 && [program, ...rest].slice(at2 + 1).some((word) => EXPANDING.test(word))) {
-      return `A program with hazard forms is followed by a word the shell expands.`;
-    }
-    if (FEEDS_ARGUMENTS.has(name) && rest.some((word) => hazardPrograms.has(baseName(word)))) {
-      return `"${name}" feeds a program with hazard forms its arguments.`;
-    }
+    const program = programOf(words);
     if (head === '') continue;
     if (depth < MAX_DEPTH) {
       const documents = SHELLS.has(baseName(program)) ? segment.hereDocuments : [];

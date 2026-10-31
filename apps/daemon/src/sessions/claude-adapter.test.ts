@@ -492,6 +492,7 @@ describe('buildQueryOptions', () => {
     ['a requires-user-interaction ask', { requiresUserInteraction: true }, true],
     ['a classifier decision reason', { decisionReasonType: 'classifier' }, true],
     ['a rule decision reason', { decisionReasonType: 'rule' }, false],
+    ['a hook ask, which carries no requiresUserInteraction', { decisionReasonType: 'hook' }, false],
     ['an interaction flag of false', { requiresUserInteraction: false }, false],
   ])('marks the request escalated for %s: %s', async (_name, extra, expected) => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
