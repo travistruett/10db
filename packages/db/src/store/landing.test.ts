@@ -37,6 +37,43 @@ describe('a project default for where work lands', () => {
   });
 });
 
+describe('a project default that names a branch', () => {
+  it('gives new tasks that branch, and an explicit landing keeps its own', () => {
+    const p = seedProject(store, { landing: 'branch', landingBranch: 'next' });
+    expect(getProject(store.db, p.id)).toMatchObject({ landing: 'branch', landingBranch: 'next' });
+    const task = store.write((ctx) => insertTask(ctx, p.id, TASK)).value;
+    expect(getTask(store.db, task.id).landing).toEqual({ kind: 'branch', branch: 'next' });
+    const held = store.write((ctx) =>
+      insertTask(ctx, p.id, { ...TASK, landing: { kind: 'hold' } }),
+    ).value;
+    expect(held.landing).toEqual({ kind: 'hold' });
+    const base = store.write((ctx) =>
+      insertTask(ctx, p.id, { ...TASK, landing: { kind: 'base' } }),
+    ).value;
+    expect(base.landing).toEqual({ kind: 'base' });
+  });
+
+  it('can be set, changed and cleared by changing the default', () => {
+    const p = seedProject(store);
+    const set = store.write((ctx) =>
+      patchProject(ctx, p.id, { landing: 'branch', landingBranch: 'next' }),
+    ).value;
+    expect(set).toMatchObject({ landing: 'branch', landingBranch: 'next' });
+    const renamed = store.write((ctx) => patchProject(ctx, p.id, { landingBranch: 'dev' })).value;
+    expect(renamed).toMatchObject({ landing: 'branch', landingBranch: 'dev' });
+    const cleared = store.write((ctx) => patchProject(ctx, p.id, { landing: 'hold' })).value;
+    expect(cleared).toMatchObject({ landing: 'hold', landingBranch: null });
+  });
+
+  it('is refused without a branch name', () => {
+    const p = seedProject(store);
+    expect(() => store.write((ctx) => patchProject(ctx, p.id, { landing: 'branch' }))).toThrow(
+      'Name the branch new tasks land in',
+    );
+    expect(getProject(store.db, p.id).landing).toBe('merge');
+  });
+});
+
 describe("a task's landing", () => {
   it.each([
     { name: 'merges when its project merges', project: 'merge', expected: { kind: 'base' } },

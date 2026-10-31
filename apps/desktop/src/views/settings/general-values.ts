@@ -3,12 +3,13 @@ import {
   AllowedCommands,
   BranchName,
   Delivery,
+  NAME_LANDING_BRANCH,
   PrTitlePrefix,
+  ProjectLanding,
   ProjectPatch,
   WorkspaceMode,
   type FlowId,
   type ProjectDto,
-  type ProjectLanding,
 } from '@10db/contracts';
 
 /**
@@ -44,6 +45,8 @@ export interface GeneralValues {
   readonly baseBranch: string;
   /** What a finished task's pull request does unless the task says otherwise. */
   readonly landing: ProjectLanding;
+  /** The branch new tasks land in when `landing` is `branch`; kept while another landing is chosen. */
+  readonly landingBranch: string;
   /** '' means none. */
   readonly prTitlePrefix: string;
   /** One command prefix per line; blank lines are ignored. */
@@ -73,6 +76,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     delivery: project.delivery,
     baseBranch: project.baseBranch,
     landing: project.landing,
+    landingBranch: project.landingBranch ?? '',
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
@@ -121,6 +125,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     errors.budgetCeiling = 'Enter a ceiling above $0, or leave it empty for none';
   const baseBranch = values.baseBranch.trim();
   const prefix = values.prTitlePrefix.trim();
+  const landingBranch = values.landingBranch.trim();
+  if (values.landing === ProjectLanding.Branch && !BranchName.safeParse(landingBranch).success)
+    errors.landingBranch = NAME_LANDING_BRANCH;
   if (!BranchName.safeParse(baseBranch).success)
     errors.baseBranch = 'Enter the base branch, such as main';
   if (prefix !== '' && !PrTitlePrefix.safeParse(prefix).success)
@@ -154,6 +161,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (values.delivery !== project.delivery) patch.delivery = values.delivery;
   if (baseBranch !== project.baseBranch) patch.baseBranch = baseBranch;
   if (values.landing !== project.landing) patch.landing = values.landing;
+  // The branch is sent only while it is the default; choosing another landing makes the daemon forget it.
+  if (values.landing === ProjectLanding.Branch && landingBranch !== project.landingBranch)
+    patch.landingBranch = landingBranch;
   const prTitlePrefix = prefix === '' ? null : prefix;
   if (prTitlePrefix !== project.prTitlePrefix) patch.prTitlePrefix = prTitlePrefix;
   if (!sameCommands(allowed.commands, project.allowedCommands))

@@ -15,8 +15,8 @@ export interface LandingDraft {
 }
 
 /** The project's default, as a task starts from it. */
-export function draftFor(project: Pick<ProjectDto, 'landing'>): LandingDraft {
-  return draftOf(taskLandingFor(project.landing));
+export function draftFor(project: Pick<ProjectDto, 'landing' | 'landingBranch'>): LandingDraft {
+  return draftOf(taskLandingFor(project));
 }
 
 export function draftOf(landing: TaskLanding): LandingDraft {
