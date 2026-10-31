@@ -5,6 +5,7 @@ import {
 } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SECRET_CHARACTERS } from '@10db/contracts';
+import { z } from 'zod';
 
 export const KEYCHAIN_SERVICE = '10db';
 /** The Keychain account of the builder's Artificial Analysis key. */
@@ -42,7 +43,7 @@ export const execFileAsync: KeychainExecAsync = (command, args, options) =>
         return;
       }
       // Node reports an exit status as a numeric `code`, and a timeout as `killed` with a signal.
-      const e = error as { code?: unknown; killed?: boolean; signal?: string | null };
+      const e = execFailure(error);
       reject(
         Object.assign(new Error('security failed'), {
           status: typeof e.code === 'number' ? e.code : null,
@@ -52,6 +53,19 @@ export const execFileAsync: KeychainExecAsync = (command, args, options) =>
       );
     });
   });
+
+/** What a failed child process carries that is safe to read: codes only, never its command line or output. */
+const ExecFailure = z.object({
+  status: z.number().nullish(),
+  code: z.union([z.string(), z.number()]).nullish(),
+  signal: z.string().nullish(),
+  killed: z.boolean().nullish(),
+});
+
+function execFailure(error: unknown): z.infer<typeof ExecFailure> {
+  const parsed = ExecFailure.safeParse(error);
+  return parsed.success ? parsed.data : {};
+}
 
 /** The Keychain could not be read or written. The message names the item and the status, never a value. */
 export class KeychainError extends Error {
@@ -72,10 +86,10 @@ export interface Keychain {
 
 function failure(error: unknown): string {
   // Execution errors carry the command line and its output, which can hold a value; only the codes are used.
-  const e = error as { status?: number | null; code?: string; signal?: string | null };
+  const e = execFailure(error);
   if (e.code === 'ETIMEDOUT') return `timed out after ${String(KEYCHAIN_TIMEOUT_MS / 1000)} s`;
   if (typeof e.status === 'number') return `security exit status ${String(e.status)}`;
-  return e.code ?? e.signal ?? 'unknown error';
+  return (typeof e.code === 'string' ? e.code : null) ?? e.signal ?? 'unknown error';
 }
 
 /**
@@ -105,7 +119,7 @@ export function keychainWith(
   };
   const readFailed = (account: string, error: unknown): null => {
     // A thrown exec error has a numeric `status` when security ran and exited non-zero.
-    if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return null;
+    if (execFailure(error).status === ITEM_NOT_FOUND) return null;
     throw new KeychainError(`Reading the Keychain item ${account} failed (${failure(error)})`);
   };
   const read = (account: string): string | null => {
@@ -171,7 +185,7 @@ export function keychainWith(
           },
         );
       } catch (error) {
-        if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return;
+        if (execFailure(error).status === ITEM_NOT_FOUND) return;
         throw new KeychainError(`Removing the Keychain item ${account} failed (${failure(error)})`);
       }
     },

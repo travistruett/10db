@@ -2,7 +2,7 @@ import {
   DEFAULT_JUDGE_CONFIG,
   JudgeConfig,
   type JudgeConfigPatch,
-  type JudgeDecision,
+  JudgeDecision,
 } from '@10db/contracts';
 import { getAppSetting, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
@@ -19,9 +19,9 @@ export function getJudgeConfig(db: DbReader): JudgeConfig {
 export function patchJudgeConfig(ctx: WriteContext, patch: JudgeConfigPatch): JudgeConfig {
   const current = getJudgeConfig(ctx.tx);
   const decisions = Object.fromEntries(
-    Object.entries(current.decisions).map(([name, decision]) => [
+    Object.values(JudgeDecision).map((name) => [
       name,
-      { ...decision, ...patch.decisions?.[name as JudgeDecision] },
+      { ...current.decisions[name], ...patch.decisions?.[name] },
     ]),
   );
   // Both inputs were parsed by the contract's schemas, so the merge is a JudgeConfig; parsing again
