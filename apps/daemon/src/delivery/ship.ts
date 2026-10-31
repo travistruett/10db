@@ -39,6 +39,7 @@ import { GitNetworkError, GitNetworkFailure } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
 import { PrState } from '../github';
 import { raiseGateHostCards } from '../inbox';
+import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
 import { settleBranch } from './branch-cleanup';
@@ -261,6 +262,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     // Shutdown killed the gate: record nothing; the batch stays SHIPPING and recovery re-runs it.
     if (result.aborted) return null;
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's tail says so.
+    if (result.blockedHosts.length > 0) await takeFoundHostsReading(deps, project.id);
     raiseGateHostCards(deps, {
       projectId: project.id,
       run: BlockedRun.Gate,

@@ -1,4 +1,9 @@
-export { foundHostFile } from './found-hosts';
+export {
+  foundHostFile,
+  readFoundHosts,
+  writeFoundHosts,
+  writeFoundHostsIfNone,
+} from './found-hosts';
 export {
   allowFoundHosts,
   allowNetworkHost,
