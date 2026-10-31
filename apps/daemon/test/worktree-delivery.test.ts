@@ -377,7 +377,7 @@ describe('worktree mode settings through a real store', () => {
     expect(await res.text()).toContain('needs pull request delivery');
   });
 
-  it('PATCH refuses a mode change while a batch is unfinished (409)', async () => {
+  it('PATCH changes the default mode while a batch is unfinished', async () => {
     const { api, project, tasks, request, answerQuestions } = await start();
     const [alpha] = tasks;
     if (!alpha) throw new Error('no Alpha task');
@@ -392,8 +392,9 @@ describe('worktree mode settings through a real store', () => {
         : undefined,
     );
     const res = await request('PATCH', `/projects/${project.id}`, { workspaceMode: 'shared' });
-    expect(res.status).toBe(409);
-    expect(await res.text()).toContain('workspace mode');
+    // The project's mode is only the default for new tasks, so work in flight doesn't block it.
+    expect(res.status).toBe(200);
+    expect(ProjectDto.parse(await res.json())).toMatchObject({ workspaceMode: 'shared' });
     await answerQuestions(['Alpha']);
   });
 });
