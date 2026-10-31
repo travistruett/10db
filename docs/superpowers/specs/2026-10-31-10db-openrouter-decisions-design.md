@@ -69,7 +69,7 @@ A new app-wide section, "Decisions", beside Models:
 - **Per decision** (one row today, "Skip review for small, well-tested changes"): on or off, the model (a text
   field with the default filled in), and the confidence it must reach.
 - **Recent decisions:** the last 20 judge calls: when, which decision, the model, the answer and confidence, and
-  what 10db did, each linking its task.
+  what 10db did, each linking its task (the board opens that task's drawer: `/board?task=<id>`).
 
 ## 4. The first decision: review size
 
@@ -79,14 +79,17 @@ QA.
 
 - **Rules first, always review:** the task has a `security`, `auth`, `migration` or `dependency` risk tag; the
   review step is pinned; the diff against the batch's base is over 400 changed lines or touches over 15 files;
-  the judge or this decision is off. Then the review runs, as today, and no call is made.
+  the change holds a binary file, or touches a dependency manifest or lockfile, a migration, a CI or workflow file
+  (`.github/**`), a protected path (`.claude/**`, `.codex/**`, `AGENTS.md`, `CLAUDE.md`) or any path in one of the
+  project's hazards; the judge or this decision is off. Then the review runs, as today, and no call is made.
 - **Otherwise ask** (timeout 4 s): state is the task's title, description and criteria, the diff's file list and
-  stat, the diff itself capped at 24 KB, and the gate's result. Question: "Does this change need an independent
+  stat, the diff itself capped at 24 KB (marked `[diff cut at 24 KB]` when it was), and that the gate passed (never its
+  output). The task text and the diff are fenced as data, not instructions. Question: "Does this change need an independent
   code review before it ships, or is it small, clear and covered by its tests?" Options `review` and `skip`.
   The default model is `typesafe/jev-1.13`; the default floor is 0.8.
 - **Skip** only when the answer is `skip` at or above the floor. The review step is marked skipped, with the reason
   "skipped by <model> (<confidence>): <the question's short answer>", and the workstream moves to the step after
-  it, or is done, exactly as a skipped QA does. Every other answer, and every fallback, runs the review.
+  it, or is done, exactly as a skipped QA does; a QA step that then follows still skips when only Markdown changed. Every other answer, and every fallback, runs the review.
 - The full gate after the step has already passed, and CI still decides before the pull request merges.
 
 ## 5. Security and data
@@ -95,7 +98,7 @@ The state sent to OpenRouter (task text and a capped diff) leaves the machine fo
 provider; TypeSafe does not train on it, and zero retention is enterprise-only. The builder accepted this by adding
 the key. Nothing else is sent: no key, no environment, no paths outside the repository. The diff is text a lane
 wrote, and System One models do not treat their state as hostile, so the decision a model makes is limited to
-**skipping a review**: the gate has passed and CI still runs, so the worst case is a missed review finding, not a
+**skipping a review**, and a change to the files a diff cannot show the weight of (manifests, migrations, CI, protected paths, binaries) is never asked about: the gate has passed and CI still runs, so the worst case is a missed review finding, not a
 loosened boundary.
 
 ## 6. Testing
