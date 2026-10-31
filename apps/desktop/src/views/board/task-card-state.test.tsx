@@ -159,6 +159,26 @@ describe('TaskCard state', () => {
       expect(cardSummary(taskDto(), shipped(), new Map())).toContain(`${LINE}.`);
     });
 
+    it('names every follow-up task when review and then QA shipped at the limit', () => {
+      const workstream = shipped();
+      const qa = stepDto({
+        role: 'qa',
+        tools: 'read_only',
+        status: 'done',
+        result: rejection,
+        shippedAtLimit: {
+          followUpTaskId: mintId('Task'),
+          followUpTitle: 'Resolve the open QA findings of "Add the badge"',
+        },
+      });
+      card({ workstream: { ...workstream, steps: [...workstream.steps, qa] } });
+      expect(
+        screen.getByText(
+          'Shipped at the retry limit with open findings. Follow-up tasks: Resolve the open findings of "Add the badge"; Resolve the open QA findings of "Add the badge"',
+        ),
+      ).toBeTruthy();
+    });
+
     it('says nothing for a task that did not ship at the limit', () => {
       card({ workstream: workstreamDto({ state: 'DONE', steps: [stepDto(), stepDto()] }) });
       expect(screen.queryByText(/retry limit/)).toBeNull();

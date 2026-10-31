@@ -2875,6 +2875,63 @@ describe('flows', () => {
       expect(step(workstream.id, 1)?.shippedAtLimit).toBeUndefined();
       expect(filedFor(task.id)).toEqual([]);
     });
+
+    describe('when a QA step follows the review', () => {
+      const plan = {
+        do: 'mcp' as const,
+        tool: 'complete_step',
+        args: { opId: 'op-flow-0570', summary: '1. Put it in src/api/a.txt.', verdict: null },
+      };
+      const thenQa = async (qa: FakeScriptBook[string][number]) => {
+        engine = await createTestEngine({
+          Alpha: [[plan, turn], ...[1, 2, 3, 4].flatMap(round), qa],
+        });
+        // Four criteria run the full flow's plan and QA steps.
+        const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
+          flow: 'full',
+          criteria: 4,
+        });
+        expect(ws(workstream.id).steps.map((s) => s.role)).toEqual([
+          'plan',
+          'implement',
+          'review',
+          'qa',
+        ]);
+        await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+        return { task, workstream };
+      };
+
+      it('runs QA as an approval would, and ships when QA approves', async () => {
+        const { task, workstream } = await thenQa([approve('op-flow-0571'), turn]);
+        expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+        expect(step(workstream.id, 3)).toMatchObject({
+          status: 'done',
+          result: { verdict: 'approve' },
+        });
+        const [filed, ...rest] = filedFor(task.id);
+        expect(rest).toEqual([]);
+        expect(filed?.description).toContain(FINAL);
+        expect(step(workstream.id, 2)).toMatchObject({
+          status: 'done',
+          result: { verdict: 'reject' },
+          shippedAtLimit: { followUpTaskId: filed?.id, followUpTitle: filed?.title },
+        });
+        expect(step(workstream.id, 3)?.shippedAtLimit).toBeUndefined();
+      });
+
+      it('ships at the limit again when QA then rejects, filing its findings too', async () => {
+        const QA_FINDINGS = '1. BLOCKING src/api/a.txt:1 the empty state crashes.';
+        const { task, workstream } = await thenQa([reject('op-flow-0572', QA_FINDINGS), turn]);
+        expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+        const filed = filedFor(task.id);
+        expect(filed).toHaveLength(2);
+        const ids = [step(workstream.id, 2), step(workstream.id, 3)].map(
+          (s) => s?.shippedAtLimit?.followUpTaskId,
+        );
+        expect(new Set(ids)).toEqual(new Set(filed.map((t) => t.id)));
+        expect(filed.find((t) => t.id === ids[1])?.description).toContain(QA_FINDINGS);
+      });
+    });
   });
 
   describe('when the reviewer keeps rejecting a task that must not ship with open findings', () => {

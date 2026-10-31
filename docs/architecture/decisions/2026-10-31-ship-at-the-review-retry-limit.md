@@ -8,17 +8,22 @@
   `finishReadOnlyStep`), the runner no longer fails the task if `shipsAtRetryLimit` holds: the rejecting step's
   role is review or QA, the task has neither the `security` nor the `auth` risk tag, and the latest gate evidence
   is not a failure (a project with no gate has none). A plan review's rejection still fails, as nothing is built.
-- The task then ends as an approved one does, through the same `completeReadOnlySteps` as the `done` move: `DONE`
-  with its claims and lease released, or, in a project with no gate, waiting on the builder's check card. In the
-  same write 10db files one follow-up task with `insertRetryLimitFollowUp` and sets `shippedAtLimit`
+- The task then moves on as an approved one does. When a step follows the rejecting one (QA after review in the
+  `full` flow), it advances to that step through the same `advanceTo` as the `advance` move, and QA runs. When
+  none follows, it ends through the same `completeReadOnlySteps` as the `done` move: `DONE` with its claims and
+  lease released, or, in a project with no gate, waiting on the builder's check card. Either way, in the same
+  write 10db files one follow-up task with `insertRetryLimitFollowUp` and sets `shippedAtLimit`
   (`followUpTaskId`, `followUpTitle`) on the rejecting step. The rejection stays that step's result, so the
   rounds list still holds it, and it is not counted as a send-back.
+- The attempt count is not reset, so a QA step that then rejects is past the limit too: it ships the same way and
+  files its own follow-up with its findings. The card and drawer name every follow-up filed, in step order.
 - The follow-up is a task in the source's project with no human column, so it is in the Ready column, not started;
   it has the source's landing and areas, no dependencies, and no risk tags. Its title is
   `Resolve the open findings of "<source title>"` (cut to the title limit), its description names the source's
   title and id and holds the last rejection's notes (without any earlier follow-up list), and each finding is an
   acceptance criterion.
-- The card says "Shipped at the retry limit with open findings. Follow-up task: <title>" in orange, the drawer
+- The card says "Shipped at the retry limit with open findings. Follow-up task: <title>" (or "Follow-up tasks:"
+  with the titles joined by "; " when review and QA each filed one) in orange, the drawer
   shows the same sentence in an alert above the review rounds, and that last round's badge reads "Open at the
   limit" instead of "Sent back".
 - The other limits (uncommitted changes, the builder's send-backs, gate failures) still fail the task, and so does
