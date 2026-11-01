@@ -1,4 +1,10 @@
-import { ConflictError, InvalidError, type BatchState, type TaskId } from '@10db/contracts';
+import {
+  ConflictError,
+  InvalidError,
+  NEW_TASK_NO_AREAS,
+  type BatchState,
+  type TaskId,
+} from '@10db/contracts';
 import {
   createTestStore,
   findFlowByName,
@@ -6,7 +12,10 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertProposal,
+  insertSource,
   insertTask,
+  insertTaskFromProposal,
   insertWorkstream,
   listBoardColumns,
   listEvidence,
@@ -109,7 +118,31 @@ describe('startTaskWithPlan', () => {
     });
   });
 
-  it('refuses to start a task whose step plan is over budget, naming the step', () => {
+  it('refuses to start a task with no areas, naming the task and what to set, and inserts no workstream', () => {
+    // The project has two areas and the proposal names no raising task, so the task is filed with none.
+    const task = state.write((ctx) =>
+      insertTaskFromProposal(ctx, {
+        proposalId: insertProposal(ctx, {
+          projectId: project.id,
+          kind: 'new_task',
+          title: 'No areas',
+          body: '',
+          sourceId: insertSource(ctx, 'agent', {}),
+        }),
+        projectId: project.id,
+        title: 'No areas',
+        description: '',
+      }),
+    );
+    expect(task.areas).toEqual([]);
+    expect(() => startTaskWithPlan(state, task.id)).toThrow(InvalidError);
+    expect(() => startTaskWithPlan(state, task.id)).toThrow(
+      `${NEW_TASK_NO_AREAS} for "No areas" before it starts: set its areas on the task.`,
+    );
+    expect(listWorkstreams(state.db, {})).toEqual([]);
+  });
+
+  it('refuses to start a task over budget, naming the step', () => {
     measureForTests(state);
     const task = addTask();
     state.write((ctx) => patchProject(ctx, project.id, { budgetCeiling: 1 }));
