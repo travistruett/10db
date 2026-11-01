@@ -16,6 +16,7 @@ export { prBody, prTitle, titlePrefix } from './pr-text';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
+export { createCiStopAnswers } from './ci-stop';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { createBranchCardAnswers } from './branch-card';
 export { removeMergedBranches } from './branch-sweep';

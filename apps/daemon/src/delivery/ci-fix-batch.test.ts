@@ -224,7 +224,8 @@ describe('cutting a fix batch', () => {
       await cutWorktree(h.ctx, fix.id, plans, new AbortController().signal);
 
       expect(listBatches(h.store.db, {}).map((b) => b.id)).toEqual([root.id]);
-      expect(h.cards()).toHaveLength(1);
+      // The cut's refusal, and the stop card the same write raised for the root.
+      expect(h.cards()).toHaveLength(2);
       // Neither the local branch nor the pull request's branch on origin was deleted or moved.
       expect(local(branch)).toBe(before);
       expect(onOrigin(branch)).toBe(head);
@@ -241,7 +242,7 @@ describe('cutting a fix batch', () => {
     await cutWorktree(h.ctx, fix.id, plans, new AbortController().signal);
 
     expect(listBatches(h.store.db, {}).map((b) => b.id)).toEqual([root.id]);
-    expect(h.cards()).toHaveLength(1);
+    expect(h.cards()).toHaveLength(2);
     expect(local(branch)).toBe(head);
     expect(onOrigin(branch)).toBe(head);
   });
