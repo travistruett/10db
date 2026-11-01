@@ -7,15 +7,31 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
+import { createTestStore, deleteAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { SANDBOXED, tempDir, type TempDir } from '../../test/fixtures';
+import {
+  createTempRepo,
+  isolatedGitEnv,
+  SANDBOXED,
+  tempDir,
+  type TempDir,
+} from '../../test/fixtures';
 import { ManualClock } from '../clock';
+import { createEventBus, createStateStore } from '../events';
+import { createGit } from '../git';
+import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
+import { listNetworkHosts } from '../permissions';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
 import { resolvePnpm } from './pnpm-binary';
-import { createWorktreeDependencies, installCommand } from './worktree-dependencies';
+import {
+  createWorktreeDependencies,
+  installCommand,
+  raiseInstallHostCards,
+} from './worktree-dependencies';
 
 const STANDALONE_PNPM = await resolvePnpm(
   Object.fromEntries(
@@ -283,4 +299,53 @@ describe('refreshing a worktree’s dependencies', () => {
     },
     90_000,
   );
+});
+
+describe('raiseInstallHostCards', () => {
+  it('names the file and recommends Allow for a project added before readings', async () => {
+    const repo = createTempRepo();
+    const { store, close } = createTestStore();
+    try {
+      const repoGit = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+      mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
+      writeFileSync(
+        join(repo.path, 'apps/desktop/src-tauri/Cargo.lock'),
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      );
+      repoGit('add', 'apps');
+      repoGit('commit', '-q', '-m', 'lock');
+      const state = createStateStore(store, createEventBus());
+      const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+      const seeded = seedProject(store, { repoPath: repo.path, delivery: 'pull_request' });
+      // No reading was ever kept, as for a project added before 10db kept readings.
+      state.write((ctx) => {
+        deleteAppSetting(ctx, `network-hosts-found:${seeded.id}`);
+      });
+
+      await raiseInstallHostCards(
+        { state, inbox, git: createGit(), logger: silentLogger },
+        seeded.id,
+        {
+          kind: 'failed',
+          exitCode: 1,
+          tail: 'error',
+          logPath: '/dev/null',
+          timedOut: false,
+          blockedHosts: ['index.crates.io'],
+        },
+      );
+
+      const [card, ...rest] = listInbox(state.db, { states: ['OPEN'] });
+      expect(rest).toEqual([]);
+      expect(card?.body).toContain(
+        "The project's apps/desktop/src-tauri/Cargo.lock needs index.crates.io",
+      );
+      expect(card?.recommendation).toBe('Allow for the project');
+      expect(listNetworkHosts(state.db, seeded.id)).toEqual([]);
+    } finally {
+      close();
+      repo.cleanup();
+    }
+  });
 });

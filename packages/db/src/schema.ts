@@ -6,6 +6,7 @@ import type {
   BatchFailure,
   BatchId,
   BatchState,
+  CiStopped,
   BoardColumnId,
   ClaimId,
   ClaimKind,
@@ -28,10 +29,14 @@ import type {
   InboxOption,
   InboxState,
   InboxTarget,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   McpVerdict,
   ModelPin,
   ModelProfileId,
   NextAction,
+  Notice,
   PermissionRuleId,
   PersonaId,
   PersonId,
@@ -40,10 +45,12 @@ import type {
   ProjectLanding,
   ProposalId,
   PullRequestChecks,
+  PullRequestMergeBlocked,
   PullRequestState,
   ProposalKind,
   Provider,
   QuestionCategory,
+  RequiredChecksDto,
   RiskTag,
   RoutingRuleId,
   SessionId,
@@ -68,6 +75,7 @@ import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
   customType,
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -141,6 +149,8 @@ export const projects = sqliteTable('projects', {
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
   changedCheckCommand: text('changed_check_command'),
+  /** Runs in place of the gate when the base has required checks; set only with a gate command. */
+  precheckCommand: text('precheck_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
@@ -174,6 +184,8 @@ export const projects = sqliteTable('projects', {
   baseBranch: text('base_branch').notNull().default('main'),
   /** What a finished task's pull request does unless its task says otherwise. */
   landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
+  /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+  landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
@@ -247,11 +259,31 @@ export const batches = sqliteTable(
     prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
     prCheckedAt: text('pr_checked_at'),
     prUnknownReason: text('pr_unknown_reason'),
+    /** The pull request's required checks as the watch last read them; kept on the root batch. */
+    prRequired: text('pr_required', { mode: 'json' }).$type<RequiredChecksDto>(),
+    /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`). */
+    prMergeBlocked: text('pr_merge_blocked').$type<PullRequestMergeBlocked>(),
+    /** A CI fix batch's root batch and the pull request head it fixes; null on any other batch. */
+    ciFixOf: text('ci_fix_of')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    ciFixHead: text('ci_fix_head'),
+    /** Why 10db stopped fixing the pull request's failing checks. */
+    ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
+    notices: text('notices', { mode: 'json' })
+      .$type<Notice[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('batches_project_idx').on(t.projectId),
+    // One fix per root and head, so a second watch round or a restart starts none.
+    uniqueIndex('batches_ci_fix_idx')
+      .on(t.ciFixOf, t.ciFixHead)
+      .where(sql`ci_fix_of IS NOT NULL AND ci_fix_head IS NOT NULL`),
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
@@ -405,6 +437,8 @@ export const workstreams = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),
+    /** What the run waits for besides the builder (another task's claim); cleared when the wait ends. */
+    notice: text('notice', { mode: 'json' }).$type<Notice>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -772,3 +806,28 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/**
+ * Every question 10db asked a fast model through OpenRouter, and what came of it. `state` and
+ * `question` are the text 10db built (task text and a capped diff), never a secret. The outcome is
+ * written when the call is logged and may be replaced once by the decision that acted on the answer.
+ */
+export const judgeCalls = sqliteTable(
+  'judge_calls',
+  {
+    id: text('id').$type<JudgeCallId>().primaryKey(),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    model: text('model').notNull(),
+    state: text('state').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    confidence: real('confidence'),
+    outcome: text('outcome').$type<JudgeOutcome>().notNull(),
+    latencyMs: integer('latency_ms'),
+    costUsd: real('cost_usd'),
+    workstreamId: text('workstream_id').$type<WorkstreamId>(),
+    taskId: text('task_id').$type<TaskId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+);

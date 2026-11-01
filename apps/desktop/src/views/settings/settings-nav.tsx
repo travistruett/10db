@@ -1,7 +1,9 @@
 import { NavLink, Stack, Text } from '@mantine/core';
 import {
   IconArrowLeft,
+  IconBolt,
   IconCoffee,
+  IconShieldCheck,
   IconColumns,
   IconCoin,
   IconCpu,
@@ -31,7 +33,9 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.Team]: IconUsers,
   [SettingsSectionKey.RoutingRules]: IconRoute,
   [SettingsSectionKey.KeepAwake]: IconCoffee,
+  [SettingsSectionKey.LanePermissions]: IconShieldCheck,
   [SettingsSectionKey.Accounts]: IconKey,
+  [SettingsSectionKey.Decisions]: IconBolt,
   [SettingsSectionKey.Models]: IconCpu,
   [SettingsSectionKey.PersonasAndFlows]: IconHierarchy,
 };

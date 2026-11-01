@@ -470,6 +470,39 @@ describe('deriveBoardStatus', () => {
       BoardStatus.Blocked,
     ],
     [
+      'done in a batch whose open pull request has a CI stop reason',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open', ciStopped: 'no_log' },
+      },
+      BoardStatus.Blocked,
+    ],
+    [
+      'done in a batch whose open pull request has no CI stop reason',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'open', ciStopped: null },
+      },
+      BoardStatus.InReview,
+    ],
+    [
+      'done in a batch whose merged pull request still has a CI stop reason',
+      {
+        taskStatus: 'done',
+        depsDone: true,
+        workstreamState: 'DONE',
+        batchState: 'SHIPPED',
+        pullRequest: { url: 'https://github.com/o/r/pull/1', state: 'merged', ciStopped: 'limit' },
+      },
+      BoardStatus.Done,
+    ],
+    [
       'done in a batch that closed without a pull request',
       { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'CLOSED' },
       BoardStatus.Done,

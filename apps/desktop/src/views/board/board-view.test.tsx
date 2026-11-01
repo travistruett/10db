@@ -1,4 +1,10 @@
-import { TaskMove, type BoardColumnDto, type TaskDto } from '@10db/contracts';
+import {
+  mintId,
+  TaskMove,
+  type BatchDto,
+  type BoardColumnDto,
+  type TaskDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +35,37 @@ function type(label: string | RegExp, value: string, scope: HTMLElement): void {
 }
 
 describe('BoardView', () => {
+  describe('the ?task= link', () => {
+    function serveTasks(...titles: string[]) {
+      const project = projectViewDto({ gateCommand: null });
+      const tasks = titles.map((title) => taskDto({ projectId: project.id, title }));
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
+        http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+      );
+      return tasks;
+    }
+
+    it('opens the drawer of the task it names', async () => {
+      const [, beta] = serveTasks('Alpha', 'Beta');
+      renderApp(`/board?task=${beta?.id ?? ''}`);
+      const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+    });
+
+    it.each([
+      ['no task', '/board'],
+      ['a task id that is not valid', '/board?task=nope'],
+      ['a task that is not on the board', `/board?task=${mintId('Task')}`],
+    ])('opens no drawer for %s', async (_name, path) => {
+      serveTasks('Alpha');
+      renderApp(path);
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+    });
+  });
+
   it('says a failed ship once, on the card, and retries it from the drawer', async () => {
     const batch = batchDto({
       state: 'FAILED',
@@ -1528,8 +1565,15 @@ describe('BoardView', () => {
       pr: ReturnType<typeof read>,
       run: 'DONE' | 'FAILED',
       extra: readonly (RequestHandler | WebSocketHandler)[],
+      batchPatch: Partial<BatchDto> = {},
     ) {
-      const batch = batchDto({ title: 'Alpha first', state: 'SHIPPED', prUrl: url, pr });
+      const batch = batchDto({
+        title: 'Alpha first',
+        state: 'SHIPPED',
+        prUrl: url,
+        pr,
+        ...batchPatch,
+      });
       const project = projectViewDto({
         id: batch.projectId,
         delivery: 'pull_request',
@@ -1584,6 +1628,59 @@ describe('BoardView', () => {
         ).toBeNull();
       },
     );
+
+    describe('with required checks', () => {
+      const jobUrl = 'https://github.com/acme/widgets/actions/runs/5/job/6';
+      const job = { name: 'build', link: jobUrl, jobId: '6', runId: '5', description: null };
+
+      it('says CI running and links the running job', async () => {
+        serveShipped('in_review', read('open', 'pending'), 'DONE', [], {
+          prRequired: { state: 'pending', failing: [], pending: [job] },
+        });
+        const column = await screen.findByRole('list', { name: 'In review tasks' });
+        const card = within(column).getByRole('listitem', { name: 'Alpha' });
+        expect(within(card).getByText('Pull request open · CI running')).toBeTruthy();
+        expect(within(card).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+          jobUrl,
+        );
+      });
+
+      it('says CI failed with the job’s name and links that job', async () => {
+        serveShipped('in_review', read('open', 'failing'), 'DONE', [], {
+          prRequired: { state: 'failing', failing: [job], pending: [] },
+        });
+        const column = await screen.findByRole('list', { name: 'In review tasks' });
+        const card = within(column).getByRole('listitem', { name: 'Alpha' });
+        expect(within(card).getByText('Pull request open · CI failed: build')).toBeTruthy();
+        expect(within(card).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+          jobUrl,
+        );
+      });
+
+      it('says Merged · CI passed on a Done card', async () => {
+        serveShipped('done', read('merged', 'passing'), 'DONE', [], {
+          prRequired: { state: 'pending', failing: [], pending: [job] },
+        });
+        const column = await screen.findByRole('list', { name: 'Done tasks' });
+        const card = within(column).getByRole('listitem', { name: 'Alpha' });
+        expect(within(card).getByText('Merged · CI passed')).toBeTruthy();
+        expect(within(card).getByRole('link', { name: 'CI checks' }).getAttribute('href')).toBe(
+          `${url}/checks`,
+        );
+      });
+
+      it('says conflicts with the base instead of CI running', async () => {
+        serveShipped('in_review', read('open', 'pending'), 'DONE', [], {
+          prRequired: { state: 'pending', failing: [], pending: [job] },
+          prMergeBlocked: 'conflicts',
+          baseBranch: 'main',
+        });
+        const column = await screen.findByRole('list', { name: 'In review tasks' });
+        const card = within(column).getByRole('listitem', { name: 'Alpha' });
+        expect(within(card).getByText('Pull request open · conflicts with main')).toBeTruthy();
+        expect(within(card).queryByText(/CI running/)).toBeNull();
+      });
+    });
 
     it('says the pull request closed, and reopens or closes the task from its menu', async () => {
       const calls: string[] = [];

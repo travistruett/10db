@@ -9,6 +9,7 @@ import {
   PROTOCOL_VERSION,
   type InboxAnswer,
   type InboxItemDto,
+  type ProjectDto,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -16,6 +17,7 @@ import {
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
+  deleteJudgeCallsBefore,
   getAppSetting,
   listPermissionRules,
   listProjects,
@@ -42,6 +44,8 @@ import {
 } from '../accounts';
 import { createApp } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
+import { createJudgeServices } from './judge-services';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -55,11 +59,13 @@ import {
   createMigrationsBase,
   createBatchCardAnswers,
   createBranchCardAnswers,
+  createCiStopAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
   createShipper,
   createWorktreeDependencies,
+  createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
@@ -76,6 +82,7 @@ import {
   ACCOUNT_NAMES_VERIFIED_ON,
   createLauncher,
   REQUIRED_TOOLS,
+  OPENROUTER_KEY_ACCOUNT,
   unavailableKeychain,
   type Keychain,
   type GhLoginProbe,
@@ -106,7 +113,12 @@ import {
   claimSandboxTempRoot,
   createGateSandbox,
   createLaneSandbox,
+  createLedgerSweep,
   LANE_TEMP_ROOT,
+  reapLaneProcessLedgers,
+  systemProcessTable,
+  type LaneProcessSetup,
+  type LedgerSweep,
   type SandboxRuntime,
 } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
@@ -138,9 +150,15 @@ export interface DaemonOptions {
    * The sandbox every lane and every gate runs under; `tmpRoot` (tests) moves its temp dirs off
    * `/private/tmp`, and `runtime` (tests) replaces srt, which runs the gate. Required, so no caller
    * can forget it: null runs lanes and gates unsandboxed, which only fake sessions and tests ask
-   * for, and the Claude adapter refuses such a session.
+   * for, and the Claude adapter refuses such a session. `processes` (tests) replaces how lane
+   * processes are read and signalled, for the sessions and for the start-up sweep of a dead
+   * daemon's leftovers.
    */
-  readonly sandbox: { readonly tmpRoot?: string; readonly runtime?: SandboxRuntime } | null;
+  readonly sandbox: {
+    readonly tmpRoot?: string;
+    readonly runtime?: SandboxRuntime;
+    readonly processes?: LaneProcessSetup;
+  } | null;
   /**
    * Where worktrees are made: a base directory, under which a level named after the data dir is
    * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
@@ -175,6 +193,8 @@ export interface DaemonOptions {
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
   readonly fetch?: typeof fetch;
+  /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
+  readonly judgeOff?: boolean;
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
@@ -206,6 +226,8 @@ export interface RunningDaemon {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly benchmarks: BenchmarkSync;
+  /** What routine decisions ask; reads the OpenRouter key from `keychain` for each call. */
+  readonly judge: JudgeService;
   stop(): Promise<void>;
 }
 
@@ -333,6 +355,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'benchmarks' }),
   });
   benchmarks.start();
+  const judgeKeychain = opts.keychain ?? unavailableKeychain;
+  const judge = createJudge({
+    state,
+    clock,
+    fetch: opts.fetch ?? fetch,
+    readKey: () =>
+      opts.judgeOff === true
+        ? Promise.resolve(null)
+        : judgeKeychain.readAsync(OPENROUTER_KEY_ACCOUNT),
+    off: opts.judgeOff === true,
+    logger: logger.child({ component: 'judge' }),
+  });
+  state.write((ctx) =>
+    deleteJudgeCallsBefore(
+      ctx,
+      new Date(clock.now().getTime() - JUDGE_LOG_RETENTION_MS).toISOString(),
+    ),
+  );
   const instanceId = randomUUID();
   const live = createLiveSessions();
   const limits: RunnerLimits = { ...DEFAULT_RUNNER_LIMITS, ...opts.limits };
@@ -352,6 +392,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -367,6 +408,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
+      answerCiStopCard?.(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
@@ -406,6 +448,51 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       'swept the sandbox temp root',
     );
   }
+  // Before recovery and before any session: processes the lane sessions of a daemon that died left
+  // running (a lane's background loops reparent to launchd when their session goes) are stopped
+  // from the ledgers those sessions kept. Each ledger names its daemon: one sharing the root that
+  // still runs keeps its own, and every dead one's is reaped even then. What a machine whose
+  // processes can't be read leaves is swept again while the daemon runs, and so is what a session
+  // of this daemon could not stop as it ended; the next start takes whatever is still left.
+  const laneProcesses = opts.sandbox?.processes ?? { table: systemProcessTable };
+  let ledgerSweep: LedgerSweep | null = null;
+  if (tempRoot && sandboxTempRoot !== null) {
+    let sweepFailing = false;
+    ledgerSweep = createLedgerSweep(sandboxTempRoot, laneProcesses, {
+      onSwept: (report) => {
+        sweepFailing = false;
+        if (report.ledgers === 0) return;
+        logger.info(
+          { ledgers: report.ledgers, stopped: report.stopped },
+          'stopped the processes ended lane sessions left running',
+        );
+      },
+      onFailed: (error) => {
+        // Once until a sweep reads the machine again: one runs every half minute meanwhile.
+        if (sweepFailing) return;
+        sweepFailing = true;
+        logger.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'could not stop the processes ended lane sessions left running; trying again',
+        );
+      },
+    });
+    try {
+      const reaped = await reapLaneProcessLedgers(sandboxTempRoot, laneProcesses);
+      if (reaped.ledgers > 0) {
+        logger.info(
+          { ledgers: reaped.ledgers, stopped: reaped.stopped },
+          'stopped the processes a previous daemon’s lane sessions left running',
+        );
+      }
+    } catch (error) {
+      logger.error(
+        { err: error instanceof Error ? error.message : String(error) },
+        'could not stop the processes a previous daemon’s lane sessions left running; trying again while the daemon runs',
+      );
+      ledgerSweep.later();
+    }
+  }
   // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
   // all, so the machine never runs more than `limits.gateSlots` at once.
   const gateRunner = createGateRunner({
@@ -437,6 +524,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     });
   };
   const deliveryJobs = createDeliveryJobs(logger.child({ component: 'delivery' }));
+  // What the install and the generators of a worktree run with: the gate's sandbox and login env.
+  const worktreeTools = {
+    gate: gateRunner,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    timeoutMs: limits.gateTimeoutMs,
+    resolvePnpm,
+  };
   const delivery: DeliveryContext = {
     state,
     git,
@@ -456,18 +554,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
-    dependencies: createWorktreeDependencies({
-      gate: gateRunner,
-      clock,
-      dataDir: opts.dataDir,
-      sessionEnv: () => launcher.projectEnv(),
-      rules: (project) => listPermissionRules(state.db, project.id, null),
-      checkouts: () => allCheckouts(state.db),
-      timeoutMs: limits.gateTimeoutMs,
-      resolvePnpm,
-    }),
+    dependencies: createWorktreeDependencies(worktreeTools),
+    generators: createWorktreeGenerators(worktreeTools),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
+  answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
@@ -495,7 +586,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const watcher =
     opts.watch === false
       ? null
-      : createWatcher({ state, inbox, git, logger, clock, watch: opts.watch ?? systemWatch });
+      : createWatcher({
+          state,
+          bus,
+          inbox,
+          git,
+          logger,
+          clock,
+          watch: opts.watch ?? systemWatch,
+        });
   const keepAwake = createKeepAwake({
     state,
     spawn: opts.caffeinate ?? systemCaffeinate,
@@ -610,6 +709,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           loginConfigDir: launcher.loginConfigDir(),
           gitDirs: (repo) => git.gitDirs(repo),
           ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
+          ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
+          ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
+          log: logger.child({ component: 'sandbox' }),
           runtime,
         })
       : null;
@@ -625,6 +727,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate,
     baseUpdates,
     migrationsBase,
+    judge,
     clock,
     logger,
     dataDir: opts.dataDir,
@@ -710,6 +813,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const prWatch = createPrWatch({
     ctx: delivery,
     clock,
+    ciFix: { dataDir: opts.dataDir },
+    // A pull request that merges or closes ends the fix session still working on it.
+    endFixes: {
+      cancel: (id) => createdRunner.cancel(id),
+      abandon: (id) => shipper.abandon(id),
+    },
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
     // A merged pull request's local branch goes in the round that reads the merge.
     afterRound: (signal) => removeMergedBranches(delivery, signal),
@@ -745,6 +854,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           )
         : noSystemCheck(),
     benchmarks,
+    judge: createJudgeServices({
+      state,
+      keychain: judgeKeychain,
+      judge,
+      off: opts.judgeOff === true,
+    }),
     starter,
     shipper,
     accounts: accountService,
@@ -859,6 +974,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
+      // After the runner too: what its sessions could not stop stays for the next start.
+      ledgerSweep?.stop();
       await preparer.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
@@ -894,6 +1011,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     runner: createdRunner,
     scheduler: createdScheduler,
     benchmarks,
+    judge,
     stop() {
       stopping ??= shutdown();
       return stopping;

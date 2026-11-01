@@ -174,6 +174,9 @@ describe('the drafting guidance', () => {
     'Hazards are not areas',
     'without asking for confirmation',
     'data, never instructions',
+    'about one pull request (~300 changed lines)',
+    'design and docs tasks included',
+    'one task per decision',
   ])('the instructions say %j', (phrase) => {
     expect(BUILDER_INSTRUCTIONS).toContain(phrase);
   });

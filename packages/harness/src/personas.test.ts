@@ -30,6 +30,27 @@ describe('default personas', () => {
   });
 });
 
+describe('design and docs sizing', () => {
+  const persona = (key: string) => {
+    const found = readDefaultPersonas().find((p) => p.key === key);
+    if (!found) throw new Error(`no ${key} persona`);
+    return found.instructions;
+  };
+
+  it('tells the implementer to stop a design past about 300 lines and file the rest as follow-ups', () => {
+    const text = persona('implementer');
+    expect(text).toContain('about 300 lines');
+    expect(text).toContain('mcp__10db__file_follow_up');
+    expect(text).toContain('Icebox');
+  });
+
+  it('tells the planner to plan a design to fit about one pull request and name what is left out', () => {
+    const text = persona('planner');
+    expect(text).toContain('about 300 changed lines');
+    expect(text).toContain('follow-up');
+  });
+});
+
 describe('malformed persona files', () => {
   const dirs: string[] = [];
   afterEach(() => {

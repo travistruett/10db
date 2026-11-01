@@ -114,7 +114,7 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   {
     name: 'migrations',
     globs: ['**/migrations/**', '**/drizzle/**'],
-    commands: ['drizzle-kit generate', 'pnpm db:migrate'],
+    commands: ['drizzle-kit generate', 'pnpm db:migrate', 'npm db:migrate', 'yarn db:migrate'],
     // The migrations run against a database every copy shares.
     scope: HazardScope.Project,
   },
@@ -127,6 +127,15 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       'pnpm rm',
       'pnpm install',
       'pnpm i',
+      'pnpm it',
+      'pnpm ci',
+      'pnpm install-test',
+      'pnpm clean-install',
+      'bun add',
+      'bun remove',
+      'bun install',
+      'bun i',
+      'bun update',
       'pnpm update',
       'pnpm up',
       'pnpm uninstall',
@@ -139,8 +148,14 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       // every lane in a shared checkout reads.
       'npm ci',
       'npm uninstall',
+      'npm install-test',
+      'npm update',
       'npm un',
       'yarn add',
+      'yarn remove',
+      'yarn install',
+      'yarn up',
+      'yarn upgrade',
       'cargo add',
       'cargo remove',
       'cargo update',
@@ -183,6 +198,15 @@ const Isolate = z.array(Name).max(64);
 
 const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
 
+/** The refusal for a default landing in a branch that is not named. */
+export const NAME_LANDING_BRANCH = 'Name the branch new tasks land in';
+
+/**
+ * The refusal for a pre-check on a project with no gate command, and for clearing the gate command
+ * while a pre-check is set: a project without a gate command runs nothing.
+ */
+export const PRECHECK_NEEDS_GATE = 'A pre-check needs a gate command: set a gate command first';
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -195,6 +219,12 @@ export const ProjectInput = z
      * gate command for both.
      */
     changedCheckCommand: z.string().min(1).nullable().default(null),
+    /**
+     * The command that runs on the Mac in place of the gate when the pull request's base branch has
+     * required checks on GitHub (CI-decides spec §3). Null keeps running the gate. Refused without
+     * a gate command.
+     */
+    precheckCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -212,6 +242,8 @@ export const ProjectInput = z
     baseBranch: BranchName.default('main'),
     /** What a finished task's pull request does unless the task says otherwise. */
     landing: z.enum(ProjectLanding).default(DEFAULT_PROJECT_LANDING),
+    /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+    landingBranch: BranchName.nullable().default(null),
     /**
      * `pull_request` delivery titles each PR `<prefix>: <batch title>`; null derives
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
@@ -248,6 +280,14 @@ export const ProjectInput = z
     message: 'nudgePct must be above handoffPct',
     path: ['nudgePct'],
   })
+  .refine((p) => p.landing !== ProjectLanding.Branch || p.landingBranch !== null, {
+    message: NAME_LANDING_BRANCH,
+    path: ['landingBranch'],
+  })
+  .refine((p) => p.precheckCommand === null || p.gateCommand !== null, {
+    message: PRECHECK_NEEDS_GATE,
+    path: ['precheckCommand'],
+  })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
     {
@@ -264,6 +304,8 @@ export const ProjectDto = z.object({
   repoPath: z.string(),
   gateCommand: z.string().nullable(),
   changedCheckCommand: z.string().nullable(),
+  /** Runs in place of the gate when the base has required checks; null keeps the gate. */
+  precheckCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -286,6 +328,7 @@ export const ProjectDto = z.object({
   delivery: z.enum(Delivery),
   baseBranch: z.string(),
   landing: z.enum(ProjectLanding),
+  landingBranch: z.string().nullable(),
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
@@ -308,6 +351,8 @@ export const ProjectPatch = z
     name: z.string().min(1),
     gateCommand: z.string().min(1).nullable(),
     changedCheckCommand: z.string().min(1).nullable(),
+    /** Refused while the project (after this patch) has no gate command. */
+    precheckCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),
@@ -318,6 +363,8 @@ export const ProjectPatch = z
     delivery: z.enum(Delivery),
     baseBranch: BranchName,
     landing: z.enum(ProjectLanding),
+    /** The branch new tasks land in when `landing` is `branch`; a `landing` that is not `branch` forgets it. */
+    landingBranch: BranchName.nullable(),
     prTitlePrefix: PrTitlePrefix.nullable(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
@@ -440,6 +487,44 @@ export const NextAction = z.discriminatedUnion('kind', [
 ]);
 export type NextAction = z.infer<typeof NextAction>;
 
+/** The longest `Notice.line`: one line on a task's card. */
+export const NOTICE_LINE_MAX = 500;
+/** The longest `Notice.body`, shown in the drawer. */
+export const NOTICE_BODY_MAX = 8000;
+
+/**
+ * Something a task's card and drawer say about the task or its batch that asks the builder nothing:
+ * 10db is waiting for another task's claim, or the batch's branch can't take its base yet. It stands
+ * until its cause is gone and raises no Inbox card (`decisions/2026-10-31-notices-not-cards.md`).
+ */
+export const Notice = z.object({
+  /** What the notice is about; a later notice with the same key in the same place replaces it. */
+  key: z.string().min(1).max(200),
+  /** `warning` is something the builder may need to act on, `info` is 10db waiting on its own. */
+  tone: z.enum(['info', 'warning']),
+  /** The one line a task's card shows. */
+  line: z.string().min(1).max(NOTICE_LINE_MAX),
+  /** What the drawer shows under the line: who, why, and what to do about it. */
+  body: z.string().max(NOTICE_BODY_MAX),
+});
+export type Notice = z.infer<typeof Notice>;
+
+function cut(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
+/**
+ * The notice cut to what `Notice` allows, ending in an ellipsis where it was cut: a gh error or a long
+ * list of paths must not make the batch or run that holds it fail to parse.
+ */
+export function fitNotice(notice: Notice): Notice {
+  return {
+    ...notice,
+    line: cut(notice.line, NOTICE_LINE_MAX),
+    body: cut(notice.body, NOTICE_BODY_MAX),
+  };
+}
+
 export const WorkstreamDto = z.object({
   id: WorkstreamId,
   taskId: TaskId,
@@ -463,6 +548,8 @@ export const WorkstreamDto = z.object({
   lastActivityAt: Timestamp.nullable(),
   /** When the builder put it first in line; null for a workstream that waits in the order it started. */
   runNextAt: Timestamp.nullable(),
+  /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
+  notice: Notice.nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

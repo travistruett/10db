@@ -1,6 +1,19 @@
+import { mkdirSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ProjectDto } from '@10db/contracts';
+import { InvalidError, type ProjectDto } from '@10db/contracts';
 import { slugOf } from './branch-name';
+
+/** The worktree root, made owner-only when missing, as a real path. */
+export function madeWorktreeRoot(root: string): string {
+  try {
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    return realpathSync(root);
+  } catch (error) {
+    throw new InvalidError(
+      `10db can't make its worktree root ${root}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
 
 /** The project id's tail in its worktree directory: enough to tell two projects of one name apart. */
 const PROJECT_ID_SUFFIX = 6;

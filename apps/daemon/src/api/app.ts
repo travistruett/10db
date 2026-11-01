@@ -20,7 +20,10 @@ import {
   InboxAnswer,
   InboxItemId,
   InboxState,
+  JudgeConfigPatch,
+  JudgeKeyInput,
   KeepAwakeInput,
+  LanePermissionsDto,
   ModelProfileId,
   NetworkHostInput,
   Month,
@@ -96,6 +99,15 @@ const RecentCount = z
   .pipe(z.number().int().min(1).max(1000))
   .optional()
   .transform((n) => n ?? null);
+/** How many judge calls to list: 1 to 100, and a larger number is read as 100. */
+const JudgeCallsQuery = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .catch(20)
+    .transform((n) => Math.min(n, 100)),
+});
 const StateList = z
   .string()
   .optional()
@@ -200,9 +212,9 @@ export function createApp(deps: ApiDeps) {
     .patch(
       '/projects/:projectId',
       validator('json', (value): ProjectPatch => ProjectPatch.parse(value)),
-      (c) =>
+      async (c) =>
         c.json(
-          deps.services.patchProject(
+          await deps.services.patchProject(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),
@@ -364,6 +376,24 @@ export function createApp(deps: ApiDeps) {
             c.req.valid('json'),
           ),
         ),
+    )
+    .get('/judge', async (c) => c.json(await deps.services.judgeStatus()))
+    .patch(
+      '/judge',
+      validator('json', (value): JudgeConfigPatch => JudgeConfigPatch.parse(value)),
+      async (c) => c.json(await deps.services.patchJudge(c.req.valid('json'))),
+    )
+    .put(
+      '/judge/key',
+      validator('json', (value): JudgeKeyInput => JudgeKeyInput.parse(value)),
+      async (c) => c.json(await deps.services.setJudgeKey(c.req.valid('json'))),
+    )
+    .delete('/judge/key', async (c) => c.json(await deps.services.removeJudgeKey()))
+    .post('/judge/test', async (c) => c.json(await deps.services.testJudge()))
+    .get(
+      '/judge/calls',
+      validator('query', (query) => JudgeCallsQuery.parse(query)),
+      (c) => c.json(deps.services.listJudgeCalls(c.req.valid('query').limit)),
     )
     .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
@@ -529,6 +559,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
+    .put(
+      '/settings/lane-permissions',
+      validator('json', (value): LanePermissionsDto => LanePermissionsDto.parse(value)),
+      (c) => c.json(deps.services.setLanePermissions(c.req.valid('json').autoMode)),
     )
     .get(
       STREAM_PATH,

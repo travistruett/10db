@@ -1,4 +1,4 @@
-import type { ContextPack, HandoffDto, NextAction } from '@10db/contracts';
+import type { ContextPack, HandoffDto, NextAction, StepResult } from '@10db/contracts';
 import { mintId } from '@10db/contracts';
 import { createTestStore, insertDecision, insertSource } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -85,6 +85,7 @@ const base = {
   step: implementStep,
   priorResults: [],
   previousResult: null,
+  earlierResults: [],
   revisedBy: null,
   task,
   claims: [{ kind: 'area' as const, name: 'ui' }],
@@ -102,6 +103,42 @@ describe('buildSessionPrompt', () => {
     expect(prompt).toContain('- Badge renders');
     expect(prompt).toContain('area ui');
     expect(prompt).toContain('commit tool');
+  });
+
+  describe('denials', () => {
+    const denials = [
+      { toolName: 'Bash', summary: 'yes > /dev/null &', note: 'no CPU load, please' },
+      { toolName: 'SandboxNetworkAccess', summary: 'example.com', note: null },
+    ];
+
+    it.each<NextAction>([
+      { kind: 'start' },
+      { kind: 'resume', providerSessionId: 'p-1', reason: 'daemon restart' },
+      { kind: 'continue_from_handoff', handoffId: mintId('Handoff') },
+    ])('tells every kind of session ($kind) what the builder denied, with the note', (action) => {
+      const prompt = buildSessionPrompt({ ...base, action, denials });
+      expect(prompt).toContain('The builder denied these calls in this workstream');
+      expect(prompt).toContain('Bash: yes > /dev/null &');
+      expect(prompt).toContain('Note from the builder: no CPU load, please');
+      expect(prompt).toContain('SandboxNetworkAccess: example.com');
+      expect(prompt).toMatch(/equivalent/);
+    });
+
+    it('says nothing when the builder denied nothing', () => {
+      expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).not.toContain(
+        'The builder denied',
+      );
+      expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, denials: [] })).not.toContain(
+        'The builder denied',
+      );
+    });
+
+    it('repeats them after a compaction', () => {
+      const text = compactionReinjection(packWithDecision, denials);
+      expect(text).toContain('Bash: yes > /dev/null &');
+      expect(text).toContain('no CPU load, please');
+      expect(compactionReinjection(packWithDecision)).not.toContain('denied');
+    });
   });
 
   it('carries the handoff when continuing', () => {
@@ -458,6 +495,30 @@ describe('buildSessionPrompt for flow steps', () => {
   });
 
   it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])(
+    'tells %s what the auto-mode classifier refuses and that a new host is refused',
+    (_name, step) => {
+      const prompt = buildSessionPrompt({
+        ...base,
+        step,
+        action: { kind: 'start' },
+        sandboxed: true,
+      });
+      expect(prompt).toContain("Claude Code's auto mode refuses");
+      expect(prompt).toContain('running the full gate');
+      expect(prompt).toContain('CPU load');
+      expect(prompt).toContain("outside this lane's worktree");
+      expect(prompt).toContain(
+        "A command that reaches a network host outside the project's allowed domains is refused",
+      );
+      expect(prompt).toContain('wait on a card from the builder');
+      expect(prompt).toContain('AskUserQuestion');
+    },
+  );
+
+  it.each([
     ['sandboxed: false', { sandboxed: false }],
     ['no sandbox flag', {}],
   ])('says nothing of the sandbox with %s', (_name, flag) => {
@@ -466,6 +527,7 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).not.toContain('mktemp');
       expect(prompt).not.toContain('Operation not permitted');
       expect(prompt).not.toContain('agent instructions');
+      expect(prompt).not.toContain('auto mode');
     }
   });
 
@@ -506,6 +568,76 @@ describe('buildSessionPrompt for flow steps', () => {
       'Earlier steps:\n--- plan (Planner)\n1. Add <Badge/> to header.tsx\n---',
     );
     expect(prompt).toContain('--- review (Reviewer): rejected\n1. No empty-state test.\n---');
+  });
+});
+
+describe('review rounds in a brief', () => {
+  const reviewStep = {
+    ...implementStep,
+    index: 1,
+    count: 3,
+    role: 'review',
+    personaName: 'Reviewer',
+    tools: 'read_only',
+  } as const;
+  const rejection = (summary: string, at: string): StepResult => ({
+    summary,
+    verdict: 'reject',
+    sessionId: mintId('Session'),
+    at,
+  });
+  const brief = (step: Parameters<typeof buildSessionPrompt>[0]['step'], earlier: StepResult[]) =>
+    buildSessionPrompt({ ...base, step, earlierResults: earlier, action: { kind: 'start' } });
+
+  it.each(['review', 'qa', 'plan_review'] as const)(
+    'tells a %s step on its first round to list every blocking finding in one rejection',
+    (role) => {
+      const prompt = brief({ ...reviewStep, role }, []);
+      expect(prompt).toContain('This is round 1');
+      expect(prompt).toContain('every blocking finding');
+      expect(prompt).toContain('one rejection');
+      expect(prompt).not.toContain('Findings from your earlier rounds');
+    },
+  );
+
+  it('shows a later round the newest rejection and tells it to check only that, plus what the fix broke', () => {
+    const prompt = brief(reviewStep, [
+      rejection('1. BLOCKING a.ts:1 stale cache.', '2026-10-13T10:00:00.000Z'),
+      rejection('1. BLOCKING b.ts:2 still no test.', '2026-10-13T11:00:00.000Z'),
+    ]);
+    expect(prompt).toContain('This is round 3');
+    expect(prompt).toContain(
+      'Findings from your earlier rounds (check only these):\n1. BLOCKING b.ts:2 still no test.',
+    );
+    // An older round's finding that the newest rejection left out was judged fixed.
+    expect(prompt).not.toContain('stale cache');
+    expect(prompt).toContain('only whether each earlier finding is fixed');
+    expect(prompt).toContain("what the fix's own changes broke");
+    expect(prompt).not.toContain('every blocking finding');
+  });
+
+  it('says a new finding the fix did not cause is a follow-up, not a rejection', () => {
+    const prompt = brief(reviewStep, [
+      rejection('1. BLOCKING a.ts:1 stale cache.', '2026-10-13T10:00:00.000Z'),
+    ]);
+    expect(prompt).toContain('followUps');
+    expect(prompt).toContain('does not reject the work');
+    // Round 1 may file a real finding that is not blocking too.
+    expect(brief(reviewStep, [])).toContain('followUps');
+  });
+
+  it('does not count an approval as a rejection round', () => {
+    const approved: StepResult = {
+      ...rejection('Looks right.', '2026-10-13T10:00:00.000Z'),
+      verdict: 'approve',
+    };
+    expect(brief(reviewStep, [approved])).toContain('This is round 1');
+  });
+
+  it('adds nothing to an implement step', () => {
+    const prompt = brief(implementStep, []);
+    expect(prompt).not.toContain('This is round');
+    expect(prompt).not.toContain('followUps');
   });
 });
 
@@ -590,6 +722,29 @@ describe('the gate in a brief', () => {
 
   it.each(briefs)('%s: never tells the agent to run the gate', (_name, brief) => {
     expect(gateInstructions(brief)).toEqual([]);
+  });
+
+  it('tells an implement step to stop a long design or docs change and file the rest as follow-ups', () => {
+    const brief = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(brief).toContain('past about 300 lines');
+    expect(brief).toContain('mcp__10db__file_follow_up');
+    expect(brief).toContain('Icebox');
+  });
+
+  it('tells a plan step to keep a design or docs plan to about one pull request', () => {
+    const brief = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'plan', personaName: 'Planner', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(brief).toContain('about 300 changed lines');
+    expect(brief).toContain('one per decision');
+    const review = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'review', personaName: 'Reviewer', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(review).not.toContain('about 300 changed lines');
   });
 
   it('tells a lane to run only the checks for what it changed', () => {

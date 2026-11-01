@@ -24,6 +24,12 @@
         "null"
       ]
     },
+    "precheckCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "areas": {
       "type": "array",
       "items": {
@@ -185,7 +191,14 @@
       "type": "string",
       "enum": [
         "merge",
+        "branch",
         "hold"
+      ]
+    },
+    "landingBranch": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "prTitlePrefix": {
@@ -362,6 +375,168 @@
                 }
               ]
             },
+            "prRequired": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "state": {
+                      "type": "string",
+                      "enum": [
+                        "pending",
+                        "passing",
+                        "failing",
+                        "none"
+                      ]
+                    },
+                    "failing": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "link": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "jobId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "link",
+                          "jobId",
+                          "runId",
+                          "description"
+                        ]
+                      }
+                    },
+                    "pending": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "link": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "jobId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "link",
+                          "jobId",
+                          "runId",
+                          "description"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "failing",
+                    "pending"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "prMergeBlocked": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "conflicts",
+                    "behind"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ciFixOf": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^bat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "ciFixHead": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "ciStopped": {
+              "default": null,
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "limit",
+                    "no_change",
+                    "no_log",
+                    "no_cut"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "gateExitCode": {
               "anyOf": [
                 {
@@ -404,6 +579,42 @@
                 "string",
                 "null"
               ]
+            },
+            "notices": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "info",
+                      "warning"
+                    ]
+                  },
+                  "line": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "body": {
+                    "type": "string",
+                    "maxLength": 8000
+                  }
+                },
+                "required": [
+                  "key",
+                  "tone",
+                  "line",
+                  "body"
+                ]
+              }
             },
             "createdAt": {
               "type": "string",
@@ -570,6 +781,168 @@
               }
             ]
           },
+          "prRequired": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "pending",
+                      "passing",
+                      "failing",
+                      "none"
+                    ]
+                  },
+                  "failing": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "link": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "jobId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "link",
+                        "jobId",
+                        "runId",
+                        "description"
+                      ]
+                    }
+                  },
+                  "pending": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "link": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "jobId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "link",
+                        "jobId",
+                        "runId",
+                        "description"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "state",
+                  "failing",
+                  "pending"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prMergeBlocked": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "conflicts",
+                  "behind"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ciFixOf": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^bat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ciFixHead": {
+            "default": null,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ciStopped": {
+            "default": null,
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "limit",
+                  "no_change",
+                  "no_log",
+                  "no_cut"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "gateExitCode": {
             "anyOf": [
               {
@@ -613,6 +986,42 @@
               "null"
             ]
           },
+          "notices": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "tone": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning"
+                  ]
+                },
+                "line": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "body": {
+                  "type": "string",
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "key",
+                "tone",
+                "line",
+                "body"
+              ]
+            }
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time",
@@ -651,6 +1060,7 @@
     "repoPath",
     "gateCommand",
     "changedCheckCommand",
+    "precheckCommand",
     "areas",
     "hazards",
     "maxLanes",
@@ -668,6 +1078,7 @@
     "delivery",
     "baseBranch",
     "landing",
+    "landingBranch",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",

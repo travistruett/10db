@@ -227,6 +227,8 @@ describe('prBody', () => {
         'make gate',
         '```',
         '',
+        'Checked on the Mac: make gate (gate).',
+        '',
         `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
         '',
         '---',
@@ -286,6 +288,8 @@ describe('prBody', () => {
         'make gate',
         '```',
         '',
+        'Checked on the Mac: make gate (gate).',
+        '',
         `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
         '',
         '## Checklist',
@@ -298,6 +302,27 @@ describe('prBody', () => {
         '',
       ].join('\n'),
     );
+  });
+
+  it('says the pre-check ran, not the gate, and that the required checks decide', () => {
+    const body = prBody({
+      batch: { id: mintId('Batch') },
+      tasks: [{ title: 'Alpha', description: '', acceptanceCriteria: ['it works'], state: 'DONE' }],
+      gate: { command: 'make gate', precheck: 'make precheck' },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+    expect(body).toContain(
+      [
+        '## How it was checked',
+        '',
+        "Checked on the Mac: make precheck (pre-check). GitHub's required checks decide.",
+        '',
+        `CI run for the pushed head: [0123456](https://github.com/acme/widgets/commit/${SHA}/checks)`,
+      ].join('\n'),
+    );
+    expect(body).not.toContain('Gate, run on the branch');
+    expect(body).not.toContain('make gate');
   });
 
   it('says each task was approved in 10db when the project has no gate command', () => {

@@ -36,6 +36,28 @@ describe('where a task lands', () => {
     expect(project.landing).toBe('merge');
   });
 
+  it('lets a project default to a named branch, which needs a name', () => {
+    const base = { name: 'p', repoPath: '/tmp/p', areas: [{ name: 'api', globs: ['src/**'] }] };
+    expect(ProjectInput.parse(base).landingBranch).toBeNull();
+    expect(ProjectInput.parse({ ...base, landing: 'branch', landingBranch: 'next' })).toMatchObject(
+      { landing: 'branch', landingBranch: 'next' },
+    );
+    expect(ProjectInput.safeParse({ ...base, landing: 'branch' }).success).toBe(false);
+    expect(
+      ProjectInput.safeParse({ ...base, landing: 'branch', landingBranch: '-d' }).success,
+    ).toBe(false);
+    expect(ProjectPatch.parse({ landing: 'branch', landingBranch: 'next' })).toEqual({
+      landing: 'branch',
+      landingBranch: 'next',
+    });
+    expect(taskLandingFor({ landing: 'branch', landingBranch: 'next' })).toEqual({
+      kind: 'branch',
+      branch: 'next',
+    });
+    expect(taskLandingFor({ landing: 'merge', landingBranch: null })).toEqual({ kind: 'base' });
+    expect(taskLandingFor({ landing: 'hold', landingBranch: null })).toEqual({ kind: 'hold' });
+  });
+
   it('lets a project hold and a task name its landing or leave it to the project', () => {
     expect(ProjectPatch.parse({ landing: 'hold' })).toEqual({ landing: 'hold' });
     expect(ProjectPatch.safeParse({ landing: 'squash' }).success).toBe(false);
@@ -51,7 +73,7 @@ describe('where a task lands', () => {
     { project: 'merge', expected: { kind: 'base' } },
     { project: 'hold', expected: { kind: 'hold' } },
   ] as const)('a task follows a project that $project', ({ project, expected }) => {
-    expect(taskLandingFor(project)).toEqual(expected);
+    expect(taskLandingFor({ landing: project, landingBranch: null })).toEqual(expected);
   });
 
   it.each([

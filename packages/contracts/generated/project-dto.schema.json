@@ -24,6 +24,12 @@
         "null"
       ]
     },
+    "precheckCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "areas": {
       "type": "array",
       "items": {
@@ -185,7 +191,14 @@
       "type": "string",
       "enum": [
         "merge",
+        "branch",
         "hold"
+      ]
+    },
+    "landingBranch": {
+      "type": [
+        "string",
+        "null"
       ]
     },
     "prTitlePrefix": {
@@ -239,6 +252,7 @@
     "repoPath",
     "gateCommand",
     "changedCheckCommand",
+    "precheckCommand",
     "areas",
     "hazards",
     "maxLanes",
@@ -256,6 +270,7 @@
     "delivery",
     "baseBranch",
     "landing",
+    "landingBranch",
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",

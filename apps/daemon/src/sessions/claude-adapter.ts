@@ -43,6 +43,7 @@ import {
   SessionEndReason,
   type AccountProbeSpec,
   type CompletionSpec,
+  type LanePermissionMode,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -93,6 +94,30 @@ export interface ClaudeAdapterOptions {
    * sandboxes every real session, and this adapter refuses one that arrives without a sandbox.
    */
   readonly allowUnsandboxed?: true;
+  /**
+   * The permission mode a sandboxed session runs in, over the one its spec carries. Only the live
+   * test sets it, to pin a mode whatever the app-wide setting says.
+   */
+  readonly lanePermissionMode?: LanePermissionMode;
+}
+
+/**
+ * What a sandboxed lane runs in when neither the adapter nor the session's spec names a mode. The
+ * hook asks 10db about the calls the classifier must not settle
+ * (docs/architecture/decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md).
+ */
+const LANE_PERMISSION_MODE: LanePermissionMode = 'auto';
+
+/**
+ * Claude Code forces `default` mode while `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is `1`, so a session in
+ * auto mode sets it to `0`. The lane profile already denies every non-allowlisted name to Bash by
+ * name, and the processes outside the sandbox hold no lane-writable code.
+ */
+function laneMode(
+  spec: SessionSpec,
+  deps: Pick<QueryDeps, 'lanePermissionMode'>,
+): LanePermissionMode {
+  return deps.lanePermissionMode ?? spec.lanePermissionMode ?? LANE_PERMISSION_MODE;
 }
 
 export const UNSANDBOXED_REFUSAL =
@@ -118,6 +143,8 @@ interface QueryDeps {
   readonly recheckSettings: (what: string) => HookJSONOutput;
   /** True once the session has been refused after it started; every tool is denied from then on. */
   readonly isRefused: () => boolean;
+  /** The mode a sandboxed session runs in, over its spec's; `LANE_PERMISSION_MODE` when neither names one. */
+  readonly lanePermissionMode?: LanePermissionMode;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -170,9 +197,8 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them, and lanes never run in auto mode, so the check is defensive: a marked call
- * still becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
- * typings omit them.
+ * classifier sets them; a marked call becomes a card that no stored rule answers. The SDK passes
+ * these fields at runtime but its typings omit them.
  */
 const EscalationFields = z.looseObject({
   requiresUserInteraction: z.boolean().optional(),
@@ -212,6 +238,21 @@ function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
   };
 }
 
+/**
+ * The inline settings of a sandboxed session. Claude Code reads `autoMode` only from user, managed
+ * or inline settings, never the repository's, so a repository cannot loosen the classifier's rules.
+ * The SDK's `settings` type has no `autoMode`; the object comes from `autoModeRules`, which validates it.
+ */
+function sandboxedSettings(
+  sandbox: NonNullable<SessionSpec['sandbox']>,
+): NonNullable<Options['settings']> {
+  return {
+    autoCompactEnabled: true,
+    permissions: { ask: [...sandbox.askRules] },
+    autoMode: sandbox.autoMode,
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
   return {
@@ -219,7 +260,13 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: sandbox ? { ...spec.env, ...sandbox.env } : { ...spec.env },
+    env: sandbox
+      ? {
+          ...spec.env,
+          ...sandbox.env,
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: laneMode(spec, deps) === 'auto' ? '0' : '1',
+        }
+      : { ...spec.env },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
@@ -229,17 +276,15 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
-    settings: sandbox
-      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
-      : { autoCompactEnabled: true },
+    settings: sandbox ? sandboxedSettings(sandbox) : { autoCompactEnabled: true },
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    // What no allow rule covers reaches canUseTool; auto mode's classifier would approve calls the
-    // cards exist to ask about.
-    permissionMode: 'default',
+    // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
+    // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
+    permissionMode: sandbox ? laneMode(spec, deps) : 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -263,9 +308,17 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
               if (hookInput.hook_event_name !== 'PreToolUse') return {};
               if (!(await deps.billingVerified) || deps.isRefused())
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
-              return toHookOutput(
-                spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
-              );
+              try {
+                return toHookOutput(
+                  spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
+                );
+              } catch (error) {
+                // A guard that fails must never let the call run.
+                return toHookOutput({
+                  decision: 'deny',
+                  reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              }
             },
           ],
         },
@@ -418,6 +471,9 @@ function startSession(
       pluginDir: opts.pluginDir,
       abortController,
       billingVerified,
+      ...(opts.lanePermissionMode === undefined
+        ? {}
+        : { lanePermissionMode: opts.lanePermissionMode }),
       onSpawn: (p) => {
         pid = p;
       },
@@ -551,6 +607,8 @@ function startSession(
         subscriptionType: account?.subscriptionType,
         claudeCodeVersion: init.claude_code_version,
         model: init.model,
+        // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
+        permissionMode: init.permissionMode,
       },
       'claude session billing',
     );

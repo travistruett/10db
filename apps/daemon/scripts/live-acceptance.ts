@@ -233,6 +233,8 @@ function startDaemonProcess(): ChildProcess {
       TENDB_DEV_UI_ORIGIN: 'http://localhost:1420',
       TENDB_LOG_LEVEL: 'info',
       TENDB_BENCHMARKS: 'off',
+      // Task text and diffs would go to OpenRouter on the builder's key.
+      TENDB_JUDGE: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.
       TENDB_PARENT_STDIN: '1',
     },

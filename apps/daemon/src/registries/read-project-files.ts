@@ -3,7 +3,7 @@ import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 /** A package file bigger than this counts as absent; the biggest lockfiles are a few megabytes. */
-const MAX_FILE_BYTES = 16 * 1024 * 1024;
+export const MAX_FILE_BYTES = 16 * 1024 * 1024;
 
 /**
  * The real path of `folder` (a path from the project root, `''` for the root itself), or null when

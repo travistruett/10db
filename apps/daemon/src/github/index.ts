@@ -2,6 +2,11 @@ export {
   createGh,
   GhError,
   GhFailure,
+  jobIdsOfLink,
+  MergeBlocked,
+  parseJobLog,
+  parseRequiredChecks,
+  PrMergeable,
   PrState,
   createSystemGhExec,
   summariseChecks,
@@ -12,8 +17,10 @@ export {
   type GhCall,
   type GhExec,
   type GhOutput,
+  type JobLog,
   type PullRequest,
   type PullRequestStatus,
+  type RequiredChecks,
 } from './gh';
 export { githubRepoOf } from './repo-name';
 export { resolveGh } from './resolve-gh';

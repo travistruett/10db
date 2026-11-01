@@ -2,7 +2,9 @@ import type { ProjectDto } from '@10db/contracts';
 import { Text, Title } from '@mantine/core';
 import { AccountsSection } from './accounts/accounts-section';
 import { BoardColumnsSection } from './board-columns-section';
+import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
+import { LanePermissionsSection } from './lane-permissions-section';
 import { PlannedSection } from './planned-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { ProjectAreas } from './project-areas';
@@ -66,11 +68,25 @@ export function SectionBody({
           <KeepAwakeSection />
         </>
       );
+    case SettingsSectionKey.LanePermissions:
+      return (
+        <>
+          {heading}
+          <LanePermissionsSection />
+        </>
+      );
     case SettingsSectionKey.Accounts:
       return (
         <>
           {heading}
           <AccountsSection />
+        </>
+      );
+    case SettingsSectionKey.Decisions:
+      return (
+        <>
+          {heading}
+          <DecisionsSection />
         </>
       );
     case SettingsSectionKey.Team:

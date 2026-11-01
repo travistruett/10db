@@ -1,13 +1,19 @@
 import { readFileSync } from 'node:fs';
 import {
   GhError,
+  PrMergeable,
   PrState,
   summariseChecks,
   type CheckRollupEntry,
   type Gh,
+  type JobLog,
+  type MergeBlocked,
   type PullRequest,
   type PullRequestStatus,
+  type RequiredChecks,
 } from '../src/github';
+
+const NO_REQUIRED: RequiredChecks = { state: 'none', failing: [], pending: [] };
 
 export type GhMethod =
   | 'authStatus'
@@ -16,8 +22,12 @@ export type GhMethod =
   | 'repoAllowsAutoMerge'
   | 'prView'
   | 'prStatus'
+  | 'prRequiredChecks'
+  | 'jobLog'
+  | 'rerunFailed'
   | 'prCreate'
-  | 'prAutoMerge';
+  | 'prAutoMerge'
+  | 'prMerge';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -31,8 +41,15 @@ export class FakeGh implements Gh {
   repo = 'acme/widgets';
   /** Whether the repository allows auto-merge, as GitHub's setting does. */
   autoMergeAllowed = true;
+  /**
+   * True when the pull request's base has no required checks: GitHub refuses auto-merge on it as
+   * "in clean status", and a direct merge is allowed.
+   */
+  noRequiredChecks = false;
   /** The pull requests auto-merge was turned on for, in order. */
   readonly autoMerged: string[] = [];
+  /** The pull requests merged directly, in order. */
+  readonly merged: string[] = [];
   /** One error per method, thrown by its next call only. */
   readonly failNext = new Map<GhMethod, GhError>();
   /**
@@ -41,11 +58,17 @@ export class FakeGh implements Gh {
    */
   readonly failRead = new Map<string, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
+  /** The Actions runs `rerunFailed` was asked to rerun, in order. */
+  readonly reruns: string[] = [];
+  private readonly required = new Map<string, RequiredChecks>();
+  private readonly jobLogs = new Map<string, JobLog>();
   private readonly byRef = new Map<
     string,
     {
       pr: { url: string; state: PrState };
       headSha: string | null;
+      mergeBlocked: MergeBlocked | null;
+      mergeable: PrMergeable;
       body: string;
       create: PrCreateCall | null;
       rollup: readonly CheckRollupEntry[];
@@ -103,11 +126,38 @@ export class FakeGh implements Gh {
       () => {
         const found = this.byRef.get(input.ref);
         return found
-          ? { ...found.pr, headSha: found.headSha, ...summariseChecks(found.rollup) }
+          ? {
+              ...found.pr,
+              headSha: found.headSha,
+              mergeBlocked: found.mergeBlocked,
+              mergeable: found.mergeable,
+              ...summariseChecks(found.rollup),
+            }
           : null;
       },
       this.failRead.get(input.ref),
     );
+  }
+
+  prRequiredChecks(input: {
+    readonly repo: string;
+    readonly url: string;
+  }): Promise<RequiredChecks> {
+    return this.call('prRequiredChecks', input, () => this.required.get(input.url) ?? NO_REQUIRED);
+  }
+
+  jobLog(input: { readonly repo: string; readonly jobId: string }): Promise<JobLog> {
+    return this.call(
+      'jobLog',
+      input,
+      () => this.jobLogs.get(input.jobId) ?? ({ kind: 'not_yet' } as const),
+    );
+  }
+
+  rerunFailed(input: { readonly repo: string; readonly runId: string }): Promise<void> {
+    return this.call('rerunFailed', input, () => {
+      this.reruns.push(input.runId);
+    });
   }
 
   prCreate(input: {
@@ -128,8 +178,27 @@ export class FakeGh implements Gh {
   }
 
   prAutoMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
-    return this.call('prAutoMerge', input, () => {
-      this.autoMerged.push(input.url);
+    return this.call(
+      'prAutoMerge',
+      input,
+      () => {
+        this.autoMerged.push(input.url);
+      },
+      this.noRequiredChecks
+        ? new GhError(
+            'failed',
+            'gh pr merge failed (exit 1): GraphQL: Pull request Pull request is in clean status (enablePullRequestAutoMerge)',
+          )
+        : undefined,
+    );
+  }
+
+  prMerge(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('prMerge', input, () => {
+      const found = this.byRef.get(input.url);
+      if (!found) throw new Error(`no PR ${input.url}`);
+      found.pr.state = PrState.Merged;
+      this.merged.push(input.url);
     });
   }
 
@@ -151,6 +220,30 @@ export class FakeGh implements Gh {
     found.headSha = sha;
   }
 
+  /** Why GitHub will not merge the PR as it is from now on; a new PR has no reason. */
+  setMergeBlocked(url: string, blocked: MergeBlocked | null): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.mergeBlocked = blocked;
+  }
+
+  /** The required checks `prRequiredChecks` reports for the PR from now on; a new PR has none. */
+  setRequiredChecks(url: string, checks: RequiredChecks): void {
+    this.required.set(url, checks);
+  }
+
+  /** The log `jobLog` returns for the job from now on; until then the run is still in progress. */
+  setJobLog(jobId: string, log: JobLog): void {
+    this.jobLogs.set(jobId, log);
+  }
+
+  /** Whether GitHub says the PR merges cleanly from now on; a new PR does. */
+  setMergeable(url: string, mergeable: PrMergeable): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.mergeable = mergeable;
+  }
+
   /** The checks the PR's rollup shows from now on; a new PR has none. */
   setChecks(url: string, rollup: readonly CheckRollupEntry[]): void {
     const found = this.byRef.get(url);
@@ -168,7 +261,15 @@ export class FakeGh implements Gh {
 
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
-    const entry = { pr: { url, state }, headSha: null, body, create, rollup: [] };
+    const entry = {
+      pr: { url, state },
+      headSha: null,
+      mergeBlocked: null,
+      mergeable: PrMergeable.Mergeable,
+      body,
+      create,
+      rollup: [],
+    };
     this.byRef.set(branch, entry);
     this.byRef.set(url, entry);
     return url;

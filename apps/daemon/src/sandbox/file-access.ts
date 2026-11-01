@@ -32,7 +32,9 @@ export interface FileAccessContext {
 /** `contains-protected` is a directory-scoped read of a path that has a protected path under it. */
 export type ReadAccess = 'inside' | 'allowed' | 'protected' | 'contains-protected' | 'ask';
 /** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part, a part that cannot be examined). */
-export type WriteAccess = 'ok' | 'git-internal' | 'claude-protected' | 'unresolvable';
+/** `sandbox-temp` is under the sandbox temp root but outside this session's own temp dir. */
+export type WriteAccess =
+  'ok' | 'git-internal' | 'claude-protected' | 'sandbox-temp' | 'unresolvable';
 
 /** A file-tool judgment that could not be made; the judge refuses the call. */
 export class FileAccessError extends Error {
@@ -231,12 +233,19 @@ const WRITE_STRICTNESS: Record<WriteAccess, number> = {
   ok: 0,
   'claude-protected': 2,
   'git-internal': 4,
+  'sandbox-temp': 4,
   unresolvable: 4,
 };
 
 function judgeWrite(real: string, ctx: FileAccessContext): WriteAccess {
   if (spellings(ctx.checkout).some((root) => isEqualOrUnder(real, join(root, '.git')))) {
     return 'git-internal';
+  }
+  // Other sessions' temp dirs and the process ledgers are there: a ledger a lane wrote would name
+  // what the next daemon start signals.
+  const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
+  if (!ownTemp && spellings(ctx.sandboxTemp.root).some((root) => isEqualOrUnder(real, root))) {
+    return 'sandbox-temp';
   }
   return isClaudeProtected(real, ctx) ? 'claude-protected' : 'ok';
 }
@@ -294,12 +303,38 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
         return { refuse: refusalFor(path, error) };
       }
     },
+    readAsk(toolName, input) {
+      try {
+        for (const path of readPathsOf(toolName, input)) {
+          if (readAccess(path, ctx, toolName !== 'Read').access === 'ask') {
+            return `${path} is outside the paths a lane may read without asking.`;
+          }
+        }
+        return null;
+      } catch {
+        return `${toolName} could not be judged.`;
+      }
+    },
+    writeAsk(path) {
+      try {
+        return writeAccess(path, ctx).access === 'claude-protected'
+          ? `${path} is a Claude Code configuration path.`
+          : null;
+      } catch {
+        return `${path} could not be judged.`;
+      }
+    },
     write(path) {
       if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
       try {
         const result = writeAccess(path, ctx);
         if (result.access === 'git-internal') {
           return { refuse: '.git/ internals are never edited; use the commit tool.' };
+        }
+        if (result.access === 'sandbox-temp') {
+          return {
+            refuse: `${path} is in 10db's sandbox temp root, outside this session's temp dir; 10db never lets a lane write there.`,
+          };
         }
         if (result.access === 'unresolvable') {
           return { refuse: `${path} cannot be resolved to one real path; 10db refuses it.` };

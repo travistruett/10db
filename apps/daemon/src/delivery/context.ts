@@ -1,5 +1,5 @@
-import { CARD_RESOLVES_WHEN, type ProjectId } from '@10db/contracts';
-import { findOpenByFoldKey, type WriteContext } from '@10db/db';
+import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
+import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
@@ -8,6 +8,7 @@ import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
 import type { WorktreeDependencies } from './worktree-dependencies';
+import type { WorktreeGenerators } from './worktree-generated';
 
 export interface DeliveryLimits {
   /** Each fetch and gh call. */
@@ -40,6 +41,8 @@ export interface DeliveryContext {
   readonly worktreeRoot: string;
   /** Brings a new worktree's seeded packages in line with its lockfile. */
   readonly dependencies: WorktreeDependencies;
+  /** Regenerates the generated files of a worktree after a merge with its base took the base's. */
+  readonly generators: WorktreeGenerators;
   /** The login environment network calls run in (environment/buildNetworkEnv). */
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
@@ -77,6 +80,21 @@ function flagOf(projectId: ProjectId, card: Card) {
       : {}),
     ...(card.options ? { options: card.options } : {}),
   };
+}
+
+/**
+ * Shows `notice` on the batch's tasks. Finding the same cause again writes nothing and tells no one,
+ * so a gate that meets a standing conflict again changes nothing.
+ */
+export function showNotice(state: StateStore, batchId: BatchId, notice: Notice): void {
+  state.write((w) => setBatchNotice(w, batchId, notice));
+}
+
+/** Takes the notices with these keys off the batch's tasks: what they said is gone. */
+export function hideNotices(state: StateStore, batchId: BatchId, keys: readonly string[]): void {
+  state.write((w) => {
+    for (const key of keys) clearBatchNotice(w, batchId, key);
+  });
 }
 
 /** Delivery cards belong to the project, not to one workstream. */
