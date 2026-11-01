@@ -172,7 +172,7 @@ fix is no longer needed (below). **(call: no disarm)**
 - **The fix session** is a lane like any other: its plan, review and per-step check (the pre-check, §3) are the
   task's.
 - **Its ship** first reads the pull request (`prStatus`). Merged or closed: the batch ends `CLOSED` with nothing
-  pushed. Then, if `git rev-list --no-merges H..<tip>` is empty, the fix changed nothing: the batch ends `CLOSED`
+  pushed. Then, if `git rev-list --first-parent --no-merges H..<tip>` is empty (`--first-parent`, because a merge of the base into the branch brings the base's own non-merge commits into `H..<tip>`), the fix changed nothing: the batch ends `CLOSED`
   with nothing pushed and the next watch round stops (step 2). Merges are left out because the per-step check's
   base update (#173, `beforeGate` in `runner.ts`) merges `origin/<base>` into the branch, so a fix that wrote
   nothing still has a new tip whenever the base has moved since `H`. Otherwise the ship's steps run as for any batch: base update (#173), pre-check, push (a

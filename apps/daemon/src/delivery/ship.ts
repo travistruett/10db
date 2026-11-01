@@ -37,7 +37,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
-import { PrState } from '../github';
+import { PrState, type PullRequest } from '../github';
 import { raiseGateHostCards } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -469,6 +469,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     repo: string,
     prUrl: string,
     signal: AbortSignal,
+    rearm = false,
   ): Promise<void> {
     const call = ghCall(deps, signal);
     try {
@@ -487,6 +488,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (signal.aborted) throw error;
       if (nothingToWaitFor(error)) {
         await mergeNow(batch, repo, prUrl, signal);
+        return;
+      }
+      if (rearm) {
+        // A fix batch re-arms a pull request whose auto-merge is probably on already, and gh's answer
+        // to that is not known (docs/architecture/research/spike-15-gh-ci-checks.md): any error
+        // counts as armed, never as the refused card.
+        deps.logger.info(
+          { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
+          'auto-merge answered an error on a re-arm; treated as armed',
+        );
+        tellMerge(batch, null);
         return;
       }
       deps.logger.warn(
@@ -557,13 +569,42 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return;
       }
+      // 0b. A CI fix batch pushes to a pull request that already exists, so it reads the pull request
+      // first: one that merged or closed meanwhile, or a fix that wrote nothing, ends the batch with
+      // nothing pushed.
+      let fixPr: PullRequest | null = null;
+      if (batch.ciFixHead !== null) {
+        step = 'gh pr view';
+        const status = await deps.gh.prStatus({ repo, ref: branch }, ghCall(deps, signal));
+        if (status === null)
+          throw new Error(`GitHub has no pull request for ${branch} to push the fix to`);
+        step = 'checking the fix for commits';
+        const own =
+          status.state === PrState.Open
+            ? await deps.git.ownCommitsSince(checkout, batch.ciFixHead, `refs/heads/${branch}`)
+            : [];
+        if (status.state !== PrState.Open || own.length === 0) {
+          const reason =
+            status.state === PrState.Open
+              ? 'the fix made no commits of its own'
+              : `its pull request is ${status.state.toLowerCase()}`;
+          deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
+          deps.logger.info({ batchId, reason, prUrl: status.url }, 'fix batch closed');
+          await afterEnd(batchId, worktreePath);
+          return;
+        }
+        fixPr = { url: status.url, state: status.state };
+      }
       const dirty = await deps.git.changedPaths(checkout);
       if (dirty.length > 0) {
         fail(batch, shipCards.dirtyCheckout(batch, dirty, worktreePath ?? undefined));
         return;
       }
-      // 1. Nothing beyond the base: nothing to push.
-      if ((await deps.git.commitsSince(checkout, baseSha, `refs/heads/${branch}`)).length === 0) {
+      // 1. Nothing beyond the base: nothing to push. (A fix batch's own commits were counted above.)
+      if (
+        batch.ciFixHead === null &&
+        (await deps.git.commitsSince(checkout, baseSha, `refs/heads/${branch}`)).length === 0
+      ) {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
@@ -666,7 +707,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(batch, project, branch, signal);
       // 4. Any PR for the branch, in any state; create one only when there is none.
       step = 'gh pr view';
-      const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
+      const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
       step = 'gh pr create';
       // The base the branch holds now: a merge before the gate moved it.
       const base = getBatch(db, batchId).baseSha ?? baseSha;
@@ -677,7 +718,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // or merged it.
       if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
         step = 'gh pr merge --auto';
-        await turnOnAutoMerge(batch, repo, prUrl, signal);
+        await turnOnAutoMerge(batch, repo, prUrl, signal, fixPr !== null);
       }
       // 5. Record it.
       deps.state.write((w) =>
