@@ -113,8 +113,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
 
   function resume(batchId: BatchId): void {
-    const project = getProject(db, getBatch(db, batchId).projectId);
-    deps.jobs.run(jobKey(project, JobQueue.Ship), (signal) => shipSteps(batchId, signal));
+    deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
+      shipSteps(batchId, signal),
+    );
   }
 
   function fail(batch: BatchDto, outcome: ShipFailure): void {
@@ -759,8 +760,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         .filter((m) => m.state === WorkstreamState.Done)
         .map((m) => m.taskTitle);
       raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
-      const project = getProject(db, batch.projectId);
-      deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+      deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
         await afterEnd(batchId, abandoned.worktreePath);
       });
       return abandoned;

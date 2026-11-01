@@ -30,7 +30,9 @@ import {
   insertBatch,
   listWorkstreams,
   patchBatch,
+  patchTask,
   transitionBatch,
+  type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
@@ -42,6 +44,7 @@ import { forgetCuttingTasks, recordCuttingTasks } from './cutting-tasks';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
+import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
@@ -72,6 +75,12 @@ export interface BatchStarter {
 export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   const db = ctx.state.db;
 
+  /** One part of a start: what it writes, in the start's one transaction, and the job it queues after. */
+  interface StartStep {
+    write(w: WriteContext): BatchDto;
+    launch(batch: BatchDto): void;
+  }
+
   function startBatch(projectId: ProjectId, raw: BatchStartInput): BatchDto[] {
     const input = BatchStartInput.parse(raw);
     const project = getProject(db, projectId);
@@ -79,23 +88,78 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new InvalidError(`${project.name} delivers locally; start its tasks one at a time`);
     const tasks = input.taskIds.map((id) => getTask(db, id));
     for (const task of tasks) checkStartable(project, task);
-    switch (project.workspaceMode) {
-      case WorkspaceMode.Shared:
-        return [startShared(project, input, tasks)];
-      case WorkspaceMode.Worktree:
-        return input.batchId === undefined
-          ? startWorktrees(project, tasks)
-          : [joinWorktree(project, input.batchId, tasks)];
-    }
+    // Phase 1: every part is checked before any is written, so a refused start leaves no batch.
+    const { steps, placement } = prepare(project, input, tasks);
+    // Phase 2: one transaction writes each task's placement and every batch, then the jobs queue.
+    const batches = ctx.state.write((w) => {
+      for (const task of tasks) {
+        const mode = placement(task);
+        if (task.workspaceMode !== mode) patchTask(w, task.id, { workspaceMode: mode });
+      }
+      return steps.map((step) => step.write(w));
+    });
+    steps.forEach((step, i) => {
+      const batch = batches[i];
+      if (batch) step.launch(batch);
+    });
+    return batches;
   }
 
-  function startShared(
+  /**
+   * Splits the tasks by placement (one shared part, one copy part per dependency group) or, for a
+   * fix task sent with `batchId`, gives them that batch's placement. Each part is checked here; none
+   * writes.
+   */
+  function prepare(
     project: ProjectDto,
     input: BatchStartInput,
     tasks: readonly TaskDto[],
-  ): BatchDto {
+  ): { steps: StartStep[]; placement: (task: TaskDto) => WorkspaceMode } {
+    if (input.batchId !== undefined) {
+      const copy = copyBatchOf(project, input.batchId);
+      if (copy)
+        return {
+          steps: [prepareJoinWorktree(project, copy, tasks)],
+          placement: () => WorkspaceMode.Worktree,
+        };
+      // Anything else is the shared batch's join, or a refusal saying why it can't be.
+      return {
+        steps: [prepareShared(project, input.title, input.batchId, tasks)],
+        placement: () => WorkspaceMode.Shared,
+      };
+    }
+    refuseCrossPlacementDependency(tasks);
+    const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
+    const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
+    return {
+      steps: [
+        ...(inFolder.length > 0 ? [prepareShared(project, input.title, undefined, inFolder)] : []),
+        ...prepareWorktrees(project, inCopies),
+      ],
+      placement: (task) => task.workspaceMode,
+    };
+  }
+
+  /** The project's batch `batchId` when it is a separate copy's; none when it is not, or names no batch. */
+  function copyBatchOf(project: ProjectDto, batchId: BatchId): BatchDto | undefined {
+    let batch: BatchDto;
+    try {
+      batch = getBatch(db, batchId);
+    } catch (error) {
+      if (error instanceof NotFoundError) return undefined;
+      throw error;
+    }
+    return batch.projectId === project.id && batch.worktreePath !== null ? batch : undefined;
+  }
+
+  function prepareShared(
+    project: ProjectDto,
+    title: string,
+    batchId: BatchId | undefined,
+    tasks: readonly TaskDto[],
+  ): StartStep {
     const existing = findUnfinishedBatch(db, project.id) ?? null;
-    if (input.batchId !== undefined && input.batchId !== existing?.id)
+    if (batchId !== undefined && batchId !== existing?.id)
       throw new ConflictError(
         existing
           ? `Batch "${existing.title}" is the project's unfinished batch; add fix tasks to it`
@@ -110,34 +174,44 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const target = existing ? null : sharedLanding(project, tasks, 'branch');
     const plans: Plans = new Map(tasks.map((t) => [t.id, planForStart(db, t.id)]));
     const inBatch = new Set<TaskId>([
-      ...input.taskIds,
+      ...tasks.map((t) => t.id),
       ...(existing ? listWorkstreams(db, { batchId: existing.id }).map((w) => w.taskId) : []),
     ]);
     refuseUnfinished(project.id, unfinishedDependencies(db, tasks, inBatch));
-    const queue = jobKey(project, JobQueue.Cut);
-    if (existing) {
-      ctx.jobs.run(queue, (signal) => join(existing.id, tasks, plans, inBatch, signal));
-      return existing;
-    }
-    const batch = ctx.state.write((w) => {
-      const inserted = insertBatch(w, {
-        projectId: project.id,
-        title: input.title,
-        ...(target ?? { baseBranch: project.baseBranch, autoMerge: true }),
-      });
-      recordCuttingTasks(w, inserted.id, plans.keys());
-      return inserted;
-    });
-    ctx.jobs.run(queue, (signal) => cut(batch.id, tasks, plans, inBatch, signal));
-    return batch;
+    if (existing)
+      return {
+        write: () => existing,
+        launch: (batch) => {
+          ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+            join(batch.id, tasks, plans, inBatch, signal),
+          );
+        },
+      };
+    return {
+      write: (w) => {
+        const inserted = insertBatch(w, {
+          projectId: project.id,
+          title,
+          ...(target ?? { baseBranch: project.baseBranch, autoMerge: true }),
+        });
+        recordCuttingTasks(w, inserted.id, plans.keys());
+        return inserted;
+      },
+      launch: (batch) => {
+        ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+          cut(batch.id, tasks, plans, inBatch, signal),
+        );
+      },
+    };
   }
 
   /**
    * One batch per dependency group, so tasks that build on each other share a worktree and the rest
-   * run apart: each inserted CUTTING with its worktree path and its workstreams QUEUED in its own
-   * transaction, once every group passed the request's checks.
+   * run apart: each inserted CUTTING with its worktree path and its workstreams QUEUED, once every
+   * group passed the request's checks.
    */
-  function startWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): BatchDto[] {
+  function prepareWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): StartStep[] {
+    if (tasks.length === 0) return [];
     const groups = groupByDependency(tasks);
     // Tasks that share a worktree share a pull request, so they must land alike; checked for every
     // group before any batch is made.
@@ -153,25 +227,28 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     );
     // The stored path is the one git makes the worktree at, so the pin store finds the batch by it.
     const root = madeWorktreeRoot();
-    return groups.map((group, i) => {
+    return groups.map((group, i): StartStep => {
       const groupPlans = plans[i] ?? new Map<TaskId, StepPlanDto>();
       const target = targets[i] ?? { baseBranch: project.baseBranch, autoMerge: true };
-      const batch = ctx.state.write((w) => {
-        const id = mintId('Batch');
-        const inserted = insertBatch(w, {
-          id,
-          projectId: project.id,
-          title: group.title,
-          ...target,
-          worktreePath: worktreePathFor(root, project, batchBranchName(group.title, id)),
-        });
-        for (const [taskId, plan] of groupPlans) insertPlannedWorkstream(w, taskId, plan, id);
-        return inserted;
-      });
-      ctx.jobs.run(jobKey(project, JobQueue.Cut), (signal) =>
-        cutWorktree(ctx, batch.id, groupPlans, signal),
-      );
-      return batch;
+      return {
+        write: (w) => {
+          const id = mintId('Batch');
+          const inserted = insertBatch(w, {
+            id,
+            projectId: project.id,
+            title: group.title,
+            ...target,
+            worktreePath: worktreePathFor(root, project, batchBranchName(group.title, id)),
+          });
+          for (const [taskId, plan] of groupPlans) insertPlannedWorkstream(w, taskId, plan, id);
+          return inserted;
+        },
+        launch: (batch) => {
+          ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+            cutWorktree(ctx, batch.id, groupPlans, signal),
+          );
+        },
+      };
     });
   }
 
@@ -188,12 +265,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /** A fix task joins the OPEN worktree batch it names, or reopens the FAILED one it names. */
-  function joinWorktree(
+  function prepareJoinWorktree(
     project: ProjectDto,
-    batchId: BatchId,
+    batch: BatchDto,
     tasks: readonly TaskDto[],
-  ): BatchDto {
-    const batch = batchOf(project, batchId);
+  ): StartStep {
     if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
       throw new ConflictError(
         `Batch "${batch.title}" is ${batch.state.toLowerCase()}; add fix tasks to it once it is open`,
@@ -202,27 +278,17 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const plans: Plans = new Map(tasks.map((t) => [t.id, planForStart(db, t.id)]));
     const inBatch = new Set<TaskId>([
       ...tasks.map((t) => t.id),
-      ...listWorkstreams(db, { batchId }).map((w) => w.taskId),
+      ...listWorkstreams(db, { batchId: batch.id }).map((w) => w.taskId),
     ]);
     refuseUnfinished(project.id, unfinishedDependencies(db, tasks, inBatch));
-    ctx.jobs.run(jobKey(project, JobQueue.Cut), (signal) =>
-      join(batchId, tasks, plans, inBatch, signal),
-    );
-    return batch;
-  }
-
-  /** The project's batch `batchId`; any other id, one naming no batch included, is a conflict. */
-  function batchOf(project: ProjectDto, batchId: BatchId): BatchDto {
-    const conflict = new ConflictError(`Batch ${batchId} is not a batch of ${project.name}`);
-    let batch: BatchDto;
-    try {
-      batch = getBatch(db, batchId);
-    } catch (error) {
-      if (error instanceof NotFoundError) throw conflict;
-      throw error;
-    }
-    if (batch.projectId !== project.id) throw conflict;
-    return batch;
+    return {
+      write: () => batch,
+      launch: () => {
+        ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+          join(batch.id, tasks, plans, inBatch, signal),
+        );
+      },
+    };
   }
 
   function refuseUnfinished(projectId: ProjectId, blocked: readonly BlockedTask[]): void {

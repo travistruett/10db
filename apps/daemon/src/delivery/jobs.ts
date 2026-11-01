@@ -1,4 +1,4 @@
-import { WorkspaceMode, type ProjectDto } from '@10db/contracts';
+import type { BatchDto } from '@10db/contracts';
 import type { Logger } from '../log';
 
 /** Which of a project's job queues a job runs in. */
@@ -6,17 +6,17 @@ export const JobQueue = { Cut: 'cut', Ship: 'ship' } as const;
 export type JobQueue = (typeof JobQueue)[keyof typeof JobQueue];
 
 /**
- * A worktree project's cuts and joins run in one queue and its ships and cleanup in another, so
- * a cut never waits behind a shipping gate. A shared project keeps one queue: its cut switches the
- * checkout a ship reads.
+ * A separate copy's cuts and joins run in one queue and its ships and cleanup in another, so they
+ * never wait behind the shared batch's queue or a shipping gate. A batch in Your folder keeps the
+ * project's single queue: its cut switches the checkout a ship reads. The queue follows the batch
+ * (whether it has a worktree), never the project's default placement, which can change while
+ * batches are unfinished.
  */
-export function jobKey(project: Pick<ProjectDto, 'id' | 'workspaceMode'>, queue: JobQueue): string {
-  switch (project.workspaceMode) {
-    case WorkspaceMode.Shared:
-      return project.id;
-    case WorkspaceMode.Worktree:
-      return `${project.id}:${queue}`;
-  }
+export function jobKey(
+  batch: Pick<BatchDto, 'projectId' | 'worktreePath'>,
+  queue: JobQueue,
+): string {
+  return batch.worktreePath === null ? batch.projectId : `${batch.projectId}:${queue}`;
 }
 
 /** Background delivery work. Jobs with the same key (a project's queue) run one at a time, in order. */
