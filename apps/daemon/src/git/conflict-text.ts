@@ -10,6 +10,15 @@ const THEIRS = /^>{7}( |$)/;
 
 const unresolved = (reason: string): TextResolution => ({ kind: 'unresolved', reason });
 
+/** Why `resolveAddedLines` leaves a hunk where the ancestor had lines: a choice, which markers show. */
+export const BOTH_CHANGED = 'both sides changed the same lines';
+
+/** True when `text` has a line that opens a conflict and a line that closes one. */
+export function hasConflictMarkers(text: string): boolean {
+  const lines = text.split(/\r?\n/);
+  return lines.some((line) => OURS.test(line)) && lines.some((line) => THEIRS.test(line));
+}
+
 /**
  * Reads a file git merged with `merge.conflictStyle=diff3` and resolves it when every conflict is
  * two sides adding lines at the same place, where the common ancestor has none there: both sides'
@@ -54,7 +63,7 @@ export function resolveAddedLines(text: string): TextResolution {
         break;
       case 'theirs':
         if (THEIRS.test(line)) {
-          if (base > 0) return unresolved('both sides changed the same lines');
+          if (base > 0) return unresolved(BOTH_CHANGED);
           out.push(...ours, ...theirs);
           hunks += 1;
           side = 'text';

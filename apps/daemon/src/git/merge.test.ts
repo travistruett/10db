@@ -372,6 +372,113 @@ describe('mergeIntoBranch', () => {
         ],
       });
     });
+
+    describe('leaving markers for a session', () => {
+      const marking = () =>
+        git.mergeIntoBranch({
+          repo: repo.path,
+          branch: 'work',
+          from: 'main',
+          message: 'Merge main into work',
+          resolve: { generated: GENERATED, leaveMarkers: true },
+        });
+
+      it('commits the merge with markers where both sides changed the same lines, the base as second parent, and settles the rest', async () => {
+        seed({
+          'src/type.ts': 'export type T = {\n  id: string;\n};\n',
+          'src/index.ts': "import a from './a';\nexport {};\n",
+        });
+        const own = commitFiles(
+          {
+            'src/type.ts': 'export type T = {\n  id: number;\n};\n',
+            'src/index.ts': "import a from './a';\nimport b from './b';\nexport {};\n",
+          },
+          'own',
+        );
+        const base = onMain(
+          {
+            'src/type.ts': 'export type T = {\n  id: bigint;\n};\n',
+            'src/index.ts': "import a from './a';\nimport c from './c';\nexport {};\n",
+          },
+          'theirs',
+        );
+        const merged = await marking();
+        expect(merged).toEqual({
+          kind: 'merged',
+          from: base,
+          head: rawGit('rev-parse', 'HEAD'),
+          fastForward: false,
+          paths: ['src/index.ts', 'src/type.ts'],
+          resolved: [{ path: 'src/index.ts', how: 'kept_both' }],
+          regenerate: [],
+          marked: ['src/type.ts'],
+        });
+        expect(rawGit('log', '-1', '--format=%P')).toBe(`${own} ${base}`);
+        expect(rawGit('rev-parse', 'refs/heads/work')).toBe(rawGit('rev-parse', 'HEAD'));
+        expect(read('src/type.ts')).toContain('<<<<<<< ');
+        expect(read('src/type.ts')).toContain('  id: number;');
+        expect(read('src/type.ts')).toContain('  id: bigint;');
+        expect(read('src/type.ts')).toContain('>>>>>>> ');
+        expect(read('src/index.ts')).toContain("import b from './b';\nimport c from './c';");
+        expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
+        expect(rawGit('log', '-1', '--format=%B')).toContain('src/type.ts');
+      });
+
+      it('still stops at a conflict markers cannot show: a deleted file, or a lockfile', async () => {
+        seed({ 'src/gone.ts': 'one\n', 'src/type.ts': 'a\n' });
+        rawGit('rm', '-q', 'src/gone.ts');
+        commitFiles({ 'src/type.ts': 'b\n' }, 'own');
+        onMain({ 'src/gone.ts': 'two\n', 'src/type.ts': 'c\n' }, 'theirs');
+        const before = snapshot();
+        const merged = await marking();
+        expect(merged.kind).toBe('conflict');
+        expect(snapshot()).toEqual(before);
+      });
+
+      it('takes the base whole for a generated directory beside a marked file, leaving its regeneration to the caller', async () => {
+        seed({
+          'src/schema.ts': 'export const a = 1;\n',
+          'packages/db/drizzle/0000_a.sql': 'a\n',
+        });
+        commitFiles(
+          {
+            'src/schema.ts': 'export const a = 2;\n',
+            'packages/db/drizzle/0000_a.sql': 'own\n',
+            'packages/db/drizzle/0001_own.sql': 'own\n',
+          },
+          'own',
+        );
+        onMain(
+          {
+            'src/schema.ts': 'export const a = 3;\n',
+            'packages/db/drizzle/0000_a.sql': 'theirs\n',
+            'packages/db/drizzle/0001_theirs.sql': 'theirs\n',
+          },
+          'theirs',
+        );
+        const merged = await marking();
+        if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
+        expect(merged.marked).toEqual(['src/schema.ts']);
+        expect(merged.regenerate).toEqual([
+          { dir: 'packages/db/drizzle/', dropped: ['packages/db/drizzle/0001_own.sql'] },
+        ]);
+        expect(existsSync(join(repo.path, 'packages/db/drizzle/0001_own.sql'))).toBe(false);
+        expect(read('packages/db/drizzle/0001_theirs.sql')).toBe('theirs\n');
+      });
+
+      it('names the files that still hold the markers the merge left, and none once they are gone', async () => {
+        seed({ 'src/type.ts': 'a\n', 'src/other.ts': 'x\n' });
+        commitFiles({ 'src/type.ts': 'b\n' }, 'own');
+        onMain({ 'src/type.ts': 'c\n' }, 'theirs');
+        const merged = await marking();
+        if (merged.kind !== 'merged') throw new Error(`expected a merge, got ${merged.kind}`);
+        expect(await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'])).toEqual([
+          'src/type.ts',
+        ]);
+        commitFiles({ 'src/type.ts': 'b\nc\n' }, 'resolved');
+        expect(await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'])).toEqual([]);
+      });
+    });
   });
 
   it.each([
@@ -697,6 +804,23 @@ describe('blobAt and isAncestor', () => {
     const newer = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
     expect(await git.isAncestor(repo.path, older, newer)).toBe(true);
     expect(await git.isAncestor(repo.path, newer, older)).toBe(false);
+  });
+});
+
+describe('a note 10db keeps at a ref', () => {
+  it('reads back what was kept, replaces it, and is gone once the ref is deleted', async () => {
+    const ref = 'refs/10db/root/merges/bat-1';
+    expect(await git.keptNote(repo.path, ref)).toBeNull();
+    await git.keepNote(repo.path, ref, '{"from":"abc"}');
+    expect(await git.keptNote(repo.path, ref)).toBe('{"from":"abc"}');
+    await git.keepNote(repo.path, ref, 'second');
+    expect(await git.keptNote(repo.path, ref)).toBe('second');
+    expect(await git.keptRefs(repo.path, 'refs/10db/root/merges/')).toEqual([ref]);
+    await git.deleteKeptRef(repo.path, ref);
+    expect(await git.keptNote(repo.path, ref)).toBeNull();
+    await expect(git.keepNote(repo.path, 'refs/heads/main', 'x')).rejects.toBeInstanceOf(
+      InvalidError,
+    );
   });
 });
 
