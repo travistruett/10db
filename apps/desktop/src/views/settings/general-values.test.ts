@@ -110,6 +110,19 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: null },
     },
     {
+      name: 'a pre-check, trimmed',
+      change: { precheckCommand: ' make precheck ' },
+      expected: { ok: true, patch: { precheckCommand: 'make precheck' } },
+    },
+    {
+      name: 'a pre-check with no gate command',
+      change: { gateCommand: '', precheckCommand: 'make precheck' },
+      expected: {
+        ok: false,
+        errors: { precheckCommand: 'A pre-check needs a gate command: set a gate command first' },
+      },
+    },
+    {
       name: 'an empty lane cap',
       change: { maxLanes: '' },
       expected: { ok: false, errors: { maxLanes: 'Enter the lane cap' } },
@@ -219,6 +232,17 @@ describe('checkGeneral', () => {
   it('shows the project list as one command per line', () => {
     const listed = projectDto({ allowedCommands: ['pnpm test', 'pnpm exec prettier'] });
     expect(generalValues(listed).allowedCommands).toBe('pnpm test\npnpm exec prettier');
+  });
+
+  it('shows a set pre-check, sends nothing while it is unchanged, and clears it when emptied', () => {
+    const checked = projectDto({ gateCommand: 'make gate', precheckCommand: 'make precheck' });
+    const values = generalValues(checked);
+    expect(values.precheckCommand).toBe('make precheck');
+    expect(checkGeneral(checked, values)).toEqual({ ok: true, patch: null });
+    expect(checkGeneral(checked, { ...values, precheckCommand: ' ' })).toEqual({
+      ok: true,
+      patch: { precheckCommand: null },
+    });
   });
 
   it('sends nothing for the list when it is unchanged, and clears it when emptied', () => {
