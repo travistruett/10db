@@ -1,5 +1,6 @@
 import {
   BatchState,
+  CiStopped,
   InvalidError,
   type BatchId,
   type StepPlanDto,
@@ -78,6 +79,8 @@ export async function cutWorktree(
       await ctx.git.deleteBranchIfAt(main, branch, made.base).catch(log);
     ctx.state.write((w) => {
       deleteCuttingBatch(w, batchId, card.title);
+      // The row was the guard against making the same fix again, so the root stops fixing.
+      if (batch.ciFixOf !== null) patchBatch(w, batch.ciFixOf, { ciStopped: CiStopped.NoCut });
     });
     raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
   };
