@@ -58,6 +58,7 @@ import {
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
@@ -156,7 +157,18 @@ export function createServices(deps: {
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) => insertTask(ctx, projectId, input));
+      const task = deps.state.write((ctx) =>
+        insertTask(
+          ctx,
+          projectId,
+          input,
+          proposePlacement(getProject(ctx.tx, projectId), {
+            areas: input.areas,
+            riskTags: input.riskTags ?? [],
+            workspaceMode: input.workspaceMode,
+          }),
+        ),
+      );
       deps.scheduler.requestTick();
       return task;
     },

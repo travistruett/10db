@@ -131,7 +131,24 @@ function landingOf(row: {
   }
 }
 
-export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskInput): TaskDto {
+/**
+ * Where a new task works and why. The daemon proposes it (`proposePlacement`) where it builds a task;
+ * a caller that passes none gets the placement the task names, else the project's default, with no reason.
+ */
+export interface Placement {
+  readonly workspaceMode: WorkspaceMode;
+  readonly reason: string | null;
+}
+
+/** The reason stored when the builder sets a task's placement from its control. */
+const BUILDER_CHOSE_PLACEMENT = 'chosen by the builder';
+
+export function insertTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: TaskInput,
+  placement?: Placement,
+): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
   if (config.flowId) getFlow(ctx.tx, config.flowId);
@@ -161,7 +178,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   return writeTask(ctx, projectId, {
     ...config,
     landing: config.landing ?? taskLandingFor(project.landing),
-    workspaceMode: placementFor(project, config.workspaceMode),
+    ...(placement ?? { workspaceMode: placementFor(project, config.workspaceMode), reason: null }),
     proposalId: null,
   });
 }
@@ -193,11 +210,12 @@ export function insertTaskFromProposal(
     readonly title: string;
     readonly description: string;
   },
+  placement?: Placement,
 ): TaskDto {
   const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
     landing: taskLandingFor(project.landing),
-    workspaceMode: placementFor(project, undefined),
+    ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -213,11 +231,11 @@ export function insertTaskFromProposal(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> & {
-    readonly landing: TaskLanding;
-    readonly workspaceMode: WorkspaceMode;
-    readonly proposalId: ProposalId | null;
-  },
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> &
+    Placement & {
+      readonly landing: TaskLanding;
+      readonly proposalId: ProposalId | null;
+    },
 ): TaskDto {
   const order = ctx.tx
     .select({ value: max(schema.tasks.boardOrder) })
@@ -238,7 +256,7 @@ function writeTask(
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
     workspaceMode: config.workspaceMode,
-    placementReason: null,
+    placementReason: config.reason,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -572,8 +590,8 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .set({
       ...fields,
       ...(landing === undefined ? {} : landingColumns(landing)),
-      // A placement the builder chose has no proposal behind it.
-      ...(fields.workspaceMode === undefined ? {} : { placementReason: null }),
+      // The patch is the builder's placement control: the reason says so, replacing a proposed one.
+      ...(fields.workspaceMode === undefined ? {} : { placementReason: BUILDER_CHOSE_PLACEMENT }),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))

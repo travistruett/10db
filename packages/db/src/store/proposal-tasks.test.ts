@@ -50,6 +50,23 @@ describe('insertTaskFromProposal', () => {
     });
   });
 
+  it('stores the placement and reason it is given', () => {
+    const project = seedProject(store, { delivery: 'pull_request', prTitlePrefix: 'feat(app)' });
+    const task = store.write((ctx) =>
+      insertTaskFromProposal(
+        ctx,
+        {
+          proposalId: seedProposal(project.id),
+          projectId: project.id,
+          title: 'Add caching',
+          description: '',
+        },
+        { workspaceMode: 'worktree', reason: 'touches deps' },
+      ),
+    ).value;
+    expect(task).toMatchObject({ workspaceMode: 'worktree', placementReason: 'touches deps' });
+  });
+
   it('persists the link from the task row to its proposal', () => {
     const project = seedProject(store);
     const proposalId = seedProposal(project.id);
