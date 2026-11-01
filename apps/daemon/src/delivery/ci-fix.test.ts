@@ -373,7 +373,9 @@ describe('a refused fix cut', () => {
 
     expect(fixBatches(root)).toEqual([]);
     expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_cut');
-    expect(h.cards()).toHaveLength(1);
+    // The cut's own refusal card, and the stop card in the write that deleted the batch.
+    expect(h.cards()).toHaveLength(2);
+    expect(h.cards().filter((c) => c.title.startsWith('CI still failing on'))).toHaveLength(1);
     const task = h.only(fixTasks());
 
     await round(w);

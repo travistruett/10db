@@ -35,6 +35,7 @@ import {
 } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
+import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import { baseNotices, NOTICE_KEY } from './notices';
 
@@ -151,8 +152,13 @@ export function createPrWatch(input: {
    * `dataDir`. Without it the watch only reads and records.
    */
   readonly ciFix?: { readonly dataDir: string };
+  /**
+   * Ends a fix whose pull request merged or closed while it was OPEN or FAILED: cancels each live
+   * member through the runner, then abandons the batch through the shipper. Without it a fix runs on.
+   */
+  readonly endFixes?: FixEnds;
 }): PrWatch {
-  const { ctx, clock, afterRound, ciFix } = input;
+  const { ctx, clock, afterRound, ciFix, endFixes } = input;
   const intervalMs = input.intervalMs ?? PR_WATCH_INTERVAL_MS;
   const logger = ctx.logger.child({ module: 'pr-watch' });
   const controller = new AbortController();
@@ -316,9 +322,25 @@ export function createPrWatch(input: {
       ...(blocked === now.prMergeBlocked ? {} : { prMergeBlocked: blocked }),
     };
     if (Object.keys(patch).length > 0) patchBatch(write, root.id, patch);
+    // A stop ends when the checks pass or run again (a rerun, or a commit someone pushed), or when
+    // the pull request merges or closes. The same write closes its card.
+    if (
+      now.ciStopped !== null &&
+      (read.state !== PrState.Open ||
+        required?.state === 'passing' ||
+        required?.state === 'pending')
+    )
+      clearCiStop(write, root.id);
   }
 
   async function round(signal: AbortSignal): Promise<void> {
+    await readAll(signal);
+    // After the reads, so a merge or close this round recorded ends its fixes in the same round.
+    if (endFixes !== undefined && !signal.aborted)
+      await endFixesOfEndedPullRequests(ctx, endFixes, signal);
+  }
+
+  async function readAll(signal: AbortSignal): Promise<void> {
     const groups = startingAfter(
       groupByPullRequest(listWatchedPullRequests(ctx.state.db)),
       resumeAfter,

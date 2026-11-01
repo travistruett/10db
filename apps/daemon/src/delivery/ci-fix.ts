@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  CiStopped,
   mintId,
   type BatchDto,
   type RequiredCheckJobDto,
@@ -15,10 +16,8 @@ import {
   getTask,
   insertBatch,
   insertTask,
-  listBatches,
   listWorkstreams,
   patchBatch,
-  type DbReader,
 } from '@10db/db';
 import { GhError, GhFailure } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
@@ -34,17 +33,13 @@ import {
   type CiFixOther,
 } from './ci-fix-text';
 import { ghCall, type DeliveryContext } from './context';
+import { fixesOf, stopCiFixing } from './ci-stop';
 import { jobKey, JobQueue } from './jobs';
 import { cutWorktree } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 
 /** The failing jobs whose logs one fix task carries; any others are named without a log. */
 const MAX_LOGGED_JOBS = 3;
-
-/** The fix batches made for a root batch's pull request, in any state. */
-function fixesOf(db: DbReader, root: BatchDto): BatchDto[] {
-  return listBatches(db, { projectId: root.projectId }).filter((b) => b.ciFixOf === root.id);
-}
 
 /** A failing check named in the task without a log. */
 const other = (job: RequiredCheckJobDto): CiFixOther => ({ name: job.name, link: job.link });
@@ -56,7 +51,8 @@ const other = (job: RequiredCheckJobDto): CiFixOther => ({ name: job.name, link:
  * cut of that batch on the pull request's own branch. Resolves whether a fix was made.
  *
  * Nothing starts while any failing job's run is still in progress (its log is not ready), and a job
- * whose log GitHub no longer has is skipped. Any other failure of gh is thrown, for the watch to
+ * whose log GitHub no longer has is skipped. When `ciFailureAction` stops, or no failing job's log can
+ * be read, fixing stops: one write sets `ci_stopped` on the root and raises its card. Any other failure of gh is thrown, for the watch to
  * treat as gh being down.
  */
 export async function startCiFix(input: {
@@ -73,7 +69,14 @@ export async function startCiFix(input: {
   const root = getBatch(db, input.root.id);
   const { branch, prUrl, repo } = root;
   if (head === null || branch === null || prUrl === null || repo === null) return false;
-  if (ciFailureAction(root, required, fixesOf(db, root), head).kind !== 'fix') return false;
+  const action = ciFailureAction(root, required, fixesOf(db, root), head);
+  if (action.kind === 'stop') {
+    ctx.state.write((w) => {
+      stopCiFixing(w, root.id, action.reason);
+    });
+    return false;
+  }
+  if (action.kind !== 'fix') return false;
 
   const actions = required.failing.filter((job) => job.jobId !== null);
   const logged = actions.slice(0, MAX_LOGGED_JOBS);
@@ -105,7 +108,14 @@ export async function startCiFix(input: {
       shown: { job: check.name, link: check.link, excerpt: logExcerpt(log.log), logFile: file },
     });
   }
-  if (jobs.length === 0 || signal.aborted) return false;
+  if (signal.aborted) return false;
+  // Every failing job's log is gone, so there is nothing to give a fix session.
+  if (jobs.length === 0) {
+    ctx.state.write((w) => {
+      stopCiFixing(w, root.id, CiStopped.NoLog);
+    });
+    return false;
+  }
 
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   for (const { file, text } of logs) writeFileSync(file, text, { mode: 0o600 });
