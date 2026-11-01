@@ -2,6 +2,7 @@ import {
   ConflictError,
   BatchState,
   InvalidError,
+  NEW_TASK_NO_AREAS,
   TaskStatus,
   WorkstreamState,
   type BatchId,
@@ -62,8 +63,17 @@ export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
   }
 }
 
-/** The plan a start would run; refuses one that no profile within the budget ceiling can run. */
+/**
+ * The plan a start would run. Refuses a task with no areas, as the New Task form does: the lane would
+ * launch holding no claim, and everything it wrote before asking for one would be a write outside
+ * every claim. Refuses a plan that no profile within the budget ceiling can run.
+ */
 export function planForStart(db: DbReader, taskId: TaskId): StepPlanDto {
+  const task = getTask(db, taskId);
+  if (task.areas.length === 0)
+    throw new InvalidError(
+      `${NEW_TASK_NO_AREAS} for "${task.title}" before it starts: set its areas on the task.`,
+    );
   const plan = resolveStepPlan(db, taskId);
   if (plan.overBudget.length > 0) {
     const ceiling = getProject(db, getTask(db, taskId).projectId).budgetCeiling;

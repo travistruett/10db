@@ -173,7 +173,11 @@ describe('git hook variables', () => {
   it('cannot steer the daemon tests that create, commit to and configure repositories', () => {
     const { repo, variables } = decoy();
     const before = snapshotFiles(repo.dir);
-    // The fixture helpers, the daemon's git module and a test that runs git with only a cwd.
+    // Only the daemon tests that name git hook variables: the fixture helpers that create, commit
+    // to and configure repositories, and the git module's own reads and writes. The rest of
+    // git.test.ts and the watcher tests build a repository per case (about 1 s each, 80 s and
+    // 26 s alone, 305 s for this test under the full gate's load) and say nothing about the
+    // variables. This selection takes about 11 s.
     const run = spawnSync(
       VITEST,
       [
@@ -182,7 +186,8 @@ describe('git hook variables', () => {
         'daemon',
         'apps/daemon/test/fixtures.test.ts',
         'apps/daemon/src/git/git.test.ts',
-        'apps/daemon/src/watcher/watcher.test.ts',
+        '-t',
+        'git hook variables',
       ],
       {
         cwd: repoRoot,
