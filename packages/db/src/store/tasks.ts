@@ -23,6 +23,7 @@ import {
   Title,
   WorkstreamId,
   WorkstreamState,
+  type GoalId,
   type BoardColumnId,
   type CiStopped,
   WorkspaceMode,
@@ -149,13 +150,7 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
   if (config.flowId) getFlow(ctx.tx, config.flowId);
-  const known = new Set([
-    ...project.areas.map((a) => a.name),
-    ...project.hazards.map((h) => h.name),
-  ]);
-  const unknown = config.areas.filter((a) => !known.has(a));
-  if (unknown.length > 0)
-    throw new InvalidError(`Unknown areas for project ${project.name}: ${unknown.join(', ')}`);
+  refuseUnknownAreas(project, config.areas);
   if (config.dependsOn.length > 0) {
     const deps = ctx.tx
       .select({
@@ -177,6 +172,49 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
     landing: config.landing ?? taskLandingFor(project),
     workspaceMode: placementFor(project, config.workspaceMode),
     proposalId: null,
+  });
+}
+
+function refuseUnknownAreas(project: ProjectDto, areas: readonly string[]): void {
+  const known = new Set([
+    ...project.areas.map((a) => a.name),
+    ...project.hazards.map((h) => h.name),
+  ]);
+  const unknown = areas.filter((a) => !known.has(a));
+  if (unknown.length > 0)
+    throw new InvalidError(`Unknown areas for project ${project.name}: ${unknown.join(', ')}`);
+}
+
+/**
+ * Writes one of a goal's tasks, with the project's default landing. `dependsOn` names tasks the
+ * caller wrote in the same transaction; a brief's task may have no acceptance criteria of its own.
+ */
+export function insertGoalTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  goalId: GoalId,
+  input: {
+    readonly title: string;
+    readonly description: string;
+    readonly acceptanceCriteria: readonly string[];
+    readonly areas: readonly string[];
+    readonly dependsOn: readonly TaskId[];
+  },
+): TaskDto {
+  const project = getProject(ctx.tx, projectId);
+  refuseUnknownAreas(project, input.areas);
+  return writeTask(ctx, projectId, {
+    title: Title.parse(input.title),
+    description: input.description,
+    acceptanceCriteria: [...input.acceptanceCriteria],
+    areas: [...input.areas],
+    dependsOn: [...input.dependsOn],
+    riskTags: [],
+    flowId: null,
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
+    proposalId: null,
+    goalId,
   });
 }
 
@@ -348,6 +386,7 @@ function writeTask(
     readonly landing: TaskLanding;
     readonly workspaceMode: WorkspaceMode;
     readonly proposalId: ProposalId | null;
+    readonly goalId?: GoalId;
     /** The human column to park the task in; absent, it is planned. */
     readonly boardColumnId?: BoardColumnId | null;
   },
@@ -373,6 +412,7 @@ function writeTask(
     boardColumnId: config.boardColumnId ?? null,
     workspaceMode: config.workspaceMode,
     placementReason: null,
+    goalId: config.goalId ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -480,6 +520,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
         : null,
     }),
     workstreamId: latest?.id ?? null,
+    goalId: row.goalId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
