@@ -381,13 +381,14 @@ describe('MCP tools in a worktree batch', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the eleven tools', async () => {
+  it('lists exactly the twelve tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
       'ask_human',
       'commit',
       'complete_step',
+      'file_follow_up',
       'find_knowledge',
       'get_context',
       'propose',
@@ -1313,6 +1314,34 @@ async function onStep(role: 'implement' | 'review' | 'plan') {
   });
   return s;
 }
+
+describe('file_follow_up', () => {
+  const args = {
+    title: 'Write the CI section of the design',
+    description: 'The design stops at 300 lines; the CI section is left.',
+    acceptanceCriteria: ['The CI section is written'],
+  };
+
+  it('files an Icebox task in the same project on the same landing, naming the task being worked on, once per opId', async () => {
+    const s = await onStep('implement');
+    const first = await s.call('file_follow_up', { opId: 'op-follow-0001', ...args });
+    const retry = await s.call('file_follow_up', { opId: 'op-follow-0001', ...args });
+    expect(first.isError).toBe(false);
+    expect(retry.json).toEqual(first.json);
+    const filed = listTasks(base.db, s.project.id).filter((t) => t.id !== s.task.id);
+    expect(filed).toHaveLength(1);
+    expect(filed[0]).toMatchObject({
+      title: args.title,
+      status: 'open',
+      boardColumnId: listBoardColumns(base.db, s.project.id)[0]?.id,
+      landing: s.task.landing,
+      acceptanceCriteria: args.acceptanceCriteria,
+    });
+    expect(filed[0]?.description).toContain(s.task.title);
+    expect(filed[0]?.description).toContain(s.task.id);
+    expect(first.json).toEqual({ taskId: filed[0]?.id, title: args.title });
+  });
+});
 
 describe('complete_step', () => {
   it('records a review verdict, and the session that gave it, on the current step once per opId', async () => {
