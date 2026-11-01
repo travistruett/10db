@@ -569,6 +569,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return;
       }
+      // Before anything can close the batch and remove its worktree: uncommitted work is never
+      // thrown away, so a dirty checkout fails here with its card and the worktree is kept.
+      const dirty = await deps.git.changedPaths(checkout);
+      if (dirty.length > 0) {
+        fail(batch, shipCards.dirtyCheckout(batch, dirty, worktreePath ?? undefined));
+        return;
+      }
       // 0b. A CI fix batch pushes to a pull request that already exists, so it reads the pull request
       // first: one that merged or closed meanwhile, or a fix that wrote nothing, ends the batch with
       // nothing pushed.
@@ -594,11 +601,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
         fixPr = { url: status.url, state: status.state };
-      }
-      const dirty = await deps.git.changedPaths(checkout);
-      if (dirty.length > 0) {
-        fail(batch, shipCards.dirtyCheckout(batch, dirty, worktreePath ?? undefined));
-        return;
       }
       // 1. Nothing beyond the base: nothing to push. (A fix batch's own commits were counted above.)
       if (

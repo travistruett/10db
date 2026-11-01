@@ -318,6 +318,30 @@ describe('shipping a fix batch', () => {
     expect(h.cards()).toEqual([]);
   });
 
+  it('fails with the dirty-checkout card and keeps the worktree when the fix left its edits uncommitted', async () => {
+    const { root, head } = await shippedRoot();
+    const branch = branchOf(root);
+    const { fix, ws } = await cutFix(root, head);
+    // A tracked file, edited and never committed: the fix made no commits of its own.
+    const edited = join(pathOf(fix), 'src/api/alpha.txt');
+    writeFileSync(edited, 'the fix, uncommitted\n');
+    h.settle(ws.id, 'DONE');
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id)).toMatchObject({
+      state: 'FAILED',
+      worktreePath: pathOf(fix),
+    });
+    expect(h.cards().map((c) => c.title)).toEqual([
+      expect.stringContaining('the checkout has uncommitted changes'),
+    ]);
+    expect(existsSync(edited)).toBe(true);
+    expect(gitIn(pathOf(fix), 'status', '--porcelain')).toContain('src/api/alpha.txt');
+    expect(onOrigin(branch)).toBe(head);
+  });
+
   it.each([PrState.Merged, PrState.Closed])(
     'ends closed with nothing pushed when the pull request %s meanwhile',
     async (state) => {
