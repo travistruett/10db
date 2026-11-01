@@ -4,6 +4,7 @@ import {
   BranchName,
   Delivery,
   NAME_LANDING_BRANCH,
+  PRECHECK_NEEDS_GATE,
   PrTitlePrefix,
   ProjectLanding,
   ProjectPatch,
@@ -34,6 +35,8 @@ export interface GeneralValues {
   readonly gateCommand: string;
   /** '' means none: every step is checked by the gate command. */
   readonly changedCheckCommand: string;
+  /** '' means none: the gate runs on the Mac. */
+  readonly precheckCommand: string;
   readonly maxLanes: number | '';
   readonly handoffPct: number | '';
   readonly nudgePct: number | '';
@@ -67,6 +70,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     name: project.name,
     gateCommand: project.gateCommand ?? '',
     changedCheckCommand: project.changedCheckCommand ?? '',
+    precheckCommand: project.precheckCommand ?? '',
     maxLanes: project.maxLanes,
     handoffPct: project.handoffPct,
     nudgePct: project.nudgePct,
@@ -115,6 +119,9 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const allowed = parseAllowedCommands(values.allowedCommands);
   if (allowed.error !== null) errors.allowedCommands = allowed.error;
   if (name === '') errors.name = 'Enter a name';
+  const precheckCommand = values.precheckCommand.trim();
+  // The daemon refuses a pre-check without a gate command, and a gate command cleared under one.
+  if (precheckCommand !== '' && gateCommand === '') errors.precheckCommand = PRECHECK_NEEDS_GATE;
   if (values.maxLanes === '') errors.maxLanes = 'Enter the lane cap';
   if (values.handoffPct === '') errors.handoffPct = 'Enter the handoff percentage';
   if (values.nudgePct === '') errors.nudgePct = 'Enter the nudge percentage';
@@ -147,6 +154,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const changedCheck = values.changedCheckCommand.trim();
   const changed = changedCheck === '' ? null : changedCheck;
   if (changed !== project.changedCheckCommand) patch.changedCheckCommand = changed;
+  const precheck = precheckCommand === '' ? null : precheckCommand;
+  if (precheck !== project.precheckCommand) patch.precheckCommand = precheck;
   if (values.maxLanes !== '' && values.maxLanes !== project.maxLanes)
     patch.maxLanes = values.maxLanes;
   if (values.handoffPct !== '' && values.handoffPct !== project.handoffPct)

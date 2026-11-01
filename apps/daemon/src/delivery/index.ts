@@ -11,6 +11,7 @@ export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export { stepCheck } from './local-check';
 export { prBody, prTitle, titlePrefix } from './pr-text';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';

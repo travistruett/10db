@@ -78,6 +78,13 @@ const rows: readonly Row[] = [
     sent: { changedCheckCommand: 'make check-changed' },
   },
   {
+    name: 'Pre-check command',
+    label: 'Pre-check command',
+    line: "Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate.",
+    change: () => type('Pre-check command', 'make precheck'),
+    sent: { precheckCommand: 'make precheck' },
+  },
+  {
     name: 'Delivery',
     project: pullRequests,
     label: 'Delivery',

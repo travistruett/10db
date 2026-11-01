@@ -35,6 +35,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.changedCheckCommand === seed.changedCheckCommand
         ? next.changedCheckCommand
         : current.changedCheckCommand,
+    precheckCommand:
+      current.precheckCommand === seed.precheckCommand
+        ? next.precheckCommand
+        : current.precheckCommand,
     maxLanes: current.maxLanes === seed.maxLanes ? next.maxLanes : current.maxLanes,
     handoffPct: current.handoffPct === seed.handoffPct ? next.handoffPct : current.handoffPct,
     nudgePct: current.nudgePct === seed.nudgePct ? next.nudgePct : current.nudgePct,
@@ -186,6 +190,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             error={errors.changedCheckCommand}
             onChange={(e) => {
               set({ changedCheckCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Pre-check command"
+          description="Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate."
+        >
+          <TextInput
+            aria-label="Pre-check command"
+            styles={MONO_INPUT}
+            value={values.precheckCommand}
+            error={errors.precheckCommand}
+            onChange={(e) => {
+              set({ precheckCommand: e.currentTarget.value });
             }}
           />
         </SettingRow>
