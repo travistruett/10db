@@ -11,7 +11,7 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
@@ -19,6 +19,12 @@ import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './ind
 import { baseConflictKey, baseKeptKey } from './cards';
 import { raise } from './context';
 import { INSTALL_SUMMARY } from './worktree-dependencies';
+
+// Each case builds a real repository, a worktree and a teammate's push: 3 to 12 s on an idle
+// machine, five times that when the gate runs every test file at once. The project's 30 s limit
+// left 'raises a card when regenerating changed nothing' timing out under that load, so this file
+// gets a limit with room, not one per case.
+vi.setConfig({ testTimeout: 120_000 });
 
 let h: DeliveryHarness;
 afterEach(() => {
