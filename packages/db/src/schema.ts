@@ -6,6 +6,7 @@ import type {
   BatchFailure,
   BatchId,
   BatchState,
+  CiStopped,
   BoardColumnId,
   ClaimId,
   ClaimKind,
@@ -44,10 +45,12 @@ import type {
   ProjectLanding,
   ProposalId,
   PullRequestChecks,
+  PullRequestMergeBlocked,
   PullRequestState,
   ProposalKind,
   Provider,
   QuestionCategory,
+  RequiredChecksDto,
   RiskTag,
   RoutingRuleId,
   SessionId,
@@ -72,6 +75,7 @@ import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
   customType,
+  type AnySQLiteColumn,
   index,
   integer,
   primaryKey,
@@ -145,6 +149,8 @@ export const projects = sqliteTable('projects', {
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
   changedCheckCommand: text('changed_check_command'),
+  /** Runs in place of the gate when the base has required checks; set only with a gate command. */
+  precheckCommand: text('precheck_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
@@ -253,6 +259,17 @@ export const batches = sqliteTable(
     prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
     prCheckedAt: text('pr_checked_at'),
     prUnknownReason: text('pr_unknown_reason'),
+    /** The pull request's required checks as the watch last read them; kept on the root batch. */
+    prRequired: text('pr_required', { mode: 'json' }).$type<RequiredChecksDto>(),
+    /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`). */
+    prMergeBlocked: text('pr_merge_blocked').$type<PullRequestMergeBlocked>(),
+    /** A CI fix batch's root batch and the pull request head it fixes; null on any other batch. */
+    ciFixOf: text('ci_fix_of')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    ciFixHead: text('ci_fix_head'),
+    /** Why 10db stopped fixing the pull request's failing checks. */
+    ciStopped: text('ci_stopped').$type<CiStopped>(),
     /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
     notices: text('notices', { mode: 'json' })
       .$type<Notice[]>()
@@ -263,6 +280,10 @@ export const batches = sqliteTable(
   },
   (t) => [
     index('batches_project_idx').on(t.projectId),
+    // One fix per root and head, so a second watch round or a restart starts none.
+    uniqueIndex('batches_ci_fix_idx')
+      .on(t.ciFixOf, t.ciFixHead)
+      .where(sql`ci_fix_of IS NOT NULL AND ci_fix_head IS NOT NULL`),
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
