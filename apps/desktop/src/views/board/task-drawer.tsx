@@ -42,6 +42,7 @@ import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { BatchPanel } from './batch-panel';
+import { ciLine } from './ci-line';
 import { FlowSelect } from './flow-select';
 import {
   draftOf,
@@ -51,6 +52,7 @@ import {
   type LandingDraft,
 } from './landing-draft';
 import { LandingField } from './landing-field';
+import { ExternalLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
@@ -76,6 +78,8 @@ export interface TaskDrawerProps {
   readonly workstream?: WorkstreamDto;
   /** The batch the workstream ships in; its branch, pull request and actions show in the drawer. */
   readonly batch?: BatchDto;
+  /** Every batch of the project: a CI fix batch finds the root that holds the required checks. */
+  readonly batches?: readonly BatchDto[];
   /** Every workstream, so the batch knows its members; used for Ship anyway and fix tasks. */
   readonly workstreams?: readonly WorkstreamDto[];
   readonly workspaceMode?: WorkspaceMode;
@@ -100,6 +104,7 @@ export function TaskDrawer({
   peers,
   workstream,
   batch,
+  batches = [],
   workstreams = [],
   workspaceMode = WorkspaceMode.Shared,
   gateCommand = null,
@@ -210,6 +215,7 @@ export function TaskDrawer({
           />
         ) : null}
         <TaskNotices notices={taskNotices(workstream, batch)} />
+        <CiStatusLine batch={batch} batches={batches} />
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
@@ -380,6 +386,29 @@ export function TaskDrawer({
  * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
  * and how to fix it, with its line breaks. Nothing when there is none.
  */
+/**
+ * Where a pull request's required checks stand (CI-decides spec §5), as the card says it, with a link
+ * to the job or the checks. Nothing for a pull request with no required checks.
+ */
+function CiStatusLine({
+  batch,
+  batches,
+}: {
+  readonly batch: BatchDto | undefined;
+  readonly batches: readonly BatchDto[];
+}) {
+  const ci = ciLine(batch, batches);
+  if (!ci) return null;
+  return (
+    <Group gap="sm" data-testid="ci-line" data-color={ci.color}>
+      <Text size="sm" c={ci.color}>
+        {ci.line}
+      </Text>
+      <ExternalLink url={ci.link.url} label={ci.link.label} />
+    </Group>
+  );
+}
+
 function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
   if (notices.length === 0) return null;
   return (
