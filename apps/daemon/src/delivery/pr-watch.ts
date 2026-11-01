@@ -27,12 +27,14 @@ import type { EventBus } from '../events';
 import {
   GhError,
   GhFailure,
+  MergeBlocked,
   PrMergeable,
   PrState,
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
+import { startCiFix } from './ci-fix';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import { baseNotices, NOTICE_KEY } from './notices';
 
@@ -144,8 +146,13 @@ export function createPrWatch(input: {
    * learned, such as deleting the branch of a pull request that merged. A rejection is logged.
    */
   readonly afterRound?: (signal: AbortSignal) => Promise<void>;
+  /**
+   * Starts a fix when a pull request's required check fails, saving the failing job's full log under
+   * `dataDir`. Without it the watch only reads and records.
+   */
+  readonly ciFix?: { readonly dataDir: string };
 }): PrWatch {
-  const { ctx, clock, afterRound } = input;
+  const { ctx, clock, afterRound, ciFix } = input;
   const intervalMs = input.intervalMs ?? PR_WATCH_INTERVAL_MS;
   const logger = ctx.logger.child({ module: 'pr-watch' });
   const controller = new AbortController();
@@ -375,6 +382,31 @@ export function createPrWatch(input: {
         }
         if (read !== null) storeRequired(write, root, read, required);
       });
+      // A pull request that conflicts runs no workflow, so its failing checks are stale.
+      if (
+        ciFix !== undefined &&
+        ended === null &&
+        root.ciFixOf === null &&
+        read?.state === PrState.Open &&
+        read.mergeBlocked !== MergeBlocked.Conflicts &&
+        required !== null &&
+        required.state === 'failing'
+      ) {
+        try {
+          await startCiFix({
+            ctx,
+            dataDir: ciFix.dataDir,
+            root,
+            required: requiredOf(required),
+            head: read.headSha,
+            signal,
+          });
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          logger.warn({ batchId: root.id, err: detailOf(error) }, 'could not start a CI fix');
+          if (ghDown(error)) ended = { error, at: root.id };
+        }
+      }
     }
     resumeAfter = ended?.at ?? null;
     settle(unanswered, ended ?? (answered ? null : failed), answered);

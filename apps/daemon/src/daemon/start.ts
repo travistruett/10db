@@ -801,6 +801,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const prWatch = createPrWatch({
     ctx: delivery,
     clock,
+    ciFix: { dataDir: opts.dataDir },
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
     // A merged pull request's local branch goes in the round that reads the merge.
     afterRound: (signal) => removeMergedBranches(delivery, signal),
