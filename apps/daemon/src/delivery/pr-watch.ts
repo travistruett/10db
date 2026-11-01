@@ -6,6 +6,8 @@ import {
   type BatchId,
   type ProjectId,
   type PullRequestStatusDto,
+  type RequiredCheckJobDto,
+  type RequiredChecksDto,
 } from '@10db/contracts';
 import {
   clearBatchNotice,
@@ -13,14 +15,23 @@ import {
   getBatch,
   listProjects,
   listWatchedPullRequests,
+  patchBatch,
   recordPullRequestStatus,
   setBatchNotice,
+  type BatchPatch,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { EventBus } from '../events';
-import { GhError, GhFailure, PrMergeable, PrState, type PullRequestStatus } from '../github';
+import {
+  GhError,
+  GhFailure,
+  PrMergeable,
+  PrState,
+  type PullRequestStatus,
+  type RequiredChecks,
+} from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import { baseNotices, NOTICE_KEY } from './notices';
@@ -72,10 +83,49 @@ interface Unanswered {
   readonly next: PullRequestStatusDto;
 }
 
-/** The batches in watch order, starting after `after` while it is still watched. */
-function startingAfter(batches: readonly BatchDto[], after: BatchId | null): BatchDto[] {
-  const at = after === null ? -1 : batches.findIndex((batch) => batch.id === after);
-  return [...batches.slice(at + 1), ...batches.slice(0, at + 1)];
+/**
+ * The shipped batches that share one pull request: the batch that opened it (the root, which has no
+ * `ciFixOf`) and the fix batches made for its failing checks. One read of the pull request serves
+ * them all; the required checks and merge state are stored on the root alone.
+ */
+interface PullRequestGroup {
+  readonly root: BatchDto;
+  readonly members: readonly BatchDto[];
+}
+
+/** The watched batches grouped by pull request, in the order each pull request's first batch appears. */
+function groupByPullRequest(batches: readonly BatchDto[]): PullRequestGroup[] {
+  const byUrl = new Map<string, BatchDto[]>();
+  for (const batch of batches) {
+    const key = batch.prUrl ?? batch.id;
+    byUrl.set(key, [...(byUrl.get(key) ?? []), batch]);
+  }
+  return [...byUrl.values()].flatMap((members) => {
+    const root = members.find((member) => member.ciFixOf === null) ?? members[0];
+    return root ? [{ root, members }] : [];
+  });
+}
+
+/** The groups in watch order, starting after the one holding `after` while it is still watched. */
+function startingAfter(
+  groups: readonly PullRequestGroup[],
+  after: BatchId | null,
+): PullRequestGroup[] {
+  const at =
+    after === null ? -1 : groups.findIndex((g) => g.members.some((batch) => batch.id === after));
+  return [...groups.slice(at + 1), ...groups.slice(0, at + 1)];
+}
+
+/** What the watch stores of a pull request's required checks. */
+function requiredOf(read: RequiredChecks): RequiredChecksDto {
+  const dto = (job: RequiredChecks['failing'][number]): RequiredCheckJobDto => ({
+    name: job.name,
+    link: job.link,
+    jobId: job.jobId,
+    runId: job.runId,
+    description: job.description,
+  });
+  return { state: read.state, failing: read.failing.map(dto), pending: read.pending.map(dto) };
 }
 
 /**
@@ -142,11 +192,21 @@ export function createPrWatch(input: {
     };
   }
 
-  /** Stores `next` and acts on the change from what was stored before, in the caller's write. */
-  function record(write: WriteContext, batch: BatchDto, next: PullRequestStatusDto): void {
+  /**
+   * Stores `next` and acts on the change from what was stored before, in the caller's write. A
+   * batch that shares its pull request with its root passes `cards: false`: the root raises the
+   * cards, so none is raised twice.
+   */
+  function record(
+    write: WriteContext,
+    batch: BatchDto,
+    next: PullRequestStatusDto,
+    cards = true,
+  ): void {
+    recordPullRequestStatus(write, batch.id, next);
+    if (!cards) return;
     const wasChecks = batch.pr?.checks ?? null;
     const wasState = batch.pr?.state ?? null;
-    recordPullRequestStatus(write, batch.id, next);
     if (next.state === PullRequestState.Open && next.checks === PullRequestChecks.Failing) {
       const card = prCards.checksFailed(batch, next.failingChecks);
       if (wasChecks !== PullRequestChecks.Failing) raiseIn(write, batch.projectId, card);
@@ -227,43 +287,93 @@ export function createPrWatch(input: {
     });
   }
 
+  /**
+   * Stores what the round read of an open pull request's required checks and of why GitHub will not
+   * merge it, on the root batch only and only when that changes what the root holds. A merged or closed
+   * pull request has no merge to block; its stored required checks stay, for "Merged · CI passed".
+   * A required read gh could not answer (`required` null) leaves the stored checks as they were.
+   */
+  function storeRequired(
+    write: WriteContext,
+    root: BatchDto,
+    read: PullRequestStatus,
+    required: RequiredChecks | null,
+  ): void {
+    const now = getBatch(write.tx, root.id);
+    const blocked = read.state === PrState.Open ? read.mergeBlocked : null;
+    const nextRequired = required === null ? now.prRequired : requiredOf(required);
+    const patch: BatchPatch = {
+      ...(JSON.stringify(nextRequired) === JSON.stringify(now.prRequired)
+        ? {}
+        : { prRequired: nextRequired }),
+      ...(blocked === now.prMergeBlocked ? {} : { prMergeBlocked: blocked }),
+    };
+    if (Object.keys(patch).length > 0) patchBatch(write, root.id, patch);
+  }
+
   async function round(signal: AbortSignal): Promise<void> {
-    const batches = startingAfter(listWatchedPullRequests(ctx.state.db), resumeAfter);
-    if (batches.length === 0) return;
+    const groups = startingAfter(
+      groupByPullRequest(listWatchedPullRequests(ctx.state.db)),
+      resumeAfter,
+    );
+    if (groups.length === 0) return;
     const unanswered: Unanswered[] = [];
     let ended: { readonly error: unknown; readonly at: BatchId } | null = null;
     let failed: { readonly error: unknown } | null = null;
     let answered = false;
-    for (const batch of batches) {
+    // One pull request is read once, whoever shares it: a root batch and its fix batches.
+    for (const { root, members } of groups) {
       if (signal.aborted) return;
       if (ended !== null) {
-        unanswered.push({ batch, next: unknown(batch, detailOf(ended.error)) });
+        for (const batch of members)
+          unanswered.push({ batch, next: unknown(batch, detailOf(ended.error)) });
         continue;
       }
-      if (batch.repo === null || batch.prUrl === null) {
-        const next = unknown(batch, `10db has no repository recorded for "${batch.title}"`);
+      const repo = members.find((batch) => batch.repo !== null)?.repo ?? null;
+      if (repo === null || root.prUrl === null) {
         ctx.state.write((write) => {
-          record(write, batch, next);
+          for (const batch of members)
+            record(
+              write,
+              batch,
+              unknown(batch, `10db has no repository recorded for "${batch.title}"`),
+              batch.id === root.id,
+            );
         });
         continue;
       }
       let read: PullRequestStatus | null;
       try {
-        read = await ctx.gh.prStatus({ repo: batch.repo, ref: batch.prUrl }, ghCall(ctx, signal));
+        read = await ctx.gh.prStatus({ repo, ref: root.prUrl }, ghCall(ctx, signal));
       } catch (error) {
         // Stopped: record nothing, the next daemon asks again.
         if (controller.signal.aborted) return;
-        logger.warn({ batchId: batch.id, err: detailOf(error) }, 'gh pr view failed');
-        if (ghDown(error)) ended = { error, at: batch.id };
+        logger.warn({ batchId: root.id, err: detailOf(error) }, 'gh pr view failed');
+        if (ghDown(error)) ended = { error, at: root.id };
         else failed ??= { error };
-        unanswered.push({ batch, next: unknown(batch, detailOf(error)) });
+        for (const batch of members)
+          unanswered.push({ batch, next: unknown(batch, detailOf(error)) });
         continue;
       }
       answered = true;
-      const next = answer(batch, read);
+      // The checks GitHub requires of an open pull request's base. A read that fails leaves what the
+      // root holds: the status read above is still true.
+      let required: RequiredChecks | null = null;
+      if (read?.state === PrState.Open) {
+        try {
+          required = await ctx.gh.prRequiredChecks({ repo, url: root.prUrl }, ghCall(ctx, signal));
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          logger.warn({ batchId: root.id, err: detailOf(error) }, 'gh pr checks failed');
+          if (ghDown(error)) ended = { error, at: root.id };
+        }
+      }
       ctx.state.write((write) => {
-        record(write, batch, next);
-        followConflict(write, batch, read);
+        for (const batch of members) {
+          record(write, batch, answer(batch, read), batch.id === root.id);
+          followConflict(write, batch, read);
+        }
+        if (read !== null) storeRequired(write, root, read, required);
       });
     }
     resumeAfter = ended?.at ?? null;

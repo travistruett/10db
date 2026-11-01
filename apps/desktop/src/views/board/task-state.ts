@@ -13,6 +13,7 @@ import {
 import type { MantineColor } from '@mantine/core';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { FAILURE_LABELS } from './batch-labels';
+import { ciLine, type CiLink } from './ci-line';
 import { ordinal } from './queue-place';
 
 const S = WorkstreamState;
@@ -21,6 +22,8 @@ const S = WorkstreamState;
 export interface TaskState {
   readonly line: string;
   readonly color: MantineColor;
+  /** Where the line's CI result lives: a job's page or the pull request's checks. */
+  readonly link?: CiLink;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */
@@ -45,12 +48,19 @@ const CHECKS_LINE: Readonly<Record<PullRequestChecks, TaskState | null>> = {
 };
 
 /**
- * What a shipped pull request says about its tasks: open with its checks, closed without merging,
- * or unreadable. Null before the batch has a pull request, and once it has merged (the task is then
- * in Done and has nothing to say).
+ * What a shipped pull request says about its tasks: for one with required checks, where CI stands
+ * (CI-decides spec §5, `ciLine`, which also says "Merged · CI passed"); else open with its checks,
+ * closed without merging, or unreadable. Null before the batch has a pull request, and once one with
+ * no required checks has merged (the task is then in Done and has nothing to say). `batches` is every
+ * batch of the project, for a CI fix batch to find the root that holds the required checks.
  */
-export function pullRequestState(batch: BatchDto | undefined): TaskState | null {
+export function pullRequestState(
+  batch: BatchDto | undefined,
+  batches: readonly BatchDto[] = batch ? [batch] : [],
+): TaskState | null {
   if (batch?.state !== BatchState.Shipped || !batch.prUrl) return null;
+  const ci = ciLine(batch, batches);
+  if (ci) return ci;
   const pr = batch.pr;
   if (pr === null) return { line: 'Pull request open', color: 'blue' };
   switch (pr.state) {
@@ -186,14 +196,16 @@ export function taskState(
   batch: BatchDto | undefined,
   gateCommand: string | null,
   place?: number,
+  batches?: readonly BatchDto[],
 ): TaskState | null {
-  const state = stateOf(workstream, batch, gateCommand, place);
+  const state = stateOf(workstream, batch, gateCommand, place, batches);
   const notices = taskNotices(workstream, batch);
   if (notices.length === 0) return state;
   const text = notices.map((n) => n.line).join(' · ');
   const warns = notices.some((n) => n.tone === 'warning');
   if (!state) return { line: text, color: warns ? 'orange' : 'blue' };
   return {
+    ...state,
     line: `${state.line} · ${text}`,
     color: warns && CALM.has(state.color) ? 'orange' : state.color,
   };
@@ -204,6 +216,7 @@ function stateOf(
   batch: BatchDto | undefined,
   gateCommand: string | null,
   place?: number,
+  batches?: readonly BatchDto[],
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
@@ -230,7 +243,8 @@ function stateOf(
       return { line: 'Recovering', color: 'orange' };
     case S.Failed:
       // A failed run the builder shipped anyway is judged by its pull request.
-      if (batch?.state === BatchState.Shipped && batch.prUrl) return pullRequestState(batch);
+      if (batch?.state === BatchState.Shipped && batch.prUrl)
+        return pullRequestState(batch, batches);
       return {
         line: workstream.failureReason
           ? `Failed: ${lowerFirst(workstream.failureReason)}`
@@ -247,7 +261,7 @@ function stateOf(
         };
       }
       if (batch?.state === BatchState.Shipping) return { line: 'Shipping', color: 'blue' };
-      return pullRequestState(batch);
+      return pullRequestState(batch, batches);
     case S.Cancelled:
       return null;
   }
