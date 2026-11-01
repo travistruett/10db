@@ -16,7 +16,8 @@ import {
 import { settleBranch } from './branch-cleanup';
 import { looseWork } from './build-output';
 import { baseConflictKey, baseKeptKey, keptWorktreeKey, worktreeCards } from './cards';
-import { raise, withdraw, type DeliveryContext } from './context';
+import { hideNotices, raise, showNotice, withdraw, type DeliveryContext } from './context';
+import { baseNotices, NOTICE_KEY } from './notices';
 import { installedLockfileKey } from './installed-lockfile';
 import { startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
@@ -126,7 +127,16 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     deleteAppSetting(w, installedLockfileKey(batchId));
     clearWorktreePath(w, batchId);
   });
-  // The base cards name the worktree too; a pull request shows a conflict for itself.
+  // The base notices name the worktree too, so they go with it. A conflict that stood when the batch
+  // shipped is still the pull request's, and the tasks keep saying so until it merges. The cards an
+  // earlier build raised for them are closed as well.
+  const conflicted = getBatch(ctx.state.db, batchId).notices.some(
+    (n) => n.key === NOTICE_KEY.baseConflict,
+  );
+  if (conflicted && batch.state === BatchState.Shipped)
+    showNotice(ctx.state, batchId, baseNotices.shippedConflict(batch));
+  else hideNotices(ctx.state, batchId, [NOTICE_KEY.baseConflict]);
+  hideNotices(ctx.state, batchId, [NOTICE_KEY.baseKept]);
   withdraw(ctx.state, ctx.inbox, project.id, [
     keptWorktreeKey.batchChanges(batchId),
     keptWorktreeKey.batchIgnored(batchId),

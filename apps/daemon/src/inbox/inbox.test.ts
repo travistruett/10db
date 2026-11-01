@@ -28,12 +28,27 @@ import {
   listTasks,
   schema,
   searchDecisions,
+  seedProject,
   updateInboxItem,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedWorkstream } from '../../test/fixtures';
+import { execFileSync } from 'node:child_process';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  seedWorkstream,
+} from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { allowFoundHosts, removeNetworkHost } from '../permissions';
+import { createGit, type Git } from '../git';
+import { silentLogger } from '../log';
+import {
+  allowFoundHosts,
+  foundHostFile,
+  listNetworkHosts,
+  removeNetworkHost,
+  storableRule,
+} from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
@@ -42,6 +57,12 @@ import {
   type InboxService,
   type WaitObserver,
 } from './index';
+
+/** A git that reads no repository: a project with no reading gets none from it. */
+const NO_GIT = {
+  folderAt: () => Promise.reject(new Error('no repository')),
+  fileAt: () => Promise.resolve({ kind: 'missing' as const }),
+};
 
 let close: () => void;
 let state: StateStore;
@@ -357,7 +378,7 @@ describe('permission broker', () => {
       onWaitEnd: () => events.push('end'),
     };
     return createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -459,7 +480,7 @@ describe('permission broker', () => {
   it('raises a card for an escalated call that matches the carried allow-once', () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -478,7 +499,7 @@ describe('permission broker', () => {
   it('allows the first matching call once when an allow_once arrived after parking', async () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -584,7 +605,7 @@ describe('permission broker without a storable pattern', () => {
     const ws = seedWorkstream(base);
     const observer: WaitObserver = { onWaitStart: () => undefined, onWaitEnd: () => undefined };
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -732,9 +753,10 @@ describe('permission broker in a sandboxed lane', () => {
     ws: ReturnType<typeof seedWorkstream>,
     sandbox = true,
     hazards: readonly HazardDef[] = DEFAULT_HAZARDS,
+    git: Pick<Git, 'folderAt' | 'fileAt'> = NO_GIT,
   ) {
     return createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -817,6 +839,128 @@ describe('permission broker in a sandboxed lane', () => {
     expect(onlyOpenCard().kind).toBe('permission');
   });
 
+  it('cards a command that starts background loops with no end, as the incident did', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'for i in 1 2 3; do (while :; do :; done) & done; pnpm test';
+    const pending = sandboxed(ws)(request('Bash', { command }));
+    const card = onlyOpenCard();
+    expect(card.kind).toBe('permission');
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await pending).toEqual({ behavior: 'allow' });
+  });
+
+  it('cards the yes-loop form too, and passes the denial on in words that cover its equivalents', async () => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', { command: 'yes > /dev/null &' }));
+    inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'no CPU load, please' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    const message = decision.behavior === 'deny' ? decision.message : '';
+    expect(message).toContain('yes > /dev/null &');
+    expect(message).toContain('no CPU load, please');
+    expect(message).toMatch(/equivalent/i);
+    expect(message).toMatch(/another (form|way)/i);
+  });
+
+  it('offers only allow-once and deny on a loop card, so no rule lets the next loop run unasked', async () => {
+    const ws = seedWorkstream(base);
+    const first = sandboxed(ws)(request('Bash', { command: 'yes &' }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(() => inbox.answer(card.id, { choice: 'allow_workstream' })).toThrow(InvalidError);
+    expect(() => inbox.answer(card.id, { choice: 'allow_project' })).toThrow(InvalidError);
+    inbox.answer(card.id, { choice: 'allow_once' });
+    expect(await first).toEqual({ behavior: 'allow' });
+    expect(listPermissionRules(state.db, ws.project.id, ws.workstream.id)).toEqual([]);
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('cards a loop even when a stored rule covers the command', () => {
+    const ws = seedWorkstream(base);
+    // As an answer on an ordinary card for the same command would have stored it.
+    const rule = storableRule('Bash', 'yes &');
+    if (rule === undefined) throw new Error('expected a storable rule');
+    base.write((ctx) =>
+      insertPermissionRule(ctx, {
+        projectId: ws.project.id,
+        workstreamId: null,
+        toolName: rule.toolName,
+        pattern: rule.pattern,
+        sourceInboxId: null,
+      }),
+    );
+    void sandboxed(ws)(request('Bash', { command: 'yes &' })).catch(() => undefined);
+    expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  it('does not card a loop that runs in the foreground', async () => {
+    const ws = seedWorkstream(base);
+    expect(await sandboxed(ws)(request('Bash', { command: 'while :; do :; done' }))).toEqual({
+      behavior: 'allow',
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('cards a loop the Bash tool runs in the background itself, offering only allow-once and deny', async () => {
+    const ws = seedWorkstream(base);
+    const command = 'while :; do :; done';
+    const pending = sandboxed(ws)(request('Bash', { command, run_in_background: true }));
+    const card = onlyOpenCard();
+    expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    expect(card.detail).toEqual({ toolName: 'Bash', summary: command });
+    expect(card.body).toContain(command);
+    expect(card.body).toContain('never ends');
+    expect(card.body).toContain('background flag');
+    inbox.answer(card.id, { choice: 'deny', note: 'no busy loops' });
+    const decision = await pending;
+    expect(decision.behavior).toBe('deny');
+    expect(decision.behavior === 'deny' ? decision.message : '').toMatch(/equivalent/i);
+  });
+
+  const BACKGROUND_FLAG: readonly {
+    readonly name: string;
+    readonly input: Record<string, unknown>;
+    readonly outcome: 'allow' | 'card';
+  }[] = [
+    {
+      name: 'yes, run in the background by the flag',
+      input: { command: 'yes > /dev/null', run_in_background: true },
+      outcome: 'card',
+    },
+    {
+      // Claude Code may read a string flag as the boolean; the broker asks rather than miss it.
+      name: 'a loop with the flag spelled as a string',
+      input: { command: 'while :; do :; done', run_in_background: 'true' },
+      outcome: 'card',
+    },
+    {
+      name: 'a loop with the flag off',
+      input: { command: 'while :; do :; done', run_in_background: false },
+      outcome: 'allow',
+    },
+    {
+      name: 'a dev server run in the background by the flag',
+      input: { command: 'pnpm dev', run_in_background: true },
+      outcome: 'allow',
+    },
+  ];
+
+  it.each(BACKGROUND_FLAG)('$outcome: $name', async ({ input, outcome }) => {
+    const ws = seedWorkstream(base);
+    const pending = sandboxed(ws)(request('Bash', input));
+    if (outcome === 'allow') {
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+      return;
+    }
+    void pending.catch(() => undefined);
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+  });
+
   const MAKE_MIGRATE: HazardDef = {
     name: 'schema',
     globs: ['db/**'],
@@ -844,9 +988,9 @@ describe('permission broker in a sandboxed lane', () => {
     },
     { name: 'a subshell after then', command: 'if true; then (cd $d && ls); fi', outcome: 'allow' },
     { name: 'a variable argument to echo', command: 'echo "$HOME" "$(date)"', outcome: 'allow' },
-    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'allow' },
-    { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'allow' },
-    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'allow' },
+    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'card' },
+    { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'card' },
+    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'card' },
     {
       name: 'a redirection after the command',
       command: 'pnpm test 2>&1 | grep $x',
@@ -896,7 +1040,7 @@ describe('permission broker in a sandboxed lane', () => {
     { name: 'noglob runs a command', command: 'noglob pnpm test', outcome: 'card' },
     { name: 'an alias definition', command: 'alias p=pnpm', outcome: 'card' },
     { name: 'eval of a variable', command: 'eval "$x"', outcome: 'card' },
-    { name: 'eval of a literal', command: 'eval "echo hi"', outcome: 'card' },
+    { name: 'eval of a literal', command: 'eval "echo hi"', outcome: 'allow' },
     { name: 'sh -c of a variable', command: 'sh -c "$x"', outcome: 'card' },
     { name: 'bash -c with no script', command: 'bash -c', outcome: 'card' },
     { name: 'a script piped into sh', command: 'echo "echo hi" | sh', outcome: 'card' },
@@ -947,18 +1091,18 @@ describe('permission broker in a sandboxed lane', () => {
     {
       name: 'pnpm filter with a quoted value',
       command: 'pnpm --filter "$pkg" test',
-      outcome: 'allow',
+      outcome: 'card',
     },
     {
       name: 'pnpm filter= with a quoted value',
       command: 'pnpm --filter="$pkg" test',
-      outcome: 'allow',
+      outcome: 'card',
     },
-    { name: 'pnpm -F with a quoted value', command: 'pnpm -F "$p" test', outcome: 'allow' },
+    { name: 'pnpm -F with a quoted value', command: 'pnpm -F "$p" test', outcome: 'card' },
     {
       name: 'a loop of pnpm filters',
       command: 'for p in daemon desktop; do pnpm --filter "@10db/$p" test; done',
-      outcome: 'allow',
+      outcome: 'card',
     },
     { name: 'a quoted word could be the subcommand', command: 'pnpm "$x"', outcome: 'card' },
     { name: 'all positional parameters', command: 'pnpm "$@"', outcome: 'card' },
@@ -1348,6 +1492,97 @@ describe('permission broker in a sandboxed lane', () => {
     }
   });
 
+  describe('Monitor', () => {
+    interface MonitorCase {
+      readonly name: string;
+      readonly input: Record<string, unknown>;
+      readonly outcome: 'allow' | 'card';
+      readonly escalated?: boolean;
+      /** Text the card's body must hold. */
+      readonly body?: string;
+    }
+    // A Monitor call gets the checks a Bash command gets and no more: its command runs in the sandbox.
+    const MONITOR_CASES: readonly MonitorCase[] = [
+      {
+        name: 'a plain wait',
+        input: { command: 'until [ -s out ]; do sleep 2; done' },
+        outcome: 'allow',
+      },
+      {
+        name: 'a tail of any file',
+        input: { command: 'tail -f /var/log/x.log' },
+        outcome: 'allow',
+      },
+      {
+        name: 'a hazard command',
+        input: { command: 'pnpm add left-pad' },
+        outcome: 'card',
+        body: 'shared with every lane',
+      },
+      {
+        name: 'a background loop with no end',
+        input: { command: '(while :; do :; done) &' },
+        outcome: 'card',
+      },
+      {
+        name: 'a socket key',
+        input: { command: 'tail -f out', ws: 'wss://example.org' },
+        outcome: 'card',
+      },
+      { name: 'no command', input: { description: 'x' }, outcome: 'card' },
+      {
+        name: 'an escalated plain wait',
+        input: { command: 'sleep 1' },
+        outcome: 'card',
+        escalated: true,
+      },
+    ];
+    const cardedTools = () => openCards().map((card) => card.detail?.['toolName']);
+
+    it.each(MONITOR_CASES)('$name -> $outcome', async (c) => {
+      const ws = seedWorkstream(base);
+      const pending = sandboxed(ws)(request('Monitor', c.input, c.escalated ?? false));
+      pending.catch(() => undefined);
+      await settle();
+      if (c.outcome === 'allow') {
+        expect(cardedTools()).toEqual([]);
+        expect(await pending).toEqual({ behavior: 'allow' });
+      } else {
+        expect(cardedTools()).toEqual(['Monitor']);
+        if (c.body !== undefined) expect(onlyOpenCard().body).toContain(c.body);
+        const command = c.input['command'];
+        if (typeof command === 'string') {
+          expect(onlyOpenCard().detail?.['summary']).toBe(command);
+        }
+      }
+    });
+
+    it('cards Monitor without a sandbox', async () => {
+      const ws = seedWorkstream(base);
+      void sandboxed(ws, false)(request('Monitor', { command: 'sleep 1' })).catch(() => undefined);
+      await settle();
+      expect(cardedTools()).toEqual(['Monitor']);
+    });
+  });
+
+  it.each([
+    'EnterWorktree',
+    'ExitWorktree',
+    'CronCreate',
+    'ScheduleWakeup',
+    'RemoteTrigger',
+    'PushNotification',
+    'SendMessage',
+    'LSP',
+    'SomeToolAddedLater',
+  ])('cards %s, a tool the hook hands over', (toolName) => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws)(request(toolName, {})).catch(() => undefined);
+    const card = onlyOpenCard();
+    expect(card.kind).toBe('permission');
+    expect(card.detail?.['toolName']).toBe(toolName);
+  });
+
   it('denies an unlisted host at once and raises one card', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
@@ -1383,6 +1618,105 @@ describe('permission broker in a sandboxed lane', () => {
     expect(card.body).toContain("The project's Cargo.lock needs index.crates.io");
     expect(card.body).not.toContain('package registry');
     expect(card.body).toContain(HOST_BODY);
+  });
+
+  it('names the file and recommends Allow for a project added before readings, from its default branch', async () => {
+    const repo = createTempRepo();
+    try {
+      mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
+      writeFileSync(
+        join(repo.path, 'apps/desktop/src-tauri/Cargo.lock'),
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      );
+      const rawGit = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+      rawGit('add', 'apps');
+      rawGit('commit', '-q', '-m', 'lock');
+      // The lane's own uncommitted line must not become its card's reason.
+      writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+      // Under pull_request delivery the base branch moves only by merged pull requests.
+      const project = seedProject(base, { repoPath: repo.path, delivery: 'pull_request' });
+      const ws = seedWorkstream(base, { project });
+      // No reading was ever written for this project, as for one added before 10db kept readings.
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        createGit(),
+      )(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+      const card = onlyOpenCard();
+      expect(card.recommendation).toBe('allow_project');
+      expect(card.body).toContain(
+        "The project's apps/desktop/src-tauri/Cargo.lock needs index.crates.io",
+      );
+      expect(listNetworkHosts(state.db, ws.project.id)).toEqual([]);
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        createGit(),
+      )(request('SandboxNetworkAccess', { host: 'exfil.example.net' }));
+      const cards = openCards().filter(
+        (c) => c.title === 'Allow network access to exfil.example.net?',
+      );
+      expect(cards.map((c) => c.recommendation)).toEqual([null]);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('under local delivery reads only origin’s base branch, never a lane’s commit on the local one', async () => {
+    const remote = createTempRepoWithOrigin();
+    const { repo } = remote;
+    try {
+      const rawGit = (...args: string[]) =>
+        execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+      mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
+      writeFileSync(
+        join(repo.path, 'apps/desktop/src-tauri/Cargo.lock'),
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      );
+      rawGit('add', 'apps');
+      rawGit('commit', '-q', '-m', 'lock');
+      rawGit('push', '-q', 'origin', 'main');
+      const git = createGit();
+      // A local lane's commit tool commits on the checked-out branch: here, main itself.
+      writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+      await git.commit({
+        repo: repo.path,
+        paths: ['.npmrc'],
+        message: 'registry',
+        opId: 'op-lane-npmrc',
+        branch: 'main',
+      });
+      const project = seedProject(base, { repoPath: repo.path, delivery: 'local' });
+      const ws = seedWorkstream(base, { project });
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        git,
+      )(request('SandboxNetworkAccess', { host: 'exfil.example.net' }));
+      expect(onlyOpenCard().recommendation).toBeNull();
+      expect(foundHostFile(state.db, project.id, 'exfil.example.net')).toBeNull();
+
+      await sandboxed(
+        ws,
+        true,
+        DEFAULT_HAZARDS,
+        git,
+      )(request('SandboxNetworkAccess', { host: 'index.crates.io' }));
+      const crates = openCards().filter(
+        (c) => c.title === 'Allow network access to index.crates.io?',
+      );
+      expect(crates.map((c) => c.recommendation)).toEqual(['allow_project']);
+      expect(listNetworkHosts(state.db, project.id)).toEqual([]);
+    } finally {
+      remote.cleanup();
+    }
   });
 
   it('recommends nothing for a host no project file names', async () => {
@@ -1735,7 +2069,7 @@ describe('permission broker without a sandbox keeps its network cards', () => {
   it('stores an unscoped network rule on always allow, which then allows with no card', async () => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,
@@ -1771,7 +2105,7 @@ describe('permission broker without a sandbox keeps its Read and Edit cards', ()
   ])('offers always-allow on a %s card and stores the unscoped rule', async (toolName, input) => {
     const ws = seedWorkstream(base);
     const decide = createPermissionBroker(
-      { state, inbox },
+      { state, inbox, git: NO_GIT, logger: silentLogger },
       {
         projectId: ws.project.id,
         workstreamId: ws.workstream.id,

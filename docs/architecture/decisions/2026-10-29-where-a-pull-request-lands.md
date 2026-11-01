@@ -29,9 +29,12 @@ Each task carries a landing, one of three, and the project carries the default n
   another way, are refused in plain words with the request, before anything is cut.
 - **Auto-merge** is `gh pr merge <url> --auto --squash`, run after the pull request opens (or is found open again
   after a restart) and before the batch is recorded SHIPPED. It never merges by itself what GitHub has not been
-  told to wait for: when the repository's `autoMergeAllowed` is false, or GitHub refuses (a pull request with
-  nothing left to wait for, for one), the pull request stays open for the builder, the batch still ships, and a
-  card says so. The repository-setting card has one fold key per project, so one stays open however many pull
+  told to wait for: when the repository's `autoMergeAllowed` is false, or GitHub refuses, the pull request stays
+  open for the builder, the batch still ships, and a card says so. One refusal is the exception: GitHub's "clean
+  status" means the pull request has nothing left to wait for (its base branch has no required checks), so
+  auto-merge has no use and 10db squash-merges it at once with `gh pr merge <url> --squash`, as auto-merge would
+  have, with no card; the pull request watch then reads it merged and its tasks are Done. If that merge is
+  refused (a conflict, a branch rule) a card says why and links the pull request. The repository-setting card has one fold key per project, so one stays open however many pull
   requests follow; a refusal's card has one per batch. A shutdown mid-call leaves the batch SHIPPING for recovery.
 - **A branch origin lacks is refused before the task starts**: when the task is made or its landing changed (the API
   asks origin with `git ls-remote --heads` at the pinned fetch URL and answers 400, "origin has no branch named X.

@@ -17,7 +17,9 @@ describe('settings sections', () => {
       'team',
       'routing-rules',
       'keep-awake',
+      'lane-permissions',
       'accounts',
+      'decisions',
       'models',
       'personas-and-flows',
     ]);
@@ -37,9 +39,11 @@ describe('settings sections', () => {
     { key: 'network-hosts', planned: false },
     { key: 'billing', planned: false },
     { key: 'keep-awake', planned: false },
+    { key: 'lane-permissions', planned: false },
     { key: 'team', planned: true },
     { key: 'routing-rules', planned: true },
     { key: 'accounts', planned: false },
+    { key: 'decisions', planned: false },
     { key: 'models', planned: true },
     { key: 'personas-and-flows', planned: true },
   ])('marks $key planned: $planned', ({ key, planned }) => {

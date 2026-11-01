@@ -123,6 +123,76 @@ describe('a shipping gate that fails', () => {
   });
 });
 
+describe('a shipping gate that fails while the Mac is overloaded', () => {
+  const overloaded = {
+    overloadedSince: () => ({ peakLoad: 187, cores: 10 }),
+  };
+
+  it('says so on the not-shipped card, whatever else it says', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
+      { load: overloaded },
+    );
+    const batch = await openBatch();
+    h.commit('src/api/alpha.test.ts');
+    expect((await finish(batch, 0)).state).toBe('FAILED');
+    const card = h.only(h.cards());
+    expect(card.title).toContain('the gate failed');
+    expect(card.body).toContain('The Mac was overloaded while this gate ran');
+    expect(card.body).toContain('load average reached 187 on 10 cores');
+    expect(card.body).toContain('src/api/alpha.test.ts > works');
+  });
+
+  it('says so on the card for a failure that looks unrelated, too', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(9, ['src/ui/other.test.ts > flakes']) },
+      { load: overloaded },
+    );
+    const batch = await openBatch();
+    expect((await finish(batch, 0)).state).toBe('FAILED');
+    const card = h.only(h.cards());
+    expect(card.title).toContain('failed twice');
+    expect(card.body).toContain('The Mac was overloaded while this gate ran');
+  });
+
+  it('asks only about the run whose failure it reports', async () => {
+    const asked: Date[] = [];
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
+      {
+        load: {
+          overloadedSince: (since) => {
+            asked.push(since);
+            return null;
+          },
+        },
+      },
+    );
+    const batch = await openBatch();
+    h.commit('src/api/alpha.test.ts');
+    await finish(batch, 0);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('adds nothing when the Mac was fine', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(9, ['src/api/alpha.test.ts > works']) },
+      { load: { overloadedSince: () => null } },
+    );
+    const batch = await openBatch();
+    h.commit('src/api/alpha.test.ts');
+    expect((await finish(batch, 0)).state).toBe('FAILED');
+    expect(h.only(h.cards()).body).not.toContain('overloaded');
+  });
+
+  it('does not touch a gate that passes', async () => {
+    h = createDeliveryHarness({ gateCommand: fakeGate(0, []) }, { load: overloaded });
+    const batch = await openBatch();
+    expect((await finish(batch, 0)).state).toBe('SHIPPED');
+    expect(h.cards().every((c) => !c.body.includes('overloaded'))).toBe(true);
+  });
+});
+
 describe('a shipping gate that fails only in tests the batch could not have caused', () => {
   it('runs once more by itself and ships when that passes, saying so on a card', async () => {
     h = createDeliveryHarness({ gateCommand: fakeGate(1, ['src/ui/other.test.ts > flakes']) });

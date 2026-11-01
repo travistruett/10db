@@ -41,3 +41,5 @@ apps/desktop/src-tauri/resources/
 apps/desktop/.e2e/
 apps/desktop/test-results/
 apps/desktop/playwright-report/
+# Empty folders Claude Code can leave next to a file it writes.
+**/.cc-writes/

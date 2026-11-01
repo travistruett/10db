@@ -1,4 +1,4 @@
-import { mintId, RiskTag, type TaskPatch } from '@10db/contracts';
+import { mintId, RiskTag, type BatchDto, type TaskPatch } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +23,7 @@ interface Opts {
   readonly task?: Parameters<typeof taskDto>[0];
   readonly workstream?: ReturnType<typeof workstreamDto>;
   readonly batch?: ReturnType<typeof batchDto>;
+  readonly batches?: ReturnType<typeof batchDto>[];
   readonly gateCommand?: string;
   readonly workstreams?: ReturnType<typeof workstreamDto>[];
   readonly place?: number;
@@ -37,6 +38,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       peers={peers}
       {...(opts.workstream ? { workstream: opts.workstream } : {})}
       {...(opts.batch ? { batch: opts.batch } : {})}
+      {...(opts.batches ? { batches: opts.batches } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
       {...(opts.place ? { place: opts.place } : {})}
@@ -328,6 +330,55 @@ describe('TaskDrawer', () => {
     });
   });
 
+  describe('notices', () => {
+    it('says what the task waits for, naming the other task, in full', async () => {
+      serve();
+      open({
+        workstream: workstreamDto({
+          state: 'RUNNING',
+          notice: {
+            key: 'claim-wait:hazard:migrations',
+            tone: 'info',
+            line: 'Waiting for hazard migrations: task "Beta" holds it',
+            body: 'Task "Beta" holds hazard migrations. Task "Alpha" is waiting for it and continues when it frees.',
+          },
+        }),
+      });
+      const d = await dialog();
+      expect(
+        within(d).getByText('Waiting for hazard migrations: task "Beta" holds it'),
+      ).toBeTruthy();
+      expect(
+        within(d).getByText(/Task "Beta" holds hazard migrations\. Task "Alpha"/),
+      ).toBeTruthy();
+    });
+
+    it("says what the task's batch stands in, with the steps to fix it", async () => {
+      serve();
+      const batch = batchDto({
+        notices: [
+          {
+            key: 'base-conflict',
+            tone: 'warning',
+            line: 'Conflicts with main: README.md',
+            body: 'main on origin changed these files:\n- README.md\n\nResolve it on GitHub.',
+          },
+        ],
+      });
+      open({ workstream: workstreamDto({ state: 'DONE', batchId: batch.id }), batch });
+      const d = await dialog();
+      expect(within(d).getByText('Conflicts with main: README.md')).toBeTruthy();
+      expect(within(d).getByText(/Resolve it on GitHub\./)).toBeTruthy();
+    });
+
+    it('shows no notice for a task with none', async () => {
+      serve();
+      open({ workstream: workstreamDto({ state: 'RUNNING' }) });
+      const d = await dialog();
+      expect(within(d).queryByTestId('task-notice')).toBeNull();
+    });
+  });
+
   describe('delivery', () => {
     it('shows the branch, the pull request and Abandon with what Abandon does', async () => {
       serve();
@@ -571,6 +622,53 @@ describe('TaskDrawer', () => {
       });
     });
 
+    describe('with required checks', () => {
+      const url = 'https://github.com/acme/widgets/pull/4';
+      const jobUrl = 'https://github.com/acme/widgets/actions/runs/5/job/6';
+      const shippedWith = (patch: Partial<BatchDto>) =>
+        batchDto({
+          state: 'SHIPPED',
+          prUrl: url,
+          pr: {
+            state: 'open',
+            checks: 'pending',
+            failingChecks: [],
+            checkedAt: '2026-10-29T12:00:00.000Z',
+            unknownReason: null,
+          },
+          ...patch,
+        });
+
+      it('says where CI stands and links the job', async () => {
+        const batch = shippedWith({
+          prRequired: {
+            state: 'failing',
+            failing: [{ name: 'build', link: jobUrl, jobId: '6', runId: '5', description: null }],
+            pending: [],
+          },
+        });
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
+        serve();
+        open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
+        const line = await within(await dialog()).findByTestId('ci-line');
+        expect(within(line).getByText('Pull request open · CI failed: build')).toBeTruthy();
+        expect(within(line).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+          jobUrl,
+        );
+      });
+
+      it('says nothing of CI for a pull request with no required checks', async () => {
+        const batch = shippedWith({ prRequired: { state: 'none', failing: [], pending: [] } });
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
+        serve();
+        open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
+        await dialog();
+        expect(screen.queryByTestId('ci-line')).toBeNull();
+      });
+    });
+
     it('a refusal to close names what blocks it', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(
@@ -666,6 +764,46 @@ describe('TaskDrawer', () => {
       expect(within(sentBack).queryByText('1. BLOCKING src/a.ts:12 no test.')).toBeNull();
       fireEvent.click(within(sentBack).getByRole('button', { name: 'Show the full review' }));
       expect(within(sentBack).getByText('1. BLOCKING src/a.ts:12 no test.')).toBeTruthy();
+    });
+
+    it('says a task shipped at the retry limit with open findings, and names the follow-up task', async () => {
+      serve();
+      const rejected = result(
+        'reject',
+        '2026-10-29T11:00:00.000Z',
+        '1. BLOCKING src/a.ts:12 no test.',
+      );
+      open({
+        workstream: workstreamDto({
+          state: 'DONE',
+          steps: [
+            stepDto(),
+            stepDto({
+              role: 'review',
+              personaName: 'Reviewer',
+              tools: 'read_only',
+              result: rejected,
+              shippedAtLimit: {
+                followUpTaskId: mintId('Task'),
+                followUpTitle: 'Resolve the open findings of "Add the badge"',
+              },
+            }),
+          ],
+        }),
+      });
+      const d = await dialog();
+      const notice = within(d).getByTestId('shipped-at-limit');
+      expect(notice.textContent).toContain('Shipped at the retry limit with open findings');
+      expect(notice.textContent).toContain('Resolve the open findings of "Add the badge"');
+      expect(within(round(d, 0)).getByText('Open at the limit')).toBeTruthy();
+      expect(within(round(d, 0)).queryByText('Sent back')).toBeNull();
+    });
+
+    it('shows no limit notice for a task that was approved', async () => {
+      serve();
+      open({ workstream: reviewed('DONE') });
+      const d = await dialog();
+      expect(within(d).queryByTestId('shipped-at-limit')).toBeNull();
     });
 
     it('shows no section for a task nobody reviewed', async () => {

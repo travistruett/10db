@@ -2,12 +2,16 @@ import {
   ACTIVE_STATES,
   BatchState,
   BoardStatus,
+  columnNameKey,
   ConflictError,
+  DEFAULT_BOARD_COLUMN,
+  Delivery,
   EventType,
   InvalidError,
   isTerminal,
   mintId,
   NotFoundError,
+  parseFindings,
   PullRequestState,
   TaskInput,
   TaskHasDependentsError,
@@ -17,8 +21,12 @@ import {
   TaskStatus,
   taskLandingFor,
   Title,
+  WorkstreamId,
   WorkstreamState,
   type GoalId,
+  type BoardColumnId,
+  type CiStopped,
+  WorkspaceMode,
   type ProjectDto,
   type ProjectId,
   type ProposalId,
@@ -29,8 +37,9 @@ import {
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getBoardColumn } from './board-columns';
+import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
+import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { transitionWorkstream } from './workstreams';
@@ -45,6 +54,8 @@ export interface BoardStatusInput {
   readonly pullRequest?: {
     readonly url: string | null;
     readonly state: PullRequestState | null;
+    /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
+    readonly ciStopped?: CiStopped | null;
   } | null;
 }
 
@@ -52,7 +63,8 @@ export interface BoardStatusInput {
  * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
  * is not Done until its pull request has merged: while its batch ships it is In progress, once the
  * pull request is open it is In review, and when the ship failed, or the pull request closed
- * without merging, it is Blocked, where the builder decides.
+ * without merging, it is Blocked, where the builder decides. An open pull request whose CI fixes
+ * stopped is Blocked too (CI-decides spec §4).
  */
 export function deriveBoardStatus({
   taskStatus,
@@ -61,10 +73,14 @@ export function deriveBoardStatus({
   batchState = null,
   pullRequest = null,
 }: BoardStatusInput): BoardStatus {
-  const shipped =
+  const column =
     batchState === BatchState.Shipped && pullRequest?.url
       ? pullRequestColumn(pullRequest.state)
       : null;
+  const shipped =
+    column === BoardStatus.InReview && (pullRequest?.ciStopped ?? null) !== null
+      ? BoardStatus.Blocked
+      : column;
   switch (taskStatus) {
     case TaskStatus.Done:
       if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
@@ -153,7 +169,8 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   }
   return writeTask(ctx, projectId, {
     ...config,
-    landing: config.landing ?? taskLandingFor(project.landing),
+    landing: config.landing ?? taskLandingFor(project),
+    workspaceMode: placementFor(project, config.workspaceMode),
     proposalId: null,
   });
 }
@@ -194,15 +211,62 @@ export function insertGoalTask(
     dependsOn: [...input.dependsOn],
     riskTags: [],
     flowId: null,
-    landing: taskLandingFor(project.landing),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     proposalId: null,
     goalId,
   });
 }
 
+const NO_COPY_WITHOUT_PULL_REQUESTS =
+  'A separate copy needs pull request delivery; in this project every task works in your folder';
+
 /**
- * Files an accepted new-task proposal as an open task linked to it. The proposal names no areas or
- * acceptance criteria, so the task starts with none; its title meets the same rule as a task made by hand.
+ * Where a new task works: the placement it names, else the project's default. Only a project that
+ * delivers by pull request has separate copies, so a local one refuses a copy (task placement spec, P1).
+ */
+function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): WorkspaceMode {
+  if (project.delivery !== Delivery.PullRequest) {
+    if (named === WorkspaceMode.Worktree) throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+    return WorkspaceMode.Shared;
+  }
+  return named ?? project.workspaceMode;
+}
+
+/**
+ * The areas a task filed from a proposal works in: those of the task whose session raised it, else
+ * the project's only area. Empty when neither says (several areas and no raising task), and then the
+ * task can't start until the builder names them.
+ */
+function areasForProposal(
+  tx: DbReader,
+  proposalId: ProposalId,
+  project: ProjectDto,
+): readonly string[] {
+  const proposal = getProposal(tx, proposalId);
+  const source = tx
+    .select({ ref: schema.sources.ref })
+    .from(schema.sources)
+    .where(eq(schema.sources.id, proposal.sourceId))
+    .get();
+  const workstreamId = WorkstreamId.safeParse(source?.ref['workstreamId']);
+  if (workstreamId.success) {
+    const raiser = tx
+      .select({ areas: schema.tasks.areas })
+      .from(schema.workstreams)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(eq(schema.workstreams.id, workstreamId.data))
+      .get();
+    if (raiser && raiser.areas.length > 0) return raiser.areas;
+  }
+  const [only, ...others] = project.areas;
+  return only && others.length === 0 ? [only.name] : [];
+}
+
+/**
+ * Files an accepted new-task proposal as an open task linked to it. The proposal names no acceptance
+ * criteria, so the task starts with none; its title meets the same rule as a task made by hand. Its
+ * areas come from the task that raised it, or the project's only area (`areasForProposal`).
  */
 export function insertTaskFromProposal(
   ctx: WriteContext,
@@ -213,12 +277,14 @@ export function insertTaskFromProposal(
     readonly description: string;
   },
 ): TaskDto {
+  const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
-    landing: taskLandingFor(getProject(ctx.tx, input.projectId).landing),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
-    areas: [],
+    areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
     riskTags: [],
     flowId: null,
@@ -226,14 +292,103 @@ export function insertTaskFromProposal(
   });
 }
 
+/** What a step hands over for a follow-up task: the rest comes from the task it was found in. */
+export interface FollowUpFields {
+  readonly title: string;
+  readonly description: string;
+  readonly acceptanceCriteria?: readonly string[];
+}
+
+/**
+ * Files a follow-up found while a step checked `sourceId`: an open task in the same project, parked
+ * in the Icebox column (the project's first column when the builder renamed it, the derived board
+ * when it has none), landing where the source lands and touching the same areas. Its description
+ * names the source. It depends on nothing, so it never holds the source up.
+ */
+export function insertFollowUpTask(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  fields: FollowUpFields,
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
+  const columns = listBoardColumns(ctx.tx, source.projectId);
+  const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
+  const origin = `Found while checking the task "${source.title}" (${source.id}).`;
+  return writeTask(ctx, source.projectId, {
+    landing: source.landing,
+    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    title: Title.parse(fields.title),
+    description: `${origin}\n\n${fields.description}`,
+    acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
+    areas: source.areas,
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    proposalId: null,
+    boardColumnId: icebox?.id ?? null,
+  });
+}
+
+/** What a step that rejected the work at the retry limit hands over: who it was and its notes. */
+export interface RetryLimitFindings {
+  /** The role that rejected, as a person reads it: "review" or "QA". */
+  readonly role: string;
+  /** The rejection's own notes, without any follow-up list 10db appended. */
+  readonly notes: string;
+}
+
+const LIMIT_TITLE_PREFIX = 'Resolve the open findings of ';
+const TITLE_MAX = 200;
+
+/**
+ * Files the findings of a rejection that used up the retry limit, for a task that shipped with them
+ * open: a task in the project's Ready column (planned, no human column), landing where the source
+ * landed and touching the same areas, with one acceptance criterion per finding. Its description
+ * names the source. It depends on nothing, so it never holds the source up.
+ */
+export function insertRetryLimitFollowUp(
+  ctx: WriteContext,
+  sourceId: TaskId,
+  found: RetryLimitFindings,
+): TaskDto {
+  const source = getTask(ctx.tx, sourceId);
+  const findings = parseFindings(found.notes);
+  const quoted = `"${source.title}"`;
+  const title = `${LIMIT_TITLE_PREFIX}${quoted}`;
+  return writeTask(ctx, source.projectId, {
+    landing: source.landing,
+    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    // Cut by characters, so the title stays one line within its limit however long the source's is.
+    title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
+    description: [
+      `The task ${quoted} (${source.id}) shipped at the retry limit: the ${found.role} step still rejected the work. These findings are open:`,
+      found.notes,
+    ].join('\n\n'),
+    acceptanceCriteria:
+      findings.length > 0
+        ? findings.map((f) => `Fixed: ${f.text}`)
+        : ['The findings in the description are fixed'],
+    areas: source.areas,
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    proposalId: null,
+    boardColumnId: null,
+  });
+}
+
 /** Writes a task the caller has already validated, at the end of the board, and announces it with its proposal, if any. */
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing'> & {
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> & {
     readonly landing: TaskLanding;
+    readonly workspaceMode: WorkspaceMode;
     readonly proposalId: ProposalId | null;
     readonly goalId?: GoalId;
+    /** The human column to park the task in; absent, it is planned. */
+    readonly boardColumnId?: BoardColumnId | null;
   },
 ): TaskDto {
   const order = ctx.tx
@@ -254,7 +409,9 @@ function writeTask(
     ...landingColumns(config.landing),
     status: TaskStatus.Open,
     boardOrder: (order?.value ?? 0) + 1,
-    workspaceMode: 'shared' as const,
+    boardColumnId: config.boardColumnId ?? null,
+    workspaceMode: config.workspaceMode,
+    placementReason: null,
     goalId: config.goalId ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -329,6 +486,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       batchState: schema.batches.state,
       prUrl: schema.batches.prUrl,
       prState: schema.batches.prState,
+      ciStopped: schema.batches.ciStopped,
     })
     .from(schema.workstreams)
     .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
@@ -346,6 +504,8 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     riskTags: row.riskTags,
     flowId: row.flowId,
     landing: landingOf(row),
+    workspaceMode: row.workspaceMode,
+    placementReason: row.placementReason,
     status: row.status,
     boardOrder: row.boardOrder,
     boardColumnId: row.boardColumnId,
@@ -355,7 +515,9 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
       batchState: latest?.batchState ?? null,
-      pullRequest: latest ? { url: latest.prUrl, state: latest.prState } : null,
+      pullRequest: latest
+        ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
+        : null,
     }),
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,
@@ -582,17 +744,38 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
         `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
       );
   }
+  if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
   ctx.tx
     .update(schema.tasks)
     .set({
       ...fields,
       ...(landing === undefined ? {} : landingColumns(landing)),
+      // A placement the builder chose has no proposal behind it.
+      ...(fields.workspaceMode === undefined ? {} : { placementReason: null }),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * A task's placement changes exactly while Start could start it (task placement spec, P3): it is
+ * open and its latest run, if any, is not active. Parking doesn't count, since a parked task has not
+ * started. Only a project that delivers by pull request has separate copies. The daemon adds the
+ * pending-join test on top.
+ */
+function checkPlacementCanChange(db: DbReader, task: TaskDto): void {
+  if (getProject(db, task.projectId).delivery !== Delivery.PullRequest)
+    throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`${task.title} is finished, so where it worked can't change`);
+  const run = latestRun(db, task.id);
+  if (run && ACTIVE_STATES.includes(run.state))
+    throw new ConflictError(
+      `${task.title} has started, so where it works can't change until its run ends`,
+    );
 }
 
 /** Below this gap a midpoint loses precision, so the project is renumbered first. */

@@ -1,8 +1,11 @@
 import { z } from 'zod';
 import { BranchName } from './git-names';
 
-/** What a project does with a finished task's pull request unless the task says otherwise. */
-export const ProjectLanding = { Merge: 'merge', Hold: 'hold' } as const;
+/**
+ * Where a new task lands unless it says otherwise: merged into the base branch, merged into the
+ * branch the project names (`landingBranch`, such as an integration branch), or held for the builder.
+ */
+export const ProjectLanding = { Merge: 'merge', Branch: 'branch', Hold: 'hold' } as const;
 export type ProjectLanding = (typeof ProjectLanding)[keyof typeof ProjectLanding];
 
 export const DEFAULT_PROJECT_LANDING: ProjectLanding = ProjectLanding.Merge;
@@ -19,10 +22,18 @@ export const TaskLanding = z.discriminatedUnion('kind', [
 export type TaskLanding = z.infer<typeof TaskLanding>;
 
 /** The landing a new task starts with: what its project does by default. */
-export function taskLandingFor(project: ProjectLanding): TaskLanding {
-  switch (project) {
+export function taskLandingFor(project: {
+  readonly landing: ProjectLanding;
+  readonly landingBranch: string | null;
+}): TaskLanding {
+  switch (project.landing) {
     case ProjectLanding.Merge:
       return { kind: 'base' };
+    case ProjectLanding.Branch:
+      // A branch default is only stored with its name; a stray row falls back to the base.
+      return project.landingBranch === null
+        ? { kind: 'base' }
+        : { kind: 'branch', branch: project.landingBranch };
     case ProjectLanding.Hold:
       return { kind: 'hold' };
   }

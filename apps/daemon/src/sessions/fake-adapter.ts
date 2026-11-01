@@ -85,6 +85,8 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({
     do: z.literal('turn_complete'),
     result: z.enum(['success', 'max_turns', 'error']).optional(),
+    /** What the model wrote in the turn's last message. */
+    text: z.string().optional(),
   }),
   z.object({
     do: z.literal('rate_limit'),
@@ -322,7 +324,9 @@ export class FakeAdapter implements SessionAdapter {
             return 'continue';
           }
           let decision: ToolDecision = { behavior: 'allow' };
+          // A guard `ask` reaches canUseTool past any allow rule, as Claude Code's hook ask does.
           if (
+            verdict.decision === 'ask' ||
             step.toolName === 'AskUserQuestion' ||
             !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd)
           ) {
@@ -379,6 +383,7 @@ export class FakeAdapter implements SessionAdapter {
           channel.push({
             type: 'turn_complete',
             ...(step.result ? { result: step.result } : {}),
+            ...(step.text ? { text: step.text } : {}),
             inputTokens: 1000,
             outputTokens: 200,
             cachedTokens: 0,

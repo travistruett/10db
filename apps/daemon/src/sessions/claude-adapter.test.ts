@@ -9,11 +9,12 @@ import type {
   SDKUserMessage,
   SpawnedProcess,
 } from '@anthropic-ai/claude-agent-sdk';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it, vi } from 'vitest';
 import { SANDBOXED, tempDir } from '../../test/fixtures';
+import { captureLogs } from '../../test/log-capture';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
@@ -35,7 +36,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
-import type { LaneSandboxSpec } from '../sandbox';
+import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { CompletionError, type SessionEvent, type SessionSpec } from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
@@ -77,6 +78,8 @@ interface Script {
   readonly mcpSet?: McpSetServersResult | Promise<McpSetServersResult> | 'reject';
   /** The message of the error a rejected setMcpServers() throws. */
   readonly mcpRejection?: string;
+  /** What claude prints on stderr as it starts. */
+  readonly stderr?: string;
 }
 
 interface Record_ {
@@ -91,10 +94,19 @@ interface Record_ {
   }[];
   /** The order of accountInfo(), setMcpServers() and the prompt reaching claude. */
   readonly order: string[];
+  /** How many times claude was started, and the abort signal each start was given. */
+  queries: number;
+  readonly signals: (AbortSignal | undefined)[];
+  /** How many fake claude processes were spawned, and how many have finished printing. */
+  spawned: number;
+  printed: number;
 }
 
-/** Stands in for the SDK's query(): the test boundary for Claude Code. */
-function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
+/**
+ * Stands in for the SDK's query(): the test boundary for Claude Code. One script serves every start;
+ * a list gives each start its own, the last one serving any after it.
+ */
+function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; record: Record_ } {
   const record: Record_ = {
     options: null,
     inputs: [],
@@ -102,9 +114,30 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
     contextCalls: [],
     mcpCalls: [],
     order: [],
+    queries: 0,
+    signals: [],
+    spawned: 0,
+    printed: 0,
   };
   const query: QueryFn = ({ prompt, options }) => {
+    const list = 'messages' in scripts ? [scripts] : scripts;
+    const script = list[Math.min(record.queries, list.length - 1)] ?? { messages: [] };
+    record.queries += 1;
     record.options = options;
+    record.signals.push(options.abortController?.signal);
+    if (script.stderr !== undefined) {
+      record.spawned += 1;
+      const child = options.spawnClaudeCodeProcess?.({
+        command: '/bin/sh',
+        args: ['-c', `printf %s '${script.stderr}' >&2`],
+        env: { PATH: '/usr/bin:/bin' },
+        signal: new AbortController().signal,
+      });
+      // The SDK types the process by its events only; the one the adapter spawns is a ChildProcess.
+      (child as { stderr?: NodeJS.ReadableStream } | undefined)?.stderr?.once('end', () => {
+        record.printed += 1;
+      });
+    }
     let inputDone: () => void = () => undefined;
     const inputEnded = new Promise<void>((resolve) => {
       inputDone = resolve;
@@ -173,7 +206,11 @@ function fakeQuery(script: Script): { query: QueryFn; record: Record_ } {
   return { query, record };
 }
 
-function adapterFor(script: Script, stopGraceMs = 1_000, clock: Clock = systemClock) {
+function adapterFor(
+  script: Script | readonly Script[],
+  stopGraceMs = 1_000,
+  clock: Clock = systemClock,
+) {
   const fake = fakeQuery(script);
   const adapter = createClaudeAdapter({
     claudePath: '/usr/local/bin/claude',
@@ -228,7 +265,7 @@ async function callHook(record: Record_, toolName: string) {
 }
 
 /** The adapter's wait for accountInfo() before it gives up. */
-const BILLING_PREFLIGHT_MS = 15_000;
+const BILLING_PREFLIGHT_MS = 30_000;
 
 const deps = {
   claudePath: '/usr/local/bin/claude',
@@ -264,6 +301,7 @@ const laneSandbox: LaneSandboxSpec = {
   },
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
   disallowedTools: ['Read(//h/.claude.json)', 'Read(//repo/.env)'],
+  autoMode: autoModeRules('make gate'),
   askRules: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'],
 };
 
@@ -344,10 +382,86 @@ describe('buildQueryOptions', () => {
     ['an unsandboxed', {}],
     ['a sandboxed', { sandbox: laneSandbox }],
   ])('runs %s session in default mode, with the guard and the broker wired', (_name, given) => {
-    const options = buildQueryOptions(spec(given), deps);
+    const options = buildQueryOptions(spec(given), { ...deps, lanePermissionMode: 'default' });
     expect(options.permissionMode).toBe('default');
     expect(options.canUseTool).toBeTypeOf('function');
     expect(options.hooks?.PreToolUse).toHaveLength(1);
+  });
+
+  it('runs a sandboxed session in the lane permission mode it is given, with the guard and the broker still wired', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), {
+      ...deps,
+      lanePermissionMode: 'auto',
+    });
+    expect(options.permissionMode).toBe('auto');
+    expect(options.canUseTool).toBeTypeOf('function');
+    expect(options.hooks?.PreToolUse).toHaveLength(1);
+    expect(options.settings).toMatchObject({
+      permissions: { ask: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'] },
+    });
+  });
+
+  it('hands a sandboxed session the classifier rules, keeping the built-in ones', () => {
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
+    const settings = options.settings as {
+      autoMode: { hard_deny: string[]; soft_deny: string[] };
+    };
+    expect(settings.autoMode.hard_deny).toHaveLength(3);
+    expect(settings.autoMode.soft_deny).toHaveLength(2);
+    expect(settings.autoMode.hard_deny[0]).toBe('$defaults');
+    expect(settings.autoMode.soft_deny[0]).toBe('$defaults');
+    expect(options.settings).toMatchObject({ permissions: { ask: laneSandbox.askRules } });
+  });
+
+  it.each<[string, 'auto' | 'default' | undefined, 'auto' | 'default' | undefined, string, string]>(
+    [
+      ['the default, which is auto', undefined, undefined, 'auto', '0'],
+      ['a spec that asks for default', undefined, 'default', 'default', '1'],
+      ['a spec that asks for auto', undefined, 'auto', 'auto', '0'],
+      ['the adapter option over the spec', 'default', 'auto', 'default', '1'],
+    ],
+  )(
+    'runs a sandboxed session in the mode of %s, with the env scrub off only in auto mode',
+    (_name, option, fromSpec, mode, scrub) => {
+      const options = buildQueryOptions(
+        spec({ sandbox: laneSandbox, ...(fromSpec ? { lanePermissionMode: fromSpec } : {}) }),
+        { ...deps, ...(option ? { lanePermissionMode: option } : {}) },
+      );
+      expect(options.permissionMode).toBe(mode);
+      expect(options.env?.['CLAUDE_CODE_SUBPROCESS_ENV_SCRUB']).toBe(scrub);
+    },
+  );
+
+  it('starts no hook command or settings file for a sandboxed session: its hooks are callbacks', () => {
+    // With the env scrub off in auto mode, a child process outside the Bash sandbox would inherit the
+    // account's credential, so the session must start none that runs lane-writable code: Claude Code's
+    // own git is the only one, and the lane cannot write the git dir.
+    const options = buildQueryOptions(spec({ sandbox: laneSandbox }), deps);
+    expect(options.settingSources).toEqual([]);
+    expect(Object.keys(options.settings as object)).not.toContain('hooks');
+    const hooks = Object.values(options.hooks ?? {}).flat();
+    expect(hooks.length).toBeGreaterThan(0);
+    for (const matcher of hooks) {
+      for (const hook of matcher.hooks) expect(hook).toBeTypeOf('function');
+    }
+  });
+
+  it('ships a harness plugin with no hook command', () => {
+    const plugin = join(__dirname, '../../../../packages/harness/plugin');
+    expect(existsSync(join(plugin, 'hooks'))).toBe(false);
+    const manifest = JSON.parse(
+      readFileSync(join(plugin, '.claude-plugin', 'plugin.json'), 'utf8'),
+    ) as Record<string, unknown>;
+    expect(manifest).not.toHaveProperty('hooks');
+  });
+
+  it('gives an unsandboxed session no classifier rules', () => {
+    expect(buildQueryOptions(spec(), deps).settings).toEqual({ autoCompactEnabled: true });
+  });
+
+  it('never runs an unsandboxed session in auto mode, whatever the lane permission mode', () => {
+    const options = buildQueryOptions(spec(), { ...deps, lanePermissionMode: 'auto' });
+    expect(options.permissionMode).toBe('default');
   });
 
   it('runs a sandboxed session under its profile, with no settings file, asking before protected edits', () => {
@@ -484,6 +598,29 @@ describe('buildQueryOptions', () => {
     expect(output).toMatchObject({ hookSpecificOutput: { permissionDecision: 'deny' } });
     expect(canUseTool).not.toHaveBeenCalled();
     expect(preToolUse).not.toHaveBeenCalled();
+  });
+
+  it('turns a guard that throws into a deny, never a call that runs', async () => {
+    const preToolUse = vi.fn((): never => {
+      throw new RangeError('too many readings');
+    });
+    const hook = buildQueryOptions(spec({ preToolUse }), deps).hooks?.PreToolUse?.[0]?.hooks[0];
+    const output = await hook?.(
+      {
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'yarn' },
+        tool_use_id: 'toolu_1',
+        session_id: 's',
+        transcript_path: '/t',
+        cwd: '/repo',
+      },
+      'toolu_1',
+      { signal: new AbortController().signal },
+    );
+    expect(output).toMatchObject({
+      hookSpecificOutput: { permissionDecision: 'deny' },
+    });
   });
 
   it('runs the guard as a PreToolUse hook', async () => {
@@ -718,6 +855,30 @@ describe('createClaudeAdapter', () => {
     ]);
   });
 
+  it('carries the last message a turn wrote, capped, and none for a turn that wrote nothing', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        resultMessage({
+          input: 1,
+          output: 1,
+          costUsd: 0.01,
+          text: '  1. BLOCKING a.ts:3 no test.  ',
+        }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01, text: 'x'.repeat(9_000) }),
+        resultMessage({ input: 1, output: 1, costUsd: 0.01 }),
+      ],
+    });
+    const turns = (await collect(adapter.start(spec()).events)).filter(
+      (e) => e.type === 'turn_complete',
+    );
+    expect(turns.map((t) => t.text)).toEqual([
+      '1. BLOCKING a.ts:3 no test.',
+      'x'.repeat(8_000),
+      undefined,
+    ]);
+  });
+
   it('never sends the prompt when the billing preflight shows Bedrock on a subscription project', async () => {
     const { adapter, record } = adapterFor({
       messages: [initMessage('none'), assistantMessage([textBlock('working')])],
@@ -821,6 +982,28 @@ describe('createClaudeAdapter', () => {
       'never answers': () => new Promise<AccountInfo>(() => undefined),
       rejects: () => Promise.reject(new Error('control channel closed')),
     } as const;
+    /** Stops the session on a manual clock: its grace periods pass as the clock is advanced. */
+    async function stopOn(clock: ManualClock, handle: { stop(): Promise<void> }): Promise<void> {
+      const stopping = handle.stop();
+      const ticker = setInterval(() => {
+        clock.advance(1_000);
+      }, 5);
+      try {
+        await stopping;
+      } finally {
+        clearInterval(ticker);
+      }
+    }
+    /** Advances the clock one wait at a time, once claude has been started for each. */
+    async function pastWaits(clock: ManualClock, record: Record_, starts: number): Promise<void> {
+      for (let start = 1; start <= starts; start += 1) {
+        await vi.waitFor(() => {
+          expect(record.queries).toBe(start);
+          expect(record.printed).toBe(record.spawned);
+        });
+        clock.advance(BILLING_PREFLIGHT_MS);
+      }
+    }
     it.each<{
       how: keyof typeof noAnswer;
       kind: 'claude_subscription' | 'anthropic_api_key';
@@ -832,29 +1015,29 @@ describe('createClaudeAdapter', () => {
         kind: 'claude_subscription',
         reason: 'account_refused',
         message:
-          /^Claude Code reported no account within 15 s for account "Claude plan".*No prompt was sent/,
+          /^Claude Code reported no account within 30 s on each of 2 starts for account "Claude plan", which looks signed out\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
         kind: 'claude_subscription',
         reason: 'account_refused',
-        message: /^Claude Code reported no account.*No prompt was sent/,
+        message: /^Claude Code reported no account.*on each of 2 starts.*No prompt was sent/,
       },
       {
         how: 'never answers',
         kind: 'anthropic_api_key',
         reason: 'billing_refused',
         message:
-          /^Account check failed: Claude Code reported no account within 15 s.*No prompt was sent/,
+          /^Account check failed: Claude Code reported no account within 30 s on each of 2 starts\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
         kind: 'anthropic_api_key',
         reason: 'billing_refused',
-        message: /^Account check failed: Claude Code reported no account.*No prompt was sent/,
+        message: /^Account check failed: Claude Code reported no account.*on each of 2 starts/,
       },
     ])(
-      '$kind: accountInfo() $how, so no prompt is sent',
+      '$kind: accountInfo() $how on both starts, so no prompt is sent',
       async ({ how, kind, reason, message }) => {
         const clock = new ManualClock();
         const { adapter, record } = adapterFor(
@@ -869,7 +1052,7 @@ describe('createClaudeAdapter', () => {
           identity: kind === 'claude_subscription' ? 'builder@example.com' : null,
         };
         const done = collect(adapter.start(spec({ account })).events);
-        clock.advance(BILLING_PREFLIGHT_MS);
+        await pastWaits(clock, record, 2);
         const events = await done;
         expect(events.map((e) => e.type)).toEqual(['ended']);
         expect(events[0]).toMatchObject({ type: 'ended', reason });
@@ -878,9 +1061,141 @@ describe('createClaudeAdapter', () => {
             refusal: { problem: 'signed_out', seenIdentity: null },
           });
         expect(endMessage(events[0])).toMatch(message);
+        expect(record.queries).toBe(2);
         expect(record.inputs).toEqual([]);
       },
     );
+
+    it('waits 30 s for each start: a slow lane at background priority is not a signed-out account', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      clock.advance(29_999);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(record.queries).toBe(1);
+      expect(record.signals[0]?.aborted).toBe(false);
+      await stopOn(clock, handle);
+      await done;
+    });
+
+    it('starts claude again when the first start gets no account, and the second one runs the session', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+        ],
+        1_000,
+        clock,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastWaits(clock, record, 1);
+      const events = await done;
+      expect(record.queries).toBe(2);
+      // The slow first start is closed, not left running beside the second.
+      expect(record.signals[0]?.aborted).toBe(true);
+      expect(record.signals[1]?.aborted).toBe(false);
+      expect(events.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+      expect(record.inputs).toHaveLength(1);
+    });
+
+    it('retries when accountInfo() rejects at once, and asks a signed-in account only once', async () => {
+      const { adapter, record } = adapterFor([
+        { messages: [], then: 'hang', account: noAnswer.rejects() },
+        { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+      ]);
+      const events = await collect(adapter.start(spec()).events);
+      expect(record.queries).toBe(2);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+      const signedIn = adapterFor({
+        messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      });
+      await collect(signedIn.adapter.start(spec()).events);
+      expect(signedIn.record.queries).toBe(1);
+    });
+
+    it('says what claude printed on each start in the refusal', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          {
+            messages: [],
+            then: 'hang',
+            account: noAnswer['never answers'](),
+            stderr: 'warming up\nplugin cache locked',
+          },
+          {
+            messages: [],
+            then: 'hang',
+            account: noAnswer['never answers'](),
+            stderr: 'Error: not logged in',
+          },
+        ],
+        1_000,
+        clock,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastWaits(clock, record, 2);
+      const [ended] = await done;
+      const message = endMessage(ended);
+      expect(message).toContain('on each of 2 starts');
+      expect(message).toContain('"warming up plugin cache locked"');
+      expect(message).toContain('"Error: not logged in"');
+      expect(ended).toMatchObject({
+        refusal: { message: expect.stringContaining('Error: not logged in') as string },
+      });
+    });
+
+    it('keeps a message sent during the first start for the second', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage()], then: 'hang' },
+        ],
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      handle.send('also: mind the lint');
+      await pastWaits(clock, record, 1);
+      await vi.waitFor(() => {
+        expect(record.inputs).toHaveLength(2);
+      });
+      expect(JSON.stringify(record.inputs[1])).toContain('also: mind the lint');
+      await stopOn(clock, handle);
+      await done;
+    });
+
+    it('does not start again after a stop', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      await stopOn(clock, handle);
+      clock.advance(BILLING_PREFLIGHT_MS);
+      const events = await done;
+      expect(record.queries).toBe(1);
+      expect(events.map((e) => e.type)).toEqual(['ended']);
+      expect(events[0]).toMatchObject({ reason: 'stopped' });
+    });
   });
 
   it("registers 10db's and the repo's servers after the preflight and before the prompt", async () => {
@@ -1284,6 +1599,46 @@ describe('createClaudeAdapter', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it.each<[string, 'default' | 'auto' | undefined, string]>([
+    ['the lane mode it was made with', 'auto', 'auto'],
+    ['auto mode when made with none', undefined, 'auto'],
+  ])('starts a sandboxed session in %s', async (_name, lanePermissionMode, expected) => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+      ...(lanePermissionMode === undefined ? {} : { lanePermissionMode }),
+    });
+    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.permissionMode).toBe(expected);
+  });
+
+  it('logs the permission mode Claude Code reports, not the one it was asked for', async () => {
+    // Claude Code starts in default mode where auto mode is unavailable; only init says so.
+    const logs = captureLogs();
+    const fake = fakeQuery({
+      messages: [
+        { ...initMessage(), permissionMode: 'default' as const },
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      lanePermissionMode: 'auto',
+    });
+    await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(fake.record.options?.permissionMode).toBe('auto');
+    const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
+    expect(billing.map((l) => l['permissionMode'])).toEqual(['default']);
   });
 
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {

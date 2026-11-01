@@ -126,6 +126,37 @@ describe('where a task lands, through the API', () => {
     });
   });
 
+  it('gives new tasks the project default branch, and an explicit landing keeps its own', async () => {
+    const { api, project } = await start();
+    git(remote.origin.path, 'branch', 'next', 'main');
+    const set = await api.patch(`/projects/${project.id}`, ProjectDto, {
+      landing: 'branch',
+      landingBranch: 'next',
+    });
+    expect(set).toMatchObject({ landing: 'branch', landingBranch: 'next' });
+    const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, TASK);
+    expect(task.landing).toEqual({ kind: 'branch', branch: 'next' });
+    const explicit = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+      ...TASK,
+      landing: { kind: 'hold' },
+    });
+    expect(explicit.landing).toEqual({ kind: 'hold' });
+  });
+
+  it('refuses a default branch origin does not have, in plain words', async () => {
+    const { api, project } = await start();
+    const refused = await refusal(`/projects/${project.id}`, 'PATCH', {
+      landing: 'branch',
+      landingBranch: 'next',
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.message).toBe(
+      'origin has no branch named next. Create it on origin, or choose another place for new tasks to land.',
+    );
+    const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, TASK);
+    expect(task.landing).toEqual({ kind: 'base' });
+  });
+
   it('does not ask origin about the project base branch', async () => {
     const { api, project } = await start();
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {

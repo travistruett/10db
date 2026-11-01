@@ -78,6 +78,13 @@ const rows: readonly Row[] = [
     sent: { changedCheckCommand: 'make check-changed' },
   },
   {
+    name: 'Pre-check command',
+    label: 'Pre-check command',
+    line: "Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate.",
+    change: () => type('Pre-check command', 'make precheck'),
+    sent: { precheckCommand: 'make precheck' },
+  },
+  {
     name: 'Delivery',
     project: pullRequests,
     label: 'Delivery',
@@ -100,6 +107,25 @@ const rows: readonly Row[] = [
     line: 'GitHub merges each pull request into main by itself once its required checks pass. A task can choose another branch, or hold.',
     change: () => fireEvent.click(screen.getByRole('radio', { name: 'Hold for my review' })),
     sent: { landing: 'hold' },
+  },
+  {
+    name: 'When checks pass, merging into a branch',
+    project: { ...pullRequests, landing: 'branch', landingBranch: 'next' },
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into next by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => type('New tasks land in', 'dev'),
+    sent: { landingBranch: 'dev' },
+  },
+  {
+    name: 'When checks pass, choosing a branch',
+    project: pullRequests,
+    label: 'When checks pass',
+    line: 'GitHub merges each pull request into main by itself once its required checks pass. A task can choose another branch, or hold.',
+    change: () => {
+      fireEvent.click(screen.getByRole('radio', { name: 'Merge into a branch' }));
+      type('New tasks land in', 'next');
+    },
+    sent: { landing: 'branch', landingBranch: 'next' },
   },
   {
     name: 'When checks pass, holding',

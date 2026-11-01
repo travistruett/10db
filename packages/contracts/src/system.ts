@@ -136,6 +136,10 @@ export type McpServerStatusDto = z.infer<typeof McpServerStatusDto>;
 export const KeepAwakeStatus = z.object({ mode: z.enum(KeepAwakeMode), active: z.boolean() });
 export type KeepAwakeStatus = z.infer<typeof KeepAwakeStatus>;
 
+/** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
+export const LanePermissionsDto = z.object({ autoMode: z.boolean() });
+export type LanePermissionsDto = z.infer<typeof LanePermissionsDto>;
+
 /** The newest event's seq, so a fresh UI can stream from now instead of replaying history. */
 export const EventsHead = z.object({ seq: z.int().min(0) });
 export type EventsHead = z.infer<typeof EventsHead>;

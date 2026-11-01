@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -123,6 +132,246 @@ describe('mergeIntoBranch', () => {
     expect(snapshot()).toEqual(before);
     expect(read('README.md')).toBe('# ours\n');
     expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
+  });
+
+  describe('resolving conflicts', () => {
+    const GENERATED = ['packages/db/drizzle/'] as const;
+    const resolving = () =>
+      git.mergeIntoBranch({
+        repo: repo.path,
+        branch: 'work',
+        from: 'main',
+        message: 'Merge main into work',
+        resolve: { generated: GENERATED },
+      });
+
+    /** A drizzle journal holding `tags`, numbered in order as drizzle-kit writes it. */
+    const journal = (...tags: string[]): string =>
+      `${JSON.stringify(
+        {
+          version: '7',
+          dialect: 'sqlite',
+          entries: tags.map((tag, idx) => ({
+            idx,
+            version: '6',
+            when: idx,
+            tag,
+            breakpoints: true,
+          })),
+        },
+        null,
+        2,
+      )}\n`;
+
+    /** Puts `files` in the history both branches share. */
+    function seed(files: Record<string, string>): void {
+      rawGit('switch', '-q', 'main');
+      commitFiles(files, 'seed');
+      rawGit('switch', '-q', 'work');
+      rawGit('merge', '-q', '--ff-only', 'main');
+    }
+
+    it('keeps both sides when each only added lines at the same place, and records which files it resolved', async () => {
+      seed({ 'src/index.ts': "import a from './a';\nexport {};\n" });
+      const own = commitFiles(
+        { 'src/index.ts': "import a from './a';\nimport b from './b';\nexport {};\n" },
+        'b',
+      );
+      const base = onMain(
+        { 'src/index.ts': "import a from './a';\nimport c from './c';\nexport {};\n" },
+        'c',
+      );
+      const merged = await resolving();
+      expect(merged).toEqual({
+        kind: 'merged',
+        from: base,
+        head: rawGit('rev-parse', 'HEAD'),
+        fastForward: false,
+        paths: ['src/index.ts'],
+        resolved: [{ path: 'src/index.ts', how: 'kept_both' }],
+        regenerate: [],
+      });
+      expect(read('src/index.ts')).toBe(
+        "import a from './a';\nimport b from './b';\nimport c from './c';\nexport {};\n",
+      );
+      expect(rawGit('log', '-1', '--format=%P')).toBe(`${own} ${base}`);
+      expect(rawGit('log', '-1', '--format=%B')).toContain('src/index.ts');
+      expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
+    });
+
+    it.each([
+      {
+        name: 'both sides changed the same line',
+        seeded: { 'README.md': 'one\ntwo\n' },
+        ours: { 'README.md': 'one\nours\n' },
+        theirs: { 'README.md': 'one\ntheirs\n' },
+        path: 'README.md',
+        reason: 'both sides changed the same lines',
+      },
+      {
+        name: 'both sides added the same new file',
+        seeded: {},
+        ours: { 'src/new.ts': 'ours\n' },
+        theirs: { 'src/new.ts': 'theirs\n' },
+        path: 'src/new.ts',
+        reason: 'both sides added this file',
+      },
+      {
+        name: 'merged JSON that no longer parses',
+        seeded: { 'package.json': '{\n  "a": 1,\n  "z": 9\n}\n' },
+        ours: { 'package.json': '{\n  "a": 1,\n  "b": 2,\n  "z": 9\n}\n' },
+        theirs: { 'package.json': '{\n  "a": 1,\n  "c": 3\n  "z": 9\n}\n' },
+        path: 'package.json',
+        reason: 'the merged file is not valid JSON',
+      },
+      {
+        // Each side only appended an entry, so a line merge would give two migrations one number.
+        name: 'both sides added a migration to a drizzle journal',
+        seeded: { 'drizzle/meta/_journal.json': journal('0000_init') },
+        ours: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_ours') },
+        theirs: { 'drizzle/meta/_journal.json': journal('0000_init', '0001_theirs') },
+        path: 'drizzle/meta/_journal.json',
+        reason: "drizzle numbers its migrations in order, so its journal isn't merged by line",
+      },
+    ])('leaves a conflict where $name, and writes nothing', async (c) => {
+      if (Object.keys(c.seeded).length > 0) seed(c.seeded);
+      commitFiles(c.ours, 'ours');
+      onMain(c.theirs, 'theirs');
+      const before = snapshot();
+      const merged = await resolving();
+      expect(merged).toMatchObject({
+        kind: 'conflict',
+        paths: [c.path],
+        unresolved: [{ path: c.path, reason: c.reason }],
+      });
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('does not resolve lines when the caller did not ask', async () => {
+      seed({ 'src/index.ts': 'a\nz\n' });
+      commitFiles({ 'src/index.ts': 'a\nb\nz\n' }, 'b');
+      onMain({ 'src/index.ts': 'a\nc\nz\n' }, 'c');
+      expect((await merge()).kind).toBe('conflict');
+    });
+
+    it('resets a generated directory to the base, names what the branch had there that the base lacks, and still resolves other files', async () => {
+      seed({
+        'packages/db/drizzle/meta/_journal.json': '{"entries":["0000"]}\n',
+        'packages/db/drizzle/0000_init.sql': 'create table a;\n',
+        'src/index.ts': 'a\nz\n',
+      });
+      commitFiles(
+        {
+          'packages/db/drizzle/meta/_journal.json': '{"entries":["0000","0001_mine"]}\n',
+          'packages/db/drizzle/0001_mine.sql': 'alter table a add b;\n',
+          'src/index.ts': 'a\nb\nz\n',
+        },
+        'mine',
+      );
+      const base = onMain(
+        {
+          'packages/db/drizzle/meta/_journal.json': '{"entries":["0000","0001_theirs"]}\n',
+          'packages/db/drizzle/0001_theirs.sql': 'alter table a add c;\n',
+          'src/index.ts': 'a\nc\nz\n',
+        },
+        'theirs',
+      );
+      const merged = await resolving();
+      expect(merged).toMatchObject({
+        kind: 'merged',
+        from: base,
+        resolved: [
+          { path: 'packages/db/drizzle/', how: 'regenerated' },
+          { path: 'src/index.ts', how: 'kept_both' },
+        ],
+        regenerate: [
+          { dir: 'packages/db/drizzle/', dropped: ['packages/db/drizzle/0001_mine.sql'] },
+        ],
+      });
+      expect(read('packages/db/drizzle/meta/_journal.json')).toBe(
+        '{"entries":["0000","0001_theirs"]}\n',
+      );
+      expect(existsSync(join(repo.path, 'packages/db/drizzle/0001_mine.sql'))).toBe(false);
+      expect(read('packages/db/drizzle/0001_theirs.sql')).toBe('alter table a add c;\n');
+      expect(read('src/index.ts')).toBe('a\nb\nc\nz\n');
+      expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
+    });
+
+    it('names every conflicted path of a merge it leaves, those it would have settled included', async () => {
+      seed({
+        'packages/db/drizzle/meta/_journal.json': journal('0000_init'),
+        'README.md': '# base\n',
+      });
+      commitFiles(
+        {
+          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_mine'),
+          'README.md': '# ours\n',
+        },
+        'mine',
+      );
+      const base = onMain(
+        {
+          'packages/db/drizzle/meta/_journal.json': journal('0000_init', '0001_theirs'),
+          'README.md': '# theirs\n',
+        },
+        'theirs',
+      );
+      const before = snapshot();
+      expect(await resolving()).toMatchObject({
+        kind: 'conflict',
+        from: base,
+        paths: ['README.md'],
+        unresolved: [{ path: 'README.md' }],
+        conflicted: ['README.md', 'packages/db/drizzle/meta/_journal.json'],
+      });
+      expect(snapshot()).toEqual(before);
+    });
+
+    it('leaves every conflict in a generated directory, with the reason given, when told it cannot be regenerated now', async () => {
+      seed({
+        'packages/db/drizzle/notes.md': 'a\nz\n',
+        'src/index.ts': 'a\nz\n',
+      });
+      commitFiles(
+        { 'packages/db/drizzle/notes.md': 'a\nb\nz\n', 'src/index.ts': 'a\nb\nz\n' },
+        'b',
+      );
+      onMain({ 'packages/db/drizzle/notes.md': 'a\nc\nz\n', 'src/index.ts': 'a\nc\nz\n' }, 'c');
+      const before = snapshot();
+      const merged = await git.mergeIntoBranch({
+        repo: repo.path,
+        branch: 'work',
+        from: 'main',
+        message: 'Merge main into work',
+        resolve: { generated: GENERATED, generatedHeld: 'not now' },
+      });
+      // Only added lines, but a generated file is never merged by line.
+      expect(merged).toMatchObject({
+        kind: 'conflict',
+        paths: ['packages/db/drizzle/notes.md'],
+        unresolved: [{ path: 'packages/db/drizzle/notes.md', reason: 'not now' }],
+      });
+      expect(snapshot()).toEqual(before);
+    });
+
+    it("leaves a conflict in a file one side deleted, and in pnpm's lockfile", async () => {
+      seed({ 'gone.txt': 'a\n', 'pnpm-lock.yaml': 'a\nz\n' });
+      commitFiles({ 'gone.txt': 'changed\n', 'pnpm-lock.yaml': 'a\nb\nz\n' }, 'ours');
+      rawGit('switch', '-q', 'main');
+      rawGit('rm', '-q', 'gone.txt');
+      commitFiles({ 'pnpm-lock.yaml': 'a\nc\nz\n' }, 'theirs');
+      rawGit('switch', '-q', 'work');
+      expect(await resolving()).toMatchObject({
+        kind: 'conflict',
+        unresolved: [
+          { path: 'gone.txt', reason: 'one side deleted this file and the other changed it' },
+          {
+            path: 'pnpm-lock.yaml',
+            reason: "pnpm's lockfile is made by pnpm, not merged by line",
+          },
+        ],
+      });
+    });
   });
 
   it.each([
@@ -390,6 +639,47 @@ describe('mergedCommit', () => {
       InvalidError,
     );
     expect(rawGit('rev-parse', 'main')).toBe(theirs);
+  });
+});
+
+describe('restoreDirs', () => {
+  it('puts the files under the directories back as HEAD has them, and leaves the rest alone', async () => {
+    commitFiles({ '.gitignore': 'cache/\n' }, 'ignore');
+    commitFiles(
+      { 'gen/a.json': '{"a":1}\n', 'gen/gone.json': '{}\n', 'src/schema.ts': 'one\n' },
+      'gen',
+    );
+    write('gen/a.json', '{"a":2, partial');
+    rmSync(join(repo.path, 'gen/gone.json'));
+    write('gen/new/half.json', '{');
+    write('gen/cache/kept.bin', 'ignored\n');
+    write('src/schema.ts', 'an edit outside\n');
+    expect(await git.restoreDirs(repo.path, ['gen/'])).toEqual([
+      'gen/a.json',
+      'gen/gone.json',
+      'gen/new/half.json',
+    ]);
+    expect(read('gen/a.json')).toBe('{"a":1}\n');
+    expect(read('gen/gone.json')).toBe('{}\n');
+    expect(existsSync(join(repo.path, 'gen/new/half.json'))).toBe(false);
+    expect(read('gen/cache/kept.bin')).toBe('ignored\n');
+    expect(read('src/schema.ts')).toBe('an edit outside\n');
+    expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('M src/schema.ts');
+  });
+
+  it('replaces a symlink a run put where a directory was, writing nothing through it', async () => {
+    const outside = tempDir('restore-outside');
+    try {
+      commitFiles({ 'gen/meta/journal.json': '[]\n' }, 'gen');
+      rmSync(join(repo.path, 'gen/meta'), { recursive: true });
+      symlinkSync(outside.path, join(repo.path, 'gen/meta'));
+      await git.restoreDirs(repo.path, ['gen/']);
+      expect(lstatSync(join(repo.path, 'gen/meta')).isDirectory()).toBe(true);
+      expect(read('gen/meta/journal.json')).toBe('[]\n');
+      expect(readdirSync(outside.path)).toEqual([]);
+    } finally {
+      outside.cleanup();
+    }
   });
 });
 

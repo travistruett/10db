@@ -5,8 +5,12 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
@@ -14,6 +18,7 @@ import {
   StepRole,
   StepStatus,
   ToolAccess,
+  Verdict,
   WorkstreamState as S,
   AccountKind,
   AccountProblem,
@@ -37,6 +42,7 @@ import {
   endSession,
   getAccount,
   getAccountRow,
+  getJudgeConfig,
   getEvidence,
   getInboxItem,
   getMcpApproval,
@@ -49,6 +55,7 @@ import {
   handoffForSession,
   insertDeviation,
   insertEvidence,
+  insertRetryLimitFollowUp,
   insertSession,
   insertSource,
   latestHandoffForStep,
@@ -58,8 +65,10 @@ import {
   listSessions,
   listEvidence,
   markSessionStarted,
+  deniedPermissionsForWorkstream,
   openItemsForWorkstream,
   patchWorkstream,
+  recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
   releaseClaims,
@@ -68,6 +77,7 @@ import {
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
+  type RetryLimitFindings,
   type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
@@ -99,6 +109,7 @@ import {
   gateNote,
   MIGRATIONS_HAZARD,
   projectAtCheckout,
+  stepCheck,
   type BaseUpdate,
   type BaseUpdates,
   type MigrationsBase,
@@ -111,7 +122,8 @@ import {
   type SessionLaunch,
 } from '../environment';
 import type { Git } from '../git';
-import { judgeToolUse, type ProtectedPath } from '../guard';
+import { judgePreToolUse, type ProtectedPath } from '../guard';
+import type { Judge } from '../judge';
 import {
   createPermissionBroker,
   raiseGateHostCards,
@@ -121,7 +133,8 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { allowedToolsFor, storableRule } from '../permissions';
+import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
+import { takeFoundHostsReading } from '../registries';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
   fileAccessJudge,
@@ -152,11 +165,24 @@ import {
   sendBackTarget,
   type StepEntry,
 } from '../team';
-import { BlockedRun, type GateRequest, type GateResult, type GateRunner } from '../verify';
+import {
+  BlockedRun,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+  type Hold,
+} from '../verify';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
 import { outstandingFixEvidence } from './fix-evidence';
+import { shipsAtRetryLimit } from './limit-ship';
+import {
+  REVIEW_SIZE_DIFF_BYTES,
+  REVIEW_SIZE_QUESTION,
+  reviewSizeRule,
+  reviewSizeState,
+} from './review-size';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
 
 /**
@@ -194,6 +220,8 @@ export interface RunnerOptions {
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
+  /** Asked whether a review that is next in line is needed. */
+  readonly judge: Judge;
   /**
    * Brings a task's base into its branch before a run that holds the migrations hazard from its
    * start; absent, it isn't.
@@ -220,6 +248,19 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * While the Mac is overloaded no session starts: each one waits here, before anything is built or
+   * launched, and a stop or cancel ends the wait.
+   */
+  readonly hold?: Hold;
+  /**
+   * Told each lane session's temp dir while it runs and when it is gone, so the load guard can name
+   * the lane a busy process left in it belongs to.
+   */
+  readonly laneTempDirs?: {
+    set(id: WorkstreamId, dir: string): void;
+    delete(id: WorkstreamId): void;
+  };
 }
 
 /** What has to happen after the write that changed a workstream has committed. */
@@ -266,6 +307,8 @@ type Outcome =
       readonly withoutHandoff: boolean;
       /** How the session ended, in a plain clause: what a step that records no result is failed with. */
       readonly ending: string;
+      /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
+      readonly wrote: string;
     }
   | {
       readonly kind: 'parked';
@@ -315,7 +358,8 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
     'allowed once. Retry the call now; 10db lets this exact call through once.',
   [PermissionChoice.AllowWorkstream]: 'allowed for the rest of this workstream. Retry the call.',
   [PermissionChoice.AllowProject]: 'always allowed in this project. Retry the call.',
-  [PermissionChoice.Deny]: 'denied. Do not retry it; find another way or ask with ask_human.',
+  [PermissionChoice.Deny]:
+    'denied. The denial covers any equivalent: do not retry it, or a variant of it in another form; work without it, or ask with ask_human.',
 };
 
 /** An allow choice with no stored rule behind it (a one-time allow, or a call with no safe rule to store) lets the first identical call through. */
@@ -346,6 +390,48 @@ function permissionAnswer(item: InboxItemDto): {
   };
 }
 
+/**
+ * Starts watching what a lane session's commands start. A start time `ps` could not read is left to
+ * the watch, which reads the process itself; while nothing watches the session it is logged, so
+ * what its commands leave running is never stopped unexplained.
+ */
+function watchLaneProcesses(
+  laneSession: LaneSession,
+  pid: number | null,
+  startedAt: string | null,
+  log: Logger,
+): void {
+  if (pid === null) {
+    log.warn({}, 'the lane session reported no process, so what its commands start is not watched');
+    return;
+  }
+  void laneSession.trackProcesses({ pid, startedAt }).then((watched) => {
+    if (!watched) {
+      log.warn(
+        { pid },
+        'the lane session’s process could not be read, so what its commands start is watched only once a later reading finds it',
+      );
+    }
+  });
+}
+
+/** Stops what a lane session's commands left running; a failure is logged, never thrown, so the session still ends. */
+async function stopLaneProcesses(
+  laneSession: LaneSession | null,
+  workstreamId: WorkstreamId,
+  logger: Logger,
+): Promise<void> {
+  if (laneSession === null) return;
+  try {
+    await laneSession.endProcesses();
+  } catch (error) {
+    logger.warn(
+      { workstreamId, err: error instanceof Error ? error.message : String(error) },
+      'the processes a lane session started could not be stopped',
+    );
+  }
+}
+
 /** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
 type HandoffCause = 'context' | 'account';
 
@@ -372,6 +458,8 @@ interface Control {
   requestHandoff: ((cause: HandoffCause, reason: string) => void) | null;
   /** Set while the gate runs; aborting it kills the gate's process group. */
   gateAbort: AbortController | null;
+  /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
+  holdAbort: AbortController | null;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   done: Promise<void>;
@@ -396,6 +484,12 @@ interface SessionState {
   resultNudged: boolean;
   /** How the session's last turn ended; null before any turn did. */
   lastTurn: TurnResult | null;
+  /**
+   * The longest last message any turn of the session wrote ('' when none did). A review that ends
+   * without recording a verdict has usually written its findings here, and the failure card shows them;
+   * the longest, because the turn after a nudge only says "done".
+   */
+  wrote: string;
   /** The share of its context window the session last reported using. */
   contextPct: number | null;
   parkedFor: InboxItemId | null;
@@ -626,14 +720,213 @@ export function createRunner(opts: RunnerOptions): Runner {
     clearLease(ctx, id);
   }
 
+  /**
+   * Whether the commits since the batch's base touch Markdown files and nothing else. A git failure
+   * (checkout gone, index locked) answers false: QA stays in the plan rather than the error ending
+   * the workstream.
+   */
+  async function changesOnlyMarkdown(row: WorkstreamRow, checkout: string): Promise<boolean> {
+    if (row.baseHead === null) return false;
+    try {
+      const files = await opts.git.filesChangedBetween(
+        checkout,
+        row.baseHead,
+        await opts.git.head(checkout),
+      );
+      return files.length > 0 && files.every((f) => f.endsWith('.md'));
+    } catch (err) {
+      opts.logger.warn(
+        { workstreamId: row.id, err: err instanceof Error ? err.message : String(err) },
+        'keeping the QA step: the changed files could not be listed',
+      );
+      return false;
+    }
+  }
+
+  /**
+   * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
+   * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
+   * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
+   * plan, as a step an existing skip rule drops never enters one, and the reason is logged.
+   */
+  async function withoutDocsOnlyQa(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+  ): Promise<WorkstreamRow> {
+    const qaIndex = row.stepIndex + 1;
+    if (
+      step.role !== StepRole.Review ||
+      step.result?.verdict !== Verdict.Approve ||
+      row.steps[qaIndex]?.role !== StepRole.Qa ||
+      row.baseHead === null
+    )
+      return row;
+    if (!(await changesOnlyMarkdown(row, checkoutOf(db, row)))) return row;
+    opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+    return { ...row, steps: row.steps.filter((_, i) => i !== qaIndex) };
+  }
+
+  /**
+   * The steps once the current one is done and step `to` entered (-1: none). A rejection at the
+   * retry limit (`atLimit`) files its findings as a follow-up task in the same write and names it on
+   * the step.
+   */
+  function stepsAdvanced(
+    ctx: WriteContext,
+    row: WorkstreamRow,
+    to: number,
+    atLimit: RetryLimitFindings | null,
+  ): WorkstreamStep[] {
+    const steps = advanceSteps(row.steps, row.stepIndex, to, entryFor(ctx, row.id));
+    if (!atLimit) return steps;
+    const followUp = insertRetryLimitFollowUp(ctx, row.taskId, atLimit);
+    return steps.map((s, i) =>
+      i === row.stepIndex
+        ? { ...s, shippedAtLimit: { followUpTaskId: followUp.id, followUpTitle: followUp.title } }
+        : s,
+    );
+  }
+
+  /** Done with the current step: step `to` runs next, as it would after an approval. */
+  function advanceTo(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    to: number,
+    atLimit: RetryLimitFindings | null,
+  ): 'next' | 'stop' {
+    const next = row.steps[to];
+    if (!next) return 'stop';
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      patchWorkstream(ctx, id, ctl.fence, {
+        steps: stepsAdvanced(ctx, row, to, atLimit),
+        stepIndex: to,
+        nextAction: { kind: 'start' },
+        model: next.model,
+        effort: next.effort,
+      });
+      ctx.emit({
+        type: EventType.StepChanged,
+        entityType: 'workstream',
+        entityId: id,
+        data: { stepIndex: to, role: next.role },
+      });
+    });
+    return 'next';
+  }
+
+  /**
+   * The last read-only step is over and the work is done: DONE, or waiting for the builder's check
+   * when the project has no gate. A rejection at the retry limit (`atLimit`) ships the same way and,
+   * in the same write, files its findings as a follow-up task and names it on the step.
+   */
+  async function completeReadOnlySteps(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    ending: { readonly reason: string; readonly atLimit: RetryLimitFindings | null },
+  ): Promise<'stop'> {
+    const gateless = getProject(db, row.projectId).gateCommand === null;
+    // Nothing checked a read-only approval either: the builder checks what the steps produced.
+    const facts = gateless ? await checkFacts(row, checkoutOf(db, row)) : null;
+    if (stopRequested(ctl) === 'cancelled') {
+      cancelNow(id, ctl.fence);
+      return 'stop';
+    }
+    opts.state.write((ctx) => {
+      countFinished(ctx, step);
+      patchWorkstream(ctx, id, ctl.fence, {
+        steps: stepsAdvanced(ctx, row, -1, ending.atLimit),
+      });
+      if (facts) {
+        waitForBuilder(ctx, id, ctl.fence, row, facts);
+        return;
+      }
+      // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
+      transitionWorkstream(ctx, id, {
+        to: S.Verifying,
+        fence: ctl.fence,
+        reason: 'steps complete',
+      });
+      markDone(ctx, id, ctl.fence, row, ending.reason);
+    });
+    return 'stop';
+  }
+
+  /**
+   * Whether the review step that is next can be left out because a model judged the change small,
+   * clear and covered by its tests. The rules that force a review make no call; so does a judge the
+   * builder has switched off. The call is made outside any database write. Any answer but `skip` at
+   * or above the floor, and every fallback, runs the review. The reason names the model, so the
+   * builder sees who skipped it.
+   */
+  async function reviewSkippedByJudge(
+    id: WorkstreamId,
+    row: WorkstreamRow,
+    review: WorkstreamStep,
+    checkout: string,
+    signal: AbortSignal,
+  ): Promise<string | null> {
+    if (opts.judge.off) return null;
+    const config = getJudgeConfig(db);
+    const decision = config.decisions.review_size;
+    if (!config.enabled || !decision.enabled || row.baseHead === null) return null;
+    const task = getTask(db, row.taskId);
+    let changes: Awaited<ReturnType<Git['diffSince']>>;
+    try {
+      const head = await opts.git.head(checkout);
+      changes = await opts.git.diffSince(checkout, row.baseHead, head, REVIEW_SIZE_DIFF_BYTES);
+    } catch (error) {
+      // An unreadable diff is no reason to skip a review.
+      opts.logger.warn({ workstreamId: id, err: error }, 'review size: the diff could not be read');
+      return null;
+    }
+    if (reviewSizeRule(task, changes, review, getProject(db, row.projectId).hazards) === 'review')
+      return null;
+    const answer = await opts.judge.choose({
+      decision: JudgeDecision.ReviewSize,
+      state: reviewSizeState(task, changes),
+      question: REVIEW_SIZE_QUESTION,
+      options: ['review', 'skip'],
+      workstreamId: id,
+      taskId: task.id,
+      signal,
+    });
+    if (answer.kind === 'fallback') {
+      opts.logger.info(
+        { workstreamId: id, reason: answer.reason, detail: answer.detail },
+        'review size: the judge did not answer; the review runs',
+      );
+      return null;
+    }
+    const skips = answer.choice === 'skip' && answer.confidence >= decision.floor;
+    const callId = JudgeCallId.parse(answer.callId);
+    opts.state.write((ctx) => {
+      recordJudgeOutcome(
+        ctx,
+        callId,
+        skips || answer.choice === 'review' ? JudgeOutcome.Acted : JudgeOutcome.BelowFloor,
+      );
+    });
+    if (!skips) return null;
+    return `review skipped by ${answer.model} (${String(answer.confidence)}): small, clear and covered by its tests`;
+  }
+
   /** After a read-only step's session: the next step in this lane, DONE, a rework, or a failure. */
   async function finishReadOnlyStep(
     id: WorkstreamId,
     ctl: Control,
-    row: WorkstreamRow,
+    started: WorkstreamRow,
     ending: string,
+    wrote: string,
   ): Promise<'next' | 'stop'> {
-    const step = currentStep(row);
+    const step = currentStep(started);
+    const row = await withoutDocsOnlyQa(id, started, step);
+    const docsOnly = row.steps.length < started.steps.length;
     // A sent-back step still holds its earlier result; only one a session of this step recorded counts.
     const floorSession = (sessionId: SessionId) =>
       (listSessions(db, id).find((x) => x.id === sessionId)?.sequence ?? 0) > step.sessionFloor;
@@ -663,66 +956,57 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return 'next';
         }
-        fail(id, ctl.fence, `The ${step.role} step ended without calling complete_step: ${ending}`);
+        // A review that wrote its findings but never recorded them: the card carries what it wrote, so
+        // the builder can judge the work on it instead of rerunning the review.
+        const gave = REVIEW_ROLES.includes(step.role) && wrote !== '';
+        fail(
+          id,
+          ctl.fence,
+          `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          gave
+            ? {
+                role: step.role,
+                personaName: step.personaName,
+                at: opts.clock.now().toISOString(),
+                findings: parseFindings(wrote),
+                summary: wrote,
+              }
+            : undefined,
+        );
         return 'stop';
       }
-      case 'done': {
-        if (getProject(db, row.projectId).gateCommand === null) {
-          // Nothing checked a read-only approval either: the builder checks what the steps produced.
-          const facts = await checkFacts(row, checkoutOf(db, row));
-          if (stopRequested(ctl) === 'cancelled') {
-            cancelNow(id, ctl.fence);
-            return 'stop';
-          }
-          opts.state.write((ctx) => {
-            countFinished(ctx, step);
-            patchWorkstream(ctx, id, ctl.fence, {
-              steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
-            });
-            waitForBuilder(ctx, id, ctl.fence, row, facts);
-          });
-          return 'stop';
-        }
-        opts.state.write((ctx) => {
-          countFinished(ctx, step);
-          patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
-          });
-          // The workflow has no RUNNING -> DONE edge; a read-only step changed no code, so no second gate.
-          transitionWorkstream(ctx, id, {
-            to: S.Verifying,
-            fence: ctl.fence,
-            reason: 'steps complete',
-          });
-          markDone(ctx, id, ctl.fence, row, `${step.role} approved`);
+      case 'done':
+        return completeReadOnlySteps(id, ctl, row, step, {
+          reason: `${step.role} approved${docsOnly ? '; QA skipped: only docs changed' : ''}`,
+          atLimit: null,
         });
-        return 'stop';
-      }
-      case 'advance': {
-        const next = row.steps[move.to];
-        if (!next) return 'stop';
-        opts.state.write((ctx) => {
-          countFinished(ctx, step);
-          patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
-            stepIndex: move.to,
-            nextAction: { kind: 'start' },
-            model: next.model,
-            effort: next.effort,
-          });
-          ctx.emit({
-            type: EventType.StepChanged,
-            entityType: 'workstream',
-            entityId: id,
-            data: { stepIndex: move.to, role: next.role },
-          });
-        });
-        return 'next';
-      }
+      case 'advance':
+        return advanceTo(id, ctl, row, step, move.to, null);
       case 'send_back': {
         const attempt = row.attempt + 1;
         if (attempt > opts.limits.maxFixAttempts) {
           const result = step.result;
+          if (
+            result &&
+            shipsAtRetryLimit({
+              role: step.role,
+              riskTags: getTask(db, row.taskId).riskTags,
+              evidence: listEvidence(db, id),
+            })
+          ) {
+            const atLimit = {
+              role: step.role === StepRole.Qa ? 'QA' : step.role,
+              notes: findingNotes(result.summary),
+            };
+            // The move an approval would get: a step that follows (QA after review) still runs. One
+            // that rejects there is past the limit too, so it ships the same way with its own follow-up.
+            const to = row.stepIndex + 1;
+            if (to < row.steps.length) return advanceTo(id, ctl, row, step, to, atLimit);
+            return completeReadOnlySteps(id, ctl, row, step, {
+              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task`,
+              atLimit,
+            });
+          }
           fail(
             id,
             ctl.fence,
@@ -1045,6 +1329,20 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
     if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    // An overloaded Mac starts no session: wait for it, unless a stop ends the wait first.
+    if (opts.hold) {
+      const holding = new AbortController();
+      ctl.holdAbort = holding;
+      try {
+        await opts.hold.untilClear(holding.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileHeld = stopRequested(ctl);
+      if (stoppedWhileHeld)
+        return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId =
       action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
@@ -1062,6 +1360,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
+      denials: deniedPermissionsForWorkstream(db, id),
       task,
       claims: claims(),
       action,
@@ -1079,6 +1378,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
       priorResults,
       previousResult: readOnly ? step.result : null,
+      earlierResults: step.earlier,
       revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
       evidence,
       recovery:
@@ -1159,7 +1459,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
+      opts.laneTempDirs?.delete(id);
       try {
         laneSession?.dispose();
       } catch (error) {
@@ -1224,6 +1526,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       firmSent: false,
       resultNudged: false,
       lastTurn: null,
+      wrote: '',
       contextPct: null,
       parkedFor: null,
       waitingOn: new Map(),
@@ -1304,6 +1607,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        ...(laneSession
+          ? {
+              lanePermissionMode: laneAutoMode(db, (stored) => {
+                opts.logger.warn(
+                  { stored },
+                  'the lane auto mode setting is not a boolean; using default mode',
+                );
+              })
+                ? 'auto'
+                : 'default',
+            }
+          : {}),
         allowedTools: allowedToolsFor(
           project,
           step.tools,
@@ -1311,7 +1626,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ),
         mcp: { url: opts.mcpUrl(), token, toolTimeoutMs: (project.humanWaitMinutes + 5) * 60_000 },
         preToolUse: (req) =>
-          judgeToolUse({
+          judgePreToolUse({
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
@@ -1328,7 +1643,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             ...(fileAccess ? { fileAccess } : {}),
           }),
         canUseTool: createPermissionBroker(
-          { state: opts.state, inbox: opts.inbox },
+          { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },
           {
             projectId: project.id,
             workstreamId: id,
@@ -1371,6 +1686,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             st.started = true;
             releaseStart();
             const pidStart = await identify(event.pid);
+            // From here on, what the session's commands start is watched, so it can be stopped when
+            // the session ends, or after a daemon that died: see `LaneSession.trackProcesses`.
+            if (laneSession !== null) watchLaneProcesses(laneSession, event.pid, pidStart, log);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
               // The session has the answer now. Kept as `answer`, a restart would send it again and
@@ -1456,7 +1774,12 @@ export function createRunner(opts: RunnerOptions): Runner {
                 sourceId,
               });
             });
-            handle.send(compactionReinjection(buildContextPack(db, getWorkstream(db, id))));
+            handle.send(
+              compactionReinjection(
+                buildContextPack(db, getWorkstream(db, id)),
+                deniedPermissionsForWorkstream(db, id),
+              ),
+            );
             break;
           case 'rate_limit':
             // Logged without any identity: what a Max plan reports here is not yet verified.
@@ -1482,6 +1805,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            if (event.text && event.text.length > st.wrote.length) st.wrote = event.text;
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
                 inputTokens: event.inputTokens,
@@ -1511,6 +1835,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 kind: 'step_done',
                 withoutHandoff: st.handoffRequested,
                 ending: describeEnding(st),
+                wrote: st.wrote,
               };
               await handle.stop();
             }
@@ -1589,6 +1914,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     kind: 'step_done',
                     withoutHandoff: st.handoffRequested,
                     ending: describeEnding(st),
+                    wrote: st.wrote,
                   };
                   break;
               }
@@ -1604,6 +1930,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
       opts.live.unregister(session.id);
+      // However the session ended (finished, cancelled, handed off, the daemon stopping), nothing
+      // its commands started keeps running: a background loop would otherwise outlive the session
+      // and hold the Mac busy.
+      await stopLaneProcesses(laneSession, id, opts.logger);
       // Only once the lane process is gone: a command still running could swap a part of the tree.
       dispose();
       ctl.handle = null;
@@ -1808,10 +2138,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    // A project with a changed-packages check has each step checked by it; the ship gate runs the
-    // full gate command before the push. Without a gate command the builder checks, as ever.
-    const gateCommand =
-      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
+    // A project with a pre-check (pull request delivery) has each step checked by it, and the ship
+    // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
+    // checked by it, and the ship gate runs the full gate command before the push. Without a gate
+    // command the builder checks, as ever.
+    const gateCommand = stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
@@ -1893,6 +2224,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
+    if (result.blockedHosts.length > 0) await takeFoundHostsReading(opts, project.id);
     raiseGateHostCards(opts, {
       projectId: project.id,
       run: BlockedRun.Gate,
@@ -1918,7 +2250,43 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (result.exitCode === 0) {
       const step = currentStep(row);
       const move = moveAfter(row.steps, row.stepIndex);
-      const next = move.kind === 'advance' ? row.steps[move.to] : undefined;
+      const planned = move.kind === 'advance' ? row.steps[move.to] : undefined;
+      // A review the judge skips leaves the plan, as a QA step of docs alone does. A cancel or a
+      // shutdown cuts the call short through the same handle that stops a gate.
+      let skipped: string | null = null;
+      if (move.kind === 'advance' && planned?.role === StepRole.Review) {
+        const judgeAbort = new AbortController();
+        ctl.gateAbort = judgeAbort;
+        const already = stopRequested(ctl);
+        if (already === 'cancelled' || already === 'shutdown') judgeAbort.abort();
+        try {
+          skipped = await reviewSkippedByJudge(id, row, planned, checkout, judgeAbort.signal);
+        } finally {
+          ctl.gateAbort = null;
+        }
+      }
+      // With the review gone, the step that follows it is QA, which a change of Markdown alone skips.
+      const afterReview =
+        skipped !== null && move.kind === 'advance' ? row.steps[move.to + 1] : undefined;
+      const skipsQa =
+        afterReview?.role === StepRole.Qa && (await changesOnlyMarkdown(row, checkout));
+      // The judge's call took time; a cancel that landed meanwhile must not be overwritten.
+      if (stopRequested(ctl) === 'cancelled') {
+        cancelNow(id, ctl.fence);
+        return;
+      }
+      // Shutdown cut the call short: record nothing, and recovery runs the gate again.
+      if (stopRequested(ctl) === 'shutdown') return;
+      const dropped = new Set<number>();
+      if (skipped !== null && move.kind === 'advance') {
+        dropped.add(move.to);
+        if (skipsQa) {
+          dropped.add(move.to + 1);
+          opts.logger.info({ workstreamId: id }, 'skipping the QA step: only docs changed');
+        }
+      }
+      const steps = row.steps.filter((_, i) => !dropped.has(i));
+      const next = move.kind === 'advance' ? steps[move.to] : undefined;
       if (move.kind === 'advance' && next) {
         opts.state.write((ctx) => {
           insertEvidence(ctx, evidence);
@@ -1928,12 +2296,15 @@ export function createRunner(opts: RunnerOptions): Runner {
             fence: ctl.fence,
             patch: {
               nextAction: { kind: 'start' },
-              steps: advanceSteps(row.steps, row.stepIndex, move.to, entryFor(ctx, id)),
+              steps: advanceSteps(steps, row.stepIndex, move.to, entryFor(ctx, id)),
               stepIndex: move.to,
               model: next.model,
               effort: next.effort,
             },
-            reason: `gate passed; next: ${next.role}`,
+            reason:
+              skipped === null
+                ? `gate passed; next: ${next.role}`
+                : `gate passed; ${skipped}; next: ${next.role}`,
           });
           clearLease(ctx, id);
         });
@@ -1942,11 +2313,17 @@ export function createRunner(opts: RunnerOptions): Runner {
       opts.state.write((ctx) => {
         insertEvidence(ctx, evidence);
         countFinished(ctx, step);
-        if (row.steps.length > 0)
+        if (steps.length > 0)
           patchWorkstream(ctx, id, ctl.fence, {
-            steps: advanceSteps(row.steps, row.stepIndex, -1, entryFor(ctx, id)),
+            steps: advanceSteps(steps, row.stepIndex, -1, entryFor(ctx, id)),
           });
-        markDone(ctx, id, ctl.fence, row, 'gate passed');
+        markDone(
+          ctx,
+          id,
+          ctl.fence,
+          row,
+          skipped === null ? 'gate passed' : `gate passed; ${skipped}`,
+        );
       });
       return;
     }
@@ -2009,7 +2386,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (taken.kind !== 'held') return;
       opts.state.write((ctx) => releaseClaim(ctx, claim.id));
       opts.logger.info(
-        { workstreamId: id, inboxId: taken.inboxId },
+        { workstreamId: id },
         "migrations hazard held back: the branch can't take its base",
       );
     } finally {
@@ -2066,7 +2443,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
           }
           if (readOnly) {
-            if ((await finishReadOnlyStep(id, ctl, finished, outcome.ending)) === 'next') continue;
+            if (
+              (await finishReadOnlyStep(id, ctl, finished, outcome.ending, outcome.wrote)) ===
+              'next'
+            )
+              continue;
             return;
           }
           if (outcome.withoutHandoff) {
@@ -2130,6 +2511,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         handle: null,
         requestHandoff: null,
         gateAbort: null,
+        holdAbort: null,
         endWaits: null,
         done: Promise.resolve(),
       };
@@ -2150,6 +2532,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.stopReason = reason;
       // A pause only stops sessions; a running gate doesn't use the provider, so let it finish.
       if (reason !== 'paused') ctl.gateAbort?.abort();
+      ctl.holdAbort?.abort();
       // Waits end before the process does, so an answer during a slow exit reaches the card.
       ctl.endWaits?.();
       await ctl.handle?.stop();

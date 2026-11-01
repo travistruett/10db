@@ -10,13 +10,14 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   BenchmarkStatusDto,
   BoardColumnDto,
   EventsHead,
+  InboxItemDto,
   KeepAwakeStatus,
   McpServerStatusDto,
   mintId,
@@ -455,6 +456,145 @@ describe('startDaemon', () => {
     },
   );
 
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'stops the processes a dead daemon’s lane sessions left, from their ledgers, before any session starts, even while another daemon shares the root',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      // Another daemon, on another data dir, still running with a lane session of its own.
+      const other = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+        stdio: 'ignore',
+      });
+      const otherPid = other.pid ?? 0;
+      const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      const deadPid = dead.pid ?? 0;
+      await new Promise((resolve) => dead.once('exit', resolve));
+      // Two loops that outlived their session, as the incident left them, and the other daemon's
+      // lane's dev server.
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7002, ppid: 1, pgid: 7000, startedAt: T },
+        { pid: 7003, ppid: 1, pgid: 7003, startedAt: T },
+        { pid: 7004, ppid: 1, pgid: 7004, startedAt: T },
+      ];
+      try {
+        writeFileSync(join(tmpRoot, `10db-daemon-${String(otherPid)}`), '', { mode: 0o400 });
+        const live = join(tmpRoot, `10db-proc-${String(otherPid)}-00000000000a.json`);
+        writeFileSync(
+          live,
+          JSON.stringify({ version: 1, members: [{ pid: 7004, pgid: 7004, startedAt: T }] }),
+        );
+        const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            members: [
+              { pid: 7001, pgid: 7000, startedAt: T },
+              { pid: 7002, pgid: 7000, startedAt: T },
+            ],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+            },
+          },
+          ...QUIET,
+        });
+        expect(rows.map((r) => r.pid)).toEqual([process.pid, 7003, 7004]);
+        expect(readdirSync(tmpRoot).sort()).toEqual(
+          [
+            `10db-daemon-${String(otherPid)}`,
+            `10db-daemon-${String(process.pid)}`,
+            `10db-proc-${String(otherPid)}-00000000000a.json`,
+          ].sort(),
+        );
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        other.kill('SIGKILL');
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same temp root as above.
+  it.skipIf(SANDBOXED)(
+    'tries again while it runs to stop what a dead daemon’s lane sessions left, when it could not read the machine at start',
+    async () => {
+      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const T = 'Thu Oct 30 12:00:00 2026';
+      const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+      const deadPid = dead.pid ?? 0;
+      await new Promise((resolve) => dead.once('exit', resolve));
+      let rows = [
+        { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
+        { pid: 7001, ppid: 1, pgid: 7001, startedAt: T },
+      ];
+      const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+      // An overloaded Mac: `ps` can't fork as the daemon starts, and can again later.
+      let readable = false;
+      const timers = new ManualClock();
+      try {
+        writeFileSync(
+          ledger,
+          JSON.stringify({
+            version: 1,
+            daemonGroup: 7000,
+            members: [{ pid: 7001, pgid: 7001, startedAt: T }],
+          }),
+        );
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            tmpRoot,
+            runtime: FAKE_SRT,
+            processes: {
+              table: () =>
+                readable
+                  ? Promise.resolve(rows.map((r) => ({ ...r })))
+                  : Promise.reject(new Error('ps: fork failed')),
+              signal: (target) => {
+                rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+                return true;
+              },
+              sleep: () => Promise.resolve(),
+              timers,
+            },
+          },
+          ...QUIET,
+        });
+        expect(existsSync(ledger)).toBe(true);
+        readable = true;
+        timers.advance(30_000);
+        await waitFor(() => !existsSync(ledger));
+        expect(rows.map((r) => r.pid)).toEqual([process.pid]);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('waits for an identity probe in flight before it closes the database', async () => {
     const repo = createTempRepo();
     try {
@@ -750,6 +890,119 @@ describe('startDaemon', () => {
       await api.post(`/workstreams/${ws.id}/cancel`, z.unknown());
       await waitForAsync(async () => ((await keepAwakeActive()) ? undefined : true));
       expect(closed).toEqual([repo.path]);
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it('starts no lane while the Mac is overloaded, raises one card naming what is busy, and starts the lane by itself once the load falls', async () => {
+    const repo = createTempRepo();
+    let load = 100;
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+    const specs: SessionSpec[] = [];
+    adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    try {
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        tickMs: 20,
+        ...QUIET,
+        load: {
+          read: () => ({ load, cores: 10 }),
+          processes: {
+            rows: () =>
+              Promise.resolve([
+                { pid: 4242, ppid: 1, pgid: 4242, cpu: 99, command: 'sh busy-loop.sh' },
+              ]),
+            files: () => Promise.resolve(new Map()),
+          },
+          sampleMs: 20,
+          sustainedMs: 0,
+        },
+      });
+      const api = apiClient(daemon.url, daemon.token);
+      const project = await api.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      const overloadCards = async () =>
+        (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+          item.title.startsWith('The Mac is overloaded'),
+        );
+      // The card is up once the overload is declared, so the task below starts into a hold.
+      const card = await waitForAsync(async () => (await overloadCards())[0]);
+      expect(card.body).toContain('pid 4242 (sh busy-loop.sh) at 99% of a core: not 10db’s');
+      const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Alpha',
+        acceptanceCriteria: ['it works'],
+        areas: ['src'],
+      });
+      const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
+      expect(await daemon.scheduler.tick()).toBe(0);
+      expect(specs).toEqual([]);
+      expect(getWorkstream(daemon.state.db, ws.id).state).toBe('QUEUED');
+      expect(await overloadCards()).toHaveLength(1);
+
+      load = 1;
+      await waitFor(() => specs.length > 0);
+      await waitForAsync(async () => ((await overloadCards()).length === 0 ? true : undefined));
+    } finally {
+      await daemon?.stop();
+      daemon = null;
+      repo.cleanup();
+    }
+  });
+
+  it('withdraws an overload card left open when 10db restarted mid-overload', async () => {
+    const repo = createTempRepo();
+    const options = (load: number) => ({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn' as const,
+      tickMs: 20,
+      ...QUIET,
+      load: {
+        read: () => ({ load, cores: 10 }),
+        processes: {
+          rows: () => Promise.resolve([]),
+          files: () => Promise.resolve(new Map<number, string[]>()),
+        },
+        sampleMs: 20,
+        sustainedMs: 0,
+      },
+    });
+    const overloadCards = async (api: ReturnType<typeof apiClient>) =>
+      (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+        item.title.startsWith('The Mac is overloaded'),
+      );
+    try {
+      daemon = await startDaemon(options(100));
+      const before = apiClient(daemon.url, daemon.token);
+      await before.post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(before),
+        areas: [{ name: 'src', globs: ['src/**'] }],
+      });
+      await waitForAsync(async () => (await overloadCards(before))[0]);
+      await daemon.stop();
+
+      daemon = await startDaemon(options(1));
+      expect(await overloadCards(apiClient(daemon.url, daemon.token))).toEqual([]);
     } finally {
       await daemon?.stop();
       daemon = null;
