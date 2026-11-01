@@ -18,6 +18,7 @@ import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
 import { githubRepoOf } from '../github';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type Card } from './cards';
+import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
@@ -80,7 +81,7 @@ export async function cutWorktree(
     ctx.state.write((w) => {
       deleteCuttingBatch(w, batchId, card.title);
       // The row was the guard against making the same fix again, so the root stops fixing.
-      if (batch.ciFixOf !== null) patchBatch(w, batch.ciFixOf, { ciStopped: CiStopped.NoCut });
+      if (batch.ciFixOf !== null) stopCiFixing(w, batch.ciFixOf, CiStopped.NoCut, card.title);
     });
     raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
   };
