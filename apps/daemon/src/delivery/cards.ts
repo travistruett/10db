@@ -425,6 +425,12 @@ export function duration(ms: number): string {
   if (ms >= 60_000) return `${String(Math.round(ms / 60_000))} min`;
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 }
+/** What ran before the push, as a failed ship's card names it. */
+export type ShipCheckName = 'gate' | 'pre-check';
+
+/** The fold key of a batch's card for a pull request left open because only the pre-check checked it. */
+export const preCheckOnlyKey = (batchId: BatchId): string => `pre-check-only:${batchId}`;
+
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
 /** How many failing tests a gate card lists. */
@@ -496,6 +502,7 @@ export const shipCards = {
     note: string | null = null,
     steps: readonly GateStepFailure[] = [],
     reran = false,
+    check: ShipCheckName = 'gate',
   ): ShipFailure => {
     const what =
       steps.length > 0
@@ -504,7 +511,7 @@ export const shipCards = {
     return {
       failure: BatchFailure.GateFailed,
       card: {
-        title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
+        title: `${notShipped(batch)}: the ${check} failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
         body: `${note === null ? '' : `${note}\n\n`}${reran ? `${RERAN}, and it failed again.\n\n` : ''}${what}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
         detail: stepsDetail(batch, steps),
       },
@@ -537,11 +544,12 @@ export const shipCards = {
     timeoutMs: number,
     logPath: string,
     note: string | null = null,
+    check: ShipCheckName = 'gate',
   ): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
     card: {
-      title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
-      body: `${note === null ? '' : `${note}\n\n`}10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      title: `${notShipped(batch)}: the ${check} timed out after ${duration(timeoutMs)}`,
+      body: `${note === null ? '' : `${note}\n\n`}10db stopped the ${check} and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),
@@ -575,6 +583,16 @@ export const shipCards = {
           },
         };
   },
+  /**
+   * GitHub has nothing to wait for on the pull request and the base has no required checks, so only
+   * the pre-check ever checked the work: 10db leaves the pull request open for the builder.
+   */
+  notMergedPreCheckOnly: (batch: BatchDto, prUrl: string): Card => ({
+    title: `not merged: ${batch.baseBranch} has no required checks and only the pre-check ran`,
+    body: `Batch "${batch.title}" was checked on the Mac by the project's pre-check, which stands in for the gate only where ${batch.baseBranch} has required checks on GitHub. It has none, so nothing but the pre-check would have checked this work, and 10db did not merge it.\n\nPull request: ${prUrl}\n\nReview and merge it yourself, add required checks to ${batch.baseBranch}, or clear the project's pre-check in Settings › General to run the full gate again.`,
+    foldKey: preCheckOnlyKey(batch.id),
+    detail: { batchId: batch.id, prUrl },
+  }),
   abandoned: (batch: BatchDto, doneTitles: readonly string[]): Card => ({
     title: `Batch "${batch.title}" abandoned`,
     body:

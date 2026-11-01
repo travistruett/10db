@@ -272,6 +272,72 @@ describe('when the base branch has no required checks', () => {
   });
 });
 
+describe('when only the pre-check ran and GitHub says the pull request has nothing to wait for', () => {
+  const notMergedCard = () =>
+    h.cards().filter((c) => c.title.startsWith('not merged: main has no required checks'));
+
+  it('does not merge a pull request whose base has no required checks, and raises a card linking it', async () => {
+    h = createDeliveryHarness({ precheckCommand: 'true' });
+    h.gh.noRequiredChecks = true;
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.merged).toEqual([]);
+    const card = h.only(h.cards());
+    expect(card.title).toBe('not merged: main has no required checks and only the pre-check ran');
+    expect(card.body).toContain(shipped.prUrl ?? 'no pull request');
+  });
+
+  it('merges at once when the required checks already passed on this head', async () => {
+    h = createDeliveryHarness({ precheckCommand: 'true' });
+    h.gh.noRequiredChecks = true;
+    h.gh.setRequiredChecks('https://github.com/acme/widgets/pull/1', {
+      state: 'passing',
+      failing: [],
+      pending: [],
+    });
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.prUrl).toBe('https://github.com/acme/widgets/pull/1');
+    expect(h.gh.merged).toEqual([shipped.prUrl]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it.each(['pending', 'failing'] as const)(
+    'neither merges nor raises a card when the required checks are %s',
+    async (state) => {
+      h = createDeliveryHarness({ precheckCommand: 'true' });
+      h.gh.noRequiredChecks = true;
+      h.gh.setRequiredChecks('https://github.com/acme/widgets/pull/1', {
+        state,
+        failing: [],
+        pending: [],
+      });
+      const shipped = await ship(await start('One', h.addTask('Alpha')));
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.gh.merged).toEqual([]);
+      expect(notMergedCard()).toEqual([]);
+      expect(h.cards()).toEqual([]);
+    },
+  );
+
+  it('neither merges nor raises a card when gh cannot read the required checks', async () => {
+    h = createDeliveryHarness({ precheckCommand: 'true' });
+    h.gh.noRequiredChecks = true;
+    h.gh.failNext.set('prRequiredChecks', new GhError('failed', 'gh pr checks failed (exit 1)'));
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(shipped.state).toBe('SHIPPED');
+    expect(h.gh.merged).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('never reads the required checks when the gate ran, and merges as before', async () => {
+    h = createDeliveryHarness();
+    h.gh.noRequiredChecks = true;
+    const shipped = await ship(await start('One', h.addTask('Alpha')));
+    expect(h.gh.merged).toEqual([shipped.prUrl]);
+    expect(h.gh.calls.some((c) => c.method === 'prRequiredChecks')).toBe(false);
+  });
+});
+
 describe('tasks that land differently', () => {
   it('are not started as one batch', () => {
     h = createDeliveryHarness();

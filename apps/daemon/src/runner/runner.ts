@@ -109,6 +109,7 @@ import {
   gateNote,
   MIGRATIONS_HAZARD,
   projectAtCheckout,
+  stepCheck,
   type BaseUpdate,
   type BaseUpdates,
   type MigrationsBase,
@@ -2137,10 +2138,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    // A project with a changed-packages check has each step checked by it; the ship gate runs the
-    // full gate command before the push. Without a gate command the builder checks, as ever.
-    const gateCommand =
-      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
+    // A project with a pre-check (pull request delivery) has each step checked by it, and the ship
+    // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
+    // checked by it, and the ship gate runs the full gate command before the push. Without a gate
+    // command the builder checks, as ever.
+    const gateCommand = stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;
