@@ -305,6 +305,44 @@ describe('the stop card’s Retry', () => {
 
     expect(h.cards().some((c) => c.body.includes('run 1 cannot be rerun'))).toBe(true);
   });
+
+  /** Answers the card as the inbox does: the answer hook runs, then the inbox closes the card. */
+  async function retry(card: InboxItemDto): Promise<void> {
+    createCiStopAnswers(h.ctx)(card, { choice: 'Retry' });
+    h.inbox.answer(card.id, { choice: 'Retry' });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it.each([
+    ['GitHub reruns the jobs', null],
+    ['GitHub refuses the rerun', new GhError('failed', 'run 1 cannot be rerun')],
+  ] as const)(
+    'raises the stop card again, with its Retry, when the checks still fail on the same head after %s',
+    async (_name, refusal) => {
+      const { root } = await shippedRoot();
+      fails(root.prUrl ?? '', job('build'));
+      h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
+      const w = watcher();
+      await begin(w);
+      const card = h.only(stopCards());
+      if (refusal !== null) h.gh.failNext.set('rerunFailed', refusal);
+
+      await retry(card);
+      expect(stopCards()).toEqual([]);
+      // The rerun failed again before the next read: still failing, on the same head, no log.
+      h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
+      await round(w);
+
+      const again = h.only(stopCards());
+      expect(again.state).toBe('OPEN');
+      expect(again.options.map((o) => o.label)).toEqual(['Retry']);
+      expect(hasStopKey(root)).toBe(true);
+      expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
+      expect(alphaStatus()).toBe(BoardStatus.Blocked);
+      expect(fixBatches(root)).toEqual([]);
+    },
+  );
 });
 
 describe('clearing a stop', () => {

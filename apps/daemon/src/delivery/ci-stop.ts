@@ -63,13 +63,25 @@ export function clearCiStop(write: WriteContext, rootId: BatchId): void {
   withdrawIn(write, root.projectId, [prCardKey.ciStopped(root.id)]);
 }
 
+/**
+ * Lifts the stop after the builder's Retry, keeping no card: the stop card closed with the answer.
+ * The next read decides again from the rows. A limit, an unchanged head or a missing log stops again
+ * with a fresh card; a refused cut is tried once more, as the builder asked for another go.
+ */
+function liftCiStop(ctx: DeliveryContext, rootId: BatchId): void {
+  ctx.state.write((w) => {
+    if (getBatch(w.tx, rootId).ciStopped !== null) patchBatch(w, rootId, { ciStopped: null });
+  });
+}
+
 const RerunDetail = z.object({ batchId: BatchId });
 
 /**
  * Acts on the stop card's Retry before the inbox records it: reruns the failed jobs of each failing
- * GitHub Actions run (`gh run rerun --failed`), once per run. The card closes with the answer; the
- * stop lifts when the next read finds the required checks running again. GitHub refusing a rerun
- * raises a card saying why. Any other answer changes nothing.
+ * GitHub Actions run (`gh run rerun --failed`), once per run. The card closes with the answer, and
+ * once the reruns are asked for the stop lifts, so a later read that still finds the checks failing
+ * stops again with a fresh card and its Retry. GitHub refusing a rerun also raises a card saying
+ * why. Any other answer changes nothing.
  */
 export function createCiStopAnswers(
   ctx: DeliveryContext,
@@ -98,6 +110,9 @@ export function createCiStopAnswers(
           errors.push(error);
         }
       }
+      // The card closed with the answer, and a stop that holds raises nothing more: lift it so the
+      // next read decides again, and a rerun that fails (or never ran) brings back a card with Retry.
+      liftCiStop(ctx, root.id);
       if (errors.length === 0) return;
       ctx.logger.warn(
         { batchId: root.id, err: detailOf(errors[0]) },
