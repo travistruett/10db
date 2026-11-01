@@ -1,8 +1,10 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { tempDir, type TempDir } from '../../test/fixtures';
-import { findRegistryHosts } from './index';
+import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
+import { createGit } from '../git';
+import { findRegistryHosts, findRegistryHostsAt } from './index';
 import { CONFIG_FORMATS, LOCK_FORMATS, namesNpmRegistry } from './package-file-formats';
 
 const dirs: TempDir[] = [];
@@ -285,6 +287,24 @@ const rows: Row[] = [
     expected: ['index.crates.io <- apps/api/Cargo.lock', 'static.crates.io <- apps/api/Cargo.lock'],
   },
   {
+    name: 'files three folders down are read: a Tauri app’s src-tauri/Cargo.lock',
+    files: {
+      'apps/desktop/src-tauri/Cargo.lock':
+        'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    },
+    expected: [
+      'index.crates.io <- apps/desktop/src-tauri/Cargo.lock',
+      'static.crates.io <- apps/desktop/src-tauri/Cargo.lock',
+    ],
+  },
+  {
+    name: 'files four folders down are not read',
+    files: {
+      'a/b/c/d/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    },
+    expected: [],
+  },
+  {
     name: 'the first file to name a host is the one reported',
     files: {
       'Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
@@ -389,6 +409,79 @@ describe('findRegistryHosts', () => {
   });
 });
 
+describe('findRegistryHostsAt', () => {
+  const git = createGit();
+  const run = (repo: string, ...args: string[]) =>
+    execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+
+  /** A repository whose main branch commits `files` on top of the temp repo's README. */
+  function committed(files: Readonly<Record<string, string>>): string {
+    const repo = createTempRepo();
+    dirs.push(repo);
+    for (const [name, text] of Object.entries(files)) {
+      const path = join(repo.path, name);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    }
+    run(repo.path, 'add', '--all', '--force');
+    run(repo.path, 'commit', '-q', '--allow-empty', '-m', 'files');
+    return repo.path;
+  }
+
+  it.each(rows)('reads what the folder reader reads: $name', async ({ files, expected }) => {
+    const repo = committed(files);
+    const found = await findRegistryHostsAt(git, repo, 'refs/heads/main');
+    expect(found.map((f) => `${f.host} <- ${f.file}`).sort()).toEqual([...expected].sort());
+  });
+
+  it('reads the commit, not the files in the checkout', async () => {
+    const repo = committed({ 'Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n' });
+    writeFileSync(join(repo, 'Gemfile.lock'), 'GEM\n  remote: https://evil.example.net/\n');
+    writeFileSync(join(repo, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
+    expect(await findRegistryHostsAt(git, repo, 'refs/heads/main')).toEqual([
+      { host: 'rubygems.org', file: 'Gemfile.lock' },
+    ]);
+  });
+
+  it('reads a linked file as absent', async () => {
+    const repo = createTempRepo();
+    dirs.push(repo);
+    writeFileSync(join(repo.path, 'real.lock'), 'GEM\n  remote: https://rubygems.org/\n');
+    symlinkSync('real.lock', join(repo.path, 'Gemfile.lock'));
+    run(repo.path, 'add', '--all');
+    run(repo.path, 'commit', '-q', '-m', 'link');
+    expect(await findRegistryHostsAt(git, repo.path, 'refs/heads/main')).toEqual([]);
+  });
+
+  it('throws for a branch that is not there', async () => {
+    const repo = committed({});
+    await expect(findRegistryHostsAt(git, repo, 'refs/heads/nope')).rejects.toThrow();
+  });
+
+  it('lists each folder once, as the walk reaches it, never below three levels', async () => {
+    const repo = committed({
+      'a/b/c/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+      'a/b/c/d/e/Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n',
+      'node_modules/x/y/z.txt': 'z',
+    });
+    const listed: string[] = [];
+    const counting = {
+      fileAt: git.fileAt.bind(git),
+      folderAt: (r: string, rev: string, folder: string) => {
+        listed.push(folder);
+        return git.folderAt(r, rev, folder);
+      },
+    };
+
+    const found = await findRegistryHostsAt(counting, repo, 'refs/heads/main');
+
+    expect(found.map((f) => f.host)).toEqual(['index.crates.io', 'static.crates.io']);
+    expect(new Set(listed).size).toBe(listed.length);
+    expect(listed.filter((f) => !f.includes('.'))).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    expect(listed.some((f) => f.startsWith('node_modules') || f.startsWith('a/b/c/d'))).toBe(false);
+  });
+});
+
 /** Every file findRegistryHosts reads in a folder: settings files, lockfiles and toolchain files. */
 const FORMATS = [...CONFIG_FORMATS, ...LOCK_FORMATS];
 
@@ -407,34 +500,89 @@ const DEFAULT_HOSTS = [
 /**
  * Text a backtracking pattern can spend time quadratic or worse in its size on, as any package file. A
  * pattern does its matching on the daemon's only thread, so a slow one stalls the API, every lane's
- * broker and every gate.
+ * broker and every gate. `text(n)` is the text at size `n`: lines, or characters.
  */
-const CRAFTED: readonly { readonly name: string; readonly text: string }[] = [
-  { name: 'a run of blank lines', text: '\n'.repeat(200_000) },
-  { name: 'a run of blank Windows lines', text: '\r\n'.repeat(200_000) },
-  { name: 'a table header padded with spaces', text: `[${' '.repeat(50_000)}x\n` },
-  { name: 'an .npmrc key with no colon', text: `//${'a'.repeat(200_000)}\n` },
+const CRAFTED: readonly {
+  readonly name: string;
+  readonly size: number;
+  readonly text: (n: number) => string;
+}[] = [
+  { name: 'a run of blank lines', size: 200_000, text: (n) => '\n'.repeat(n) },
+  { name: 'a run of blank Windows lines', size: 200_000, text: (n) => '\r\n'.repeat(n) },
+  { name: 'a table header padded with spaces', size: 50_000, text: (n) => `[${' '.repeat(n)}x\n` },
+  { name: 'an .npmrc key with no colon', size: 200_000, text: (n) => `//${'a'.repeat(n)}\n` },
   {
     name: 'a setting whose value holds a lone carriage return',
-    text: `a=${' '.repeat(200_000)}x\ry\n`,
+    size: 200_000,
+    text: (n) => `a=${' '.repeat(n)}x\ry\n`,
   },
 ];
 
-describe('the package files on crafted text', () => {
-  it.each(CRAFTED)('every format reads $name in time linear in its size', ({ text }) => {
+/** How many times bigger the large text is than the small one its time is compared with. */
+const GROWTH = 8;
+/** Linear time grows about GROWTH times, quadratic time GROWTH ** 2 (64) times: this lies between. */
+const MAX_TIME_GROWTH = 24;
+/**
+ * The small and large inputs are timed back to back this many times, and the lowest ratio of a pair is
+ * kept. Load only ever adds time, and both halves of a pair see the same load. Comparing the fastest
+ * small run with the fastest large run does not hold up under gate load: a busy spell that covers every
+ * large run but no small run reads as growth (39 times in one gate, where the reader grows about 9 times).
+ */
+const ATTEMPTS = 9;
+/**
+ * The small text's time is never taken as less than this: below it a time is timer noise, and a linear
+ * reader's few milliseconds on the large text must not look like growth. A quadratic one takes seconds
+ * on the large text, far above MAX_TIME_GROWTH times this.
+ */
+const FLOOR_MS = 2;
+
+/**
+ * How many times longer `run` takes on the crafted text at its full size than at 1/GROWTH of it, both
+ * measured here, so a loaded machine slows both and the ratio holds. `prepare` builds a run's input
+ * outside the timing.
+ */
+async function timeGrowth<T>(
+  crafted: (typeof CRAFTED)[number],
+  prepare: (text: string) => T,
+  run: (input: T) => unknown,
+): Promise<number> {
+  async function timed(input: T): Promise<number> {
     const started = performance.now();
-    for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
-    namesNpmRegistry(text);
-    // Each format takes a few milliseconds over these texts; a quadratic one takes seconds.
-    expect(performance.now() - started).toBeLessThan(1_000);
+    await run(input);
+    return performance.now() - started;
+  }
+  const small = prepare(crafted.text(crafted.size / GROWTH));
+  const large = prepare(crafted.text(crafted.size));
+  await timed(small); // warms the code before anything counts
+  let best = Infinity;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const smallMs = Math.max(await timed(small), FLOOR_MS);
+    best = Math.min(best, (await timed(large)) / smallMs);
+  }
+  return best;
+}
+
+describe('the package files on crafted text', () => {
+  it.each(CRAFTED)('every format reads $name in time linear in its size', async (crafted) => {
+    const growth = await timeGrowth(
+      crafted,
+      (text) => text,
+      (text) => {
+        for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
+        namesNpmRegistry(text);
+      },
+    );
+    expect(growth).toBeLessThan(MAX_TIME_GROWTH);
   });
 
-  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async ({ text }) => {
-    const root = project(Object.fromEntries(FORMATS.map((format) => [format.path, text])));
-    const started = performance.now();
-    const found = await hostsOf(root);
-    // Reading the files is most of this; a quadratic pattern alone takes far longer.
-    expect(performance.now() - started).toBeLessThan(5_000);
-    expect(found).toEqual(DEFAULT_HOSTS);
+  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async (crafted) => {
+    const growth = await timeGrowth(
+      crafted,
+      (text) => project(Object.fromEntries(FORMATS.map((format) => [format.path, text]))),
+      async (root) => {
+        expect(await hostsOf(root)).toEqual(DEFAULT_HOSTS);
+      },
+    );
+    expect(growth).toBeLessThan(MAX_TIME_GROWTH);
   });
 });

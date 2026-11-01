@@ -174,6 +174,7 @@ describe('Gh.prStatus', () => {
         url: INPUT.ref,
         state: 'OPEN',
         headRefOid: HEAD,
+        mergeable: 'CONFLICTING',
         statusCheckRollup: [
           {
             __typename: 'CheckRun',
@@ -192,6 +193,8 @@ describe('Gh.prStatus', () => {
       url: INPUT.ref,
       state: 'OPEN',
       headSha: HEAD,
+      mergeBlocked: null,
+      mergeable: 'CONFLICTING',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
     });
@@ -202,8 +205,23 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup,headRefOid',
+      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
     ]);
+  });
+
+  it('reads whether the pull request merges cleanly, and unknown for an answer it does not know', async () => {
+    const read = async (mergeable: unknown) =>
+      (
+        await view({
+          exitCode: 0,
+          stdout: JSON.stringify({ url: INPUT.ref, state: 'OPEN', mergeable }),
+        }).gh.prStatus(INPUT, CALL)
+      )?.mergeable;
+    expect(await read('MERGEABLE')).toBe('MERGEABLE');
+    expect(await read('CONFLICTING')).toBe('CONFLICTING');
+    expect(await read('UNKNOWN')).toBe('UNKNOWN');
+    expect(await read('SOMETHING_NEW')).toBe('UNKNOWN');
+    expect(await read(undefined)).toBe('UNKNOWN');
   });
 
   it("reads a merged pull request's head commit, and none when gh gives none", async () => {
@@ -217,6 +235,34 @@ describe('Gh.prStatus', () => {
       stdout: JSON.stringify({ url: INPUT.ref, state: 'MERGED', headRefOid: '' }),
     });
     await expect(bare.gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ headSha: null });
+  });
+
+  // GitHub's mergeStateStatus: DIRTY is a merge conflict, BEHIND a base that moved on; everything
+  // else (CLEAN, BLOCKED, UNSTABLE, HAS_HOOKS, DRAFT, UNKNOWN, a value added later) is not 10db's call.
+  it.each([
+    ['DIRTY', 'conflicts'],
+    ['BEHIND', 'behind'],
+    ['CLEAN', null],
+    ['BLOCKED', null],
+    ['UNSTABLE', null],
+    ['HAS_HOOKS', null],
+    ['DRAFT', null],
+    ['UNKNOWN', null],
+    ['SOMETHING_NEW', null],
+    ['', null],
+    [null, null],
+    [undefined, null],
+  ])('reads mergeStateStatus %s as %s', async (mergeStateStatus, mergeBlocked) => {
+    const { gh } = view({
+      exitCode: 0,
+      stdout: JSON.stringify({
+        url: INPUT.ref,
+        state: 'OPEN',
+        statusCheckRollup: [],
+        ...(mergeStateStatus === undefined ? {} : { mergeStateStatus }),
+      }),
+    });
+    await expect(gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ mergeBlocked });
   });
 
   it('reads a pull request with no checks', async () => {
@@ -339,6 +385,8 @@ describe('Gh.prStatus', () => {
         url: INPUT.ref,
         state: 'OPEN',
         headSha: null,
+        mergeBlocked: null,
+        mergeable: 'UNKNOWN',
         checks,
         failingChecks: failing,
       });

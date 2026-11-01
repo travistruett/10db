@@ -6,6 +6,7 @@ import type {
   BatchFailure,
   BatchId,
   BatchState,
+  CiStopped,
   BoardColumnId,
   ClaimId,
   ClaimKind,
@@ -19,6 +20,12 @@ import type {
   FailingCheckDto,
   FlowId,
   FlowStepDef,
+  GoalBudget,
+  GoalCriterionId,
+  GoalId,
+  GoalState,
+  CriterionCheck,
+  CriterionState,
   HandoffId,
   HandoffInput,
   HazardDef,
@@ -28,10 +35,14 @@ import type {
   InboxOption,
   InboxState,
   InboxTarget,
+  JudgeCallId,
+  JudgeDecision,
+  JudgeOutcome,
   McpVerdict,
   ModelPin,
   ModelProfileId,
   NextAction,
+  Notice,
   PermissionRuleId,
   PersonaId,
   PersonId,
@@ -40,10 +51,12 @@ import type {
   ProjectLanding,
   ProposalId,
   PullRequestChecks,
+  PullRequestMergeBlocked,
   PullRequestState,
   ProposalKind,
   Provider,
   QuestionCategory,
+  RequiredChecksDto,
   RiskTag,
   RoutingRuleId,
   SessionId,
@@ -67,6 +80,7 @@ import type {
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
+  type AnySQLiteColumn,
   customType,
   index,
   integer,
@@ -141,6 +155,8 @@ export const projects = sqliteTable('projects', {
   repoPath: text('repo_path').notNull().unique(),
   gateCommand: text('gate_command'),
   changedCheckCommand: text('changed_check_command'),
+  /** Runs in place of the gate when the base has required checks; set only with a gate command. */
+  precheckCommand: text('precheck_command'),
   areas: text('areas', { mode: 'json' }).$type<AreaDef[]>().notNull(),
   hazards: text('hazards', { mode: 'json' }).$type<HazardDef[]>().notNull(),
   maxLanes: integer('max_lanes').notNull(),
@@ -174,19 +190,26 @@ export const projects = sqliteTable('projects', {
   baseBranch: text('base_branch').notNull().default('main'),
   /** What a finished task's pull request does unless its task says otherwise. */
   landing: text('landing').$type<ProjectLanding>().notNull().default('merge'),
+  /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
+  landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
     .$type<string[]>()
     .notNull()
     .default(sql`'[]'`),
-  /** Where tasks work: the one checkout, or a git worktree per started task. */
+  /** Where a new task works unless it says otherwise; each task keeps its own (`tasks.workspace_mode`). */
   workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull().default('shared'),
   /** Ignored directories of the main checkout a new worktree gets copies of. */
   worktreeSeed: text('worktree_seed', { mode: 'json' })
     .$type<string[]>()
     .notNull()
     .default(sql`'["node_modules"]'`),
+  /** Area and hazard names whose tasks are proposed a separate copy. */
+  isolate: text('isolate', { mode: 'json' })
+    .$type<string[]>()
+    .notNull()
+    .default(sql`'["migrations","deps"]'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -242,11 +265,31 @@ export const batches = sqliteTable(
     prFailingChecks: text('pr_failing_checks', { mode: 'json' }).$type<FailingCheckDto[]>(),
     prCheckedAt: text('pr_checked_at'),
     prUnknownReason: text('pr_unknown_reason'),
+    /** The pull request's required checks as the watch last read them; kept on the root batch. */
+    prRequired: text('pr_required', { mode: 'json' }).$type<RequiredChecksDto>(),
+    /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`). */
+    prMergeBlocked: text('pr_merge_blocked').$type<PullRequestMergeBlocked>(),
+    /** A CI fix batch's root batch and the pull request head it fixes; null on any other batch. */
+    ciFixOf: text('ci_fix_of')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    ciFixHead: text('ci_fix_head'),
+    /** Why 10db stopped fixing the pull request's failing checks. */
+    ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
+    notices: text('notices', { mode: 'json' })
+      .$type<Notice[]>()
+      .notNull()
+      .default(sql`'[]'`),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     index('batches_project_idx').on(t.projectId),
+    // One fix per root and head, so a second watch round or a restart starts none.
+    uniqueIndex('batches_ci_fix_idx')
+      .on(t.ciFixOf, t.ciFixHead)
+      .where(sql`ci_fix_of IS NOT NULL AND ci_fix_head IS NOT NULL`),
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
@@ -302,11 +345,21 @@ export const tasks = sqliteTable(
     boardColumnId: text('board_column_id')
       .$type<BoardColumnId>()
       .references(() => boardColumns.id),
-    workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
+    /**
+     * Where the task runs when next started: the project's checkout or a copy of its own. Read only
+     * while the task can be started; a finished task's batch says where it ran.
+     */
+    workspaceMode: text('workspace_mode').$type<WorkspaceMode>().notNull(),
+    /** Why the placement was proposed; null when it was chosen or took the project default. */
+    placementReason: text('placement_reason'),
+    /** The goal the task belongs to (goals spec §4); null for a task on its own. */
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references((): AnySQLiteColumn => goals.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('tasks_project_idx').on(t.projectId)],
+  (t) => [index('tasks_project_idx').on(t.projectId), index('tasks_goal_idx').on(t.goalId)],
 );
 
 export const taskDeps = sqliteTable(
@@ -394,6 +447,8 @@ export const workstreams = sqliteTable(
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),
+    /** What the run waits for besides the builder (another task's claim); cleared when the wait ends. */
+    notice: text('notice', { mode: 'json' }).$type<Notice>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -761,3 +816,110 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/** An outcome 10db pursues across many tasks (goals spec §4). Phase 1 writes only `draft`. */
+export const goals = sqliteTable(
+  'goals',
+  {
+    id: text('id').$type<GoalId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    objective: text('objective').notNull(),
+    caresMost: text('cares_most'),
+    /** The notes below the brief's front matter. */
+    description: text('description').notNull().default(''),
+    ownerId: text('owner_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    state: text('state').$type<GoalState>().notNull().default('draft'),
+    /** Tokens and dollars; null means no spend check (§6). */
+    budget: text('budget', { mode: 'json' }).$type<GoalBudget>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('goals_project_idx').on(t.projectId)],
+);
+
+/** A goal's criteria in brief order (goals spec §5). Phase 1 writes them `unproven`. */
+export const goalCriteria = sqliteTable(
+  'goal_criteria',
+  {
+    id: text('id').$type<GoalCriterionId>().primaryKey(),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .notNull()
+      .references(() => goals.id),
+    position: integer('position').notNull(),
+    text: text('text').notNull(),
+    check: text('check').$type<CriterionCheck>().notNull(),
+    /** The task a `task` or `merged` criterion names. */
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    /** A `command` criterion's own command; null means the project's gate command. */
+    command: text('command'),
+    commandApproved: integer('command_approved', { mode: 'boolean' }).notNull().default(false),
+    /** Who accepts an `accept` criterion; null means the owner. */
+    personId: text('person_id')
+      .$type<PersonId>()
+      .references(() => people.id),
+    state: text('state').$type<CriterionState>().notNull().default('unproven'),
+    /** Evidence ids, pull request URLs or file paths. */
+    proof: text('proof', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    provenAt: text('proven_at'),
+    /** The person who ticked it, or `daemon`. */
+    provenBy: text('proven_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('goal_criteria_position_idx').on(t.goalId, t.position)],
+);
+
+/** When each person last opened each goal in Factory: the digest's window (goals spec §8). */
+export const goalViews = sqliteTable(
+  'goal_views',
+  {
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .notNull()
+      .references(() => goals.id),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    openedAt: text('opened_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.goalId, t.personId] })],
+);
+
+/**
+ * Every question 10db asked a fast model through OpenRouter, and what came of it. `state` and
+ * `question` are the text 10db built (task text and a capped diff), never a secret. The outcome is
+ * written when the call is logged and may be replaced once by the decision that acted on the answer.
+ */
+export const judgeCalls = sqliteTable(
+  'judge_calls',
+  {
+    id: text('id').$type<JudgeCallId>().primaryKey(),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    model: text('model').notNull(),
+    state: text('state').notNull(),
+    question: text('question').notNull(),
+    answer: text('answer'),
+    confidence: real('confidence'),
+    outcome: text('outcome').$type<JudgeOutcome>().notNull(),
+    latencyMs: integer('latency_ms'),
+    costUsd: real('cost_usd'),
+    workstreamId: text('workstream_id').$type<WorkstreamId>(),
+    taskId: text('task_id').$type<TaskId>(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+);

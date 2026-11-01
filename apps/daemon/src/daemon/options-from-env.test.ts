@@ -74,3 +74,13 @@ describe('daemonOptionsFromEnv', () => {
     },
   );
 });
+
+describe('judgeOff', () => {
+  it.each([
+    ['off', { TENDB_JUDGE: 'off' }, true],
+    ['on', { TENDB_JUDGE: 'on' }, false],
+    ['unset', {}, false],
+  ])('is %s -> %s for TENDB_JUDGE', (_name, source, off) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).judgeOff ?? false).toBe(off);
+  });
+});

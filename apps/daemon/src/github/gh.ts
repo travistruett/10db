@@ -42,6 +42,17 @@ export class GhError extends Error {
 export const PrState = { Open: 'OPEN', Closed: 'CLOSED', Merged: 'MERGED' } as const;
 export type PrState = (typeof PrState)[keyof typeof PrState];
 
+/**
+ * Whether GitHub can merge the pull request into its base as it stands. `UNKNOWN` is GitHub still
+ * working it out (right after a push or an Update branch), or an answer 10db does not know.
+ */
+export const PrMergeable = {
+  Mergeable: 'MERGEABLE',
+  Conflicting: 'CONFLICTING',
+  Unknown: 'UNKNOWN',
+} as const;
+export type PrMergeable = (typeof PrMergeable)[keyof typeof PrMergeable];
+
 export interface PullRequest {
   readonly url: string;
   readonly state: PrState;
@@ -56,9 +67,47 @@ export interface PullRequestStatus {
   readonly state: PrState;
   /** The commit the pull request's branch was at when GitHub last saw it; null when gh gives none. */
   readonly headSha: string | null;
+  /** Whether the pull request conflicts with its base, as GitHub last worked it out. */
+  readonly mergeable: PrMergeable;
   readonly checks: PullRequestChecks;
   readonly failingChecks: FailingCheckDto[];
+  /**
+   * Why GitHub will not merge the pull request as it is, from its `mergeStateStatus`: `conflicts` for
+   * DIRTY, `behind` for BEHIND, null for anything else (clean, blocked, unknown, a value added later).
+   */
+  readonly mergeBlocked: MergeBlocked | null;
 }
+
+export const MergeBlocked = { Conflicts: 'conflicts', Behind: 'behind' } as const;
+export type MergeBlocked = (typeof MergeBlocked)[keyof typeof MergeBlocked];
+
+/** One required check of a pull request, with the Actions ids its link carries (null when it has none). */
+export interface CiJob {
+  readonly name: string;
+  /** An https link to the check's page, or null. */
+  readonly link: string | null;
+  /** The Actions job id, from a link `…/actions/runs/R/job/J`; null for a check that is no Actions job. */
+  readonly jobId: string | null;
+  /** The Actions run id, from the same link; null for a check that is no Actions run. */
+  readonly runId: string | null;
+  readonly description: string | null;
+}
+
+/**
+ * The required checks of a pull request's base, as `gh pr checks --required` reports them: `failing`
+ * if any failed, else `pending` if any is running, queued or cancelled (a run a newer push replaced),
+ * else `passing`; `none` when GitHub reports no required checks. `pending` lists the pending and
+ * cancelled ones, `failing` the failed ones.
+ */
+export interface RequiredChecks {
+  readonly state: 'passing' | 'pending' | 'failing' | 'none';
+  readonly failing: CiJob[];
+  readonly pending: CiJob[];
+}
+
+/** A failed job's log: `not_yet` while its run is still in progress, which is no error. */
+export type JobLog =
+  { readonly kind: 'ready'; readonly log: string } | { readonly kind: 'not_yet' };
 
 /** The host integration (batch delivery spec §7): everything 10db asks GitHub, through the gh CLI. */
 export interface Gh {
@@ -77,6 +126,24 @@ export interface Gh {
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
   ): Promise<PullRequestStatus | null>;
+  /**
+   * The pull request's required checks. Throws a GhError, never answers `none`, for any failure of
+   * the call itself: no network, signed out, a server error.
+   */
+  prRequiredChecks(
+    input: { readonly repo: string; readonly url: string },
+    call: GhCall,
+  ): Promise<RequiredChecks>;
+  /**
+   * The log of the failed steps of an Actions job (`jobId` is a number as text), or `not_yet` while its
+   * run is in progress. Throws a GhError for anything else, such as a log GitHub no longer keeps.
+   */
+  jobLog(input: { readonly repo: string; readonly jobId: string }, call: GhCall): Promise<JobLog>;
+  /** Reruns the failed jobs of an Actions run. Throws a GhError with GitHub's reason when it refuses. */
+  rerunFailed(
+    input: { readonly repo: string; readonly runId: string },
+    call: GhCall,
+  ): Promise<void>;
   prCreate(
     input: {
       readonly repo: string;
@@ -95,6 +162,11 @@ export interface Gh {
    * nothing left to wait for.
    */
   prAutoMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
+  /**
+   * Squash-merges the pull request now, for one with nothing to wait for. Throws a GhError when
+   * GitHub refuses, with its reason, such as a conflict or a branch rule.
+   */
+  prMerge(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
 }
 
 export interface GhOutput {
@@ -275,6 +347,31 @@ function rollupEntry(raw: unknown): CheckRollupEntry {
   return item.success ? item.data : UNREADABLE_CHECK;
 }
 
+/** An Actions id in a call: digits only, so it can never be read as a gh flag. */
+const ACTIONS_ID = /^\d{1,20}$/;
+const ACTIONS_PATH = /^\/[^/]+\/[^/]+\/actions\/runs\/(\d+)(?:\/jobs?\/(\d+))?\/?$/;
+
+/**
+ * The Actions run and job a check link names: `https://github.com/<owner>/<repo>/actions/runs/<R>/job/<J>`
+ * gives both, a link to the run gives only the run, and anything else (a commit status from another CI,
+ * a link that is not https, no link) gives neither.
+ */
+export function jobIdsOfLink(link: string | null | undefined): {
+  runId: string | null;
+  jobId: string | null;
+} {
+  const none = { runId: null, jobId: null };
+  if (link === null || link === undefined || httpsOrNull(link) === null) return none;
+  const match = ACTIONS_PATH.exec(new URL(link).pathname);
+  if (!match) return none;
+  return { runId: match[1] ?? null, jobId: match[2] ?? null };
+}
+
+const MERGE_BLOCKED: Readonly<Record<string, MergeBlocked>> = {
+  DIRTY: MergeBlocked.Conflicts,
+  BEHIND: MergeBlocked.Behind,
+};
+
 const PrStatusView = z.object({
   url: z.url(),
   state: z.enum(PrState),
@@ -282,8 +379,22 @@ const PrStatusView = z.object({
     .string()
     .nullish()
     .transform((oid) => (oid === undefined || oid === null || oid === '' ? null : oid)),
+  mergeable: z.enum(PrMergeable).catch(PrMergeable.Unknown),
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
+  mergeStateStatus: z
+    .string()
+    .nullish()
+    .transform((state) => MERGE_BLOCKED[state ?? ''] ?? null),
 });
+
+/** One entry of `gh pr checks --json name,state,bucket,link,workflow,description`. */
+const RequiredCheckItem = z.object({
+  name: z.string(),
+  bucket: z.string(),
+  link: z.string().nullish(),
+  description: z.string().nullish(),
+});
+const RequiredChecksView = z.array(RequiredCheckItem);
 
 const FAILING_CONCLUSIONS = new Set(['FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']);
 const FAILING_STATES = new Set(['FAILURE', 'ERROR']);
@@ -339,6 +450,91 @@ function failure(args: readonly string[], out: GhOutput): GhError {
     UNREACHABLE.test(out.stderr) ? GhFailure.Unreachable : GhFailure.Failed,
     `gh ${args.slice(0, 2).join(' ')} failed (exit ${String(out.exitCode)}): ${out.stderr.trim().slice(0, 500)}`,
   );
+}
+
+/** gh's exit codes for `gh pr checks`: 0 all passed, 1 one failed, 8 one pending. */
+const CHECKS_EXITS = new Set([0, 1, 8]);
+/**
+ * gh's two messages of none, matched against the whole of stderr. "no checks reported on the '<branch>'
+ * branch" comes when the head commit has no checks at all, which gh says before it filters to
+ * `--required`: a base with no CI, or a pull request pushed before GitHub lists its runs. "no required
+ * checks reported …" comes when checks exist and none is required. Both are in gh 2.83.2's binary.
+ */
+const NO_CHECKS = /^no (?:required )?checks reported on the '.*' branch$/i;
+/** gh's `job <id> is still in progress; logs will be available when it is complete` (or `run <id> …`). */
+const RUN_IN_PROGRESS =
+  /^(?:job|run) \d+ is still in progress; logs will be available when it is complete$/i;
+
+/**
+ * Reads what `gh pr checks --required --json …` printed, from its exit code and both streams together.
+ * With a list on stdout (and exit 0, 1 or 8, gh's codes for passed, failed and pending) the list decides.
+ * gh's message of none ("no checks reported …" or "no required checks reported …") as the whole of
+ * stderr, with exit 1 and nothing on stdout, is `none`; nothing else is. Any other failure, a network or
+ * auth error with the same exit code included, throws a GhError, so it is never read as `none`.
+ */
+export function parseRequiredChecks(args: readonly string[], out: GhOutput): RequiredChecks {
+  const none: RequiredChecks = { state: 'none', failing: [], pending: [] };
+  const empty = out.stdout.trim() === '';
+  if (CHECKS_EXITS.has(out.exitCode) && !empty) {
+    const items = parseOutput(RequiredChecksView, args, out.stdout);
+    const failing: CiJob[] = [];
+    const pending: CiJob[] = [];
+    for (const item of items) {
+      const link = httpsOrNull(item.link);
+      const job: CiJob = {
+        name: item.name,
+        link,
+        ...jobIdsOfLink(link),
+        // gh prints "" for a check with no description.
+        description:
+          item.description === undefined || item.description === null || item.description === ''
+            ? null
+            : item.description,
+      };
+      switch (item.bucket) {
+        case 'pass':
+        case 'skipping':
+          break;
+        case 'fail':
+          failing.push(job);
+          break;
+        case 'pending':
+        case 'cancel':
+          pending.push(job);
+          break;
+        default:
+          throw new GhError(
+            GhFailure.Failed,
+            `gh ${args.slice(0, 2).join(' ')} printed a check bucket 10db doesn't know: ${item.bucket.slice(0, 40)}`,
+          );
+      }
+    }
+    if (failing.length > 0) return { state: 'failing', failing, pending };
+    if (pending.length > 0) return { state: 'pending', failing, pending };
+    return items.length === 0 ? none : { state: 'passing', failing, pending };
+  }
+  if (out.exitCode === 1 && empty && NO_CHECKS.test(out.stderr.trim())) return none;
+  throw failure(args, out);
+}
+
+/**
+ * Reads what `gh run view --job <id> --log-failed` printed: the log on exit 0 (empty when no step
+ * failed), `not_yet` when gh says the run is still in progress, else a GhError.
+ */
+export function parseJobLog(args: readonly string[], out: GhOutput): JobLog {
+  if (out.exitCode === 0) return { kind: 'ready', log: out.stdout };
+  if (out.exitCode !== AUTH_REQUIRED_EXIT && RUN_IN_PROGRESS.test(out.stderr.trim()))
+    return { kind: 'not_yet' };
+  throw failure(args, out);
+}
+
+/** An id from a caller goes into gh's arguments: refuse anything that is not an Actions id. */
+function actionsId(kind: string, id: string, args: readonly string[]): void {
+  if (!ACTIONS_ID.test(id))
+    throw new GhError(
+      GhFailure.Failed,
+      `gh ${args.slice(0, 2).join(' ')} was given ${kind} id ${JSON.stringify(id.slice(0, 40))}, which is not a number`,
+    );
 }
 
 /** A login is one word of letters, digits, hyphens and underscores; gh prints `null` for none. */
@@ -415,7 +611,7 @@ export function createGh(exec: GhExec): Gh {
         '-R',
         repo,
         '--json',
-        'url,state,statusCheckRollup,headRefOid',
+        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
       ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
@@ -426,8 +622,33 @@ export function createGh(exec: GhExec): Gh {
         url: view.url,
         state: view.state,
         headSha: view.headRefOid,
+        mergeBlocked: view.mergeStateStatus,
+        mergeable: view.mergeable,
         ...summariseChecks(view.statusCheckRollup ?? []),
       };
+    },
+    async prRequiredChecks({ repo, url }, call) {
+      const args = [
+        'pr',
+        'checks',
+        url,
+        '-R',
+        repo,
+        '--required',
+        '--json',
+        'name,state,bucket,link,workflow,description',
+      ];
+      return parseRequiredChecks(args, await exec(args, call));
+    },
+    async jobLog({ repo, jobId }, call) {
+      const args = ['run', 'view', '--job', jobId, '-R', repo, '--log-failed'];
+      actionsId('job', jobId, args);
+      return parseJobLog(args, await exec(args, call));
+    },
+    async rerunFailed({ repo, runId }, call) {
+      const args = ['run', 'rerun', runId, '-R', repo, '--failed'];
+      actionsId('run', runId, args);
+      await ok(args, call);
     },
     async prCreate({ repo, base, head, title, bodyFile }, call) {
       const args = [
@@ -459,6 +680,9 @@ export function createGh(exec: GhExec): Gh {
     },
     async prAutoMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--auto', '--squash'], call);
+    },
+    async prMerge({ repo, url }, call) {
+      await ok(['pr', 'merge', url, '-R', repo, '--squash'], call);
     },
   };
 }

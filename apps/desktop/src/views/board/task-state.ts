@@ -6,11 +6,14 @@ import {
   rejectionsSentBack,
   WorkstreamState,
   type BatchDto,
+  type ShippedAtLimit,
+  type Notice,
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import { canClose, canRetry } from '../factory/workstream-state';
 import { FAILURE_LABELS } from './batch-labels';
+import { ciLine, type CiLink } from './ci-line';
 import { ordinal } from './queue-place';
 
 const S = WorkstreamState;
@@ -19,6 +22,8 @@ const S = WorkstreamState;
 export interface TaskState {
   readonly line: string;
   readonly color: MantineColor;
+  /** Where the line's CI result lives: a job's page or the pull request's checks. */
+  readonly link?: CiLink;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */
@@ -43,12 +48,19 @@ const CHECKS_LINE: Readonly<Record<PullRequestChecks, TaskState | null>> = {
 };
 
 /**
- * What a shipped pull request says about its tasks: open with its checks, closed without merging,
- * or unreadable. Null before the batch has a pull request, and once it has merged (the task is then
- * in Done and has nothing to say).
+ * What a shipped pull request says about its tasks: for one with required checks, where CI stands
+ * (CI-decides spec §5, `ciLine`, which also says "Merged · CI passed"); else open with its checks,
+ * closed without merging, or unreadable. Null before the batch has a pull request, and once one with
+ * no required checks has merged (the task is then in Done and has nothing to say). `batches` is every
+ * batch of the project, for a CI fix batch to find the root that holds the required checks.
  */
-export function pullRequestState(batch: BatchDto | undefined): TaskState | null {
+export function pullRequestState(
+  batch: BatchDto | undefined,
+  batches: readonly BatchDto[] = batch ? [batch] : [],
+): TaskState | null {
   if (batch?.state !== BatchState.Shipped || !batch.prUrl) return null;
+  const ci = ciLine(batch, batches);
+  if (ci) return ci;
   const pr = batch.pr;
   if (pr === null) return { line: 'Pull request open', color: 'blue' };
   switch (pr.state) {
@@ -118,14 +130,93 @@ export function reviewSentBackLine(workstream: WorkstreamDto | undefined): strin
 }
 
 /**
- * What a task is doing right now, from its latest workstream and the batch it ships in. Null when
- * there is nothing to say: no run, a cancelled one, or finished work that is not being shipped.
+ * The follow-up tasks filed when the work shipped at the retry limit with findings still open, in
+ * step order: one per step that rejected past the limit (a review, then the QA after it). Empty
+ * otherwise.
+ */
+export function shippedAtLimit(workstream: WorkstreamDto | undefined): ShippedAtLimit[] {
+  return (workstream?.steps ?? []).flatMap((s) => (s.shippedAtLimit ? [s.shippedAtLimit] : []));
+}
+
+/** The sentence a card and the drawer say of work that shipped at the retry limit; null when it did not. */
+export function shippedAtLimitLine(workstream: WorkstreamDto | undefined): string | null {
+  const shipped = shippedAtLimit(workstream);
+  if (shipped.length === 0) return null;
+  const titles = shipped.map((s) => s.followUpTitle).join('; ');
+  return `Shipped at the retry limit with open findings. ${shipped.length === 1 ? 'Follow-up task' : 'Follow-up tasks'}: ${titles}`;
+}
+
+/**
+ * Whether what a batch stands for is still going: not ended without shipping, and a shipped one not
+ * yet merged or closed. Only then do its notices still say something true.
+ */
+function batchStands(batch: BatchDto): boolean {
+  switch (batch.state) {
+    case BatchState.Abandoned:
+    case BatchState.Closed:
+      return false;
+    case BatchState.Shipped:
+      return (
+        batch.pr?.state !== PullRequestState.Merged && batch.pr?.state !== PullRequestState.Closed
+      );
+    case BatchState.Cutting:
+    case BatchState.Open:
+    case BatchState.Shipping:
+    case BatchState.Failed:
+      return true;
+  }
+}
+
+/**
+ * The notices a task's card and drawer show besides its state: what its run waits for, such as another
+ * task's hazard, then what its batch stands in, such as a conflict with its base. These ask the builder
+ * nothing, so none is an Inbox card. None for a cancelled or failed run, which have their own say.
+ */
+export function taskNotices(
+  workstream: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+): Notice[] {
+  if (!workstream || workstream.state === S.Cancelled || workstream.state === S.Failed) return [];
+  return [
+    ...(workstream.notice ? [workstream.notice] : []),
+    ...(batch && batchStands(batch) ? batch.notices : []),
+  ];
+}
+
+/** The colors a notice's warning turns orange: the ones that say nothing needs the builder yet. */
+const CALM: ReadonlySet<MantineColor> = new Set(['blue', 'gray', 'green']);
+
+/**
+ * What a task is doing right now, from its latest workstream and the batch it ships in, with the
+ * notices that stand beside it. Null when there is nothing to say: no run, a cancelled one, or finished
+ * work that is not being shipped and has no notice.
  */
 export function taskState(
   workstream: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
   gateCommand: string | null,
   place?: number,
+  batches?: readonly BatchDto[],
+): TaskState | null {
+  const state = stateOf(workstream, batch, gateCommand, place, batches);
+  const notices = taskNotices(workstream, batch);
+  if (notices.length === 0) return state;
+  const text = notices.map((n) => n.line).join(' · ');
+  const warns = notices.some((n) => n.tone === 'warning');
+  if (!state) return { line: text, color: warns ? 'orange' : 'blue' };
+  return {
+    ...state,
+    line: `${state.line} · ${text}`,
+    color: warns && CALM.has(state.color) ? 'orange' : state.color,
+  };
+}
+
+function stateOf(
+  workstream: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+  gateCommand: string | null,
+  place?: number,
+  batches?: readonly BatchDto[],
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
@@ -152,7 +243,8 @@ export function taskState(
       return { line: 'Recovering', color: 'orange' };
     case S.Failed:
       // A failed run the builder shipped anyway is judged by its pull request.
-      if (batch?.state === BatchState.Shipped && batch.prUrl) return pullRequestState(batch);
+      if (batch?.state === BatchState.Shipped && batch.prUrl)
+        return pullRequestState(batch, batches);
       return {
         line: workstream.failureReason
           ? `Failed: ${lowerFirst(workstream.failureReason)}`
@@ -169,7 +261,7 @@ export function taskState(
         };
       }
       if (batch?.state === BatchState.Shipping) return { line: 'Shipping', color: 'blue' };
-      return pullRequestState(batch);
+      return pullRequestState(batch, batches);
     case S.Cancelled:
       return null;
   }

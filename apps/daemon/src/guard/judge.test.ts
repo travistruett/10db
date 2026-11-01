@@ -651,7 +651,10 @@ describe('resolveInRepo', () => {
   });
 });
 
-describe('paths that climb out of a link', () => {
+describe.each([
+  { setup: 'narrow areas', areas: AREAS, claim: 'api' },
+  { setup: 'a ** area', areas: [{ name: 'repo', globs: ['**'] }], claim: 'repo' },
+])('paths that climb out of a link ($setup)', ({ areas, claim }) => {
   const own = tempDir('guard-climb-link');
   beforeAll(() => {
     mkdirSync(join(own.path, '.git', 'hooks'), { recursive: true });
@@ -670,9 +673,9 @@ describe('paths that climb out of a link', () => {
       toolName,
       toolInput,
       repoPath: own.path,
-      areas: AREAS,
+      areas,
       hazards: DEFAULT_HAZARDS,
-      claims: [{ kind: 'area', name: 'api' }],
+      claims: [{ kind: 'area', name: claim }],
       readOnly: false,
       protectedPaths: guarded(),
     });
@@ -1369,6 +1372,80 @@ describe('classifyPath', () => {
   });
 });
 
+describe('classifyPath with dotfiles', () => {
+  const REPO_AREA = [{ name: 'repo', globs: ['**'] }];
+
+  it.each(['.gitignore', '.github/workflows/ci.yml', '.claude/rules/testing.md', 'a/.b/.c/d'])(
+    'puts %s in an area whose glob is **',
+    (path) => {
+      expect(classifyPath(path, REPO_AREA, [])).toEqual({ areas: ['repo'], hazards: [] });
+    },
+  );
+
+  it('still routes a path a stock hazard covers to that hazard', () => {
+    expect(classifyPath('.claude/rules/testing.md', REPO_AREA, DEFAULT_HAZARDS)).toEqual({
+      areas: ['repo'],
+      hazards: ['harness'],
+    });
+  });
+
+  it('still lists a hazard that covers the path', () => {
+    expect(
+      classifyPath('.github/workflows/ci.yml', REPO_AREA, [
+        { name: 'ci', globs: ['.github/**'], commands: [] },
+      ]),
+    ).toEqual({ areas: ['repo'], hazards: ['ci'] });
+  });
+
+  it('leaves a hazard glob without dot matching', () => {
+    expect(
+      classifyPath('.github/ci.yml', REPO_AREA, [{ name: 'all', globs: ['**'], commands: [] }])
+        .hazards,
+    ).toEqual([]);
+  });
+
+  it('keeps a dot in a glob literal', () => {
+    const areas = [{ name: 'ts', globs: ['src/*.ts'] }];
+    expect(classifyPath('src/a.ts', areas, []).areas).toEqual(['ts']);
+    expect(classifyPath('src/ats', areas, []).areas).toEqual([]);
+  });
+
+  it('lets an area edit a dotfile once it claims the area', () => {
+    const verdict = judgeToolUse({
+      toolName: 'Edit',
+      toolInput: { file_path: '.gitignore' },
+      repoPath: repo.path,
+      areas: REPO_AREA,
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: 'area', name: 'repo' }],
+      readOnly: false,
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe('allow');
+  });
+
+  it.each(['.git/config', '.git', 'sub/.git', 'a/.git/b'])('keeps %s in no area', (path) => {
+    expect(classifyPath(path, REPO_AREA, []).areas).toEqual([]);
+  });
+
+  it.each(['.git/hooks/pre-commit', '.git/config'])(
+    'denies an edit of %s with the ** area claimed and no file-access judge',
+    (path) => {
+      const verdict = judgeToolUse({
+        toolName: 'Edit',
+        toolInput: { file_path: path },
+        repoPath: repo.path,
+        areas: REPO_AREA,
+        hazards: DEFAULT_HAZARDS,
+        claims: [{ kind: 'area', name: 'repo' }],
+        readOnly: false,
+        protectedPaths: guarded(),
+      });
+      expect(verdict.decision).toBe('deny');
+    },
+  );
+});
+
 describe('stringField', () => {
   it.each<{ name: string; input: unknown; expected: string | null }>([
     { name: 'a string field', input: { command: 'ls' }, expected: 'ls' },
@@ -1980,8 +2057,15 @@ describe('file access judge', () => {
   const refusing: FileAccessJudge = {
     read: () => ({ refuse: 'no reads' }),
     write: () => ({ refuse: 'no writes' }),
+    readAsk: () => null,
+    writeAsk: () => null,
   };
-  const permissive: FileAccessJudge = { read: () => 'ok', write: () => 'ok' };
+  const permissive: FileAccessJudge = {
+    read: () => 'ok',
+    write: () => 'ok',
+    readAsk: () => null,
+    writeAsk: () => null,
+  };
   const withJudge = (
     fileAccess: FileAccessJudge | undefined,
     toolName: string,
@@ -2593,6 +2677,33 @@ describe('hazardFor agrees with the guard on which commands need a hazard claim'
     const verdict = judge('Bash', { command });
     expect(verdict.decision === 'deny' && verdict.reason.includes('hazard claim')).toBe(
       hazard !== null,
+    );
+  });
+});
+
+describe('a Monitor command is judged as a Bash command', () => {
+  const UNSAFE = [
+    'git push --force origin main',
+    'gh pr merge 1 --admin',
+    'npm publish',
+    'git reset --hard HEAD~3',
+    'git commit --no-verify -m x',
+    `rm -rf ${join(repo.path, '.git')}`,
+    'pnpm add x',
+  ];
+  it.each(UNSAFE)('refuses %s through Monitor as through Bash', (command) => {
+    const viaBash = bash(command);
+    expect(viaBash.decision).toBe('deny');
+    expect(judge('Monitor', { command })).toEqual(viaBash);
+  });
+
+  it('allows a plain Monitor command', () => {
+    expect(judge('Monitor', { command: 'tail -f out.log' })).toEqual({ decision: 'allow' });
+  });
+
+  it('still refuses Monitor in a read-only step', () => {
+    expect(judge('Monitor', { command: 'tail -f out.log' }, API_AND_DB, true).decision).toBe(
+      'deny',
     );
   });
 });

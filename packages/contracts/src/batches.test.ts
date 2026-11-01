@@ -14,8 +14,11 @@ import {
   TaskStartResult,
 } from './batches';
 import {
+  DEFAULT_ISOLATE,
   DEFAULT_WORKTREE_SEED,
   ProjectInput,
+  ProjectPatch,
+  TaskDto,
   TaskInput,
   TaskPatch,
   WorktreeSeedName,
@@ -249,6 +252,26 @@ describe('worktree mode contracts', () => {
     expect(parsed.worktreeSeed).toEqual(['node_modules']);
   });
 
+  it('ProjectInput isolates migrations and deps by default, and takes other names', () => {
+    expect(ProjectInput.parse(project).isolate).toEqual([...DEFAULT_ISOLATE]);
+    expect(DEFAULT_ISOLATE).toEqual(['migrations', 'deps']);
+    expect(ProjectInput.parse({ ...project, isolate: ['contracts'] }).isolate).toEqual([
+      'contracts',
+    ]);
+    expect(ProjectInput.safeParse({ ...project, isolate: ['Not A Name'] }).success).toBe(false);
+    expect(ProjectPatch.parse({ isolate: [] })).toEqual({ isolate: [] });
+  });
+
+  it('a task names its placement in input and patch, and carries it with its reason', () => {
+    const input = { title: 'Add a table', acceptanceCriteria: ['x'], areas: ['api'] };
+    expect(TaskInput.parse(input).workspaceMode).toBeUndefined();
+    expect(TaskInput.parse({ ...input, workspaceMode: 'worktree' }).workspaceMode).toBe('worktree');
+    expect(TaskInput.safeParse({ ...input, workspaceMode: 'elsewhere' }).success).toBe(false);
+    expect(TaskPatch.parse({ workspaceMode: 'shared' })).toEqual({ workspaceMode: 'shared' });
+    expect(TaskDto.shape.workspaceMode.options).toEqual(['shared', 'worktree']);
+    expect(TaskDto.shape.placementReason.safeParse(null).success).toBe(true);
+  });
+
   it('ProjectInput caps the seed at 32 names', () => {
     const seed = Array.from({ length: 33 }, (_, i) => `d${String(i)}`);
     expect(ProjectInput.safeParse({ ...project, worktreeSeed: seed }).success).toBe(false);
@@ -285,6 +308,26 @@ describe('worktree mode contracts', () => {
   it('BatchDto carries a nullable worktree path', () => {
     expect(BatchDto.parse(batch).worktreePath).toBe('/tmp/wt/x');
     expect(BatchDto.parse({ ...batch, worktreePath: null }).worktreePath).toBe(null);
+  });
+
+  it('BatchDto without notices reads as none', () => {
+    expect(BatchDto.parse(batch).notices).toEqual([]);
+  });
+
+  it('BatchDto carries the notices its tasks show', () => {
+    const notice = {
+      key: 'base-conflict',
+      tone: 'warning',
+      line: 'Conflicts with main',
+      body: 'x',
+    };
+    expect(BatchDto.parse({ ...batch, notices: [notice] }).notices).toEqual([notice]);
+    expect(BatchDto.safeParse({ ...batch, notices: [{ ...notice, line: '' }] }).success).toBe(
+      false,
+    );
+    expect(BatchDto.safeParse({ ...batch, notices: [{ ...notice, tone: 'red' }] }).success).toBe(
+      false,
+    );
   });
 
   it('BatchDto without pr reads as null', () => {
@@ -332,6 +375,7 @@ describe('worktree mode contracts', () => {
       repoPath: '/tmp/app',
       gateCommand: 'make gate',
       changedCheckCommand: null,
+      precheckCommand: null,
       areas: [],
       hazards: [],
       maxLanes: 2,
@@ -349,11 +393,13 @@ describe('worktree mode contracts', () => {
       delivery: 'local',
       baseBranch: 'main',
       landing: 'merge',
+      landingBranch: null,
       prTitlePrefix: null,
       allowedCommands: [],
       sandboxLoopback: false,
       workspaceMode: 'shared',
       worktreeSeed: ['node_modules'],
+      isolate: ['migrations', 'deps'],
       createdAt: '2026-10-21T12:00:00.000Z',
       updatedAt: '2026-10-21T12:00:00.000Z',
     };

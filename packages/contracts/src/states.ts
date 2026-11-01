@@ -229,6 +229,37 @@ export const PullRequestChecks = {
 } as const;
 export type PullRequestChecks = ValueOf<typeof PullRequestChecks>;
 
+/**
+ * A pull request's required checks on its head (CI-decides spec §4): `none` means the base
+ * requires none. A cancelled required check reads as pending.
+ */
+export const RequiredChecksState = {
+  Pending: 'pending',
+  Passing: 'passing',
+  Failing: 'failing',
+  None: 'none',
+} as const;
+export type RequiredChecksState = ValueOf<typeof RequiredChecksState>;
+
+/** Why GitHub will not merge a pull request as it is; 10db resolves neither. */
+export const PullRequestMergeBlocked = {
+  Conflicts: 'conflicts',
+  Behind: 'behind',
+} as const;
+export type PullRequestMergeBlocked = ValueOf<typeof PullRequestMergeBlocked>;
+
+/**
+ * Why 10db stopped fixing a pull request's failing required checks: it hit the fix limit, a fix
+ * changed nothing, no failing check had a log to read, or the fix batch could not be cut.
+ */
+export const CiStopped = {
+  Limit: 'limit',
+  NoChange: 'no_change',
+  NoLog: 'no_log',
+  NoCut: 'no_cut',
+} as const;
+export type CiStopped = ValueOf<typeof CiStopped>;
+
 /** Why shipping stopped; the batch's flag card carries the detail. */
 export const BatchFailure = {
   WrongBranch: 'wrong_branch',

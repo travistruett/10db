@@ -1,4 +1,9 @@
-export { foundHostFile } from './found-hosts';
+export {
+  foundHostFile,
+  readFoundHosts,
+  writeFoundHosts,
+  writeFoundHostsIfNone,
+} from './found-hosts';
 export {
   allowFoundHosts,
   allowNetworkHost,
@@ -7,6 +12,7 @@ export {
   removeNetworkHost,
   unallowedFoundHosts,
 } from './network-hosts';
+export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
 export {
   allowedToolsFor,
   baseAllowedTools,

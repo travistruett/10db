@@ -1,5 +1,6 @@
 import {
   EvidenceKind,
+  findingNotes,
   REVIEW_ROLES,
   ToolAccess,
   type ClaimKind,
@@ -8,8 +9,9 @@ import {
   type HandoffDto,
   type NextAction,
   type StepResult,
-  type StepRole,
+  StepRole,
   type TaskDto,
+  Verdict,
 } from '@10db/contracts';
 import { failedSteps } from './failed-steps';
 
@@ -46,9 +48,43 @@ export interface PromptInput {
   readonly priorResults: readonly PriorResult[];
   /** A read-only step sent back sees the result it gave before. */
   readonly previousResult: StepResult | null;
+  /** The results this step gave on earlier rounds (a review's rejections), oldest first. */
+  readonly earlierResults: readonly StepResult[];
   readonly revisedBy: { readonly role: StepRole; readonly personaName: string } | null;
   /** The session runs in the lane sandbox, which loads no repo settings and blocks paths outside its profile. */
   readonly sandboxed?: boolean;
+  /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
+  readonly denials?: readonly Denial[];
+}
+
+/** A call the builder denied, and the note they gave. */
+export interface Denial {
+  readonly toolName: string;
+  readonly summary: string;
+  readonly note: string | null;
+}
+
+/** The longest call or note a prompt repeats; a denial is a pointer, not a transcript. */
+const MAX_DENIAL_CHARS = 400;
+
+const clip = (text: string): string =>
+  text.length > MAX_DENIAL_CHARS ? `${text.slice(0, MAX_DENIAL_CHARS)}…` : text;
+
+/**
+ * What the builder denied in this workstream, in words that cover equivalents. Empty when nothing
+ * was denied. A denial is the builder's answer for the whole workstream, so a new session, a resumed
+ * one and a compacted one all see it.
+ */
+function renderDenials(denials: readonly Denial[]): string[] {
+  if (denials.length === 0) return [];
+  const lines = denials.map(
+    (d) =>
+      `${d.toolName}: ${clip(d.summary)}${d.note ? `\n  Note from the builder: ${clip(d.note)}` : ''}`,
+  );
+  return [
+    'The builder denied these calls in this workstream. Each denial covers any equivalent: the same effect written another way (another program, a loop, a script, a wrapper or a different tool) is denied too. Do not run them or equivalents; work without them, or ask with ask_human.',
+    bullets(lines),
+  ];
 }
 
 export const HANDOFF_NUDGE =
@@ -83,6 +119,8 @@ const SANDBOX_RULES = [
   "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
   'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
+  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
+  "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.",
 ];
 
 const RULES = [
@@ -93,6 +131,8 @@ const RULES = [
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
   "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
+  // In the brief as well as the persona: a builder's edited persona is never overwritten.
+  'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
   'When the acceptance criteria are met and committed, end your turn.',
   'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
 ];
@@ -104,6 +144,11 @@ function readOnlyRules(role: StepRole): string[] {
     REVIEW_ROLES.includes(role)
       ? 'When you are done, call mcp__10db__complete_step with your findings and a verdict (approve or reject), then end your turn.'
       : 'When you are done, call mcp__10db__complete_step with your plan, then end your turn.',
+    ...(role === StepRole.Plan
+      ? [
+          'A task is about one pull request (about 300 changed lines), design and docs included. If a design or docs plan would grow past that, plan the part that stands alone and list the sections left out by name, one per decision, as follow-up tasks for the implementer to file.',
+        ]
+      : []),
     PLAIN_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
@@ -261,6 +306,38 @@ function actionSection(input: PromptInput): string {
   }
 }
 
+const FOLLOW_UPS_ELSEWHERE =
+  '(It also filed follow-up tasks. They are separate tasks: do not do them in this one.)';
+
+const FOLLOW_UP_HOW =
+  'Title each follow-up as an outcome (what is true when it is done) and describe what you saw and where; 10db files it as a task in the Icebox column and names it in your result.';
+
+/**
+ * What a review role is told about its round. The first round lists every blocking finding at once;
+ * a later round checks only the newest rejection (it already holds the older findings that were
+ * still open) plus what the fix broke, and files anything else it sees as a follow-up task.
+ */
+function roundSection(step: StepBrief, earlierResults: readonly StepResult[]): string[] {
+  if (!REVIEW_ROLES.includes(step.role)) return [];
+  const rejections = earlierResults.filter((r) => r.verdict === Verdict.Reject);
+  const latest = rejections.at(-1);
+  if (!latest) {
+    return [
+      '',
+      `This is round 1 of your step. If you reject, list every blocking finding you can see in one rejection, as numbered notes, so the fix can address them together. A real problem that does not block goes in the followUps list of mcp__10db__complete_step instead, not in the rejection. ${FOLLOW_UP_HOW}`,
+    ];
+  }
+  return [
+    '',
+    `This is round ${String(rejections.length + 1)} of your step: the work was sent back after your last rejection. Check only whether each earlier finding is fixed, and what the fix's own changes broke. Do not read the whole change again for new problems.`,
+    '',
+    'Findings from your earlier rounds (check only these):',
+    findingNotes(latest.summary),
+    '',
+    `Reject only for an earlier finding that is still not fixed or for something the fix's own changes broke, and number each one. A finding that is new and that the fix did not cause does not reject the work: put it in the followUps list of mcp__10db__complete_step. ${FOLLOW_UP_HOW} If every earlier finding is fixed and the fix broke nothing, approve.`,
+  ];
+}
+
 function stepSection(input: PromptInput): string[] {
   const { step } = input;
   const lines = [
@@ -272,7 +349,11 @@ function stepSection(input: PromptInput): string[] {
     lines.push('', 'Earlier steps:');
     for (const prior of input.priorResults) {
       const verdict = prior.result.verdict ? `: ${VERDICT_LABEL[prior.result.verdict]}` : '';
-      lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, prior.result.summary, '---');
+      const notes = findingNotes(prior.result.summary);
+      lines.push(`--- ${prior.role} (${prior.personaName})${verdict}`, notes);
+      // The follow-ups it filed are tasks of their own, so they are not this task's to do.
+      if (notes !== prior.result.summary) lines.push(FOLLOW_UPS_ELSEWHERE);
+      lines.push('---');
     }
   }
   if (input.previousResult) {
@@ -281,6 +362,7 @@ function stepSection(input: PromptInput): string[] {
       : '';
     lines.push('', `Your previous result${verdict}:`, input.previousResult.summary);
   }
+  lines.push(...roundSection(step, input.earlierResults));
   return lines;
 }
 
@@ -309,11 +391,13 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),
+    ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
     '',
     actionSection(input),
   ].join('\n');
 }
 
-export function compactionReinjection(pack: ContextPack): string {
-  return `10db: your conversation was compacted. Here is your context pack again:\n${JSON.stringify(pack, null, 2)}`;
+export function compactionReinjection(pack: ContextPack, denials: readonly Denial[] = []): string {
+  const again = `10db: your conversation was compacted. Here is your context pack again:\n${JSON.stringify(pack, null, 2)}`;
+  return denials.length === 0 ? again : [again, '', ...renderDenials(denials)].join('\n');
 }

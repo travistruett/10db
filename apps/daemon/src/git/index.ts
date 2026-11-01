@@ -7,6 +7,7 @@ export {
   WorktreeNotOursError,
   type BranchMerge,
   type CheckoutPlace,
+  type FolderAt,
   type Git,
   type SwitchBack,
 } from './git';

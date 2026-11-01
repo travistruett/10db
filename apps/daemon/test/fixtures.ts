@@ -116,7 +116,15 @@ export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cl
   const origin = tempDir('origin');
   const env = isolatedGitEnv();
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin.path], { env, stdio: 'pipe' });
-  for (const [key, value] of Object.entries(TEST_REPO_CONFIG))
+  // A test that commits in the origin itself (as GitHub's branch update does) needs an identity:
+  // CI's git can't guess one from the host name the way a Mac's does.
+  const originConfig = {
+    ...TEST_REPO_CONFIG,
+    'user.name': 'github',
+    'user.email': 'github@10db.invalid',
+    'commit.gpgsign': 'false',
+  };
+  for (const [key, value] of Object.entries(originConfig))
     execFileSync('git', ['--git-dir', origin.path, 'config', key, value], { env, stdio: 'pipe' });
   const repo = createTempRepo();
   execFileSync('git', ['-C', repo.path, 'remote', 'add', 'origin', origin.path], {
@@ -249,8 +257,12 @@ export function createMemoryKeychain(items: Record<string, string> = {}): Keycha
   const map = new Map(Object.entries(items));
   return {
     read: (account) => map.get(account) ?? null,
+    readAsync: (account) => Promise.resolve(map.get(account) ?? null),
     write: (account, secret) => {
       map.set(account, secret);
+    },
+    remove: (account) => {
+      map.delete(account);
     },
   };
 }

@@ -44,6 +44,9 @@ const DaemonEnv = z.object({
   // for every daemon that is not the installed app (e2e, live acceptance, `pnpm dev`): the free
   // quota is shared, and a throwaway daemon with no earlier sync would spend it.
   TENDB_BENCHMARKS: z.enum(['on', 'off']).optional(),
+  // `off` keeps the daemon from reading the OpenRouter key and from calling OpenRouter: every decision
+  // keeps today's rule. Set for every daemon that is not the installed app, as TENDB_BENCHMARKS is.
+  TENDB_JUDGE: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
 });

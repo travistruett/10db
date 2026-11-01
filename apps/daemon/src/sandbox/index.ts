@@ -6,11 +6,19 @@ export {
   SYSTEM_READS,
   type LaneProfileInput,
 } from './profile';
+export { autoModeRules } from './auto-mode-rules';
 export { protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export { claimSandboxTempRoot } from './stale-files';
+export {
+  createLedgerSweep,
+  reapLaneProcessLedgers,
+  type LaneProcessSetup,
+  type LedgerSweep,
+} from './lane-processes';
+export { systemProcessTable } from './process-table';
 export {
   createLaneTempDir,
   LANE_TEMP_ROOT,

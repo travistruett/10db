@@ -22,6 +22,7 @@ import {
   credentialProblem,
   missingAccountRefusal,
   modelMatches,
+  noAccountWhy,
   seenFrom,
   type SeenAccount,
 } from './account-check';
@@ -42,6 +43,7 @@ import {
   SessionEndReason,
   type AccountProbeSpec,
   type CompletionSpec,
+  type LanePermissionMode,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -49,8 +51,16 @@ import {
 } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
-/** How long Claude Code may take to report its account before the prompt is sent. */
-const BILLING_PREFLIGHT_MS = 15_000;
+/**
+ * How long one start of Claude Code may take to report its account before the prompt is sent. A lane
+ * runs at background priority, so on a busy Mac a start can be slow; a signed-out account is noticed
+ * after this wait on each of `START_ATTEMPTS` starts.
+ */
+const BILLING_PREFLIGHT_MS = 30_000;
+/** How many times a session starts Claude Code before no account from it reads as a signed-out account. */
+const START_ATTEMPTS = 2;
+/** The latest stderr of one start that is kept to say what Claude Code printed. */
+const STDERR_KEPT_CHARS = 4_000;
 /** How long an identity probe waits for `accountInfo()`. */
 const IDENTITY_PROBE_MS = 15_000;
 const STOP_GRACE_MS = 5_000;
@@ -84,6 +94,30 @@ export interface ClaudeAdapterOptions {
    * sandboxes every real session, and this adapter refuses one that arrives without a sandbox.
    */
   readonly allowUnsandboxed?: true;
+  /**
+   * The permission mode a sandboxed session runs in, over the one its spec carries. Only the live
+   * test sets it, to pin a mode whatever the app-wide setting says.
+   */
+  readonly lanePermissionMode?: LanePermissionMode;
+}
+
+/**
+ * What a sandboxed lane runs in when neither the adapter nor the session's spec names a mode. The
+ * hook asks 10db about the calls the classifier must not settle
+ * (docs/architecture/decisions/2026-10-31-lanes-run-in-auto-mode-inside-the-sandbox.md).
+ */
+const LANE_PERMISSION_MODE: LanePermissionMode = 'auto';
+
+/**
+ * Claude Code forces `default` mode while `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is `1`, so a session in
+ * auto mode sets it to `0`. The lane profile already denies every non-allowlisted name to Bash by
+ * name, and the processes outside the sandbox hold no lane-writable code.
+ */
+function laneMode(
+  spec: SessionSpec,
+  deps: Pick<QueryDeps, 'lanePermissionMode'>,
+): LanePermissionMode {
+  return deps.lanePermissionMode ?? spec.lanePermissionMode ?? LANE_PERMISSION_MODE;
 }
 
 export const UNSANDBOXED_REFUSAL =
@@ -109,6 +143,8 @@ interface QueryDeps {
   readonly recheckSettings: (what: string) => HookJSONOutput;
   /** True once the session has been refused after it started; every tool is denied from then on. */
   readonly isRefused: () => boolean;
+  /** The mode a sandboxed session runs in, over its spec's; `LANE_PERMISSION_MODE` when neither names one. */
+  readonly lanePermissionMode?: LanePermissionMode;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -161,9 +197,8 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
 
 /**
  * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them, and lanes never run in auto mode, so the check is defensive: a marked call
- * still becomes a card that no stored rule answers. The SDK passes these fields at runtime but its
- * typings omit them.
+ * classifier sets them; a marked call becomes a card that no stored rule answers. The SDK passes
+ * these fields at runtime but its typings omit them.
  */
 const EscalationFields = z.looseObject({
   requiresUserInteraction: z.boolean().optional(),
@@ -203,6 +238,21 @@ function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
   };
 }
 
+/**
+ * The inline settings of a sandboxed session. Claude Code reads `autoMode` only from user, managed
+ * or inline settings, never the repository's, so a repository cannot loosen the classifier's rules.
+ * The SDK's `settings` type has no `autoMode`; the object comes from `autoModeRules`, which validates it.
+ */
+function sandboxedSettings(
+  sandbox: NonNullable<SessionSpec['sandbox']>,
+): NonNullable<Options['settings']> {
+  return {
+    autoCompactEnabled: true,
+    permissions: { ask: [...sandbox.askRules] },
+    autoMode: sandbox.autoMode,
+  };
+}
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
   return {
@@ -210,7 +260,13 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: sandbox ? { ...spec.env, ...sandbox.env } : { ...spec.env },
+    env: sandbox
+      ? {
+          ...spec.env,
+          ...sandbox.env,
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: laneMode(spec, deps) === 'auto' ? '0' : '1',
+        }
+      : { ...spec.env },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
@@ -220,17 +276,15 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     strictMcpConfig: true,
     // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
     // settingSources. Compaction stays on as the emergency fallback.
-    settings: sandbox
-      ? { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } }
-      : { autoCompactEnabled: true },
+    settings: sandbox ? sandboxedSettings(sandbox) : { autoCompactEnabled: true },
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),
     plugins: [{ type: 'local', path: deps.pluginDir }],
     allowedTools: [...spec.allowedTools],
-    // What no allow rule covers reaches canUseTool; auto mode's classifier would approve calls the
-    // cards exist to ask about.
-    permissionMode: 'default',
+    // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
+    // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
+    permissionMode: sandbox ? laneMode(spec, deps) : 'default',
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
@@ -254,9 +308,17 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
               if (hookInput.hook_event_name !== 'PreToolUse') return {};
               if (!(await deps.billingVerified) || deps.isRefused())
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
-              return toHookOutput(
-                spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
-              );
+              try {
+                return toHookOutput(
+                  spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
+                );
+              } catch (error) {
+                // A guard that fails must never let the call run.
+                return toHookOutput({
+                  decision: 'deny',
+                  reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
+                });
+              }
             },
           ],
         },
@@ -295,10 +357,24 @@ function failedServersNote(names: readonly string[]): string {
   );
 }
 
+/** Where one start of Claude Code stands among the starts a session may make. */
+interface StartAttempt {
+  /** What each earlier start printed on stderr; one entry per earlier start that got no account. */
+  readonly earlier: readonly string[];
+  /** More starts follow this one. */
+  readonly last: boolean;
+  /**
+   * This start got no account and is closed without an `ended` event, so the session starts again:
+   * what it printed, and the messages sent to it that never reached claude.
+   */
+  readonly unanswered: (printed: string, unsent: readonly string[]) => void;
+}
+
 function startSession(
   spec: SessionSpec,
   opts: ClaudeAdapterOptions,
   runQuery: QueryFn,
+  attempt: StartAttempt,
 ): SessionHandle {
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
@@ -340,6 +416,12 @@ function startSession(
   const finished = new Promise<void>((resolve) => {
     markFinished = resolve;
   });
+  /** The latest of what claude printed on stderr, for the refusal when it reports no account. */
+  let stderrTail = '';
+  /** Closed without an `ended` event: the session starts claude again. */
+  let closedForRetry = false;
+  /** Messages sent before the prompt, which wait for the preflight and are lost if it fails. */
+  const unsent: string[] = [];
 
   const emit = (event: SessionEvent): void => {
     if (!ended) events.push(event);
@@ -350,14 +432,15 @@ function startSession(
     resolvePreflight(false);
     resolveVerified(false);
     input.end();
-    events.push({
-      type: 'ended',
-      reason,
-      message,
-      ...(failureRefusal && reason === SessionEndReason.AccountRefused
-        ? { refusal: failureRefusal }
-        : {}),
-    });
+    if (!closedForRetry)
+      events.push({
+        type: 'ended',
+        reason,
+        message,
+        ...(failureRefusal && reason === SessionEndReason.AccountRefused
+          ? { refusal: failureRefusal }
+          : {}),
+      });
     events.end();
     markFinished();
   };
@@ -388,6 +471,9 @@ function startSession(
       pluginDir: opts.pluginDir,
       abortController,
       billingVerified,
+      ...(opts.lanePermissionMode === undefined
+        ? {}
+        : { lanePermissionMode: opts.lanePermissionMode }),
       onSpawn: (p) => {
         pid = p;
       },
@@ -413,6 +499,7 @@ function startSession(
         return haltOutput;
       },
       onStderr: (chunk) => {
+        stderrTail = (stderrTail + chunk).slice(-STDERR_KEPT_CHARS);
         log.debug({ stderr: chunk.slice(0, STDERR_LOG_CHARS) }, 'claude stderr');
       },
     }),
@@ -437,9 +524,23 @@ function startSession(
     account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
     if (ended || failure) return;
     if (!account) {
-      const why = `Claude Code reported no account within ${String(BILLING_PREFLIGHT_MS / 1_000)} s`;
+      if (!attempt.last && !stopRequested) {
+        // One slow start says nothing about the account: close this claude and let the session start another.
+        // Nothing is logged of what it printed beyond its length; the refusal, if it comes, says it.
+        log.warn(
+          { printedChars: stderrTail.length },
+          'claude reported no account; starting it again',
+        );
+        closedForRetry = true;
+        end(SessionEndReason.Error, null);
+        void settleWithin(clock, q.interrupt(), graceMs);
+        abortController.abort();
+        attempt.unanswered(stderrTail, unsent);
+        return;
+      }
+      const { why, printed } = noAccountWhy(BILLING_PREFLIGHT_MS, [...attempt.earlier, stderrTail]);
       // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
-      const signedOut = missingAccountRefusal(spec.account, why);
+      const signedOut = missingAccountRefusal(spec.account, why, printed);
       if (signedOut)
         refuse(
           SessionEndReason.AccountRefused,
@@ -449,7 +550,7 @@ function startSession(
       else
         refuse(
           SessionEndReason.BillingRefused,
-          `Account check failed: ${why}. No prompt was sent. ${fixHint}`,
+          `Account check failed: ${why}. ${printed}. No prompt was sent. ${fixHint}`,
         );
       return;
     }
@@ -506,6 +607,8 @@ function startSession(
         subscriptionType: account?.subscriptionType,
         claudeCodeVersion: init.claude_code_version,
         model: init.model,
+        // The mode in effect, which is `default` where auto mode is unavailable whatever was asked for.
+        permissionMode: init.permissionMode,
       },
       'claude session billing',
     );
@@ -642,6 +745,7 @@ function startSession(
         input.push(userMessage(text, 'next'));
         return;
       }
+      unsent.push(text);
       void preflightOk.then((ok) => {
         if (ok && !halted()) input.push(userMessage(text, 'next'));
       });
@@ -660,6 +764,69 @@ function startSession(
       await finished;
       abortTimer.cancel();
       forceTimer.cancel();
+    },
+  };
+}
+
+/**
+ * A session that starts Claude Code again when a start gets no account from it, up to `START_ATTEMPTS`
+ * starts. A slow start (a lane runs at background priority) is not a signed-out account: only the
+ * last start's silence is refused. The first start closes without any event, so the caller sees one
+ * session; messages sent meanwhile go to the next start, and a stop in between ends it as stopped.
+ */
+function startWithRetry(
+  spec: SessionSpec,
+  opts: ClaudeAdapterOptions,
+  runQuery: QueryFn,
+): SessionHandle {
+  const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
+  const events = createChannel<SessionEvent>();
+  /** What each start that got no account printed. */
+  const printed: string[] = [];
+  /** Set by a start that closed for another; its unsent messages grow while the next one is made. */
+  let pending: { readonly unsent: string[] } | null = null;
+  let stopRequested = false;
+  let current: SessionHandle | null = null;
+  // Read through a function: TypeScript would otherwise keep the narrowing from the assignments.
+  const closedStart = (): { readonly unsent: string[] } | null => pending;
+  const stopAsked = (): boolean => stopRequested;
+  const settled = (async () => {
+    let carried: readonly string[] = [];
+    for (let number = 1; number <= START_ATTEMPTS; number += 1) {
+      pending = null;
+      const handle = startSession(spec, opts, runQuery, {
+        earlier: [...printed],
+        last: number === START_ATTEMPTS,
+        unanswered: (text, unsent) => {
+          printed.push(text);
+          pending = { unsent: [...unsent] };
+        },
+      });
+      current = handle;
+      for (const text of carried) handle.send(text);
+      for await (const event of handle.events) events.push(event);
+      const closed = closedStart();
+      if (!closed) break;
+      if (stopAsked()) {
+        events.push({ type: 'ended', reason: SessionEndReason.Stopped, message: null });
+        break;
+      }
+      log.info({ starts: number }, 'claude session starts again');
+      carried = closed.unsent;
+    }
+    events.end();
+  })();
+  return {
+    events,
+    send(text) {
+      const waiting = closedStart();
+      if (waiting) waiting.unsent.push(text);
+      else current?.send(text);
+    },
+    async stop() {
+      stopRequested = true;
+      await current?.stop();
+      await settled;
     },
   };
 }
@@ -789,7 +956,7 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
     start: (spec) =>
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)
-        : startSession(spec, opts, runQuery),
+        : startWithRetry(spec, opts, runQuery),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
     complete: (ask) => complete(ask, opts, runQuery),
   };

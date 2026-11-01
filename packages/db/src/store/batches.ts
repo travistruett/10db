@@ -11,11 +11,27 @@ import {
   WorkstreamState,
   type BatchDto,
   type BatchFailure,
+  fitNotice,
   type BatchId,
+  type CiStopped,
+  type Notice,
   type ProjectId,
+  type PullRequestMergeBlocked,
   type PullRequestStatusDto,
+  type RequiredChecksDto,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, isNotNull, isNull, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  notInArray,
+  or,
+  type SQL,
+} from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -36,6 +52,9 @@ export interface BatchPatch {
   readonly worktreePath?: string | null;
   readonly returnBranch?: string | null;
   readonly returnSha?: string | null;
+  readonly prRequired?: RequiredChecksDto | null;
+  readonly prMergeBlocked?: PullRequestMergeBlocked | null;
+  readonly ciStopped?: CiStopped | null;
 }
 
 /** The pull request status a batch row holds; null until the watcher has read it once. */
@@ -64,10 +83,16 @@ function toBatchDto(row: BatchRow): BatchDto {
     repo: row.repo,
     prUrl: row.prUrl,
     pr: toPullRequestStatus(row),
+    prRequired: row.prRequired,
+    prMergeBlocked: row.prMergeBlocked,
+    ciFixOf: row.ciFixOf,
+    ciFixHead: row.ciFixHead,
+    ciStopped: row.ciStopped,
     gateExitCode: row.gateExitCode,
     gateLogPath: row.gateLogPath,
     failure: row.failure,
     worktreePath: row.worktreePath,
+    notices: row.notices,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -115,14 +140,22 @@ export function listUnfinishedBatches(db: DbReader, projectId: ProjectId): Batch
     .map(toBatchDto);
 }
 
-/** The batch a project view shows: the newest unfinished one, else the latest. */
+/**
+ * The batch a project view shows (task placement spec, P5): the unfinished shared batch, else the
+ * newest finished one, else none. Never a copy's unfinished batch: `openBatches` lists those.
+ */
 export function currentBatch(db: DbReader, projectId: ProjectId): BatchDto | null {
-  const newest = listUnfinishedBatches(db, projectId)[0];
-  if (newest) return newest;
+  const shared = findUnfinishedBatch(db, projectId);
+  if (shared) return shared;
   const latest = db
     .select()
     .from(schema.batches)
-    .where(eq(schema.batches.projectId, projectId))
+    .where(
+      and(
+        eq(schema.batches.projectId, projectId),
+        notInArray(schema.batches.state, [...UNFINISHED_BATCH_STATES]),
+      ),
+    )
     .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
     .limit(1)
     .get();
@@ -195,6 +228,8 @@ export function insertBatch(
     readonly id?: BatchId;
     /** A worktree batch names its worktree here; a shared batch leaves it out and runs alone. */
     readonly worktreePath?: string;
+    /** A CI fix batch names the root batch it fixes and the pull request head it fixes. */
+    readonly ciFix?: { readonly of: BatchId; readonly head: string };
   },
 ): BatchDto {
   if (input.worktreePath === undefined) {
@@ -229,6 +264,12 @@ export function insertBatch(
     prFailingChecks: null,
     prCheckedAt: null,
     prUnknownReason: null,
+    prRequired: null,
+    prMergeBlocked: null,
+    ciFixOf: input.ciFix?.of ?? null,
+    ciFixHead: input.ciFix?.head ?? null,
+    ciStopped: null,
+    notices: [],
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -263,6 +304,40 @@ export function patchBatch(ctx: WriteContext, id: BatchId, patch: BatchPatch): B
     .run();
   emitBatch(ctx, id, { changed: Object.keys(patch) });
   return getBatch(ctx.tx, id);
+}
+
+/**
+ * Puts `notice` among the batch's notices, replacing the one with its key. Writes, and tells clients,
+ * only when that changes what the batch says, so a gate that finds the same thing again changes nothing.
+ * Resolves whether it changed.
+ */
+export function setBatchNotice(ctx: WriteContext, id: BatchId, given: Notice): boolean {
+  const notice = fitNotice(given);
+  const { notices } = getBatchRow(ctx.tx, id);
+  const at = notices.findIndex((n) => n.key === notice.key);
+  const current = notices[at];
+  if (current !== undefined && JSON.stringify(current) === JSON.stringify(notice)) return false;
+  const next = at < 0 ? [...notices, notice] : notices.map((n, i) => (i === at ? notice : n));
+  ctx.tx
+    .update(schema.batches)
+    .set({ notices: next, updatedAt: ctx.now })
+    .where(eq(schema.batches.id, id))
+    .run();
+  emitBatch(ctx, id, { changed: ['notices'] });
+  return true;
+}
+
+/** Takes the notice with this key off the batch; resolves whether there was one. */
+export function clearBatchNotice(ctx: WriteContext, id: BatchId, key: string): boolean {
+  const { notices } = getBatchRow(ctx.tx, id);
+  if (!notices.some((n) => n.key === key)) return false;
+  ctx.tx
+    .update(schema.batches)
+    .set({ notices: notices.filter((n) => n.key !== key), updatedAt: ctx.now })
+    .where(eq(schema.batches.id, id))
+    .run();
+  emitBatch(ctx, id, { changed: ['notices'] });
+  return true;
 }
 
 /** What the PR watcher read of a pull request; stored whole, so a read is never half a status. */

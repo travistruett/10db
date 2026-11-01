@@ -5,6 +5,7 @@ import {
   activeClaims,
   acquireClaims,
   claimRequestsForTask,
+  deleteAppSetting,
   getBatch,
   getBatchRow,
   getTask,
@@ -23,6 +24,7 @@ import { alive } from '../../test/orphan-gate';
 import { writeHook } from '../../test/git-hooks';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { GhError } from '../github';
+import { listNetworkHosts } from '../permissions';
 
 /** The repo's template, as a repository commits it at `.github/pull_request_template.md`. */
 const PR_TEMPLATE = [
@@ -243,6 +245,42 @@ describe('shipping', () => {
     expect(hostCards[0]?.options.map((o) => o.label)).toEqual(['Allow for the project', 'Not now']);
   });
 
+  it("names the file and recommends Allow on a blocked shipping gate's card for a project added before readings", async () => {
+    h = createDeliveryHarness(
+      { gateCommand: 'cargo test; exit 101' },
+      {
+        shipGate: (gate) => ({
+          run: async (request) => {
+            const result = await gate.run(request);
+            return { ...result, blockedHosts: ['index.crates.io'] };
+          },
+        }),
+      },
+    );
+    // The default branch commits a Cargo.lock three folders down; no reading was ever kept.
+    h.commit(
+      'apps/desktop/src-tauri/Cargo.lock',
+      'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    );
+    h.state.write((ctx) => {
+      deleteAppSetting(ctx, `network-hosts-found:${h.project.id}`);
+    });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(failed.state).toBe('FAILED');
+    const card = h.only(
+      h.cards().filter((c) => c.title === 'Allow network access to index.crates.io?'),
+    );
+    expect(card.body).toContain(
+      "The project's apps/desktop/src-tauri/Cargo.lock needs index.crates.io",
+    );
+    expect(card.recommendation).toBe('Allow for the project');
+    expect(listNetworkHosts(h.state.db, h.project.id)).toEqual([]);
+  });
+
   it("runs the project's full gate before the push, never its changed-packages check", async () => {
     h = createDeliveryHarness({ gateCommand: 'false', changedCheckCommand: 'true' });
     const { batch } = await openBatch('Add greetings', 'Alpha');
@@ -253,6 +291,60 @@ describe('shipping', () => {
     expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
       command: 'false',
     });
+  });
+
+  it('runs the pre-check in place of the gate when the project sets one, and says so in the pull request', async () => {
+    h = createDeliveryHarness({
+      gateCommand: 'echo FULL-GATE-RAN; exit 1',
+      changedCheckCommand: 'false',
+      precheckCommand: 'true',
+    });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const shipped = await finishAll(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    const started = batchLines(batch.id).filter((line) => line['msg'] === 'gate started');
+    expect(started).toMatchObject([{ command: 'true' }]);
+    const body = h.gh.body(shipped.prUrl ?? '');
+    expect(body).toContain(
+      "Checked on the Mac: true (pre-check). GitHub's required checks decide.",
+    );
+    expect(body).not.toContain('FULL-GATE-RAN');
+  });
+
+  it('fails the batch with a card naming the pre-check when it fails, and pushes nothing', async () => {
+    h = createDeliveryHarness({ gateCommand: 'true', precheckCommand: 'echo LINT-BROKE; exit 3' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(h.gh.prCreates()).toEqual([]);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('the pre-check failed (exit 3)');
+    expect(card.title).not.toContain('the gate failed');
+    expect(card.body).toContain('LINT-BROKE');
+  });
+
+  it('times a pre-check out like a gate, naming it', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: 'true', precheckCommand: 'sleep 30' },
+      { gateTimeoutMs: 300 },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const failed = await finishAll(batch);
+    expect(failed.state).toBe('FAILED');
+    expect(h.only(h.cards()).title).toContain('the pre-check timed out');
+    expect(onOrigin(batch.branch)).toBeNull();
+  });
+
+  it('says the gate ran in the pull request when no pre-check is set', async () => {
+    h = createDeliveryHarness({ gateCommand: 'true' });
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const shipped = await finishAll(batch);
+    expect(h.gh.body(shipped.prUrl ?? '')).toContain('Checked on the Mac: true (gate).');
   });
 
   it('ships a batch without a gate step when the project has none', async () => {

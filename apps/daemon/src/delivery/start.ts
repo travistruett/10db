@@ -1,4 +1,3 @@
-import { mkdirSync, realpathSync } from 'node:fs';
 import {
   ACTIVE_STATES,
   BatchStartInput,
@@ -45,7 +44,7 @@ import { jobKey, JobQueue } from './jobs';
 import { resolveStartCards } from './stale-cards';
 import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
-import { worktreePathFor } from './worktree-path';
+import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
 
 export interface BatchStarter {
@@ -152,7 +151,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       (group): Plans => new Map(group.tasks.map((t) => [t.id, planForStart(db, t.id)])),
     );
     // The stored path is the one git makes the worktree at, so the pin store finds the batch by it.
-    const root = madeWorktreeRoot();
+    const root = madeWorktreeRoot(ctx.worktreeRoot);
     return groups.map((group, i) => {
       const groupPlans = plans[i] ?? new Map<TaskId, StepPlanDto>();
       const target = targets[i] ?? { baseBranch: project.baseBranch, autoMerge: true };
@@ -173,18 +172,6 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       );
       return batch;
     });
-  }
-
-  /** The worktree root, made owner-only when missing, as a real path. */
-  function madeWorktreeRoot(): string {
-    try {
-      mkdirSync(ctx.worktreeRoot, { recursive: true, mode: 0o700 });
-      return realpathSync(ctx.worktreeRoot);
-    } catch (error) {
-      throw new InvalidError(
-        `10db can't make its worktree root ${ctx.worktreeRoot}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    }
   }
 
   /** A fix task joins the OPEN worktree batch it names, or reopens the FAILED one it names. */

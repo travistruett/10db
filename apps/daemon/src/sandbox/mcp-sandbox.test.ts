@@ -73,7 +73,12 @@ function forSession(
     systemPrefixes: [],
     runtime,
   }).forSession({
-    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
+    project: {
+      id: projectId,
+      repoPath: repo.path,
+      sandboxLoopback: false,
+      gateCommand: 'make gate',
+    },
     env: {
       PATH: '/usr/bin:/bin',
       HOME: home,
@@ -206,7 +211,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     "reaches no host, not even the project's or localhost, with the project's loopback %s",
     async (_name, loopback) => {
       const session = await forSession({
-        project: { id: projectId, repoPath: repo.path, sandboxLoopback: loopback },
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: loopback,
+          gateCommand: 'make gate',
+        },
       });
       try {
         // The lane's own commands still reach the project's hosts, and localhost by its switch.
@@ -234,7 +244,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it("reaches exactly the hosts its approval names, never the project's or localhost", async () => {
     const hosts = ['*.docs.example', 'api.example.org'];
     const session = await forSession({
-      project: { id: projectId, repoPath: repo.path, sandboxLoopback: true },
+      project: {
+        id: projectId,
+        repoPath: repo.path,
+        sandboxLoopback: true,
+        gateCommand: 'make gate',
+      },
       mcpServers: { docs: { ...SERVER, hosts }, other: { ...SERVER, hosts: [] } },
     });
     try {
@@ -273,8 +288,13 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       // The value itself is never in the report.
       expect(JSON.stringify(session.mcpFailures)).not.toContain('line-one');
       const { settingsFile, tmp, envFile } = launchOf(session, 'docs');
-      // Only the lane's own files and the started server's are left: the failed one's are gone.
-      expect(readdirSync(tmpRoot).sort()).toEqual(
+      // Only the lane's own files, the started server's and the daemon's process ledger are left:
+      // the failed one's are gone.
+      const left = readdirSync(tmpRoot);
+      expect(
+        left.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
+      ).toHaveLength(1);
+      expect(left.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
         [session.tmpDir, settingsFile, tmp, envFile, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
           .map((path) => path.slice(tmpRoot.length + 1))
           .sort(),

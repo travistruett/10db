@@ -1,9 +1,32 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
-import { findingBody, parseFindings, rejectionsSentBack, reviewRounds } from './review-rounds';
-import type { WorkstreamStep } from './steps';
+import {
+  findingBody,
+  findingNotes,
+  parseFindings,
+  rejectionsSentBack,
+  reviewRounds,
+} from './review-rounds';
+import { FOLLOW_UPS_HEADING, type WorkstreamStep } from './steps';
+
+describe('findingNotes', () => {
+  it('cuts the follow-up list 10db appended, and leaves notes without one as they are', () => {
+    const notes = '1. BLOCKING a.ts:1 still broken.';
+    expect(findingNotes(`${notes}\n\n${FOLLOW_UPS_HEADING}\n- tsk_x Fix b.ts:9 messages`)).toBe(
+      notes,
+    );
+    expect(findingNotes(notes)).toBe(notes);
+  });
+});
 
 describe('parseFindings', () => {
+  it('stops at the follow-up list 10db appends, which names tasks and is no finding', () => {
+    const summary = `1. BLOCKING a.ts:1 still broken.\n\n${FOLLOW_UPS_HEADING}\n- tsk_x Fix b.ts:9 messages`;
+    expect(parseFindings(summary)).toEqual([
+      { severity: 'BLOCKING', location: 'a.ts:1', text: 'BLOCKING a.ts:1 still broken.' },
+    ]);
+  });
+
   it.each([
     {
       name: 'a blocking finding with a file and line',
