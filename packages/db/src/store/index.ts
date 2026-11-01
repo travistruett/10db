@@ -6,6 +6,7 @@ export * from './claims';
 export * from './events';
 export * from './evidence';
 export * from './flows';
+export * from './goals';
 export * from './handoffs';
 export * from './holds';
 export * from './inbox';

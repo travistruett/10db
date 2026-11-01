@@ -19,6 +19,12 @@ import type {
   FailingCheckDto,
   FlowId,
   FlowStepDef,
+  GoalBudget,
+  GoalCriterionId,
+  GoalId,
+  GoalState,
+  CriterionCheck,
+  CriterionState,
   HandoffId,
   HandoffInput,
   HazardDef,
@@ -67,6 +73,7 @@ import type {
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
+  type AnySQLiteColumn,
   customType,
   index,
   integer,
@@ -303,10 +310,14 @@ export const tasks = sqliteTable(
       .$type<BoardColumnId>()
       .references(() => boardColumns.id),
     workspaceMode: text('workspace_mode').$type<'shared'>().notNull(),
+    /** The goal the task belongs to (goals spec §4); null for a task on its own. */
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references((): AnySQLiteColumn => goals.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('tasks_project_idx').on(t.projectId)],
+  (t) => [index('tasks_project_idx').on(t.projectId), index('tasks_goal_idx').on(t.goalId)],
 );
 
 export const taskDeps = sqliteTable(
@@ -761,3 +772,85 @@ export const aaModels = sqliteTable('aa_models', {
   data: text('data', { mode: 'json' }).$type<AaModelDto>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/** An outcome 10db pursues across many tasks (goals spec §4). Phase 1 writes only `draft`. */
+export const goals = sqliteTable(
+  'goals',
+  {
+    id: text('id').$type<GoalId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    objective: text('objective').notNull(),
+    caresMost: text('cares_most'),
+    /** The notes below the brief's front matter. */
+    description: text('description').notNull().default(''),
+    ownerId: text('owner_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    state: text('state').$type<GoalState>().notNull().default('draft'),
+    /** Tokens and dollars; null means no spend check (§6). */
+    budget: text('budget', { mode: 'json' }).$type<GoalBudget>(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('goals_project_idx').on(t.projectId)],
+);
+
+/** A goal's criteria in brief order (goals spec §5). Phase 1 writes them `unproven`. */
+export const goalCriteria = sqliteTable(
+  'goal_criteria',
+  {
+    id: text('id').$type<GoalCriterionId>().primaryKey(),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .notNull()
+      .references(() => goals.id),
+    position: integer('position').notNull(),
+    text: text('text').notNull(),
+    check: text('check').$type<CriterionCheck>().notNull(),
+    /** The task a `task` or `merged` criterion names. */
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    /** A `command` criterion's own command; null means the project's gate command. */
+    command: text('command'),
+    commandApproved: integer('command_approved', { mode: 'boolean' }).notNull().default(false),
+    /** Who accepts an `accept` criterion; null means the owner. */
+    personId: text('person_id')
+      .$type<PersonId>()
+      .references(() => people.id),
+    state: text('state').$type<CriterionState>().notNull().default('unproven'),
+    /** Evidence ids, pull request URLs or file paths. */
+    proof: text('proof', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    provenAt: text('proven_at'),
+    /** The person who ticked it, or `daemon`. */
+    provenBy: text('proven_by'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('goal_criteria_position_idx').on(t.goalId, t.position)],
+);
+
+/** When each person last opened each goal in Factory: the digest's window (goals spec §8). */
+export const goalViews = sqliteTable(
+  'goal_views',
+  {
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .notNull()
+      .references(() => goals.id),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .notNull()
+      .references(() => people.id),
+    openedAt: text('opened_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.goalId, t.personId] })],
+);
