@@ -250,6 +250,10 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .get('/accounts/pauses', (c) => c.json(deps.services.listAccountPauses()))
+    .post('/accounts/:accountId/resume', (c) =>
+      c.json(deps.services.resumeAccount(AccountId.parse(c.req.param('accountId')))),
+    )
     .post('/accounts/:accountId/archive', (c) =>
       c.json(deps.services.archiveAccount(AccountId.parse(c.req.param('accountId')))),
     )

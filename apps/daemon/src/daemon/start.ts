@@ -592,6 +592,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     startGate,
     runtime: accounts,
+    pauses: accountPauses,
     onSaved: () => {
       scheduler?.requestTick();
     },

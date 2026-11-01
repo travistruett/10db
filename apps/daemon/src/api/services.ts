@@ -6,6 +6,7 @@ import type {
   AccountId,
   AccountIdentityDto,
   AccountPatch,
+  AccountPauseDto,
   AccountSecretInput,
   AccountSignInDto,
   AccountUsageDto,
@@ -224,4 +225,8 @@ export interface ApiServices {
   accountIdentity(id: AccountId): Promise<AccountIdentityDto>;
   /** A month's tokens and dollars, in total and per project; `null` is the current month. */
   accountUsage(id: AccountId, month: string | null): AccountUsageDto;
+  /** The accounts paused now, with why, since when and until when. */
+  listAccountPauses(): AccountPauseDto[];
+  /** Lifts a refused or monthly-cap pause and answers the pauses still in force; a usage-limit pause is a conflict. */
+  resumeAccount(id: AccountId): AccountPauseDto[];
 }

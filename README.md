@@ -139,6 +139,11 @@ project's account in Settings, Billing. Sessions on an account run under its own
 metered account stops starting sessions at its monthly cap until the next month or a raised cap.
 `GET /accounts/<id>/usage?month=YYYY-MM` shows its tokens and dollars per project.
 
+Settings, Accounts shows each paused account's reason, when it began and, for a usage limit or a cap,
+when it ends. A refused or monthly-cap pause has a Resume button there (`POST /accounts/<id>/resume`), so
+answering Later on a "sessions refused" card never leaves the account stuck; a usage-limit pause ends by
+itself and offers none. `GET /accounts/pauses` lists them.
+
 A project can move to another account in Settings, Billing, even with work in flight. A running session
 finishes where it is, and each lane's next session runs on the new account, fresh from its latest handoff;
 work that was neither committed nor handed off stays behind. When an account hits its usage limit, each

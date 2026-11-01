@@ -97,6 +97,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     accountSignIn: track('accountSignIn'),
     accountIdentity: track('accountIdentity'),
     accountUsage: track('accountUsage'),
+    listAccountPauses: track('listAccountPauses'),
+    resumeAccount: track('resumeAccount'),
     ...overrides,
   };
 }

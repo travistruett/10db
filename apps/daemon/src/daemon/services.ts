@@ -271,6 +271,8 @@ export function createServices(deps: {
     accountSignIn: (id) => deps.accounts.signIn(id),
     accountIdentity: (id) => deps.accounts.identity(id),
     accountUsage: (id, month) => deps.accounts.usage(id, month),
+    listAccountPauses: () => deps.accounts.pauses(),
+    resumeAccount: (id) => deps.accounts.resume(id),
     getTeam(projectId) {
       getProject(db, projectId);
       return getTeam(db, projectId);
