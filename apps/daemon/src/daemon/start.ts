@@ -582,7 +582,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const watcher =
     opts.watch === false
       ? null
-      : createWatcher({ state, inbox, git, logger, clock, watch: opts.watch ?? systemWatch });
+      : createWatcher({
+          state,
+          bus,
+          inbox,
+          git,
+          logger,
+          clock,
+          watch: opts.watch ?? systemWatch,
+        });
   const keepAwake = createKeepAwake({
     state,
     spawn: opts.caffeinate ?? systemCaffeinate,
