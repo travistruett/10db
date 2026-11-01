@@ -50,7 +50,14 @@ export async function cutWorktree(
   const main = project.repoPath;
   const path = batch.worktreePath;
   if (path === null) throw new InvalidError(`Batch "${batch.title}" has no worktree path`);
-  const branch = batchBranchName(batch.title, batch.id);
+  // A CI fix batch is cut on the pull request's own branch, at the head CI failed on.
+  const fix =
+    batch.ciFixOf !== null && batch.ciFixHead !== null && batch.branch !== null
+      ? { branch: batch.branch, head: batch.ciFixHead }
+      : null;
+  if (batch.ciFixOf !== null && fix === null)
+    throw new InvalidError(`Fix batch "${batch.title}" has no branch or failing head to cut on`);
+  const branch = fix?.branch ?? batchBranchName(batch.title, batch.id);
   const made: { worktree: boolean; branch: boolean; base: string | null } = {
     worktree: false,
     branch: false,
@@ -132,13 +139,35 @@ export async function cutWorktree(
       return;
     }
     if (stopped()) return;
+    if (fix) {
+      // The pull request's branch as origin has it, then the local branch fast-forwarded to the head
+      // CI failed on. Nothing here is ever reset or forced, and a refusal leaves the branch as it was.
+      try {
+        await ctx.git.fetch(main, fix.branch, networkCall(ctx, signal));
+      } catch (error) {
+        if (!stopped()) await refuse(startCards.fetchFailed(fix.branch, error));
+        return;
+      }
+      try {
+        if (!(await ctx.git.hasCommit(main, fix.head)))
+          throw new InvalidError(
+            `origin's ${fix.branch} does not have commit ${fix.head}; the branch was rewritten`,
+          );
+        await ctx.git.fastForwardBranch(main, fix.branch, fix.head);
+      } catch (error) {
+        if (!stopped()) await refuse(startCards.notStarted(error));
+        return;
+      }
+      if (stopped()) return;
+    }
     let baseSha: string;
     try {
       baseSha = await ctx.git.addWorktree({
         repo: main,
         path,
         branch,
-        startPoint: base,
+        // The fix batch's branch exists: the batch it fixes made it, or the fast-forward above did.
+        startPoint: fix ? null : base,
         lockReason: worktreeLockReason(batchId),
       });
     } catch (error) {
@@ -147,7 +176,8 @@ export async function cutWorktree(
       return;
     }
     made.worktree = true;
-    made.branch = true;
+    // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
+    made.branch = fix === null;
     made.base = baseSha;
     try {
       const seeded = await seedWorktree({
