@@ -375,6 +375,7 @@ describe('worktree mode contracts', () => {
       repoPath: '/tmp/app',
       gateCommand: 'make gate',
       changedCheckCommand: null,
+      precheckCommand: null,
       areas: [],
       hazards: [],
       maxLanes: 2,

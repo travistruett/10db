@@ -1,4 +1,10 @@
-import { EventsHead, KeepAwakeStatus, PROTOCOL_VERSION, SystemCheckDto } from '@10db/contracts';
+import {
+  EventsHead,
+  KeepAwakeStatus,
+  LanePermissionsDto,
+  PROTOCOL_VERSION,
+  SystemCheckDto,
+} from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory } from '@tanstack/react-router';
@@ -54,6 +60,9 @@ export function baseHandlers(
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>
       HttpResponse.json(KeepAwakeStatus.parse({ mode: 'while_running', active: false })),
+    ),
+    http.get(daemonUrl('/settings/lane-permissions', base), () =>
+      HttpResponse.json(LanePermissionsDto.parse({ autoMode: true })),
     ),
     http.get(daemonUrl('/system', base), () =>
       HttpResponse.json(

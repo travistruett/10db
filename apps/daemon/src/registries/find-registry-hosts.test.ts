@@ -522,8 +522,13 @@ const CRAFTED: readonly {
 const GROWTH = 8;
 /** Linear time grows about GROWTH times, quadratic time GROWTH ** 2 (64) times: this lies between. */
 const MAX_TIME_GROWTH = 24;
-/** Each input is run this many times and the fastest kept: load only ever adds time. */
-const ATTEMPTS = 5;
+/**
+ * The small and large inputs are timed back to back this many times, and the lowest ratio of a pair is
+ * kept. Load only ever adds time, and both halves of a pair see the same load. Comparing the fastest
+ * small run with the fastest large run does not hold up under gate load: a busy spell that covers every
+ * large run but no small run reads as growth (39 times in one gate, where the reader grows about 9 times).
+ */
+const ATTEMPTS = 9;
 /**
  * The small text's time is never taken as less than this: below it a time is timer noise, and a linear
  * reader's few milliseconds on the large text must not look like growth. A quadratic one takes seconds
@@ -541,20 +546,20 @@ async function timeGrowth<T>(
   prepare: (text: string) => T,
   run: (input: T) => unknown,
 ): Promise<number> {
-  async function fastest(text: string): Promise<number> {
-    const input = prepare(text);
-    let best = Infinity;
-    for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
-      const started = performance.now();
-      await run(input);
-      best = Math.min(best, performance.now() - started);
-    }
-    return best;
+  async function timed(input: T): Promise<number> {
+    const started = performance.now();
+    await run(input);
+    return performance.now() - started;
   }
-  await fastest(crafted.text(crafted.size / GROWTH)); // warms the code before anything counts
-  const small = Math.max(await fastest(crafted.text(crafted.size / GROWTH)), FLOOR_MS);
-  const large = await fastest(crafted.text(crafted.size));
-  return large / small;
+  const small = prepare(crafted.text(crafted.size / GROWTH));
+  const large = prepare(crafted.text(crafted.size));
+  await timed(small); // warms the code before anything counts
+  let best = Infinity;
+  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+    const smallMs = Math.max(await timed(small), FLOOR_MS);
+    best = Math.min(best, (await timed(large)) / smallMs);
+  }
+  return best;
 }
 
 describe('the package files on crafted text', () => {

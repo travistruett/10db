@@ -59,6 +59,7 @@ import {
   createMigrationsBase,
   createBatchCardAnswers,
   createBranchCardAnswers,
+  createCiStopAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -391,6 +392,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -406,6 +408,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
+      answerCiStopCard?.(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
@@ -555,6 +558,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     generators: createWorktreeGenerators(worktreeTools),
   };
   answerBranchCard = createBranchCardAnswers(delivery);
+  answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
@@ -582,7 +586,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const watcher =
     opts.watch === false
       ? null
-      : createWatcher({ state, inbox, git, logger, clock, watch: opts.watch ?? systemWatch });
+      : createWatcher({
+          state,
+          bus,
+          inbox,
+          git,
+          logger,
+          clock,
+          watch: opts.watch ?? systemWatch,
+        });
   const keepAwake = createKeepAwake({
     state,
     spawn: opts.caffeinate ?? systemCaffeinate,
@@ -801,6 +813,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const prWatch = createPrWatch({
     ctx: delivery,
     clock,
+    ciFix: { dataDir: opts.dataDir },
+    // A pull request that merges or closes ends the fix session still working on it.
+    endFixes: {
+      cancel: (id) => createdRunner.cancel(id),
+      abandon: (id) => shipper.abandon(id),
+    },
     ...(opts.prWatchIntervalMs ? { intervalMs: opts.prWatchIntervalMs } : {}),
     // A merged pull request's local branch goes in the round that reads the merge.
     afterRound: (signal) => removeMergedBranches(delivery, signal),

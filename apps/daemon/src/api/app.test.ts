@@ -52,6 +52,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     systemCheck: none,
     keepAwake: () => ({ mode: 'while_running', active: false }),
     setKeepAwake: none,
+    lanePermissions: () => ({ autoMode: true }),
+    setLanePermissions: none,
     eventsHead: () => 0,
     reviewProjectMcp: none,
     inspectFolder: none,
@@ -192,6 +194,29 @@ describe('API', () => {
     expect(await (await put({ mode: 'always' })).json()).toEqual({ mode: 'always', active: true });
     expect((await put({ mode: 'sometimes' })).status).toBe(400);
     expect(modes).toEqual(['always']);
+  });
+
+  it('serves and sets the lane permission setting behind the token', async () => {
+    const seen: boolean[] = [];
+    const services = stubServices({
+      setLanePermissions: (autoMode) => {
+        seen.push(autoMode);
+        return { autoMode };
+      },
+    });
+    expect((await app(services).request('/settings/lane-permissions')).status).toBe(401);
+    expect(await (await app(services).request('/settings/lane-permissions', auth)).json()).toEqual({
+      autoMode: true,
+    });
+    const put = (body: unknown) =>
+      app(services).request('/settings/lane-permissions', {
+        method: 'PUT',
+        headers: { ...auth.headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect(await (await put({ autoMode: false })).json()).toEqual({ autoMode: false });
+    expect((await put({ autoMode: 'yes' })).status).toBe(400);
+    expect(seen).toEqual([false]);
   });
 
   it("reviews a project's repo MCP servers behind the token", async () => {
@@ -750,6 +775,11 @@ describe('batch routes', () => {
     repo: null,
     prUrl: null,
     pr: null,
+    prRequired: null,
+    prMergeBlocked: null,
+    ciFixOf: null,
+    ciFixHead: null,
+    ciStopped: null,
     gateExitCode: null,
     gateLogPath: null,
     failure: null,

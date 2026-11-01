@@ -371,6 +371,22 @@ export interface Git {
    */
   addWorktree(input: AddWorktreeInput): Promise<string>;
   /**
+   * Makes local branch `branch` point at commit `to`, which the object store must hold: made when
+   * there is none, moved when `to` descends from the tip, 'unchanged' when it is there already. Never
+   * a reset: a branch with commits `to` lacks, one checked out anywhere (main checkout, worktree,
+   * rebase, bisect) or one that moved meanwhile is refused with an InvalidError, and nothing changes.
+   */
+  fastForwardBranch(
+    repo: string,
+    branch: string,
+    to: string,
+  ): Promise<'unchanged' | 'created' | 'moved'>;
+  /**
+   * The commits `tip` has since `base` that are its own: first parents only, merges left out,
+   * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
+   */
+  ownCommitsSince(repo: string, base: string, tip: string): Promise<string[]>;
+  /**
    * Removes a 10db worktree of `repo` at `path` and its pin; 'absent' when git lists none and
    * nothing is there. Anything else at `path`, or a path outside the worktree root, is refused.
    */
@@ -2000,6 +2016,46 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function fastForwardBranch(
+    repo: string,
+    branch: string,
+    to: string,
+  ): Promise<'unchanged' | 'created' | 'moved'> {
+    if (!OBJECT_ID.test(to)) throw new InvalidError(`${to} is not a commit id`);
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const ref = `refs/heads/${branch}`;
+      if ((await revParse(c, `${to}^{commit}`)) === null)
+        throw new InvalidError(`${to} is not in the repository`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === to) return 'unchanged';
+      const update = async (old: string): Promise<void> => {
+        try {
+          // The old value makes a branch that moved meanwhile, or one made meanwhile, a refusal.
+          await git(c, ['update-ref', '--no-deref', ref, to, old]);
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error;
+          throw new InvalidError(
+            `Branch ${branch} could not be set to ${to}: it changed, or the name is not valid`,
+          );
+        }
+      };
+      if (tip === null) {
+        await update('0'.repeat(to.length));
+        return 'created';
+      }
+      const holder = await branchInUse(c, branch);
+      if (holder !== null)
+        throw new InvalidError(
+          `Branch ${branch} is checked out at ${holder}, so it can't be moved to ${to}`,
+        );
+      if (!(await isAncestor(c, tip, to)))
+        throw new InvalidError(`Branch ${branch} is at ${tip}, which ${to} does not descend from`);
+      await update(tip);
+      return 'moved';
+    });
+  }
+
   async function listWorktrees(main: Pinned): Promise<WorktreeEntry[]> {
     return parseWorktreeList(await git(main, ['worktree', 'list', '--porcelain', '-z']));
   }
@@ -2303,6 +2359,19 @@ export function createGit(opts: GitOptions = {}): Git {
       return type === 'blob' && REGULAR_FILE_MODES.includes(mode) ? oid : null;
     },
     addWorktree,
+    fastForwardBranch,
+    async ownCommitsSince(repo, base, tip) {
+      return (
+        await git(await pinned(repo), [
+          'rev-list',
+          '--first-parent',
+          '--no-merges',
+          `${base}..${tip}`,
+        ])
+      )
+        .split('\n')
+        .filter(Boolean);
+    },
     removeWorktree,
     worktreeChanges,
     worktreeIgnoredFiles,

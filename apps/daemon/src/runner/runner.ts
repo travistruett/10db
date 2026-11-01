@@ -109,6 +109,7 @@ import {
   gateNote,
   MIGRATIONS_HAZARD,
   projectAtCheckout,
+  stepCheck,
   type BaseUpdate,
   type BaseUpdates,
   type MigrationsBase,
@@ -132,7 +133,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { allowedToolsFor, storableRule } from '../permissions';
+import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { escalateStep, offeredProfiles } from '../routing';
 import {
@@ -1606,6 +1607,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        ...(laneSession
+          ? {
+              lanePermissionMode: laneAutoMode(db, (stored) => {
+                opts.logger.warn(
+                  { stored },
+                  'the lane auto mode setting is not a boolean; using default mode',
+                );
+              })
+                ? 'auto'
+                : 'default',
+            }
+          : {}),
         allowedTools: allowedToolsFor(
           project,
           step.tools,
@@ -2125,10 +2138,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       sendBackUncommitted(id, ctl, row, uncommitted);
       return;
     }
-    // A project with a changed-packages check has each step checked by it; the ship gate runs the
-    // full gate command before the push. Without a gate command the builder checks, as ever.
-    const gateCommand =
-      project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
+    // A project with a pre-check (pull request delivery) has each step checked by it, and the ship
+    // runs it in place of the gate. Otherwise a project with a changed-packages check has each step
+    // checked by it, and the ship gate runs the full gate command before the push. Without a gate
+    // command the builder checks, as ever.
+    const gateCommand = stepCheck(project)?.command ?? null;
     if (gateCommand === null) {
       await finishWithoutGate(id, ctl, row, checkout);
       return;

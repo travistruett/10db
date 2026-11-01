@@ -1,6 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
 import { commandForms, startsWithWords } from './command-forms';
-import { commandOf, shellQuote, shellScripts } from './judge';
+import { SHELLS, commandOf, shellQuote, shellScripts, redirectionReadings } from './judge';
 import { findExecCommands, parseShell } from './shell-words';
 
 /** The deepest `sh -c`, `eval` and `find -exec` nesting the guard follows. */
@@ -29,7 +29,7 @@ export function hazardHit(
     const inner = [...segment.nested, ...segment.hereDocuments].map((body) => ({ body, depth }));
     if (depth < MAX_DEPTH) {
       const deeper = depth + 1;
-      if (head === 'sh' || head === 'bash' || head === 'zsh') {
+      if (SHELLS.has(head)) {
         inner.push(...shellScripts(words).map((body) => ({ body, depth: deeper })));
       }
       if (head === 'find') {
@@ -42,9 +42,13 @@ export function hazardHit(
       const found = hazardHit(next.body, hazards, next.depth);
       if (found !== null) return found;
     }
-    const forms = commandForms(words);
+    const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     for (const hazard of hazards) {
-      if (hazard.commands.some((c) => forms.bare.some((f) => startsWithWords(f, c.split(' '))))) {
+      if (
+        hazard.commands.some((c) =>
+          readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
+        )
+      ) {
         return { name: hazard.name, words };
       }
     }

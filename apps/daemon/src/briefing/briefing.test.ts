@@ -495,6 +495,30 @@ describe('buildSessionPrompt for flow steps', () => {
   });
 
   it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])(
+    'tells %s what the auto-mode classifier refuses and that a new host is refused',
+    (_name, step) => {
+      const prompt = buildSessionPrompt({
+        ...base,
+        step,
+        action: { kind: 'start' },
+        sandboxed: true,
+      });
+      expect(prompt).toContain("Claude Code's auto mode refuses");
+      expect(prompt).toContain('running the full gate');
+      expect(prompt).toContain('CPU load');
+      expect(prompt).toContain("outside this lane's worktree");
+      expect(prompt).toContain(
+        "A command that reaches a network host outside the project's allowed domains is refused",
+      );
+      expect(prompt).toContain('wait on a card from the builder');
+      expect(prompt).toContain('AskUserQuestion');
+    },
+  );
+
+  it.each([
     ['sandboxed: false', { sandboxed: false }],
     ['no sandbox flag', {}],
   ])('says nothing of the sandbox with %s', (_name, flag) => {
@@ -503,6 +527,7 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).not.toContain('mktemp');
       expect(prompt).not.toContain('Operation not permitted');
       expect(prompt).not.toContain('agent instructions');
+      expect(prompt).not.toContain('auto mode');
     }
   });
 
@@ -697,6 +722,29 @@ describe('the gate in a brief', () => {
 
   it.each(briefs)('%s: never tells the agent to run the gate', (_name, brief) => {
     expect(gateInstructions(brief)).toEqual([]);
+  });
+
+  it('tells an implement step to stop a long design or docs change and file the rest as follow-ups', () => {
+    const brief = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(brief).toContain('past about 300 lines');
+    expect(brief).toContain('mcp__10db__file_follow_up');
+    expect(brief).toContain('Icebox');
+  });
+
+  it('tells a plan step to keep a design or docs plan to about one pull request', () => {
+    const brief = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'plan', personaName: 'Planner', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(brief).toContain('about 300 changed lines');
+    expect(brief).toContain('one per decision');
+    const review = buildSessionPrompt({
+      ...base,
+      step: { ...implementStep, role: 'review', personaName: 'Reviewer', tools: 'read_only' },
+      action: { kind: 'start' },
+    });
+    expect(review).not.toContain('about 300 changed lines');
   });
 
   it('tells a lane to run only the checks for what it changed', () => {

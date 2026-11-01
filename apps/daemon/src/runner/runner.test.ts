@@ -62,7 +62,7 @@ import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
 import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
-import { allowedToolsFor, listNetworkHosts } from '../permissions';
+import { allowedToolsFor, listNetworkHosts, setLaneAutoMode } from '../permissions';
 import {
   createLaneSandbox,
   SandboxedMcpServer,
@@ -239,6 +239,64 @@ describe('runner', () => {
     engine = await createTestEngine(
       { Alpha: [[write('src/api/a.txt'), commit('op-alpha-chg-1', ['src/api/a.txt']), turn]] },
       { gateCommand: 'echo FULL-GATE-RAN; exit 3', changedCheckCommand: 'true' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [check] = listEvidence(engine.store.db, workstream.id);
+    expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
+  });
+
+  it('checks a step with the pre-check in pull request delivery, never the gate or the changed-packages check', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-alpha-pre-1', ['src/api/a.txt']), turn]] },
+      {
+        delivery: 'pull_request',
+        gateCommand: 'echo FULL-GATE-RAN; exit 3',
+        changedCheckCommand: 'echo CHANGED-RAN; exit 4',
+        precheckCommand: 'true',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [check] = listEvidence(engine.store.db, workstream.id);
+    expect(check).toMatchObject({ kind: 'gate', command: 'true', exitCode: 0 });
+  });
+
+  it('sends a failed pre-check back as a fix with its output', async () => {
+    engine = await createTestEngine(
+      {
+        Alpha: [
+          [turn],
+          [write('src/api/fixed.txt'), commit('op-pre-fix-1', ['src/api/fixed.txt']), turn],
+        ],
+      },
+      {
+        delivery: 'pull_request',
+        gateCommand: 'true',
+        precheckCommand: 'test -f src/api/fixed.txt || { echo PRECHECK-MISSING; exit 2; }',
+      },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'fix' } });
+
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[1]?.prompt).toContain('PRECHECK-MISSING');
+  });
+
+  it('keeps checking a step with the gate in local delivery, whatever the pre-check', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[write('src/api/a.txt'), commit('op-alpha-pre-2', ['src/api/a.txt']), turn]] },
+      { delivery: 'local', gateCommand: 'true', precheckCommand: 'exit 9' },
     );
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -3895,6 +3953,26 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(specs[0]?.prompt).not.toContain('mktemp');
     },
   );
+
+  it('reads the app-wide auto mode setting when each session starts', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]], Beta: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+    );
+    const specs = recordSpecs();
+    const first = engine.addTask('Alpha');
+    engine.launch(first.workstream.id);
+    await engine.runner.idle();
+    engine.state.write((ctx) => {
+      setLaneAutoMode(ctx, false);
+    });
+    const second = engine.addTask('Beta');
+    engine.launch(second.workstream.id);
+    await engine.runner.idle();
+    expect(specs.map((spec) => spec.lanePermissionMode)).toEqual(['auto', 'default']);
+  });
 
   it("reads the project's localhost switch when each session starts, so a change applies at the next one", async () => {
     const probe = sandboxProbe();

@@ -16,6 +16,8 @@ export interface TaskCardProps {
   readonly workstream: WorkstreamDto | undefined;
   /** The batch the workstream ships in; it says whether finished work was shipped. */
   readonly batch?: BatchDto | undefined;
+  /** Every batch of the project: a CI fix batch finds the root that holds the required checks. */
+  readonly batches?: readonly BatchDto[] | undefined;
   /** The project's gate command, named while the task is checked. */
   readonly gateCommand?: string | null | undefined;
   /** Titles and statuses of the project's tasks, for the dependency marker. */
@@ -63,10 +65,13 @@ export function cardSummary(
   landing: string | null = null,
   startNote: StartNote | null = null,
   place?: number,
+  batches?: readonly BatchDto[],
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
-  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand, place);
+  const state = startNote
+    ? noteState(startNote)
+    : taskState(workstream, batch, gateCommand, place, batches);
   const sentBack = reviewSentBackLine(workstream);
   const atLimit = shippedAtLimitLine(workstream);
   return [
@@ -88,6 +93,7 @@ export function TaskCard({
   task,
   workstream,
   batch,
+  batches,
   gateCommand = null,
   peers,
   pullRequest,
@@ -97,7 +103,9 @@ export function TaskCard({
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
-  const state = startNote ? noteState(startNote) : taskState(workstream, batch, gateCommand, place);
+  const state = startNote
+    ? noteState(startNote)
+    : taskState(workstream, batch, gateCommand, place, batches);
   const sentBack = reviewSentBackLine(workstream);
   const atLimit = shippedAtLimitLine(workstream);
   // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker

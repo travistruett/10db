@@ -11,6 +11,7 @@ import {
   mintId,
   NAME_LANDING_BRANCH,
   NotFoundError,
+  PRECHECK_NEEDS_GATE,
   ProjectInput,
   ProjectLanding,
   ProjectPatch,
@@ -196,6 +197,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
     landing === ProjectLanding.Branch ? (changes.landingBranch ?? current.landingBranch) : null;
   if (landing === ProjectLanding.Branch && landingBranch === null)
     throw new InvalidError(NAME_LANDING_BRANCH);
+  // A project with no gate command runs nothing, so a pre-check there would check nothing.
+  const gateCommand = changes.gateCommand === undefined ? current.gateCommand : changes.gateCommand;
+  const precheckCommand =
+    changes.precheckCommand === undefined ? current.precheckCommand : changes.precheckCommand;
+  if (precheckCommand !== null && gateCommand === null) throw new InvalidError(PRECHECK_NEEDS_GATE);
   const moving = changes.accountId !== undefined && changes.accountId !== current.accountId;
   if (changes.accountId !== undefined && moving) {
     // Work in flight moves too: each lane's next session runs on the new account.

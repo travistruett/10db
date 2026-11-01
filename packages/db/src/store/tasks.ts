@@ -21,8 +21,10 @@ import {
   TaskStatus,
   taskLandingFor,
   Title,
+  WorkstreamId,
   WorkstreamState,
   type BoardColumnId,
+  type CiStopped,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -36,6 +38,7 @@ import { and, asc, desc, eq, inArray, max, ne } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
+import { getProposal } from './knowledge';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { transitionWorkstream } from './workstreams';
@@ -50,6 +53,8 @@ export interface BoardStatusInput {
   readonly pullRequest?: {
     readonly url: string | null;
     readonly state: PullRequestState | null;
+    /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
+    readonly ciStopped?: CiStopped | null;
   } | null;
 }
 
@@ -57,7 +62,8 @@ export interface BoardStatusInput {
  * Board column for a task (spec §5.1): Ready means deps done and nothing blocking. A finished task
  * is not Done until its pull request has merged: while its batch ships it is In progress, once the
  * pull request is open it is In review, and when the ship failed, or the pull request closed
- * without merging, it is Blocked, where the builder decides.
+ * without merging, it is Blocked, where the builder decides. An open pull request whose CI fixes
+ * stopped is Blocked too (CI-decides spec §4).
  */
 export function deriveBoardStatus({
   taskStatus,
@@ -66,10 +72,14 @@ export function deriveBoardStatus({
   batchState = null,
   pullRequest = null,
 }: BoardStatusInput): BoardStatus {
-  const shipped =
+  const column =
     batchState === BatchState.Shipped && pullRequest?.url
       ? pullRequestColumn(pullRequest.state)
       : null;
+  const shipped =
+    column === BoardStatus.InReview && (pullRequest?.ciStopped ?? null) !== null
+      ? BoardStatus.Blocked
+      : column;
   switch (taskStatus) {
     case TaskStatus.Done:
       if (batchState === BatchState.Shipping) return BoardStatus.InProgress;
@@ -186,8 +196,39 @@ function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): Wo
 }
 
 /**
- * Files an accepted new-task proposal as an open task linked to it. The proposal names no areas or
- * acceptance criteria, so the task starts with none; its title meets the same rule as a task made by hand.
+ * The areas a task filed from a proposal works in: those of the task whose session raised it, else
+ * the project's only area. Empty when neither says (several areas and no raising task), and then the
+ * task can't start until the builder names them.
+ */
+function areasForProposal(
+  tx: DbReader,
+  proposalId: ProposalId,
+  project: ProjectDto,
+): readonly string[] {
+  const proposal = getProposal(tx, proposalId);
+  const source = tx
+    .select({ ref: schema.sources.ref })
+    .from(schema.sources)
+    .where(eq(schema.sources.id, proposal.sourceId))
+    .get();
+  const workstreamId = WorkstreamId.safeParse(source?.ref['workstreamId']);
+  if (workstreamId.success) {
+    const raiser = tx
+      .select({ areas: schema.tasks.areas })
+      .from(schema.workstreams)
+      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+      .where(eq(schema.workstreams.id, workstreamId.data))
+      .get();
+    if (raiser && raiser.areas.length > 0) return raiser.areas;
+  }
+  const [only, ...others] = project.areas;
+  return only && others.length === 0 ? [only.name] : [];
+}
+
+/**
+ * Files an accepted new-task proposal as an open task linked to it. The proposal names no acceptance
+ * criteria, so the task starts with none; its title meets the same rule as a task made by hand. Its
+ * areas come from the task that raised it, or the project's only area (`areasForProposal`).
  */
 export function insertTaskFromProposal(
   ctx: WriteContext,
@@ -205,7 +246,7 @@ export function insertTaskFromProposal(
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
-    areas: [],
+    areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
     riskTags: [],
     flowId: null,
@@ -405,6 +446,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       batchState: schema.batches.state,
       prUrl: schema.batches.prUrl,
       prState: schema.batches.prState,
+      ciStopped: schema.batches.ciStopped,
     })
     .from(schema.workstreams)
     .leftJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
@@ -433,7 +475,9 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       depsDone: dependenciesDone(db, row.id),
       workstreamState: latest?.state ?? null,
       batchState: latest?.batchState ?? null,
-      pullRequest: latest ? { url: latest.prUrl, state: latest.prState } : null,
+      pullRequest: latest
+        ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
+        : null,
     }),
     workstreamId: latest?.id ?? null,
     createdAt: row.createdAt,

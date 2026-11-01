@@ -4,6 +4,7 @@ import { AccountsSection } from './accounts/accounts-section';
 import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
+import { LanePermissionsSection } from './lane-permissions-section';
 import { PlannedSection } from './planned-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { ProjectAreas } from './project-areas';
@@ -65,6 +66,13 @@ export function SectionBody({
         <>
           {heading}
           <KeepAwakeSection />
+        </>
+      );
+    case SettingsSectionKey.LanePermissions:
+      return (
+        <>
+          {heading}
+          <LanePermissionsSection />
         </>
       );
     case SettingsSectionKey.Accounts:

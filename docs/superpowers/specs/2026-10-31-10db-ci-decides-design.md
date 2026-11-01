@@ -119,11 +119,13 @@ keyed by the root, so none is raised twice. The required checks are stored as `p
 | every required check `pass` or `skipping`         | `passing`           |                                                                |
 | any `pending`, or `cancel`, and none `fail`       | `pending`           | a cancelled run is usually one a newer push replaced           |
 | any `fail`                                        | `failing`           | the failing jobs, with links                                   |
-| "no required checks reported" (exit 1, on stderr) | `none`              | before GitHub lists the runs, or a base without required checks |
+| "no required checks reported" (exit 1, on stderr) | `none`              | a base with checks but none of them required |
+| "no checks reported" (exit 1, on stderr)          | `none`              | the head has no checks: before GitHub lists the runs, or no CI |
 | any other error                                   | unchanged           | the watch's unknown read, as today                             |
 
-The parser takes the exit code and both streams together; "none" is matched on stderr only, so a network or auth
-failure is never read as no required checks. `gh pr view` also gains `mergeStateStatus`, stored as
+The parser takes the exit code and both streams together; "none" is matched against the whole of stderr, so a
+network or auth failure is never read as no required checks. What gh 2.83.2 prints is recorded in
+`docs/architecture/research/spike-15-gh-ci-checks.md`. `gh pr view` also gains `mergeStateStatus`, stored as
 `pr_merge_blocked` (`conflicts` for `DIRTY`, `behind` for `BEHIND`, else null): GitHub runs no workflow on a pull
 request that conflicts, so the card says that rather than "CI running" (§5).
 
@@ -170,7 +172,7 @@ fix is no longer needed (below). **(call: no disarm)**
 - **The fix session** is a lane like any other: its plan, review and per-step check (the pre-check, §3) are the
   task's.
 - **Its ship** first reads the pull request (`prStatus`). Merged or closed: the batch ends `CLOSED` with nothing
-  pushed. Then, if `git rev-list --no-merges H..<tip>` is empty, the fix changed nothing: the batch ends `CLOSED`
+  pushed. Then, if `git rev-list --first-parent --no-merges H..<tip>` is empty (`--first-parent`, because a merge of the base into the branch brings the base's own non-merge commits into `H..<tip>`), the fix changed nothing: the batch ends `CLOSED`
   with nothing pushed and the next watch round stops (step 2). Merges are left out because the per-step check's
   base update (#173, `beforeGate` in `runner.ts`) merges `origin/<base>` into the branch, so a fix that wrote
   nothing still has a new tip whenever the base has moved since `H`. Otherwise the ship's steps run as for any batch: base update (#173), pre-check, push (a

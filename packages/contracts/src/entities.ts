@@ -114,7 +114,7 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   {
     name: 'migrations',
     globs: ['**/migrations/**', '**/drizzle/**'],
-    commands: ['drizzle-kit generate', 'pnpm db:migrate'],
+    commands: ['drizzle-kit generate', 'pnpm db:migrate', 'npm db:migrate', 'yarn db:migrate'],
     // The migrations run against a database every copy shares.
     scope: HazardScope.Project,
   },
@@ -127,6 +127,15 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       'pnpm rm',
       'pnpm install',
       'pnpm i',
+      'pnpm it',
+      'pnpm ci',
+      'pnpm install-test',
+      'pnpm clean-install',
+      'bun add',
+      'bun remove',
+      'bun install',
+      'bun i',
+      'bun update',
       'pnpm update',
       'pnpm up',
       'pnpm uninstall',
@@ -139,8 +148,14 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
       // every lane in a shared checkout reads.
       'npm ci',
       'npm uninstall',
+      'npm install-test',
+      'npm update',
       'npm un',
       'yarn add',
+      'yarn remove',
+      'yarn install',
+      'yarn up',
+      'yarn upgrade',
       'cargo add',
       'cargo remove',
       'cargo update',
@@ -186,6 +201,12 @@ const UsageHandoffAt = z.number().min(USAGE_HANDOFF_MIN).max(USAGE_HANDOFF_MAX);
 /** The refusal for a default landing in a branch that is not named. */
 export const NAME_LANDING_BRANCH = 'Name the branch new tasks land in';
 
+/**
+ * The refusal for a pre-check on a project with no gate command, and for clearing the gate command
+ * while a pre-check is set: a project without a gate command runs nothing.
+ */
+export const PRECHECK_NEEDS_GATE = 'A pre-check needs a gate command: set a gate command first';
+
 export const ProjectInput = z
   .object({
     name: z.string().min(1),
@@ -198,6 +219,12 @@ export const ProjectInput = z
      * gate command for both.
      */
     changedCheckCommand: z.string().min(1).nullable().default(null),
+    /**
+     * The command that runs on the Mac in place of the gate when the pull request's base branch has
+     * required checks on GitHub (CI-decides spec §3). Null keeps running the gate. Refused without
+     * a gate command.
+     */
+    precheckCommand: z.string().min(1).nullable().default(null),
     areas: z.array(AreaDef).min(1),
     hazards: z.array(HazardDef).default(() => [...DEFAULT_HAZARDS]),
     maxLanes: z.int().min(1).max(16).default(2),
@@ -257,6 +284,10 @@ export const ProjectInput = z
     message: NAME_LANDING_BRANCH,
     path: ['landingBranch'],
   })
+  .refine((p) => p.precheckCommand === null || p.gateCommand !== null, {
+    message: PRECHECK_NEEDS_GATE,
+    path: ['precheckCommand'],
+  })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
     {
@@ -273,6 +304,8 @@ export const ProjectDto = z.object({
   repoPath: z.string(),
   gateCommand: z.string().nullable(),
   changedCheckCommand: z.string().nullable(),
+  /** Runs in place of the gate when the base has required checks; null keeps the gate. */
+  precheckCommand: z.string().nullable(),
   areas: z.array(AreaDef),
   hazards: z.array(HazardDef),
   maxLanes: z.int(),
@@ -318,6 +351,8 @@ export const ProjectPatch = z
     name: z.string().min(1),
     gateCommand: z.string().min(1).nullable(),
     changedCheckCommand: z.string().min(1).nullable(),
+    /** Refused while the project (after this patch) has no gate command. */
+    precheckCommand: z.string().min(1).nullable(),
     maxLanes: z.int().min(1).max(16),
     handoffPct: z.int().min(5).max(95),
     nudgePct: z.int().min(6).max(98),

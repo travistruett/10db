@@ -13,9 +13,12 @@ import {
   type BatchFailure,
   fitNotice,
   type BatchId,
+  type CiStopped,
   type Notice,
   type ProjectId,
+  type PullRequestMergeBlocked,
   type PullRequestStatusDto,
+  type RequiredChecksDto,
 } from '@10db/contracts';
 import {
   and,
@@ -49,6 +52,9 @@ export interface BatchPatch {
   readonly worktreePath?: string | null;
   readonly returnBranch?: string | null;
   readonly returnSha?: string | null;
+  readonly prRequired?: RequiredChecksDto | null;
+  readonly prMergeBlocked?: PullRequestMergeBlocked | null;
+  readonly ciStopped?: CiStopped | null;
 }
 
 /** The pull request status a batch row holds; null until the watcher has read it once. */
@@ -77,6 +83,11 @@ function toBatchDto(row: BatchRow): BatchDto {
     repo: row.repo,
     prUrl: row.prUrl,
     pr: toPullRequestStatus(row),
+    prRequired: row.prRequired,
+    prMergeBlocked: row.prMergeBlocked,
+    ciFixOf: row.ciFixOf,
+    ciFixHead: row.ciFixHead,
+    ciStopped: row.ciStopped,
     gateExitCode: row.gateExitCode,
     gateLogPath: row.gateLogPath,
     failure: row.failure,
@@ -217,6 +228,8 @@ export function insertBatch(
     readonly id?: BatchId;
     /** A worktree batch names its worktree here; a shared batch leaves it out and runs alone. */
     readonly worktreePath?: string;
+    /** A CI fix batch names the root batch it fixes and the pull request head it fixes. */
+    readonly ciFix?: { readonly of: BatchId; readonly head: string };
   },
 ): BatchDto {
   if (input.worktreePath === undefined) {
@@ -251,6 +264,11 @@ export function insertBatch(
     prFailingChecks: null,
     prCheckedAt: null,
     prUnknownReason: null,
+    prRequired: null,
+    prMergeBlocked: null,
+    ciFixOf: input.ciFix?.of ?? null,
+    ciFixHead: input.ciFix?.head ?? null,
+    ciStopped: null,
     notices: [],
     createdAt: ctx.now,
     updatedAt: ctx.now,

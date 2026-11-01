@@ -37,7 +37,7 @@ import {
 import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
-import { PrState } from '../github';
+import { PrState, type PullRequest, type RequiredChecks } from '../github';
 import { raiseGateHostCards } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -50,6 +50,7 @@ import {
   shipCards,
   wrongBranchCard,
   type Card,
+  type ShipCheckName,
   type ShipFailure,
 } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
@@ -67,6 +68,7 @@ import {
 } from './context';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
+import { shipCheck } from './local-check';
 import { mergeNotices, NOTICE_KEY } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import { prBody, prTitle, titlePrefix } from './pr-text';
@@ -196,8 +198,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Runs the project gate on the batch branch, recording its process group for recovery.
-   * `beforeStart` runs once the gate holds its slot; a false answer stops it as an abort would.
+   * Runs the check before the push (the pre-check or the gate) on the batch branch, recording its
+   * process group for recovery. `beforeStart` runs once it holds its gate slot; a false answer stops
+   * it as an abort would.
    */
   async function runGate(
     batch: BatchDto,
@@ -205,9 +208,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
     beforeStart: () => Promise<boolean>,
   ): Promise<GateResult | null> {
-    const gateCommand = project.gateCommand;
+    const gateCommand = shipCheck(project)?.command;
     // The caller skips the gate step for a project without a gate.
-    if (gateCommand === null) throw new InvalidError('This project has no gate command to run');
+    if (gateCommand === undefined)
+      throw new InvalidError('This project has no gate command to run');
     let recording: Promise<void> = Promise.resolve();
     const logPath = join(
       deps.dataDir,
@@ -414,7 +418,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       prBody({
         batch,
         tasks,
-        gate: { command: project.gateCommand },
+        gate: {
+          command: project.gateCommand,
+          precheck: shipCheck(project)?.kind === 'precheck' ? project.precheckCommand : null,
+        },
         ci: { repo: target.repo, sha },
         template: await readPrTemplate(deps.git, target.checkout, sha, deps.logger),
       }),
@@ -469,6 +476,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     repo: string,
     prUrl: string,
     signal: AbortSignal,
+    precheckOnly: boolean,
+    rearm = false,
   ): Promise<void> {
     const call = ghCall(deps, signal);
     try {
@@ -486,7 +495,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
     } catch (error) {
       if (signal.aborted) throw error;
       if (nothingToWaitFor(error)) {
-        await mergeNow(batch, repo, prUrl, signal);
+        if (precheckOnly) await mergeIfRequiredChecksPassed(batch, repo, prUrl, signal);
+        else await mergeNow(batch, repo, prUrl, signal);
+        return;
+      }
+      if (rearm) {
+        // A fix batch re-arms a pull request whose auto-merge is probably on already, and gh's answer
+        // to that is not known (docs/architecture/research/spike-15-gh-ci-checks.md): any error
+        // counts as armed, never as the refused card.
+        deps.logger.info(
+          { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
+          'auto-merge answered an error on a re-arm; treated as armed',
+        );
+        tellMerge(batch, null);
         return;
       }
       deps.logger.warn(
@@ -494,6 +515,47 @@ export function createShipper(deps: ShipperDeps): Shipper {
         'auto-merge not turned on',
       );
       tellMerge(batch, mergeNotices.refused(prUrl, error));
+    }
+  }
+
+  /**
+   * GitHub said the pull request has nothing to wait for, and only the pre-check ran on the Mac, so
+   * merging on that answer alone could land work nothing but the pre-check checked. It says the same
+   * when the base has no required checks and when they already passed on this head, so read them:
+   * passing merges at once; none leaves the pull request open with a card; anything else (pending,
+   * failing, a read that failed) merges nothing and raises nothing, and the pull request watch takes over.
+   */
+  async function mergeIfRequiredChecksPassed(
+    batch: BatchDto,
+    repo: string,
+    prUrl: string,
+    signal: AbortSignal,
+  ): Promise<void> {
+    let required: RequiredChecks;
+    try {
+      required = await deps.gh.prRequiredChecks({ repo, url: prUrl }, ghCall(deps, signal));
+    } catch (error) {
+      if (signal.aborted) throw error;
+      deps.logger.warn(
+        { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
+        'required checks not read; pull request not merged at once',
+      );
+      return;
+    }
+    deps.logger.info(
+      { batchId: batch.id, prUrl, required: required.state },
+      'only the pre-check ran; required checks read',
+    );
+    switch (required.state) {
+      case 'passing':
+        await mergeNow(batch, repo, prUrl, signal);
+        return;
+      case 'none':
+        raise(deps.inbox, batch.projectId, shipCards.notMergedPreCheckOnly(batch, prUrl));
+        return;
+      case 'pending':
+      case 'failing':
+        return;
     }
   }
 
@@ -557,24 +619,58 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return;
       }
+      // Before anything can close the batch and remove its worktree: uncommitted work is never
+      // thrown away, so a dirty checkout fails here with its card and the worktree is kept.
       const dirty = await deps.git.changedPaths(checkout);
       if (dirty.length > 0) {
         fail(batch, shipCards.dirtyCheckout(batch, dirty, worktreePath ?? undefined));
         return;
       }
-      // 1. Nothing beyond the base: nothing to push.
-      if ((await deps.git.commitsSince(checkout, baseSha, `refs/heads/${branch}`)).length === 0) {
+      // 0b. A CI fix batch pushes to a pull request that already exists, so it reads the pull request
+      // first: one that merged or closed meanwhile, or a fix that wrote nothing, ends the batch with
+      // nothing pushed.
+      let fixPr: PullRequest | null = null;
+      if (batch.ciFixHead !== null) {
+        step = 'gh pr view';
+        const status = await deps.gh.prStatus({ repo, ref: branch }, ghCall(deps, signal));
+        if (status === null)
+          throw new Error(`GitHub has no pull request for ${branch} to push the fix to`);
+        step = 'checking the fix for commits';
+        const own =
+          status.state === PrState.Open
+            ? await deps.git.ownCommitsSince(checkout, batch.ciFixHead, `refs/heads/${branch}`)
+            : [];
+        if (status.state !== PrState.Open || own.length === 0) {
+          const reason =
+            status.state === PrState.Open
+              ? 'the fix made no commits of its own'
+              : `its pull request is ${status.state.toLowerCase()}`;
+          deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
+          deps.logger.info({ batchId, reason, prUrl: status.url }, 'fix batch closed');
+          await afterEnd(batchId, worktreePath);
+          return;
+        }
+        fixPr = { url: status.url, state: status.state };
+      }
+      // 1. Nothing beyond the base: nothing to push. (A fix batch's own commits were counted above.)
+      if (
+        batch.ciFixHead === null &&
+        (await deps.git.commitsSince(checkout, baseSha, `refs/heads/${branch}`)).length === 0
+      ) {
         const reason = 'no commits beyond the base';
         deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
         deps.logger.info({ batchId, reason }, 'batch closed');
         await afterEnd(batchId, worktreePath);
         return;
       }
-      // 2. The gate, on the branch as it will be pushed: a worktree batch's with its base as origin
-      // has it now merged in, so it tests what the pull request would merge. A project with no gate
-      // was checked by the builder, task by task, as it was, so neither runs.
-      if (project.gateCommand !== null) {
-        step = 'the gate';
+      // 2. The gate, or the pre-check in its place when the project sets one, on the branch as it
+      // will be pushed: a worktree batch's with its base as origin has it now merged in, so it tests
+      // what the pull request would merge. A project with no gate was checked by the builder, task by
+      // task, as it was, so neither runs.
+      const check = shipCheck(project);
+      if (check !== null) {
+        const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
+        step = `the ${name}`;
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
         const gateOnce = async (): Promise<{
@@ -618,6 +714,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
               deps.limits.gateTimeoutMs,
               first.gate.logPath,
               cardNote(first),
+              name,
             ),
           );
           return;
@@ -625,7 +722,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (first.gate.exitCode !== 0) {
           const steps = await readGateFailures(checkout, first.gate.tail);
           if (!(await outsideTheBatch(batchId, checkout, steps))) {
-            fail(batch, shipCards.gateFailed(batch, first.gate, cardNote(first), steps));
+            fail(
+              batch,
+              shipCards.gateFailed(batch, first.gate, cardNote(first), steps, false, name),
+            );
             return;
           }
           // Every failing test is one the batch couldn't have caused: one more run, by itself,
@@ -644,6 +744,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
                 deps.limits.gateTimeoutMs,
                 second.gate.logPath,
                 cardNote(second),
+                name,
               ),
             );
             return;
@@ -654,7 +755,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
               batch,
               (await outsideTheBatch(batchId, checkout, again))
                 ? shipCards.gateFailedUnrelated(batch, cardNote(second), again)
-                : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true),
+                : shipCards.gateFailed(batch, second.gate, cardNote(second), again, true, name),
             );
             return;
           }
@@ -666,7 +767,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(batch, project, branch, signal);
       // 4. Any PR for the branch, in any state; create one only when there is none.
       step = 'gh pr view';
-      const existing = await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal));
+      const existing = fixPr ?? (await deps.gh.prView({ repo, ref: branch }, ghCall(deps, signal)));
       step = 'gh pr create';
       // The base the branch holds now: a merge before the gate moved it.
       const base = getBatch(db, batchId).baseSha ?? baseSha;
@@ -677,7 +778,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // or merged it.
       if (batch.autoMerge && (existing === null || existing.state === PrState.Open)) {
         step = 'gh pr merge --auto';
-        await turnOnAutoMerge(batch, repo, prUrl, signal);
+        await turnOnAutoMerge(
+          batch,
+          repo,
+          prUrl,
+          signal,
+          check?.kind === 'precheck',
+          fixPr !== null,
+        );
       }
       // 5. Record it.
       deps.state.write((w) =>
