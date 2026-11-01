@@ -54,8 +54,11 @@ export interface PrBodyTask {
 export function prBody(input: {
   readonly batch: { readonly id: BatchId };
   readonly tasks: readonly PrBodyTask[];
-  /** The project's gate command, or null when it has none. */
-  readonly gate: { readonly command: string | null };
+  /**
+   * The project's gate command, or null when it has none; `precheck` is the pre-check command when
+   * that ran on the Mac in place of the gate.
+   */
+  readonly gate: { readonly command: string | null; readonly precheck?: string | null };
   /** The CI run for the head that was pushed: its checks page for the commit. */
   readonly ci: { readonly repo: string; readonly sha: string };
   /** The repo's pull request template, or null when it has none. */
@@ -97,7 +100,7 @@ function whatAndWhy(tasks: readonly PrBodyTask[]): string {
  * passed to reach the push.
  */
 function howChecked(
-  gate: { readonly command: string | null },
+  gate: { readonly command: string | null; readonly precheck?: string | null },
   ci: { readonly repo: string; readonly sha: string },
   tasks: readonly PrBodyTask[],
 ): string {
@@ -112,12 +115,21 @@ function howChecked(
       ciLine,
     ].join('\n');
   }
+  if (gate.precheck != null) {
+    return [
+      `Checked on the Mac: ${gate.precheck} (pre-check). GitHub's required checks decide.`,
+      '',
+      ciLine,
+    ].join('\n');
+  }
   return [
     'Gate, run on the branch before the push:',
     '',
     '```',
     gate.command,
     '```',
+    '',
+    `Checked on the Mac: ${gate.command} (gate).`,
     '',
     ciLine,
   ].join('\n');
