@@ -1,4 +1,4 @@
-import { mintId, RiskTag, type TaskPatch } from '@10db/contracts';
+import { mintId, RiskTag, type BatchDto, type TaskPatch } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -23,6 +23,7 @@ interface Opts {
   readonly task?: Parameters<typeof taskDto>[0];
   readonly workstream?: ReturnType<typeof workstreamDto>;
   readonly batch?: ReturnType<typeof batchDto>;
+  readonly batches?: ReturnType<typeof batchDto>[];
   readonly gateCommand?: string;
   readonly workstreams?: ReturnType<typeof workstreamDto>[];
   readonly place?: number;
@@ -37,6 +38,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       peers={peers}
       {...(opts.workstream ? { workstream: opts.workstream } : {})}
       {...(opts.batch ? { batch: opts.batch } : {})}
+      {...(opts.batches ? { batches: opts.batches } : {})}
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
       {...(opts.place ? { place: opts.place } : {})}
@@ -617,6 +619,53 @@ describe('TaskDrawer', () => {
         const d = await dialog();
         expect(within(d).queryByRole('button', { name: 'Reopen task' })).toBeNull();
         expect(within(d).queryByRole('button', { name: 'Close task' })).toBeNull();
+      });
+    });
+
+    describe('with required checks', () => {
+      const url = 'https://github.com/acme/widgets/pull/4';
+      const jobUrl = 'https://github.com/acme/widgets/actions/runs/5/job/6';
+      const shippedWith = (patch: Partial<BatchDto>) =>
+        batchDto({
+          state: 'SHIPPED',
+          prUrl: url,
+          pr: {
+            state: 'open',
+            checks: 'pending',
+            failingChecks: [],
+            checkedAt: '2026-10-29T12:00:00.000Z',
+            unknownReason: null,
+          },
+          ...patch,
+        });
+
+      it('says where CI stands and links the job', async () => {
+        const batch = shippedWith({
+          prRequired: {
+            state: 'failing',
+            failing: [{ name: 'build', link: jobUrl, jobId: '6', runId: '5', description: null }],
+            pending: [],
+          },
+        });
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
+        serve();
+        open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
+        const line = await within(await dialog()).findByTestId('ci-line');
+        expect(within(line).getByText('Pull request open · CI failed: build')).toBeTruthy();
+        expect(within(line).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+          jobUrl,
+        );
+      });
+
+      it('says nothing of CI for a pull request with no required checks', async () => {
+        const batch = shippedWith({ prRequired: { state: 'none', failing: [], pending: [] } });
+        const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
+        const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
+        serve();
+        open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
+        await dialog();
+        expect(screen.queryByTestId('ci-line')).toBeNull();
       });
     });
 

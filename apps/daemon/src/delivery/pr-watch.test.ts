@@ -946,3 +946,173 @@ describe('restart and stop', () => {
     expect(clock.pendingTimers()).toBe(0);
   });
 });
+
+describe('the required checks of a pull request', () => {
+  const job = (name: string) => ({
+    name,
+    link: `https://github.com/acme/widgets/actions/runs/1/job/${name}`,
+    jobId: name,
+    runId: '1',
+    description: null,
+  });
+  const requiredReads = () => h.gh.calls.filter((c) => c.method === 'prRequiredChecks').length;
+  const stored = (id: BatchId) => getBatch(h.store.db, id);
+
+  /** A fix batch sharing its root's pull request, shipped as a fix leaves one. */
+  function shippedFix(root: { id: BatchId; prUrl: string }, title: string, head: string): BatchId {
+    const id = h.state.write((ctx) =>
+      insertBatch(ctx, {
+        projectId: h.project.id,
+        title,
+        baseBranch: 'main',
+        worktreePath: `/tmp/wt/${title}`,
+        ciFix: { of: root.id, head },
+      }),
+    ).id;
+    for (const to of ['OPEN', 'SHIPPING'] as const)
+      h.state.write((ctx) => transitionBatch(ctx, id, { to }));
+    h.state.write((ctx) =>
+      transitionBatch(ctx, id, {
+        to: 'SHIPPED',
+        patch: { repo: 'acme/widgets', prUrl: root.prUrl, branch: `10db/${title}` },
+      }),
+    );
+    return id;
+  }
+
+  it('stores the required checks of an open pull request on its batch', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setRequiredChecks(prUrl, { state: 'pending', failing: [], pending: [job('build')] });
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(stored(id).prRequired).toEqual({
+      state: 'pending',
+      failing: [],
+      pending: [job('build')],
+    });
+
+    h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: [job('build')], pending: [] });
+    await round(w);
+    expect(stored(id).prRequired).toMatchObject({ state: 'failing', failing: [job('build')] });
+  });
+
+  it('stores none for a pull request with no required checks', async () => {
+    setup();
+    const { id } = shipped(h.project.id, 'Alpha');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(stored(id).prRequired).toEqual({ state: 'none', failing: [], pending: [] });
+  });
+
+  it('stores why GitHub will not merge the pull request, and clears it', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setMergeBlocked(prUrl, 'conflicts');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(stored(id).prMergeBlocked).toBe('conflicts');
+    h.gh.setMergeBlocked(prUrl, 'behind');
+    await round(w);
+    expect(stored(id).prMergeBlocked).toBe('behind');
+    h.gh.setMergeBlocked(prUrl, null);
+    await round(w);
+    expect(stored(id).prMergeBlocked).toBeNull();
+  });
+
+  it('keeps what it stored when the required checks cannot be read, and writes nothing for a read that changes nothing', async () => {
+    setup();
+    const { id, prUrl } = shipped(h.project.id, 'Alpha');
+    h.gh.setRequiredChecks(prUrl, { state: 'passing', failing: [], pending: [] });
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const written = () =>
+      listEventsAfter(h.store.db, 0, 10_000).filter(
+        (e) => e.entityId === id && JSON.stringify(e.data).includes('prRequired'),
+      ).length;
+    expect(written()).toBe(1);
+
+    h.gh.failNext.set('prRequiredChecks', new GhError('failed', 'HTTP 502'));
+    await round(w);
+    expect(stored(id).prRequired?.state).toBe('passing');
+    expect(stored(id).pr?.state).toBe('open');
+    await round(w);
+    expect(written()).toBe(1);
+  });
+
+  it('reads a pull request shared by two batches once per round, and records its status on both', async () => {
+    setup();
+    const root = shipped(h.project.id, 'Alpha');
+    const fix = shippedFix(root, 'Fix CI: build', 'abc');
+    h.gh.setRequiredChecks(root.prUrl, { state: 'pending', failing: [], pending: [job('build')] });
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(polls()).toBe(1);
+    expect(requiredReads()).toBe(1);
+    expect(pr(root.id)).toMatchObject({ state: 'open' });
+    expect(pr(fix)).toMatchObject({ state: 'open' });
+
+    await round(w);
+    expect(polls()).toBe(2);
+    expect(requiredReads()).toBe(2);
+
+    // The required checks and merge state are the root's alone.
+    h.gh.setMergeBlocked(root.prUrl, 'behind');
+    await round(w);
+    expect(stored(root.id)).toMatchObject({ prMergeBlocked: 'behind' });
+    expect(stored(root.id).prRequired?.state).toBe('pending');
+    expect(stored(fix)).toMatchObject({ prRequired: null, prMergeBlocked: null });
+
+    h.gh.setState(root.prUrl, 'MERGED');
+    await round(w);
+    expect(pr(root.id)).toMatchObject({ state: 'merged' });
+    expect(pr(fix)).toMatchObject({ state: 'merged' });
+    const before = polls();
+    await round(w, INTERVAL * 3);
+    expect(polls()).toBe(before);
+  });
+
+  it('raises one failing-checks card for a shared pull request, keyed by the root', async () => {
+    setup();
+    const root = shipped(h.project.id, 'Alpha');
+    shippedFix(root, 'Fix CI: build', 'abc');
+    h.gh.setChecks(root.prUrl, [run('build', 'FAILURE')]);
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+    expect(card.detail).toMatchObject({ batchId: root.id });
+    await round(w);
+    expect(h.cards()).toHaveLength(1);
+  });
+
+  it('raises one closed card for a shared pull request, keyed by the root', async () => {
+    setup();
+    const root = shipped(h.project.id, 'Alpha');
+    shippedFix(root, 'Fix CI: build', 'abc');
+    h.gh.setState(root.prUrl, 'CLOSED');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    const card = h.only(h.cards());
+    expect(card.detail).toMatchObject({ batchId: root.id });
+  });
+
+  it('reads each of two pull requests once, a group of batches counting as one', async () => {
+    setup();
+    const a = shipped(h.project.id, 'Alpha');
+    shippedFix(a, 'Fix A', 'abc');
+    const b = shipped(h.project.id, 'Beta');
+    const w = watcher();
+    w.start();
+    await w.idle();
+    expect(reads(a.prUrl)).toBe(1);
+    expect(reads(b.prUrl)).toBe(1);
+    expect(polls()).toBe(2);
+  });
+});

@@ -56,6 +56,8 @@ export async function settleBranch(ctx: DeliveryContext, batchId: BatchId): Prom
   const batch = getBatch(ctx.state.db, batchId);
   const base = batch.baseSha;
   if (batch.branch === null || base === null) return;
+  // A CI fix batch's branch is its pull request's, which the batch it fixes owns.
+  if (batch.ciFixOf !== null) return;
   if (batch.state !== BatchState.Closed && batch.state !== BatchState.Abandoned) return;
   const repo = getProject(ctx.state.db, batch.projectId).repoPath;
   const removal = await removeBranch(ctx.git, repo, batch.branch, (tip) =>
