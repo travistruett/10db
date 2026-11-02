@@ -1942,6 +1942,43 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it('does not let an excuse recorded while the file was missing excuse a later deletion of it', async () => {
+      const lane = running();
+      watcher.sync();
+      touch(SENSITIVE_FILE);
+      execFileSync('git', ['add', SENSITIVE_FILE], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', 'Add .mcp.json'], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      // The lane removed the file inside the batch window, so the card is used with the file missing.
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      // Later the file is back, and a deletion no card allowed removes it again.
+      touch(SENSITIVE_FILE);
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it("does not let a finished lane's excused write excuse another lane's write in the checkout", async () => {
+      const done = running('Alpha', ['ui']);
+      watcher.sync();
+      editCard(done, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      state.write((ctx) =>
+        transitionWorkstream(ctx, done.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      const next = running('Beta', ['api']);
+      watcher.sync();
+      // The file is unchanged since the excused write, so its stamp still matches.
+      expect(await watcher.stepEnd(next.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
     describe('after the daemon restarts', () => {
       const restart = (): void => {
         watcher.stop();
@@ -2073,6 +2110,26 @@ describe('worktree checkouts', () => {
         writeFileSync(join(repo.path, 'README.md'), '# fixture\n');
         expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         rmSync(join(repo.path, 'README.md'));
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['README.md']);
+      });
+
+      it('does not excuse a deletion again once the file came back and went unseen behind a reset directory time', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        const readme = join(repo.path, 'README.md');
+        const resetDirectoryTime = (): void => {
+          utimesSync(repo.path, 1_700_000_000.5, 1_700_000_000.5);
+        };
+        rmSync(readme);
+        resetDirectoryTime();
+        emit('README.md');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        // Back and gone again with no event, and the checkout's modification time put back as it was.
+        writeFileSync(readme, '# fixture\n');
+        rmSync(readme);
+        resetDirectoryTime();
         expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['README.md']);
       });
 

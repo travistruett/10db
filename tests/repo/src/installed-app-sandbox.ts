@@ -43,13 +43,24 @@ const STUBS: Record<string, readonly string[]> = {
     // Successful runs, newest first, as "<run id> <commit>": STUB_SUCCESS_RUN built the head, then STUB_RUNS.
     "  'run list '*'--status success'*)",
     '    [ -z "$STUB_SUCCESS_RUN" ] || echo "$STUB_SUCCESS_RUN $STUB_HEAD_SHA"',
-    '    for run in ${STUB_RUNS:-}; do echo "${run/@/ }"; done ;;',
-    '  \'run list \'*\'--json databaseId,status \'*) [ -z "${STUB_ACTIVE_RUN:-}" ] || echo "$STUB_ACTIVE_RUN" ;;',
-    "  'run list '*'--event workflow_dispatch'*) [ ! -f \"$STUB_STATE/dispatched\" ] || echo 101; echo 100 ;;",
-    '  \'workflow run \'*) touch "$STUB_STATE/dispatched" ;;',
+    // STUB_RUNS_AFTER_CANCEL: finished builds that appear once a run has been reported cancelled.
+    '    for run in ${STUB_RUNS:-} $([ ! -f "$STUB_STATE/cancelled" ] || echo ${STUB_RUNS_AFTER_CANCEL:-}); do echo "${run/@/ }"; done ;;',
+    // The run of the head still under way; STUB_ACTIVE_RUN_AFTER_CANCEL replaces it once a run has been reported cancelled.
+    "  'run list '*'--json databaseId,status '*)",
+    '    if [ -f "$STUB_STATE/cancelled" ]; then active="${STUB_ACTIVE_RUN_AFTER_CANCEL:-}"; else active="${STUB_ACTIVE_RUN:-}"; fi',
+    '    [ -z "$active" ] || echo "$active" ;;',
+    // Each dispatch starts the next run id: 101, 102, ...
+    "  'run list '*'--event workflow_dispatch'*)",
+    '    for ((i = $(cat "$STUB_STATE/dispatched" 2>/dev/null || echo 0); i > 0; i--)); do echo $((100 + i)); done; echo 100 ;;',
+    `  'workflow run '*) ${count('dispatched')} ;;`,
     "  'run view '*)",
     `    ${count('view')}`,
     '    if [ "$n" -le "${STUB_VIEW_FAILS:-0}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi',
+    // STUB_CANCELLED_RUNS: run ids that end cancelled, as when a newer run in the concurrency group replaces them.
+    '    case " ${STUB_CANCELLED_RUNS:-} " in *" $3 "*)',
+    '      touch "$STUB_STATE/cancelled"',
+    '      printf \'completed\\ncancelled\\n%s\\n\' "$STUB_HEAD_SHA"; exit 0 ;;',
+    '    esac',
     '    printf \'%s\\n%s\\n%s\\n\' "${STUB_RUN_STATUS:-completed}" "${STUB_RUN_CONCLUSION-success}" "$STUB_HEAD_SHA" ;;',
     "  'run download '*)",
     '    while [ "$#" -gt 0 ]; do [ "$1" = --dir ] && dir="$2"; shift; done',

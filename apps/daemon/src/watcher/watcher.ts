@@ -40,7 +40,7 @@ import {
   ANSWERED_STATES,
   cardAllowances,
   cardUseKeys,
-  GONE,
+  isDeletionStamp,
   relativeIn,
   ruleAllowances,
   writeStamp,
@@ -69,7 +69,7 @@ const BULK_LISTED = 20;
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
 /** A write a lane's permission card allowed, as it looked when excused. */
 interface ExcusedWrite {
-  /** The write's modification time, size and content hash (`writeStamp`). */
+  /** The write's modification time, size and content hash, or a deletion's stamp (`writeStamp`). */
   readonly stamp: string;
   /** The only lane it excuses. */
   readonly workstreamId: WorkstreamId;
@@ -426,7 +426,7 @@ export function createWatcher(deps: {
     const named = paths === undefined ? null : new Set(paths);
     let forgot = false;
     for (const [key, write] of excusedWrites) {
-      if (write.stamp !== GONE) continue;
+      if (!isDeletionStamp(write.stamp)) continue;
       const [keyRoot = '', path = ''] = key.split('\0');
       if (keyRoot !== root || (named !== null && !named.has(path))) continue;
       if (!existsAsEntry(join(root, path))) continue;
@@ -499,7 +499,8 @@ export function createWatcher(deps: {
         continue;
       }
       usedCards.add(use);
-      // A deletion is remembered as GONE, which excuses it only while the file stays gone (forgetRestored).
+      // A deletion is remembered by its directory's stamp, which excuses it only while the file stays gone
+      // and nothing else is added to or removed from that directory (forgetRestored, deletionStamp).
       excuse(excusedKey(root, path, lane), { stamp, workstreamId: lane, useKey: use });
       allowed.add(path);
     }
