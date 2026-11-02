@@ -13,6 +13,8 @@ export interface NetworkCall {
 export const GitNetworkFailure = {
   Timeout: 'timeout',
   Rejected: 'rejected',
+  /** The remote's own server failed (an HTTP 5xx, `fatal error in commit_refs_rules`): not a divergence. */
+  ServerError: 'server_error',
   Aborted: 'aborted',
   Failed: 'failed',
 } as const;
@@ -42,6 +44,24 @@ export class GitNetworkError extends Error {
 }
 
 const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
+/** A ref the remote refused because the branch moved: a real divergence, never retried. */
+const DIVERGED = /non-fast-forward|fetch first|stale info|\(already exists\)/i;
+/** An HTTP 5xx from the server, as curl and git word it. */
+const HTTP_5XX = /returned error: 5\d\d|\bHTTP\/?\s?(?:\d\.\d\s)?5\d\d\b/i;
+/** The reason GitHub gives in `[remote rejected] a -> a (reason)` when its own side failed. */
+const SERVER_REASON =
+  /\[remote rejected\][^\n]*\((?:[^)\n]*(?:fatal error|internal (?:server )?error|server error|unavailable|bad gateway|gateway time-?out|temporar|try again|timed? ?out|failed to (?:update|lock) ref)[^)\n]*)\)/i;
+
+/**
+ * What a failed fetch or push was, read from git's stderr. A server-side failure (an HTTP 5xx, or a
+ * `remote rejected` whose reason is GitHub's own error) is told apart from a rejection for
+ * divergence, since the first is worth retrying and the second needs the builder.
+ */
+export function failureKind(detail: string): GitNetworkFailure {
+  if (DIVERGED.test(detail)) return GitNetworkFailure.Rejected;
+  if (HTTP_5XX.test(detail) || SERVER_REASON.test(detail)) return GitNetworkFailure.ServerError;
+  return REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed;
+}
 /** How much of git's output a run keeps: the end, where git says what went wrong. */
 const OUTPUT_TAIL = 2000;
 /** How much it reads before redacting; a line cut at the front of this is dropped whole. */
@@ -142,15 +162,7 @@ export function gitNetwork(
           ),
         );
       else if (code === 0) resolve(run);
-      else
-        reject(
-          new GitNetworkError(
-            REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed,
-            args,
-            detail,
-            run,
-          ),
-        );
+      else reject(new GitNetworkError(failureKind(detail), args, detail, run));
     });
   });
 }

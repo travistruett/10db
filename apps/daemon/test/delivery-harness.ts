@@ -264,6 +264,8 @@ export function createDeliveryHarness(
     readonly load?: Pick<LoadGuard, 'overloadedSince'>;
     /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
     readonly shipGate?: (gate: GateRunner) => GateRunner;
+    /** Wraps the real git, as a test that needs a push GitHub's server fails. */
+    readonly wrapGit?: (git: Git) => Git;
   } = {},
 ): DeliveryHarness {
   const remote = createTempRepoWithOrigin();
@@ -279,7 +281,8 @@ export function createDeliveryHarness(
   const gitRefusals: GitTrustError[] = [];
   const worktrees = tempDir('worktrees');
   const worktreeRoot = join(realpathSync(worktrees.path), 'level');
-  const git = createGit({ onRefused: (error) => gitRefusals.push(error), worktreeRoot });
+  const realGit = createGit({ onRefused: (error) => gitRefusals.push(error), worktreeRoot });
+  const git = opts.wrapGit?.(realGit) ?? realGit;
   const gh = new FakeGh();
   const jobs = createDeliveryJobs(silentLogger);
   const ticks = { count: 0 };
@@ -321,6 +324,8 @@ export function createDeliveryHarness(
       ...DEFAULT_DELIVERY_LIMITS,
       networkTimeoutMs: opts.networkTimeoutMs ?? 10_000,
       pushTimeoutMs: opts.pushTimeoutMs ?? 20_000,
+      // The harness's clock never advances by itself, so a test waits for no retry.
+      pushRetryWaitMs: 0,
       gateTimeoutMs: opts.gateTimeoutMs ?? 20_000,
     },
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global, ...opts.networkEnv }),

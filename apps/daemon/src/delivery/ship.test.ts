@@ -23,6 +23,7 @@ import { waitFor } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
 import { writeHook } from '../../test/git-hooks';
 import { hangingSsh } from '../../test/hanging-ssh';
+import { GitNetworkError, GitNetworkFailure, type Git } from '../git';
 import { GhError } from '../github';
 import { listNetworkHosts } from '../permissions';
 
@@ -670,6 +671,72 @@ describe('the push', () => {
     } finally {
       ssh.cleanup();
     }
+  });
+});
+
+describe('a push the server fails', () => {
+  const SERVER_REASON =
+    ' ! [remote rejected] 10db/x -> 10db/x (fatal error in commit_refs_rules)\nerror: failed to push some refs to github.com';
+
+  /** A git whose push throws GitHub's server error `failures` times before it pushes for real. */
+  function failingPushes(failures: number) {
+    const calls = { count: 0 };
+    const wrapGit = (git: Git): Git => ({
+      ...git,
+      push: (repo, branch, net) => {
+        calls.count += 1;
+        if (calls.count <= failures)
+          return Promise.reject(
+            new GitNetworkError(GitNetworkFailure.ServerError, ['push'], SERVER_REASON, {
+              durationMs: 1,
+              output: SERVER_REASON,
+            }),
+          );
+        return git.push(repo, branch, net);
+      },
+    });
+    return { calls, wrapGit };
+  }
+
+  it('is retried by itself, and ships with no card when a retry lands', async () => {
+    const pushes = failingPushes(2);
+    h = createDeliveryHarness({}, { wrapGit: pushes.wrapGit });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const shipped = await finishAll(batch);
+    expect(shipped.state).toBe('SHIPPED');
+    expect(pushes.calls.count).toBe(3);
+    expect(h.cards()).toEqual([]);
+    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+  });
+
+  it("quotes the remote's reason, and never says the branch diverged, when it keeps failing", async () => {
+    const pushes = failingPushes(100);
+    h = createDeliveryHarness({}, { wrapGit: pushes.wrapGit });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const ended = await finishAll(batch);
+    expect(ended).toMatchObject({ state: 'FAILED', failure: 'network' });
+    // The first push and two retries, no more.
+    expect(pushes.calls.count).toBe(3);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('GitHub failed the push');
+    expect(card.body).toContain('fatal error in commit_refs_rules');
+    expect(card.body).not.toContain("has commits this checkout doesn't");
+    expect(card.body).not.toMatch(/reconcile/i);
+    expect(h.gh.prCreates()).toEqual([]);
+  });
+
+  it('is not retried when it is a real non-fast-forward, which still asks for a reconcile by hand', async () => {
+    const pushes = failingPushes(0);
+    h = createDeliveryHarness({}, { wrapGit: pushes.wrapGit });
+    const { batch } = await openBatch('Greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    h.teammatePush(batch.branch ?? '', 'src/api/theirs.txt');
+    const ended = await finishAll(batch);
+    expect(ended).toMatchObject({ state: 'FAILED', failure: 'push_rejected' });
+    expect(pushes.calls.count).toBe(1);
+    expect(h.only(h.cards()).body).toContain("has commits this checkout doesn't");
   });
 });
 

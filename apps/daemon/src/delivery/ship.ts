@@ -243,6 +243,9 @@ function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
   );
 }
 
+/** How many times 10db pushes again by itself after GitHub's server fails a push, before a card. */
+const PUSH_SERVER_RETRIES = 2;
+
 /**
  * Why a shipping step threw. The push is the only git network call in shipping that can fail it (the
  * fetch before the gate only leaves the base out): a rejected or timed-out push has its own card, and
@@ -258,6 +261,8 @@ function stepFailure(
   switch (error.kind) {
     case GitNetworkFailure.Rejected:
       return shipCards.pushRejected(batch, error.detail);
+    case GitNetworkFailure.ServerError:
+      return shipCards.pushServerError(batch, error.detail, PUSH_SERVER_RETRIES);
     case GitNetworkFailure.Timeout:
       return shipCards.pushTimedOut(batch, limits.pushTimeoutMs);
     // Only shutdown aborts a push, and the shipper returns before asking for a card then.
@@ -539,32 +544,63 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
-  /** Logs the push's duration and output, landed or refused, so what git printed is on record. */
+  /** Waits `ms` on the injected clock; a shutdown (the signal) ends the wait early. */
+  function pause(ms: number, signal: AbortSignal): Promise<void> {
+    if (ms <= 0 || signal.aborted) return Promise.resolve();
+    return new Promise((resolve) => {
+      const timer = deps.clock.setTimeout(done, ms);
+      function done(): void {
+        signal.removeEventListener('abort', onAbort);
+        resolve();
+      }
+      function onAbort(): void {
+        timer.cancel();
+        done();
+      }
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /**
+   * Logs the push's duration and output, landed or refused, so what git printed is on record. A push
+   * GitHub's server fails (`GitNetworkFailure.ServerError`) is pushed again, at most
+   * `PUSH_SERVER_RETRIES` more times with a short wait between; the last failure is thrown.
+   */
   async function pushBranch(
     batch: BatchDto,
     project: ProjectDto,
     branch: string,
     signal: AbortSignal,
   ): Promise<void> {
-    try {
-      const run = await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
-      deps.logger.info(
-        { batchId: batch.id, branch, durationMs: run.durationMs, output: run.output },
-        'git push finished',
-      );
-    } catch (error) {
-      if (error instanceof GitNetworkError)
-        deps.logger.warn(
-          {
-            batchId: batch.id,
-            branch,
-            kind: error.kind,
-            durationMs: error.durationMs,
-            output: error.output,
-          },
-          'git push failed',
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        const run = await deps.git.push(project.repoPath, branch, pushCall(deps, signal));
+        deps.logger.info(
+          { batchId: batch.id, branch, durationMs: run.durationMs, output: run.output, attempt },
+          'git push finished',
         );
-      throw error;
+        return;
+      } catch (error) {
+        if (error instanceof GitNetworkError)
+          deps.logger.warn(
+            {
+              batchId: batch.id,
+              branch,
+              kind: error.kind,
+              durationMs: error.durationMs,
+              output: error.output,
+              attempt,
+            },
+            'git push failed',
+          );
+        const retry =
+          error instanceof GitNetworkError &&
+          error.kind === GitNetworkFailure.ServerError &&
+          attempt < PUSH_SERVER_RETRIES &&
+          !signal.aborted;
+        if (!retry) throw error;
+        await pause(deps.limits.pushRetryWaitMs, signal);
+      }
     }
   }
 
