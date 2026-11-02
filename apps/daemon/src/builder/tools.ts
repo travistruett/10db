@@ -50,6 +50,14 @@ export function createBuilderTools(
     services
       .listWorkstreams({ active: false })
       .some((run) => run.id === task.workstreamId && run.state === WorkstreamState.Held);
+  /** Whether the task is open and on the Board, and its latest run failed. */
+  const hasFailedRun = (task: TaskDto): boolean =>
+    task.workstreamId !== null &&
+    task.status === TaskStatus.Open &&
+    task.boardColumnId === null &&
+    services
+      .listWorkstreams({ active: false })
+      .some((run) => run.id === task.workstreamId && run.state === WorkstreamState.Failed);
   return {
     [BuilderToolName.ListProjects]: (args) => {
       BuilderToolInputs.list_projects.parse(args);
@@ -118,12 +126,15 @@ export function createBuilderTools(
     [BuilderToolName.RemoveTask]: (args) =>
       taskSummary(services.removeTask(BuilderToolInputs.remove_task.parse(args).taskId)),
     [BuilderToolName.StartTask]: (args) => {
-      const { taskId } = BuilderToolInputs.start_task.parse(args);
+      const { taskId, fresh } = BuilderToolInputs.start_task.parse(args);
       // The API starts any open task; an agent filing tasks must not jump one past its dependencies.
       const task = services.getTask(taskId);
       // A held task already started once: the Board's Start queues its run again, so this does too.
       const held = isHeld(task);
-      if (!held && task.boardStatus !== BoardStatus.Ready) {
+      // Starting over is the one start a failed task gets here; the daemon judges the rest (its
+      // dependencies, its batch) before it abandons anything.
+      const startingOver = fresh === true && hasFailedRun(task);
+      if (!held && !startingOver && task.boardStatus !== BoardStatus.Ready) {
         throw new DomainError(
           'conflict',
           `Task ${task.title} is ${task.boardStatus.replace('_', ' ')}, not ready, so it can't be started`,
@@ -145,7 +156,7 @@ export function createBuilderTools(
           );
         }
       }
-      const started = services.startTask(taskId);
+      const started = services.startTask(taskId, fresh === undefined ? {} : { fresh });
       return started.kind === 'workstream'
         ? { taskId, workstreamId: started.workstream.id }
         : { taskId, batchId: started.batch.id };
