@@ -41,7 +41,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 ## Git
 
 - Work on a branch and open a PR to `main`. Nobody pushes to `main`. PRs are squash-merged, and the
-  PR title becomes the commit, so it must be a Conventional Commit too.
+  PR title becomes the commit, so it must be a Conventional Commit too. `main` merges through a
+  GitHub merge queue: CI runs on `merge_group` too, and a pull request merges only when the checks
+  pass on it combined with the entries ahead of it
+  (`docs/architecture/decisions/2026-11-02-merge-queue.md`).
 - Sessions running in parallel each work in their own worktree, never in a shared checkout. A
   worktree made by hand goes in `10db-worktrees/` beside the checkout:
   `git worktree add ../10db-worktrees/<name> -b <branch> origin/main`. Never put one inside the
@@ -89,7 +92,8 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - Contributor rules (setup, commits and scopes, squash merges, signing, AI-assisted work) are in
   `CONTRIBUTING.md`; vulnerability reports follow `SECURITY.md`. Branch and tag rules live in
   `.github/rulesets/` and repo settings in `.github/repo-settings.json`; `make github-settings`
-  applies both, by hand, with admin rights. Releases come from release-please
+  applies both, by hand, with admin rights (the merge queue rule included; nothing applies it
+  automatically). Releases come from release-please
   (`release-please-config.json`); never edit `CHANGELOG.md` or a version field by hand.
 
 ## Subagents

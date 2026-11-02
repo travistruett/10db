@@ -111,6 +111,48 @@ describe('CI workflow', () => {
     expect(skipsOnEvent.map(([name]) => name)).toEqual([]);
   });
 
+  it('runs on merge queue entries, where every required check must report', () => {
+    // main merges through a GitHub merge queue (decisions/2026-11-02-merge-queue.md). The queue
+    // tests each pull request combined with those ahead of it, and waits for the required checks
+    // on a gh-readonly-queue/main/... branch: a check that doesn't run on merge_group never reports
+    // and the entry times out.
+    const parsed = readWorkflow(CI);
+    expect(parsed.on['merge_group']).toEqual({ types: ['checks_requested'] });
+    // No job may be limited to other events, except dependency-review (next test).
+    const limited = Object.entries(parsed.jobs)
+      .filter(([, job]) => job.if !== undefined)
+      .map(([name]) => name);
+    expect(limited).toEqual(['dependency-review']);
+  });
+
+  it('skips dependency-review off pull_request, which the queue counts as passing', () => {
+    // The action diffs a pull request's base and head and has no pull request on a queue entry. A
+    // job skipped by its `if` reports as skipped, and a required check that is skipped counts as
+    // passing; dependency-review already ran on the pull request itself.
+    expect(readWorkflow(CI).jobs['dependency-review']?.if).toBe(
+      "github.event_name == 'pull_request'",
+    );
+  });
+
+  it('has policy diff the queue entry against its base, and lint the PR title only on pull requests', () => {
+    const steps = readWorkflow(CI).jobs['policy']?.steps ?? [];
+    const policy = steps.find((step) => step.run?.includes('scripts/policy.sh'));
+    expect(policy?.env?.['BASE_SHA']).toBe(
+      '${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}',
+    );
+    expect(policy?.env?.['HEAD_SHA']).toBe(
+      '${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}',
+    );
+    const title = steps.find((step) => step.run?.includes('commitlint'));
+    expect(title?.if).toBe("github.event_name == 'pull_request'");
+  });
+
+  it('does not apply the ruleset from a workflow: make github-settings does, by hand', () => {
+    for (const path of workflowPaths()) {
+      expect(readRepoFile(path), path).not.toMatch(/github-settings|\/rulesets/);
+    }
+  });
+
   it('installs every mise tool the gate tests spawn, so the required gate check can run them', () => {
     // The gate runs the whole tests/repo project: the hook and policy tests call gitleaks,
     // actionlint and zizmor. mise-action creates shims only for installed tools, so a missing one
