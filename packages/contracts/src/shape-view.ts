@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DecisionId, GoalId, ShapeProposalId, TaskId } from './ids';
+import { DecisionId, GoalId, ShapeMessageId, ShapeProposalId, TaskId } from './ids';
 import {
   ShapeDto,
   ShapeMessageDto,
@@ -7,11 +7,16 @@ import {
   ShapeProposalKind,
   ShapeProposalState,
 } from './shape';
+import { ShapeFileDto } from './shape-files';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §4, §6 Rows, §11.
 // What the Shape routes answer and accept: the view the screen renders, and the builder's actions.
 
 const Timestamp = z.iso.datetime();
+
+/** What the latest round did to a row (§6 What changed, and why). */
+export const ShapeRoundMark = { New: 'new', Changed: 'changed', Moved: 'moved' } as const;
+export type ShapeRoundMark = (typeof ShapeRoundMark)[keyof typeof ShapeRoundMark];
 
 /** What Convert made from a proposal; a goal lists its tasks, a loose task is one, a decision has its own id. */
 export const ShapeConvertedDto = z.object({
@@ -29,8 +34,15 @@ const proposalFields = {
   state: z.enum(ShapeProposalState),
   /** The round that last created or changed it. */
   round: z.int().min(0),
-  /** The fields the builder pinned; empty until slice 2's editing. */
+  /** The fields the builder pinned; `*` pins the row as a whole (Restore). */
   pinned: z.array(z.string()),
+  /**
+   * What the latest round did to it, until the next round (§6): created it, changed it, or moved it to
+   * Earlier. Null for a row the latest round left alone.
+   */
+  mark: z.enum(ShapeRoundMark).nullable(),
+  /** The builder's messages it came from; what Why? scrolls to and highlights. Empty for a builder's own row. */
+  sourceMessageIds: z.array(ShapeMessageId),
   /** What it became once accepted; null while it is pending, superseded or rejected. */
   converted: ShapeConvertedDto.nullable(),
   createdAt: Timestamp,
@@ -100,6 +112,8 @@ export const ShapeViewDto = z.object({
   proposals: z.array(ShapeProposalDto),
   /** The latest `note_heard` echo, shown before the first Propose. */
   heard: z.array(z.string()),
+  /** The files dropped into the conversation, oldest first (§5.4). */
+  files: z.array(ShapeFileDto),
   turn: ShapeTurnDto,
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
@@ -143,6 +157,27 @@ export type ShapeConvertResult = z.infer<typeof ShapeConvertResult>;
 /** The 400 body of Convert when it refuses: every error at once, nothing written. */
 export const ShapeConvertError = z.object({ errors: z.array(z.string().min(1)).min(1) });
 export type ShapeConvertError = z.infer<typeof ShapeConvertError>;
+
+/** What the builder cannot set by editing a row: its identity and where it came from. */
+const NOT_EDITABLE = new Set(['key', 'kind', 'goalId', 'sourceMessageIds']);
+
+/**
+ * Editing a row sets fields, and each is pinned (§6 Editing). A goal's task field is named by its
+ * path, `tasks.<key>.<field>`, so a pin on one task never holds its siblings.
+ */
+export const ShapeEditInput = z.object({
+  fields: z
+    .record(z.string().min(1), z.unknown())
+    .refine((fields) => Object.keys(fields).length > 0, { message: 'Set at least one field' })
+    .refine((fields) => Object.keys(fields).every((f) => !NOT_EDITABLE.has(f)), {
+      message: 'A row’s key, kind, goal and sources cannot be edited',
+    }),
+});
+export type ShapeEditInput = z.infer<typeof ShapeEditInput>;
+
+/** Unpin one field, or with none the whole row (a restored row is pinned as a whole). */
+export const ShapeUnpinInput = z.object({ field: z.string().min(1).optional() });
+export type ShapeUnpinInput = z.infer<typeof ShapeUnpinInput>;
 
 /** Withdraw Decision…: the builder's reason is required. */
 export const ShapeWithdrawInput = z.object({ reason: z.string().min(1).max(2000) });

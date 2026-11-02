@@ -233,7 +233,7 @@ export function startShapeSession(
       resolvePreflight(false);
       return;
     }
-    input.push(userMessage(spec.prompt));
+    input.push(userMessage(spec.prompt, undefined, spec.images));
     promptSent = true;
     resolvePreflight(true);
   };
@@ -323,15 +323,15 @@ export function startShapeSession(
 
   return {
     events,
-    send(text) {
+    send(text, images) {
       if (halted()) return;
       // Never ahead of the first message: one sent during the preflight waits for it.
       if (promptSent) {
-        input.push(userMessage(text, 'next'));
+        input.push(userMessage(text, 'next', images));
         return;
       }
       void preflightOk.then((ok) => {
-        if (ok && !halted()) input.push(userMessage(text, 'next'));
+        if (ok && !halted()) input.push(userMessage(text, 'next', images));
       });
     },
     async interrupt() {

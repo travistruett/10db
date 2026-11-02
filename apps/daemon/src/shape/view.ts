@@ -4,6 +4,7 @@ import {
   ShapeProposalBody,
   ShapeProposalDto,
   ShapeProposalState,
+  ShapeRoundMark,
   type ShapeConvertedDto,
   type ShapeId,
   type ShapeTurnDto,
@@ -12,6 +13,7 @@ import {
 import {
   getDecision,
   getShape,
+  listShapeFiles,
   listShapeLinks,
   listShapeMessages,
   listShapeProposals,
@@ -55,10 +57,22 @@ function convertedOf(
   };
 }
 
+/**
+ * What the latest round did to a row, until the next one (§6): a row carries the round that last
+ * created or changed it, or moved it to Earlier.
+ */
+function markOf(row: ShapeProposalRow, latestRound: number): ShapeRoundMark | null {
+  if (row.round !== latestRound) return null;
+  if (row.state === ShapeProposalState.Superseded) return ShapeRoundMark.Moved;
+  if (row.state !== ShapeProposalState.Pending) return null;
+  return row.createdRound === row.round ? ShapeRoundMark.New : ShapeRoundMark.Changed;
+}
+
 function proposalOf(
   db: DbReader,
   row: ShapeProposalRow,
   links: readonly ShapeLinkRow[],
+  latestRound: number,
 ): ShapeProposalDto {
   // The row's body was validated when it was written; parsing it again types it for the screen.
   return ShapeProposalDto.parse({
@@ -68,6 +82,8 @@ function proposalOf(
     state: row.state,
     round: row.round,
     pinned: row.pinned,
+    mark: markOf(row, latestRound),
+    sourceMessageIds: row.sourceMessageIds,
     body: ShapeProposalBody[row.kind].parse(row.body),
     converted: convertedOf(db, row, links),
     createdAt: row.createdAt,
@@ -78,11 +94,15 @@ function proposalOf(
 export function buildShapeView(db: DbReader, shapeId: ShapeId, turn: ShapeTurnDto): ShapeViewDto {
   const messages = listShapeMessages(db, shapeId);
   const links = listShapeLinks(db, shapeId);
+  const shape = getShape(db, shapeId);
   return {
-    shape: getShape(db, shapeId),
+    shape,
     messages,
-    proposals: listShapeProposals(db, shapeId).map((row) => proposalOf(db, row, links)),
+    proposals: listShapeProposals(db, shapeId).map((row) =>
+      proposalOf(db, row, links, shape.round),
+    ),
     heard: latestHeard(messages),
+    files: listShapeFiles(db, shapeId),
     turn,
   };
 }

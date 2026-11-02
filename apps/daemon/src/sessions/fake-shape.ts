@@ -1,7 +1,13 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createChannel } from './channel';
-import type { SessionEvent, ShapeSessionHandle, ShapeSessionSpec, ShapeToolRequest } from './types';
+import type {
+  SessionEvent,
+  ShapeImage,
+  ShapeSessionHandle,
+  ShapeSessionSpec,
+  ShapeToolRequest,
+} from './types';
 import type { GuardVerdict } from '../guard';
 
 /** What a scripted turn of a fake Shape session did. */
@@ -17,6 +23,8 @@ export interface FakeShapeTurn {
   readonly spec: ShapeSessionSpec;
   /** The message the turn answers. */
   readonly message: string;
+  /** The images sent with it, as image content blocks. */
+  readonly images: readonly ShapeImage[];
   /** Which message of this session it is, from 1. */
   readonly number: number;
   /** Aborts when the turn is interrupted. */
@@ -171,7 +179,7 @@ export function createFakeShapeSession(
   providerSessionId: string,
 ): ShapeSessionHandle {
   const events = createChannel<SessionEvent>();
-  const queue: string[] = [];
+  const queue: { text: string; images: readonly ShapeImage[] }[] = [];
   let ended = false;
   let wake: (() => void) | null = null;
   let current: AbortController | null = null;
@@ -196,10 +204,10 @@ export function createFakeShapeSession(
 
   const loop = async (): Promise<void> => {
     events.push({ type: 'started', providerSessionId, pid: null });
-    queue.push(spec.prompt);
+    queue.push({ text: spec.prompt, images: spec.images ?? [] });
     while (!isEnded()) {
-      const message = queue.shift();
-      if (message === undefined) {
+      const next = queue.shift();
+      if (next === undefined) {
         await new Promise<void>((resolve) => {
           wake = resolve;
         });
@@ -210,7 +218,14 @@ export function createFakeShapeSession(
       let result: FakeShapeTurnResult = {};
       let failed = false;
       try {
-        result = await behaviour({ spec, message, number, signal: current.signal, guard });
+        result = await behaviour({
+          spec,
+          message: next.text,
+          images: next.images,
+          number,
+          signal: current.signal,
+          guard,
+        });
       } catch (error) {
         if (!current.signal.aborted) {
           failed = true;
@@ -241,8 +256,8 @@ export function createFakeShapeSession(
 
   return {
     events,
-    send(text) {
-      queue.push(text);
+    send(text, images = []) {
+      queue.push({ text, images });
       wake?.();
     },
     interrupt() {

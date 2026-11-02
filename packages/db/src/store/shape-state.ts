@@ -5,6 +5,7 @@ import {
   type DecisionId,
   type GoalId,
   type ShapeDto,
+  type ShapeFileId,
   type ShapeId,
   type ShapeLinkId,
   type ShapeMessageAuthor,
@@ -154,6 +155,7 @@ export interface NewShapeProposal {
   readonly kind: ShapeProposalKind;
   readonly state: ShapeProposalState;
   readonly round: number;
+  readonly createdRound: number;
   readonly pinned: readonly string[];
   readonly body: Json;
   readonly taskHashes: ShapeProposalRow['taskHashes'];
@@ -174,7 +176,10 @@ export function insertShapeProposal(ctx: WriteContext, input: NewShapeProposal):
 }
 
 export type ShapeProposalPatch = Partial<
-  Pick<ShapeProposalRow, 'state' | 'round' | 'pinned' | 'body' | 'taskHashes' | 'sourceMessageIds'>
+  Pick<
+    ShapeProposalRow,
+    'state' | 'round' | 'createdRound' | 'pinned' | 'body' | 'taskHashes' | 'sourceMessageIds'
+  >
 >;
 
 export function patchShapeProposal(
@@ -203,6 +208,52 @@ export function listShapeProposals(db: DbReader, shapeId: ShapeId): ShapeProposa
     .where(eq(schema.shapeProposals.shapeId, shapeId))
     .orderBy(asc(schema.shapeProposals.id))
     .all();
+}
+
+// --- Files --------------------------------------------------------------------------------------
+
+export type ShapeFileRow = typeof schema.shapeFiles.$inferSelect;
+
+export function insertShapeFile(
+  ctx: WriteContext,
+  input: {
+    readonly shapeId: ShapeId;
+    readonly name: string;
+    readonly mediaType: string;
+    readonly size: number;
+    readonly storedPath: string;
+  },
+): ShapeFileRow {
+  const shape = getShape(ctx.tx, input.shapeId);
+  const row: ShapeFileRow = { id: mintId('ShapeFile'), ...input, createdAt: ctx.now };
+  ctx.tx.insert(schema.shapeFiles).values(row).run();
+  ctx.emit({
+    type: EventType.ShapeChanged,
+    entityType: 'shape',
+    entityId: input.shapeId,
+    data: { projectId: shape.projectId },
+  });
+  return row;
+}
+
+export function getShapeFile(db: DbReader, id: ShapeFileId): ShapeFileRow {
+  const row = db.select().from(schema.shapeFiles).where(eq(schema.shapeFiles.id, id)).get();
+  if (!row) throw new NotFoundError('shape file', id);
+  return row;
+}
+
+/** The conversation's files, oldest first. */
+export function listShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
+  return db
+    .select()
+    .from(schema.shapeFiles)
+    .where(eq(schema.shapeFiles.shapeId, shapeId))
+    .orderBy(asc(schema.shapeFiles.id))
+    .all();
+}
+
+export function countShapeFiles(db: DbReader, shapeId: ShapeId): number {
+  return listShapeFiles(db, shapeId).length;
 }
 
 // --- Links --------------------------------------------------------------------------------------

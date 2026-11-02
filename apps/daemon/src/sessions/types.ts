@@ -98,6 +98,8 @@ export interface ShapeSessionSpec {
   readonly systemPrompt: string;
   /** The first message; later ones come from `send`. */
   readonly prompt: string;
+  /** Images that go with the first message. */
+  readonly images?: readonly ShapeImage[];
   readonly model: string;
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
@@ -181,7 +183,16 @@ export interface SessionHandle {
   stop(): Promise<void>;
 }
 
+/** A dropped image as Claude sees it: an image content block, base64 (Shape spec §5.4). */
+export interface ShapeImage {
+  readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+  /** Base64 of the file's bytes. */
+  readonly data: string;
+}
+
 export interface ShapeSessionHandle extends SessionHandle {
+  /** Queues a message, with the images dropped since the last one as content blocks. */
+  send(text: string, images?: readonly ShapeImage[]): void;
   /** Interrupts the turn that is running; the session stays open for the next message. */
   interrupt(): Promise<void>;
 }

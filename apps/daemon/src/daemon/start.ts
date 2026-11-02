@@ -783,6 +783,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     clock,
     log: logger.child({ component: 'shape' }),
+    filesDir: join(opts.dataDir, 'shapes'),
     mcp: {
       get url() {
         return mcpUrl;

@@ -77,6 +77,7 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  ShapeFileId,
   ShapeId,
   ShapeLinkId,
   ShapeMessageAuthor,
@@ -1032,7 +1033,10 @@ export const shapeProposals = sqliteTable(
     key: text('key').notNull(),
     kind: text('kind').$type<ShapeProposalKind>().notNull(),
     state: text('state').$type<ShapeProposalState>().notNull(),
+    /** The round that last created or changed it; a round that restates it unchanged leaves this alone. */
     round: integer('round').notNull(),
+    /** The round that created it (or brought it back after a drop); `round` equal to it means "new". */
+    createdRound: integer('created_round').notNull().default(0),
     /** The fields the builder pinned; `*` pins the row as a whole (Restore). */
     pinned: text('pinned', { mode: 'json' })
       .$type<string[]>()
@@ -1052,6 +1056,25 @@ export const shapeProposals = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('shape_proposals_key_unique').on(t.shapeId, t.key)],
+);
+
+/** A file the builder dropped into a conversation (§5.4), or a terminal session handed over (§5.6). */
+export const shapeFiles = sqliteTable(
+  'shape_files',
+  {
+    id: text('id').$type<ShapeFileId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    name: text('name').notNull(),
+    mediaType: text('media_type').notNull(),
+    size: integer('size').notNull(),
+    /** Where the daemon copied it, under the data directory. */
+    storedPath: text('stored_path').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
 );
 
 /**

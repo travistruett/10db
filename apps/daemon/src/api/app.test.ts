@@ -105,6 +105,12 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
+    editShapeProposal: track('editShapeProposal'),
+    unpinShapeProposal: track('unpinShapeProposal'),
+    restoreShapeProposal: track('restoreShapeProposal'),
+    dropShapeProposal: track('dropShapeProposal'),
+    addShapeFile: track('addShapeFile'),
+    startShape: track('startShape'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -1043,6 +1049,7 @@ describe('shape routes', () => {
       messages: [],
       proposals: [],
       heard: [],
+      files: [],
       turn: { running: false, queued: 0, proposing: false },
     };
     const services = stubServices({
@@ -1188,12 +1195,146 @@ describe('shape routes', () => {
     ).toBe(400);
   });
 
+  describe('editing a row', () => {
+    const proposalId = mintId('ShapeProposal');
+    const path = `/shapes/${shapeId}/proposals/${proposalId}`;
+    const patch = (body: unknown) => ({ method: 'PATCH', ...json, body: JSON.stringify(body) });
+
+    it('edits, unpins, restores and drops a row, each answering 204', async () => {
+      const calls: string[] = [];
+      const services = stubServices({
+        editShapeProposal: (s, p, fields) => {
+          calls.push(`edit ${s} ${p} ${JSON.stringify(fields)}`);
+        },
+        unpinShapeProposal: (s, p, field) => {
+          calls.push(`unpin ${s} ${p} ${field ?? '*'}`);
+        },
+        restoreShapeProposal: (s, p) => {
+          calls.push(`restore ${s} ${p}`);
+        },
+        dropShapeProposal: (s, p) => {
+          calls.push(`drop ${s} ${p}`);
+        },
+      });
+      const request = (url: string, init: RequestInit) => app(services).request(url, init);
+      expect((await request(path, patch({ fields: { size: 'M' } }))).status).toBe(204);
+      expect((await request(`${path}/unpin`, post({ field: 'size' }))).status).toBe(204);
+      expect((await request(`${path}/unpin`, post({}))).status).toBe(204);
+      expect((await request(`${path}/restore`, post({}))).status).toBe(204);
+      expect((await request(`${path}/drop`, post({}))).status).toBe(204);
+      expect(calls).toEqual([
+        `edit ${shapeId} ${proposalId} {"size":"M"}`,
+        `unpin ${shapeId} ${proposalId} size`,
+        `unpin ${shapeId} ${proposalId} *`,
+        `restore ${shapeId} ${proposalId}`,
+        `drop ${shapeId} ${proposalId}`,
+      ]);
+    });
+
+    it('refuses an edit that sets nothing or names a malformed row, and passes on a service refusal', async () => {
+      const services = stubServices({
+        editShapeProposal: () => {
+          throw new ConflictError('This proposal was converted');
+        },
+      });
+      expect((await app(services).request(path, patch({ fields: {} }))).status).toBe(400);
+      expect(
+        (
+          await app(services).request(
+            `/shapes/${shapeId}/proposals/nope`,
+            patch({ fields: { a: 1 } }),
+          )
+        ).status,
+      ).toBe(400);
+      const refused = await app(services).request(path, patch({ fields: { size: 'M' } }));
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ message: 'This proposal was converted' });
+    });
+  });
+
+  describe('dropping a file', () => {
+    const bytes = new TextEncoder().encode('# The brief');
+    const upload = (body: Uint8Array = bytes, type = 'text/markdown') => ({
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': type },
+      body,
+    });
+    const stored = (name: string) => ({
+      id: mintId('ShapeFile'),
+      shapeId,
+      name,
+      mediaType: 'text/markdown',
+      size: bytes.length,
+      storedPath: `/data/shapes/${shapeId}/files/${name}`,
+      createdAt: AT,
+    });
+
+    it('passes the name, type and bytes to the service and answers 201 with the stored file', async () => {
+      const seen: { name: string; mediaType: string; text: string }[] = [];
+      const services = stubServices({
+        addShapeFile: (_id, file) => {
+          seen.push({
+            name: file.name,
+            mediaType: file.mediaType,
+            text: new TextDecoder().decode(file.bytes),
+          });
+          return stored(file.name);
+        },
+      });
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=${encodeURIComponent('brief notes.md')}`,
+        upload(),
+      );
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({ name: 'brief notes.md' });
+      expect(seen).toEqual([
+        { name: 'brief notes.md', mediaType: 'text/markdown', text: '# The brief' },
+      ]);
+    });
+
+    it('takes a file up to 20 MB, past the limit every other body has', async () => {
+      const services = stubServices({ addShapeFile: (_id, file) => stored(file.name) });
+      const big = new Uint8Array(MAX_BODY_BYTES + 1024);
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=big.pdf`,
+        upload(big, 'application/pdf'),
+      );
+      expect(res.status).toBe(201);
+    });
+
+    it('refuses a body past 20 MB without reading it on', async () => {
+      const services = stubServices({ addShapeFile: (_id, file) => stored(file.name) });
+      const tooBig = new Uint8Array(20 * 1024 * 1024 + 4096);
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=big.pdf`,
+        upload(tooBig, 'application/pdf'),
+      );
+      expect(res.status).toBe(413);
+    });
+
+    it('needs a name, and says why a file is refused', async () => {
+      const services = stubServices({
+        addShapeFile: () => {
+          throw new InvalidError(
+            'run.sh can’t be added: drop Markdown, plain text, PDF, PNG, JPEG or WebP',
+          );
+        },
+      });
+      expect((await app(services).request(`/shapes/${shapeId}/files`, upload())).status).toBe(400);
+      const refused = await app(services).request(`/shapes/${shapeId}/files?name=run.sh`, upload());
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(await refused.json())).toContain('run.sh');
+    });
+  });
+
   it('needs the token', async () => {
     for (const [method, path] of [
       ['GET', `/projects/${projectId}/shapes`],
       ['GET', `/shapes/${shapeId}`],
       ['POST', `/shapes/${shapeId}/messages`],
       ['POST', `/shapes/${shapeId}/convert`],
+      ['POST', `/shapes/${shapeId}/files`],
+      ['PATCH', `/shapes/${shapeId}/proposals/${mintId('ShapeProposal')}`],
     ] as const)
       expect((await app().request(path, { method })).status).toBe(401);
   });

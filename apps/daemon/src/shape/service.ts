@@ -1,35 +1,50 @@
+import { readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   ConflictError,
   EventType,
   InvalidError,
+  NotFoundError,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  ShapeOrigin,
+  ShapeProposalState,
+  shapeFileKind,
   SessionMode,
   type DecisionId,
   type Effort,
   type GoalId,
   type ProjectId,
   type ShapeDto,
+  type ShapeFileDto,
+  type ShapeFileId,
   type ShapeId,
   type ShapeMessageDto,
-  type ShapeOrigin,
+  type ShapeMessageId,
   type ShapeProposalId,
   type ShapeViewDto,
   type SessionId,
+  type StartShapeInput,
 } from '@10db/contracts';
 import {
+  countShapeFiles,
   endSession,
   findShapeLinkOfGoal,
   getShape,
+  getShapeProposal,
   getShapeSdkSessionId,
   insertSession,
   insertShape,
+  insertShapeFile,
   insertShapeMessage,
+  listShapeFiles,
   listShapeMessages,
   listShapes,
   markSessionStarted,
   patchShape,
   updateSessionUsage,
+  type ShapeFileRow,
+  type WriteContext,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
@@ -39,6 +54,7 @@ import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
   SessionAdapter,
   SessionEvent,
+  ShapeImage,
   ShapeSessionHandle,
   ShapeSessionSpec,
   TurnResult,
@@ -46,6 +62,8 @@ import type {
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
+import { asImage, checkDroppedFile, storeFile } from './dropped-files';
+import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import {
   proposeNote,
   SHAPE_ALLOWED_TOOLS,
@@ -53,6 +71,12 @@ import {
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_SYSTEM_PROMPT,
 } from './policy';
+import {
+  dropProposal as dropRow,
+  editProposal as editRow,
+  restoreProposal as restoreRow,
+  unpinProposal as unpinRow,
+} from './rounds';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
 import { buildShapeView } from './view';
@@ -78,14 +102,45 @@ export interface ShapeServiceDeps {
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /** Resolves a project's launch; throws when its account can't start a session. */
   launch(projectId: ProjectId): ShapeLaunch;
+  /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
+  readonly filesDir: string;
   /** How long a session idles before its process closes; 10 minutes. */
   readonly idleMs?: number;
   /** The share of the context window past which a conversation moves to a fresh session; 70. */
   readonly contextLimitPct?: number;
 }
 
+/** A file as the input hands it over: the name and type the browser reported, and its bytes. */
+export interface DroppedFile {
+  readonly name: string;
+  readonly mediaType: string;
+  readonly bytes: Uint8Array;
+}
+
 export interface ShapeService {
   create(projectId: ProjectId, input: { title: string; origin: ShapeOrigin }): ShapeDto;
+  /**
+   * `start_shape` (spec §5.6): a conversation from a terminal session, its summary the builder's first
+   * message and its text files kept. Starts no turn.
+   */
+  startFromTerminal(input: StartShapeInput): ShapeDto;
+  /**
+   * Keeps a dropped file (§5.4) and sends it with the next message: an image as an image block, any
+   * other file as a line naming its path. Throws InvalidError, naming the file, when it is refused.
+   */
+  addFile(shapeId: ShapeId, file: DroppedFile): ShapeFileDto;
+  /**
+   * The builder's actions on a row (§6 Editing). Each is one write and reaches the next turn as a note.
+   * Throws NotFoundError for a row of another conversation and ConflictError for a converted or dropped one.
+   */
+  editProposal(
+    shapeId: ShapeId,
+    id: ShapeProposalId,
+    fields: Readonly<Record<string, unknown>>,
+  ): void;
+  unpinProposal(shapeId: ShapeId, id: ShapeProposalId, field?: string): void;
+  restoreProposal(shapeId: ShapeId, id: ShapeProposalId): void;
+  dropProposal(shapeId: ShapeId, id: ShapeProposalId): void;
   /** Records a builder message and queues its turn. */
   send(shapeId: ShapeId, text: string): ShapeMessageDto;
   /** Queues a Propose turn, or ignores the press while a Propose turn is queued or running. */
@@ -137,6 +192,14 @@ interface Turn {
   readonly kind: 'message' | 'propose';
   /** What the session is sent, with the id of the message it answers. */
   readonly prompt: string;
+  /** The transcript row the turn answers; builder messages before it are context a fresh session lacks. */
+  readonly messageId: ShapeMessageId;
+}
+
+/** What goes ahead of a turn's message: the builder's edits since the last turn and the files dropped. */
+interface Intake {
+  readonly notes: readonly string[];
+  readonly files: readonly ShapeFileRow[];
 }
 
 type TurnEnd =
@@ -154,6 +217,10 @@ interface Live {
 
 interface Runtime {
   readonly queue: Turn[];
+  /** The builder's edits not yet told to Claude; they go ahead of the next turn. */
+  readonly notes: string[];
+  /** Files dropped since the last turn started. */
+  readonly files: ShapeFileId[];
   current: Turn | null;
   live: Live | null;
   /** Resolves the running turn, when the session says it ended. */
@@ -186,6 +253,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (rt === undefined) {
       rt = {
         queue: [],
+        notes: [],
+        files: [],
         current: null,
         live: null,
         waiting: null,
@@ -238,6 +307,30 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       },
       shapeId,
     );
+
+  /**
+   * One builder action on a row, as one write with its transcript note: whichever of this and a
+   * reconcile lands second sees the other. The note reaches Claude ahead of the next turn.
+   */
+  const builderAction = (
+    shapeId: ShapeId,
+    id: ShapeProposalId,
+    act: (ctx: WriteContext, label: string) => string | null,
+  ): void => {
+    const note = state.write((ctx) => {
+      const row = getShapeProposal(ctx.tx, id);
+      if (row.shapeId !== shapeId) throw new NotFoundError('shape proposal', id);
+      const text = act(ctx, rowLabel(row));
+      if (text !== null)
+        insertShapeMessage(ctx, shapeId, {
+          author: ShapeMessageAuthor.Note,
+          kind: ShapeMessageKind.Edit,
+          body: text,
+        });
+      return text;
+    });
+    if (note !== null) runtimeOf(shapeId).notes.push(note);
+  };
 
   // --- Events from a session --------------------------------------------------------------------
 
@@ -310,22 +403,74 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   // --- Starting a session -----------------------------------------------------------------------
 
+  /** The lines that tell Claude what the builder did since it last heard: edits, then files. */
+  const intakeText = (intake: Intake): string =>
+    [
+      ...intake.notes.map((note) => `[note] ${note}`),
+      ...intake.files.map((file) => `[file] ${file.storedPath} (${file.name})`),
+    ].join('\n');
+
+  /** The dropped images among the files, read from where the daemon keeps them. */
+  const imagesOf = (files: readonly ShapeFileRow[]): ShapeImage[] =>
+    files.flatMap((file) => {
+      try {
+        const kind = shapeFileKind(file.name);
+        const image = kind === null ? null : asImage(kind, readFileSync(file.storedPath));
+        return image === null ? [] : [image];
+      } catch (error) {
+        log.warn({ err: error, file: file.name }, 'a dropped image could not be read');
+        return [];
+      }
+    });
+
+  /** Takes what has gathered for the conversation's next turn. */
+  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => {
+    const dropped = new Set(rt.files.splice(0));
+    return {
+      notes: rt.notes.splice(0),
+      files: listShapeFiles(state.db, shapeId).filter((f) => dropped.has(f.id)),
+    };
+  };
+
   /** Starts the conversation's session with `prompt` as its first message. */
-  const start = (shapeId: ShapeId, rt: Runtime, turn: Turn): void => {
+  const start = (shapeId: ShapeId, rt: Runtime, turn: Turn, intake: Intake): void => {
     const shape = getShape(state.db, shapeId);
     const launch = deps.launch(shape.projectId);
     const resumeId = getShapeSdkSessionId(state.db, shapeId);
-    let prompt = turn.prompt;
+    const transcript = listShapeMessages(state.db, shapeId);
+    const parts: string[] = [];
     // No session to resume, and Claude has spoken: a session that lost it starts from the digest,
     // which is stored so what it saw is on record.
-    const spoken = listShapeMessages(state.db, shapeId).some(
+    const spoken = transcript.some(
       (m) => m.author === ShapeMessageAuthor.Claude && m.kind === ShapeMessageKind.Text,
     );
     if (resumeId === null && spoken) {
       const digest = buildDigest(state.db, shapeId);
       say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Digest, digest);
-      prompt = `${digest}\n\n${turn.prompt}`;
+      parts.push(digest);
     }
+    // A session that never heard the conversation (a start_shape summary, or earlier messages whose
+    // session never started) is told what the builder has said so far, and about every file.
+    let files = intake.files;
+    if (resumeId === null) {
+      if (!spoken)
+        parts.push(
+          ...transcript
+            .filter(
+              (m) =>
+                m.author === ShapeMessageAuthor.Builder &&
+                m.kind === ShapeMessageKind.Text &&
+                m.id < turn.messageId,
+            )
+            .map((m) => `[m:${m.id}] ${m.body}`),
+        );
+      files = listShapeFiles(state.db, shapeId);
+    }
+    const lines = intakeText({ notes: intake.notes, files });
+    if (lines !== '') parts.push(lines);
+    parts.push(turn.prompt);
+    const prompt = parts.join('\n\n');
+    const images = imagesOf(intake.files);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -343,6 +488,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       cwd: launch.cwd,
       systemPrompt: SHAPE_SYSTEM_PROMPT,
       prompt,
+      ...(images.length === 0 ? {} : { images }),
       model: launch.model,
       effort: launch.effort,
       resumeProviderSessionId: resumeId,
@@ -430,10 +576,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const ended = new Promise<TurnEnd>((resolve) => {
       rt.waiting = resolve;
     });
+    const intake = takeIntake(shapeId, rt);
     try {
-      if (rt.live === null) start(shapeId, rt, turn);
-      else rt.live.handle.send(turn.prompt);
+      if (rt.live === null) start(shapeId, rt, turn, intake);
+      else {
+        const lines = intakeText(intake);
+        rt.live.handle.send(
+          lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
+          imagesOf(intake.files),
+        );
+      }
     } catch (error) {
+      // The turn never reached Claude, so what was to go ahead of it waits for the next one.
+      rt.notes.unshift(...intake.notes);
+      rt.files.unshift(...intake.files.map((f) => f.id));
       rt.waiting = null;
       log.warn({ err: error, shapeId }, 'shape session could not start');
       notice(
@@ -507,6 +663,105 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   return {
     create: (projectId, input) => state.write((ctx) => insertShape(ctx, projectId, input)),
 
+    startFromTerminal(input) {
+      const made: { id: ShapeId | null } = { id: null };
+      try {
+        return state.write((ctx) => {
+          const shape = insertShape(ctx, input.projectId, {
+            title: input.title,
+            origin: ShapeOrigin.ClaudeCode,
+          });
+          made.id = shape.id;
+          insertShapeMessage(ctx, shape.id, {
+            author: ShapeMessageAuthor.Note,
+            kind: ShapeMessageKind.Notice,
+            body: 'From a Claude Code session',
+          });
+          insertShapeMessage(ctx, shape.id, {
+            author: ShapeMessageAuthor.Builder,
+            kind: ShapeMessageKind.Text,
+            body: input.summary,
+          });
+          for (const file of input.files) {
+            const bytes = new TextEncoder().encode(file.content);
+            const checked = checkDroppedFile({
+              name: file.name,
+              mediaType: '',
+              bytes,
+              held: countShapeFiles(ctx.tx, shape.id),
+            });
+            insertShapeFile(ctx, {
+              shapeId: shape.id,
+              name: checked.name,
+              mediaType: checked.mediaType,
+              size: bytes.length,
+              storedPath: storeFile(deps.filesDir, shape.id, checked.name, bytes),
+            });
+          }
+          return shape;
+        });
+      } catch (error) {
+        // The write rolled back; the files it had copied are not part of any conversation.
+        if (made.id !== null)
+          rmSync(join(deps.filesDir, made.id), { recursive: true, force: true });
+        throw error;
+      }
+    },
+
+    addFile(shapeId, file) {
+      getShape(state.db, shapeId);
+      const checked = checkDroppedFile({
+        ...file,
+        held: countShapeFiles(state.db, shapeId),
+      });
+      const storedPath = storeFile(deps.filesDir, shapeId, checked.name, file.bytes);
+      try {
+        const row = state.write((ctx) =>
+          insertShapeFile(ctx, {
+            shapeId,
+            name: checked.name,
+            mediaType: checked.mediaType,
+            size: file.bytes.length,
+            storedPath,
+          }),
+        );
+        runtimeOf(shapeId).files.push(row.id);
+        return row;
+      } catch (error) {
+        rmSync(storedPath, { force: true });
+        throw error;
+      }
+    },
+
+    editProposal(shapeId, id, fields) {
+      builderAction(shapeId, id, (ctx, label) => {
+        editRow(ctx, id, fields);
+        return editNote(label, fields);
+      });
+    },
+
+    unpinProposal(shapeId, id, field) {
+      builderAction(shapeId, id, (ctx, label) => {
+        unpinRow(ctx, id, field);
+        return unpinNote(label, field);
+      });
+    },
+
+    restoreProposal(shapeId, id) {
+      builderAction(shapeId, id, (ctx, label) => {
+        restoreRow(ctx, id);
+        return restoreNote(label);
+      });
+    },
+
+    dropProposal(shapeId, id) {
+      builderAction(shapeId, id, (ctx, label) => {
+        if (getShapeProposal(ctx.tx, id).state === ShapeProposalState.Rejected) return null;
+        dropRow(ctx, id);
+        return dropNote(label);
+      });
+    },
+
     send(shapeId, text) {
       const rt = runtimeOf(shapeId);
       const message = say(shapeId, ShapeMessageAuthor.Builder, ShapeMessageKind.Text, text);
@@ -515,7 +770,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         state.write((ctx) => {
           patchShape(ctx, shapeId, { title });
         });
-      rt.queue.push({ kind: 'message', prompt: `[m:${message.id}] ${text}` });
+      rt.queue.push({
+        kind: 'message',
+        prompt: `[m:${message.id}] ${text}`,
+        messageId: message.id,
+      });
       pump(shapeId, rt);
       return message;
     },
@@ -534,7 +793,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           body: note,
         });
       });
-      rt.queue.push({ kind: 'propose', prompt: `[m:${message.id}] ${instruction}` });
+      rt.queue.push({
+        kind: 'propose',
+        prompt: `[m:${message.id}] ${instruction}`,
+        messageId: message.id,
+      });
       pump(shapeId, rt);
       return { status: 'started' };
     },

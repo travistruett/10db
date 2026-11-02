@@ -42,6 +42,7 @@ const ID_SCHEMAS = {
   ShapeProposal: idSchema('spp', 'ShapeProposalId'),
   ShapeLink: idSchema('slk', 'ShapeLinkId'),
   ShapeFinding: idSchema('shf', 'ShapeFindingId'),
+  ShapeFile: idSchema('sfl', 'ShapeFileId'),
 } as const;
 
 const ID_PREFIX = {
@@ -75,6 +76,7 @@ const ID_PREFIX = {
   ShapeProposal: 'spp',
   ShapeLink: 'slk',
   ShapeFinding: 'shf',
+  ShapeFile: 'sfl',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -147,5 +149,7 @@ export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
 export type ShapeLinkId = IdOf<'ShapeLink'>;
 export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;
 export type ShapeFindingId = IdOf<'ShapeFinding'>;
+export const ShapeFileId = ID_SCHEMAS.ShapeFile;
+export type ShapeFileId = IdOf<'ShapeFile'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

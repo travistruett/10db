@@ -14,6 +14,12 @@ export type ShapeApiServices = Pick<
   | 'convertShape'
   | 'removeDraftGoal'
   | 'withdrawShapeDecision'
+  | 'editShapeProposal'
+  | 'unpinShapeProposal'
+  | 'restoreShapeProposal'
+  | 'dropShapeProposal'
+  | 'addShapeFile'
+  | 'startShape'
 >;
 
 export function createShapeServices(deps: { readonly shape: ShapeService }): ShapeApiServices {
@@ -54,5 +60,19 @@ export function createShapeServices(deps: { readonly shape: ShapeService }): Sha
     withdrawShapeDecision: (shapeId, decisionId, reason) => {
       shape.withdrawDecision(shapeId, decisionId, reason);
     },
+    editShapeProposal: (shapeId, id, fields) => {
+      shape.editProposal(shapeId, id, fields);
+    },
+    unpinShapeProposal: (shapeId, id, field) => {
+      shape.unpinProposal(shapeId, id, field);
+    },
+    restoreShapeProposal: (shapeId, id) => {
+      shape.restoreProposal(shapeId, id);
+    },
+    dropShapeProposal: (shapeId, id) => {
+      shape.dropProposal(shapeId, id);
+    },
+    addShapeFile: (shapeId, file) => shape.addFile(shapeId, file),
+    startShape: (input) => shape.startFromTerminal(input),
   };
 }

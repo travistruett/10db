@@ -14,6 +14,7 @@ export type {
   SessionEvent,
   SessionHandle,
   SessionSpec,
+  ShapeImage,
   ShapeSessionHandle,
   ShapeSessionSpec,
   ShapeToolRequest,

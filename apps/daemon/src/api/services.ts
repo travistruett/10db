@@ -69,11 +69,14 @@ import type {
   ShapeConvertInput,
   ShapeConvertResult,
   ShapeDto,
+  ShapeFileDto,
   ShapeId,
   ShapeInput,
   ShapeMessageDto,
+  ShapeProposalId,
   ShapeProposeResult,
   ShapeViewDto,
+  StartShapeInput,
   StepPlanDto,
   StartTaskInput,
   SystemCheckDto,
@@ -217,6 +220,27 @@ export interface ApiServices {
   removeDraftGoal(goalId: GoalId): void;
   /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
+  /**
+   * The builder's actions on a proposal row: edit sets fields and pins them, unpin lets a field (or the
+   * whole row) go, restore brings a row back from Earlier pinned, drop tombstones its key. Throws
+   * NotFoundError for a row of another conversation, ConflictError for a converted or dropped one and
+   * InvalidError for an edit that does not fit.
+   */
+  editShapeProposal(
+    shapeId: ShapeId,
+    id: ShapeProposalId,
+    fields: Readonly<Record<string, unknown>>,
+  ): void;
+  unpinShapeProposal(shapeId: ShapeId, id: ShapeProposalId, field?: string): void;
+  restoreShapeProposal(shapeId: ShapeId, id: ShapeProposalId): void;
+  dropShapeProposal(shapeId: ShapeId, id: ShapeProposalId): void;
+  /** Keeps a dropped file; throws InvalidError naming the file and the reason when it is refused. */
+  addShapeFile(
+    shapeId: ShapeId,
+    file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
+  ): ShapeFileDto;
+  /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
+  startShape(input: StartShapeInput): ShapeDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;

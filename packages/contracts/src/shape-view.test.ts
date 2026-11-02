@@ -3,6 +3,8 @@ import {
   CONTRACT_SCHEMAS,
   mintId,
   ShapeConvertInput,
+  ShapeEditInput,
+  ShapeUnpinInput,
   ShapeMessageInput,
   ShapeProposalDto,
   ShapeViewDto,
@@ -20,6 +22,8 @@ const base = {
   state: 'pending',
   round: 1,
   pinned: [],
+  mark: null,
+  sourceMessageIds: [source],
   converted: null,
   createdAt: AT,
   updatedAt: AT,
@@ -34,6 +38,52 @@ const looseBody = {
   ceremony: 'direct',
   sourceMessageIds: [source],
 };
+
+describe('a proposal row’s round mark and sources', () => {
+  it.each(['new', 'changed', 'moved', null])('takes the mark %j', (mark) => {
+    expect(
+      ShapeProposalDto.safeParse({ ...base, mark, key: 'a', kind: 'task', body: looseBody })
+        .success,
+    ).toBe(true);
+  });
+
+  it('refuses a mark that is not one of the three', () => {
+    expect(
+      ShapeProposalDto.safeParse({
+        ...base,
+        mark: 'stale',
+        key: 'a',
+        kind: 'task',
+        body: looseBody,
+      }).success,
+    ).toBe(false);
+  });
+});
+
+describe('ShapeEditInput', () => {
+  it('takes the fields to set', () => {
+    expect(ShapeEditInput.parse({ fields: { size: 'M' } })).toEqual({ fields: { size: 'M' } });
+  });
+
+  it('takes a goal task’s field by its path', () => {
+    expect(ShapeEditInput.safeParse({ fields: { 'tasks.density.size': 'M' } }).success).toBe(true);
+  });
+
+  it('refuses an edit that sets nothing', () => {
+    expect(ShapeEditInput.safeParse({ fields: {} }).success).toBe(false);
+  });
+
+  it.each(['key', 'sourceMessageIds', 'kind', 'goalId'])('refuses to edit %s', (field) => {
+    expect(ShapeEditInput.safeParse({ fields: { [field]: 'x' } }).success).toBe(false);
+  });
+});
+
+describe('ShapeUnpinInput', () => {
+  it('names a field, or none to unpin the whole row', () => {
+    expect(ShapeUnpinInput.parse({ field: 'size' })).toEqual({ field: 'size' });
+    expect(ShapeUnpinInput.parse({})).toEqual({});
+  });
+});
 
 describe('ShapeProposalDto', () => {
   it('parses a row with the body of its kind, defaults applied', () => {
@@ -87,10 +137,22 @@ describe('ShapeViewDto', () => {
       ],
       proposals: [{ ...base, key: 'thin-scrollbars', kind: 'task', body: looseBody }],
       heard: ['Thinner scrollbars'],
+      files: [
+        {
+          id: mintId('ShapeFile'),
+          shapeId,
+          name: 'brief.md',
+          mediaType: 'text/markdown',
+          size: 12,
+          storedPath: '/data/shapes/x/files/brief.md',
+          createdAt: AT,
+        },
+      ],
       turn: { running: false, queued: 0, proposing: false },
     });
     expect(view.proposals).toHaveLength(1);
     expect(view.heard).toEqual(['Thinner scrollbars']);
+    expect(view.files[0]?.name).toBe('brief.md');
   });
 
   it('is in the contract schemas the generator writes', () => {

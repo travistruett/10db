@@ -75,18 +75,40 @@ function unitsOf(draft: PlanDraft): Unit[] {
   return units;
 }
 
-/** The part of a body a hash and a changed-fields mark look at: everything but where it came from. */
-function content(body: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(body).filter(([field]) => field !== 'sourceMessageIds'));
+/**
+ * A value in the form a hash and a changed-fields mark compare: where it came from is left out, and a
+ * list's order doesn't count (spec §6 What changed, and why), so a round that only reorders or recites
+ * its sources changes nothing.
+ */
+function canonical(value: unknown): unknown {
+  if (Array.isArray(value))
+    return value.map(canonical).sort((a, b) => {
+      const [x, y] = [JSON.stringify(a), JSON.stringify(b)];
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
+  if (typeof value === 'object' && value !== null)
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([field]) => field !== 'sourceMessageIds')
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([field, inner]) => [field, canonical(inner)]),
+    );
+  return value;
 }
 
+const same = (a: unknown, b: unknown): boolean =>
+  JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+
 const hashOf = (value: unknown): string =>
-  createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
+  createHash('sha256')
+    .update(JSON.stringify(canonical(value)))
+    .digest('hex')
+    .slice(0, 16);
 
 /** The fields of `after` that differ from `before`. */
 function changedFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {
   return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-    .filter((field) => JSON.stringify(before[field]) !== JSON.stringify(after[field]))
+    .filter((field) => field !== 'sourceMessageIds' && !same(before[field], after[field]))
     .sort();
 }
 
@@ -108,8 +130,8 @@ function marksFor(unit: Unit, previous: Record<string, unknown> | null, before: 
         return [
           key,
           {
-            hash: hashOf(content(t)),
-            changedFields: prior === undefined ? [] : changedFields(content(prior), content(t)),
+            hash: hashOf(t),
+            changedFields: prior === undefined ? [] : changedFields(prior, t),
           },
         ];
       }),
@@ -118,8 +140,8 @@ function marksFor(unit: Unit, previous: Record<string, unknown> | null, before: 
   if (unit.kind !== 'task') return before;
   return {
     [unit.key]: {
-      hash: hashOf(content(unit.body)),
-      changedFields: previous === null ? [] : changedFields(content(previous), content(unit.body)),
+      hash: hashOf(unit.body),
+      changedFields: previous === null ? [] : changedFields(previous, unit.body),
     },
   };
 }
@@ -195,8 +217,7 @@ export function reconcileDraft(
     }
     if (row?.state === ShapeProposalState.Rejected) {
       const sameChange =
-        unit.kind === 'change_task' &&
-        hashOf(content(unit.body)) === hashOf(content(asRecord(row.body)));
+        unit.kind === 'change_task' && hashOf(unit.body) === hashOf(asRecord(row.body));
       if (unit.kind !== 'change_task' || sameChange) {
         errors.push(
           `${unit.key}: the builder dropped this ${unit.kind === 'change_task' ? 'change' : 'row'}; do not propose it again. Raise it in chat as a question if it matters.`,
@@ -235,6 +256,7 @@ export function reconcileDraft(
         kind: unit.kind,
         state: ShapeProposalState.Pending,
         round,
+        createdRound: round,
         pinned: [],
         body: body as Json,
         taskHashes: marksFor({ ...unit, body }, null, {}),
@@ -243,14 +265,17 @@ export function reconcileDraft(
       created.push(unit.key);
       continue;
     }
-    const previous = row.state === ShapeProposalState.Rejected ? null : asRecord(row.body);
+    const revived = row.state === ShapeProposalState.Rejected;
+    const previous = revived ? null : asRecord(row.body);
+    // A row carries the round that last changed it: restating it unchanged leaves its mark alone.
+    const changed = revived || row.state !== ShapeProposalState.Pending || !same(previous, body);
     patchShapeProposal(ctx, row.id, {
       state: ShapeProposalState.Pending,
-      round,
+      ...(changed ? { round } : {}),
+      ...(revived ? { createdRound: round, pinned: [] } : {}),
       body: body as Json,
       taskHashes: marksFor({ ...unit, body }, previous, row.taskHashes),
       sourceMessageIds: sourcesOf(body).length > 0 ? sourcesOf(body) : row.sourceMessageIds,
-      ...(row.state === ShapeProposalState.Rejected ? { pinned: [] } : {}),
     });
     updated.push(unit.key);
   }
@@ -296,6 +321,46 @@ function pendingRow(ctx: WriteContext, id: ShapeProposalId): ShapeProposalRow {
   return row;
 }
 
+/** A row the builder can still act on: not converted, and not dropped (a drop is for good). */
+function liveRow(ctx: WriteContext, id: ShapeProposalId): ShapeProposalRow {
+  const row = pendingRow(ctx, id);
+  if (row.state === ShapeProposalState.Rejected)
+    throw new ConflictError('The builder dropped this row; it stays dropped');
+  return row;
+}
+
+/** A row coming back from Earlier is no longer "moved": it takes the round that made it. */
+const comesBack = (row: ShapeProposalRow) =>
+  row.state === ShapeProposalState.Superseded
+    ? { state: ShapeProposalState.Pending, round: row.createdRound }
+    : {};
+
+/**
+ * The body with the builder's fields set. A goal's task field is named `tasks.<key>.<field>`, so a
+ * pin on it holds that task alone.
+ */
+function withFields(
+  body: Record<string, unknown>,
+  fields: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  let next: Record<string, unknown> = { ...body };
+  for (const [name, value] of Object.entries(fields)) {
+    const [head, taskKey, field] = name.split('.');
+    if (head !== 'tasks' || taskKey === undefined || field === undefined) {
+      next[name] = value;
+      continue;
+    }
+    const tasks = Array.isArray(next['tasks']) ? next['tasks'].map(asRecord) : [];
+    if (!tasks.some((t) => t['key'] === taskKey))
+      throw new InvalidError(`That edit names the task ${taskKey}, which this row does not have`);
+    next = {
+      ...next,
+      tasks: tasks.map((t) => (t['key'] === taskKey ? { ...t, [field]: value } : t)),
+    };
+  }
+  return next;
+}
+
 /**
  * The builder sets fields of a row: the values are written, parsed as the row's kind says, and
  * pinned, so no later round changes them. The hash of the task they touched is rewritten.
@@ -305,11 +370,12 @@ export function editProposal(
   id: ShapeProposalId,
   fields: Readonly<Record<string, unknown>>,
 ): void {
-  const row = pendingRow(ctx, id);
+  const row = liveRow(ctx, id);
   let body: Record<string, unknown>;
   try {
-    body = parsedBody(row.kind, { ...asRecord(row.body), ...fields });
+    body = parsedBody(row.kind, withFields(asRecord(row.body), fields));
   } catch (error) {
+    if (error instanceof InvalidError) throw error;
     throw new InvalidError(
       `That edit does not fit a ${row.kind}: ${error instanceof Error ? error.message : String(error)}`,
     );
@@ -323,21 +389,36 @@ export function editProposal(
     body: body as Json,
     taskHashes: marks,
     pinned: [...new Set([...row.pinned, ...Object.keys(fields)])],
-    state: row.state === ShapeProposalState.Superseded ? ShapeProposalState.Pending : row.state,
+    ...comesBack(row),
   });
 }
 
-/** Restore: a row from Earlier comes back, held as a whole until the builder unpins or drops it. */
+/**
+ * Restore: a row from Earlier comes back, held as a whole until the builder unpins or drops it. On a
+ * pending row it pins the row as a whole.
+ */
 export function restoreProposal(ctx: WriteContext, id: ShapeProposalId): void {
-  const row = pendingRow(ctx, id);
+  const row = liveRow(ctx, id);
   patchShapeProposal(ctx, id, {
-    state: ShapeProposalState.Pending,
+    ...comesBack(row),
     pinned: [...new Set([...row.pinned, PIN_WHOLE_ROW])],
   });
 }
 
+/** Unpin: one field is the draft's again, or with no field the row as a whole. */
+export function unpinProposal(ctx: WriteContext, id: ShapeProposalId, field?: string): void {
+  const row = liveRow(ctx, id);
+  if (field === undefined) {
+    patchShapeProposal(ctx, id, { pinned: [] });
+    return;
+  }
+  if (!row.pinned.includes(field)) throw new InvalidError(`${field} is not pinned`);
+  patchShapeProposal(ctx, id, { pinned: row.pinned.filter((p) => p !== field) });
+}
+
 /** Drop: the row is rejected and stays as a tombstone, so a draft reusing its key is refused. */
 export function dropProposal(ctx: WriteContext, id: ShapeProposalId): void {
-  pendingRow(ctx, id);
+  const row = pendingRow(ctx, id);
+  if (row.state === ShapeProposalState.Rejected) return;
   patchShapeProposal(ctx, id, { state: ShapeProposalState.Rejected });
 }
