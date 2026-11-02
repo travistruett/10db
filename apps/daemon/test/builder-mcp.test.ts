@@ -160,6 +160,7 @@ describe('the builder MCP endpoint', () => {
     expect(projects[0]?.['hazards']).toContainEqual(
       expect.objectContaining({ name: 'migrations', globs: expect.any(Array) as unknown }),
     );
+    expect(projects[0]?.['isolate']).toEqual(['migrations', 'deps']);
     expect(projects[0]?.['columns']).toContainEqual({ id: column.id, name: 'Later' });
   });
 

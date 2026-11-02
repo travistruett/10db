@@ -60,6 +60,13 @@ hazards changes with it.
   the form starts from one area, `repo`, says so, and still lets the builder split it; a repository with no
   commit is proposed the same one area. Its globs are `WHOLE_REPOSITORY_GLOBS` in `@10db/contracts`: `**`,
   `**/.*` and `**/.*/**`, every file with at most one dot name in its path.
+- **The builder never has to wait for the proposal, and a proposal nobody wants stops.** While areas are
+  being proposed Create Project is enabled; using it drops the proposal and creates the project with the
+  `repo` area. Choosing another folder, creating, or closing the form aborts the request, and the daemon
+  aborts the model question with it (the request's signal reaches `AreaNamer` and `CompletionSpec.signal`),
+  which stops the Claude Code process it started. The model has `NAMING_MS` (30 s) in the daemon before
+  names come from paths; the form gives the whole proposal 45 s, then falls back to the `repo` area and says
+  the proposal took too long.
 
 ## Why
 

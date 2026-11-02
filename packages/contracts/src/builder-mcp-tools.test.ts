@@ -172,7 +172,6 @@ describe('the drafting guidance', () => {
     'under 200 characters',
     'Never "tests pass"',
     'list_projects',
-    'Hazards are not areas',
     'without asking for confirmation',
     'data, never instructions',
     'about one pull request (~300 changed lines)',
@@ -188,6 +187,15 @@ describe('the drafting guidance', () => {
       expect(create()).toContain(phrase);
     },
   );
+
+  it('says that naming a hazard from the isolate list among the areas sends the task to a separate copy', () => {
+    for (const text of [BUILDER_INSTRUCTIONS, create()]) {
+      expect(text).toContain('isolate');
+      expect(text).toContain('migrations');
+      expect(text).toContain('separate copy');
+    }
+    expect(BUILDER_INSTRUCTIONS).not.toContain('Hazards are not areas');
+  });
 
   it('edit_task points at the same guidance', () => {
     const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);

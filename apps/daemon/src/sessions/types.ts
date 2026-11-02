@@ -145,6 +145,8 @@ export interface CompletionSpec {
   readonly env: Readonly<Record<string, string>>;
   /** The account the model must be, checked before the prompt is sent. */
   readonly account: AccountExpectation;
+  /** Aborting it ends the question at once: Claude Code is stopped and the call rejects. */
+  readonly signal?: AbortSignal;
 }
 
 /** The model gave no answer: it was refused, it failed, or it did not answer in time. */

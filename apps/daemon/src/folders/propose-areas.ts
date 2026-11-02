@@ -16,13 +16,22 @@ const HISTORY_COMMITS = 400;
 /**
  * Asks a model one question and returns its text. The prompt carries paths from the repository as
  * data; the model gets no tool and no file, so it can read and run nothing of the repository's.
+ * Aborting `signal` must stop the question and end any process it started.
  */
-export type AreaNamer = (prompt: string) => Promise<string>;
+export type AreaNamer = (prompt: string, signal?: AbortSignal) => Promise<string>;
+
+/**
+ * How long the model may take to name the areas before they are named from their paths instead.
+ * Shorter than the desktop's wait for the whole proposal, so the model's process ends first.
+ */
+export const NAMING_MS = 30_000;
 
 export interface ProposeAreasDeps {
   readonly git: Git;
   /** Names and merges the candidates; null leaves them named from their paths. */
   readonly namer: AreaNamer | null;
+  /** Overrides `NAMING_MS`. */
+  readonly namingMs?: number;
   /** The data dir, the lane temp root and the worktree root: 10db's own places. */
   readonly protectedRoots: readonly string[];
 }
@@ -46,13 +55,40 @@ function realOrResolved(path: string): string {
 async function named(
   namer: AreaNamer | null,
   candidates: Parameters<typeof namingPrompt>[0],
+  namingMs: number,
+  caller: AbortSignal | undefined,
 ): Promise<{ areas: ProposedArea[]; source: AreaProposalSource }> {
-  if (namer !== null) {
+  if (namer !== null && caller?.aborted !== true) {
+    // One signal for the question: it ends when the caller gives up or the bound passes.
+    const question = new AbortController();
+    const stop = () => {
+      question.abort();
+    };
+    const timer = setTimeout(stop, namingMs);
+    caller?.addEventListener('abort', stop, { once: true });
+    const ended = new Promise<null>((resolve) => {
+      question.signal.addEventListener(
+        'abort',
+        () => {
+          resolve(null);
+        },
+        { once: true },
+      );
+    });
     try {
-      const areas = areasFromModel(await namer(namingPrompt(candidates)), candidates);
+      const asked = namer(namingPrompt(candidates), question.signal);
+      // A namer that ignores its signal still must not hold the proposal past the bound.
+      asked.catch(() => undefined);
+      const text = await Promise.race([asked, ended]);
+      const areas = text === null ? null : areasFromModel(text, candidates);
       if (areas !== null) return { areas, source: AreaProposalSource.Model };
     } catch {
       // A model that is unavailable or slow costs the builder the names, not the proposal.
+    } finally {
+      clearTimeout(timer);
+      caller?.removeEventListener('abort', stop);
+      // The question is over whichever way it ended: nothing it started may keep running.
+      question.abort();
     }
   }
   return { areas: areasFromStructure(candidates), source: AreaProposalSource.Structure };
@@ -68,6 +104,7 @@ async function named(
 export async function proposeAreas(
   deps: ProposeAreasDeps,
   path: string,
+  signal?: AbortSignal,
 ): Promise<AreaProposalResult> {
   const given = realOrResolved(path);
   if (deps.protectedRoots.some((p) => equalOrUnder(given, realOrResolved(p))))
@@ -87,6 +124,6 @@ export async function proposeAreas(
   // A repository with nothing committed yet has no seam to find: one area holds whatever comes.
   if (candidates.length === 0)
     return { ok: true, proposal: { areas: [EVERYTHING], namedBy: AreaProposalSource.Structure } };
-  const { areas, source } = await named(deps.namer, candidates);
+  const { areas, source } = await named(deps.namer, candidates, deps.namingMs ?? NAMING_MS, signal);
   return { ok: true, proposal: { areas, namedBy: source } };
 }
