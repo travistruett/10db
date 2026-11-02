@@ -149,10 +149,18 @@ export function checkBriefRules(brief: GoalBrief, project: BriefProject): GoalAd
   brief.criteria.forEach((criterion, i) => {
     if (criterion.check !== 'accept' || criterion.person === undefined) return;
     const name = criterion.person;
-    if (!project.people.some((p) => p.handle === name || p.name === name))
+    // The same resolution as the store: a handle wins; otherwise the name must be one person's.
+    if (project.people.some((p) => p.handle === name)) return;
+    const named = project.people.filter((p) => p.name === name).length;
+    if (named === 0)
       errors.push({
         path: `Criterion ${String(i + 1)}, person`,
         message: `nobody is called ${name}`,
+      });
+    else if (named > 1)
+      errors.push({
+        path: `Criterion ${String(i + 1)}, person`,
+        message: `more than one person is called ${name}; name them by handle instead`,
       });
   });
   return errors;
