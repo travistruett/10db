@@ -1603,6 +1603,17 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it('excuses one write after an allow for the workstream that stored no rule, then cards the next', async () => {
+      const lane = running();
+      watcher.sync();
+      const globFile = 'docs/a[1].md';
+      editCard(lane, globFile, 'allow_workstream');
+      await write(globFile);
+      expect(flags()).toEqual([]);
+      await write(globFile);
+      expect(flags().map((f) => f.body)).toEqual([globFile]);
+    });
+
     it('does not let a card allowed for another lane excuse this one', async () => {
       const a = running('Alpha', ['api']);
       const b = running('Beta', ['ui']);
