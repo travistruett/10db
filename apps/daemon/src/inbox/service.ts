@@ -393,15 +393,21 @@ export function createInboxService(deps: {
         }
         assertKnownChoice(item, answer);
         if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
-        // Parking ends the run, so no session is handed the answer: the card closes with it.
+        // Parking ends the run, so no session is handed the answer: the card closes with it. It is
+        // 10db's control over the run, not the builder's answer to the question, so it is no decision
+        // either: the question and answer live only on the parked run's notice.
+        const parks = parksTask(item, answer);
         const closesDirectly =
-          parksTask(item, answer) ||
-          (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
+          parks || (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
         const updated = updateInboxItem(ctx, id, {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
           answer,
         });
-        if (item.kind === InboxKind.Question && DECISION_CATEGORIES.includes(item.category)) {
+        if (
+          !parks &&
+          item.kind === InboxKind.Question &&
+          DECISION_CATEGORIES.includes(item.category)
+        ) {
           const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: id });
           insertDecision(ctx, {
             projectId: item.projectId,

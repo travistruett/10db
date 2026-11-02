@@ -11,6 +11,7 @@ import {
   getTask,
   getWorkstream,
   listBoardColumns,
+  listRecentDecisions,
   schema,
   transitionWorkstream,
 } from '@10db/db';
@@ -136,6 +137,24 @@ describe('answering Park the task', () => {
     expect(run.notice?.body).toContain(PARK_TASK_CHOICE);
     expect(run.notice?.body).toContain('later');
     expect(run.notice?.body).toContain('The lane has no network for it');
+  });
+
+  it('records no decision: parking is 10db’s control over the run, not an answer to the question', async () => {
+    const ctx = seedWorkstream(base);
+    const { item } = askOn(ctx);
+    expect(item.category).toBe('engineering');
+    inbox.answer(item.id, { choice: PARK_TASK_CHOICE, note: 'later' });
+    await settled();
+    expect(listRecentDecisions(state.db, ctx.project.id, 20)).toEqual([]);
+  });
+
+  it('still records a lane’s own answer to an engineering question as a decision', () => {
+    const ctx = seedWorkstream(base);
+    const { item } = askOn(ctx);
+    inbox.answer(item.id, { choice: 'Retry' });
+    expect(listRecentDecisions(state.db, ctx.project.id, 20).map((d) => d.choice)).toEqual([
+      'Retry',
+    ]);
   });
 
   it('does not deliver the answer to the waiting session', async () => {

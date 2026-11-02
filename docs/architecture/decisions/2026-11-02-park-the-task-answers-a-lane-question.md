@@ -10,7 +10,10 @@
   option with that label already. It covers `ask_human` and the `AskUserQuestion` tool alike. The lane's own limit of
   four options is unchanged; the card may show five.
 - **Answering it parks.** `InboxService.answer` closes the card as `RESOLVED` with the answer (the same direct close a
-  flag card gets) and does not hand it to the waiting session. Then `createParkAnswers`
+  flag card gets) and does not hand it to the waiting session. It records no decision, whatever the card's category:
+  parking is 10db's control over the run, not the builder's answer to the question, and a project decision reading
+  "… -> Park the task" would tell every later lane, the one that runs the task again included, to stop. The question
+  and answer live only on the parked run's notice. Then `createParkAnswers`
   (`apps/daemon/src/inbox/park-answer.ts`) does, for every run the card targets that has not ended:
   1. `runner.cancel`: the session stops and the run is `CANCELLED`, as a cancel from the Board does, so no review
      round follows and nothing sends the work back;
