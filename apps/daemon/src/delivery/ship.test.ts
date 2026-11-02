@@ -740,6 +740,54 @@ describe('a push the server fails', () => {
   });
 });
 
+describe('a push the remote declines by repository rule or hook', () => {
+  it.each([
+    [
+      'a rule violation',
+      'remote: error: GH013: Repository rule violations found for refs/heads/10db/x.\n ! [remote rejected] 10db/x -> 10db/x (push declined due to repository rule violations)\nerror: failed to push some refs',
+      'push declined due to repository rule violations',
+    ],
+    [
+      'a hook decline',
+      ' ! [remote rejected] 10db/x -> 10db/x (pre-receive hook declined)\nerror: failed to push some refs',
+      'pre-receive hook declined',
+    ],
+  ])(
+    '%s: one push, a card quoting the reason, no claim of divergence',
+    async (_n, stderr, reason) => {
+      const calls = { count: 0 };
+      h = createDeliveryHarness(
+        {},
+        {
+          wrapGit: (git: Git): Git => ({
+            ...git,
+            push: () => {
+              calls.count += 1;
+              return Promise.reject(
+                new GitNetworkError(GitNetworkFailure.Declined, ['push'], stderr, {
+                  durationMs: 1,
+                  output: stderr,
+                }),
+              );
+            },
+          }),
+        },
+      );
+      const { batch } = await openBatch('Greetings', 'Alpha');
+      h.commit('src/api/alpha.txt');
+      const ended = await finishAll(batch);
+      expect(ended).toMatchObject({ state: 'FAILED', failure: 'network' });
+      expect(calls.count).toBe(1);
+      const card = h.only(h.cards());
+      expect(card.body).toContain(reason);
+      expect(card.body).toMatch(/repository rule or hook/);
+      expect(card.body).not.toContain("has commits this checkout doesn't");
+      expect(card.body).not.toMatch(/reconcile/i);
+      expect(h.gh.prCreates()).toEqual([]);
+    },
+  );
+});
+
 describe('Ship anyway, Retry and Abandon', () => {
   it('ships anyway only when every workstream is done, cancelled or failed, listing the failed one', async () => {
     h = createDeliveryHarness();

@@ -261,6 +261,8 @@ function stepFailure(
   switch (error.kind) {
     case GitNetworkFailure.Rejected:
       return shipCards.pushRejected(batch, error.detail);
+    case GitNetworkFailure.Declined:
+      return shipCards.pushDeclined(batch, error.detail);
     case GitNetworkFailure.ServerError:
       return shipCards.pushServerError(batch, error.detail, PUSH_SERVER_RETRIES);
     case GitNetworkFailure.Timeout:
