@@ -5,7 +5,8 @@
 # commit of the ref (among its last 100) that has one, without waiting for the head's build when
 # main has moved on; it prints that commit and how many commits behind the head it is. Only when
 # none of them has a finished build does it wait for a run of the head already under way, or start
-# one and wait for it. release-dry-run runs on every push to main as well as by hand (and keeps at
+# one and wait for it; if that run ends cancelled (a newer push replaced it in the concurrency
+# group), it looks again, up to 3 cancelled runs. release-dry-run runs on every push to main as well as by hand (and keeps at
 # most one build waiting per branch), so main's build is usually ready already; starting one is
 # the fallback (another ref, or builds that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
 # 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
@@ -102,58 +103,6 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 
-if ! sha="$(gh api "repos/{owner}/{repo}/commits/$ref" --jq .sha 2> "$gh_err")"; then
-  grep -q 'No commit found' "$gh_err" && fail "GitHub has no branch or tag named $ref"
-  fail "gh could not ask GitHub about $ref: $(cat "$gh_err"). Check gh auth status and the network."
-fi
-[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || fail "GitHub answered '$sha' for the head of $ref, not a commit SHA"
-
-# Main moves faster than a build takes, so the head's build is often still queued or running while
-# an older commit's has finished. The newest commit of the ref with a finished successful build and
-# a live artifact is installed; the head's build is waited for only when none of them has one.
-commits_scanned=100
-if ! commits="$(gh api "repos/{owner}/{repo}/commits?sha=$ref&per_page=$commits_scanned" --jq '.[].sha' 2> "$gh_err")"; then
-  fail "gh could not list the commits of $ref: $(cat "$gh_err")"
-fi
-if ! finished="$(gh run list --workflow "$workflow" --status success --limit "$commits_scanned" \
-  --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2> "$gh_err")"; then
-  fail "gh could not list the finished builds: $(cat "$gh_err")"
-fi
-
-run_id=""
-built=""
-behind=0 # the commits the installed one trails the head of the ref by
-position=0
-while IFS= read -r commit; do
-  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || continue
-  for id in $(awk -v commit="$commit" '$2 == commit { print $1 }' <<< "$finished"); do
-    [[ "$id" =~ ^[0-9]+$ ]] || continue
-    live="$(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
-      --jq "[.artifacts[] | select(.name == \"$artifact\" and (.expired | not))] | length")"
-    if [ "$live" -gt 0 ]; then
-      run_id="$id"
-      built="$commit"
-      behind="$position"
-      break
-    fi
-    echo "The build of ${commit:0:12} in run $id has expired (GitHub keeps it for 7 days)."
-  done
-  [ -z "$run_id" ] || break
-  position=$((position + 1))
-done <<< "$commits"
-
-if [ -n "$run_id" ]; then
-  if [ "$behind" -eq 0 ]; then
-    echo "Using the build of $ref at ${built:0:12} from run $run_id."
-  else
-    echo "The build of the head of $ref (${sha:0:12}) has not finished; using the newest finished one, ${built:0:12} from run $run_id."
-  fi
-else
-  run_id="$(gh run list --workflow "$workflow" --commit "$sha" --limit 20 --json databaseId,status \
-    --jq '[.[] | select(.status != "completed")][0].databaseId // empty')"
-  [ -z "$run_id" ] || echo "A build of ${sha:0:12} is already under way in run $run_id; waiting for it."
-fi
-
 dispatched_runs() {
   gh run list --workflow "$workflow" --branch "$ref" --event workflow_dispatch --limit 20 \
     --json databaseId --jq '.[].databaseId'
@@ -162,30 +111,91 @@ dispatched_runs() {
 started=$SECONDS
 past_deadline() { [ $((SECONDS - started)) -ge "$deadline_seconds" ]; }
 
-if [ -z "$run_id" ]; then
-  # gh workflow run does not say which run it started, so the new run is the one that wasn't there before.
-  before="$(dispatched_runs)"
-  gh workflow run "$workflow" --ref "$ref"
-  echo "Started a build of $ref on GitHub; the first build of a commit takes about 15 minutes."
-  while [ -z "$run_id" ]; do
-    for id in $(dispatched_runs); do
-      if ! grep -qx "$id" <<< "$before"; then
+# release-dry-run's concurrency group cancels a run still waiting when a newer push or dispatch
+# arrives on the same ref. A run waited on that ends cancelled is replaced by a newer one, so the
+# whole search starts again (the newer run, or a build that finished meanwhile, turns up in it);
+# a third cancelled run in a row is no longer a replacement, and stops it.
+cancelled_runs=0
+max_cancelled_runs=3
+while :; do
+  if ! sha="$(gh api "repos/{owner}/{repo}/commits/$ref" --jq .sha 2> "$gh_err")"; then
+    grep -q 'No commit found' "$gh_err" && fail "GitHub has no branch or tag named $ref"
+    fail "gh could not ask GitHub about $ref: $(cat "$gh_err"). Check gh auth status and the network."
+  fi
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || fail "GitHub answered '$sha' for the head of $ref, not a commit SHA"
+
+  # Main moves faster than a build takes, so the head's build is often still queued or running while
+  # an older commit's has finished. The newest commit of the ref with a finished successful build and
+  # a live artifact is installed; the head's build is waited for only when none of them has one.
+  commits_scanned=100
+  if ! commits="$(gh api "repos/{owner}/{repo}/commits?sha=$ref&per_page=$commits_scanned" --jq '.[].sha' 2> "$gh_err")"; then
+    fail "gh could not list the commits of $ref: $(cat "$gh_err")"
+  fi
+  if ! finished="$(gh run list --workflow "$workflow" --status success --limit "$commits_scanned" \
+    --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2> "$gh_err")"; then
+    fail "gh could not list the finished builds: $(cat "$gh_err")"
+  fi
+
+  run_id=""
+  built=""
+  behind=0 # the commits the installed one trails the head of the ref by
+  position=0
+  while IFS= read -r commit; do
+    [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || continue
+    for id in $(awk -v commit="$commit" '$2 == commit { print $1 }' <<< "$finished"); do
+      [[ "$id" =~ ^[0-9]+$ ]] || continue
+      live="$(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
+        --jq "[.artifacts[] | select(.name == \"$artifact\" and (.expired | not))] | length")"
+      if [ "$live" -gt 0 ]; then
         run_id="$id"
+        built="$commit"
+        behind="$position"
         break
       fi
+      echo "The build of ${commit:0:12} in run $id has expired (GitHub keeps it for 7 days)."
     done
-    if [ -z "$run_id" ]; then
-      past_deadline && fail "the build GitHub was asked to start never appeared; see gh run list --workflow $workflow"
-      sleep "$poll_seconds"
-    fi
-  done
-fi
-[[ "$run_id" =~ ^[0-9]+$ ]] || fail "GitHub answered '$run_id' for a run id"
+    [ -z "$run_id" ] || break
+    position=$((position + 1))
+  done <<< "$commits"
 
-if [ -n "$built" ]; then
-  # A finished, successful build chosen above.
-  head="$built"
-else
+  if [ -n "$run_id" ]; then
+    if [ "$behind" -eq 0 ]; then
+      echo "Using the build of $ref at ${built:0:12} from run $run_id."
+    else
+      echo "The build of the head of $ref (${sha:0:12}) has not finished; using the newest finished one, ${built:0:12} from run $run_id."
+    fi
+  else
+    run_id="$(gh run list --workflow "$workflow" --commit "$sha" --limit 20 --json databaseId,status \
+      --jq '[.[] | select(.status != "completed")][0].databaseId // empty')"
+    [ -z "$run_id" ] || echo "A build of ${sha:0:12} is already under way in run $run_id; waiting for it."
+  fi
+
+  if [ -z "$run_id" ]; then
+    # gh workflow run does not say which run it started, so the new run is the one that wasn't there before.
+    before="$(dispatched_runs)"
+    gh workflow run "$workflow" --ref "$ref"
+    echo "Started a build of $ref on GitHub; the first build of a commit takes about 15 minutes."
+    while [ -z "$run_id" ]; do
+      for id in $(dispatched_runs); do
+        if ! grep -qx "$id" <<< "$before"; then
+          run_id="$id"
+          break
+        fi
+      done
+      if [ -z "$run_id" ]; then
+        past_deadline && fail "the build GitHub was asked to start never appeared; see gh run list --workflow $workflow"
+        sleep "$poll_seconds"
+      fi
+    done
+  fi
+  [[ "$run_id" =~ ^[0-9]+$ ]] || fail "GitHub answered '$run_id' for a run id"
+
+  if [ -n "$built" ]; then
+    # A finished, successful build chosen above.
+    head="$built"
+    break
+  fi
+
   # A long wait meets the odd failed request (a 502, a dropped connection); only three in a row stop it.
   view_failures=0
   while :; do
@@ -200,6 +210,13 @@ else
     past_deadline && fail "run $run_id did not finish in $deadline_seconds seconds; follow it with gh run watch $run_id, then run this again"
     sleep "$poll_seconds"
   done
+  if [ "$conclusion" = cancelled ]; then
+    cancelled_runs=$((cancelled_runs + 1))
+    if [ "$cancelled_runs" -lt "$max_cancelled_runs" ]; then
+      echo "Run $run_id was cancelled, most likely replaced by a newer run of $ref; looking again."
+      continue
+    fi
+  fi
   [ "$conclusion" = success ] || fail "run $run_id ended in $conclusion; read it with gh run view $run_id --log-failed"
   [[ "$head" =~ ^[0-9a-f]{40}$ ]] || fail "run $run_id reports '$head' as its commit"
   # The build was of the head, or of a commit pushed after it (a dispatch builds the ref as it is then).
@@ -209,7 +226,8 @@ else
     [ "$commit" != "$head" ] || { behind="$position"; break; }
     position=$((position + 1))
   done <<< "$commits"
-fi
+  break
+done
 
 gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
 

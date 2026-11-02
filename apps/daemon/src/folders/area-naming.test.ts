@@ -99,6 +99,42 @@ describe('an area reason', () => {
     });
   });
 
+  describe('holds no lone surrogate when a model wrote it as a \\uD800-style escape', () => {
+    const LONE_SURROGATE = /\p{Cs}/u;
+    const EMOJI = String.fromCodePoint(0x1f600);
+    // The answer text as the model sends it: the escapes reach JSON.parse as six characters each.
+    const reasonFrom = (escaped: string): string | undefined =>
+      areasFromModel(`{"areas":[{"name":"x","reason":"${escaped}","candidates":[1]}]}`, [
+        candidate(AreaCandidateKind.Folder, 'a'),
+      ])?.[0]?.reason;
+
+    it.each([
+      ['high', '\\ud800'],
+      ['low', '\\udc00'],
+      ['high, upper-case escape', '\\uD83D'],
+    ])('a lone %s surrogate in a short reason', (_, escape) => {
+      const reason = reasonFrom(`The ${escape}daemon${escape} code`);
+      expect(reason).not.toMatch(LONE_SURROGATE);
+      expect(reason).toBe('The daemon code');
+    });
+
+    it('a low surrogate then a high one, which are not a pair', () => {
+      const reason = reasonFrom('a\\udc00\\ud800b');
+      expect(reason).not.toMatch(LONE_SURROGATE);
+      expect(reason).toBe('ab');
+    });
+
+    it('keeps a paired astral character, escaped or not, beside a lone one', () => {
+      const reason = reasonFrom(`Fast \\ud83d\\ude00 and ${EMOJI}\\ud800 end`);
+      expect(reason).not.toMatch(LONE_SURROGATE);
+      expect(reason).toBe(`Fast ${EMOJI} and ${EMOJI} end`);
+    });
+
+    it('is not a reason when nothing but lone surrogates is left', () => {
+      expect(reasonFrom('\\ud800\\ud800')).toBeUndefined();
+    });
+  });
+
   describe('holds no format character (bidi override, zero-width)', () => {
     const FORMAT = /\p{Cf}/u;
     // Right-to-left override, zero-width space and joiner, the four bidi isolates, a BOM.
