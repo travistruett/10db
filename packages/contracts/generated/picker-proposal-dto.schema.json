@@ -30,6 +30,12 @@
               "title": {
                 "type": "string"
               },
+              "headline": {
+                "type": "string"
+              },
+              "why": {
+                "type": "string"
+              },
               "description": {
                 "type": "string"
               },
@@ -205,6 +211,8 @@
               "id",
               "projectId",
               "title",
+              "headline",
+              "why",
               "description",
               "acceptanceCriteria",
               "areas",

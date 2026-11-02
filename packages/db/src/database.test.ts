@@ -417,6 +417,41 @@ describe('migrating a database that has a gate command and evidence', () => {
   });
 });
 
+describe('migrating to task headlines', () => {
+  it('gives a task made before it an empty headline and why, and keeps its title', () => {
+    const AT = '2026-11-02T12:00:00.000Z';
+    // The last migration before tasks had a headline and a why.
+    migrateDatabase(db, migrationsThrough('0024_goal_visit_started_at'));
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES ('tsk_a', 'prj_a', 'The promise', '', '[]', '[]', 'open', 1, 'shared', ?, ?)`,
+      AT,
+      AT,
+    );
+    migrateDatabase(db);
+    expect(db.$client.prepare('SELECT title, headline, why FROM tasks').all()).toEqual([
+      { title: 'The promise', headline: '', why: '' },
+    ]);
+  });
+});
+
 describe('migrating to per-task placement', () => {
   const AT = '2026-10-29T12:00:00.000Z';
 

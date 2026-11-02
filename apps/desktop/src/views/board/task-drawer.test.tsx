@@ -236,6 +236,29 @@ describe('TaskDrawer', () => {
     });
   });
 
+  it('shows the headline and why, and saves them trimmed when changed', async () => {
+    const patched: TaskPatch[] = [];
+    const task = taskDto({ headline: 'Old words', why: 'It mattered.' });
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(task);
+      }),
+    );
+    open({ task });
+    const d = await dialog();
+    expect(within(d).getByLabelText<HTMLInputElement>('Headline').value).toBe('Old words');
+    expect(within(d).getByLabelText<HTMLInputElement>('Why').value).toBe('It mattered.');
+    await edit('Headline', " Odd files can't freeze 10db ");
+    await edit('Why', '  ');
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).toMatchObject({ headline: "Odd files can't freeze 10db", why: '' });
+  });
+
   describe('areas', () => {
     function serveAreaSaves(): TaskPatch[] {
       const patched: TaskPatch[] = [];

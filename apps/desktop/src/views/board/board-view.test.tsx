@@ -869,6 +869,8 @@ describe('BoardView', () => {
     });
     expect(posted[0]).toEqual({
       title: 'Beta',
+      headline: '',
+      why: '',
       description: '',
       acceptanceCriteria: ['It works', 'It is tested'],
       areas: ['api'],

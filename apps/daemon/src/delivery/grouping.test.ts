@@ -20,6 +20,8 @@ function tasksNamed(deps: Record<string, readonly string[]>): Map<string, TaskDt
         id: idOf(name),
         projectId: mintId('Project'),
         title: name,
+        headline: '',
+        why: '',
         description: '',
         acceptanceCriteria: ['it works'],
         areas: ['api'],

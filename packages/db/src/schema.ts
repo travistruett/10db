@@ -322,6 +322,10 @@ export const tasks = sqliteTable(
       .notNull()
       .references(() => projects.id),
     title: text('title').notNull(),
+    /** The plain-words what the desktop names the task by; empty falls back to the title. */
+    headline: text('headline').notNull().default(''),
+    /** One optional sentence on why the task matters; empty when none was given. */
+    why: text('why').notNull().default(''),
     description: text('description').notNull(),
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),

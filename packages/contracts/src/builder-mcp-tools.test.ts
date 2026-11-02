@@ -214,6 +214,31 @@ describe('the drafting guidance', () => {
     }
   });
 
+  it('asks for a headline on every task and a why whenever the reason is not obvious', () => {
+    const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
+    for (const text of [BUILDER_INSTRUCTIONS, create(), edit?.description ?? '']) {
+      expect(text).toContain('headline on every task');
+      expect(text).toContain("why whenever the reason isn't obvious from the headline");
+    }
+    expect(BUILDER_INSTRUCTIONS).toContain('80 characters');
+    expect(BUILDER_INSTRUCTIONS).toContain('200 characters');
+  });
+
+  it('create_task and edit_task take a headline and a why, in the tool list and when parsed', () => {
+    const words = { headline: 'Odd files cannot freeze 10db', why: 'A FIFO hung every lane.' };
+    expect(
+      BuilderToolInputs.create_task.parse({ projectId: mintId('Project'), title: 't', ...words }),
+    ).toMatchObject(words);
+    expect(BuilderToolInputs.edit_task.parse({ taskId: mintId('Task'), ...words })).toMatchObject(
+      words,
+    );
+    for (const name of [BuilderToolName.CreateTask, BuilderToolName.EditTask]) {
+      const schema = JSON.stringify(builderToolList().find((t) => t.name === name)?.inputSchema);
+      expect(schema).toContain('"headline"');
+      expect(schema).toContain('"why"');
+    }
+  });
+
   it('edit_task points at the same guidance', () => {
     const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
     expect(edit?.description).toContain('seen or measured');

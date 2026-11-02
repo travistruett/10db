@@ -112,6 +112,32 @@ tasks:
     );
   });
 
+  it("takes a task's optional headline and why, empty when absent", () => {
+    const { brief } = parsed(
+      VALID.replace(
+        "    title: Patch a task's areas and dependencies\n",
+        "    title: Patch a task's areas and dependencies\n    headline: Change a task's areas\n    why: Areas were fixed once a task was made.\n",
+      ),
+    );
+    expect(brief.tasks[0]).toMatchObject({
+      headline: "Change a task's areas",
+      why: 'Areas were fixed once a task was made.',
+    });
+    expect(brief.tasks[1]).toMatchObject({ headline: '', why: '' });
+  });
+
+  it('refuses a headline over 80 characters and a why with a newline, naming each', () => {
+    const errors = refused(
+      VALID.replace(
+        "    title: Patch a task's areas and dependencies\n",
+        `    title: Patch a task's areas and dependencies\n    headline: ${'x'.repeat(81)}\n    why: "two\\nlines"\n`,
+      ),
+    );
+    expect(errors.map((e) => e.path)).toEqual(['Task 1, headline', 'Task 1, why']);
+    expect(errors[0]?.message).toMatch(/headline is at most 80/);
+    expect(errors[1]?.message).toMatch(/why is one line/);
+  });
+
   it('names a criterion by its position', () => {
     const errors = refused(`---
 title: T

@@ -7,6 +7,8 @@ const task = {
   id: mintId('Task'),
   projectId: mintId('Project'),
   title: 'T',
+  headline: '',
+  why: '',
   description: '',
   acceptanceCriteria: ['x'],
   areas: ['api'],

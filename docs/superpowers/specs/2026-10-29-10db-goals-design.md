@@ -393,8 +393,11 @@ goal owns this loop.
 ## 11. Adopt a Plan
 
 **Designed (phase 1).** A goal brief is a Markdown file with YAML front matter, validated by a zod schema in
-`@10db/contracts`: title, objective, criteria (text and check kind), budget, tasks (a key, title, description,
-acceptance criteria, areas, and the keys it depends on), and optional people (proposed; the owner confirms).
+`@10db/contracts`: title, objective, criteria (text and check kind), budget, tasks (a key, title, an optional
+`headline` and `why`, description, acceptance criteria, areas, and the keys it depends on), and optional people
+(proposed; the owner confirms). A task's `headline` is the plain-words what the Board names it by (one line, at most
+80 characters) and its `why` one sentence on why it matters (one line, at most 200); adopting the goal stores both,
+and a task without them shows its title (readable board spec, `2026-11-02-10db-readable-board-design.md` §4).
 Adoption is deterministic:
 
 - **Two ways in, one route.** In the app, Adopt a Plan… opens the native panel (as the project folder is
@@ -432,6 +435,8 @@ criteria:
 tasks:
   - key: task-patch-route
     title: Patch a task's areas and dependencies
+    headline: Change a task's areas
+    why: A task's areas are fixed once it is made, so a wrong guess blocks it.
     areas: [repo]
     criteria: [PATCH /tasks/:id changes areas and dependencies, and refuses unknown areas]
   - key: drawer-editor

@@ -63,6 +63,7 @@ import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
+import { HeadlineField, WhyField } from './task-words-fields';
 import {
   canCloseRun,
   canRetryRun,
@@ -143,6 +144,9 @@ export function TaskDrawer({
   const landingEditable = task.workstreamId === null;
   const initialCriteria = task.acceptanceCriteria.join('\n');
   const [title, setTitle] = useState(task.title);
+  const [headline, setHeadline] = useState(task.headline);
+  const [why, setWhy] = useState(task.why);
+  const wordsChanged = headline.trim() !== task.headline || why.trim() !== task.why;
   const [description, setDescription] = useState(task.description);
   const [criteria, setCriteria] = useState(initialCriteria);
   const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
@@ -165,6 +169,8 @@ export function TaskDrawer({
 
   const dirty =
     title !== task.title ||
+    headline !== task.headline ||
+    why !== task.why ||
     description !== task.description ||
     criteria !== initialCriteria ||
     flowId !== task.flowId ||
@@ -214,6 +220,7 @@ export function TaskDrawer({
           acceptanceCriteria: lines,
           flowId,
           riskTags: risks,
+          ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
@@ -324,6 +331,8 @@ export function TaskDrawer({
             onChange={setAreas}
           />
         ) : null}
+        <HeadlineField value={headline} onChange={setHeadline} />
+        <WhyField value={why} onChange={setWhy} />
         <Textarea
           label="Description"
           autosize

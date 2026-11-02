@@ -12,6 +12,7 @@ import {
   listWorkstreams,
   moveTask,
   patchProject,
+  patchTask,
   seedProject,
   transitionBatch,
 } from '@10db/db';
@@ -318,6 +319,18 @@ describe('cutting a branch', () => {
     await h.jobs.idle();
     expect(listBatches(h.store.db)).toHaveLength(1);
     expect(h.git$('branch', '--list', '10db/*').split('\n').filter(Boolean)).toHaveLength(1);
+  });
+
+  it("titles a task's batch and branch after its title, never its headline", async () => {
+    const task = h.addTask('Stamping a file never blocks on a FIFO');
+    h.store.write((ctx) =>
+      patchTask(ctx, task.id, { headline: "Odd files can't freeze 10db", why: 'A FIFO hung.' }),
+    );
+    const batch = h.starter.startTask(task.id);
+    await h.jobs.idle();
+    const cut = getBatch(h.store.db, batch.id);
+    expect(cut.title).toBe('Stamping a file never blocks on a FIFO');
+    expect(cut.branch).toContain('stamping-a-file');
   });
 });
 
