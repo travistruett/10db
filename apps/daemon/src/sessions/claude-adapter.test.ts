@@ -9,6 +9,7 @@ import type {
   SDKUserMessage,
   SpawnedProcess,
 } from '@anthropic-ai/claude-agent-sdk';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
@@ -1639,6 +1640,40 @@ describe('createClaudeAdapter', () => {
     expect(fake.record.options?.permissionMode).toBe('auto');
     const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
     expect(billing.map((l) => l['permissionMode'])).toEqual(['default']);
+  });
+
+  it('logs a permission mode change Claude Code reports partway through a session', async () => {
+    // Claude Code can leave auto mode mid-session, for example after repeated classifier refusals.
+    const logs = captureLogs();
+    const status = (permissionMode?: 'default' | 'auto'): SDKMessage => ({
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      uuid: randomUUID(),
+      session_id: PROVIDER_SESSION,
+    });
+    const fake = fakeQuery({
+      messages: [
+        { ...initMessage(), permissionMode: 'auto' as const },
+        status(),
+        status('default'),
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      lanePermissionMode: 'auto',
+    });
+    const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+    const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
+    expect(billing.map((l) => l['permissionMode'])).toEqual(['auto']);
+    const changes = logs.lines().filter((l) => l['msg'] === 'claude session permission mode');
+    expect(changes.map((l) => l['permissionMode'])).toEqual(['default']);
   });
 
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {
