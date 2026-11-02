@@ -245,6 +245,25 @@ describe('a pull request that lands in another branch', () => {
     expect(second.notices).toEqual([]);
   });
 
+  it('says so on every copy of one start, which counts as no use to the others', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const answered = h.starter.startBatch(h.project.id, {
+      title: 'Together',
+      taskIds: [
+        h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }).id,
+        h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } }).id,
+      ],
+    });
+    expect(answered).toHaveLength(2);
+    await h.jobs.idle();
+    for (const { id } of answered) {
+      const batch = getBatch(h.store.db, id);
+      expect(batch.state).toBe('OPEN');
+      expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
+    }
+  });
+
   it('refuses a branch origin does not have, in plain words, before anything starts', async () => {
     h = createDeliveryHarness();
     const before = h.git$('rev-parse', 'HEAD');

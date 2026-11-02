@@ -407,6 +407,52 @@ describe('seeding a new copy', () => {
         expect(notice.line).not.toContain('sharp');
       });
 
+      it('says nothing when the onlyBuiltDependencies list is empty: nothing builds', async () => {
+        allowing('onlyBuiltDependencies: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the empty list is in package.json', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { onlyBuiltDependencies: [] } }),
+        );
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the list holds only names that are not packages', async () => {
+        allowing('onlyBuiltDependencies:\n  - "../evil"\n  - "Bad Name"\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the list is in a file, which is not read', async () => {
+        allowing('onlyBuiltDependenciesFile: allowed.json\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('does not apply ignoredBuiltDependencies, which pnpm 9 does not read', async () => {
+        allowing('ignoredBuiltDependencies:\n  - sharp\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).toContain('sharp');
+      });
+
       it('ignores allowBuilds, which pnpm 9 does not read', async () => {
         allowing('allowBuilds:\n  prisma: true\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
