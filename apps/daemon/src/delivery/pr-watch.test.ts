@@ -679,6 +679,48 @@ describe('a pull request whose head never got its required checks', () => {
     expect(asked.filter((a) => a.startsWith('restart-ci'))).toHaveLength(1);
   });
 
+  it('keeps the ask across the unknown read GitHub gives the head 10db pushed', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS);
+    expect(asked).toContain(`restart-ci ${id}`);
+
+    // GitHub has not worked out the new head yet: not blocked, mergeability unknown.
+    h.gh.setHead(prUrl, HEAD_B);
+    h.gh.setBlockedOnChecks(prUrl, false);
+    h.gh.setMergeable(prUrl, 'UNKNOWN');
+    await round(watch);
+    h.gh.setBlockedOnChecks(prUrl, true);
+    h.gh.setMergeable(prUrl, 'MERGEABLE');
+    await rounds(watch, GRACE_ROUNDS);
+    expect(stuckNotice(id)).toBeUndefined();
+    await round(watch);
+
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
+    expect(stuckNotice(id)).toBeDefined();
+  });
+
+  it('keeps the notice through an unknown read, and drops it when a check appears', async () => {
+    const { id, prUrl } = stuck();
+    const { watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 2);
+    expect(stuckNotice(id)).toBeDefined();
+
+    // The base moved: GitHub works the merge state out again.
+    h.gh.setBlockedOnChecks(prUrl, false);
+    h.gh.setMergeable(prUrl, 'UNKNOWN');
+    await round(watch);
+    expect(stuckNotice(id)).toBeDefined();
+
+    h.gh.setChecks(prUrl, [run('build', null)]);
+    await round(watch);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
   it('drops the notice once the checks start, and starts counting again for a later head', async () => {
     const { id, prUrl } = stuck();
     const { asked, watch } = spy();

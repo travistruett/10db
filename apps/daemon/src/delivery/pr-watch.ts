@@ -403,15 +403,21 @@ export function createPrWatch(input: {
   ): void {
     // A read that gave no answer says nothing: the count and the notice stay as they are.
     if (read === null) return;
+    // The count and the notice end only when a check appears on the head, the pull request is no
+    // longer open, or it conflicts (the catch-up for conflicts takes over).
+    const over =
+      read.state !== PrState.Open ||
+      root.ciFixOf !== null ||
+      read.checks !== PullRequestChecks.None ||
+      (required !== null && required.state !== 'none') ||
+      read.mergeBlocked === MergeBlocked.Conflicts ||
+      read.mergeable === PrMergeable.Conflicting;
+    // Any other read that is not BLOCKED on checks is ambiguous: GitHub reports UNKNOWN for a while
+    // after each push and whenever the base moves. It neither counts nor resets.
     const missing =
-      read.state === PrState.Open &&
-      root.ciFixOf === null &&
-      read.checks === PullRequestChecks.None &&
-      read.blockedOnChecks &&
-      read.mergeBlocked === null &&
-      read.mergeable !== PrMergeable.Conflicting;
-    if (missing && required === null) return;
-    if (!missing || required?.state !== 'none') {
+      !over && required !== null && read.blockedOnChecks && read.mergeBlocked === null;
+    if (!over && !missing) return;
+    if (over) {
       awaitingRuns.delete(root.id);
       if (
         getBatch(ctx.state.db, root.id).notices.some((n) => n.key === NOTICE_KEY.checksNeverStarted)
