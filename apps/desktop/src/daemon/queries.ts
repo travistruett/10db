@@ -19,6 +19,7 @@ import {
   type BoardColumnId,
   type BoardColumnInput,
   type BoardColumnPatch,
+  type GoalId,
   type InboxAnswer,
   type InboxItemId,
   type KeepAwakeMode,
@@ -59,7 +60,8 @@ export const queryKeys = {
   lanePermissions: ['lane-permissions'],
   system: ['system'],
   flows: ['flows'],
-  candidates: (projectId: ProjectId, size: number) => ['candidates', projectId, size] as const,
+  candidates: (projectId: ProjectId, size: number, goalId: GoalId | null) =>
+    ['candidates', projectId, size, goalId] as const,
 } as const;
 
 const ProjectList = z.array(ProjectViewDto);
@@ -593,16 +595,24 @@ export function usePatchProject(projectId: ProjectId) {
   });
 }
 
-/** The picker's proposal for the batch sheet: the project's Ready tasks, each with its step plan. */
-export function useCandidates(projectId: ProjectId, size: number, enabled: boolean) {
+/**
+ * The picker's proposal for the batch sheet: the project's Ready tasks, each with its step plan.
+ * With a `goalId` the pool is that goal's tasks alone.
+ */
+export function useCandidates(
+  projectId: ProjectId,
+  size: number,
+  enabled: boolean,
+  goalId: GoalId | null = null,
+) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: queryKeys.candidates(projectId, size),
+    queryKey: queryKeys.candidates(projectId, size, goalId),
     queryFn: async () =>
       readJson(
         await client.projects[':projectId'].candidates.$get({
           param: { projectId },
-          query: { size: String(size) },
+          query: { size: String(size), ...(goalId ? { goalId } : {}) },
         }),
         PickerProposalDto,
       ),

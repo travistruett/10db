@@ -3,6 +3,7 @@ import {
   Delivery,
   PICK_MAX,
   WorkspaceMode,
+  type GoalId,
   type PickerProposalDto,
   type ProjectViewDto,
 } from '@10db/contracts';
@@ -191,12 +192,14 @@ export interface BatchSheetProps {
   readonly project: ProjectViewDto;
   readonly opened: boolean;
   readonly onClose: () => void;
+  /** Limits the proposal to this goal's tasks; absent, it draws on every ready task. */
+  readonly goal?: { readonly id: GoalId; readonly title: string };
 }
 
 /** Spec §5.2.4: what each picked task will run, before anything starts. */
-export function BatchSheet({ project, opened, onClose }: BatchSheetProps) {
+export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) {
   const [size, setSize] = useState(project.maxLanes);
-  const proposal = useCandidates(project.id, size, opened);
+  const proposal = useCandidates(project.id, size, opened, goal?.id ?? null);
   return (
     <Drawer
       opened={opened}
@@ -221,6 +224,7 @@ export function BatchSheet({ project, opened, onClose }: BatchSheetProps) {
           most, then board order. Tasks whose areas collide are left out. The PM review isn’t built
           yet.
         </Text>
+        {goal ? <Text size="sm">{`Only tasks of the goal ${goal.title}.`}</Text> : null}
         {proposal.isError ? (
           <Alert color="red" title="Couldn't load the proposal">
             {proposal.error.message}
