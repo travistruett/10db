@@ -267,7 +267,7 @@ export function moveBackCard(
 export const CAP_RAISE_DETAIL = 'capRaise';
 
 /** The raise a cap card offers: the account, the answer's label and the cap it sets. */
-export interface CapRaise {
+interface CapRaise {
   readonly accountId: AccountId;
   readonly choice: string;
   readonly toUsd: number;
@@ -292,7 +292,7 @@ export function capCard(account: AccountRow, cap: CapStatus): AccountCard {
     foldKey: accountFoldKey(account.id, AccountPauseReason.MonthlyCap),
     detail: {
       ...detail(account, AccountPauseReason.MonthlyCap, null, null),
-      [CAP_RAISE_DETAIL]: { accountId: account.id, choice, toUsd },
+      [CAP_RAISE_DETAIL]: { accountId: account.id, choice, toUsd } satisfies CapRaise,
     },
     options: [
       {
