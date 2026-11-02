@@ -118,6 +118,9 @@ export function createClaimDeadlockAnswers(deps: {
     // nothing. The card goes, and the builder is told the answer was not applied.
     if (!deps.waits.awaitsCard(item.id)) refuseEnded(deps, item.id);
     if (choice.action === 'yield') {
+      // A task that already ended has nothing to give up, and its terminal event has passed, so
+      // nothing would ever drop the yield: it would outlive the daemon's run and answer a retry.
+      if (isTerminal(getWorkstreamRow(deps.state.db, id).state)) return;
       // The task is told through its wait, so a claim is released only from a task that waits: one
       // that does not is in no deadlock, and losing a claim untold would let two tasks edit one area.
       if (!deps.waits.yielded(id, { claims: choice.claims, inboxId: item.id }))

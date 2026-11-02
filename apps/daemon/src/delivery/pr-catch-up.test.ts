@@ -128,6 +128,24 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
   });
 
+  it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const before = onOrigin(batch.branch);
+    h.state.write((c) =>
+      patchProject(c, h.project.id, { gateCommand: 'true', precheckCommand: 'false' }),
+    );
+
+    await catchUp(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('pre-check failed');
+    expect(card.body).toContain('10db settled these files itself in the merge');
+    expect(card.body).toContain('src/index.ts');
+  });
+
   it('puts the local branch back at the pull request head when the check fails in the worktree it kept', async () => {
     const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
@@ -470,6 +488,32 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).toEqual([
       'pull-request-merge',
     ]);
+  });
+
+  it('treats an auto-merge error on a retry as armed, with no notice, when it was armed before', async () => {
+    // The first arm succeeds, so the pull request is known to be set to merge.
+    const batch = await shipped('README.md', '# ours\n');
+    expect(batch.notices.map((n) => n.key)).not.toContain('pull-request-merge');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const url = conflicts(batch);
+    const stopped = await catchUp(batch);
+    expect(stopped.notices).toEqual([]);
+
+    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again,
+    // and gh's answer to arming a pull request that is armed already is an error.
+    h.gh.setMergeBlocked(url, null);
+    h.gh.setMergeable(url, PrMergeable.Mergeable);
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
+    );
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.failNext.has('prAutoMerge')).toBe(false);
+    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).not.toContain(
+      'pull-request-merge',
+    );
   });
 
   it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {

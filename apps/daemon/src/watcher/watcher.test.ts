@@ -1824,6 +1824,104 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    describe('a directory the allowed write created', () => {
+      const FILE = '.codex/rules/new.rules';
+      const emitBoth = async (): Promise<void> => {
+        touch(FILE);
+        emit('.codex/rules');
+        emit(FILE);
+        await watcher.flush();
+      };
+
+      it('raises no stray card for the new directory that holds only the allowed file', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        await emitBoth();
+        expect(flags()).toEqual([]);
+      });
+
+      it('raises no stray card when only the directory is reported', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        touch(FILE);
+        emit('.codex/rules');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
+      it('still cards the directory that holds a file no card allowed', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        touch('.codex/rules/other.rules');
+        await emitBoth();
+        expect(flags().map((f) => f.body)).toContain('.codex/rules');
+      });
+
+      it('cards the directory again when a later write no card allowed lands in it', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        await emitBoth();
+        expect(flags()).toEqual([]);
+        await emitBoth();
+        expect(
+          flags()
+            .map((f) => f.body)
+            .sort(),
+        ).toEqual(['.codex/rules', FILE]);
+      });
+    });
+
+    describe('a folded Allow Edit card', () => {
+      /** Both lanes ask to edit `rel`; the inbox folds the two asks into one card, answered once. */
+      function foldedCard(
+        lanes: readonly { workstream: WorkstreamDto }[],
+        rel: string,
+        choice: string,
+      ): void {
+        const path = join(repo.path, rel);
+        const items = lanes.map(
+          (lane) =>
+            inbox.ask({
+              projectId: project.id,
+              workstreamId: lane.workstream.id,
+              sessionId: mintId('Session'),
+              kind: 'permission',
+              title: 'Allow Edit?',
+              body: path,
+              options: [
+                { label: 'allow_once', description: '' },
+                { label: 'deny', description: '' },
+              ],
+              recommendation: null,
+              category: 'environment',
+              urgency: 'normal',
+              detail: { toolName: 'Edit', summary: path, path },
+              signal: new AbortController().signal,
+            }).item,
+        );
+        expect(new Set(items.map((i) => i.id)).size).toBe(1);
+        const first = items[0];
+        if (!first) throw new Error('no card');
+        inbox.answer(first.id, { choice });
+      }
+
+      it('excuses one write per lane it targets, and cards the next', async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        foldedCard([a, b], SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        await write(SENSITIVE_FILE);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
     it('cards a write that a card answered before the watcher started, whatever other projects hold', async () => {
       const lane = running();
       editCard(lane, SENSITIVE_FILE, 'allow_once');
