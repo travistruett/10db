@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import type * as fs from 'node:fs';
 import type * as fsPromises from 'node:fs/promises';
 import {
@@ -84,7 +85,13 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
-import { STAMP_ATTEMPTS, STAMP_BUDGET_MS, stampOrReason, writeStamp } from './allowed-writes';
+import {
+  STAMP_ATTEMPTS,
+  STAMP_BUDGET_MS,
+  stampMatchesExpected,
+  stampOrReason,
+  writeStamp,
+} from './allowed-writes';
 
 describe('stampOrReason', () => {
   let root: string;
@@ -106,6 +113,33 @@ describe('stampOrReason', () => {
     if (!('stamp' in result)) throw new Error(`no stamp: ${result.reason}`);
     expect(result.stamp).toMatch(/^\d+:5:[0-9a-f]{64}$/);
     expect(await writeStamp(root, 'a.txt')).toBe(result.stamp);
+  });
+
+  describe('stampMatchesExpected', () => {
+    const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+
+    it('compares the hash the stamp holds, never the file as it is now', async () => {
+      writeFileSync(join(root, 'a.txt'), 'X');
+      const stamp = await writeStamp(root, 'a.txt');
+      if (stamp === null) throw new Error('no stamp');
+      // The file changes after it was stamped: the verdict is still about the content that was stamped.
+      writeFileSync(join(root, 'a.txt'), 'Y');
+      expect(stampMatchesExpected(stamp, sha('X'))).toBe(true);
+      expect(stampMatchesExpected(stamp, sha('Y'))).toBe(false);
+    });
+
+    it('is false for a deletion stamp', async () => {
+      const stamp = await writeStamp(root, 'gone.txt');
+      if (stamp === null) throw new Error('no stamp');
+      expect(stampMatchesExpected(stamp, sha(''))).toBe(false);
+    });
+
+    it('has nothing to compare for a file rewritten while it was read: it has no stamp, so it is carded', async () => {
+      writeFileSync(join(root, 'busy.txt'), 'X');
+      moving.path = join(root, 'busy.txt');
+      const result = await stampOrReason(root, 'busy.txt');
+      expect('stamp' in result).toBe(false);
+    });
   });
 
   it('gives a deletion stamp for a path that is not there', async () => {
