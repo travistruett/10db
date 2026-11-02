@@ -55,6 +55,20 @@
   startup. A ship that writes or clears `pull-request-merge` closes the batch's `auto-merge-refused:<id>` card, and
   one that sets a pull request to merge closes the project's `auto-merge-off:<projectId>` card.
 
+## Ship failures (follow-up, 2026-11-01)
+
+- **Every "Batch … not shipped" card offers Retry and Abandon** (`shipCards`: dirty checkout, gate failed or
+  timed out, push rejected or timed out, network, gh not installed or signed out). Each carries
+  `detail.actions: ['retry', 'abandon']`; the Inbox shows buttons over the batch's existing ship and abandon routes
+  (`batch-card-actions.tsx`), which the daemon acts on, and either closes the card. The card still closes itself when
+  the batch ships (`resolvesWhen`). None offers only a Dismiss.
+- **What asked nothing is a notice, not a card:** "the gate passed when 10db ran it again" is the batch notice
+  `gate-rerun` (info; cleared when the next gate of the batch starts), and "only the pre-check ran, so the pull
+  request waits" is the `pull-request-merge` notice (`mergeNotices.preCheckOnly`), which closes the
+  `pre-check-only:<id>` card an earlier build raised. The "Batch … abandoned" card is gone: the builder just asked
+  for it, an abandoned batch shows no notices, and the branch card (Delete Branch or Keep) already says what stays
+  unmerged.
+
 ## Why
 
 - A card interrupts: it raises the Inbox count, wants a look and then a dismiss, and these three asked for no

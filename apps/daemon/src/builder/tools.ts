@@ -25,6 +25,7 @@ export type BuilderServices = Pick<
   | 'patchTask'
   | 'startTask'
   | 'moveTask'
+  | 'runNext'
   | 'listBoardColumns'
   | 'listInbox'
 > &
@@ -124,6 +125,12 @@ export function createBuilderTools(
       const { taskId, to, after, before } = BuilderToolInputs.move_task.parse(args);
       const moved = services.moveTask(taskId, TaskMove.parse({ to, after, before }));
       return { ...taskSummary(moved), boardColumnId: moved.boardColumnId };
+    },
+    // The Board's Run Next, through the same service as POST /tasks/:taskId/run-next.
+    [BuilderToolName.RunNext]: (args) => {
+      const { taskId } = BuilderToolInputs.run_next.parse(args);
+      const { workstream, waitingOn } = services.runNext(taskId);
+      return { taskId, workstreamId: workstream.id, state: workstream.state, waitingOn };
     },
     // Card text is written by managed sessions (an ask_human question becomes the title), so the
     // builder's clients get the title alone: no body, options or detail to act on.

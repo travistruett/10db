@@ -85,18 +85,19 @@ export function ciFixTitle(job: string, pullRequestTitle: string): string {
 }
 
 /**
- * The file name of a job's full log, `<job>-<sha>.log`. A job name is the workflow's own text, so
- * anything outside letters, digits, dot, dash and underscore becomes an underscore, and a name that
- * changed gets a short hash of the original so two such names never share a file.
+ * The file name of a job's full log, `<job>-<job id>-<sha>.log`. A job name is the workflow's own
+ * text, so anything outside letters, digits, dot, dash and underscore becomes an underscore, and a
+ * name that changed gets a short hash of the original so two such names never share a file. Two
+ * jobs can share a name on one head (the same `test` in two workflows), so the job id is in the name.
  */
-export function ciFixLogName(job: string, sha: string): string {
+export function ciFixLogName(job: string, jobId: string, sha: string): string {
   const safe = job.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^[._-]+/, '');
   const clipped = safe.slice(0, LOG_NAME_MAX);
   const name =
     clipped === job && clipped !== ''
       ? clipped
       : `${clipped === '' ? 'job' : clipped}-${createHash('sha256').update(job).digest('hex').slice(0, 8)}`;
-  return `${name}-${sha.replace(/[^A-Za-z0-9]/g, '')}.log`;
+  return `${name}-${jobId.replace(/[^A-Za-z0-9]/g, '')}-${sha.replace(/[^A-Za-z0-9]/g, '')}.log`;
 }
 
 /** A failing job whose log the task carries. */

@@ -791,6 +791,7 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
         `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
       );
   }
+  if (fields.areas !== undefined) checkAreasCanChange(ctx.tx, getTask(ctx.tx, id), fields.areas);
   if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
   ctx.tx
     .update(schema.tasks)
@@ -805,6 +806,20 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * A task's areas change only while it has never started: its lane takes the areas as claims when it
+ * starts, and a finished task's are history. Every area must be one the project has.
+ */
+function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string[]): void {
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`${task.title} is finished, so its areas are fixed`);
+  if (latestRun(db, task.id))
+    throw new ConflictError(
+      `${task.title} has already started, so its areas are fixed: the lane took them when it started`,
+    );
+  refuseUnknownAreas(getProject(db, task.projectId), areas);
 }
 
 /**

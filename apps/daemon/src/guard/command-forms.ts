@@ -70,6 +70,14 @@ const FLAG_TABLES: ReadonlyMap<string, FlagTable> = new Map([
   ],
 ]);
 
+/** How pnpm treats a flag, by its table: takes the next word, takes none, or is not listed. */
+export function pnpmFlagKind(flag: string): 'value' | 'boolean' | 'unknown' {
+  const flags = FLAG_TABLES.get('pnpm');
+  if (flags?.values.has(flag)) return 'value';
+  if (flags?.booleans.has(flag)) return 'boolean';
+  return 'unknown';
+}
+
 /** The most readings of one command tried; past it, an unknown flag is read as taking no value. */
 const MAX_READINGS = 64;
 
