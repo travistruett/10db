@@ -1,6 +1,7 @@
 import {
   EventType,
   PullRequestChecks,
+  PullRequestMergeBlocked,
   PullRequestState,
   type BatchDto,
   type BatchId,
@@ -251,6 +252,15 @@ export function createPrWatch(input: {
   const awaitingRuns = new Map<BatchId, { head: string | null; since: number; asked: boolean }>();
   /** Each open pull request with a cancelled required check, by its root batch. */
   const cancelledRuns = new Map<BatchId, CancelledRun>();
+  /**
+   * The head each pull request was in the merge queue at, by root batch. A queue that lets go of a
+   * pull request still at that head, with the pull request open, has removed it; one that lets go of
+   * a pull request at another head was pushed over. In memory: the stored `queued` mark is what a
+   * restart reads, and it has no head, so a pull request with no entry counts as unpushed.
+   */
+  const queuedAt = new Map<BatchId, string | null>();
+  /** The head each pull request the queue removed failed at, by root batch: it reads as a failed required check. */
+  const removedAt = new Map<BatchId, string | null>();
   /** Set by `recheck`; the next round to start takes it, so a round already running leaves it. */
   let recheckDue = false;
 
@@ -393,15 +403,24 @@ export function createPrWatch(input: {
    * merge it, on the root batch only and only when that changes what the root holds. A merged or closed
    * pull request has no merge to block; its stored required checks stay, for "Merged · CI passed".
    * A required read gh could not answer (`required` null) leaves the stored checks as they were.
+   * `queue`: whether the pull request is in the merge queue, null when that read gave no answer
+   * (the stored mark then stays). A queued pull request is stored as `queued`, whatever else
+   * GitHub says of its merge state.
    */
   function storeRequired(
     write: WriteContext,
     root: BatchDto,
     read: PullRequestStatus,
     required: RequiredChecks | null,
+    queue: boolean | null,
   ): void {
     const now = getBatch(write.tx, root.id);
-    const blocked = read.state === PrState.Open ? read.mergeBlocked : null;
+    let blocked: PullRequestMergeBlocked | null = null;
+    if (read.state === PrState.Open) {
+      const queued =
+        queue === true || (queue === null && now.prMergeBlocked === PullRequestMergeBlocked.Queued);
+      blocked = queued ? PullRequestMergeBlocked.Queued : read.mergeBlocked;
+    }
     const nextRequired = required === null ? now.prRequired : requiredOf(required);
     const patch: BatchPatch = {
       ...(JSON.stringify(nextRequired) === JSON.stringify(now.prRequired)
@@ -422,6 +441,51 @@ export function createPrWatch(input: {
   }
 
   /**
+   * Follows an open pull request through its base's merge queue, and returns the required checks the
+   * round goes on with. A pull request in the queue is left alone (the caller pushes and starts
+   * nothing for it). One the queue let go of while it is open and still at the head it was queued at has
+   * been removed, as when its merge group failed: that reads as a failed required check, `Merge queue`,
+   * with no job log to read (so 10db stops fixing with its card, and the task is Blocked), for as long
+   * as the head is the one that failed. A new head, pushed by anyone, is read as its own checks say.
+   * `queue` null: the read gave no answer, and nothing changes.
+   */
+  function followQueue(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+    queue: boolean | null,
+  ): RequiredChecks | null {
+    if (read?.state !== PrState.Open) {
+      queuedAt.delete(root.id);
+      removedAt.delete(root.id);
+      return required;
+    }
+    if (queue === null) return required;
+    if (queue) {
+      queuedAt.set(root.id, read.headSha);
+      removedAt.delete(root.id);
+      return required;
+    }
+    const was = root.prMergeBlocked === PullRequestMergeBlocked.Queued || queuedAt.has(root.id);
+    const head = queuedAt.has(root.id) ? queuedAt.get(root.id) : read.headSha;
+    queuedAt.delete(root.id);
+    if (was && head === read.headSha) removedAt.set(root.id, read.headSha);
+    else if (removedAt.has(root.id) && removedAt.get(root.id) !== read.headSha)
+      removedAt.delete(root.id);
+    if (required === null || required.state === 'failing' || !removedAt.has(root.id))
+      return required;
+    const removal: RequiredChecks['failing'][number] = {
+      name: 'Merge queue',
+      link: root.prUrl,
+      jobId: null,
+      runId: null,
+      description:
+        'GitHub removed the pull request from the merge queue, as when the queue’s merge group failed',
+    };
+    return { ...required, state: 'failing', failing: [removal] };
+  }
+
+  /**
    * Follows a pull request whose head has no check at all while GitHub holds it for a required one:
    * its workflows never started, as when GitHub could not build the merge ref at push time and so
    * skipped them. The minutes a head gets for its runs to appear count from when the watch first saw
@@ -434,12 +498,16 @@ export function createPrWatch(input: {
     root: BatchDto,
     read: PullRequestStatus | null,
     required: RequiredChecks | null,
+    queue: boolean | null,
   ): void {
     // A read that gave no answer says nothing: the count and the notice stay as they are.
     if (read === null) return;
     // The count and the notice end only when a check appears on the head, the pull request is no
-    // longer open, or it conflicts (the catch-up for conflicts takes over).
+    // longer open, or it conflicts (the catch-up for conflicts takes over). Or it is in the merge
+    // queue (BLOCKED with its checks pending is the queue's waiting, not a head whose runs never
+    // started, and a push would take it out of the queue), or the queue read gave no answer.
     const over =
+      queue !== false ||
       read.state !== PrState.Open ||
       root.ciFixOf !== null ||
       read.checks !== PullRequestChecks.None ||
@@ -525,6 +593,7 @@ export function createPrWatch(input: {
     root: BatchDto,
     read: PullRequestStatus | null,
     required: RequiredChecks | null,
+    queue: boolean | null,
     signal: AbortSignal,
   ): Promise<void> {
     if (read === null || required === null) return;
@@ -539,6 +608,9 @@ export function createPrWatch(input: {
       clearRerunNotices(root.id, null);
       return;
     }
+    // A pull request in the merge queue (or one whose queue read gave no answer) is left as it is: a
+    // rerun would start a run on its head while the queue holds it. The count resumes after the queue.
+    if (queue !== false) return;
     // A failing check starts a fix, which pushes a new head: the cancelled one is not the question.
     if (required.state === 'failing') return;
     const cancelled = required.cancelled;
@@ -706,6 +778,21 @@ export function createPrWatch(input: {
           if (ghDown(error)) ended = { error, at: root.id };
         }
       }
+      // Whether the open pull request waits in its base's merge queue (null: unread, or not open). A
+      // push to its branch takes it out of the queue, so while it is queued or unread nothing below
+      // pushes to it, starts a watchdog or reruns a check for it.
+      let queue: boolean | null = null;
+      if (read?.state === PrState.Open) {
+        try {
+          queue = await ctx.gh.prInMergeQueue({ repo, url: root.prUrl }, ghCall(ctx, signal));
+        } catch (error) {
+          if (controller.signal.aborted) return;
+          logger.warn({ batchId: root.id, err: detailOf(error) }, 'gh api graphql failed');
+          if (ghDown(error)) ended = { error, at: root.id };
+        }
+      }
+      // A pull request the queue removed reads as a failed required check.
+      required = followQueue(root, read, required, queue);
       // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
       let catchUpCardWasOpen = false;
       ctx.state.write((write) => {
@@ -713,7 +800,7 @@ export function createPrWatch(input: {
           record(write, batch, answer(batch, read), batch.id === root.id);
           followConflict(write, batch, read);
         }
-        if (read !== null) storeRequired(write, root, read, required);
+        if (read !== null) storeRequired(write, root, read, required, queue);
         // The catch-up card closes when the pull request merges cleanly or is gone. Not while it is
         // behind: the merge below is asked only of a clean one, and the card is what says it is due.
         if (
@@ -729,6 +816,7 @@ export function createPrWatch(input: {
       if (
         landing !== undefined &&
         read?.state === PrState.Open &&
+        queue === false &&
         root.ciFixOf === null &&
         root.autoMerge
       ) {
@@ -740,9 +828,9 @@ export function createPrWatch(input: {
         else if (read.mergeable === PrMergeable.Mergeable && read.mergeBlocked === null)
           landing.retryMerge(root.id, { catchUpCardWasOpen });
       }
-      followMissingRuns(root, read, required);
+      followMissingRuns(root, read, required, queue);
       try {
-        await followCancelled(root, read, required, signal);
+        await followCancelled(root, read, required, queue, signal);
       } catch (error) {
         if (controller.signal.aborted) return;
         logger.warn(
@@ -757,6 +845,7 @@ export function createPrWatch(input: {
         ended === null &&
         root.ciFixOf === null &&
         read?.state === PrState.Open &&
+        queue === false &&
         read.mergeBlocked !== MergeBlocked.Conflicts &&
         required !== null &&
         required.state === 'failing'

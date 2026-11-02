@@ -2617,6 +2617,19 @@ describe('worktree checkouts', () => {
           expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         });
 
+        it('cards a FIFO at a card-named path, finishing the batch instead of blocking on it', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          const fifo = join(repo.path, SENSITIVE_FILE);
+          mkdirSync(dirname(fifo), { recursive: true });
+          execFileSync('mkfifo', [fifo]);
+          emit(SENSITIVE_FILE);
+          // A blocking open would hang here, with nothing to open the FIFO for writing.
+          await watcher.flush();
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        });
+
         it('excuses a file still changing once per card, and cards the next such write', async () => {
           const lane = running();
           watcher.sync();

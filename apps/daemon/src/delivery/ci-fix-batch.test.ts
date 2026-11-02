@@ -400,6 +400,40 @@ describe('shipping a fix batch', () => {
     expect(onOrigin(branch)).toBe(head);
   });
 
+  // A push takes the pull request out of its base's merge queue, which the builder or the queue may
+  // have put it in since the fix started: the fix ends with nothing pushed.
+  it('ends closed with nothing pushed when the pull request is in the merge queue', async () => {
+    const { root, head, prUrl } = await shippedRoot();
+    const branch = branchOf(root);
+    const { fix, ws } = await cutFix(root, head);
+    await commitIn(fix, 'src/api/fix.txt');
+    h.settle(ws.id, 'DONE');
+    h.gh.setInMergeQueue(prUrl, true);
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
+    expect(onOrigin(branch)).toBe(head);
+    expect(h.gh.autoMerged).toHaveLength(1);
+    expect(local(branch)).not.toBeNull();
+  });
+
+  it('pushes nothing when the merge queue cannot be read', async () => {
+    const { root, head, prUrl } = await shippedRoot();
+    const branch = branchOf(root);
+    const { fix, ws } = await cutFix(root, head);
+    await commitIn(fix, 'src/api/fix.txt');
+    h.settle(ws.id, 'DONE');
+    h.gh.failQueueRead.set(prUrl, new GhError('failed', 'HTTP 502'));
+
+    h.shipper.checkBatch(fix.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, fix.id).state).not.toBe('SHIPPED');
+    expect(onOrigin(branch)).toBe(head);
+  });
+
   it.each([PrState.Merged, PrState.Closed])(
     'ends closed with nothing pushed when the pull request %s meanwhile',
     async (state) => {

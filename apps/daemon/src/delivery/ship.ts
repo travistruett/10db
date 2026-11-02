@@ -903,16 +903,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
         const status = await deps.gh.prStatus({ repo, ref: branch }, ghCall(deps, signal));
         if (status === null)
           throw new Error(`GitHub has no pull request for ${branch} to push the fix to`);
+        // In the merge queue: a push would take it out. Read here, not trusted from the watch's read.
+        step = 'checking the merge queue';
+        const queued =
+          status.state === PrState.Open &&
+          (await deps.gh.prInMergeQueue({ repo, url: status.url }, ghCall(deps, signal)));
         step = 'checking the fix for commits';
         const own =
-          status.state === PrState.Open
+          status.state === PrState.Open && !queued
             ? await deps.git.ownCommitsSince(checkout, batch.ciFixHead, `refs/heads/${branch}`)
             : [];
-        if (status.state !== PrState.Open || own.length === 0) {
-          const reason =
-            status.state === PrState.Open
-              ? 'the fix made no commits of its own'
-              : `its pull request is ${status.state.toLowerCase()}`;
+        if (status.state !== PrState.Open || queued || own.length === 0) {
+          let reason = `its pull request is ${status.state.toLowerCase()}`;
+          if (queued)
+            reason = 'its pull request is in the merge queue, where a push would remove it';
+          else if (status.state === PrState.Open) reason = 'the fix made no commits of its own';
           deps.state.write((w) => transitionBatch(w, batchId, { to: BatchState.Closed, reason }));
           deps.logger.info({ batchId, reason, prUrl: status.url }, 'fix batch closed');
           await afterEnd(batchId, worktreePath);
@@ -1227,14 +1232,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const project = getProject(db, batch.projectId);
     const main = project.repoPath;
     let status: PullRequestStatus | null;
+    let queued: boolean;
     try {
       status = await deps.gh.prStatus({ repo, ref: prUrl }, ghCall(deps, signal));
+      // A push takes the pull request out of its base's merge queue, and the watch read it a round
+      // ago: ask again just before. A queue that cannot be read is no answer, so nothing is pushed.
+      queued =
+        status?.state === PrState.Open
+          ? await deps.gh.prInMergeQueue({ repo, url: prUrl }, ghCall(deps, signal))
+          : false;
     } catch (error) {
       if (!stopped())
         deps.logger.warn({ batchId, err: detailOf(error) }, 'pull request not read to catch it up');
       return;
     }
     if (status?.state !== PrState.Open) return;
+    if (queued) {
+      deps.logger.info({ batchId, prUrl }, 'pull request is in the merge queue: not caught up');
+      return;
+    }
     // The watch saw this a round ago: a check that has appeared since, running or finished, is
     // never pushed over.
     if (cause === 'checks' ? !checksNeverStarted(status) : !conflicting(status)) return;

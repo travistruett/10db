@@ -1,5 +1,15 @@
 import { createHash } from 'node:crypto';
-import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+  type BigIntStats,
+} from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -162,11 +172,22 @@ function deletionStamp(root: string, path: string): string | null {
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 export const STAMP_ATTEMPTS = 3;
 
-/** The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. */
-function hashFile(path: string): string {
+/**
+ * The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. `before` is the
+ * stat taken just ahead of the open. The open is non-blocking, so a FIFO swapped in after that stat can't block
+ * the daemon on the open, and the opened file must still be the regular file `before` described: 'not-a-file'
+ * for something else (a FIFO, a device), 'swapped' for another regular file. Links are followed.
+ */
+function hashFile(
+  path: string,
+  before: BigIntStats,
+): { hash: string } | { skip: 'not-a-file' | 'swapped' } {
   const hash = createHash('sha256');
-  const fd = openSync(path, 'r');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (!opened.isFile()) return { skip: 'not-a-file' };
+    if (opened.dev !== before.dev || opened.ino !== before.ino) return { skip: 'swapped' };
     const chunk = Buffer.allocUnsafe(1024 * 1024);
     for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
       hash.update(chunk.subarray(0, n));
@@ -174,7 +195,7 @@ function hashFile(path: string): string {
   } finally {
     closeSync(fd);
   }
-  return hash.digest('hex');
+  return { hash: hash.digest('hex') };
 }
 
 /**
@@ -222,7 +243,13 @@ export function stampOrReason(
     try {
       const before = statSync(path, { bigint: true });
       if (!before.isFile()) return { reason: 'not-a-file' };
-      const hash = hashFile(path);
+      const read = hashFile(path, before);
+      if ('skip' in read) {
+        if (read.skip === 'not-a-file') return { reason: 'not-a-file' };
+        // Another regular file took the path since the stat: read again.
+        continue;
+      }
+      const { hash } = read;
       // The file changed while it was read: the content may not be the one the time and size name.
       const after = statSync(path, { bigint: true });
       if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
