@@ -58,6 +58,20 @@ export const supersededNotices = {
       body: `${named} failed in this batch and ${one ? 'was' : 'were'} started over in a new run, which does the work again from ${batch.baseBranch}. Nothing will run the failed attempt${one ? '' : 's'} again, but the commits ${one ? 'it' : 'they'} made are still on ${batch.branch ?? "the batch's branch"}, and no gate or review passed them. So this batch doesn't ship by itself.\n\nShip anyway puts those commits in the pull request with the other tasks' work, and the new run may then conflict with them or repeat them. To keep them out, revert them on the branch first, then Ship anyway, or abandon the batch.`,
     };
   },
+  /**
+   * The batch holds a failed attempt that left no commits, because the fresh start meant to replace
+   * it was refused: nothing runs the task now, and the batch waits so the builder can start again.
+   */
+  refusedStart: (titles: readonly string[]): Notice => {
+    const named = titles.map((t) => `"${t}"`).join(', ');
+    const one = titles.length === 1;
+    return {
+      key: NOTICE_KEY.supersededAttempt,
+      tone: 'warning',
+      line: `${named} failed here and ${one ? 'its' : 'their'} start over was refused: this batch is waiting`,
+      body: `${named} failed in this batch and ${one ? 'was' : 'were'} started over, but that new start was refused, so nothing is running ${one ? 'it' : 'them'} now. This batch keeps the failed attempt${one ? '' : 's'} so ${one ? 'it' : 'they'} can still be retried, and doesn't ship by itself.\n\nStart ${one ? 'the task' : 'the tasks'} again to retry, or Ship anyway to ship the other tasks' work without ${one ? 'it' : 'them'}. Closing ${one ? 'the task' : 'the tasks'} lets the batch ship the rest by itself.`,
+    };
+  },
 };
 
 /**

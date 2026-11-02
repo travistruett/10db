@@ -464,8 +464,8 @@ function failure(args: readonly string[], out: GhOutput): GhError {
 
 /**
  * gh's exit codes for `gh pr checks` with a list: its help says 0 all passed, 1 one failed and 8 one
- * pending, but with `--json` gh 2.83.2 exits 0 for pending and failing lists too (spike 15). The list
- * decides either way.
+ * pending, but with `--json` gh 2.83.2 exits 0 for pending, failing and cancelled lists too (spike
+ * 15). The list decides either way.
  */
 const CHECKS_EXITS = new Set([0, 1, 8]);
 /**

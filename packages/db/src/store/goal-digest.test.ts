@@ -475,27 +475,74 @@ describe('the rows', () => {
 
   it('offers the queued task first in line next when every open task is queued', () => {
     const { goal, a, b, c } = adopt();
-    // Started in the order b, a, c, so b leads the queue even though a comes first on the Board.
+    // a is done, so b is free to start. c was started first, so it leads the queue, but it waits on
+    // b: the scheduler passes it and starts b.
+    finish(a);
     setClock(9);
-    run(b, WorkstreamState.Queued);
-    setClock(10);
-    run(a, WorkstreamState.Queued);
-    setClock(11);
     run(c, WorkstreamState.Queued);
+    setClock(10);
+    run(b, WorkstreamState.Queued);
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.Queued);
     expect(digest.next).toEqual({ taskId: b, title: 'Drawer', waitsOn: [] });
   });
 
   it('puts a task the builder ran next ahead of the others in an all-queued goal’s next', () => {
-    const { goal, a, b, c } = adopt();
-    for (const [i, id] of [a, b, c].entries()) {
+    const free = store.write((ctx) =>
+      insertGoal(ctx, project.id, {
+        brief: {
+          title: 'Free tasks',
+          objective: 'No dependencies.',
+          tasks: [
+            { key: 'a', title: 'One', areas: ['api'] },
+            { key: 'b', title: 'Two', areas: ['ui'] },
+            { key: 'c', title: 'Three', areas: ['api'] },
+          ],
+        },
+      }),
+    ).value;
+    for (const [i, id] of free.taskIds.entries()) {
       setClock(9 + i);
       run(id, WorkstreamState.Queued);
     }
+    const last = free.taskIds[2];
+    if (!last) throw new Error('the brief makes three tasks');
     setClock(13);
-    store.write((ctx) => runNext(ctx, c));
-    expect(goalDigest(store.db, goal.id, null).next?.taskId).toBe(c);
+    store.write((ctx) => runNext(ctx, last));
+    expect(goalDigest(store.db, free.id, null).next?.taskId).toBe(last);
+  });
+
+  it('skips a queued task run next that waits on an open task, for one the scheduler can start', () => {
+    const { goal, a, b, c } = adopt();
+    // b waits on a. The builder runs b next, so b leads the queue, but the scheduler would pass it.
+    setClock(9);
+    run(a, WorkstreamState.Queued);
+    setClock(10);
+    run(b, WorkstreamState.Queued);
+    setClock(11);
+    run(c, WorkstreamState.Queued);
+    setClock(13);
+    store.write((ctx) => runNext(ctx, b));
+    expect(goalDigest(store.db, goal.id, null).next).toEqual({
+      taskId: a,
+      title: 'Patch route',
+      waitsOn: [],
+    });
+  });
+
+  it('lists the open dependencies of the queued task first in line when every queued task waits', () => {
+    const { goal, a, b, c } = adopt();
+    run(a, WorkstreamState.Running);
+    run(c, WorkstreamState.Running);
+    setClock(10);
+    run(b, WorkstreamState.Queued);
+    setClock(13);
+    store.write((ctx) => runNext(ctx, b));
+    expect(goalDigest(store.db, goal.id, null).next).toEqual({
+      taskId: b,
+      title: 'Drawer',
+      waitsOn: [{ taskId: a, title: 'Patch route' }],
+    });
   });
 
   it('sums tokens over the goal’s sessions, and dollars only where a session has them', () => {

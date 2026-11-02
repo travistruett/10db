@@ -26,8 +26,8 @@ const out = (exitCode: number, stdout = '', stderr = ''): GhOutput => ({
  * when one failed and 8 when one is pending (gh's documented codes); none is an error on stderr with
  * exit 1 and nothing on stdout. The `SPIKE_*` fixtures are verbatim from T3's spike and its follow-up
  * with gh 2.83.2 (docs/architecture/research/spike-15-gh-ci-checks.md). With `--json`, gh exits 0 for
- * pending and failing lists alike, so the list decides, never the exit code. A cancelled check and a
- * head with no checks at all were not on hand, so those follow gh 2.83.2's source and strings.
+ * pending, failing and cancelled lists alike, so the list decides, never the exit code. A head with no
+ * checks at all was not on hand, so that case follows gh 2.83.2's source and strings.
  */
 const check = (
   name: string,
@@ -63,6 +63,14 @@ const SPIKE_PENDING = out(
 const SPIKE_FAILING = out(
   0,
   '[{"bucket":"fail","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990697","name":"gate","state":"FAILURE","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990931","name":"desktop","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990937","name":"policy","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990907","name":"dependency-review","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990972","name":"cargo-deny","state":"SUCCESS","workflow":"ci"}]\n',
+);
+/**
+ * Spike: the same on #333, whose required `desktop` check GitHub cancelled (job 125201910780, no step
+ * ran). Exit 0, not gh's documented 1; the bucket is `cancel` and the state `CANCELLED`.
+ */
+const SPIKE_CANCELLED = out(
+  0,
+  '[{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201911007","name":"policy","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910880","name":"gate","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201911030","name":"dependency-review","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201911350","name":"cargo-deny","state":"SUCCESS","workflow":"ci"},{"bucket":"cancel","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910780","name":"desktop","state":"CANCELLED","workflow":"ci"}]\n',
 );
 /** Spike: `gh run view --job 125101889888 --log-failed` while that job was still running. */
 const SPIKE_LOG_IN_PROGRESS = out(
@@ -208,6 +216,22 @@ describe('what the spike saw gh print', () => {
       ],
       pending: [],
       cancelled: [],
+    });
+  });
+
+  it('reads a cancelled required check, exit 0, as pending with the cancelled job', () => {
+    expect(parseRequiredChecks(['pr', 'checks'], SPIKE_CANCELLED)).toEqual({
+      state: 'pending',
+      failing: [],
+      pending: [
+        {
+          name: 'desktop',
+          link: 'https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910780',
+          runId: '41422731196',
+          jobId: '125201910780',
+          description: null,
+        },
+      ],
     });
   });
 

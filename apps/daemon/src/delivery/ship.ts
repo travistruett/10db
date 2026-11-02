@@ -212,11 +212,22 @@ function committed(db: DbReader, member: WorkstreamDto): boolean {
  * cases the builder could still want the old batch to keep the attempt.
  */
 function replacementUnsettled(db: DbReader, member: WorkstreamDto): boolean {
-  const current = getTask(db, member.taskId).workstreamId;
-  if (current === null) return false;
-  const next = getWorkstream(db, current);
+  const task = getTask(db, member.taskId);
+  // A closed task will not start again, so nothing is left to wait for.
+  if (task.status === TaskStatus.Cancelled || task.workstreamId === null) return false;
+  const next = getWorkstream(db, task.workstreamId);
   if (next.batchId === null) return next.state === WorkstreamState.Cancelled;
   return getBatch(db, next.batchId).state === BatchState.Cutting;
+}
+/**
+ * Whether a superseded member is held only because its replacement's cut was refused: the task's
+ * latest run is cancelled and detached from any batch, and the task is still open to start again.
+ */
+function replacementRefused(db: DbReader, member: WorkstreamDto): boolean {
+  const task = getTask(db, member.taskId);
+  if (task.status === TaskStatus.Cancelled || task.workstreamId === null) return false;
+  const next = getWorkstream(db, task.workstreamId);
+  return next.batchId === null && next.state === WorkstreamState.Cancelled;
 }
 
 /**
@@ -1048,7 +1059,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const left = current
         .filter((m) => superseded(w.tx, m) && committed(w.tx, m))
         .map((m) => m.taskTitle);
+      // Commits on the branch are the heavier warning, so they take the notice's one slot.
+      const refused = current
+        .filter((m) => superseded(w.tx, m) && !committed(w.tx, m) && replacementRefused(w.tx, m))
+        .map((m) => m.taskTitle);
       if (left.length > 0) setBatchNotice(w, batchId, supersededNotices.committed(batch, left));
+      else if (refused.length > 0)
+        setBatchNotice(w, batchId, supersededNotices.refusedStart(refused));
       else clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
       if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Ready) return false;
       transitionBatch(w, batchId, {
