@@ -18,6 +18,8 @@ export const NOTICE_KEY = {
   baseKept: 'base-kept',
   /** A lane launched without the base's newer commits because origin could not be fetched. */
   baseFetch: 'base-fetch',
+  /** A lane launched without the base's newer commits because uncommitted changes were in the way. */
+  baseUncommitted: 'base-uncommitted',
   /** The pull request waits for the builder to merge it. */
   merge: 'pull-request-merge',
   /** The shipping gate failed once, in tests the batch didn't change, and passed when run again. */
@@ -162,6 +164,17 @@ export const baseNotices = {
     tone: 'warning',
     line: `Couldn't fetch ${batch.baseBranch}: this lane started on the copy as it is`,
     body: `10db brings ${batch.baseBranch} into a batch's copy when a lane launches, so the lane sees what merged while it waited. It couldn't fetch ${batch.baseBranch} from origin (${detailOf(error)}), so this lane started on the copy as it is, without any commits that merged into ${batch.baseBranch} since the copy was cut.\n\nThe next launch or gate fetches again, and this notice goes once a fetch works.`,
+  }),
+  /**
+   * A lane launched on the batch's copy without the base's newer commits, because uncommitted changes
+   * in `paths` (most likely another task's, mid-session) are in the way of the merge. The next launch
+   * or gate that can take the base clears it.
+   */
+  uncommitted: (batch: BatchDto, paths: readonly string[]): Notice => ({
+    key: NOTICE_KEY.baseUncommitted,
+    tone: 'warning',
+    line: `Uncommitted changes in ${shortPaths(paths)}: this lane started without ${batch.baseBranch}’s newer commits`,
+    body: `10db brings ${batch.baseBranch} into a batch's copy when a lane launches, so the lane sees what merged while it waited. Uncommitted changes, most likely another task's of this batch that is still working, are in files ${batch.baseBranch} has changed:\n${listPaths(paths)}\n\n10db never overwrites them, so it didn't merge ${batch.baseBranch}, and this lane started without the newer commits on ${batch.baseBranch}. It may build on code that has since changed there.\n\nThe next launch or gate tries again once those changes are committed, and this notice goes once the branch holds ${batch.baseBranch}.`,
   }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
   kept: (

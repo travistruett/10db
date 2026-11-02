@@ -599,7 +599,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       ctx.logger.warn({ batchId: batch.id, ref, err: why(error) }, 'base merge note not dropped');
     }
     tell(batch, () => {
-      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseConflict, NOTICE_KEY.baseKept]);
+      hideNotices(ctx.state, batch.id, [
+        NOTICE_KEY.baseConflict,
+        NOTICE_KEY.baseKept,
+        NOTICE_KEY.baseUncommitted,
+      ]);
     });
     const head = await ctx.git.head(path);
     ctx.logger.info(
@@ -721,6 +725,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           tell(batch, () => {
             showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
           });
+        // A gate's note says it ran without the base; a lane launching has no gate note, so the
+        // batch's tasks are told it started on the stale copy.
+        if (changed.length > 0 && options.atLaunch)
+          tell(batch, () => {
+            showNotice(ctx.state, batch.id, baseNotices.uncommitted(batch, changed));
+          });
         return alone({
           ...notMerged(
             batch,
@@ -749,7 +759,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     // The branch holds the base, the builder's own hand merge included: nothing is in its way.
     tell(batch, () => {
-      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseConflict, NOTICE_KEY.baseKept]);
+      hideNotices(ctx.state, batch.id, [
+        NOTICE_KEY.baseConflict,
+        NOTICE_KEY.baseKept,
+        NOTICE_KEY.baseUncommitted,
+      ]);
     });
     let unmoved: string | null = null;
     try {

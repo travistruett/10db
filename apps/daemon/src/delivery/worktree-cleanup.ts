@@ -166,7 +166,7 @@ async function removeWorktreeAndSettle(
   if (conflicted && batch.state === BatchState.Shipped)
     showNotice(ctx.state, batchId, baseNotices.shippedConflict(batch));
   else hideNotices(ctx.state, batchId, [NOTICE_KEY.baseConflict]);
-  hideNotices(ctx.state, batchId, [NOTICE_KEY.baseKept]);
+  hideNotices(ctx.state, batchId, [NOTICE_KEY.baseKept, NOTICE_KEY.baseUncommitted]);
   withdraw(ctx.state, ctx.inbox, project.id, [
     keptWorktreeKey.batchChanges(batchId),
     keptWorktreeKey.batchIgnored(batchId),
