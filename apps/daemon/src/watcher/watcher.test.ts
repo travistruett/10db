@@ -8,6 +8,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -27,6 +28,7 @@ import {
   claimRequestsForTask,
   copyHazardNames,
   createTestStore,
+  getAppSetting,
   insertBatch,
   insertPermissionRule,
   insertTask,
@@ -1927,6 +1929,112 @@ describe('worktree checkouts', () => {
         writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
         expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    describe('an excused write stays with the lane whose card allowed it', () => {
+      const EXCUSED_SETTING = 'watcher.excusedWrites';
+      const restart = (): void => {
+        watcher.stop();
+        watcher = createWatcher({
+          state,
+          inbox,
+          git: createGit(),
+          logger: silentLogger,
+          clock,
+          watch: fake.watch,
+          batchMs: 500,
+        });
+      };
+
+      it("does not excuse another lane's step end write to the same unchanged file", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it("does not excuse another lane's step end write after a restart", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restart();
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it('does not excuse a later deletion of a file whose deletion a card excused', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        // Back as it was, so git reports nothing, then deleted again.
+        writeFileSync(join(repo.path, 'README.md'), '# fixture\n');
+        emit('README.md');
+        await watcher.flush();
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual(['README.md']);
+      });
+
+      it('forgets the excused writes of a lane when its run ends', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toHaveLength(1);
+        state.write((ctx) =>
+          transitionWorkstream(ctx, lane.workstream.id, {
+            to: WorkstreamState.Cancelled,
+            fence: null,
+          }),
+        );
+        watcher.sync();
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toEqual([]);
+      });
+
+      it('keeps the excused writes of a lane that still runs when another lane ends', async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        state.write((ctx) =>
+          transitionWorkstream(ctx, b.workstream.id, {
+            to: WorkstreamState.Cancelled,
+            fence: null,
+          }),
+        );
+        watcher.sync();
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toHaveLength(1);
+        restart();
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+      });
+
+      it('does not excuse a changed file with the same modification time and size', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        const file = join(repo.path, SENSITIVE_FILE);
+        const pin = (text: string): void => {
+          writeFileSync(file, text);
+          utimesSync(file, 1_700_000_000.5, 1_700_000_000.5);
+        };
+        pin('x');
+        emit(SENSITIVE_FILE);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        pin('y');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
     });
 

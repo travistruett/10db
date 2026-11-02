@@ -1,4 +1,5 @@
-import { realpathSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -123,11 +124,27 @@ export function relativeIn(root: string, path: string): string | null {
   return null;
 }
 
-/** What identifies the current write to a file: its modification time to the nanosecond, or `gone`. */
-export function writeStamp(root: string, rel: string): string {
+/** The largest file whose content is hashed for a stamp; a bigger one is never remembered as excused. */
+const MAX_STAMPED_BYTES = 16 * 1024 * 1024;
+
+/**
+ * What identifies the current write to a file: its modification time to the nanosecond, its size and a
+ * hash of its content, so a file changed behind a restored modification time and size is another write.
+ * Null for a file that can't be remembered as one write: one that is gone (a deletion looks the same
+ * every time), a directory or other non-file, one too large to hash, or one that can't be read.
+ */
+export function writeStamp(root: string, rel: string): string | null {
   try {
-    return String(statSync(resolve(root, rel), { bigint: true }).mtimeNs);
+    const path = resolve(root, rel);
+    const before = statSync(path, { bigint: true });
+    if (!before.isFile() || before.size > BigInt(MAX_STAMPED_BYTES)) return null;
+    const content = readFileSync(path);
+    // The file changed while it was read: the content may not be the one the time and size name.
+    const after = statSync(path, { bigint: true });
+    if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return null;
+    const hash = createHash('sha256').update(content).digest('hex');
+    return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
   } catch {
-    return 'gone';
+    return null;
   }
 }
