@@ -1230,13 +1230,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
         } else if (await deps.git.isAncestor(main, head, tip)) {
           // Only the merge an earlier catch-up of this run wrote, and neither pushed nor put back, goes:
           // this one starts from the head. Anything else, a merge the builder made included, stays.
-          if (unpushedHead.get(batchId) !== tip) {
-            const extra = (await deps.git.commitsSince(main, head, tip)).reverse();
+          const recorded = unpushedHead.get(batchId);
+          if (recorded !== tip) {
+            // When the tip descends from the merge 10db left unpushed, that merge is 10db's, not a
+            // commit to push: only the commits after it are named.
+            const ownMerge =
+              recorded !== undefined && (await deps.git.isAncestor(main, recorded, tip))
+                ? recorded
+                : null;
+            const extra = (await deps.git.commitsSince(main, ownMerge ?? head, tip)).reverse();
             const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
             const one = extra.length === 1;
+            const own =
+              ownMerge === null
+                ? ''
+                : ` It also has 10db's own unpushed merge ${ownMerge.slice(0, 7)}, which was not gated: don't push it.`;
             stop({
               kind: 'other',
-              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks that 10db did not write (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone.${own} Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
             });
             return;
           }
