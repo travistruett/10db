@@ -414,7 +414,10 @@ const SHELLS = ['bash', 'sh', 'zsh'];
 // Programs that read their stdin or arguments as a script to run.
 const SCRIPT_RUNNERS = [...SHELLS, 'eval', 'source', '.'];
 
-/** @typedef {{ valueOptions: string[], operands: number }} Wrapper */
+/**
+ * `loneDash`: a `-` on its own is an option (env reads it as `-i`), not the command.
+ * @typedef {{ valueOptions: string[], operands: number, loneDash?: boolean }} Wrapper
+ */
 /** @type {Wrapper} */
 const PLAIN_WRAPPER = { valueOptions: [], operands: 0 };
 // Words that run another command without changing what it is: shell keywords and wrappers. Each
@@ -430,7 +433,14 @@ const WRAPPERS = new Map([
   ['exec', { valueOptions: ['-a'], operands: 0 }],
   ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
   // -P altpath is BSD/macOS env's.
-  ['env', { valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'], operands: 0 }],
+  [
+    'env',
+    {
+      valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'],
+      operands: 0,
+      loneDash: true,
+    },
+  ],
   [
     'stdbuf',
     { valueOptions: [...['-i', '-o', '-e'], ...['--input', '--output', '--error']], operands: 0 },
@@ -492,7 +502,15 @@ function takesNextWord(word, valueOptions) {
  */
 function skipWrapperArguments(words, from, wrapper) {
   let i = from;
-  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+  while (
+    i < words.length &&
+    words[i].startsWith('-') &&
+    (words[i] !== '-' || wrapper.loneDash === true)
+  ) {
+    if (words[i] === '-') {
+      i += 1;
+      continue;
+    }
     if (words[i] === '--') {
       i += 1;
       break;
@@ -648,15 +666,55 @@ function envSplitString(words) {
   return null;
 }
 
+// The options GNU and BSD/macOS env know. `-S` and `--split-string` hand the rest to a nested env.
+const ENV_FLAG_LETTERS = 'i0v';
+const ENV_VALUE_LETTERS = 'uCaP';
+const ENV_FLAG_LONG = [
+  ...['--ignore-environment', '--null', '--debug', '--version', '--help'],
+  ...['--block-signal', '--default-signal', '--ignore-signal', '--list-signal-handling'],
+];
+const ENV_VALUE_LONG = ['--unset', '--chdir', '--argv0'];
+const ENV_VALUE_OPTIONS = [...[...ENV_VALUE_LETTERS].map((l) => `-${l}`), ...ENV_VALUE_LONG];
+
+/**
+ * True when the leading env options in `words` (the words after `env`) include one this guard
+ * doesn't know, so it can't tell whether the word after it is a value or the command.
+ * @param {string[]} words
+ */
+function hasUnknownEnvOption(words) {
+  let i = 0;
+  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+    const word = words[i];
+    if (word === '--') return false;
+    if (word.startsWith('--')) {
+      const name = word.split('=')[0];
+      if (name.length > 2 && '--split-string'.startsWith(name)) return false;
+      const known = [...ENV_FLAG_LONG, ...ENV_VALUE_LONG];
+      if (name.length <= 2 || !known.some((long) => long.startsWith(name))) return true;
+    } else {
+      for (let k = 1; k < word.length; k += 1) {
+        const letter = word[k];
+        if (letter === 'S') return false;
+        if (ENV_VALUE_LETTERS.includes(letter)) break;
+        if (!ENV_FLAG_LETTERS.includes(letter)) return true;
+      }
+    }
+    i += takesNextWord(word, ENV_VALUE_OPTIONS) ? 2 : 1;
+  }
+  return false;
+}
+
 /**
  * The command a `bash -c`, `sh -c`, `zsh -c`, `eval` or `env -S` segment runs, so it can be
- * judged too. A flag cluster such as `-ce` or `-lc` counts as `-c`.
+ * judged too. A flag cluster such as `-ce` or `-lc` counts as `-c`. env puts the words an -S
+ * string splits into back in its arguments and keeps parsing options from them, so that string is
+ * judged as `env <string>`.
  * @param {string[]} words
  * @returns {string | null}
  */
 function nestedCommand(words) {
   const split = envSplitString(words);
-  if (split !== null) return split;
+  if (split !== null) return `env ${split}`;
   const i = commandStart(words);
   if (words[i] === 'eval') return words.slice(i + 1).join(' ');
   if (!SHELLS.includes(programAt(words, i))) return null;
@@ -1046,6 +1104,14 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       if (destination === null) listCertain = false;
       else followedCd = true;
     } else listCertain = false;
+    const split = envSplitString(seg.words);
+    if (split !== null && hasUnknownEnvOption(segments(split)[0]?.words ?? [])) {
+      verdicts.push({
+        decision: 'ask',
+        reason:
+          'An env option inside the -S string is not one the guard knows, so it cannot tell which word is the command.',
+      });
+    }
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
       const verdict = inner === null ? null : judge(inner, cwd, whole, dir);
