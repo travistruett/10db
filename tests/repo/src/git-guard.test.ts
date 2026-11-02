@@ -362,6 +362,10 @@ describe('git guard decisions', () => {
     ['env - git push --force', 'env - git push --force origin main', 'ask'],
     ['env -i - git add', 'env -i - git add -A', 'deny'],
     ['env - with an assignment', 'env - FOO=1 git add -A', 'deny'],
+    // GNU env checks for a lone `-` after its getopt loop has used up `--`.
+    ['env -- - git add', 'env -- - git add -A', 'deny'],
+    ['env -- - git push --force', 'env -- - git push --force origin main', 'ask'],
+    ['env -S with -- -', "env -S '-- - git add -A'", 'deny'],
     // env keeps parsing its options in the words an -S string splits into.
     ['env -S with -i', "env -S '-i git add -A'", 'deny'],
     ['env -S with -u VALUE', "env -S '-u X git push --force'", 'ask'],

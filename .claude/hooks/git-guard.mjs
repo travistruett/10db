@@ -582,6 +582,8 @@ function skipWrapperArguments(words, from, wrapper) {
     }
     if (words[i] === '--') {
       i += 1;
+      // GNU env checks for a lone `-` after its getopt loop has used up `--`.
+      if (wrapper.loneDash === true && words[i] === '-') i += 1;
       break;
     }
     const option = readOption(words[i], wrapper);
