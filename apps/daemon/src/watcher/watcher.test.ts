@@ -1195,6 +1195,75 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
       });
 
+      describe("in a copy shared with another lane that commits in that lane's own area", () => {
+        beforeEach(() => {
+          state.write((ctx) =>
+            patchProject(ctx, project.id, {
+              areas: [
+                { name: 'ui', globs: ['src/ui/**'] },
+                { name: 'docs', globs: ['docs/**'] },
+              ],
+            }),
+          );
+          project = getProject(base.db, project.id);
+        });
+
+        it("resolves once the lane's claim covers all its writes", async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane.path, 'docs/b.md');
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('stays open when an unlisted write, committed or not, is covered by no claim', async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          writeAt(lane.path, 'zzz/last.ts');
+          await watcher.flush();
+          expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane.path, 'docs/b.md');
+          commit(lane.path, 'zzz/last.ts');
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
+
+        it("still judges a listed path by the granted lane's own claims", async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          launchIn(lane.batch, 'Beta', 'docs');
+          // A card from before Beta's claim, listing a path only Beta's claim covers.
+          inbox.flag({
+            projectId: project.id,
+            workstreamId: lane.workstream.id,
+            title: `${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`,
+            body: `${lane.path}: docs/a.md\n…and 1 more`,
+            detail: {
+              count: STRAY_BULK_THRESHOLD + 1,
+              paths: ['docs/a.md'],
+              candidates: [lane.workstream.id],
+            },
+            foldKey: `stray-write:${lane.batch.id}:bulk`,
+          });
+          watcher.sync();
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
+      });
+
       it('stays open when a path it lists is sensitive', async () => {
         const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
         inbox.flag({

@@ -387,8 +387,9 @@ export function createWatcher(deps: {
    * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
    * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
    * Sensitive paths stay carded. A bulk card resolves only when every path it lists is covered and not
-   * sensitive and, when it lists fewer than it counts, nothing the lane changed since its base, committed or
-   * not, lies outside the claims, since the paths it leaves out can't be read from the card.
+   * sensitive and, when it lists fewer than it counts, nothing changed since the lane's base, committed or
+   * not, lies outside every claim in the checkout (the lane's own and other watched lanes'), since the paths
+   * it leaves out can't be read from the card. The listed paths need the lane's own claims.
    */
   async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
@@ -420,12 +421,16 @@ export function createWatcher(deps: {
           root,
           await deps.git.changedFilesSince(root, base),
         );
+        // The diff since the base holds what other lanes (or the builder) committed in this checkout; a path
+        // another watched lane's claim covers there is that lane's to answer for, so it counts as covered.
         unlistedCovered =
-          findStrays(
-            changed.filter((p) => !isSensitivePath(p)),
+          straysIn(
             project,
-            claims,
-          ).length === 0;
+            worktreeBatchOf(ws),
+            changed.filter((p) => !isSensitivePath(p)),
+            WATCHED_STATES,
+            lane,
+          ).strays.length === 0;
       } catch {
         unlistedCovered = false;
       }
