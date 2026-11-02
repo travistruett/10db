@@ -809,7 +809,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       it('merges the base with its markers in the files, committed with the base as second parent, and runs no gate on the branch', async () => {
         const { batch, ws, own, teammate, path } = await overlapping();
         const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, inSession);
-        expect(update).toMatchObject({ kind: 'conflicted', paths: ['README.md'] });
+        // The markers are this gate's own merge's, which no session has seen.
+        expect(update).toMatchObject({ kind: 'conflicted', paths: ['README.md'], fresh: true });
         expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
         expect(readFileSync(join(path, 'README.md'), 'utf8')).toContain('<<<<<<< ');
         expect(state(path).status).toBe('');
@@ -829,10 +830,10 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         await updates.beforeGate(batch.id, signal, inSession);
         const head = gitIn(path, 'rev-parse', 'HEAD');
         h.teammatePush('main', 'src/more.txt');
-        expect(await updates.beforeGate(batch.id, signal, inSession)).toMatchObject({
-          kind: 'conflicted',
-          paths: ['README.md'],
-        });
+        const again = await updates.beforeGate(batch.id, signal, inSession);
+        expect(again).toMatchObject({ kind: 'conflicted', paths: ['README.md'] });
+        // Found, not made by this gate: a session was already sent these.
+        expect(again).not.toHaveProperty('fresh');
         // A caller that does not ask for a session finds them too and does not merge.
         expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
           kind: 'conflicted',
