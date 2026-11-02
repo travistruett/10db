@@ -284,6 +284,19 @@ describe('folderAt', () => {
   });
 });
 
+describe('commitAt', () => {
+  it('resolves a ref to the commit it names, and a commit to itself', async () => {
+    const sha = (await git.head(repo.path)).trim();
+    expect(await git.commitAt(repo.path, 'refs/heads/main')).toBe(sha);
+    expect(await git.commitAt(repo.path, sha)).toBe(sha);
+  });
+
+  it('rejects a rev that names no commit', async () => {
+    await expect(git.commitAt(repo.path, 'refs/heads/nope')).rejects.toThrow();
+    await expect(git.commitAt(repo.path, '-h')).rejects.toThrow();
+  });
+});
+
 describe('gitDirs', () => {
   it('names one directory for both in an ordinary checkout', async () => {
     const gitDir = join(realpathSync(repo.path), '.git');

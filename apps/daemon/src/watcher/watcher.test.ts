@@ -1995,6 +1995,37 @@ describe('worktree checkouts', () => {
       expect(await watcher.stepEnd(next.workstream.id)).toEqual([SENSITIVE_FILE]);
     });
 
+    describe("in a checkout shared with a lane whose card excused the file's write", () => {
+      const excusedForA = async () => {
+        const a = running('Alpha', ['ui']);
+        const b = running('Beta', ['api']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        return { a, b };
+      };
+
+      it("raises no card at the other lane's step end for the file still showing the excused write", async () => {
+        const { b } = await excusedForA();
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it("still cards at the other lane's step end a different write to that file", async () => {
+        const { b } = await excusedForA();
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by lane Beta');
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it("still cards at the other lane's step end another file, and leaves out only the excused one", async () => {
+        const { b } = await excusedForA();
+        touch('.env');
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+      });
+    });
+
     describe('after the daemon restarts', () => {
       const restart = (): void => {
         watcher.stop();

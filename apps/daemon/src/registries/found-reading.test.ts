@@ -201,6 +201,7 @@ describe('taking a reading for a project added before 10db kept one', () => {
     const made = [{ host: 'rubygems.org', file: 'Gemfile.lock' }];
     // Another caller (or createProject) keeps its reading while this one is still listing the branch.
     const racing = {
+      commitAt: git.commitAt.bind(git),
       fileAt: git.fileAt.bind(git),
       folderAt: async (r: string, rev: string, folder: string) => {
         const listing = await git.folderAt(r, rev, folder);

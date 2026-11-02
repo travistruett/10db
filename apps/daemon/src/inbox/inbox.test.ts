@@ -59,6 +59,7 @@ import {
 
 /** A git that reads no repository: a project with no reading gets none from it. */
 const NO_GIT = {
+  commitAt: () => Promise.reject(new Error('no repository')),
   folderAt: () => Promise.reject(new Error('no repository')),
   fileAt: () => Promise.resolve({ kind: 'missing' as const }),
 };
@@ -774,7 +775,7 @@ describe('permission broker in a sandboxed lane', () => {
     ws: ReturnType<typeof seedWorkstream>,
     sandbox = true,
     hazards: readonly HazardDef[] = DEFAULT_HAZARDS,
-    git: Pick<Git, 'folderAt' | 'fileAt'> = NO_GIT,
+    git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'> = NO_GIT,
   ) {
     return createPermissionBroker(
       { state, inbox, git, logger: silentLogger },

@@ -799,7 +799,20 @@ export function createWatcher(deps: {
       const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
       // Not a write its permission card allowed: the builder decided about that one already.
       const allowed = allowedWrites(ws.projectId, root, written, [workstreamId]);
-      const flagged = written.filter((rel) => !allowed.has(rel));
+      // Nor a file still showing the write another running lane's card excused: a stamp that matches means
+      // nobody has written to it since, so it is that lane's write and not this lane's to answer for.
+      const others = listWorkstreams(db, { states: WATCHED_STATES, projectId: ws.projectId })
+        .map((other) => other.id)
+        .filter((id) => id !== workstreamId);
+      const flagged = written.filter((rel) => {
+        if (allowed.has(rel)) return false;
+        if (others.length === 0) return true;
+        const stamp = writeStamp(root, rel);
+        return (
+          stamp === null ||
+          !others.some((id) => excusedWrites.get(excusedKey(root, id, rel)) === stamp)
+        );
+      });
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
       return flagged;
     },
