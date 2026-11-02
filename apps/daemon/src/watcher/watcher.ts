@@ -435,9 +435,11 @@ export function createWatcher(deps: {
    * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
    * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
    * Sensitive paths stay carded. A bulk card resolves only when every path it lists is covered and not
-   * sensitive and, when it lists fewer than it counts, nothing changed since the lane's base, committed or
-   * not, lies outside every claim in the checkout (the lane's own and other watched lanes'), since the paths
-   * it leaves out can't be read from the card. The listed paths need the lane's own claims.
+   * sensitive and, when it lists fewer than it counts, nothing changed since the lane's base lies outside
+   * every claim in the checkout (the lane's own and other watched lanes'), since the paths it leaves out
+   * can't be read from the card. What counts as changed is the uncommitted changes plus the files of commits
+   * made through the commit tool (those with a 10db-Op trailer); commits without one, such as the builder's
+   * own or a pull, are left out. The listed paths need the lane's own claims.
    */
   async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
@@ -467,10 +469,14 @@ export function createWatcher(deps: {
         const changed = withoutBookkeeping(
           ws.projectId,
           root,
-          await deps.git.changedFilesSince(root, base),
+          await deps.git.opChangedFilesSince(root, base),
         );
-        // The diff since the base holds what other lanes (or the builder) committed in this checkout; a path
-        // another watched lane's claim covers there is that lane's to answer for, so it counts as covered.
+        // Excluded: files only commits with no 10db-Op trailer changed since the base (the builder's own
+        // commits, and merges or pulls that brought commits in), so they never keep the card open. Counted:
+        // every uncommitted change in the checkout, and every file a commit made through the commit tool
+        // changed, whichever lane made it; a path another watched lane's claim covers is that lane's to
+        // answer for, so it counts as covered. A builder edit not yet committed still counts, and so does a
+        // file the builder committed with an op trailer in its message.
         unlistedCovered =
           straysIn(
             project,
