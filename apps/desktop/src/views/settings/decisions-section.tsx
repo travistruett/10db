@@ -39,6 +39,7 @@ const OUTCOME_TEXT: Readonly<Record<Exclude<JudgeOutcome, 'acted'>, string>> = {
   [JudgeOutcome.FallbackNoKey]: 'No key; the review ran',
   [JudgeOutcome.FallbackTimeout]: 'Timed out; the review ran',
   [JudgeOutcome.FallbackError]: 'The call failed; the review ran',
+  [JudgeOutcome.Stopped]: 'Stopped before it answered',
 };
 
 /**

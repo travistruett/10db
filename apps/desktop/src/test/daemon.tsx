@@ -54,6 +54,7 @@ export function baseHandlers(
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
+    http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),

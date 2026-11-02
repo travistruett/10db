@@ -38,7 +38,8 @@
         "fallback_off",
         "fallback_no_key",
         "fallback_timeout",
-        "fallback_error"
+        "fallback_error",
+        "stopped"
       ]
     },
     "latencyMs": {

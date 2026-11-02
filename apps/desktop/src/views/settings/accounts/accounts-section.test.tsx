@@ -1,14 +1,42 @@
-import { AccountId, type AccountDto, type AccountUsageDto } from '@10db/contracts';
+import {
+  AccountId,
+  type AccountDto,
+  type AccountPauseDto,
+  type AccountUsageDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { accountKeys } from '../../../daemon/account-queries';
-import { accountDto, accountUsageDto, DEFAULT_ACCOUNT } from '../../../test/account-fixtures';
+import {
+  accountDto,
+  accountPauseDto,
+  accountUsageDto,
+  DEFAULT_ACCOUNT,
+} from '../../../test/account-fixtures';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../../test/daemon';
+import { formatMoment } from './account-pause';
 
-function serve(accounts: AccountDto[], usage: Record<string, AccountUsageDto> = {}) {
+/** The accounts the Resume button was pressed for. */
+const resumed: string[] = [];
+beforeEach(() => {
+  resumed.length = 0;
+});
+
+function serve(
+  accounts: AccountDto[],
+  usage: Record<string, AccountUsageDto> = {},
+  pauses: AccountPauseDto[] = [],
+) {
+  let paused = pauses;
   server.use(
     http.get(daemonUrl('/accounts'), () => HttpResponse.json(accounts)),
+    http.get(daemonUrl('/accounts/pauses'), () => HttpResponse.json(paused)),
+    http.post(daemonUrl('/accounts/:accountId/resume'), ({ params }) => {
+      resumed.push(String(params['accountId']));
+      paused = paused.filter((p) => p.accountId !== params['accountId']);
+      return HttpResponse.json(paused);
+    }),
     http.get(daemonUrl('/accounts/:accountId/usage'), ({ params }) =>
       HttpResponse.json(
         usage[String(params['accountId'])] ??
@@ -57,6 +85,47 @@ describe('AccountsSection', () => {
     const row = await rowOf(account.label);
     expect(within(row).getByText(status)).toBeTruthy();
     expect(within(row).getByText(identity)).toBeTruthy();
+  });
+
+  it('shows a refused pause with its reason and since when, and resumes it', async () => {
+    const pause = accountPauseDto({ accountId: DEFAULT_ACCOUNT.id, reason: 'refused' });
+    serve([DEFAULT_ACCOUNT], {}, [pause]);
+    const row = await rowOf('Claude plan');
+    expect(await within(row).findByText(/Sessions refused/)).toBeTruthy();
+    expect(within(row).getByText(new RegExp(`since ${formatMoment(pause.since)}`))).toBeTruthy();
+    fireEvent.click(within(row).getByRole('button', { name: 'Resume Claude plan' }));
+    await waitFor(() => {
+      expect(resumed).toEqual([DEFAULT_ACCOUNT.id]);
+    });
+    await waitFor(() => {
+      expect(within(row).queryByText(/Sessions refused/)).toBeNull();
+    });
+  });
+
+  it('shows a monthly-cap pause with when it ends, and offers Resume', async () => {
+    const until = '2026-11-01T07:00:00.000Z';
+    const pause = accountPauseDto({ reason: 'monthly_cap', until });
+    serve([DEFAULT_ACCOUNT], {}, [pause]);
+    const row = await rowOf('Claude plan');
+    expect(await within(row).findByText(/Monthly cap reached/)).toBeTruthy();
+    expect(within(row).getByText(new RegExp(`until ${formatMoment(until)}`))).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Resume Claude plan' })).toBeTruthy();
+  });
+
+  it('shows a usage-limit pause with when it ends and offers no Resume', async () => {
+    const until = '2026-10-30T23:30:00.000Z';
+    serve([DEFAULT_ACCOUNT], {}, [accountPauseDto({ reason: 'usage_limit', until })]);
+    const row = await rowOf('Claude plan');
+    expect(await within(row).findByText(/Usage limit reached/)).toBeTruthy();
+    expect(within(row).getByText(new RegExp(`until ${formatMoment(until)}`))).toBeTruthy();
+    expect(within(row).queryByRole('button', { name: /Resume/ })).toBeNull();
+  });
+
+  it('shows nothing about pauses for an account that is not paused', async () => {
+    serve([DEFAULT_ACCOUNT]);
+    const row = await rowOf('Claude plan');
+    expect(within(row).queryByText(/Paused/)).toBeNull();
+    expect(within(row).queryByRole('button', { name: /Resume/ })).toBeNull();
   });
 
   it('shows a metered account’s spend against its cap with a progress bar', async () => {
