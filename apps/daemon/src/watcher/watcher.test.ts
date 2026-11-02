@@ -2100,24 +2100,36 @@ describe('worktree checkouts', () => {
         watcher.sync();
       };
 
-      it("does not excuse another lane's step end write to the same unchanged file", async () => {
+      // The file still holds exactly what lane A's card allowed (the stamp hashes its content), so lane B
+      // wrote nothing new to it; carding B would blame it for A's allowed write.
+      it("raises no card at another lane's step end while the file still holds the excused write", async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once');
         await write(SENSITIVE_FILE);
         expect(flags()).toEqual([]);
-        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
-        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
       });
 
-      it("does not excuse another lane's step end write after a restart", async () => {
+      it("raises no card at another lane's step end for the excused write after a restart", async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once');
         await write(SENSITIVE_FILE);
         restartAndResume(a);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+      });
+
+      it("cards another lane's step end once the file no longer holds the excused write", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'changed after the excused write');
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
 
