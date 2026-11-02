@@ -116,6 +116,7 @@ export function createClaimDeadlockAnswers(deps: {
       return;
     }
     if (isTerminal(getWorkstreamRow(deps.state.db, id).state)) return;
+    deps.waits.cancelled(id);
     deps.cancel(id).catch((error: unknown) => {
       deps.log.error(
         { err: error, workstreamId: id },

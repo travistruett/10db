@@ -95,6 +95,7 @@ const DEADLOCK_CARD = 'claim-deadlock';
 export class ClaimWaits {
   readonly #live = new Map<string, LiveWait>();
   readonly #yields = new Map<WorkstreamId, Yielded>();
+  readonly #cancelled = new Set<WorkstreamId>();
   readonly #onWait: () => void;
 
   /** `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again. */
@@ -116,6 +117,8 @@ export class ClaimWaits {
     };
     const done = claimOrWait(a, state, this).finally(() => {
       this.#live.delete(key);
+      if (![...this.#live.values()].some((w) => w.state.workstreamId === a.workstreamId))
+        this.#cancelled.delete(a.workstreamId);
     });
     done.catch(() => undefined);
     const entry = { state, done };
@@ -134,6 +137,21 @@ export class ClaimWaits {
     const before = this.#yields.get(workstreamId)?.claims ?? [];
     this.#yields.set(workstreamId, { ...given, claims: [...before, ...given.claims] });
     return true;
+  }
+
+  /**
+   * The builder cancelled `workstreamId`. Its waits end at their next look and count as waiting for
+   * nothing from now on: its session takes a moment to stop, and until then its wait must not raise the
+   * deadlock card again for a deadlock the cancel just ended.
+   */
+  cancelled(workstreamId: WorkstreamId): void {
+    if ([...this.#live.values()].some((w) => w.state.workstreamId === workstreamId))
+      this.#cancelled.add(workstreamId);
+  }
+
+  /** Whether the builder cancelled this task while it waited. */
+  isCancelled(workstreamId: WorkstreamId): boolean {
+    return this.#cancelled.has(workstreamId);
   }
 
   /** Claims the task was made to give up that its agent has not been told of yet. */
@@ -165,6 +183,7 @@ export class ClaimWaits {
   /** The workstreams `workstreamId` is waiting on now. */
   holdersAwaitedBy(workstreamId: WorkstreamId): WorkstreamId[] {
     const out: WorkstreamId[] = [];
+    if (this.#cancelled.has(workstreamId)) return out;
     for (const { state } of this.#live.values())
       if (state.workstreamId === workstreamId && state.heldBy !== null) out.push(state.heldBy);
     return out;
@@ -371,6 +390,8 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
   };
   try {
     for (;;) {
+      if (waits.isCancelled(a.workstreamId))
+        throw new InvalidError('The builder cancelled this task. End your turn.');
       const given = waits.pendingYield(a.workstreamId);
       if (given) return yieldRefusal(given, a);
       const outcome = tryAcquire(a);
