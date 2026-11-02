@@ -173,6 +173,8 @@ export function createWatcher(deps: {
   let timer: Timer | null = null;
   // Work queued per checkout (`onRoot`), keyed by the checkout's path; a checkout with nothing queued has none.
   const queues = new Map<string, Promise<void>>();
+  // Checkouts with a batch run queued that has not started yet; it takes the checkout's `pending` when it does.
+  const waiting = new Set<string>();
   let stopped = false;
 
   /** The batch a workstream works in when that batch has its own worktree. */
@@ -813,7 +815,8 @@ export function createWatcher(deps: {
   /**
    * Runs `work` after what is already queued for the checkout `root`. Each checkout has a queue of its own, so
    * a file that takes long to stamp holds up only the work behind it in its own checkout, never another
-   * checkout's batches or another project's, and never for longer than the stamp time budget.
+   * checkout's batches or another project's. With at most one batch waiting per checkout (see `flush`), work
+   * queued there waits for at most the batch running and the one waiting, each bounded by the stamp budget.
    */
   function onRoot(root: string, work: () => Promise<void>): Promise<void> {
     const queued = (queues.get(root) ?? Promise.resolve()).then(work);
@@ -824,15 +827,24 @@ export function createWatcher(deps: {
     return queued;
   }
 
+  /**
+   * Queues a batch run for each checkout with pending changes, unless one is already waiting to start there.
+   * The run takes the checkout's pending changes when it starts, so events that arrive while an earlier batch
+   * is still running join the one waiting run: a checkout never holds more than one batch waiting.
+   */
   function flush(): Promise<void> {
     timer?.cancel();
     timer = null;
-    const batches = [...pending.entries()].map(([id, set]) => [id, [...set].sort()] as const);
-    pending.clear();
-    for (const [root, paths] of batches) {
+    for (const root of pending.keys()) {
+      if (waiting.has(root)) continue;
+      waiting.add(root);
       void onRoot(root, async () => {
+        waiting.delete(root);
+        const set = pending.get(root);
+        pending.delete(root);
+        if (set === undefined) return;
         try {
-          await processBatch(root, paths);
+          await processBatch(root, [...set].sort());
         } catch (error) {
           deps.logger.warn({ root, err: String(error) }, 'watcher batch failed');
         }

@@ -2038,6 +2038,44 @@ describe('worktree checkouts', () => {
       ).toEqual([`${a.path}: ${SENSITIVE_FILE}`, `${b.path}: docs/stray.md`].sort());
     });
 
+    it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
+      const a = running('Alpha', ['api']);
+      running('Beta', ['ui']);
+      watcher.sync();
+      editCard(a, SENSITIVE_FILE, 'allow_once');
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      let release: (r: { reason: 'too-large' }) => void = () => undefined;
+      stamp.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      touch(SENSITIVE_FILE);
+      emit(SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      // Lane A keeps touching its file while the first stamp is held; each flush would queue a batch.
+      for (let i = 0; i < 5; i += 1) {
+        touch(SENSITIVE_FILE);
+        emit(SENSITIVE_FILE);
+        void watcher.flush();
+      }
+      touch('docs/stray.md');
+      emit('docs/stray.md');
+      void watcher.flush();
+      release({ reason: 'too-large' });
+      await flushing;
+      await watcher.flush();
+      // One more batch took every event that arrived meanwhile: the stray is carded after it, and the file
+      // was stamped once more, not once per flush.
+      expect(flags().map((f) => f.body)).toContain('docs/stray.md');
+      expect(stamp.mock.calls.filter(([, rel]) => rel === SENSITIVE_FILE)).toHaveLength(2);
+    });
+
     it('cards a path too large to stamp and leaves the card for the write that can be', async () => {
       const lane = inWorktree('Alpha', 'ui');
       watcher.sync();

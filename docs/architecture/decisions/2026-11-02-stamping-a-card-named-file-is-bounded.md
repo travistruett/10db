@@ -14,8 +14,12 @@
 - The 16 MiB cap stays removed: any file a disk reads in 30 s (tens of gigabytes) is still stamped.
 - The watcher keeps one queue per checkout (`onRoot`) instead of one chain for every project. A batch or a
   claim-grant re-check waits only for the work already queued in its own checkout, so a slow file holds up
-  neither another lane's checkout nor another project, and its own checkout for no longer than the budget.
-  `flush` settles when every queue has.
+  neither another lane's checkout nor another project.
+- A checkout holds at most one batch waiting to start. `flush` queues a run for a checkout only when none is
+  waiting there, and the run takes the checkout's pending changes when it starts, so events that arrive while
+  a slow batch runs join the waiting one. Work in a checkout so waits for at most the batch running and the
+  one waiting, each within the budget, however often a lane touches a slow file. `flush` settles when every
+  queue has.
 - `allowedWrites` reads the stamps of a batch's card-named paths together, then decides path by path with no
   await between the decisions, against the cards and excused writes as they are after the reads.
 - A step end reads a file for another lane's excused stamp only when that lane has an excused write for the
