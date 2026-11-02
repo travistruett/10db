@@ -9,6 +9,7 @@ import {
   TaskStatus,
   WorkstreamState,
   Delivery,
+  queueOrder,
   type DigestCost,
   type DigestDecision,
   type DigestDeviation,
@@ -267,7 +268,11 @@ function teamOf(tasks: readonly TaskRow[], facts: Facts): DigestTeamMember[] {
   return team;
 }
 
-/** The first task that can start now, else the first that cannot yet and what it waits on. */
+/**
+ * The first task that can start now, else the first that cannot yet and what it waits on. With no
+ * unstarted task left, the queued task first in line for a lane (a queued task has started, so it
+ * waits on nothing).
+ */
 function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNext | null {
   const unstarted = tasks.filter((t) => {
     if (t.status !== TaskStatus.Open) return false;
@@ -277,7 +282,19 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
   const ready = unstarted.find((t) => dependenciesDone(db, t.id));
   if (ready) return { taskId: ready.id, title: ready.title, waitsOn: [] };
   const blocked = unstarted[0];
-  if (!blocked) return null;
+  if (!blocked) {
+    const queued: { task: TaskRow; ws: WorkstreamRow }[] = [];
+    for (const task of tasks) {
+      const run = facts.latest.get(task.id);
+      if (task.status === TaskStatus.Open && run && isQueued(run)) {
+        queued.push({ task, ws: run.workstream });
+      }
+    }
+    const firstInLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws))[0];
+    return firstInLine
+      ? { taskId: firstInLine.task.id, title: firstInLine.task.title, waitsOn: [] }
+      : null;
+  }
   const waitsOn = db
     .select({
       taskId: schema.tasks.id,
