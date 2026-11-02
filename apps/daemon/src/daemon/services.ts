@@ -34,12 +34,13 @@ import {
   insertTask,
   latestEventSeq,
   latestWorkstreamOf,
+  openGoalDigest,
   listAaModels,
   listBatches,
   listBoardColumns,
   listEventsAfter,
   listFlows,
-  listGoals,
+  listGoalSummaries,
   listInbox,
   listModelProfiles,
   listPeople,
@@ -257,13 +258,12 @@ export function createServices(deps: {
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
+    listGoals: (projectId) => listGoalSummaries(db, projectId),
+    // The view mark advances in the same transaction that reads the window it closes.
+    openGoalDigest: (goalId) => deps.state.write((ctx) => openGoalDigest(ctx, goalId)),
     shipBatch: (id) => deps.shipper.ship(id),
     abandonBatch: (id) => deps.shipper.abandon(id),
     adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
-    listGoals(projectId) {
-      getProject(db, projectId);
-      return listGoals(db, projectId);
-    },
     getGoal: (id) => getGoal(db, id),
     listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),

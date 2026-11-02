@@ -30,8 +30,10 @@ import type {
   GoalAdoptInput,
   GoalAdoptIssue,
   GoalAdoptPreview,
+  GoalDigestDto,
   GoalDto,
   GoalId,
+  GoalListDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -164,6 +166,16 @@ export interface ApiServices {
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
+  /**
+   * The project's goals, each with its digest and count of new items since the builder last opened
+   * it, and the Ungrouped group. Leaves every view mark as it was.
+   */
+  listGoals(projectId: ProjectId): GoalListDto;
+  /**
+   * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
+   * advances to now. Throws NotFoundError for an unknown goal.
+   */
+  openGoalDigest(goalId: GoalId): GoalDigestDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;
@@ -173,8 +185,6 @@ export interface ApiServices {
    * Throws NotFoundError for an unknown project.
    */
   adoptGoal(projectId: ProjectId, input: GoalAdoptInput): Promise<GoalAdoptResult>;
-  /** The project's goals, oldest first. Throws NotFoundError for an unknown project. */
-  listGoals(projectId: ProjectId): GoalDto[];
   /** Throws NotFoundError for an unknown goal. */
   getGoal(id: GoalId): GoalDto;
   listFlows(): FlowDto[];
