@@ -87,8 +87,7 @@ export interface BeforeGateOptions {
    * The caller can send a session to resolve conflicts, as a task's verify gate can: a conflict
    * that only needs both sides' work put together is merged into the branch with its markers
    * (`conflicted`), rather than shown as a notice with the gate running on the stale branch. The
-   * shipping gate has no session to send, so it never starts such a merge; it only finds one a
-   * task's gate started.
+   * shipping gate sends the batch's last task (`ship.ts` `sendToMerge`), so it asks too.
    */
   readonly inSession?: true;
 }

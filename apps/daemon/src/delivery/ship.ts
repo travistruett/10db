@@ -11,6 +11,9 @@ import {
   latestPerTask,
   shipReadiness,
   ShipReadiness,
+  StepRole,
+  StepStatus,
+  TaskStatus,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -29,7 +32,9 @@ import {
   listPermissionRules,
   listWorkstreams,
   patchBatch,
+  patchWorkstream,
   releaseClaims,
+  setTaskStatus,
   transitionBatch,
   transitionWorkstream,
   type DbReader,
@@ -38,6 +43,7 @@ import type { Clock } from '../clock';
 import { GitNetworkError, GitNetworkFailure } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
 import { PrState, type PullRequest, type RequiredChecks } from '../github';
+import { insertPlannedWorkstream } from '../team';
 import { raiseGateHostCards } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -102,6 +108,8 @@ export interface Shipper {
   abandon(batchId: BatchId): BatchDto;
 }
 
+type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
+
 /** A batch's members: each task's latest workstream in it. */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
   return latestPerTask(listWorkstreams(db, { batchId }));
@@ -164,6 +172,92 @@ export function createShipper(deps: ShipperDeps): Shipper {
         ...card,
         resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
       });
+  }
+
+  /**
+   * The base merge before the shipping gate left git's conflict markers in `update.paths`, or an
+   * earlier gate's markers are still there: no gate ran and nothing was pushed. The batch's last
+   * finished task runs again as a session that resolves them, as a task's own gate would send it
+   * (`decisions/2026-11-01-a-session-resolves-the-conflicts-of-the-base-merge.md`): in one write
+   * the batch goes SHIPPING → FAILED → OPEN (a fix task reopens it the same way), the task opens
+   * again and gets a workstream of one implement step whose next action is `merge`. No card is
+   * raised; the session asks the builder (ask_human) only for a resolution that changes what a
+   * side does, and the batch ships itself once the task is done and the markers are gone. When no
+   * task can take them, one card names the files and why.
+   */
+  function sendToMerge(batch: BatchDto, update: ConflictedUpdate): void {
+    const outcome = deps.state.write((w): { readonly why: string } | 'moved' | 'sent' => {
+      if (getBatch(w.tx, batch.id).state !== BatchState.Shipping) return 'moved';
+      const [last] = members(w.tx, batch.id)
+        .filter((m) => m.state === WorkstreamState.Done)
+        .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+      if (!last) return { why: 'the batch has no finished task to send them to' };
+      const task = getTask(w.tx, last.taskId);
+      if (task.status !== TaskStatus.Done)
+        return {
+          why: `its last task, "${task.title}", ${task.status === TaskStatus.Cancelled ? 'was closed' : `is ${task.status}`}`,
+        };
+      const implement = last.steps.filter((s) => s.role === StepRole.Implement).at(-1);
+      if (!implement) return { why: `its last task, "${task.title}", ran no implement step` };
+      const reason = `conflict markers in ${String(update.paths.length)} file(s) from the merge of the base`;
+      transitionBatch(w, batch.id, {
+        to: BatchState.Failed,
+        patch: { failure: BatchFailure.BaseConflict },
+        reason,
+      });
+      transitionBatch(w, batch.id, {
+        to: BatchState.Open,
+        patch: { failure: null },
+        reason: 'a session resolves the merge',
+      });
+      setTaskStatus(w, task.id, TaskStatus.Open);
+      const next = insertPlannedWorkstream(
+        w,
+        task.id,
+        {
+          flowName: 'merge',
+          overBudget: [],
+          steps: [
+            {
+              role: implement.role,
+              personaId: implement.personaId,
+              personaName: implement.personaName,
+              tools: implement.tools,
+              score: implement.score,
+              profileId: implement.profileId,
+              model: implement.model,
+              effort: implement.effort,
+              need: implement.need,
+              reason: implement.reason,
+              overBudget: implement.overBudget,
+              pinned: implement.pinned,
+              status: StepStatus.Pending,
+              attempts: 0,
+              startedAt: null,
+              sessionFloor: 0,
+              result: null,
+              earlier: [],
+              sentBack: 0,
+            },
+          ],
+        },
+        batch.id,
+      );
+      patchWorkstream(w, next.id, null, {
+        nextAction: { kind: 'merge', base: `origin/${batch.baseBranch}`, paths: [...update.paths] },
+      });
+      return 'sent';
+    });
+    if (outcome === 'moved') return;
+    if (outcome === 'sent') {
+      deps.logger.info(
+        { batchId: batch.id, files: update.paths },
+        'shipping gate found the base merge conflicted; the last task resolves it',
+      );
+      deps.onWorkQueued();
+      return;
+    }
+    fail(batch, shipCards.baseConflict(batch, update.paths, outcome.why));
   }
 
   /**
@@ -687,12 +781,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
           const gate = await deps.baseUpdates.gate(batchId, signal, () =>
             runGate(batch, projectAtCheckout(project, checkout), signal, async () => {
               before.startedAt = deps.clock.now();
-              const update = await deps.baseUpdates.beforeGate(batchId, signal);
+              // The batch's last task is the session to send when the base's conflicts need one.
+              const update = await deps.baseUpdates.beforeGate(batchId, signal, {
+                inSession: true,
+              });
               before.update = update;
-              return update.kind !== 'aborted';
+              // Markers in the branch fail any gate, and the stale branch isn't what would merge.
+              return update.kind !== 'aborted' && update.kind !== 'conflicted';
             }),
           );
-          if (gate === null) return null;
+          if (gate === null) {
+            if (before.update?.kind === 'conflicted' && !stopped())
+              sendToMerge(batch, before.update);
+            return null;
+          }
           return {
             gate,
             note: gateNote(before.update ?? { kind: 'up_to_date', note: null }),

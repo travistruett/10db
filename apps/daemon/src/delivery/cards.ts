@@ -556,6 +556,18 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
+  /**
+   * The base merge before the shipping gate left git's conflict markers in `paths`, and the batch's
+   * last task could not be sent back to resolve them (`why`): nothing was pushed and no gate ran.
+   */
+  baseConflict: (batch: BatchDto, paths: readonly string[], why: string): ShipFailure => ({
+    failure: BatchFailure.BaseConflict,
+    card: {
+      title: `${notShipped(batch)}: it conflicts with ${batch.baseBranch}`,
+      body: `10db merged origin/${batch.baseBranch} into the branch and git left conflict markers in:\n${listPaths(paths)}\n\nNo session could resolve them, because ${why}. No gate ran and nothing was pushed. Resolve the markers in the batch's worktree, commit, then retry.\n\n${RETRY}`,
+      detail: { batchId: batch.id },
+    },
+  }),
   pushRejected: (batch: BatchDto, detail: string): ShipFailure => ({
     failure: BatchFailure.PushRejected,
     card: {
