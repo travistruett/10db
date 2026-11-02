@@ -17,12 +17,17 @@ export function useInspectFolder() {
 
 /**
  * The areas the daemon proposes for the repository at `path`. A mutation for the same reason as
- * `useInspectFolder`: it runs on a builder's choice, and the answer is not cached state.
+ * `useInspectFolder`: it runs on a builder's choice, and the answer is not cached state. Aborting
+ * `signal` cancels the request, which stops the daemon's model question and the Claude Code process
+ * behind it.
  */
 export function useProposeAreas() {
   const { client } = useDaemon();
   return useMutation({
-    mutationFn: async (path: string) =>
-      readJson(await client.folders['propose-areas'].$post({ json: { path } }), AreaProposalResult),
+    mutationFn: async ({ path, signal }: { readonly path: string; readonly signal: AbortSignal }) =>
+      readJson(
+        await client.folders['propose-areas'].$post({ json: { path } }, { init: { signal } }),
+        AreaProposalResult,
+      ),
   });
 }

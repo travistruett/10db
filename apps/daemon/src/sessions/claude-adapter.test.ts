@@ -67,8 +67,11 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
 
 interface Script {
   readonly messages: readonly SDKMessage[];
-  /** After the scripted messages: end the stream, wait for input to end or an abort, or throw. */
-  readonly then?: 'end' | 'hang' | { readonly throws: string };
+  /**
+   * After the scripted messages: end the stream, wait for input to end or an abort, wait for an
+   * abort alone (a model that never answers), or throw.
+   */
+  readonly then?: 'end' | 'hang' | 'stall' | { readonly throws: string };
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
@@ -162,6 +165,10 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
     async function* stream(): AsyncGenerator<SDKMessage, void> {
       for (const message of script.messages) yield message;
       const then = script.then ?? 'end';
+      if (then === 'stall') {
+        await aborted;
+        throw new Error('Claude Code process aborted by user');
+      }
       if (then === 'hang') {
         await Promise.race([inputEnded, aborted]);
         if (signal?.aborted) throw new Error('Claude Code process aborted by user');
@@ -2087,6 +2094,30 @@ describe('complete', () => {
     clock.advance(120_000);
     await failure;
     expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('stops Claude Code when the caller gives up, without waiting for the answer', async () => {
+    const { adapter, record } = adapterFor_({ messages: [], then: 'stall' });
+    const caller = new AbortController();
+    const asked = adapter.complete({ ...ASK, signal: caller.signal });
+    const failure = expect(asked).rejects.toThrow(CompletionError);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(1);
+    });
+    expect(record.options?.abortController?.signal.aborted).toBe(false);
+    caller.abort();
+    await failure;
+    expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('never starts Claude Code for a caller that has already given up', async () => {
+    const { adapter, record } = adapterFor_({ messages: [answer('x')] });
+    const caller = new AbortController();
+    caller.abort();
+    await expect(adapter.complete({ ...ASK, signal: caller.signal })).rejects.toThrow(
+      CompletionError,
+    );
+    expect(record.inputs).toEqual([]);
   });
 });
 

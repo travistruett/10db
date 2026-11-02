@@ -279,6 +279,51 @@ describe('proposeAreas with a model', () => {
     expect(namesOf(areas)).toEqual(['api', 'root', 'ui', 'web']);
   });
 
+  it('stops waiting for a model that has not answered within its bound, and aborts the question', async () => {
+    const repo = repoWith(WORKSPACE);
+    let asked: AbortSignal | undefined;
+    const hung: AreaNamer = (_, signal) => {
+      asked = signal;
+      return new Promise<string>(() => undefined);
+    };
+    const result = await proposeAreas(
+      { git: createGit(), namer: hung, protectedRoots: [], namingMs: 20 },
+      repo.path,
+    );
+    expect(result.ok && result.proposal.namedBy).toBe(AreaProposalSource.Structure);
+    expect(asked?.aborted).toBe(true);
+  });
+
+  it('aborts the question when the caller gives up', async () => {
+    const repo = repoWith(WORKSPACE);
+    const caller = new AbortController();
+    let asked: AbortSignal | undefined;
+    const hung: AreaNamer = (_, signal) => {
+      asked = signal;
+      caller.abort();
+      return new Promise<string>(() => undefined);
+    };
+    await proposeAreas(
+      { git: createGit(), namer: hung, protectedRoots: [] },
+      repo.path,
+      caller.signal,
+    );
+    expect(asked?.aborted).toBe(true);
+  });
+
+  it('asks the model nothing when the caller has already given up', async () => {
+    const repo = repoWith(WORKSPACE);
+    const caller = new AbortController();
+    caller.abort();
+    let calls = 0;
+    const namer: AreaNamer = () => {
+      calls += 1;
+      return Promise.resolve('x');
+    };
+    await proposeAreas({ git: createGit(), namer, protectedRoots: [] }, repo.path, caller.signal);
+    expect(calls).toBe(0);
+  });
+
   it('keeps a model area from taking a default hazard name', async () => {
     const repo = repoWith(WORKSPACE);
     const { areas } = await proposal(

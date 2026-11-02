@@ -37,12 +37,17 @@ export interface AreasFieldProps {
 export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
   if (drafts === null) {
     return (
-      <Group gap="xs" role="status">
-        <Loader size="xs" />
-        <Text size="sm" c="dimmed">
-          Looking for the areas of this repository…
+      <Stack gap={2} role="status">
+        <Group gap="xs">
+          <Loader size="xs" />
+          <Text size="sm" c="dimmed">
+            Looking for the areas of this repository…
+          </Text>
+        </Group>
+        <Text size="xs" c="dimmed">
+          You can create the project now with one area covering every file, and split it later.
         </Text>
-      </Group>
+      </Stack>
     );
   }
   const problems = draftProblems(drafts);

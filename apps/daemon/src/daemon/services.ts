@@ -394,10 +394,11 @@ export function createServices(deps: {
         },
         path,
       ),
-    proposeAreas: (path) =>
+    proposeAreas: (path, signal) =>
       proposeAreas(
         { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
+        signal,
       ),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);
