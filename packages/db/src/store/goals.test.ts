@@ -203,6 +203,34 @@ describe('insertGoal', () => {
     },
   );
 
+  describe('an accept criterion naming a person', () => {
+    const accepts = (person: string) =>
+      store.write((ctx) =>
+        insertGoal(ctx, project.id, {
+          brief: brief({ criteria: [{ text: 'x', check: CriterionCheck.Accept, person }] }),
+        }),
+      ).value;
+
+    it('is refused as ambiguous when two people share the name', () => {
+      store.write((ctx) => insertPerson(ctx, { handle: 'sam-a', name: 'Sam' }));
+      store.write((ctx) => insertPerson(ctx, { handle: 'sam-b', name: 'Sam' }));
+      const before = counts();
+      expect(() => accepts('Sam')).toThrow(InvalidError);
+      expect(() => accepts('Sam')).toThrow(/more than one/);
+      expect(counts()).toEqual(before);
+    });
+
+    it('takes an exact handle over another person whose name is the same text', () => {
+      const sam = store.write((ctx) => insertPerson(ctx, { handle: 'sam', name: 'Samuel' })).value;
+      store.write((ctx) => insertPerson(ctx, { handle: 'other', name: 'sam' }));
+      expect(accepts('sam').criteria[0]?.personId).toBe(sam.id);
+    });
+
+    it('takes the one person whose name matches', () => {
+      expect(accepts('Mark').criteria[0]?.personId).toBe(mark.id);
+    });
+  });
+
   it('writes nothing when the owner does not exist', () => {
     const before = counts();
     expect(() =>
