@@ -72,7 +72,11 @@ export async function retireWorktree(
   return withWorktreeLock(batchId, () => retire(ctx, batchId, discard));
 }
 
-async function retire(ctx: DeliveryContext, batchId: BatchId, discard: boolean): Promise<Retirement> {
+async function retire(
+  ctx: DeliveryContext,
+  batchId: BatchId,
+  discard: boolean,
+): Promise<Retirement> {
   const batch = getBatch(ctx.state.db, batchId);
   const path = batch.worktreePath;
   if (path === null || !FINISHED.includes(batch.state)) return { kind: 'nothing' };

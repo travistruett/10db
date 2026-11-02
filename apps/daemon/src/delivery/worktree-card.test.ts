@@ -122,8 +122,8 @@ describe('a worktree 10db kept', () => {
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.cards().find((c) => c.title.includes('uncommitted changes kept'));
-    expect(card).toBeDefined();
-    return { batch, path, card: card as InboxItemDto };
+    if (!card) throw new Error('no kept-dirty worktree card');
+    return { batch, path, card };
   }
 
   it('offers Remove worktree and Keep, and Remove worktree removes it with its changes', async () => {
@@ -232,7 +232,10 @@ describe('a checkout left on the batch branch', () => {
 
     expect(h.git$('branch', '--show-current')).toBe('main');
     expect(h.cards().filter((c) => c.title.startsWith('Your checkout'))).toEqual([]);
-    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({ returnBranch: null, returnSha: null });
+    expect(getBatchRow(h.store.db, batch.id)).toMatchObject({
+      returnBranch: null,
+      returnSha: null,
+    });
   });
 
   it('raises a new card when something is still in the way', async () => {
@@ -262,7 +265,10 @@ describe('a checkout left on the batch branch', () => {
     // The dirty card is answered first, so this one is a card of its own rather than folded into it.
     inbox.answer(dirty.id, { choice: CheckoutChoice.Leave });
     const project = h.project;
-    const gone = checkoutCards.gone(batch, project, { branch: 'deleted-branch', sha: 'a'.repeat(40) });
+    const gone = checkoutCards.gone(batch, project, {
+      branch: 'deleted-branch',
+      sha: 'a'.repeat(40),
+    });
     expect(gone.options?.map((o) => o.label)).toEqual([
       CheckoutChoice.SwitchBase,
       CheckoutChoice.Leave,

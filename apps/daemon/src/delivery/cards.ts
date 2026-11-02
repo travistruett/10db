@@ -405,7 +405,11 @@ export const worktreeCards = {
     ...worktreeOffer({ kind: 'stray', path }, { batchId: batch.id }),
   }),
   /** 10db could not carry out a Remove worktree or Delete directory answer: the same offer again. */
-  removeFailed: (offer: Extract<WorktreeOffer, { kind: 'kept' | 'orphan' | 'stray' }>, path: string, error: unknown): Card => ({
+  removeFailed: (
+    offer: Extract<WorktreeOffer, { kind: 'kept' | 'orphan' | 'stray' }>,
+    path: string,
+    error: unknown,
+  ): Card => ({
     title: `10db could not remove ${path}`,
     body: `${detailOf(error)}\n\nNothing was removed that the error doesn't name. Answer again once that is fixed, or keep ${path}.`,
     foldKey: keptWorktreeKey.removeFailed(path),

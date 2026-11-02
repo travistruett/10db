@@ -110,7 +110,10 @@ export function createWorktreeCardAnswers(
           try {
             await retireWorktree(ctx, offer.batchId, true);
           } catch (error) {
-            ctx.logger.warn({ batchId: offer.batchId, err: message(error) }, 'worktree not removed');
+            ctx.logger.warn(
+              { batchId: offer.batchId, err: message(error) },
+              'worktree not removed',
+            );
             raise(ctx.inbox, batch.projectId, worktreeCards.removeFailed(offer, path, error));
           }
         });
