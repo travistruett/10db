@@ -81,7 +81,10 @@ batch's branch, so its push lands on the same pull request.
   the base's rules before the push)**
 - **A failure** is the gate's failure path with its card, titled "the pre-check failed", and nothing is pushed.
   The one-rerun rule for failures the batch couldn't have caused applies only when the log has failing tests, as
-  today, so it never fires for a pre-check that runs none.
+  today. This repository's pre-check can have them only from the `architecture-docs` and `agent-docs` rule
+  tests. Those tests' own files are not the batch's, so the rule can fire once for such a failure, although
+  the docs file the batch changed is the cause and the second run fails the same way. That costs one extra
+  run of a cheap pre-check; the failure card follows.
 - **The safety net.** When the ship ran the pre-check (not the gate) and GitHub answers "clean status" to
   auto-merge, the ship reads `prRequiredChecks` (§4) before #174's merge at once. GitHub says "clean status" both
   when the base has no required checks and when they have already passed on this head (a ship retried after CI
