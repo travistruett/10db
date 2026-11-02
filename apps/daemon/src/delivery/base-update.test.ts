@@ -1224,6 +1224,41 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 
+  it("hides the uncommitted notice once the sibling's commit makes the next gate's merge conflict", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-uncommitted');
+    // The sibling commits its edit: nothing is uncommitted, and the base now conflicts with it.
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-conflict');
+  });
+
+  it("hides the uncommitted notice once the sibling's commit leaves only untracked files in the way", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.commit('.gitignore', 'build/\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-uncommitted');
+    // The sibling's work is committed (the base's README change is taken back out of the way).
+    await commitOnBatch(batch, 'README.md', '# theirs\n');
+    mkdirSync(join(path, 'build'));
+    writeFileSync(join(path, 'build', 'out.js'), 'built\n');
+    h.teammatePush('main', 'build', 'a file now\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-kept');
+  });
+
   it('shows no launch notice for uncommitted changes a gate meets', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened();
