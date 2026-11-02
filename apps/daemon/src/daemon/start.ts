@@ -103,6 +103,7 @@ import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
+  forgetEndedYields,
   withdrawStaleClaimWaits,
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
@@ -861,6 +862,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       watcher?.sync();
     }
   });
+  // A yield the builder chose for a task that then ended is never delivered; drop it.
+  const unsubscribeYields = forgetEndedYields(bus, claimWaits);
   keepAwake.refresh();
   watcher?.sync();
 
@@ -996,6 +999,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       moveBack.stop();
       nightly.cancel();
       unsubscribeLanes();
+      unsubscribeYields();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.

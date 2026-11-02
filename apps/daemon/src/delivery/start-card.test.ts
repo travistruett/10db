@@ -4,6 +4,7 @@ import { ConflictError, TaskStatus } from '@10db/contracts';
 import {
   getBatch,
   getTask,
+  insertWorkstream,
   listBatches,
   listInbox,
   listWorkstreams,
@@ -78,6 +79,22 @@ describe('the answers of a refused start', () => {
     for (const t of tasks) expect(getTask(h.store.db, t.id).status).toBe(TaskStatus.Cancelled);
     expect(listBatches(h.store.db)).toEqual([]);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('cancels a task that ran before and failed, when its restart is refused', async () => {
+    const task = h.addTask('Alpha', { areas: ['api'] });
+    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
+    h.settle(earlier.id, 'FAILED');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    expect(card.options.map((o) => o.label)).toContain(StartChoice.Cancel);
+    inbox.answer(card.id, { choice: StartChoice.Cancel });
+    expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(h.cards()).toEqual([]);
+    // The failed run stays as history.
+    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toContain(earlier.id);
   });
 
   it('titles a repeated start after its first task, and keeps the title within 200 characters', () => {
