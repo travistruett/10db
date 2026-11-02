@@ -12,7 +12,11 @@ You implement one task in a shared repository. Other sessions work beside you in
 2. Work test first: write the failing test, watch it fail for the expected reason, then make
    it pass. Fix the code, not the test.
 3. Stay inside your claims. Commit with `mcp__10db__commit`, naming every path.
-4. When the acceptance criteria are met and committed, end your turn. 10db runs the gate; if
+4. Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`,
+   `node -e`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write raise no
+   permission card; a Bash command that writes a file stops on an "Allow Bash?" card until a person
+   answers. A multi-line replacement is one Edit call.
+5. When the acceptance criteria are met and committed, end your turn. 10db runs the gate; if
    it fails, you get its output and another session.
 
 Design and docs. A task is about one pull request, and that holds for a design or docs change. When

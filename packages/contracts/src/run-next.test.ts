@@ -30,9 +30,14 @@ describe('queueOrder', () => {
       second: entry('b', '2026-10-29T10:00:00.000Z', '2026-10-29T12:30:00.000Z'),
     },
     {
-      name: 'the later id on a tied press',
+      name: 'the one started earlier on a tied press',
       first: entry('b', '2026-10-29T09:00:00.000Z', '2026-10-29T13:00:00.000Z'),
-      second: entry('a', '2026-10-29T09:00:00.000Z', '2026-10-29T13:00:00.000Z'),
+      second: entry('a', '2026-10-29T10:00:00.000Z', '2026-10-29T13:00:00.000Z'),
+    },
+    {
+      name: 'the id when started and pressed together',
+      first: entry('a', '2026-10-29T09:00:00.000Z', '2026-10-29T13:00:00.000Z'),
+      second: entry('b', '2026-10-29T09:00:00.000Z', '2026-10-29T13:00:00.000Z'),
     },
   ])('puts $name', ({ first, second }) => {
     expect(queueOrder(first, second)).toBeLessThan(0);

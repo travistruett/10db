@@ -68,6 +68,23 @@
   keeping the cards but giving them a Dismiss option (still an interruption); computing the wait from `ClaimWaits`
   at read time (lost on restart, unreachable from the db package that builds the DTO).
 
+## Start refusals (2026-11-01)
+
+A refused start (`startCards`, `worktreeCards`, the wrong-branch card of a join, `landing`'s missing branch) stays an
+Inbox card, and `forTasks` gives every one two answers the daemon acts on (`delivery/start-card.ts`,
+`createStartCardAnswers`, run before the inbox records the answer):
+
+- **Retry start** repeats the start from `detail.startRefused` (the batch title, and the batch it tried to join) and the
+  card's `taskIds`. A start the request itself refuses (a task running, an unfinished dependency) throws, so the card
+  stays open and says why; one the background cut refuses raises a fresh card, since the first closed with the answer.
+- **Cancel task** removes each named task as the Board's remove does (`cancelTask`); a task that has started since, or
+  that another open task waits on, throws and keeps the card open.
+
+The tasks of a CI fix batch get **Cancel task** alone: a start can't repeat a fix cut, and the pull request's CI-stop
+card, raised with it, has the Retry. No start refusal became a notice: a task that never started has neither a run nor a
+batch to hold one (`workstreams.notice`, `batches.notices`), and each refusal has a real next step the builder takes
+by answering, so none "asks nothing". The Board already shows a refused task's line from its card (`start-note.ts`).
+
 ## Open
 
 - The "Claim deadlock" card now offers answers the daemon acts on (each task yields its claim, or either is
