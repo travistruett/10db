@@ -416,6 +416,32 @@ describe('a shipped pull request that conflicts with its base', () => {
     ]);
   });
 
+  it('treats an auto-merge error on a retry as armed, with no notice, when it was armed before', async () => {
+    // The first arm succeeds, so the pull request is known to be set to merge.
+    const batch = await shipped('README.md', '# ours\n');
+    expect(batch.notices.map((n) => n.key)).not.toContain('pull-request-merge');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const url = conflicts(batch);
+    const stopped = await catchUp(batch);
+    expect(stopped.notices).toEqual([]);
+
+    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again,
+    // and gh's answer to arming a pull request that is armed already is an error.
+    h.gh.setMergeBlocked(url, null);
+    h.gh.setMergeable(url, PrMergeable.Mergeable);
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
+    );
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.failNext.has('prAutoMerge')).toBe(false);
+    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).not.toContain(
+      'pull-request-merge',
+    );
+  });
+
   it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {
     const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
