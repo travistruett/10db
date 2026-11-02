@@ -599,6 +599,54 @@ describe('watcher', () => {
       expect(writtenBy).toContain('atomic-write staging directory');
     });
 
+    describe('in a .claude folder nested in a sensitive one', () => {
+      const nested = '.claude/hooks/.claude';
+
+      it('raises no card for the staging directory, the folder holding it or the nested lock, and logs them', async () => {
+        running();
+        touch('.claude/hooks/pre.sh');
+        mkdirSync(join(repo.path, nested, '.cc-writes'), { recursive: true, mode: 0o700 });
+        touch(`${nested}/scheduled_tasks.lock`);
+        watcher.sync();
+        emit(nested);
+        emit(`${nested}/.cc-writes`);
+        emit(`${nested}/scheduled_tasks.lock`);
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([]);
+        expect(bookkeepingLogs().sort()).toEqual([
+          nested,
+          `${nested}/.cc-writes`,
+          `${nested}/scheduled_tasks.lock`,
+        ]);
+      });
+
+      it('raises no card for a file in the nested staging directory while git ignores it', async () => {
+        running();
+        writeFileSync(join(repo.path, '.gitignore'), '.cc-writes/\n');
+        touch(`${nested}/.cc-writes/x.tmp`);
+        watcher.sync();
+        emit(`${nested}/.cc-writes/x.tmp`);
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([]);
+      });
+
+      it('still flags a real file under the nested .claude, beside the bookkeeping', async () => {
+        running();
+        mkdirSync(join(repo.path, nested, '.cc-writes'), { recursive: true, mode: 0o700 });
+        touch(`${nested}/settings.json`);
+        watcher.sync();
+        emit(nested);
+        emit(`${nested}/.cc-writes`);
+        emit(`${nested}/settings.json`);
+        await watcher.flush();
+        expect(
+          flags()
+            .map((f) => f.body)
+            .sort(),
+        ).toEqual([nested, `${nested}/settings.json`]);
+      });
+    });
+
     it.each([
       { name: 'untracked', ignore: '' },
       { name: 'gitignored', ignore: '.claude/\n' },

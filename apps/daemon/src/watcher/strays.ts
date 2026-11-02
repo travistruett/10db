@@ -1,6 +1,6 @@
 import { ClaimKind, type ProjectDto, type WorkstreamId } from '@10db/contracts';
 import { classifyPath } from '../guard';
-import { isInsideClaudeCodeBookkeeping } from './claude-code-bookkeeping';
+import { isInsideClaudeCodeBookkeeping } from '../git';
 
 /** More strays than this in one batch become a single card. */
 export const STRAY_BULK_THRESHOLD = 50;
