@@ -2049,6 +2049,9 @@ export function createRunner(opts: RunnerOptions): Runner {
    * step runs again as a session that resolves them, and the gate runs once they are gone. The
    * session asks the builder (ask_human) only for a resolution that would change what a side does,
    * so no card is raised here. A session that leaves them again counts against the retry limit.
+   * A step that has used all its fix attempts still gets one session for a new base merge, since
+   * the merge is 10db's doing and not a failed attempt of the step's: the limit for these sends is
+   * one past the fix limit.
    */
   function sendToMerge(
     id: WorkstreamId,
@@ -2058,11 +2061,11 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): void {
     const attempt = row.attempt + 1;
     const batch = row.batchId === null ? null : getBatch(db, row.batchId);
-    if (attempt > opts.limits.maxFixAttempts) {
+    if (attempt > opts.limits.maxFixAttempts + 1) {
       fail(
         id,
         ctl.fence,
-        `The conflict markers of the merge of ${batch?.baseBranch ?? 'the base'} are still in ${update.paths.join(', ')} after ${String(attempt - 1)} sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+        `The conflict markers of the merge of ${batch?.baseBranch ?? 'the base'} are still in ${update.paths.join(', ')} after ${String(row.attempt)} fix and merge sessions of this step, and its retry limit (${String(opts.limits.maxFixAttempts)}, and one more session for a merge) is used up`,
       );
       return;
     }
