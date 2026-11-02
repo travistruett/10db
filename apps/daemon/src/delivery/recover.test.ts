@@ -95,18 +95,25 @@ describe('recoverBatches', () => {
       stop: () => Promise.resolve(),
     };
     const task = h.addTask('Alpha');
-    // The daemon stopped before the cut ran: the CUTTING row, and no workstream yet.
+    // The daemon stopped before the cut ran: the CUTTING row and its task's QUEUED workstream.
     const cutting = h.only(
       createBatchStarter({ ...h.ctx, jobs: noJobs }).startBatch(h.project.id, {
         title: 'Greetings',
         taskIds: [task.id],
       }),
     );
+    expect(listWorkstreams(h.store.db, { batchId: cutting.id })).toMatchObject([
+      { taskId: task.id, state: 'QUEUED' },
+    ]);
     await recover();
     const card = h.only(h.cards());
     expect(card.title).toBe(
       'Batch not started: 10db stopped while cutting the branch for "Greetings"',
     );
+    // Cancelled with the row, so the task can be started again.
+    expect(listWorkstreams(h.store.db, {})).toMatchObject([
+      { taskId: task.id, state: 'CANCELLED', batchId: null },
+    ]);
     h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [task.id] });
     await h.jobs.idle();
     expect(h.cards()).toEqual([]);

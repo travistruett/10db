@@ -1,4 +1,4 @@
-import { mintId, WorkspaceMode } from '@10db/contracts';
+import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
 import { createDeliveryJobs, jobKey, JobQueue } from './index';
@@ -72,8 +72,8 @@ describe('delivery jobs', () => {
     expect(ranAfterStop).toBe(false);
   });
 
-  it("a cut queue job runs while the same project's ship queue job waits", async () => {
-    const project = { id: mintId('Project'), workspaceMode: WorkspaceMode.Worktree };
+  it("a separate copy's cut queue job runs while its ship queue job waits", async () => {
+    const project = { projectId: mintId('Project'), worktreePath: '/copies/one' };
     const jobs = createDeliveryJobs(silentLogger);
     const order: string[] = [];
     let release = (): void => undefined;
@@ -95,9 +95,40 @@ describe('delivery jobs', () => {
     expect(order).toEqual(['cut', 'ship']);
   });
 
-  it('jobKey keeps one queue in shared mode', () => {
-    const project = { id: mintId('Project'), workspaceMode: WorkspaceMode.Shared };
-    expect(jobKey(project, JobQueue.Cut)).toBe(project.id);
-    expect(jobKey(project, JobQueue.Ship)).toBe(project.id);
+  it("keeps one queue for a shared batch and gives a copy's batch its own two", () => {
+    const projectId = mintId('Project');
+    const shared = { projectId, worktreePath: null };
+    const copy = { projectId, worktreePath: '/copies/one' };
+    expect(jobKey(shared, JobQueue.Cut)).toBe(projectId);
+    expect(jobKey(shared, JobQueue.Ship)).toBe(projectId);
+    expect(jobKey(copy, JobQueue.Cut)).toBe(`${projectId}:cut`);
+    expect(jobKey(copy, JobQueue.Ship)).toBe(`${projectId}:ship`);
+  });
+
+  it("a copy's work does not wait behind the shared batch's queue", async () => {
+    const projectId = mintId('Project');
+    const jobs = createDeliveryJobs(silentLogger);
+    const order: string[] = [];
+    let release = (): void => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    jobs.run(jobKey({ projectId, worktreePath: null }, JobQueue.Cut), async () => {
+      await gate;
+      order.push('shared');
+    });
+    jobs.run(jobKey({ projectId, worktreePath: '/copies/one' }, JobQueue.Cut), () => {
+      order.push('copy cut');
+      return Promise.resolve();
+    });
+    jobs.run(jobKey({ projectId, worktreePath: '/copies/one' }, JobQueue.Ship), () => {
+      order.push('copy ship');
+      return Promise.resolve();
+    });
+    await tick();
+    expect(order).toEqual(['copy cut', 'copy ship']);
+    release();
+    await jobs.idle();
+    expect(order).toEqual(['copy cut', 'copy ship', 'shared']);
   });
 });

@@ -8,6 +8,7 @@ import {
 import { Drawer, Stack, Text, Title } from '@mantine/core';
 import { useState } from 'react';
 import { useAccounts } from '../../../daemon/account-queries';
+import { AccountPause } from './account-pause';
 import { ArchiveAccount } from './archive-account';
 import { EditAccountForm } from './edit-account-form';
 import { IdentityCheck } from './identity-check';
@@ -34,6 +35,7 @@ function AccountDrawerBody({
 }) {
   return (
     <Stack gap="lg">
+      {account.archived ? null : <AccountPause account={account} />}
       <Stack gap="xs">
         <Title order={4}>Identity</Title>
         {account.kind === AccountKind.ClaudeSubscription ? <SignInSteps account={account} /> : null}

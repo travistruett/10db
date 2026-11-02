@@ -246,6 +246,19 @@ export const AccountDto = z.object({
 });
 export type AccountDto = z.infer<typeof AccountDto>;
 
+/**
+ * `GET /accounts/pauses`: each account that is paused now. `until` is null for a pause with no end
+ * (a refusal); only a refused or monthly-cap pause can be lifted by `POST /accounts/:id/resume`.
+ */
+export const AccountPauseDto = z.object({
+  accountId: AccountId,
+  reason: z.enum(AccountPauseReason),
+  /** When the pause began. */
+  since: Timestamp,
+  until: Timestamp.nullable(),
+});
+export type AccountPauseDto = z.infer<typeof AccountPauseDto>;
+
 /** How to sign a subscription account in with the unmodified `claude` (spec §5). */
 export const AccountSignInDto = z.object({
   accountId: AccountId,
