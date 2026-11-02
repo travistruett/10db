@@ -1321,6 +1321,28 @@ describe('BoardView', () => {
     expect(cardsViewport?.contains(more)).toBe(false);
   });
 
+  it('keeps a column scrollbar in a strip of its own, beside the cards, on hover only', async () => {
+    const project = projectDto();
+    const done = Array.from({ length: 22 }, (_, i) =>
+      taskDto({
+        projectId: project.id,
+        title: `Done ${String(i)}`,
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: i,
+      }),
+    );
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+    );
+    renderApp('/board');
+    const list = await screen.findByRole('list', { name: 'Done tasks' });
+    const viewport = list.closest('[data-scrollbars="y"]');
+    // 'y' reserves the strip always, so cards keep their width when the scrollbar fades in.
+    expect(viewport?.getAttribute('data-offset-scrollbars')).toBe('y');
+  });
+
   it('Ready ends in Add Task, which opens New Task', async () => {
     const project = projectDto();
     serve(
