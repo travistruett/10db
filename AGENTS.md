@@ -72,7 +72,9 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   branch tip is that pull request's head commit, so deleting it loses nothing. PRs are
   squash-merged, so `-d` refuses a merged branch. A branch with commits added after its pull
   request's head, an open or closed pull request, none, or a state the guard can't confirm (no
-  network, no `gh`) still asks. Codex has no such check; its rule always prompts.
+  network, no `gh`) still asks. The guard asks GitHub only for a deletion that would otherwise ask
+  (never for `-d`), and all its lookups for one command wait at most 20 s together; a branch not
+  confirmed by then counts as unconfirmed. Codex has no such check; its rule always prompts.
   A bare `git push` is judged in the directory the command runs in: the Claude guard follows a
   `cd` (and `git -C`) earlier in the same command line, so `cd ../10db-worktrees/x && git push`
   on a feature branch doesn't ask, while a `cd` to a checkout on main, or to a path it can't read
