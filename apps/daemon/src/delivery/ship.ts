@@ -631,15 +631,18 @@ export function createShipper(deps: ShipperDeps): Shipper {
           { batchId: batch.id, repo, prUrl },
           'repository does not allow auto-merge',
         );
+        autoMergeArmed.delete(batch.id);
         tellMerge(batch, mergeNotices.notAllowed(repo, prUrl));
         return;
       }
       await deps.gh.prAutoMerge({ repo, url: prUrl }, call);
+      autoMergeArmed.add(batch.id);
       tellMerge(batch, null);
       deps.logger.info({ batchId: batch.id, repo, prUrl }, 'auto-merge turned on');
     } catch (error) {
       if (signal.aborted) throw error;
       if (nothingToWaitFor(error)) {
+        autoMergeArmed.delete(batch.id);
         if (precheckOnly) await mergeIfRequiredChecksPassed(batch, repo, prUrl, signal);
         else await mergeNow(batch, repo, prUrl, signal);
         return;
@@ -655,6 +658,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         tellMerge(batch, null);
         return;
       }
+      autoMergeArmed.delete(batch.id);
       deps.logger.warn(
         { batchId: batch.id, prUrl, err: error instanceof Error ? error.message : String(error) },
         'auto-merge not turned on',
@@ -1062,6 +1066,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
    */
   const mergeAgain = new Set<BatchId>();
+  /**
+   * Pull requests whose auto-merge GitHub accepted in this run. In memory: a restart forgets it, and
+   * a retry then reports an error as the refused notice rather than assuming auto-merge is on.
+   */
+  const autoMergeArmed = new Set<BatchId>();
   const lastMergeRetry = new Map<BatchId, number>();
 
   /**
@@ -1312,7 +1321,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
           prUrl,
           signal,
           shipCheck(project)?.kind === 'precheck',
-          again,
+          // A re-arm only for a pull request known to have been armed; otherwise an error is the refused notice.
+          again && autoMergeArmed.has(batchId),
         );
       } finally {
         retrying.delete(batchId);
