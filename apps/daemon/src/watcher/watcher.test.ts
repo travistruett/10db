@@ -54,6 +54,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { ANSWERED_CARDS_READ } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
@@ -1599,6 +1600,45 @@ describe('worktree checkouts', () => {
       await write(SENSITIVE_FILE);
       expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
       expect(flags()).toEqual([]);
+    });
+
+    it('cards a write that a card answered before the watcher started, whatever other projects hold', async () => {
+      const lane = running();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      // Another project answers more cards than one read takes, all newer than the card above, so the card
+      // is among its own project's latest answered but not among the latest across every project.
+      const other = seedProject(base, { repoPath: join(repo.path, 'other') });
+      const otherLane = seedWorkstream(base, { project: other, title: 'Other', areas: ['api'] });
+      for (let i = 0; i < ANSWERED_CARDS_READ + 20; i++) {
+        const { item } = inbox.ask({
+          projectId: other.id,
+          workstreamId: otherLane.workstream.id,
+          sessionId: mintId('Session'),
+          kind: 'permission',
+          title: 'Allow Edit?',
+          body: `other ${String(i)}`,
+          options: [{ label: 'deny', description: '' }],
+          recommendation: null,
+          category: 'environment',
+          urgency: 'normal',
+          detail: null,
+          signal: new AbortController().signal,
+        });
+        inbox.answer(item.id, { choice: 'deny' });
+      }
+      watcher.stop();
+      watcher = createWatcher({
+        state,
+        inbox,
+        git: createGit(),
+        logger: silentLogger,
+        clock,
+        watch: fake.watch,
+        batchMs: 500,
+      });
+      watcher.sync();
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
     });
   });
 });
