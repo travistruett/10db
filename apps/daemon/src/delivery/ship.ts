@@ -1090,6 +1090,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /** Each pull request's last catch-up: the head it conflicted at, and when it ran. */
   const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
   /**
+   * Each pull request's merge a catch-up wrote, did not push, and could not put back: the one tip
+   * ahead of GitHub's head a later catch-up may rewind. In memory: after a restart that tip gets the card.
+   */
+  const unpushedHead = new Map<BatchId, string>();
+  /**
    * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
    * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
    * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
@@ -1187,17 +1192,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
             });
           else await deps.git.fastForwardBranch(main, branch, head);
         } else if (await deps.git.isAncestor(main, head, tip)) {
-          // Only a merge of an earlier catch-up that was not pushed, nor put back, goes: this one starts
-          // from the head. A commit of the builder's own is never dropped.
-          const own = await deps.git.ownCommitsSince(main, head, tip);
-          if (own.length > 0) {
-            const shown = own.slice(0, 5).map((sha) => sha.slice(0, 7));
+          // Only the merge an earlier catch-up of this run wrote, and neither pushed nor put back, goes:
+          // this one starts from the head. Anything else, a merge the builder made included, stays.
+          if (unpushedHead.get(batchId) !== tip) {
+            const extra = (await deps.git.commitsSince(main, head, tip)).reverse();
+            const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
+            const one = extra.length === 1;
             stop({
               kind: 'other',
-              why: `${branch} here has ${own.length === 1 ? 'a commit' : `${String(own.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${own.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${own.length === 1 ? 'it' : 'them'} to the pull request, or drop ${own.length === 1 ? 'it' : 'them'} from the local branch.`,
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
             });
             return;
           }
+          unpushedHead.delete(batchId);
           await deps.git.rewindBranch(
             kept && batch.worktreePath !== null ? batch.worktreePath : main,
             branch,
@@ -1291,7 +1298,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (made) await retire(batchId);
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
-      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+      if (pushed) unpushedHead.delete(batchId);
+      else if (before !== null) await rewind(batchId, main, branch, before, keptAt);
     }
   }
 
@@ -1303,11 +1311,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
     to: string,
     keptAt: string | null,
   ): Promise<void> {
+    let tip: string | null = null;
     try {
-      const tip = await deps.git.branchTip(main, branch);
+      tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
+      unpushedHead.delete(batchId);
     } catch (error) {
+      // The merge stays on the branch: the next catch-up of this run may take it back from GitHub's head.
+      if (tip !== null && tip !== to) unpushedHead.set(batchId, tip);
       deps.logger.warn(
         { batchId, branch, err: detailOf(error) },
         'branch not put back after a catch-up that was not pushed',

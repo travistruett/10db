@@ -184,27 +184,20 @@ describe('a shipped pull request that conflicts with its base', () => {
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
     const head = onOrigin(branch);
-    // An earlier catch-up's merge of main, left on the local branch and never pushed.
-    const stale = h.git$(
-      '-c',
-      'user.name=10db',
-      '-c',
-      'user.email=10db@example.com',
-      'commit-tree',
-      `${head}^{tree}`,
-      '-p',
-      head,
-      '-p',
-      'main',
-      '-m',
-      'Merge main',
-    );
-    h.git$('update-ref', `refs/heads/${branch}`, stale, head);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
-
+    // An earlier catch-up's merge of main fails its check and can't be put back: it stays, unpushed.
+    vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
     await catchUp(batch);
+    const stale = h.git$('rev-parse', `refs/heads/${branch}`);
+    expect(h.git$('log', '-1', '--format=%P', stale).split(' ')).toHaveLength(2);
+    expect(onOrigin(branch)).toBe(head);
+
+    // Its retry time passes, and the next catch-up starts from the head again.
+    h.shipClock.advance(31 * 60_000);
+    await catchUp(getBatch(h.store.db, batch.id));
 
     expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(head);
+    expect(h.cards().filter((c) => c.body.includes('lacks'))).toEqual([]);
     expect(onOrigin(branch)).toBe(head);
 
     // The builder presses Update branch, the base moves again and the check is fixed.
@@ -258,6 +251,58 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(onOrigin(branch)).toBe(head);
     const card = h.only(h.cards());
     expect(card.body).toContain(byHand.slice(0, 7));
+  });
+
+  it("keeps the builder's own merge of main ahead of the pull request head and raises a card naming it", async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const branch = batch.branch ?? '';
+    const head = onOrigin(branch);
+    h.git$('fetch', '-q', 'origin');
+    // The builder runs `git merge origin/main` and settles the conflict by hand, not yet pushed.
+    const byHand = h.git$(
+      '-c',
+      'user.name=Builder',
+      '-c',
+      'user.email=builder@example.com',
+      'commit-tree',
+      `${head}^{tree}`,
+      '-p',
+      head,
+      '-p',
+      'origin/main',
+      '-m',
+      "Merge branch 'main'",
+    );
+    h.git$('update-ref', `refs/heads/${branch}`, byHand, head);
+
+    await catchUp(batch);
+
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
+    expect(onOrigin(branch)).toBe(head);
+    const card = h.only(h.cards());
+    expect(card.body).toContain(byHand.slice(0, 7));
+  });
+
+  it('keeps an unpushed merge of 10db after a restart and raises a card naming it', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const branch = batch.branch ?? '';
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
+    await catchUp(batch);
+    const stale = h.git$('rev-parse', `refs/heads/${branch}`);
+    expect(stale).not.toBe(onOrigin(branch));
+
+    // The daemon restarts: what it knew of its own merge is gone.
+    h.restartShipper();
+    await catchUp(getBatch(h.store.db, batch.id));
+
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(stale);
+    const card = h.only(h.cards());
+    expect(card.body).toContain(stale.slice(0, 7));
   });
 
   it('merges it once GitHub says it is clean, when it had refused the merge', async () => {
