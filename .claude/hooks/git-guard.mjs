@@ -13,11 +13,13 @@ import { join, posix } from 'node:path';
  *   raw: string,
  *   words: string[],
  *   separator: string,
+ *   closesExpansion: boolean,
  *   substitutions: string[],
  *   heredocs: string[],
  * }} Segment
  * `raw` keeps the segment text for quote-aware checks, `separator` is the operator that ended it,
- * `substitutions` holds the commands of `$(...)` and backticks that run inside double quotes or an
+ * `closesExpansion` is true when that operator is the `)` of a `$(...)`, `<(...)`, `>(...)` or
+ * `$((...))` rather than of a subshell, `substitutions` holds the commands of `$(...)` and backticks that run inside double quotes or an
  * unquoted heredoc, and `heredocs` holds the bodies of heredocs fed to the segment.
  */
 
@@ -131,8 +133,14 @@ class Scanner {
     /** True while inside `$'...'`, where a backslash escapes any character. */
     this.ansiQuote = false;
     this.parenDepth = 0;
+    /** For each open `(`: whether it opens an expansion rather than a subshell. @type {boolean[]} */
+    this.openParens = [];
+    /** Whether the last `)` read closed an expansion. */
+    this.closedExpansion = false;
     /** Open parentheses of the `$((...))` or `((...))` being read; heredocs can't start there. */
     this.arithParens = 0;
+    /** Whether the arithmetic being read opened with `$((`, an expansion, not a bare `((`. */
+    this.arithExpansion = false;
     /**
      * @type {{
      *   delimiter: string,
@@ -159,14 +167,18 @@ class Scanner {
     this.word = '';
   }
 
-  /** @param {string} separator */
-  endSegment(separator) {
+  /**
+   * @param {string} separator
+   * @param {boolean} [closesExpansion] the separator is a `)` that closes a `$(`, `<(`, `>(` or `$((`
+   */
+  endSegment(separator, closesExpansion = false) {
     this.endWord();
     if (this.raw.trim() !== '') {
       this.out.push({
         raw: this.raw.trim(),
         words: this.words,
         separator,
+        closesExpansion,
         substitutions: this.substitutions,
         heredocs: [],
       });
@@ -243,7 +255,7 @@ class Scanner {
     if (ch === '&' && (/[<>]$/.test(this.raw) || this.source[this.pos + 1] === '>')) return false;
     if (ch === '(') this.openParen();
     if (ch === ')' && this.closeParen()) return true;
-    this.endSegment(ch);
+    this.endSegment(ch, ch === ')' && this.closedExpansion);
     this.pos += 1;
     if (ch === '\n') this.skipHeredocBodies();
     return true;
@@ -253,9 +265,17 @@ class Scanner {
     if (this.arithParens > 0) this.arithParens += 1;
     else if (this.source.startsWith('((', this.pos)) {
       // `$((` anywhere, or `((` where a command would start, opens an arithmetic expression.
-      if (this.word.endsWith('$') || this.raw === '') this.arithParens = 1;
+      if (this.word.endsWith('$') || this.raw === '') {
+        this.arithParens = 1;
+        this.arithExpansion = this.word.endsWith('$');
+      }
     }
     this.parenDepth += 1;
+    // `$(`, `<(`, `>(` and the parentheses of `$((...))` open an expansion; any other `(` opens a
+    // subshell or group. The scanner is looking at the raw text before the `(`, so adjacency holds.
+    // A bare `((` stays a group: bash reads it as nested subshells when its close isn't `))`.
+    const inArithExpansion = this.arithParens > 0 && this.arithExpansion;
+    this.openParens.push(inArithExpansion || /(^|[^\\])[$<>]$/.test(this.raw));
   }
 
   /** @returns {boolean} true when this `)` closes the substitution being read */
@@ -266,6 +286,8 @@ class Scanner {
       return true;
     }
     this.parenDepth = Math.max(0, this.parenDepth - 1);
+    // A `)` with nothing open (a `case` pattern's) is not known to close an expansion.
+    this.closedExpansion = this.openParens.pop() === true;
     return false;
   }
 
@@ -959,7 +981,9 @@ function judge(command, cwd, whole = command, startDir = cwd) {
     const start = commandStart(seg.words);
     const previous = index > 0 ? segs[index - 1].separator : '';
     if (['(', ')', '`'].includes(previous)) grouped = true;
-    if (followedCd && [')', '`', '&'].includes(previous)) dir = null;
+    // A substitution's `)` leaves the shell where it was; a cd inside it already made `dir` null.
+    const closedExpansion = index > 0 && segs[index - 1].closesExpansion;
+    if (followedCd && [')', '`', '&'].includes(previous) && !closedExpansion) dir = null;
     if (['', ';', '\n'].includes(previous)) {
       if (uncertainAtListEnd) dir = null;
       uncertainAtListEnd = false;
