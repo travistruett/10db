@@ -30,6 +30,7 @@ import {
   type Store,
 } from '@10db/db';
 import {
+  MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   parseFindings,
   type ProjectDto,
@@ -215,13 +216,12 @@ async function seedSession(
         ...seedWorkstream(base, shared ? { ...shared, areas } : { repoPath: repo.path, areas }),
         areaScope: undefined,
       };
-  const { token, hash } = mintSessionToken();
   const head = execFileSync('git', ['-C', worktree?.path ?? repo.path, 'rev-parse', 'HEAD'], {
     env: isolatedGitEnv(),
   })
     .toString()
     .trim();
-  const session = state.write((ctx) => {
+  state.write((ctx) => {
     acquireClaims(ctx, {
       projectId: seeded.project.id,
       workstreamId: seeded.workstream.id,
@@ -233,15 +233,23 @@ async function seedSession(
       baseHead: head,
       ...(workstreamBranch === null || worktree ? {} : { branch: workstreamBranch }),
     });
-    return insertSession(ctx, {
-      workstreamId: seeded.workstream.id,
+  });
+  return { ...seeded, ...(await connectSession(seeded.workstream.id)) };
+}
+
+/** Opens a new session, with its own token and client, on a workstream that already exists. */
+async function connectSession(workstreamId: WorkstreamId) {
+  const { token, hash } = mintSessionToken();
+  const session = state.write((ctx) =>
+    insertSession(ctx, {
+      workstreamId,
       provider: 'claude',
       model: 'sonnet',
       effort: 'medium',
       mode: 'managed',
       mcpTokenHash: hash,
-    });
-  });
+    }),
+  );
   const client = new Client({ name: 'test', version: '0' });
   const transport = new StreamableHTTPClientTransport(new URL(url), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
@@ -264,7 +272,7 @@ async function seedSession(
   const stopSession = (): void => {
     stop.abort();
   };
-  return { ...seeded, session, token, client, call, stopSession };
+  return { session, token, client, call, stopSession };
 }
 
 const writeRepoFile = (rel: string, text: string) => {
@@ -1630,6 +1638,74 @@ describe('file_follow_up', () => {
     expect(filed[0]?.description).toContain('Work left from the task');
     expect(filed[0]?.description).not.toContain('Found while checking');
     expect(first.json).toEqual({ taskId: filed[0]?.id, title: args.title });
+  });
+
+  it.each(['implement', 'review'] as const)(
+    'refuses a filing past the cap in one %s step, and a replayed opId still answers',
+    async (role) => {
+      const s = await onStep(role);
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1) {
+        const ok = await s.call('file_follow_up', {
+          ...args,
+          opId: `op-follow-cap-${String(i).padStart(2, '0')}`,
+          title: `${args.title} ${String(i)}`,
+        });
+        expect(ok.isError).toBe(false);
+      }
+      const over = await s.call('file_follow_up', { ...args, opId: 'op-follow-cap-over' });
+      expect(over.isError).toBe(true);
+      expect(over.text).toContain(`${String(MAX_FOLLOW_UPS)} follow-up tasks`);
+      const replay = await s.call('file_follow_up', {
+        ...args,
+        opId: 'op-follow-cap-00',
+        title: `${args.title} 0`,
+      });
+      expect(replay.isError).toBe(false);
+      expect(listTasks(base.db, s.project.id).filter((t) => t.id !== s.task.id)).toHaveLength(
+        MAX_FOLLOW_UPS,
+      );
+    },
+  );
+
+  const fillCap = async (s: Pick<Awaited<ReturnType<typeof connectSession>>, 'call'>) => {
+    for (let i = 0; i < MAX_FOLLOW_UPS; i += 1)
+      await s.call('file_follow_up', {
+        ...args,
+        opId: `op-follow-step-${String(i).padStart(2, '0')}`,
+      });
+  };
+
+  it('counts filings per step: a second session of the same step, after a handoff, is still refused', async () => {
+    const s = await onStep('implement');
+    await fillCap(s);
+    const next = await connectSession(s.workstream.id);
+    const result = await next.call('file_follow_up', { ...args, opId: 'op-follow-step-next' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(`${String(MAX_FOLLOW_UPS)} follow-up tasks`);
+  });
+
+  it('counts filings per step: a session in a later step starts again', async () => {
+    const s = await seedSession();
+    state.write((ctx) => {
+      patchWorkstream(ctx, s.workstream.id, null, {
+        steps: [stepAt('implement'), stepAt('review')],
+        stepIndex: 0,
+      });
+    });
+    await fillCap(s);
+    // The runner moves to the next step with its floor at the sessions so far.
+    state.write((ctx) => {
+      patchWorkstream(ctx, s.workstream.id, null, {
+        steps: [
+          { ...stepAt('implement'), status: 'done' },
+          { ...stepAt('review'), sessionFloor: 1 },
+        ],
+        stepIndex: 1,
+      });
+    });
+    const next = await connectSession(s.workstream.id);
+    const result = await next.call('file_follow_up', { ...args, opId: 'op-follow-step-next' });
+    expect(result.isError).toBe(false);
   });
 });
 
