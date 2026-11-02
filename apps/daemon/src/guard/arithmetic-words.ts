@@ -109,6 +109,26 @@ function withoutRedirections(words: readonly string[]): string[] {
   return out;
 }
 
+/** The builtins that take `-n`, which makes a name refer to another variable. */
+export const NAMEREF_BUILTINS: ReadonlySet<string> = new Set([
+  'declare',
+  'typeset',
+  'local',
+  'integer',
+  'float',
+  'private',
+]);
+
+/**
+ * Whether a word of a declaring command may expand to a flag: the parser marked it dynamic (an
+ * unquoted `$`, backtick, glob character or `~`, so a quoted `'?n'` is not) and it is not a plain
+ * `name=value`, which the shell does not expand into words. After `touch ./-n`, `declare ?n r=s`
+ * runs `declare -n r=s`.
+ */
+export function mayExpandToFlag(word: string, dynamic: boolean): boolean {
+  return dynamic && !/^[A-Za-z_]\w*\+?=/.test(word);
+}
+
 /** A declaration that makes a name refer to another variable, which later assignments follow. */
 export function declaresNameref(head: string, words: readonly string[]): boolean {
   return DECLARING.has(head) && words.slice(1).some((word) => /^-[a-zA-Z]*n/.test(word));
