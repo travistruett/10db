@@ -1,6 +1,7 @@
 import type { BatchDto, Notice } from '@10db/contracts';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
-import { detailOf, listPaths } from './cards';
+import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
+import type { GateStepFailure } from './gate-failures';
 import type { TakenNumber } from './migration-numbers';
 
 /**
@@ -19,6 +20,8 @@ export const NOTICE_KEY = {
   baseFetch: 'base-fetch',
   /** The pull request waits for the builder to merge it. */
   merge: 'pull-request-merge',
+  /** The shipping gate failed once, in tests the batch didn't change, and passed when run again. */
+  gateRerun: 'gate-rerun',
   /** 10db merged the base into the open pull request's branch. */
   update: 'pull-request-update',
 } as const;
@@ -144,6 +147,17 @@ export const baseNotices = {
   }),
 };
 
+/** What delivery shows on a batch's tasks about a shipping gate that needed no answer from the builder. */
+export const gateNotices = {
+  /** The second run 10db made by itself passed, and the batch went on to ship. */
+  rerunPassed: (steps: readonly GateStepFailure[]): Notice => ({
+    key: NOTICE_KEY.gateRerun,
+    tone: 'info',
+    line: 'The gate passed when 10db ran it again',
+    body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
+  }),
+};
+
 /** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
 export const updateNotices = {
   /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
@@ -184,6 +198,16 @@ export const mergeNotices = {
     tone: 'warning',
     line: `Pull request waits for you to merge it: ${repo} doesn't allow auto-merge`,
     body: `GitHub's "Allow auto-merge" setting is off for ${repo}, so a pull request can't merge itself when its checks pass. The pull request is open and waits for you to merge it: ${prUrl}\n\nTurn on Allow auto-merge in ${repo}'s settings on GitHub (Settings, General, Pull Requests) and 10db will have later pull requests merge by themselves.`,
+  }),
+  /**
+   * GitHub has nothing to wait for on the pull request and the base has no required checks, so only
+   * the pre-check ever checked the work: 10db leaves the pull request open for the builder.
+   */
+  preCheckOnly: (batch: BatchDto, prUrl: string): Notice => ({
+    key: NOTICE_KEY.merge,
+    tone: 'warning',
+    line: `Pull request waits for you to merge it: ${batch.baseBranch} has no required checks and only the pre-check ran`,
+    body: `Batch "${batch.title}" was checked on the Mac by the project's pre-check, which stands in for the gate only where ${batch.baseBranch} has required checks on GitHub. It has none, so nothing but the pre-check would have checked this work, and 10db did not merge it.\n\nThe pull request is open and waits for you to merge it: ${prUrl}\n\nReview and merge it yourself, add required checks to ${batch.baseBranch}, or clear the project's pre-check in Settings › General to run the full gate again.`,
   }),
   /** GitHub turned this one pull request down, or gh could not ask. */
   refused: (prUrl: string, error: unknown): Notice => ({

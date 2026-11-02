@@ -1,7 +1,15 @@
 import { BatchDto, mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchCardFields } from './batch-card';
-import { checkoutCards, shipCards, worktreeCards, wrongBranchCard, type Card } from './cards';
+import { GhError } from '../github';
+import {
+  checkoutCards,
+  shipCards,
+  worktreeCards,
+  wrongBranchCard,
+  type Card,
+  type ShipFailure,
+} from './cards';
 
 const AT = '2026-10-13T12:00:00.000Z';
 const batch = BatchDto.parse({
@@ -68,6 +76,26 @@ describe('batch cards', () => {
     const fields = batchCardFields({ id: mintId('Workstream'), batchId: batch.id });
     const later = fields?.options.find((o) => o.label === 'Later');
     expect(later?.description).toBe("Leave the batch open; decide later in the task's drawer");
+  });
+});
+
+describe('the cards of a batch that failed to ship', () => {
+  const failures: Record<string, ShipFailure> = {
+    'dirty checkout': shipCards.dirtyCheckout(batch, ['a.ts']),
+    'base markers': shipCards.baseMarkers(batch, ['a.ts']),
+    'gate failed': shipCards.gateFailed(batch, gate),
+    'gate failed twice, unrelated': shipCards.gateFailedUnrelated(batch, null, []),
+    'gate timed out': shipCards.gateTimedOut(batch, 60_000, '/data/logs/gate/b.log'),
+    'push rejected': shipCards.pushRejected(batch, 'rejected: non-fast-forward'),
+    'push timed out': shipCards.pushTimedOut(batch, 60_000),
+    network: shipCards.network(batch, 'gh pr create', new Error('connection reset')),
+    'gh not installed': shipCards.network(batch, 'gh pr create', new GhError('not_installed', 'x')),
+    'gh signed out': shipCards.network(batch, 'gh pr create', new GhError('signed_out', 'x')),
+  };
+
+  // Each offers Retry and Abandon, which the Inbox card shows as buttons over the ship and abandon routes.
+  it.each(Object.entries(failures))('%s offers Retry and Abandon of its batch', (_name, f) => {
+    expect(f.card.detail).toMatchObject({ batchId: batch.id, actions: ['retry', 'abandon'] });
   });
 });
 
