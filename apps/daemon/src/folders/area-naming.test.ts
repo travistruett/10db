@@ -70,6 +70,35 @@ describe('an area reason', () => {
     expect(areas?.[0]?.reason).toContain('reason');
   });
 
+  describe('cut to 300 characters', () => {
+    const LONE_SURROGATE = /\p{Cs}/u;
+    const EMOJI = String.fromCodePoint(0x1f600);
+    const reasonFromModel = (reason: string): string | undefined =>
+      areasFromModel(JSON.stringify({ areas: [{ name: 'x', reason, candidates: [1] }] }), [
+        candidate(AreaCandidateKind.Folder, 'a'),
+      ])?.[0]?.reason;
+
+    it('does not end in half an astral character when one straddles the cut', () => {
+      // Code units 298 and 299 are the two halves of the emoji; the cut falls between them.
+      const reason = reasonFromModel(`${'a'.repeat(298)}${EMOJI}${'b'.repeat(20)}`);
+      expect(reason).not.toMatch(LONE_SURROGATE);
+      expect(reason).toBe(`${'a'.repeat(298)}…`);
+    });
+
+    it('keeps an astral character that ends just before the cut', () => {
+      const reason = reasonFromModel(`${'a'.repeat(297)}${EMOJI}${'b'.repeat(20)}`);
+      expect(reason).not.toMatch(LONE_SURROGATE);
+      expect(reason).toBe(`${'a'.repeat(297)}${EMOJI}…`);
+    });
+
+    it('does not end in half an astral character when a folder label is long', () => {
+      const label = `${'a'.repeat(298)}${EMOJI}${'b'.repeat(40)}`;
+      for (const area of areasFromStructure([candidate(AreaCandidateKind.Folder, label)])) {
+        expect(area.reason, area.name).not.toMatch(LONE_SURROGATE);
+      }
+    });
+  });
+
   describe('holds no format character (bidi override, zero-width)', () => {
     const FORMAT = /\p{Cf}/u;
     // Right-to-left override, zero-width space and joiner, the four bidi isolates, a BOM.
