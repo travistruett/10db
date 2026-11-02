@@ -338,6 +338,22 @@ describe('seeding a new copy', () => {
     expect(installsIn(batch)).toHaveLength(1);
   });
 
+  it('does not clone after a shared lane ran, even once its batch has ended', async () => {
+    withInstalledProject();
+    const sharedBatch = await startedOne(shared('Alpha'));
+    const lane = h.only(listWorkstreams(h.store.db, { batchId: sharedBatch.id }));
+    h.settle(lane.id, 'DONE');
+    // The lane's write to a dependency in Your folder is still there after its batch is gone.
+    writeFileSync(join(h.repo, 'node_modules/pkg/index.js'), 'module.exports = "lane";\n');
+    h.shipper.abandon(sharedBatch.id);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, sharedBatch.id).state).toBe('ABANDONED');
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+  });
+
   it('clones again once the shared batch has ended', async () => {
     withInstalledProject();
     const sharedBatch = await startedOne(shared('Alpha'));

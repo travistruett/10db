@@ -6,6 +6,9 @@ import {
   type BatchState,
   type ProjectId,
   type ProjectInput,
+  type TaskId,
+  type WorkstreamId,
+  type WorkstreamState,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
@@ -22,6 +25,7 @@ import {
   getTask,
   getWorkstream,
   insertBatch,
+  insertSession,
   insertTask,
   insertWorkstream,
   latestDoneWorkstream,
@@ -37,6 +41,7 @@ import {
   seedAccount,
   seedProject,
   setTaskStatus,
+  sharedLaneRan,
   transitionBatch,
   transitionWorkstream,
   type Store,
@@ -294,6 +299,68 @@ describe('worktree batches', () => {
     move(done.id, 'OPEN', 'SHIPPING', 'SHIPPED');
     expect(findUnfinishedBatch(store.db, project.id)).toBeUndefined();
     expect(open.worktreePath).not.toBeNull();
+  });
+
+  describe('sharedLaneRan', () => {
+    const taskIn = (projectId: ProjectId, workspaceMode: 'shared' | 'worktree') =>
+      store.write((ctx) =>
+        insertTask(ctx, projectId, {
+          title: `Task ${workspaceMode}`,
+          acceptanceCriteria: ['x'],
+          areas: ['api'],
+          workspaceMode,
+        }),
+      ).value;
+    const workstreamOf = (taskId: TaskId) =>
+      store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+    const run = (id: WorkstreamId, ...states: WorkstreamState[]) => {
+      for (const to of states)
+        store.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
+    };
+
+    it('is false for a project with no workstreams, or only ones that never ran', () => {
+      const project = prProject();
+      expect(sharedLaneRan(store.db, project.id)).toBe(false);
+      const queued = workstreamOf(taskIn(project.id, 'shared').id);
+      expect(sharedLaneRan(store.db, project.id)).toBe(false);
+      run(queued.id, 'CANCELLED');
+      expect(sharedLaneRan(store.db, project.id)).toBe(false);
+    });
+
+    it("is false while only a copy's lane has run", () => {
+      const project = prProject();
+      const ws = workstreamOf(taskIn(project.id, 'worktree').id);
+      run(ws.id, 'STARTING', 'RUNNING', 'VERIFYING', 'DONE');
+      expect(sharedLaneRan(store.db, project.id)).toBe(false);
+    });
+
+    it('is true once a shared lane has started, whatever became of it', () => {
+      const project = prProject();
+      const ws = workstreamOf(taskIn(project.id, 'shared').id);
+      run(ws.id, 'STARTING');
+      expect(sharedLaneRan(store.db, project.id)).toBe(true);
+      run(ws.id, 'RUNNING', 'VERIFYING', 'DONE');
+      expect(sharedLaneRan(store.db, project.id)).toBe(true);
+      // Another project's shared lane is not this project's.
+      expect(sharedLaneRan(store.db, prProject().id)).toBe(false);
+    });
+
+    it('is true for a cancelled shared workstream that had a session', () => {
+      const project = prProject();
+      const ws = workstreamOf(taskIn(project.id, 'shared').id);
+      store.write((ctx) =>
+        insertSession(ctx, {
+          workstreamId: ws.id,
+          provider: 'claude',
+          model: 'm',
+          effort: 'low',
+          mode: 'managed',
+          mcpTokenHash: 'hash',
+        }),
+      );
+      run(ws.id, 'CANCELLED');
+      expect(sharedLaneRan(store.db, project.id)).toBe(true);
+    });
   });
 
   it('listUnfinishedBatches answers every unfinished batch, newest first', () => {
