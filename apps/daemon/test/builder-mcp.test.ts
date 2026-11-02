@@ -184,6 +184,25 @@ describe('the builder MCP endpoint', () => {
     expect(projects[0]?.['columns']).toContainEqual({ id: column.id, name: 'Later' });
   });
 
+  it('marks the catch-all area in list_projects and leaves the others unmarked', async () => {
+    await api().post('/projects', ProjectDto, {
+      name: 'proposed',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [
+        { name: 'src', globs: ['src/**'] },
+        { name: 'root', globs: ['*', '.*'], catchAll: true },
+      ],
+    });
+    const projects = z
+      .array(z.object({ areas: z.array(z.record(z.string(), z.unknown())) }).loose())
+      .parse(await callJson('list_projects'));
+    expect(projects[0]?.areas).toEqual([
+      { name: 'src', globs: ['src/**'] },
+      { name: 'root', globs: ['*', '.*'], catchAll: true },
+    ]);
+  });
+
   it('lists flows', async () => {
     const flows = z.array(z.object({ id: z.string(), name: z.string() }).loose());
     expect(flows.parse(await callJson('list_flows')).length).toBeGreaterThan(0);

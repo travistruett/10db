@@ -47,6 +47,7 @@ import {
   type StdioMcpServer,
 } from '../src/sandbox';
 import { createClaudeAdapter, type SessionEvent } from '../src/sessions';
+import { bashWrites } from './bash-writes';
 import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
 import { captureLogs } from './log-capture';
 
@@ -1341,16 +1342,19 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       expect(edits.length, 'the file was changed with Edit, MultiEdit or Write').toBeGreaterThan(0);
       expect(edits.some((c) => c.isError === false)).toBe(true);
       // No Bash call wrote the file: an interpreter one-liner, an in-place edit, a redirect or tee
-      // in a command that names it (a script could name it indirectly, but the file's content is
-      // checked above and a card for such a call is checked below).
-      const WRITES = /python3?\s+-c|node\s+-e|perl\s+-\w*i|sed\s+-\w*i|>|<<|\btee\b/;
+      // in a command that names it (bashWrites ignores 2>&1, >/dev/null and a > inside quotes, so
+      // a read-only `git diff greeting.ts 2>&1` passes). Only a command that names the file is
+      // checked: a script that reaches it indirectly is not caught here. The card check below
+      // doesn't catch it either, since in auto mode the classifier can approve a write inside the
+      // checkout without a card. The Edit call above is what shows the model had a way to make the
+      // change without Bash.
       expect(
         run.calls
           .filter(
             (c) =>
               c.name === 'Bash' &&
               commandOf(c.input).includes('greeting') &&
-              WRITES.test(commandOf(c.input)),
+              bashWrites(commandOf(c.input)),
           )
           .map((c) => commandOf(c.input)),
       ).toEqual([]);

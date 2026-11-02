@@ -88,12 +88,13 @@ describe('the answers of a refused start', () => {
    * and checks the task retires with its earlier run kept as the latest.
    */
   function cancelRefusedRestart(settle: (taskId: TaskId) => { id: string }) {
-    const base = h.addTask('Base', { areas: ['ui'] });
-    const task = h.addTask('Alpha', { areas: ['api'], dependsOn: [base.id] });
+    const base = h.addTask('Base', { areas: ['api'] });
+    const task = h.addTask('Alpha', { areas: ['ui'], dependsOn: [base.id] });
     const earlier = settle(task.id);
     expect(() =>
       h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] }),
     ).toThrow(ConflictError);
+    expect(getTask(h.store.db, task.id).workstreamId).toBe(earlier.id);
     const card = h.only(h.cards());
     // No new run went in: the earlier run is still the task's latest.
     expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toEqual([earlier.id]);

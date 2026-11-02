@@ -28,6 +28,7 @@ import { branchBehindBase, missingLandingBranch } from './landing';
 import { seedNotices } from './notices';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
+import { unbuiltAllowedPackages } from './worktree-scripts';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -266,6 +267,18 @@ export async function cutWorktree(
           showNotice(ctx.state, batchId, seedNotices.skipped(unmade));
         } catch (error) {
           ctx.logger.warn({ batchId, err: error }, 'seed notice not written');
+        }
+      }
+    }
+    if (!seed && installed.kind === 'installed') {
+      // The install ran no install script, and no seed carried built output: a package the project
+      // allows to build (a native addon, a generated client) is installed but not built.
+      const unbuilt = unbuiltAllowedPackages(path);
+      if (unbuilt.length > 0) {
+        try {
+          showNotice(ctx.state, batchId, seedNotices.scriptsSkipped(unbuilt));
+        } catch (error) {
+          ctx.logger.warn({ batchId, err: error }, 'install scripts notice not written');
         }
       }
     }
