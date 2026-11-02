@@ -156,6 +156,25 @@ describe('the placement proposed when a task is made', () => {
       });
   });
 
+  it('proposes a separate copy for a migration task filed as the create_task guidance says', async () => {
+    const created = await project();
+    const listed = await client.callTool({ name: BuilderToolName.ListProjects, arguments: {} });
+    const text = Text.parse(listed.content)
+      .map((c) => c.text)
+      .join('');
+    const entry = z
+      .array(z.object({ id: z.string(), isolate: z.array(z.string()) }))
+      .parse(JSON.parse(text))
+      .find((p) => p.id === created.id);
+    // The guidance: name a hazard from the project's isolate list among the task's areas.
+    expect(entry?.isolate).toContain('migrations');
+    const { viaMcp } = await makeBoth(created.id, { areas: ['app', ...(entry?.isolate ?? [])] });
+    expect(viaMcp).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches migrations, deps',
+    });
+  });
+
   it('keeps a reason after the isolate list changes', async () => {
     const { id } = await project();
     const { viaApi } = await makeBoth(id, { areas: ['migrations'] });

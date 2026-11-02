@@ -1,6 +1,11 @@
 name: release-dry-run
 
 on:
+  # The app follows main by itself and installs this build of each new commit. Building at the
+  # merge keeps it ready by the time the app looks. Never set cancel-in-progress: the app waits
+  # for the build of the commit it saw, and a newer push must not cancel it.
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions: {}

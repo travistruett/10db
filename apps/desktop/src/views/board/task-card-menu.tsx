@@ -1,5 +1,6 @@
 import { BoardStatus, TaskStatus, WorkstreamState, type TaskDto } from '@10db/contracts';
 import { ActionIcon, Menu } from '@mantine/core';
+import { useClipboard } from '@mantine/hooks';
 import { IconDots } from '@tabler/icons-react';
 import type { DropTarget, MenuMove } from './drop-rules';
 import type { HoldOption } from './task-hold';
@@ -83,6 +84,7 @@ export function TaskCardMenu({
   closeLine,
 }: TaskCardMenuProps) {
   const startable = canStart(task, latest, shippedAnywayClosed);
+  const clipboard = useClipboard({ timeout: 1500 });
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
@@ -152,6 +154,16 @@ export function TaskCardMenu({
             {abandonRefusal === null ? 'Abandon' : `Abandon (${abandonRefusal.replace(/\.$/, '')})`}
           </Menu.Item>
         ) : null}
+        <Menu.Divider />
+        {/* The menu stays open so the item can say it copied. */}
+        <Menu.Item
+          closeMenuOnClick={false}
+          onClick={() => {
+            clipboard.copy(task.id);
+          }}
+        >
+          {clipboard.copied ? 'Copied' : 'Copy ID'}
+        </Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );
