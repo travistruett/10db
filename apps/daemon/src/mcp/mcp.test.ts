@@ -30,6 +30,7 @@ import {
   type Store,
 } from '@10db/db';
 import {
+  EventType,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   parseFindings,
@@ -50,6 +51,7 @@ import {
   ClaimWaits,
   createClaimDeadlockAnswers,
   createMcpHandler,
+  forgetEndedYields,
   mintSessionToken,
   withdrawStaleClaimWaits,
 } from './index';
@@ -78,6 +80,8 @@ const sessionStops = new Map<string, AbortController>();
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
 let claimWaits: ClaimWaits;
+/** Ends the daemon's subscription that drops a finished task's pending yield. */
+let stopForgetting: () => void;
 /** What an answer to a flag card does; the daemon wires the same into its inbox. */
 let answerDeadlock: ReturnType<typeof createClaimDeadlockAnswers>;
 /** The workstreams the builder's answers cancelled, in order. */
@@ -117,7 +121,8 @@ beforeEach(async () => {
   const test = createTestStore();
   close = test.close;
   base = test.store;
-  state = createStateStore(test.store, createEventBus());
+  const bus = createEventBus();
+  state = createStateStore(test.store, bus);
   cancelled = [];
   inbox = createInboxService({
     state,
@@ -147,6 +152,7 @@ beforeEach(async () => {
       waitsStarted += 1;
     },
   });
+  stopForgetting = forgetEndedYields(bus, claimWaits);
   const handler = createMcpHandler({
     protectedPaths: GUARDED,
     state,
@@ -176,6 +182,7 @@ beforeEach(async () => {
   url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}/mcp`;
 });
 afterEach(() => {
+  stopForgetting();
   server.close();
   close();
   repo.cleanup();
@@ -1067,6 +1074,57 @@ describe('MCP tools', () => {
       ).json;
       expect(told).toMatchObject({ granted: false, waiting: false });
       expect(String(told?.['instruction'])).toContain('area api');
+      sessionAbort.abort();
+    });
+
+    it.each(['CANCELLED', 'FAILED', 'DONE'] as const)(
+      'drops a yield its agent never heard about once the task is %s',
+      async (to) => {
+        claimWaitSliceMs = 50;
+        const { a, b, alpha, beta, card } = await deadlocked();
+        expect((await alpha).json).toMatchObject({ waiting: true });
+        expect((await beta).json).toMatchObject({ waiting: true });
+        inbox.answer(card.id, { choice: 'Alpha yields area api' });
+        await vi.waitFor(() => {
+          expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('api');
+          expect(claimWaits.holdersAwaitedBy(a.workstream.id)).toEqual([]);
+        });
+        expect(claimWaits.pendingYield(a.workstream.id)).toBeDefined();
+        // The task goes on to a state it cannot ask from, and the entry would outlive it.
+        state.write((ctx) => {
+          if (to === 'CANCELLED') transitionWorkstream(ctx, a.workstream.id, { to, fence: null });
+          // The fixture's task sits in QUEUED, which cannot reach these two; only the event matters.
+          else
+            ctx.emit({
+              type: EventType.WorkstreamChanged,
+              entityType: 'workstream',
+              entityId: a.workstream.id,
+              data: { from: 'RUNNING', to, reason: null },
+            });
+        });
+        expect(claimWaits.pendingYield(a.workstream.id)).toBeUndefined();
+        sessionAbort.abort();
+      },
+    );
+
+    it('keeps a yield while its task is still going', async () => {
+      claimWaitSliceMs = 50;
+      const { a, b, alpha, beta, card } = await deadlocked();
+      expect((await alpha).json).toMatchObject({ waiting: true });
+      expect((await beta).json).toMatchObject({ waiting: true });
+      inbox.answer(card.id, { choice: 'Alpha yields area api' });
+      await vi.waitFor(() => {
+        expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('api');
+      });
+      state.write((ctx) => {
+        ctx.emit({
+          type: EventType.WorkstreamChanged,
+          entityType: 'workstream',
+          entityId: a.workstream.id,
+          data: { from: 'RUNNING', to: 'WAITING_HUMAN', reason: null },
+        });
+      });
+      expect(claimWaits.pendingYield(a.workstream.id)).toBeDefined();
       sessionAbort.abort();
     });
 
