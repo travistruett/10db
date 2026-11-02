@@ -24,6 +24,7 @@ import {
   seedProject,
   setTaskStatus,
   transitionBatch,
+  type Placement,
   type Store,
 } from './index';
 
@@ -162,6 +163,75 @@ describe('task placement', () => {
     const error = refusal(() => place(task.id, 'worktree'));
     expect(error).toBeInstanceOf(ConflictError);
     expect(String(error)).toContain('Alpha is finished');
+  });
+
+  describe('a placement proposed again with a patch', () => {
+    const proposed: Placement = { workspaceMode: 'worktree', reason: 'touches migrations' };
+    const edit = (id: TaskId, placement: Placement = proposed) =>
+      store.write((ctx) => patchTask(ctx, id, { riskTags: ['migration'] }, placement)).value;
+
+    it('moves an unstarted shared task to a separate copy with the reason', () => {
+      const task = addTask(project().id);
+      expect(edit(task.id)).toMatchObject({
+        workspaceMode: 'worktree',
+        placementReason: 'touches migrations',
+      });
+      expect(getTask(store.db, task.id)).toMatchObject({
+        workspaceMode: 'worktree',
+        placementReason: 'touches migrations',
+      });
+    });
+
+    it('moves a task whose latest run failed', () => {
+      const task = addTask(project().id);
+      runIn(task.id, 'FAILED');
+      expect(edit(task.id).workspaceMode).toBe('worktree');
+    });
+
+    it('leaves a task the builder placed alone, and keeps the builder as the reason', () => {
+      const task = addTask(project().id);
+      place(task.id, 'shared');
+      expect(edit(task.id)).toMatchObject({
+        workspaceMode: 'shared',
+        placementReason: 'chosen by the builder',
+      });
+    });
+
+    it('leaves a task that has started where it is', () => {
+      const task = addTask(project().id);
+      runIn(task.id, 'RUNNING');
+      expect(edit(task.id)).toMatchObject({ workspaceMode: 'shared', placementReason: null });
+    });
+
+    it('leaves a task that is not open where it is', () => {
+      const task = addTask(project().id);
+      store.write((ctx) => {
+        setTaskStatus(ctx, task.id, 'done');
+      });
+      expect(edit(task.id).workspaceMode).toBe('shared');
+    });
+
+    it('does nothing in a project with local delivery', () => {
+      const task = addTask(seedProject(store).id);
+      expect(edit(task.id)).toMatchObject({ workspaceMode: 'shared', placementReason: null });
+    });
+
+    it('gives a copy the caller named, with no reason, the proposed reason', () => {
+      const task = addTask(project().id, { workspaceMode: 'worktree' });
+      expect(edit(task.id)).toMatchObject({
+        workspaceMode: 'worktree',
+        placementReason: 'touches migrations',
+      });
+    });
+
+    it('a proposal that says shared changes nothing', () => {
+      const task = addTask(project().id);
+      const shared = { workspaceMode: 'shared', reason: null } as const;
+      expect(edit(task.id, shared)).toMatchObject({
+        workspaceMode: 'shared',
+        placementReason: null,
+      });
+    });
   });
 
   it('a placement patch is refused in a project with local delivery', () => {
