@@ -63,6 +63,113 @@ function branchOffer(batch: BatchDto): Pick<Card, 'options' | 'detail'> {
   };
 }
 
+/** The `detail` key of a worktree or checkout card that offers an answer the daemon acts on. */
+export const WORKTREE_CARD_DETAIL = 'worktreeCard';
+
+/** The answers of a worktree card (`createWorktreeCardAnswers`). */
+export const WorktreeChoice = {
+  /** Make a failed batch's worktree whole again and reopen the batch. */
+  Retry: 'Retry',
+  Abandon: 'Abandon batch',
+  /** Remove a kept worktree and what it holds. */
+  Remove: 'Remove worktree',
+  /** Delete a directory git doesn't list as a worktree. */
+  Delete: 'Delete directory',
+  Keep: 'Keep',
+} as const;
+export type WorktreeChoice = (typeof WorktreeChoice)[keyof typeof WorktreeChoice];
+
+/** The answers of a card about a checkout left on a batch's branch. */
+export const CheckoutChoice = {
+  /** Try the switch back again, to where the checkout was when the batch started. */
+  SwitchBack: 'Switch back',
+  /** Switch to the batch's base branch instead of the place that is gone. */
+  SwitchBase: 'Switch to the base branch',
+  Leave: 'Leave it',
+} as const;
+export type CheckoutChoice = (typeof CheckoutChoice)[keyof typeof CheckoutChoice];
+
+/** What a worktree or checkout card offers, which `createWorktreeCardAnswers` carries out. */
+export type WorktreeOffer =
+  /** A failed batch whose worktree can't be made whole: retry it, or give the batch up. */
+  | { readonly kind: 'batch'; readonly batchId: BatchId }
+  /** An open batch whose worktree is gone, which only abandoning settles. */
+  | { readonly kind: 'abandon'; readonly batchId: BatchId }
+  /** A finished batch's worktree 10db kept. */
+  | { readonly kind: 'kept'; readonly batchId: BatchId }
+  /** A worktree no batch uses any more. */
+  | { readonly kind: 'orphan'; readonly path: string }
+  /** A directory under the worktree root that git doesn't list as a worktree. */
+  | { readonly kind: 'stray'; readonly path: string }
+  /** A checkout left on a finished batch's branch; `place` is where it goes back to. */
+  | {
+      readonly kind: 'checkout';
+      readonly batchId: BatchId;
+      readonly place: { readonly branch: string | null; readonly sha: string };
+      /** The base branch to switch to when the place is gone. */
+      readonly base?: string;
+    };
+
+/** The options and detail a card carries to offer `offer`; `detail` adds to the card's own. */
+export function worktreeOffer(
+  offer: WorktreeOffer,
+  detail: Record<string, Json> = {},
+): Required<Pick<Card, 'options' | 'detail'>> {
+  const keep = (what: string): InboxOption => ({
+    label: WorktreeChoice.Keep,
+    description: `Leave ${what} where it is`,
+  });
+  const abandon: InboxOption = {
+    label: WorktreeChoice.Abandon,
+    description: 'Give up the batch and its tasks stop; the branch is offered for deletion',
+  };
+  const options = ((): InboxOption[] => {
+    switch (offer.kind) {
+      case 'batch':
+        return [
+          {
+            label: WorktreeChoice.Retry,
+            description: 'Make the worktree whole again from the batch branch and reopen the batch',
+          },
+          abandon,
+        ];
+      case 'abandon':
+        return [abandon];
+      case 'kept':
+      case 'orphan':
+        return [
+          {
+            label: WorktreeChoice.Remove,
+            description: 'Remove the worktree and everything in it, uncommitted work included',
+          },
+          keep('the worktree'),
+        ];
+      case 'stray':
+        return [
+          {
+            label: WorktreeChoice.Delete,
+            description: 'Delete the directory and everything in it',
+          },
+          keep('the directory'),
+        ];
+      case 'checkout':
+        return [
+          offer.base === undefined
+            ? {
+                label: CheckoutChoice.SwitchBack,
+                description: 'Try switching the checkout back again, once nothing is in the way',
+              }
+            : {
+                label: CheckoutChoice.SwitchBase,
+                description: `Switch the checkout to ${offer.base}`,
+              },
+          { label: CheckoutChoice.Leave, description: 'Leave the checkout where it is' },
+        ];
+    }
+  })();
+  return { options, detail: { ...detail, [WORKTREE_CARD_DETAIL]: { ...offer } } };
+}
+
 const commitsOf = (count: number): string => `${String(count)} commit${count === 1 ? '' : 's'}`;
 
 export const MAX_LISTED_PATHS = 20;
@@ -79,6 +186,8 @@ export const keptWorktreeKey = {
   batchIgnored: (batchId: BatchId): string => `worktree-ignored:${batchId}`,
   orphanChanges: (path: string): string => `worktree-orphan:${path}`,
   orphanIgnored: (path: string): string => `worktree-orphan-ignored:${path}`,
+  stray: (path: string): string => `worktree-stray:${path}`,
+  removeFailed: (path: string): string => `worktree-remove-failed:${path}`,
 };
 
 /** The git-ignored files beside a kept worktree's changes, which its removal command deletes too. */
@@ -208,15 +317,15 @@ export const worktreeCards = {
       case 'waits':
         return {
           title: `Batch "${batch.title}" waits: its worktree ${path} is missing`,
-          body: `Nothing in the batch starts without its worktree. Abandon the batch in a task's drawer on the Board, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
+          body: `Nothing in the batch starts without its worktree. Abandon the batch here, or restart 10db, which fails the batch so Retry can make the worktree again from ${branch}.`,
           foldKey: `worktree-missing:${batch.id}`,
-          detail,
+          ...worktreeOffer({ kind: 'abandon', batchId: batch.id }, detail),
         };
       case 'failed':
         return {
           title: `Batch "${batch.title}" failed: its worktree ${path} is missing`,
-          body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Press Retry in a task's drawer on the Board to make it again from ${branch}, or abandon the batch there.`,
-          detail,
+          body: `10db restarted and found no worktree at ${path}, so nothing in the batch runs. Retry makes it again from ${branch}; Abandon batch gives the batch up.`,
+          ...worktreeOffer({ kind: 'batch', batchId: batch.id }, detail),
         };
     }
   },
@@ -229,9 +338,9 @@ export const worktreeCards = {
     ignored: readonly string[],
   ): Card => ({
     title: `Batch "${batch.title}" abandoned: uncommitted changes kept in ${path}`,
-    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}${alsoIgnored(ignored)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    body: `10db never throws away uncommitted work, so it kept the worktree with these changes:\n${listPaths(paths)}${alsoIgnored(ignored)}\n\nCopy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: keptWorktreeKey.batchChanges(batch.id),
-    detail: { batchId: batch.id },
+    ...worktreeOffer({ kind: 'kept', batchId: batch.id }, { batchId: batch.id }),
   }),
   /** `main` is the project's main checkout, where the removal command runs. */
   /**
@@ -252,13 +361,13 @@ export const worktreeCards = {
       paths === null
         ? `The batch is finished, but 10db couldn't read its worktree ${path}, so it may hold files you need, and kept it.`
         : `The batch is finished, but its worktree ${path} holds git-ignored files 10db didn't put there, such as a hand-made .env, so 10db kept it:\n${listPaths(paths)}`
-    }\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.${
+    }\n\nCopy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.${
       batch.branch === null
         ? ''
         : ` Its branch ${batch.branch} is checked out there, so 10db leaves the branch too until the worktree is gone.`
     }`,
     foldKey: keptWorktreeKey.batchIgnored(batch.id),
-    detail: { batchId: batch.id },
+    ...worktreeOffer({ kind: 'kept', batchId: batch.id }, { batchId: batch.id }),
   }),
   /**
    * `paths` is null when git couldn't read the worktree, which counts as changed. `main` is the
@@ -278,30 +387,41 @@ export const worktreeCards = {
       paths === null
         ? "10db couldn't read it, so it may hold uncommitted work"
         : `it holds uncommitted changes:\n${listPaths(paths)}${alsoIgnored(ignored)}`
-    }\n\n10db never throws away uncommitted work. Copy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    }\n\n10db never throws away uncommitted work. Copy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: keptWorktreeKey.orphanChanges(path),
+    ...worktreeOffer({ kind: 'orphan', path }),
   }),
   /** `main` is the project's main checkout, where the removal command runs. */
   orphanIgnored: (main: string, path: string, paths: readonly string[]): Card => ({
     title: `10db kept ${path}: it holds git-ignored files`,
-    body: `No batch uses this worktree any more, but it holds git-ignored files 10db didn't put there, such as a hand-made .env:\n${listPaths(paths)}\n\nCopy what you need, then remove it with ${worktreeRemovalCommand(main, path)}.`,
+    body: `No batch uses this worktree any more, but it holds git-ignored files 10db didn't put there, such as a hand-made .env:\n${listPaths(paths)}\n\nCopy what you need, then answer Remove worktree, or remove it yourself with ${worktreeRemovalCommand(main, path)}.`,
     foldKey: keptWorktreeKey.orphanIgnored(path),
+    ...worktreeOffer({ kind: 'orphan', path }),
   }),
   leftBehind: (batch: BatchDto, path: string): Card => ({
     title: `10db left ${path} in place`,
-    body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside, then delete it yourself if nothing there is needed.`,
-    detail: { batchId: batch.id },
+    body: `The worktree path of batch "${batch.title}" holds a directory git doesn't list as a worktree, so 10db didn't remove it and no longer treats it as the batch's. Look inside first. Delete directory deletes it and everything in it; Keep leaves it for you.`,
+    foldKey: keptWorktreeKey.stray(path),
+    ...worktreeOffer({ kind: 'stray', path }, { batchId: batch.id }),
+  }),
+  /** 10db could not carry out a Remove worktree or Delete directory answer: the same offer again. */
+  removeFailed: (offer: Extract<WorktreeOffer, { kind: 'kept' | 'orphan' | 'stray' }>, path: string, error: unknown): Card => ({
+    title: `10db could not remove ${path}`,
+    body: `${detailOf(error)}\n\nNothing was removed that the error doesn't name. Answer again once that is fixed, or keep ${path}.`,
+    foldKey: keptWorktreeKey.removeFailed(path),
+    refresh: true,
+    ...worktreeOffer(offer),
   }),
   inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
-    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then press Retry in a task's drawer on the Board.`,
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then answer Retry (Abandon batch gives the batch up).`,
     foldKey: `worktree-in-the-way:${batch.id}`,
-    detail: { batchId: batch.id },
+    ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
   }),
   notReopened: (batch: BatchDto, error: unknown): Card => ({
     title: `Batch "${batch.title}" not reopened: ${detailOf(error)}`,
-    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then press Retry in a task's drawer on the Board.`,
-    detail: { batchId: batch.id },
+    body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before the batch reopens, and couldn't. Fix the cause, then answer Retry (Abandon batch gives the batch up).`,
+    ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
   }),
   notWhole: (
     batch: BatchDto,
@@ -312,8 +432,8 @@ export const worktreeCards = {
     const branch = batch.branch ?? '(not cut)';
     return {
       title: `Batch "${batch.title}" not retried: its worktree is on ${found ?? 'a detached HEAD'}, with uncommitted changes`,
-      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then press Retry in a task's drawer on the Board:\n${listPaths(paths)}`,
-      detail: { batchId: batch.id },
+      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then answer Retry (Abandon batch gives the batch up):\n${listPaths(paths)}`,
+      ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
     };
   },
 };
@@ -704,12 +824,27 @@ function ended(batch: BatchDto): string {
  * Why 10db left a shared batch's checkout on the batch's branch when the batch ended, instead of
  * switching it back to where the cut found it. One per batch.
  */
-function leftCard(batch: BatchDto, why: string, body: string): Card {
+function leftCard(
+  batch: BatchDto,
+  place: CheckoutPlace,
+  why: string,
+  body: string,
+  /** Offers the batch's base branch instead of the place, which is gone. */
+  base?: string,
+): Card {
   return {
     title: `Your checkout stays on ${batch.branch ?? '(no branch)'}: ${why}`,
     body,
     foldKey: `checkout-return:${batch.id}`,
-    detail: { batchId: batch.id },
+    ...worktreeOffer(
+      {
+        kind: 'checkout',
+        batchId: batch.id,
+        place: { branch: place.branch, sha: place.sha },
+        ...(base === undefined ? {} : { base }),
+      },
+      { batchId: batch.id },
+    ),
   };
 }
 
@@ -725,8 +860,9 @@ export const checkoutCards = {
   ): Card =>
     leftCard(
       batch,
+      place,
       'it has uncommitted changes',
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but only when nothing in it is uncommitted, and these files have changes:\n${listPaths(paths)}\n\nCommit, stash or discard them, then switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but only when nothing in it is uncommitted, and these files have changes:\n${listPaths(paths)}\n\nCommit, stash or discard them, then answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
   ignored: (
     batch: BatchDto,
@@ -736,32 +872,38 @@ export const checkoutCards = {
   ): Card =>
     leftCard(
       batch,
+      place,
       `ignored files are where ${placeName(place)} has files`,
-      `Batch "${batch.title}" ${ended(batch)}. Switching your checkout back to ${placeName(place)} would overwrite or delete these git-ignored files, which git treats as disposable:\n${listPaths(paths)}\n\nMove what you need out of the way, then switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. Switching your checkout back to ${placeName(place)} would overwrite or delete these git-ignored files, which git treats as disposable:\n${listPaths(paths)}\n\nMove what you need out of the way, then answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
   checkedOut: (batch: BatchDto, place: CheckoutPlace, path: string): Card =>
     leftCard(
       batch,
+      place,
       `${placeName(place)} is checked out in another worktree`,
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but ${placeName(place)} is checked out in the worktree at ${path}, and git checks a branch out in one worktree at a time. Switch that worktree to another branch or remove it, then switch this checkout yourself.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to ${placeName(place)} when a batch ends, but ${placeName(place)} is checked out in the worktree at ${path}, and git checks a branch out in one worktree at a time. Switch that worktree to another branch or remove it, then answer Switch back.`,
     ),
   gone: (batch: BatchDto, project: Checkout, place: CheckoutPlace): Card =>
     leftCard(
       batch,
+      place,
       `${placeName(place)} no longer exists`,
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to where it was when the batch started, ${placeName(place)}, which is gone now. Switch ${project.repoPath} to the branch you want with git switch.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches your checkout back to where it was when the batch started, ${placeName(place)}, which is gone now. Switch to the base branch ${batch.baseBranch} here, or switch ${project.repoPath} to the branch you want yourself with git switch.`,
+      batch.baseBranch,
     ),
   lanesRunning: (batch: BatchDto, project: Checkout, place: CheckoutPlace, lanes: number): Card =>
     leftCard(
       batch,
+      place,
       `work is running in ${project.name}`,
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no work runs in the project, and ${String(lanes)} workstream(s) run now. Once they finish, switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no work runs in the project, and ${String(lanes)} workstream(s) run now. Once they finish, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
   failed: (batch: BatchDto, project: Checkout, place: CheckoutPlace, error: unknown): Card =>
     leftCard(
       batch,
+      place,
       `10db could not switch it back to ${placeName(place)}`,
-      `Batch "${batch.title}" ${ended(batch)}. ${detailOf(error)}\n\nOnce that is fixed, switch back with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. ${detailOf(error)}\n\nOnce that is fixed, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
 };
 

@@ -1,4 +1,4 @@
-import { BatchState, type BatchId } from '@10db/contracts';
+import { BatchState, type BatchDto, type BatchId, type ProjectDto } from '@10db/contracts';
 import {
   clearWorktreePath,
   deleteAppSetting,
@@ -60,18 +60,25 @@ export type Retirement =
  * directories other than build output, such as a hand-made `.env`; both are checked here so no
  * caller can remove them, and a kept worktree raises a card naming what it holds. Removal
  * withdraws those cards. The clear is last, so recovery re-runs every earlier step after a crash.
- * Safe to repeat; a no-op once cleared. Holds the batch's worktree lock.
+ * Safe to repeat; a no-op once cleared. Holds the batch's worktree lock. `discard` is the builder's
+ * Remove worktree answer on a kept worktree's card: it skips those two checks and removes what they
+ * kept, uncommitted changes and git-ignored files included.
  */
-export async function retireWorktree(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
-  return withWorktreeLock(batchId, () => retire(ctx, batchId));
+export async function retireWorktree(
+  ctx: DeliveryContext,
+  batchId: BatchId,
+  discard = false,
+): Promise<Retirement> {
+  return withWorktreeLock(batchId, () => retire(ctx, batchId, discard));
 }
 
-async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retirement> {
+async function retire(ctx: DeliveryContext, batchId: BatchId, discard: boolean): Promise<Retirement> {
   const batch = getBatch(ctx.state.db, batchId);
   const path = batch.worktreePath;
   if (path === null || !FINISHED.includes(batch.state)) return { kind: 'nothing' };
   const project = getProject(ctx.state.db, batch.projectId);
   const main = project.repoPath;
+  if (discard) return removeWorktreeAndSettle(ctx, batch, project, path);
   if (batch.state === BatchState.Abandoned && existsAsEntry(path)) {
     try {
       const changed = await ctx.git.changedPaths(path);
@@ -100,6 +107,18 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
     raise(ctx.inbox, project.id, worktreeCards.keptIgnored(batch, main, path, loose));
     return { kind: 'kept', reason: 'ignored', paths: loose };
   }
+  return removeWorktreeAndSettle(ctx, batch, project, path);
+}
+
+/** Removes the batch's worktree at `path` and settles what hung on it (the rest of `retireWorktree`). */
+async function removeWorktreeAndSettle(
+  ctx: DeliveryContext,
+  batch: BatchDto,
+  project: ProjectDto,
+  path: string,
+): Promise<Retirement> {
+  const batchId = batch.id;
+  const main = project.repoPath;
   try {
     await ctx.git.removeWorktree(main, path);
   } catch (error) {
