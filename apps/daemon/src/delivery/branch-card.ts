@@ -1,5 +1,5 @@
 import { BatchId, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
-import { getBatch, getProject } from '@10db/db';
+import { getBatch } from '@10db/db';
 import { z } from 'zod';
 import { deleteAskedBranch } from './branch-cleanup';
 import { BRANCH_CARD_DETAIL, BranchChoice } from './cards';
@@ -21,7 +21,7 @@ export function createBranchCardAnswers(
     const card = BranchCardDetail.safeParse(item.detail?.[BRANCH_CARD_DETAIL]);
     if (!card.success || answer.choice !== BranchChoice.Delete) return;
     const batchId = card.data.batchId;
-    const project = getProject(ctx.state.db, getBatch(ctx.state.db, batchId).projectId);
-    ctx.jobs.run(jobKey(project, JobQueue.Ship), () => deleteAskedBranch(ctx, batchId));
+    const batch = getBatch(ctx.state.db, batchId);
+    ctx.jobs.run(jobKey(batch, JobQueue.Ship), () => deleteAskedBranch(ctx, batchId));
   };
 }
