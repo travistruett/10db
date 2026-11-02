@@ -1805,6 +1805,45 @@ describe('a required check GitHub cancelled', () => {
     expect(noticeOf(id)).toBeUndefined();
   });
 
+  it('does not run the check a second time when the daemon restarts after the rerun, before any notice', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+    await w.stop();
+
+    // The new daemon reads the same head cancelled again: the rerun already happened.
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+    // It leaves the check alone and says so once the minutes a rerun gets to start have passed.
+    for (let i = 0; i < GRACE_ROUNDS; i++) await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)?.line).toContain('desktop');
+  });
+
+  it('runs the check once more on a new head after a restart', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    await w.stop();
+
+    h.gh.setHead(prUrl, HEAD_B);
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77', '77']);
+  });
+
   it('leaves a check that is genuinely running pending, with nothing rerun', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, running('desktop'));

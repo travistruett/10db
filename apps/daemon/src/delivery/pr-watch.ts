@@ -37,7 +37,15 @@ import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
-import { baseNotices, cancelledNotices, ciNotices, NOTICE_KEY, type CancelledWhy } from './notices';
+import {
+  baseNotices,
+  cancelledNotices,
+  ciNotices,
+  NOTICE_KEY,
+  rerunNoticeHead,
+  rerunNotices,
+  type CancelledWhy,
+} from './notices';
 
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
@@ -173,7 +181,7 @@ function requiredOf(read: RequiredChecks): RequiredChecksDto {
 
 /**
  * Where a pull request's cancelled required check stands, for one head. In memory: a restart starts
- * from the stored notice instead.
+ * from the stored rerun notice (the head 10db ran again) and the stored cancelled notice instead.
  */
 interface CancelledRun {
   readonly head: string | null;
@@ -487,6 +495,21 @@ export function createPrWatch(input: {
   }
 
   /**
+   * Takes off the batch the notices that say 10db ran a cancelled check again, except the one for
+   * `keepHead`. They are the stored record of a rerun, read back after a restart.
+   */
+  function clearRerunNotices(rootId: BatchId, keepHead: string | null): void {
+    const stale = getBatch(ctx.state.db, rootId).notices.filter((n) => {
+      const head = rerunNoticeHead(n.key);
+      return head !== null && head !== keepHead;
+    });
+    if (stale.length === 0) return;
+    ctx.state.write((write) => {
+      for (const n of stale) clearBatchNotice(write, rootId, n.key);
+    });
+  }
+
+  /**
    * Follows an open pull request's cancelled required checks (a runner problem, say, or a run
    * GitHub stopped). A cancelled check is its own state, never pending: nothing runs for it, and the
    * pull request cannot merge. The second read in a row that lists one (a newer push's run replaces
@@ -513,12 +536,32 @@ export function createPrWatch(input: {
     ) {
       cancelledRuns.delete(root.id);
       clearCancelledNotice(root.id);
+      clearRerunNotices(root.id, null);
       return;
     }
     // A failing check starts a fix, which pushes a new head: the cancelled one is not the question.
     if (required.state === 'failing') return;
     const cancelled = required.cancelled;
-    const seen = cancelledRuns.get(root.id);
+    const storedNotices = getBatch(ctx.state.db, root.id).notices;
+    // The rerun is stored on the batch, so a daemon that restarted after it reads the head as asked.
+    clearRerunNotices(root.id, read.headSha);
+    let seen = cancelledRuns.get(root.id);
+    if (
+      seen === undefined &&
+      read.headSha !== null &&
+      storedNotices.some((n) => rerunNoticeHead(n.key) === read.headSha)
+    ) {
+      seen = {
+        head: read.headSha,
+        streak: 0,
+        asked: true,
+        // The time of the rerun isn't stored: the minutes a run gets to start count from this read.
+        askedAt: clock.now().getTime(),
+        active: false,
+        notified: storedNotices.some((n) => n.key === NOTICE_KEY.checksCancelled),
+      };
+      cancelledRuns.set(root.id, seen);
+    }
     const sameHead = seen?.head === read.headSha;
     if (cancelled.length === 0) {
       if (seen !== undefined && sameHead) {
@@ -588,6 +631,13 @@ export function createPrWatch(input: {
     track.asked = true;
     track.askedAt = at;
     track.active = false;
+    // Stored right after the rerun: a restart before any notice must not run this head a second time.
+    if (read.headSha !== null) {
+      const headSha = read.headSha;
+      ctx.state.write((write) => {
+        setBatchNotice(write, root.id, rerunNotices.ran(headSha, cancelled));
+      });
+    }
   }
 
   async function round(signal: AbortSignal): Promise<void> {
