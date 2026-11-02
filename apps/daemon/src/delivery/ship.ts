@@ -1031,7 +1031,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // The branch as GitHub has it: a fix, or Update branch, may have moved it past the local one.
       const head = status.headSha;
       const tip = await deps.git.branchTip(main, branch);
-      let unpushed = false;
       if (head === null) {
         if (tip === null) {
           stop({
@@ -1054,8 +1053,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
             });
           else await deps.git.fastForwardBranch(main, branch, head);
         } else if (await deps.git.isAncestor(main, head, tip))
-          // An earlier catch-up merged and its check failed, so nothing was pushed.
-          unpushed = true;
+          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+          await deps.git.rewindBranch(
+            kept && batch.worktreePath !== null ? batch.worktreePath : main,
+            branch,
+            tip,
+            head,
+          );
         else {
           stop({
             kind: 'other',
@@ -1080,7 +1084,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
-        return update.kind === 'merged' || (update.kind === 'up_to_date' && unpushed);
+        return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
         if (check === null) {
@@ -1102,7 +1106,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         else stop({ kind: 'other', why: brought.note });
         return;
       }
-      if (brought.kind === 'up_to_date' && !unpushed) {
+      if (brought.kind === 'up_to_date') {
         // GitHub says conflict, the branch holds the base: its answer is stale, or the base moved again.
         deps.logger.info(
           { batchId, prUrl },

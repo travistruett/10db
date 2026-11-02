@@ -178,6 +178,57 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
   });
 
+  it('starts from the pull request head when the local branch holds an earlier unpushed merge of 10db', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const url = conflicts(batch);
+    const branch = batch.branch ?? '';
+    const head = onOrigin(branch);
+    // An earlier catch-up's merge, left on the local branch and never pushed.
+    const stale = h.git$(
+      '-c',
+      'user.name=10db',
+      '-c',
+      'user.email=10db@example.com',
+      'commit-tree',
+      `${head}^{tree}`,
+      '-p',
+      head,
+      '-m',
+      'Merge main',
+    );
+    h.git$('update-ref', `refs/heads/${branch}`, stale, head);
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+
+    await catchUp(batch);
+
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(head);
+    expect(onOrigin(branch)).toBe(head);
+
+    // The builder presses Update branch, the base moves again and the check is fixed.
+    const byHand = h.origin$(
+      '-c',
+      'user.name=Builder',
+      '-c',
+      'user.email=builder@example.com',
+      'commit-tree',
+      `refs/heads/${branch}^{tree}`,
+      '-p',
+      head,
+      '-m',
+      'Update branch',
+    );
+    h.origin$('update-ref', `refs/heads/${branch}`, byHand);
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'true' }));
+    h.gh.setHead(url, byHand);
+
+    await catchUp(getBatch(h.store.db, batch.id));
+
+    expect(h.cards().filter((c) => c.body.includes("can't tell which is current"))).toEqual([]);
+    expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
+  });
+
   it('merges it once GitHub says it is clean, when it had refused the merge', async () => {
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set(
