@@ -291,9 +291,13 @@ export async function cutWorktree(
       // The install ran no install script, and no seed carried built output: a package the project
       // allows to build (a native addon, a generated client) is installed but not built.
       const unbuilt = unbuiltAllowedPackages(path);
-      if (unbuilt.length > 0) {
+      if (unbuilt.names.length > 0) {
         try {
-          showNotice(ctx.state, batchId, seedNotices.scriptsSkipped(unbuilt));
+          showNotice(
+            ctx.state,
+            batchId,
+            seedNotices.scriptsSkipped(unbuilt.names, unbuilt.legacyPnpmMajor),
+          );
         } catch (error) {
           ctx.logger.warn({ batchId, err: error }, 'install scripts notice not written');
         }
