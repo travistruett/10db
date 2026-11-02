@@ -115,7 +115,9 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 
 - **Shape** is a top-level view between Factory and Inbox. Its nav item lists the project's conversations (title,
   state, age) under it. Factory's header primary, Adopt a Plan…, becomes **Shape Work…**, which opens a new
-  conversation; a dropped `.md` brief starts one too. The adopt route is unchanged.
+  conversation; a dropped `.md` brief starts one too. Adopt a Plan… leaves the UI (its modal and hook,
+  `apps/desktop/src/views/factory/adopt-plan.tsx` and `use-adopt-plan.ts`, are removed); the adopt route stays for
+  briefs made elsewhere (the builder's choice, 2026-11-02).
 - **Left, about 45%: the conversation.** Plain text blocks, not bubbles; the builder's in bright text. Tool use
   collapses to one dimmed line ("Read apps/desktop/src/views/board/ (12 files)", "propose_plan · 2 changes ·
   passed"). The input autosizes, takes dropped files and pasted images (§5.4), and holds the group's one filled
@@ -132,14 +134,17 @@ The card side of annotations (an indicator per kind on a task card) is the reada
   - **Questions for others:** stored only, labelled "Sent when people arrive (goals phase 3)".
   - **Earlier:** superseded rows, collapsed, each with **Restore**.
 
-  Every row edits in place (a pencil on hover). **Convert…** sits in the header, disabled until a proposal exists.
+  Every row edits in place (a pencil on hover). The header holds **Rehearse** (§7, `default` variant) and
+  **Convert…**, both disabled until a proposal exists. Converted rows stay in the list, dimmed, under the goal or
+  task they became ("Converted · on the Board"), and carry their calibration once the task finishes (§8).
 
 - **Before the first Propose** the sidebar shows only **Heard so far** (§6) and one line: "Press Propose when
   you've said enough. Claude will split what you said into goals and loose tasks, size them from tasks like them
   that already ran, and preview how the factory would run them."
 - **The Convert modal** is a form modal (DESIGN.md): a checkbox per pending proposal with where it goes ("to
   Backlog", "to Knowledge", "under Real areas"), the line "Nothing starts. Tasks wait on the Board.", and, beside
-  the primary **Convert n**, a warning while a review runs or a finding is open.
+  the primary **Convert n**, a warning while a review or rehearsal runs, or a finding or rehearsal question is
+  open.
 
 | Surface       | Loading                       | Empty                                | Error                                                 |
 | ------------- | ----------------------------- | ------------------------------------ | ----------------------------------------------------- |
@@ -190,8 +195,14 @@ MCP servers; it has no read-only mode.
   tool is allowed only on real paths under the project's checkout or the conversation's files directory (§5.4). A
   symlink out, a protected path, and a `Grep` or `Glob` of a directory holding one are refused, with a dimmed line
   in the conversation.
-- `Agent` may launch only the two reviewer definitions (§7), passed as programmatic agents; the built-in
+- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7), passed as
+  programmatic agents, each on the session's own model; the built-in
   general-purpose type is not offered.
+- **Who is calling.** Subagents share the session's MCP connection, so the PreToolUse hook tells them apart: the
+  SDK's hook input carries `agent_id` only inside a subagent, and `agent_type` names it. The hook refuses
+  `report_finding` when `agent_id` is absent (the main session can't report findings or rehearsal marks), refuses
+  every other Shape tool when it is present (a reviewer can't propose), and sets the finding's `reviewer` from
+  `agent_type`, never from the tool's input. Test, red first: the main session calling `report_finding` is refused.
 - **Tests, red first:** an `Edit`, a `Bash` call, a `Read` of `~/.ssh/id_ed25519`, a `Read` of the 10db data
   directory, a `Read` through a symlink in the checkout that points out, and a `Grep` of a directory holding a
   protected path are each refused; a reviewer's attempt at `propose_plan` is refused.
@@ -207,6 +218,16 @@ MCP servers; it has no read-only mode.
 - **One turn at a time.** A message sent during a turn is queued and shown as queued; **Stop** interrupts the turn
   (the SDK's interrupt) and the queue runs next. Row edits and Propose presses during a turn queue the same way, as
   injected notes.
+- **Guards.**
+  - A Propose pressed while a Propose turn is queued or running is ignored (the button shows it's pending).
+  - A Propose turn that ends with no accepted `propose_plan` call shows "Claude didn't propose; Propose Again" in
+    the chat and is logged with the conversation's count of refused `propose_plan` calls.
+  - A builder edit and a reconcile each run as one SQLite write, one after the other, so whichever lands second sees
+    the other: a pin set before a reconcile is kept by it, and a reconcile before an edit is overwritten by it.
+  - **Long conversations.** Past 70% of the model's context window (the SDK's context usage), the daemon moves the
+    conversation to a fresh SDK session seeded with the digest below, and notes it in the chat ("Continued in a
+    fresh session; nothing is lost"). Compaction stays only as the SDK's emergency fallback, as for lanes
+    (factory-loop decision 2).
 - **Resume** uses the SDK session id while Claude Code still has it. When it doesn't (its cleanup removes old
   session files), the daemon starts a new SDK session seeded with a digest it builds deterministically: the last 40
   messages verbatim, the current proposals and the conversation's links (§12). The digest is stored as a `note`
@@ -227,14 +248,40 @@ handler builds a session's tool set from its row: a lane's tools for a workstrea
 share their session's MCP connection, so what a reviewer may call is set by its agent definition's tool list (§7),
 not by the token.
 
-| Tool                                 | Who                | Does                                                                                                                |
-| ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `note_heard(items)`                  | session            | the Heard so far echo: up to 12 strings of at most 80 characters                                                    |
-| `similar_tasks(query)`               | session            | finished tasks with lane time (§8), matched by FTS over title and description, with lane time, wall time and tokens |
-| `propose_plan(draft)`                | session            | the whole plan (§6); refused until the first Propose                                                                |
-| `attach(target, attachment)`         | session            | a Mermaid diagram, a chart or an HTML mockup on a proposed task or goal (§10.3)                                     |
-| `write_spec(effortKey, markdown)`    | session            | an effort's spec (§7)                                                                                               |
-| `report_finding(effortKey, finding)` | reviewer subagents | a finding row (§7)                                                                                                  |
+| Tool                                           | Who                | Does                                                                                                                                                                                                                                                                                                                                                             |
+| ---------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `note_heard(items)`                            | session            | the Heard so far echo: up to 12 strings of at most 80 characters                                                                                                                                                                                                                                                                                                 |
+| `similar_tasks(query)`                         | session            | finished tasks with lane time (§8), matched by FTS over title and description, with lane time, wall time and tokens                                                                                                                                                                                                                                              |
+| `propose_plan(draft)`                          | session            | the whole plan (§6); refused until the first Propose                                                                                                                                                                                                                                                                                                             |
+| `attach(target, attachment)`                   | session            | a Mermaid diagram, a chart or an HTML mockup on a proposed task or goal (§10.3)                                                                                                                                                                                                                                                                                  |
+| `write_spec(effortKey, markdown)`              | session            | an effort's spec (§7)                                                                                                                                                                                                                                                                                                                                            |
+| `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                                          |
+| `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                                                    |
+| `find_records(query)`                          | session            | read-only search over the decisions that apply to this project (`searchDecisions`: the project's and the builder-wide `you` ones), principles once they exist, and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
+
+**Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
+touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You
+decided the opposite on Oct 30; still true?"). A contradiction never blocks: the builder answers, and a reversal
+becomes a record proposal that supersedes the old decision.
+
+### 5.6 Starting from a terminal
+
+**Built:** the builder MCP server (`apps/daemon/src/builder/`), which the builder's own Claude Code sessions reach
+through the 10db-task skill, with `create_task` and its siblings.
+
+**Designed.** A brainstorm that starts in a terminal moves into Shape without retyping. The builder MCP gains
+`start_shape { projectId, title, summary, files? }`: it creates a conversation whose first message is the summary,
+authored `builder` (it is the builder's own session speaking for them, so proposals can cite it) and marked "From a
+Claude Code session". It answers the conversation's id; the app lists the new conversation at once (`shape.changed`)
+and shows a notice, since the desktop has no deep-link scheme to open it from outside **(spec's call)**. Creating it
+starts no Claude turn: the first turn runs when the builder next writes or presses Propose. Jev's `shape_ready`
+judges the summary like any builder message. Files
+come as inline text only (name and content; Markdown or plain text, at most 256 KB in all), never as paths, so a
+session can't have the daemon copy a file from elsewhere on the Mac, and a model can actually emit them in one tool
+call; images and PDFs are dropped into the conversation in the app **(spec's call: the cap)**. Each file becomes a
+`shape_files` row in the conversation's files directory, counts toward §5.4's 20, and reaches the session as a line
+naming its path, as a dropped text file does. The conversation starts before its first Propose, like any other. The 10db-task skill, which lives outside the repository, gets a `shape` command calling it, added by hand
+once the tool lands.
 
 ## 6. Propose and the plan
 
@@ -251,16 +298,24 @@ not by the token.
 
 **`PlanDraft`** (zod, `@10db/contracts`):
 
-| Field          | Holds                                                                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `goals[]`      | a `GoalBrief` plus `key`, `ceremony`, `eval?`; each task carries `basis` or `size` (§8), `annotations` (reserved), and may add `dependsOnOutside` keys |
-| `looseTasks[]` | `key`, title, description, criteria, areas, `basis` or `size`, `ceremony`, `dependsOn` keys, `annotations`                                             |
-| `landings[]`   | `key`, title, the proposal keys that land together in one pull request (§10.4)                                                                         |
-| `records[]`    | `key`, kind `decision \| principle`, scope `project \| area` (with the area), statement, rationale, `sourceMessageIds`                                 |
-| `questions[]`  | `key`, text, for (a role or a person), `sourceMessageIds`                                                                                              |
-| `additions[]`  | once something is converted: `key`, `goalId` and the loose-task fields                                                                                 |
-| `changes[]`    | once something is converted: a created task's id and new title, description, acceptance criteria, areas or dependencies                                |
-| `removals[]`   | once something is converted: a created task's id and why                                                                                               |
+| Field          | Holds                                                                                                                                                                                                                                                                                                                                           |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `goals[]`      | a `GoalBrief` plus `key`, `ceremony`, `eval?`; each task carries `basis` or `size` (§8), `annotations` (reserved), and may add `dependsOnOutside` keys                                                                                                                                                                                          |
+| `looseTasks[]` | `key`, title, description, criteria, areas, `basis` or `size`, `ceremony`, `dependsOn` keys, `annotations`                                                                                                                                                                                                                                      |
+| `landings[]`   | `key`, title, the proposal keys that land together in one pull request (§10.4)                                                                                                                                                                                                                                                                  |
+| `records[]`    | `key`, kind; a decision has `question`, `choice` and `rationale` (the `decisions` columns), a principle a statement and rationale; scope `you \| project \| area` (with the area); `supersedes?` (a decision id); a `you` decision's successor defaults to `you`, and the row and the Convert modal say "replaces a decision for every project" |
+| `questions[]`  | `key`, text, for (a role or a person)                                                                                                                                                                                                                                                                                                           |
+| `additions[]`  | once something is converted: `key`, `goalId` and the loose-task fields                                                                                                                                                                                                                                                                          |
+| `changes[]`    | once something is converted: a created task's id and new title, description, acceptance criteria, areas or dependencies                                                                                                                                                                                                                         |
+| `removals[]`   | once something is converted: a created task's id and why                                                                                                                                                                                                                                                                                        |
+
+Every proposal of every kind (goals, their tasks, loose tasks, landings, records, questions, additions, changes,
+removals) carries `sourceMessageIds`, at least one: the builder's messages it came from, or the injected note that
+started it (an engine event reopening the conversation, §12). Rows the builder makes in the sidebar (an edit, a
+split or merged landing, a chip acted on) are builder-authored and need none. A row whose draft omits its ids
+keeps its stored ones, so a resumed session (§5.3) never has to restate ids it can no longer see; the resume digest
+lists each row's ids too. `sourceMessageIds` ships in slice 1's `PlanDraft`; the Why? link and round marks that
+read it come in slice 2.
 
 **Validation** runs on the merged result (the draft, pinned fields, restored rows and converted rows) and answers
 every error at once in the tool result, naming the field ("Task 3, depends on: no proposal has the key
@@ -274,14 +329,19 @@ drawer-editr"):
 - loose tasks and additions pass the same area checks;
 - `basis` and `size` are exclusive (zod refuses both); a basis id must be a finished task with lane time, refused
   by name otherwise; an XL task is refused ("split it");
-- `sourceMessageIds` must be the builder's messages in this conversation;
+- `sourceMessageIds` must be the builder's messages in this conversation, or an engine-event note (§12); Propose,
+  edit and digest notes can't be cited;
+- a record's `supersedes` names a current decision (not superseded or withdrawn, the head of its chain, as M3
+  allows) that applies to this project: the project's own or a builder-wide `you` one. Convert sets the new
+  decision's `supersedes_id` (`packages/db/src/schema.ts`, `decisions`);
 - a change or removal names a task this conversation created (through `shape_links`) that hasn't started (not
   running, done, failed or cancelled); hand-filed tasks and other conversations' tasks are out of reach, so two
   conversations never hold changes to one task **(spec's call)**; a goal's criteria are out of reach too (the owner
   edits them, goals spec §6);
 - every task key is in at most one landing, and a landing's tasks all share a placement and a landing target
   (§10.4);
-- keys are unique across the draft.
+- keys are unique across the draft;
+- size caps: at most 12 goals, 40 tasks per goal and 80 proposals in all, refused by name past them.
 
 **Rounds.** A draft is reconciled per round:
 
@@ -300,12 +360,23 @@ drawer-editr"):
 **Rows.** **Built:** `proposals` and `sources`, written today by agents' `propose` tool
 (`packages/db/src/store/knowledge.ts`), with `ProposalKind` `new_task | change_task | principle | note`.
 **Designed:** `ProposalKind` gains `goal`, `task` (loose, or an addition with `goalId`), `remove_task`, `decision`,
-`question` and `landing`; `SourceKind` gains `shape`. A Shape proposal carries its key, round, pin set and typed body (JSON,
-parsed with its zod schema on read) in new nullable columns, so existing proposals are unchanged.
+`question` and `landing`; `SourceKind` gains `shape`. A Shape proposal carries its key, round, pin set, typed body
+(JSON, parsed with its zod schema on read) and, **per task key** (a loose task's or addition's own key, and each
+task key inside a goal), a content hash and the list of fields its last round changed, in new nullable columns, so
+existing proposals are unchanged. Reconciling writes the hashes and changed fields; a builder edit updates the hash
+of the task it touched. Round marks, rehearsal and the Convert modal all work per task key, so editing one task of
+a goal never marks or re-rehearses its siblings.
 
 **Editing.** A field the builder edits is pinned: `propose_plan` can't change it, and the edit reaches the next
 turn as a note ("The builder set Compact density's size to M"). Unpinning is a row action. A chip the builder acts
 on (§9) creates a builder-authored row, pinned the same way.
+
+**What changed, and why.** After each round, rows the round created or changed carry a "new" or "changed" mark,
+and superseded ones a "moved to Earlier" line, until the next round; under the sidebar's header, "4 changes in
+round 3" (created, changed and superseded rows together) filters the list to them. Every row has **Why?**, which
+scrolls the conversation to its source messages and highlights them. The marks come from each proposal's stored
+round and changed fields; a change in `sourceMessageIds` alone, or in the order of a list, doesn't count. Nothing
+is asked of a model.
 
 ## 7. Ceremony
 
@@ -327,8 +398,38 @@ paths and an empty list otherwise; phase 2's Schema and Contracts classes read t
 you". For `spec` the session writes a spec (`write_spec`, kept as the effort's spec attachment) and launches two
 reviewer subagents, **scope** and **engineering**, as programmatic agent definitions with exactly `Read`, `Grep`,
 `Glob` and `report_finding`, under the same confinement. Findings are `shape_findings` rows (effort, reviewer,
-severity, text, state `open | resolved | dismissed`) under the effort, each resolved by chat or dismissed. Convert
-warns, but doesn't block, while a review runs or a finding is open.
+severity, text, state `open | resolved | dismissed`) under the effort, each resolved by chat (the session amends the
+plan, then calls `resolve_finding`) or dismissed. Convert warns, but doesn't block, while a review runs or a finding
+is open.
+
+**Rehearsal.** For every effort, whatever its ceremony, a third reviewer, **rehearsal**, reads each proposed task as
+the implementer who will be handed it, with the same tools and confinement, and reports the questions it would
+have to ask before starting ("Which column does 'density' mean: card padding or rows per column?"), as findings of
+kind `question` under the task, each stamped by the daemon with the content hash of the task it read (§6 Rows). A
+rehearsal with nothing to ask reports `none`, so every rehearsed task and hash leaves a mark (`shape_rehearsals`:
+task key, hash, round, questions found). It covers goal tasks, loose tasks and additions; changes and removals
+aren't rehearsed.
+
+- **When.** The daemon can't launch a subagent itself, so a rehearsal is a turn it injects, as Propose is: a note
+  ("Rehearse: read these tasks as their implementer") and a turn whose prompt asks for one `Agent` call to the
+  rehearsal reviewer per task listed. It runs when the builder presses **Rehearse**, and when he opens the Convert
+  modal while any task of a selected proposal has no mark for its current hash: the modal shows "Rehearsing 3
+  tasks…" and offers **Convert Anyway**: one call, `convert { proposalIds, interrupt: true }`, which interrupts the
+  turn and takes Convert's hold before the queue can start another, so it never meets the 409.
+- **Checked, not trusted.** The rehearsal note lists each task with the hash the daemon read it at; a reviewer's
+  marks carry that hash, and a mark whose hash is no longer the task's current one (an edit landed meanwhile) is
+  discarded. A rehearsal reviewer always ends with a closing report (`none` means done with zero questions); the
+  mark is written only on it, so an interrupted rehearsal leaves no mark. When the turn ends, the daemon compares
+  the tasks it listed with the marks written; a task with none reads "Not rehearsed" in the modal and is never
+  treated as clean.
+- **Resolving.** As with other findings: the session amends the task through `propose_plan`, then calls
+  `resolve_finding`; or the builder dismisses it. A builder edit to the task resolves its open rehearsal questions
+  with "answered by your edit".
+- Convert warns while a rehearsal question is open.
+- **Measure:** Inbox question cards per converted task, against the project's rate for tasks filed any other way
+  (`InboxKind.Question` cards on the task's workstreams), shown under the Sizing line in Settings › Decisions
+  (§8); slice 4 builds it.
+- **(spec's call:** rehearsal runs on opening the Convert modal**)**
 
 **The proposed eval** (an `eval` on a goal) has a north-star objective, baseline criteria, the model(s) under test
 and constraints (the builder's eval shape; prior art: gstack's `/eval-plan`, with preregistered bars and stop
@@ -356,6 +457,12 @@ attachment on the goal.
 - **The builder's override.** He changes the basis (size stays derived) or pins a bucket. A pinned bucket wins for
   every consumer, with that bucket's median or midpoint as hours, and reads "size set by you". The success measure
   counts derived sizes only and reports overrides beside it.
+- **Calibration, shown.** Once a converted task finishes, its converted row in the Proposed sidebar (§4) and its
+  task drawer read "Sized M (~2 h) · took 5 h of lane time", the actual in yellow when it falls outside one bucket
+  either way. Settings › Decisions gains a **Sizing** line: the share of finished converted tasks whose derived
+  size is within one bucket of their lane time, with n, and the same per bucket; overrides are counted beside it,
+  never in it. A reopened conversation is told which of its tasks mis-sized, so its re-plans account
+  for it.
 
 ## 9. Intelligence
 
@@ -366,6 +473,12 @@ attachment on the goal.
 | Claude | talks, reads code, splits, picks bases, writes every proposal field, specs, attachments | (it is the session) |
 | Jev    | three nudges, below                                                                     | no chip             |
 | Daemon | validation, hours and buckets, the preview, Convert                                     | (deterministic)     |
+
+**Per-project opt-in (the builder's choice, 2026-11-02).** These calls send the builder's own brainstorm messages,
+not code, to OpenRouter and the model's provider, and a brainstorm can hold a client's details. So Shape's Jev
+decisions make no call at all, shadow included, until a project turns on **Send brainstorm messages to fast
+models** in its settings, which names OpenRouter and the provider; it is off for every project by default,
+including existing ones. With it off, there are no chips and nothing is logged.
 
 **Designed.** `JudgeDecision` gains three decisions, each with `enabled`, model (default `typesafe/jev-1.13`) and
 floor (default 0.8) in Settings › Decisions:
@@ -394,6 +507,11 @@ Decisions and principles proposed in the sidebar are 10db's internal Orgtools fo
 `decisions` and `insertDecision`. **Designed (M3, `docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md`):**
 the `principles` table, supersede, retire and withdraw. If M3's data task hasn't landed when slice 3 starts, slice 3
 builds the `principles` table and withdraw to M3's plan, so M3 adopts them unchanged. **(spec's call)**
+
+**Supersede.** Today `insertDecision` always writes `supersedes_id` null, and search and the context pack don't
+leave superseded decisions out (`packages/db/src/store/knowledge.ts`). The slice that ships `supersedes` (slice 3,
+with `find_records`) extends `insertDecision` with `supersedesId` and filters superseded and withdrawn decisions
+out of `searchDecisions` and the context pack, to M3's plan, unless M3 has already done so.
 
 ### 10.2 The factory preview
 
@@ -453,7 +571,8 @@ shifts and am fine updating the app / main much more seldomly." Today nearly eve
 ## 11. Convert
 
 **Designed.** `POST /shapes/:shapeId/convert { proposalIds }`. While a turn runs, it answers 409 with "Claude is
-still answering; Stop or wait", and the modal offers both. Otherwise it holds the conversation (new turns queue)
+still answering; Stop or wait", and the modal offers both. It is idempotent: a proposal already accepted is never
+converted again, so a repeated or double-clicked Convert answers with what the first one created. Otherwise it holds the conversation (new turns queue)
 and, in one SQLite transaction:
 
 - inserts the selected efforts in dependency order across efforts (a goal or loose task after every effort it
@@ -479,9 +598,10 @@ refusal writes nothing and lists each error. Nothing starts.
 - **Remove Draft Goal**, in a goal's menu and drawer: allowed while every task of the goal is unstarted; removes
   the tasks (the task-removal service), the criteria and the goal in one transaction, and marks the shape's goal
   proposal `pending` again, so it can be edited and converted anew. Goals phase 2's Cancel covers started goals.
-- **Withdraw Decision**, in the decision's row in Knowledge: the `decisions.withdrawn_at` tombstone of M3's plan
-  (`docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md`, "decisions gain a withdrawn tombstone"); a withdrawn
-  decision leaves context packs and searches. M3 adopts the column as built.
+- **Withdraw Decision**, in the decision's row in Knowledge: M3's withdrawn tombstone as M3's plan designs it
+  (`docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md`, task 1 and K1/K3): `withdrawn_at`, `withdrawn_by`
+  and a required `withdrawn_reason`, and only the head of a supersede chain can be withdrawn (409 otherwise). A
+  withdrawn decision leaves context packs and searches. M3 adopts the columns as built.
 - A principle is withdrawn the same way once it exists (§10.1); a landing group is removed with its last unstarted
   task, or ungrouped from the task's drawer.
 
@@ -504,19 +624,20 @@ Convert has no undo of its own beyond these.
 (`packages/db/AGENTS.md`); the FTS5 index over finished tasks' titles and descriptions for `similar_tasks` is a
 hand-written `--custom` migration. Changes to existing tables: `sessions.workstream_id` nullable and
 `sessions.shape_id` added, with a check that exactly one is set (§5.1); `tasks.landing_group_id` (§10.4);
-`decisions.withdrawn_at` (§11); the `proposals` columns of §6; the project setting `oneWayPaths` (§7). New
+`decisions.withdrawn_at`, `withdrawn_by` and `withdrawn_reason` (§11); the `proposals` columns of §6; the project setting `oneWayPaths` (§7). New
 tables:
 
-| Table               | Holds                                                                                                                       |
-| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `shapes`            | id, project, title, state (`listening \| proposed \| converted`), SDK session id, propose unlocked, round, created, updated |
-| `shape_messages`    | §5.3                                                                                                                        |
-| `shape_files`       | a dropped file's name, type, size and stored path                                                                           |
-| `shape_findings`    | §7                                                                                                                          |
-| `shape_attachments` | kind (`mermaid \| chart \| mockup \| spec \| eval`), body, target (proposal key, or created goal or task)                   |
-| `shape_questions`   | text, for, source messages, the goal or task it belongs to                                                                  |
-| `shape_links`       | shape, proposal, created goal, task or decision                                                                             |
-| `landing_groups`    | id, project, title, the shape that proposed it                                                                              |
+| Table               | Holds                                                                                                                                                                  |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `shapes`            | id, project, title, state (`listening \| proposed \| converted`), origin (`app \| claude_code`), SDK session id, propose unlocked, round, created, updated             |
+| `shape_messages`    | §5.3                                                                                                                                                                   |
+| `shape_files`       | a dropped file's name, type, size and stored path                                                                                                                      |
+| `shape_findings`    | §7: effort or task, reviewer (`scope \| engineering \| rehearsal`), kind (`finding \| question`), severity, text, state, how resolved, the round and task hash it read |
+| `shape_rehearsals`  | task key, the hash it read, round, questions found (zero included)                                                                                                     |
+| `shape_attachments` | kind (`mermaid \| chart \| mockup \| spec \| eval`), body, target (proposal key, or created goal or task)                                                              |
+| `shape_questions`   | text, for, source messages, the goal or task it belongs to                                                                                                             |
+| `shape_links`       | shape, proposal, created goal, task or decision                                                                                                                        |
+| `landing_groups`    | id, project, title, the shape that proposed it                                                                                                                         |
 
 Contracts: `ShapeDto`, `ShapeMessageDto`, `PlanDraft`, the proposal bodies and the MCP tool inputs, in
 `@10db/contracts`. Events: `shape.changed`, `shape.message`, `proposal.created` and `proposal.resolved` (existing),
@@ -529,14 +650,16 @@ All in scope; this is build order. Each slice ships something usable.
 1. **Core.** `PlanDraft` and the Shape contracts; `shapes`, `shape_messages` and `shape_links`; Shape sessions on
    `sessions` (§5.1) with confinement (§5.2), turns and resume; `note_heard` and `propose_plan` with validation
    (dependencies across efforts included) and rounds; the Shape view with a read-only sidebar; Convert for goals,
-   loose tasks and decisions; Remove Draft Goal and Withdraw Decision (§11); Shape Work… in Factory. Acceptance: the
-   six-item list.
-2. **Editing and input.** Editable rows, pins, Restore, Drop; file drop and pasted screenshots; a check that macOS
-   dictation works in the Tauri window's input.
+   loose tasks and decisions; Remove Draft Goal and Withdraw Decision (§11); the guards (§5.3); Shape Work… in
+   Factory and Adopt a Plan…'s UI removed; the live confinement test (§15). Acceptance: the six-item list.
+2. **Editing and input.** Editable rows, pins, Restore, Drop; round marks and Why? (§6); file drop and pasted
+   screenshots; `start_shape` (§5.6); a check that macOS dictation works in the Tauri window's input.
 3. **Intelligence.** `gate.started`/`finished` and lane-time reconstruction; `similar_tasks`, bases, derived sizes;
-   the three Jev decisions in shadow, their scoring and Settings rows; records with principles (§10.1); questions.
-4. **Ceremony and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer agents,
-   findings; the proposed eval.
+   calibration shown back (§8); `find_records` (§5.5); the three Jev decisions in shadow, their scoring and Settings
+   rows; records with principles (§10.1); questions.
+4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
+   agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
+   Convert modal and the question-card measure (§7); the proposed eval.
 5. **Preview, attachments, reopen.** The factory preview; Mermaid, charts and mockups with §10.3's tests; Open
    conversation, the resume route, re-plan additions, changes and removals.
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
@@ -560,7 +683,38 @@ Table-driven and red first (`.claude/rules/testing.md`), with the fake Claude ad
 - landings: two unrelated tasks of one landing starting into one batch, a late task joining the open batch, a
   late task after the batch shipped making a new one, a landing with mixed placements refused;
 - accounts: a Shape session's usage counted on the project's account, a rate-limit pause queueing turns;
+- rehearsal: a question finding resolved by a `propose_plan` that changes the task, a task re-read after it
+  changes, Convert warning on an open question;
+- memory: `find_records` finding a recorded decision with its date, never returning another project's; a record
+  that supersedes a decision (the project's, or a `you` one) converting with `supersedes_id` set, and the superseded
+  one missing from search and the context pack; one naming a withdrawn, already superseded or foreign decision
+  refused;
+- provenance: a builder-authored row needing no source ids, a draft omitting a row's ids keeping its stored ones;
+- rehearsal turn: opening the Convert modal with an unrehearsed task starting one; a task rehearsed with no
+  questions not re-rehearsed; a listed task the turn skipped reading "Not rehearsed"; Convert Anyway stopping the
+  turn and converting even with a message queued; a builder edit resolving a question; editing one goal task
+  leaving its siblings' marks; an edit during the turn discarding the stale mark; an interrupted rehearsal leaving
+  no mark; the main session's `report_finding` refused and a reviewer's other Shape tools refused;
+- withdraw: a reason required, and withdrawing a decision that isn't the head of its chain refused (409);
+- round marks: a changed field marked, an unchanged row unmarked, Why? pointing at the cited messages;
+- `start_shape`: a conversation created with the summary first, a path-like file refused, an over-limit file
+  refused;
+- calibration: a finished converted task showing its actual, the Sizing line's share over a fixed set;
+- guards: a second Propose ignored, a Propose turn with no proposal noticed, a double Convert creating once, a
+  draft over a cap refused, an edit and a reconcile in both orders keeping the pin, the context handoff at 70%;
+- Jev opt-in: a project with it off making no judge call and logging nothing;
 - the view: one render test per state of the wireframe, axe in Playwright.
+
+**Beyond the fake adapter** (the builder's choice, 2026-11-02):
+
+- `apps/daemon/test/shape-session.live.test.ts`, outside `make gate` and run with `TENDB_LIVE_CLAUDE=1` after each
+  Claude Code or SDK upgrade, as `lane-sandbox.live.test.ts` is: a real Shape session's `Edit`, `Bash` and a `Read`
+  outside the checkout are refused, the main session's `report_finding` is denied through `agent_id`, and a
+  reviewer's `propose_plan` is denied.
+- **The Shape eval:** the three reference transcripts (the design doc's assignment: the 2026-11-02 six-item list,
+  one document-driven brainstorm, one single idea), each with what the builder actually filed, replayed through a
+  live session and scored on splits, kinds, sizes and dependencies against what was filed. It runs on any change to
+  Shape's prompts or tool contracts, with its baseline recorded, and needs the three transcripts first.
 
 ## 16. Open, and the spec's calls
 
@@ -577,7 +731,11 @@ Table-driven and red first (`.claude/rules/testing.md`), with the fake Claude ad
 
 **Decided by the builder (2026-11-02):** full scope, slices are order only ("I'd rather just boil the lake
 here"); Claude writes every field and Jev only nudges; proposals come as goals, loose tasks, records and questions;
-Convert's undos are built in slice 1; landings are in scope as slice 6.
+Convert's undos are built in slice 1; landings are in scope as slice 6. From the CEO review (scope expansion), the
+builder added: the rehearsal reviewer (§7), `find_records` (§5.5), calibration shown back (§8), round marks and Why?
+(§6), and `start_shape` (§5.6). In the same review the builder chose: Jev's Shape decisions as a per-project opt-in
+(§9), the robustness guards (§5.3, §6, §11), removing Adopt a Plan… from the UI (§4), and a live confinement test
+plus the Shape eval (§15).
 
 **The spec's calls, to confirm:**
 
@@ -589,4 +747,6 @@ Convert's undos are built in slice 1; landings are in scope as slice 6.
 - the size buckets (§8) and the estimate for unsized work (§10.2);
 - the shadow gate of 20 answers and 75% (§9);
 - slice 3 building the principles table if M3 hasn't (§10.1);
-- a late task joining its landing's open batch (§10.4).
+- a late task joining its landing's open batch (§10.4);
+- rehearsal running on opening the Convert modal (§7);
+- `start_shape` answering an id and a notice rather than a deep link, and its 256 KB text-only cap (§5.6).
