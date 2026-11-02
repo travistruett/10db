@@ -1,15 +1,16 @@
 import {
   GoalDigestDto,
-  type DigestDeviation,
-  type DigestWaitingOn,
   GoalDto,
   GoalListDto,
   GoalSummaryDto,
   mintId,
+  type DigestDeviation,
+  type DigestWaitingOn,
+  type GoalCriterionDto,
+  type GoalId,
   type GoalStatus,
   type UngroupedDigestDto,
 } from '@10db/contracts';
-import { projectViewDto } from './fixtures';
 
 const AT = '2026-10-13T12:00:00.000Z';
 
@@ -17,9 +18,9 @@ const AT = '2026-10-13T12:00:00.000Z';
 export function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
   return GoalDto.parse({
     id: mintId('Goal'),
-    projectId: projectViewDto().id,
-    title: 'Real areas',
-    objective: 'Areas.',
+    projectId: mintId('Project'),
+    title: 'Ship the importer',
+    objective: 'Importing a CSV works end to end.',
     caresMost: null,
     description: '',
     ownerId: mintId('Person'),
@@ -33,10 +34,34 @@ export function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
   });
 }
 
-export function goalDigestDto(overrides: Partial<GoalDigestDto> = {}): GoalDigestDto {
+export function goalCriterionDto(
+  goalId: GoalId,
+  overrides: Partial<GoalCriterionDto> = {},
+): GoalCriterionDto {
+  return {
+    id: mintId('GoalCriterion'),
+    goalId,
+    text: 'The greeting names the visitor',
+    check: 'accept',
+    taskId: null,
+    command: null,
+    commandApproved: false,
+    personId: null,
+    state: 'unproven',
+    proof: [],
+    provenAt: null,
+    provenBy: null,
+    ...overrides,
+  };
+}
+
+export function goalDigestDto(
+  goalId: GoalId,
+  overrides: Partial<GoalDigestDto> = {},
+): GoalDigestDto {
   return GoalDigestDto.parse({
-    goalId: mintId('Goal'),
-    status: 'running',
+    goalId,
+    status: 'not_started',
     since: null,
     progress: { done: 0, total: 3, cancelled: [] },
     openPullRequests: 0,
@@ -52,17 +77,17 @@ export function goalDigestDto(overrides: Partial<GoalDigestDto> = {}): GoalDiges
   });
 }
 
-/** A goal and its digest as the list answers them; `newItems` defaults to the digest's recent items. */
 export function goalSummaryDto(
-  overrides: { goal?: Partial<GoalDto>; digest?: Partial<GoalDigestDto>; newItems?: number } = {},
+  goal: Partial<GoalDto> = {},
+  digest: Partial<GoalDigestDto> = {},
+  newItems = 0,
 ): GoalSummaryDto {
-  const goal = goalDto(overrides.goal);
-  const digest = goalDigestDto({ goalId: goal.id, ...overrides.digest });
-  const recent =
-    digest.waitingOn.recent.length +
-    digest.deviations.recent.length +
-    digest.decisions.recent.length;
-  return GoalSummaryDto.parse({ goal, digest, newItems: overrides.newItems ?? recent });
+  const dto = goalDto(goal);
+  return GoalSummaryDto.parse({ goal: dto, digest: goalDigestDto(dto.id, digest), newItems });
+}
+
+export function goalListDto(...goals: GoalSummaryDto[]): GoalListDto {
+  return GoalListDto.parse({ goals, ungrouped: null });
 }
 
 export function digestDeviation(summary: string, at: string): DigestDeviation {
@@ -78,13 +103,6 @@ export function digestWaitingOn(title: string, at: string): DigestWaitingOn {
     assigneeName: 'You',
     at,
   };
-}
-
-export function goalListDto(
-  goals: readonly GoalSummaryDto[] = [],
-  ungrouped: UngroupedDigestDto | null = null,
-): GoalListDto {
-  return GoalListDto.parse({ goals, ungrouped });
 }
 
 export function ungroupedDto(

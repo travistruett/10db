@@ -55,12 +55,13 @@ function workstreams(...all: WorkstreamDto[]): RequestHandler {
 function goal(
   title: string,
   status: GoalDigestDto['status'],
-  extra: { digest?: Partial<GoalDigestDto>; goal?: Partial<GoalSummaryDto['goal']> } = {},
+  extra: {
+    digest?: Partial<GoalDigestDto>;
+    goal?: Partial<GoalSummaryDto['goal']>;
+    newItems?: number;
+  } = {},
 ): GoalSummaryDto {
-  return goalSummaryDto({
-    goal: { title, ...extra.goal },
-    digest: { status, ...extra.digest },
-  });
+  return goalSummaryDto({ title, ...extra.goal }, { status, ...extra.digest }, extra.newItems);
 }
 
 /** The row button of a goal: found by its title, which its accessible name starts with. */
@@ -106,7 +107,7 @@ describe('FactoryView goal list', () => {
         state: ws.state,
       })),
     });
-    serve(goals(goalListDto([], ungrouped)), workstreams(running, failed));
+    serve(goals({ ...goalListDto(), ungrouped }), workstreams(running, failed));
     renderApp('/factory');
 
     const row = await screen.findByRole('button', { name: /^Ungrouped/ });
@@ -125,28 +126,26 @@ describe('FactoryView goal list', () => {
   it('orders goals failed, waiting on you, running, not started, Ungrouped, then Done, all collapsed', async () => {
     const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
     serve(
-      goals(
-        goalListDto(
-          [
-            goal('Finished', 'done'),
-            goal('Idle', 'not_started'),
-            goal('Busy', 'running'),
-            goal('Asking', 'waiting_on_you'),
-            goal('Broken', 'failed'),
-            goal('Landing', 'shipping', { digest: { openPullRequests: 3 } }),
-          ],
-          ungroupedDto({
-            workstreams: [
-              {
-                workstreamId: loose.id,
-                taskId: loose.taskId,
-                taskTitle: 'Loose run',
-                state: 'RUNNING',
-              },
-            ],
-          }),
+      goals({
+        ...goalListDto(
+          goal('Finished', 'done'),
+          goal('Idle', 'not_started'),
+          goal('Busy', 'running'),
+          goal('Asking', 'waiting_on_you'),
+          goal('Broken', 'failed'),
+          goal('Landing', 'shipping', { digest: { openPullRequests: 3 } }),
         ),
-      ),
+        ungrouped: ungroupedDto({
+          workstreams: [
+            {
+              workstreamId: loose.id,
+              taskId: loose.taskId,
+              taskTitle: 'Loose run',
+              state: 'RUNNING',
+            },
+          ],
+        }),
+      }),
       workstreams(loose),
     );
     renderApp('/factory');
@@ -166,10 +165,10 @@ describe('FactoryView goal list', () => {
   it('puts the most recently changed goal first within a status', async () => {
     serve(
       goals(
-        goalListDto([
+        goalListDto(
           goal('Older', 'running', { goal: { updatedAt: hoursAgo(5) } }),
           goal('Newer', 'running', { goal: { updatedAt: hoursAgo(1) } }),
-        ]),
+        ),
       ),
     );
     renderApp('/factory');
@@ -209,7 +208,7 @@ describe('FactoryView goal list', () => {
       line: 'Not started · 11 tasks · Start Ready Tasks on the Board',
     },
   ])('says $name in one line', async ({ summary, line }) => {
-    serve(goals(goalListDto([summary])));
+    serve(goals(goalListDto(summary)));
     renderApp('/factory');
     expect((await screen.findByRole('button', { name: /^Real areas/ })).textContent).toContain(
       line,
@@ -221,12 +220,13 @@ describe('FactoryView goal list', () => {
     const item = (n: number) => digestDeviation(`Deviation ${String(n)}`, hoursAgo(1));
     serve(
       goals(
-        goalListDto([
+        goalListDto(
           goal('Real areas', 'running', {
             digest: { since, deviations: { recent: [item(1), item(2), item(3)], earlier: [] } },
+            newItems: 3,
           }),
           goal('Quiet', 'running'),
-        ]),
+        ),
       ),
     );
     renderApp('/factory');
@@ -257,14 +257,11 @@ describe('FactoryView goal detail', () => {
       prUrl: 'https://github.com/acme/widgets/pull/9',
     });
     const withBatch = { ...wsA, batchId: batch.id };
-    const summaryA = goalSummaryDto({
-      goal: { ...a, taskIds: [wsA.taskId] },
-      digest: { status: 'running', progress: progress(1, 3) },
-    });
-    const summaryB = goalSummaryDto({
-      goal: { ...b, taskIds: [wsB.taskId] },
-      digest: { status: 'running' },
-    });
+    const summaryA = goalSummaryDto(
+      { ...a, taskIds: [wsA.taskId] },
+      { status: 'running', progress: progress(1, 3) },
+    );
+    const summaryB = goalSummaryDto({ ...b, taskIds: [wsB.taskId] }, { status: 'running' });
     return { a, b, wsA: withBatch, wsB, batch, project, summaryA, summaryB };
   }
 
@@ -272,7 +269,7 @@ describe('FactoryView goal detail', () => {
     const { summaryA, summaryB, wsA, wsB, batch, project } = fixtures();
     const opened: string[] = [];
     serve(
-      goals(goalListDto([summaryA, summaryB])),
+      goals(goalListDto(summaryA, summaryB)),
       workstreams(wsA, wsB),
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
@@ -306,7 +303,7 @@ describe('FactoryView goal detail', () => {
 
   it('closes an open goal on its row and on Escape', async () => {
     const { summaryA, wsA } = fixtures();
-    serve(goals(goalListDto([summaryA])), workstreams(wsA), digests([], summaryA.digest));
+    serve(goals(goalListDto(summaryA)), workstreams(wsA), digests([], summaryA.digest));
     renderApp('/factory');
 
     const row = await screen.findByRole('button', { name: /^Real areas/ });
@@ -329,8 +326,7 @@ describe('FactoryView goal detail', () => {
   it('shows the digest rows, Δ rows labelled since the last visit, with Show Earlier for the rest', async () => {
     const { summaryA, wsA } = fixtures();
     const since = hoursAgo(3);
-    const digest = goalDigestDto({
-      goalId: summaryA.goal.id,
+    const digest = goalDigestDto(summaryA.goal.id, {
       status: 'running',
       since,
       progress: progress(6, 11),
@@ -358,7 +354,7 @@ describe('FactoryView goal detail', () => {
       },
       cost: { tokens: 412_000, dollars: 3.5, sessions: 14 },
     });
-    serve(goals(goalListDto([{ ...summaryA, digest }])), workstreams(wsA), digests([], digest));
+    serve(goals(goalListDto({ ...summaryA, digest })), workstreams(wsA), digests([], digest));
     renderApp('/factory');
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
@@ -388,7 +384,7 @@ describe('FactoryView goal detail', () => {
   it('shows skeleton lines while the digest loads, then an error inside the goal when it fails', async () => {
     const { summaryA, wsA } = fixtures();
     serve(
-      goals(goalListDto([summaryA])),
+      goals(goalListDto(summaryA)),
       workstreams(wsA),
       http.get(daemonUrl('/goals/:goalId/digest'), () =>
         HttpResponse.json({ error: 'boom', message: 'The digest broke' }, { status: 500 }),
@@ -414,11 +410,11 @@ describe('FactoryView goal detail', () => {
       stepIndex: 0,
       contextPct: null,
     });
-    const summary = goalSummaryDto({
-      goal: { title: 'Real areas', taskIds: [queued.taskId] },
-      digest: { status: 'not_started' },
-    });
-    serve(goals(goalListDto([summary])), workstreams(queued), digests([], summary.digest));
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [queued.taskId] },
+      { status: 'not_started' },
+    );
+    serve(goals(goalListDto(summary)), workstreams(queued), digests([], summary.digest));
     renderApp('/factory');
 
     const row = await screen.findByRole('button', { name: /^Real areas/ });
@@ -437,11 +433,11 @@ describe('FactoryView goal detail', () => {
 
 describe('FactoryView sessions', () => {
   function open(ws: WorkstreamDto, over: (RequestHandler | WebSocketHandler)[] = []) {
-    const summary = goalSummaryDto({
-      goal: { title: 'Real areas', taskIds: [ws.taskId] },
-      digest: { status: 'failed' },
-    });
-    serve(goals(goalListDto([summary])), workstreams(ws), digests([], summary.digest), ...over);
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [ws.taskId] },
+      { status: 'failed' },
+    );
+    serve(goals(goalListDto(summary)), workstreams(ws), digests([], summary.digest), ...over);
     renderApp('/factory');
   }
 

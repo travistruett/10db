@@ -37,9 +37,11 @@ tasks:
 ---
 `;
 
-/** A disposable repository for the worktree-mode project; git config comes from nowhere but this repo. */
-function createRepository(): void {
-  mkdirSync(WORKTREE_REPO, { recursive: true });
+const GOALS_REPO = join(E2E_DIR, 'goals-repo');
+
+/** A disposable repository for a project; git config comes from nowhere but this repo. */
+function createRepository(repo: string = WORKTREE_REPO): void {
+  mkdirSync(repo, { recursive: true });
   const globalConfig = join(E2E_DIR, 'worktree-gitconfig');
   writeFileSync(globalConfig, '');
   const env = {
@@ -48,7 +50,7 @@ function createRepository(): void {
     GIT_CONFIG_GLOBAL: globalConfig,
   };
   const git = (...args: string[]): void => {
-    execFileSync('git', args, { cwd: WORKTREE_REPO, env, stdio: 'ignore' });
+    execFileSync('git', args, { cwd: repo, env, stdio: 'ignore' });
   };
   git('init', '-b', 'main');
   git('config', 'maintenance.auto', 'false');
@@ -56,7 +58,7 @@ function createRepository(): void {
   git('config', 'user.email', 'e2e@10db.invalid');
   git('config', 'user.name', '10db e2e');
   git('config', 'commit.gpgsign', 'false');
-  writeFileSync(join(WORKTREE_REPO, 'README.md'), '# worktree e2e\n');
+  writeFileSync(join(repo, 'README.md'), '# worktree e2e\n');
   git('add', 'README.md');
   git('commit', '-m', 'Initial commit');
 }
@@ -315,6 +317,108 @@ test.describe('the Board with several open batches', () => {
       }
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-factory-${String(size.width)}.png`) });
+      }
+    });
+  }
+});
+
+const GOAL_TITLES = ['Greet the visitor', 'Say farewell', 'Tidy the rooms'] as const;
+
+/** A brief with two tasks, so its goal has open tasks and earns a strip. */
+function briefOf(title: string, n: number): string {
+  return [
+    '---',
+    `title: ${title}`,
+    'objective: Every visitor is looked after.',
+    'tasks:',
+    `  - key: first-${String(n)}`,
+    `    title: ${title}, part one`,
+    '    areas: [docs]',
+    `  - key: second-${String(n)}`,
+    `    title: ${title}, part two`,
+    '    areas: [docs]',
+    '---',
+    '',
+  ].join('\n');
+}
+
+/** A project with three goals, each with open tasks, adopted from briefs through the daemon's own route. */
+async function seedGoals(request: Page['request']): Promise<string> {
+  createRepository(GOALS_REPO);
+  const project = await request.post(`${daemonUrl}/projects`, {
+    headers: auth,
+    data: {
+      name: 'goals',
+      repoPath: GOALS_REPO,
+      gateCommand: 'true',
+      areas: [{ name: 'docs', globs: ['**'] }],
+      handoffPct: 40,
+      nudgePct: 50,
+    },
+  });
+  expect(project.ok()).toBe(true);
+  const projectId = Created.parse(await project.json()).id;
+  for (const [n, title] of GOAL_TITLES.entries()) {
+    const adopted = await request.post(`${daemonUrl}/projects/${projectId}/goals/adopt`, {
+      headers: auth,
+      data: { text: briefOf(title, n) },
+    });
+    expect(adopted.status()).toBe(201);
+  }
+  return projectId;
+}
+
+test.describe('the Board with three goals', () => {
+  let projectId = '';
+
+  test.beforeAll(async ({ playwright }) => {
+    const request = await playwright.request.newContext();
+    projectId = await seedGoals(request);
+    await request.dispose();
+  });
+
+  for (const size of SIZES) {
+    const label = `${String(size.width)}x${String(size.height)}`;
+
+    test(`shows the goal strips and keeps the columns' minimum height at ${label}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await claudeIsInstalled(page);
+      await page.addInitScript((id: string) => {
+        window.localStorage.setItem('tendb.project', JSON.stringify(id));
+      }, projectId);
+      await page.goto('/board');
+      await expect(page.getByTestId('board-columns')).toBeVisible();
+
+      // One slim strip per goal, above the columns, and no goal among the cards.
+      const above = page.getByTestId('board-above-columns');
+      await expect(above.getByTestId('goal-strip')).toHaveCount(GOAL_TITLES.length);
+      for (const title of GOAL_TITLES) {
+        await expect(above.getByRole('button', { name: title })).toBeVisible();
+        // The goal's title shows in the columns only as the dimmed label on its two tasks' cards.
+        const inColumns = page.getByTestId('board-columns').getByText(title, { exact: true });
+        await expect(inColumns.and(page.getByTestId('task-card-goal'))).toHaveCount(2);
+        await expect(
+          inColumns.and(page.locator(':not([data-testid="task-card-goal"])')),
+        ).toHaveCount(0);
+      }
+
+      // The strips leave the columns their minimum height; where the window is short the page scrolls.
+      await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
+      expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(
+        COLUMNS_MIN_HEIGHT,
+      );
+      await expectColumnsBottomReachable(page);
+      if (size.roomy) expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
+
+      // A strip opens its goal's drawer.
+      await above.getByRole('button', { name: GOAL_TITLES[0] }).click();
+      const drawer = page.getByRole('dialog', { name: 'Goal' });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByText('Every visitor is looked after.')).toBeVisible();
+      if (SHOTS) {
+        await page.screenshot({ path: join(SHOTS, `e2e-board-goals-${String(size.width)}.png`) });
       }
     });
   }

@@ -5,7 +5,8 @@ import { useOpenGoal } from '../../daemon/goal-queries';
 import { useNow } from '../../shell/relative';
 import { GoalDetail, UngroupedDetail } from './goal-detail';
 import { GoalRow } from './goal-row';
-import { GOAL_COLORS, groupGoals, ungroupedLine, verdictLine } from './goal-status';
+import { GOAL_STATUS_LOOK } from '../board/goal-status';
+import { groupGoals, ungroupedLine, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
 
 /** The row key of the Ungrouped group, beside the goals' ids. */
@@ -49,7 +50,7 @@ export function GoalList({ list }: { readonly list: GoalListDto }) {
         title={summary.goal.title}
         line={verdictLine(summary.digest)}
         news={newsOf(summary, now)}
-        color={GOAL_COLORS[summary.digest.status]}
+        color={GOAL_STATUS_LOOK[summary.digest.status].color}
         expanded={expanded}
         onToggle={() => {
           toggleGoal(summary);
@@ -79,7 +80,7 @@ export function GoalList({ list }: { readonly list: GoalListDto }) {
         <GoalRow
           title="Ungrouped"
           line={ungroupedLine(ungrouped)}
-          color={GOAL_COLORS[ungrouped.status]}
+          color={GOAL_STATUS_LOOK[ungrouped.status].color}
           expanded={openKey === UNGROUPED}
           onToggle={() => {
             setOpenKey(openKey === UNGROUPED ? null : UNGROUPED);

@@ -5,7 +5,6 @@ import {
   SYSTEM_COLUMN_LABEL,
   RiskTag,
   TaskStatus,
-  WorkspaceMode,
   type BatchDto,
   type FlowId,
   type Notice,
@@ -55,6 +54,9 @@ import {
   type LandingDraft,
 } from './landing-draft';
 import { LandingField } from './landing-field';
+import { placementOpen } from './placement';
+import { PlacementBadge } from './placement-badge';
+import { PlacementChoice } from './placement-choice';
 import { ExternalLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
@@ -86,7 +88,11 @@ export interface TaskDrawerProps {
   readonly batches?: readonly BatchDto[];
   /** Every workstream, so the batch knows its members; used for Ship anyway and fix tasks. */
   readonly workstreams?: readonly WorkstreamDto[];
-  readonly workspaceMode?: WorkspaceMode;
+  /**
+   * Whether the project delivers by pull request, the only delivery where a task can run in a
+   * separate copy; the placement control shows only then, and only while the placement is open.
+   */
+  readonly placementEditable?: boolean;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
   /** Starts the task afresh: offered when a failed run shipped anyway and its pull request closed. */
@@ -115,7 +121,7 @@ export function TaskDrawer({
   batch,
   batches = [],
   workstreams = [],
-  workspaceMode = WorkspaceMode.Shared,
+  placementEditable = false,
   gateCommand = null,
   onStart,
   place,
@@ -124,6 +130,9 @@ export function TaskDrawer({
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
+  // The placement is saved on its own the moment it is chosen, so its refusal stays beside it.
+  const placementPatch = usePatchTask();
+  const placementIsOpen = placementOpen(task, workstream?.state);
   const [landing, setLanding] = useState<LandingDraft>(() => draftOf(task.landing));
   const [landingError, setLandingError] = useState<string | null>(null);
   // Once the task has run its batch decides where its pull request lands.
@@ -257,12 +266,7 @@ export function TaskDrawer({
         ) : null}
         {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
         {batch ? (
-          <BatchPanel
-            batch={batch}
-            workstreams={workstreams}
-            workspaceMode={workspaceMode}
-            gateCommand={gateCommand}
-          />
+          <BatchPanel batch={batch} workstreams={workstreams} gateCommand={gateCommand} />
         ) : null}
         <TextInput
           aria-label="Title"
@@ -277,6 +281,7 @@ export function TaskDrawer({
           <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
             {columnName}
           </Badge>
+          {placementIsOpen ? <PlacementBadge task={task} /> : null}
           {areasEditable
             ? null
             : task.areas.map((area) => (
@@ -288,6 +293,23 @@ export function TaskDrawer({
             <Text size="xs" c="dimmed">{`Waits on ${waitsOn.join(', ')}`}</Text>
           ) : null}
         </Group>
+        {placementIsOpen && placementEditable ? (
+          <Stack gap={4}>
+            <PlacementChoice
+              task={task}
+              showReason={false}
+              pending={placementPatch.isPending}
+              onChange={(workspaceMode) => {
+                placementPatch.mutate({ taskId: task.id, patch: { workspaceMode } });
+              }}
+            />
+            {placementPatch.error ? (
+              <Text size="sm" c="red" role="alert">
+                {placementPatch.error.message}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : null}
         {areasEditable ? (
           <MultiSelect
             label="Areas"

@@ -3,10 +3,10 @@ import {
   BoardStatus,
   Delivery,
   TaskStatus,
-  WorkspaceMode,
   WorkstreamState,
   type BatchDto,
   type BatchId,
+  type GoalId,
   type ProjectId,
   type ProjectViewDto,
   type TaskDto,
@@ -14,11 +14,12 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, ScrollArea, Stack, Text } from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, ScrollArea, Select, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
+import { useGoals } from '../../daemon/goal-queries';
 import {
   useAbandonBatch,
   useBatches,
@@ -40,6 +41,8 @@ import { BatchStrip, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
+import { GoalDrawer } from './goal-drawer';
+import { GoalStrip, goalsWithOpenTasks } from './goal-strip';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
@@ -48,6 +51,7 @@ import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { ciLine } from './ci-line';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
+import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
 import { canRunNext } from './run-next';
 import { cardSummary, TaskCard } from './task-card';
@@ -68,6 +72,8 @@ const NEW_TASK_FORM_ID = 'new-task-form';
 
 /** The columns never shrink below this, however many strips sit above them. */
 const COLUMNS_MIN_HEIGHT = 320;
+/** The goal filter's option for no filter; a goal's ID never has this form. */
+const ALL_GOALS = 'all';
 /** The strips together take at most this share of the board's height. */
 const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
@@ -159,6 +165,8 @@ interface BoardColumnsProps {
   readonly onAddTask: () => void;
   /** The task a `?task=` link names: its drawer is open until the builder opens or closes another. */
   readonly linkedId: TaskId | null;
+  /** Each goal's title, for the label on its tasks' cards. */
+  readonly goalTitles: ReadonlyMap<GoalId, string>;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -173,6 +181,7 @@ function BoardColumns({
   started,
   onAddTask,
   linkedId,
+  goalTitles,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
@@ -313,7 +322,9 @@ function BoardColumns({
                 landing={landingOf(task, batch)}
                 startNote={noteOf(task)}
                 place={ws ? places.get(ws.id) : undefined}
+                placementShown={placementOpen(task, ws?.state)}
                 peers={peers}
+                goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
               />
             );
           }}
@@ -346,6 +357,7 @@ function BoardColumns({
               noteOf(task),
               ws ? places.get(ws.id) : undefined,
               allBatches,
+              placementOpen(task, ws?.state) ? placementLabel(task.workspaceMode) : null,
             );
           }}
           renderMenu={(task) => {
@@ -446,7 +458,7 @@ function BoardColumns({
           batches={allBatches}
           workstreams={workstreams}
           {...(openPlace !== undefined ? { place: openPlace } : {})}
-          workspaceMode={project.workspaceMode}
+          placementEditable={pullRequests}
           gateCommand={project.gateCommand}
           areaNames={project.areas.map((area) => area.name)}
           {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
@@ -462,11 +474,12 @@ function BoardColumns({
   );
 }
 
-/** Worktree mode shows every open batch in the daemon's order, newest first; shared mode shows the one current batch. */
+/**
+ * Every unfinished batch of both kinds, in the daemon's order, newest first: a separate copy's
+ * batch beside the shared one. With none open, the project's current batch stands in.
+ */
 function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
-  if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
-    return project.openBatches;
-  }
+  if (project.openBatches.length > 0) return project.openBatches;
   return project.currentBatch ? [project.currentBatch] : [];
 }
 
@@ -485,11 +498,27 @@ export function BoardView() {
     error: null,
   });
   const [sheetOpen, sheet] = useDisclosure(false);
+  const goals = useGoals(project?.id ?? null);
+  // The goal whose drawer is open and the goal the filter shows, by ID so they follow the refetched list.
+  const [openGoalId, setOpenGoalId] = useState<GoalId | null>(null);
+  const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(null);
+  // The goal whose ready tasks the batch sheet is proposing.
+  const [sheetGoalId, setSheetGoalId] = useState<GoalId | null>(null);
 
   const taskList = tasks.data ?? [];
+  const goalList = goals.data?.goals ?? [];
+  const goalStrips = goalsWithOpenTasks(goalList, taskList);
+  const openGoal = goalList.find((g) => g.goal.id === openGoalId);
+  const sheetGoal = goalList.find((g) => g.goal.id === sheetGoalId);
+  // A filter on a goal that is gone (another project's, or deleted) shows everything.
+  const filterGoal = goalList.find((g) => g.goal.id === filterGoalId);
+  const goalTitles = new Map(goalList.map((g) => [g.goal.id, g.goal.title] as const));
   // Without the columns a parked card has nowhere to go, so it is left out rather than shown in a derived column.
   const shownTasks = columns.data ? taskList : taskList.filter((t) => t.boardColumnId === null);
-  const layout = boardLayout(columns.data ?? [], shownTasks);
+  const visibleTasks = filterGoal
+    ? shownTasks.filter((t) => t.goalId === filterGoal.goal.id)
+    : shownTasks;
+  const layout = boardLayout(columns.data ?? [], visibleTasks);
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const batchList = batches.data ?? [];
   const batchById = new Map(batchList.map((b) => [b.id, b]));
@@ -497,12 +526,28 @@ export function BoardView() {
   const strips = project ? sharedBatches(stripBatches(project), workstreams.data ?? []) : [];
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
-  const readyCount = layout.find(isReady)?.tasks.length ?? 0;
+  // The header's Start Ready Tasks proposes from every ready task, so its count ignores the goal filter.
+  const readyCount = boardLayout(columns.data ?? [], shownTasks).find(isReady)?.tasks.length ?? 0;
 
   return (
     <Stack flex="1 1 0px">
       <Group justify="flex-end" align="flex-end">
         <Group align="flex-end">
+          {goalList.length > 0 ? (
+            <Select
+              label="Goal"
+              w={220}
+              allowDeselect={false}
+              data={[
+                { value: ALL_GOALS, label: 'All goals' },
+                ...goalList.map((g) => ({ value: g.goal.id, label: g.goal.title })),
+              ]}
+              value={filterGoal?.goal.id ?? ALL_GOALS}
+              onChange={(id) => {
+                setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+              }}
+            />
+          ) : null}
           {project ? (
             <SplitButton
               leftSection={<IconPlus size={16} stroke={1.5} />}
@@ -584,7 +629,7 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {strips.length > 0 ? (
+      {strips.length > 0 || goalStrips.length > 0 ? (
         <ScrollArea.Autosize
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
@@ -593,6 +638,15 @@ export function BoardView() {
           data-testid="board-above-columns"
         >
           <Stack gap="xs">
+            {goalStrips.map((summary) => (
+              <GoalStrip
+                key={summary.goal.id}
+                summary={summary}
+                onOpen={() => {
+                  setOpenGoalId(summary.goal.id);
+                }}
+              />
+            ))}
             {strips.map((batch) => (
               <BatchStrip key={batch.id} batch={batch} workstreams={workstreams.data ?? []} />
             ))}
@@ -612,11 +666,38 @@ export function BoardView() {
           started={started}
           onAddTask={taskModal.open}
           linkedId={task ?? null}
+          goalTitles={goalTitles}
+        />
+      ) : null}
+
+      {openGoal ? (
+        <GoalDrawer
+          key={openGoal.goal.id}
+          summary={openGoal}
+          tasks={taskList.filter((t) => t.goalId === openGoal.goal.id)}
+          onStartReady={() => {
+            setSheetGoalId(openGoal.goal.id);
+            setOpenGoalId(null);
+          }}
+          onClose={() => {
+            setOpenGoalId(null);
+          }}
         />
       ) : null}
 
       {project ? (
         <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
+      ) : null}
+      {project && sheetGoal ? (
+        <BatchSheet
+          key={sheetGoal.goal.id}
+          project={project}
+          opened
+          goal={{ id: sheetGoal.goal.id, title: sheetGoal.goal.title }}
+          onClose={() => {
+            setSheetGoalId(null);
+          }}
+        />
       ) : null}
       {project ? (
         <FormModal

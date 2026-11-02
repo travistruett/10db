@@ -166,12 +166,13 @@ export function createAccountRuntime(opts: {
           // Spend is account-wide, so every project's cap card shows the same running total.
           const cap = capStatus(db, account, opts.clock.now());
           if (!cap) return;
-          const body = capCard(account, cap).body;
+          // The raise it offers follows the spend too, so the option and detail are rewritten with the body.
+          const { body, options = [], detail } = capCard(account, cap);
           const foldKey = accountFoldKey(account.id, AccountPauseReason.MonthlyCap);
           for (const project of listProjects(db)) {
             if (project.accountId !== account.id) continue;
             const open = findOpenByFoldKey(db, project.id, foldKey);
-            if (open) opts.inbox.reword(open.id, body);
+            if (open) opts.inbox.reword(open.id, body, { options, detail });
           }
           return;
         }

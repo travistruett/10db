@@ -5,32 +5,9 @@ import {
   type GoalSummaryDto,
   type UngroupedDigestDto,
 } from '@10db/contracts';
-import type { MantineColor } from '@mantine/core';
+import { GOAL_STATUS_LOOK } from '../board/goal-status';
 
 const G = GoalStatus;
-
-/** DESIGN.md status colors: red failed, yellow waiting on a person, orange paused, blue running, gray not started, green done. */
-export const GOAL_COLORS: Readonly<Record<Status, MantineColor>> = {
-  [G.Failed]: 'red',
-  [G.WaitingOnYou]: 'yellow',
-  [G.WaitingOnSomeone]: 'yellow',
-  [G.Paused]: 'orange',
-  [G.Running]: 'blue',
-  [G.Shipping]: 'blue',
-  [G.NotStarted]: 'gray',
-  [G.Done]: 'green',
-};
-
-export const GOAL_LABELS: Readonly<Record<Status, string>> = {
-  [G.Failed]: 'Failed',
-  [G.WaitingOnYou]: 'Waiting on you',
-  [G.WaitingOnSomeone]: 'Waiting on someone',
-  [G.Paused]: 'Paused',
-  [G.Running]: 'Running',
-  [G.Shipping]: 'Shipping',
-  [G.NotStarted]: 'Not started',
-  [G.Done]: 'Done',
-};
 
 /** The list's order (§8): the statuses that need the builder first, then what is moving, then what waits. */
 const ORDER: readonly Status[] = [
@@ -59,7 +36,7 @@ export function progressLine(digest: GoalDigestDto): string {
 
 /** A goal's one-line verdict, as the collapsed row says it. */
 export function verdictLine(digest: GoalDigestDto): string {
-  const label = GOAL_LABELS[digest.status];
+  const label = GOAL_STATUS_LOOK[digest.status].label;
   const total = digest.progress.total;
   switch (digest.status) {
     case G.Failed:

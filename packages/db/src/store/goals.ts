@@ -17,7 +17,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import type { z } from 'zod';
-import { and, asc, eq, or } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -128,19 +128,35 @@ function builderId(db: DbReader): PersonId {
   return builder.id;
 }
 
+/**
+ * An exact handle (unique) wins. Otherwise the name must belong to exactly one person: a name
+ * is not unique, and guessing between two people would hand the acceptance to the wrong one.
+ */
 function personNamed(db: DbReader, name: string, where: string): PersonId {
-  const person = db
+  const byHandle = db
     .select({ id: schema.people.id })
     .from(schema.people)
-    .where(or(eq(schema.people.handle, name), eq(schema.people.name, name)))
+    .where(eq(schema.people.handle, name))
     .get();
+  if (byHandle) return byHandle.id;
+  const byName = db
+    .select({ id: schema.people.id })
+    .from(schema.people)
+    .where(eq(schema.people.name, name))
+    .limit(2)
+    .all();
+  const [person, other] = byName;
   if (!person) throw new InvalidError(`${where}: nobody is called ${name}`);
+  if (other)
+    throw new InvalidError(
+      `${where}: more than one person is called ${name}; name them by handle instead`,
+    );
   return person.id;
 }
 
 /**
  * The brief's tasks, each after the tasks it depends on and otherwise in brief order. Refuses a
- * repeated key, a dependency on a key no task has, and a cycle.
+ * repeated key, a dependency on a key no task has, a dependency listed twice, and a cycle.
  */
 function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
   const byKey = new Map<string, GoalBriefTask>();
@@ -148,10 +164,15 @@ function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
     if (byKey.has(task.key)) throw new InvalidError(`Two tasks have the key ${task.key}`);
     byKey.set(task.key, task);
   }
-  for (const task of tasks)
-    for (const key of task.depends_on)
+  for (const task of tasks) {
+    const seen = new Set<string>();
+    for (const key of task.depends_on) {
       if (!byKey.has(key))
         throw new InvalidError(`Task ${task.key} depends on ${key}, and no task has that key`);
+      if (seen.has(key)) throw new InvalidError(`Task ${task.key} depends on ${key} twice`);
+      seen.add(key);
+    }
+  }
 
   const ordered: GoalBriefTask[] = [];
   const done = new Set<string>();
