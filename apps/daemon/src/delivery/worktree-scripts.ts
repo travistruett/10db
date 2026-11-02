@@ -1,5 +1,5 @@
-import { lstatSync, readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { lstatSync, readdirSync, readFileSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
 
 /** The largest config file read; a bigger one counts as absent. */
@@ -17,6 +17,26 @@ function readData(path: string): unknown {
     const info = lstatSync(path);
     if (!info.isFile() || info.size > MAX_CONFIG_BYTES) return undefined;
     return parse(readFileSync(path, 'utf8')) as unknown;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The data in `file`, a path the project names, when it stays inside `root`: not above it, not
+ * through a linked directory, and not itself a link. Undefined otherwise, or when `readData` can't.
+ */
+function readInside(root: string, file: string): unknown {
+  try {
+    const path = resolve(root, file);
+    const within = (base: string, target: string): boolean => {
+      const rel = relative(base, target);
+      return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+    };
+    if (!within(root, path)) return undefined;
+    // A linked directory on the way would lead out of the copy even though the path reads as inside.
+    if (!within(realpathSync(root), realpathSync(path))) return undefined;
+    return readData(path);
   } catch {
     return undefined;
   }
@@ -53,7 +73,9 @@ const valid = (names: Set<string>): string[] =>
 /**
  * Which packages the project lets run their install scripts: `allowBuilds` entries set to true
  * (pnpm-workspace.yaml), the older `onlyBuiltDependencies` lists, and `dangerouslyAllowAllBuilds`
- * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Read as
+ * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. An
+ * `onlyBuiltDependenciesFile` is read like the other config files, only when its path stays inside
+ * `root` and reaches no link. Read as
  * data from the copy's own files, which hold the base's content at the cut; nothing in them runs.
  */
 export function buildPolicy(root: string, legacy = false): BuildPolicy {
@@ -78,17 +100,15 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   for (const source of sources) {
     if (!legacy && source['dangerouslyAllowAllBuilds'] === true) all = true;
     namesIn(source['onlyBuiltDependencies'], allowed);
-    if (
-      Array.isArray(source['onlyBuiltDependencies']) ||
-      typeof source['onlyBuiltDependenciesFile'] === 'string'
-    )
-      limited = true;
+    const file = source['onlyBuiltDependenciesFile'];
+    if (typeof file === 'string') namesIn(readInside(root, file), allowed);
+    if (Array.isArray(source['onlyBuiltDependencies']) || typeof file === 'string') limited = true;
     // pnpm 10.1 added ignoredBuiltDependencies; pnpm 9 and earlier don't read it.
     if (!legacy) namesIn(source['ignoredBuiltDependencies'], denied);
     namesIn(source['neverBuiltDependencies'], denied);
   }
   // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list (or a file of
-  // them, which isn't read here) limits them: an empty list builds nothing.
+  // them) limits them: an empty or unreadable list builds nothing.
   if (legacy && !limited) all = true;
   return { all, allowed: valid(allowed), denied: valid(denied) };
 }
