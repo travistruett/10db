@@ -24,7 +24,7 @@
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, globSync, readFileSync } from 'node:fs';
+import { globSync, lstatSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -227,6 +227,34 @@ function changedFiles(base) {
 }
 
 /**
+ * The changed files that can be formatted and linted: those lstat can see. A deleted file (ENOENT,
+ * ENOTDIR) drops out silently. A file the sandbox denies reading (apps/daemon/.env.example in a
+ * lane) passes existsSync but fails lstat with EPERM, and Prettier lstats every path it is named
+ * before it applies .prettierignore, so one such path would fail the whole format step. It is
+ * skipped with one printed line, so the skip stays visible; it still counts toward which packages
+ * are checked.
+ * @param {string[]} files repo-relative
+ */
+function readableFiles(files) {
+  /** @type {string[]} */
+  const kept = [];
+  /** @type {string[]} */
+  const unreadable = [];
+  for (const file of files) {
+    try {
+      lstatSync(join(root, file));
+      kept.push(file);
+    } catch (error) {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') unreadable.push(file);
+    }
+  }
+  if (unreadable.length > 0)
+    console.log(`check-changed: skipping what it cannot read: ${unreadable.join(', ')}`);
+  return kept;
+}
+
+/**
  * A step to run: its name, and the command with its arguments.
  * @typedef {{ name: string, command: string, args: string[] }} Step
  * @typedef {{ name: string, ok: boolean, seconds: number, output: string }} StepResult
@@ -378,13 +406,14 @@ async function main() {
   console.log(
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );
-  const present = files.filter((f) => existsSync(join(root, f)));
-  const formatTargets = plan.format.filter((f) => existsSync(join(root, f)));
+  const readable = readableFiles(files);
+  const present = new Set(readable);
+  const formatTargets = plan.format.filter((f) => present.has(f));
   const lintable = (/** @type {string} */ f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f);
   // The pre-check lints the changed files only; the changed-packages check lints whole packages.
   const lintTargets = precheck
-    ? present.filter(lintable)
-    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && existsSync(join(root, f)))];
+    ? readable.filter(lintable)
+    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && present.has(f))];
   /** @type {Step[]} */
   const together = [];
   if (formatTargets.length > 0)

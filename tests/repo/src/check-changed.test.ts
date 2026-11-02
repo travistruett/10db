@@ -296,6 +296,56 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     'pnpm run typecheck',
   ];
 
+  it('skips a changed file it cannot stat, naming it, and a deleted one silently', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'scripts'));
+    copyFileSync(
+      join(repoRoot, 'scripts/check-changed.mjs'),
+      join(dir, 'scripts/check-changed.mjs'),
+    );
+    mkdirSync(join(dir, 'apps/x/src'), { recursive: true });
+    mkdirSync(join(dir, 'apps/x/locked'));
+    writeFileSync(join(dir, 'apps/x/package.json'), '{"name":"x"}');
+    writeFileSync(join(dir, 'apps/x/src/a.ts'), 'export {};\n');
+    writeFileSync(join(dir, 'apps/x/locked/b.ts'), 'export {};\n');
+    // A directory without search permission makes lstat of what is inside fail with EACCES, as the
+    // sandbox's read deny list does for apps/daemon/.env.example.
+    chmodSync(join(dir, 'apps/x/locked'), 0o000);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const log = join(dir, 'commands.log');
+    const stub = join(bin, 'pnpm');
+    writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "pnpm $*" >> '${log}'\n`);
+    chmodSync(stub, 0o755);
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          'scripts/check-changed.mjs',
+          '--precheck',
+          '--',
+          'apps/x/src/a.ts',
+          'apps/x/src/gone.ts',
+          'apps/x/locked/b.ts',
+        ],
+        { cwd: dir, encoding: 'utf8', env: { PATH: bin } },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        'check-changed: skipping what it cannot read: apps/x/locked/b.ts\n',
+      );
+      expect(result.stdout).not.toContain('gone.ts');
+      const commands = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+      expect(commands).toContain('pnpm exec prettier --check --ignore-unknown apps/x/src/a.ts');
+      expect(commands).toContain(
+        'pnpm exec eslint --max-warnings=0 --no-warn-ignored apps/x/src/a.ts',
+      );
+    } finally {
+      chmodSync(join(dir, 'apps/x/locked'), 0o755);
+    }
+  });
+
   it('runs the four steps over every package, not the gate, for a file it cannot place', () => {
     const run = runWithStubs(['--precheck', '--', 'pnpm-lock.yaml']);
     expect(run.stdout).toContain('pre-check over every package');
