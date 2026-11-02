@@ -12,6 +12,12 @@ export {
   removeNetworkHost,
   unallowedFoundHosts,
 } from './network-hosts';
+export {
+  expectedWriteIn,
+  expectedWriteOf,
+  matchesExpectedWrite,
+  type ExpectedWrite,
+} from './expected-write';
 export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
 export {
   allowedToolsFor,

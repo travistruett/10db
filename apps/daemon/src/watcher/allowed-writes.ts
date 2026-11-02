@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  lstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -10,7 +18,12 @@ import {
   type PermissionRuleDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { storableRule } from '../permissions';
+import {
+  expectedWriteIn,
+  matchesExpectedWrite,
+  storableRule,
+  type ExpectedWrite,
+} from '../permissions';
 
 /** The tools whose permission cards name the file they write (the broker's edit family). */
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -36,6 +49,8 @@ export interface EditAllowance {
   readonly path: string;
   /** Whether it covers every write to the path (a stored rule, or a choice that stored one), not one. */
   readonly standing: boolean;
+  /** What the card's own call writes, when its card says; the only write a single-use card then excuses. */
+  readonly expected?: ExpectedWrite;
 }
 
 /**
@@ -66,6 +81,7 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
     // stored none, such as a sandboxed path with a glob character, behaves as allow-once.
     const summary = item.detail?.['summary'];
     const stored = typeof summary === 'string' && storableRule(tool, summary) !== undefined;
+    const expected = expectedWriteIn(item.detail);
     // The inbox folds identical cards from several lanes into one, with a target for each lane; the
     // builder's answer allows each of those lanes' write.
     for (const target of item.targets) {
@@ -75,6 +91,7 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
         useKey: useKey(item.id, target.workstreamId),
         path,
         standing: !once && stored,
+        ...(expected === undefined ? {} : { expected }),
       });
     }
   }
@@ -180,6 +197,27 @@ function hashFile(path: string): string {
 export function writeStamp(root: string, rel: string): string | null {
   const result = readStamp(root, rel);
   return 'stamp' in result ? result.stamp : null;
+}
+
+/**
+ * Whether the file `stamp` (`writeStamp`) was taken from holds what `expected` says an allowed call wrote.
+ * A deletion never does: no edit call deletes its file.
+ */
+export function stampMatchesExpected(
+  root: string,
+  rel: string,
+  stamp: string,
+  expected: ExpectedWrite,
+): boolean {
+  if (isDeletionStamp(stamp)) return false;
+  const hash = stamp.split(':')[2] ?? '';
+  return matchesExpectedWrite(expected, hash, () => {
+    try {
+      return readFileSync(resolve(root, rel), 'utf8');
+    } catch {
+      return null;
+    }
+  });
 }
 
 /** Why a path has no stamp: it is not a regular file, it can't be read, or it kept changing while read. */

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2106,6 +2107,17 @@ describe('permission broker in a sandboxed lane', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws, false)(request('Write', { file_path: 'docs/a.md' })).catch(() => undefined);
     expect(onlyOpenCard().detail).toMatchObject({ toolName: 'Write', path: 'docs/a.md' });
+  });
+
+  it('records on an edit card what the call writes, so the watcher excuses that write only', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(
+      ws,
+      false,
+    )(request('Write', { file_path: 'docs/a.md', content: 'hello' })).catch(() => undefined);
+    expect(onlyOpenCard().detail).toMatchObject({
+      expectedWrite: { sha256: createHash('sha256').update('hello').digest('hex') },
+    });
   });
 
   it('names no file on a card for a tool that is not an edit', () => {

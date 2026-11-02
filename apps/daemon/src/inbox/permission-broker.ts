@@ -23,7 +23,13 @@ import {
   unreadableHazard,
 } from '../guard';
 import type { Logger } from '../log';
-import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
+import {
+  expectedWriteOf,
+  type ExpectedWrite,
+  foundHostFile,
+  matchPermissionRule,
+  storableRule,
+} from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
@@ -179,14 +185,20 @@ function summarize(req: ToolRequest): string {
  * The file an edit call writes, for its card's detail: the watcher reads it to tell that the builder allowed
  * the write and raises no stray-write card for it. A sandboxed lane's is the real path the judge resolved.
  */
-function editedPath(req: ToolRequest, ask: Ask | null): { path?: string } {
+function editedPath(
+  req: ToolRequest,
+  ask: Ask | null,
+): { path?: string; expectedWrite?: ExpectedWrite } {
   if (!EDIT_FAMILY.has(req.toolName)) return {};
   const [real, ...more] = ask?.realPaths ?? [];
   const path =
     real !== undefined && more.length === 0
       ? real
       : (stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path'));
-  return path === null ? {} : { path };
+  if (path === null) return {};
+  // What the call writes, so the watcher excuses that write and not another lane's to the same file.
+  const expectedWrite = expectedWriteOf(req.toolName, req.input);
+  return expectedWrite === undefined ? { path } : { path, expectedWrite };
 }
 
 /** Decides every canUseTool call: stored rules first, then a card for the builder. Never an LLM. */
