@@ -184,8 +184,9 @@ interface LaneRun {
   readonly cards: InboxItemDto[];
   readonly events: SessionEvent[];
   /**
-   * The permission mode Claude Code's init reported, as the adapter logs it: the mode in effect,
-   * which is `default` where auto mode is unavailable whatever the session asked for.
+   * Every permission mode Claude Code reported, as the adapter logs them, in order: the init's,
+   * then each status message's. The init's is the mode in effect, which is `default` where auto
+   * mode is unavailable whatever the session asked for; a later one means the mode changed.
    */
   readonly permissionModes: unknown[];
   readonly profile: unknown;
@@ -428,7 +429,11 @@ async function runLane(opts: {
       events,
       permissionModes: logs
         .lines()
-        .filter((line) => line['msg'] === 'claude session billing')
+        .filter(
+          (line) =>
+            line['msg'] === 'claude session billing' ||
+            line['msg'] === 'claude session permission mode',
+        )
         .map((line) => line['permissionMode']),
       profile: lane.spec.settings,
       envFile: {
@@ -862,15 +867,17 @@ function commandOf(input: unknown): string {
 const REFUSED = /denied|blocked|hazard claim/i;
 
 /**
- * Fails the case unless Claude Code's init reported auto mode. Where auto mode is unavailable it
- * starts in default mode, where hazards and new hosts reach 10db anyway, so a pass would prove
- * nothing about auto mode.
+ * Fails the case unless Claude Code reported auto mode at init and every mode it reported after
+ * that, in a status message, was auto too. Where auto mode is unavailable it starts in default mode,
+ * and it can drop to default partway through, for example after repeated classifier refusals.
+ * Hazards and new hosts reach 10db anyway in default mode, so a pass would prove nothing about
+ * auto mode.
  */
 function expectAutoMode(run: LaneRun): void {
   expect(
-    run.permissionModes,
-    'Claude Code did not report auto mode, so this run proves nothing about it',
-  ).toEqual(['auto']);
+    run.permissionModes.length > 0 && run.permissionModes.every((mode) => mode === 'auto'),
+    `Claude Code left or did not report auto mode (it reported ${JSON.stringify(run.permissionModes)}), so this run proves nothing about it`,
+  ).toBe(true);
 }
 
 /**

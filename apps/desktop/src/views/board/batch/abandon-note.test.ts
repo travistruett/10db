@@ -11,7 +11,7 @@ describe('abandonNote', () => {
   it('names the one unfinished task it cancels', () => {
     expect(abandonNote(batch, [member('Alpha', 'QUEUED'), member('Beta', 'DONE')])).toEqual({
       refusal: null,
-      line: 'Abandon keeps the branch and cancels its unfinished task.',
+      line: 'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its unfinished task.',
     });
   });
 
@@ -22,12 +22,14 @@ describe('abandonNote', () => {
       member('Gamma', 'FAILED'),
       member('Delta', 'DONE'),
     ]);
-    expect(note.line).toBe('Abandon keeps the branch and cancels its 2 unfinished tasks.');
+    expect(note.line).toBe(
+      'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+    );
   });
 
   it('says nothing is cancelled when every task is done', () => {
     expect(abandonNote(batch, [member('Alpha', 'DONE')]).line).toBe(
-      'Abandon keeps the branch and closes it without shipping.',
+      'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and closes the batch without shipping.',
     );
   });
 
@@ -36,7 +38,7 @@ describe('abandonNote', () => {
     const retried = workstreamDto({ ...first, id: workstreamDto().id, state: 'QUEUED' });
     const elsewhere = workstreamDto({ taskTitle: 'Other', state: 'QUEUED' });
     expect(abandonNote(batch, [first, retried, elsewhere]).line).toBe(
-      'Abandon keeps the branch and cancels its unfinished task.',
+      'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its unfinished task.',
     );
   });
 
@@ -53,7 +55,7 @@ describe('abandonNote', () => {
   ])('is blocked while a task is %s, because the daemon refuses', (_name, live) => {
     expect(abandonNote(batch, [live, member('Beta', 'QUEUED')])).toEqual({
       refusal: 'Alpha is running: cancel it in Factory first.',
-      line: 'Alpha is running: cancel it in Factory first. Abandon keeps the branch and cancels its 2 unfinished tasks.',
+      line: 'Alpha is running: cancel it in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
     });
   });
 
@@ -65,7 +67,7 @@ describe('abandonNote', () => {
     const note = abandonNote(batch, [member('Alpha', 'RUNNING'), member('Beta', 'VERIFYING')]);
     expect(note.refusal).toBe('Alpha and Beta are running: cancel them in Factory first.');
     expect(note.line).toBe(
-      'Alpha and Beta are running: cancel them in Factory first. Abandon keeps the branch and cancels its 2 unfinished tasks.',
+      'Alpha and Beta are running: cancel them in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
     );
   });
 });

@@ -36,7 +36,9 @@ hazards changes with it.
   matches only itself, so a Next.js screen `[orgId]` gets `[[]orgId]/**`, not a class matching `o/`. Node's
   matcher reads a backslash as a separator, never an escape, and a project refuses one, so where no exact glob
   exists (a backslash, a stray bracket, braces holding a comma or `..`) those characters become `?`, which also
-  matches a name differing only there.
+  matches a name differing only there. Because that `?` could match a sibling folder (`a?b/**` takes `axb/`
+  too), and the guard allows a write when any matching area is claimed, candidates whose `?` globs match
+  another candidate's files are made one candidate, so each file still lands in exactly one area.
 - **Candidates merged by history.** Two folder or route candidates that changed together in at least four
   commits, and in at least three quarters of the commits of the one that changed less, are merged. A commit that
   touched more than four candidates says nothing about any pair. A commit's files are placed by the folders each
