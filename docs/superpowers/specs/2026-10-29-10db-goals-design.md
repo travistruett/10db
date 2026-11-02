@@ -96,12 +96,12 @@ people (§10), tasks, a budget (§6) and a state (§6).
 
 **Designed.** Each criterion has a check kind, fixed when the goal is written:
 
-| Check     | Proven when                                                                                                                                                                                         | Who ticks                                                    |
-| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| `task`    | the named task is done (its own gate, review and delivery passed)                                                                                                                                   | the daemon                                                   |
-| `merged`  | the named task's pull request is merged on the base branch                                                                                                                                          | the daemon                                                   |
+| Check     | Proven when                                                                                                                                                                                          | Who ticks                                                    |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `task`    | the named task is done (its own gate, review and delivery passed)                                                                                                                                    | the daemon                                                   |
+| `merged`  | the named task's pull request is merged on the base branch                                                                                                                                           | the daemon                                                   |
 | `command` | the project's gate command, or a command the owner approved when adopting the goal, passes in the lane sandbox in a clean worktree at the base branch's head, run once no goal task is left unmerged | the daemon                                                   |
-| `accept`  | a named person (the owner by default) accepts the linked proof                                                                                                                                      | that person; an agent or anyone may attach proof, never tick |
+| `accept`  | a named person (the owner by default) accepts the linked proof                                                                                                                                       | that person; an agent or anyone may attach proof, never tick |
 
 **Done rule:** a goal is done when every criterion is proven. Tasks are how criteria get proven, not the
 measure.
@@ -128,14 +128,14 @@ is stored unapproved. Phase 2 adds the checks, ticking, and the owner's approval
 
 **Designed (phase 2).**
 
-| State       | Entered by                                         | Effect                                                                                                                                                                  |
-| ----------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `draft`     | Adopt a Plan, New Goal                             | nothing runs; the tasks are on the Board under the goal                                                                                                                 |
-| `running`   | Start Goal, Resume                                 | the scheduler starts the goal's ready tasks                                                                                                                             |
-| `waiting`   | a card owned by a person blocks the goal           | other ready tasks keep running                                                                                                                                          |
-| `paused`    | Pause, or the budget is crossed                    | no new task starts; running steps finish their current step, then park, as an account pause does today                                                                  |
-| `done`      | every criterion proven                             | nothing new starts                                                                                                                                                      |
-| `cancelled` | Cancel, confirmed                                  | running workstreams are cancelled as Cancel does today; unstarted tasks are removed (the remove-unstarted route) or kept, chosen in the confirm                          |
+| State       | Entered by                               | Effect                                                                                                                                          |
+| ----------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `draft`     | Adopt a Plan, New Goal                   | nothing runs; the tasks are on the Board under the goal                                                                                         |
+| `running`   | Start Goal, Resume                       | the scheduler starts the goal's ready tasks                                                                                                     |
+| `waiting`   | a card owned by a person blocks the goal | other ready tasks keep running                                                                                                                  |
+| `paused`    | Pause, or the budget is crossed          | no new task starts; running steps finish their current step, then park, as an account pause does today                                          |
+| `done`      | every criterion proven                   | nothing new starts                                                                                                                              |
+| `cancelled` | Cancel, confirmed                        | running workstreams are cancelled as Cancel does today; unstarted tasks are removed (the remove-unstarted route) or kept, chosen in the confirm |
 
 - Editing a running goal: unstarted tasks can be added or removed at any time. A criteria edit is a one-way
   decision for the owner.
@@ -169,15 +169,15 @@ one-way decision (recorded in the same step, its `door_reason` naming the same c
 
 **Fixed one-way classes.** Paths and patterns are project settings with these defaults. **(spec's call)**
 
-| Class          | Rule                                                                                                                                                                      | Blocks                                   |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
-| Schema         | the diff touches the schema paths (10db: `packages/db/src/schema.ts`, `packages/db/drizzle/`)                                                                             | at the end of the step                   |
-| Contracts      | the diff touches the contract paths (10db: `packages/contracts/src/`)                                                                                                     | at the end of the step                   |
-| Deletes        | the diff removes tracked files outside the task's areas, or a migration drops a table or column                                                                           | at the end of the step                   |
-| Spend          | the goal's sessions cross its budget (§6)                                                                                                                                 | in the scheduler                         |
-| Ship           | a command matching the ship patterns (defaults: `git tag`, `git push --tags`, a push of a tag, the project's deploy commands); not merging a pull request                  | before the command runs, held by the guard |
-| Outside people | a message to anyone not on the goal                                                                                                                                       | before it is sent                        |
-| Membership     | adding or removing a person on a goal                                                                                                                                     | before it applies                        |
+| Class          | Rule                                                                                                                                                      | Blocks                                     |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| Schema         | the diff touches the schema paths (10db: `packages/db/src/schema.ts`, `packages/db/drizzle/`)                                                             | at the end of the step                     |
+| Contracts      | the diff touches the contract paths (10db: `packages/contracts/src/`)                                                                                     | at the end of the step                     |
+| Deletes        | the diff removes tracked files outside the task's areas, or a migration drops a table or column                                                           | at the end of the step                     |
+| Spend          | the goal's sessions cross its budget (§6)                                                                                                                 | in the scheduler                           |
+| Ship           | a command matching the ship patterns (defaults: `git tag`, `git push --tags`, a push of a tag, the project's deploy commands); not merging a pull request | before the command runs, held by the guard |
+| Outside people | a message to anyone not on the goal                                                                                                                       | before it is sent                          |
+| Membership     | adding or removing a person on a goal                                                                                                                     | before it applies                          |
 
 A step-end block leaves the step's work committed on its branch; the task waits, as a `check` card does today,
 with the decision card open.
@@ -258,15 +258,16 @@ decisions; phase 3 adds "Waiting on Mark" with the evidence sent.
   ("2 running · 1 failed"); expanded, it shows their Sessions table with Retry and Cancel. Finished work is
   reached from each task's drawer (its latest run), not from Factory.
 
-| Surface         | Loading                              | Empty                               | Error                                                     |
-| --------------- | ------------------------------------ | ----------------------------------- | --------------------------------------------------------- |
-| Goal list       | `Loader size="sm"`, as Factory today | the guided line above, Ungrouped    | red `Alert` "Couldn't load the goals" with the message    |
-| A goal's digest | its rows' skeleton lines             | a row with nothing says "None"      | a red `Alert` inside the expanded goal; the row stays     |
-| Adopt a Plan    | the primary's `loading` state        | not applicable                      | the refusal sheet (§11); a daemon error beside Pick Again |
-| Ungrouped       | with the list                        | hidden when nothing runs or failed  | with the list                                             |
+| Surface         | Loading                              | Empty                              | Error                                                     |
+| --------------- | ------------------------------------ | ---------------------------------- | --------------------------------------------------------- |
+| Goal list       | `Loader size="sm"`, as Factory today | the guided line above, Ungrouped   | red `Alert` "Couldn't load the goals" with the message    |
+| A goal's digest | its rows' skeleton lines             | a row with nothing says "None"     | a red `Alert` inside the expanded goal; the row stays     |
+| Adopt a Plan    | the primary's `loading` state        | not applicable                     | the refusal sheet (§11); a daemon error beside Pick Again |
+| Ungrouped       | with the list                        | hidden when nothing runs or failed | with the list                                             |
 
 The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; the digest's loading and
 "None" rows are the spec's call.
+
 - **Order:** failed, waiting on you, waiting on someone, paused, running, shipping, not started, then
   Ungrouped, then done goals under
   one collapsed "Done (n)" line; within a status, the most recently changed first.
@@ -285,16 +286,16 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   Δ rows have items. Inside, each Δ row's label reads "Deviations · since 3h ago", lists only those items, and
   offers **Show Earlier** for the rest.
 
-| Row            | Phase 1 source                                                                  | Later                                         |
-| -------------- | ------------------------------------------------------------------------------- | --------------------------------------------- |
-| Progress bar   | tasks done of total, labelled "tasks"                                           | phase 2: criteria proven of total             |
-| Working now    | running workstreams: persona, `model@effort`, task, step                        |                                               |
-| Team           | the personas and models the goal's tasks are routed to                          |                                               |
-| Waiting on (Δ) | open Inbox cards on the goal's tasks                                            | phase 3: per person, with what was sent       |
-| Next           | the next ready task, or the one it waits on, from `task_deps`                   |                                               |
-| Deviations (Δ) | `deviations` rows on the goal's workstreams                                     | phase 2: the engine's deviations too          |
-| Decisions (Δ)  | the project's decisions recorded in the window, read only                       | phase 2: the goal's own, with Keep / Flip     |
-| Cost           | tokens over all the goal's sessions; dollars where `cost_usd` is set            |                                               |
+| Row            | Phase 1 source                                                       | Later                                     |
+| -------------- | -------------------------------------------------------------------- | ----------------------------------------- |
+| Progress bar   | tasks done of total, labelled "tasks"                                | phase 2: criteria proven of total         |
+| Working now    | running workstreams: persona, `model@effort`, task, step             |                                           |
+| Team           | the personas and models the goal's tasks are routed to               |                                           |
+| Waiting on (Δ) | open Inbox cards on the goal's tasks                                 | phase 3: per person, with what was sent   |
+| Next           | the next ready task, or the one it waits on, from `task_deps`        |                                           |
+| Deviations (Δ) | `deviations` rows on the goal's workstreams                          | phase 2: the engine's deviations too      |
+| Decisions (Δ)  | the project's decisions recorded in the window, read only            | phase 2: the goal's own, with Keep / Flip |
+| Cost           | tokens over all the goal's sessions; dollars where `cost_usd` is set |                                           |
 
 - **Progress** counts the goal's tasks with status `done` (their pull request may still be open) over its
   tasks that aren't cancelled; cancelled ones are listed in the goal's drawer.
@@ -306,8 +307,10 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   **Built:** the daemon computes it (`packages/db/src/store/goal-digest.ts`). `GET /projects/:projectId/goals`
   answers `GoalListDto` (each goal's digest and count of new items, plus Ungrouped) and leaves every mark
   alone; only `GET /goals/:goalId/digest` advances its goal's mark. A visit lasts while the goal is opened again
-  within 30 minutes of its last opening: `goal_views.visit_since` keeps the window the visit began with, so a
-  refetch or remount in the same visit answers the same Δ rows, and the list's count still drops to zero. In phase 1 every open card on a goal's
+  within 30 minutes of its last opening, for at most 2 hours from when the visit began
+  (`goal_views.visit_started_at`): `goal_views.visit_since` keeps the window the visit began with, so a
+  refetch or remount in the same visit answers the same Δ rows, and the list's count still drops to zero;
+  repeated clicks never stretch 'since you left' back past 2 hours. In phase 1 every open card on a goal's
   tasks counts as waiting on you, tokens are input plus output (cached tokens aside), and a task whose
   work is done but whose batch has no merged pull request keeps the goal at Shipping.
 
@@ -324,15 +327,15 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
 
 **The journey this serves:**
 
-| Step | The builder                                      | Feels                         | What supports it                                              |
-| ---- | ------------------------------------------------ | ----------------------------- | ------------------------------------------------------------- |
-| 1    | asks Claude Code to turn a spec into a goal      | handing off, not filling a form | the 10db-task skill's `goal` command, dry run first          |
-| 2    | opens Factory                                    | oriented in five seconds      | status order, one line per goal, "3 new since 3h ago"         |
-| 3    | opens the goal with news                         | caught up, not reading logs   | the digest rows, Δ only, Show Earlier for the rest            |
-| 4    | sees "Waiting on you"                            | knows the one thing to do     | yellow first in order; the card in the Inbox                  |
-| 5    | sees a failed task                               | in control                    | red first; Retry and Cancel in the goal's Sessions            |
-| 6    | sees "Shipping · 3 pull requests open"           | trusts green when it comes    | green only once everything merged                             |
-| 7    | comes back after a week                          | the record holds              | Done (n) collapsed; decisions in the knowledge store          |
+| Step | The builder                                 | Feels                           | What supports it                                      |
+| ---- | ------------------------------------------- | ------------------------------- | ----------------------------------------------------- |
+| 1    | asks Claude Code to turn a spec into a goal | handing off, not filling a form | the 10db-task skill's `goal` command, dry run first   |
+| 2    | opens Factory                               | oriented in five seconds        | status order, one line per goal, "3 new since 3h ago" |
+| 3    | opens the goal with news                    | caught up, not reading logs     | the digest rows, Δ only, Show Earlier for the rest    |
+| 4    | sees "Waiting on you"                       | knows the one thing to do       | yellow first in order; the card in the Inbox          |
+| 5    | sees a failed task                          | in control                      | red first; Retry and Cancel in the goal's Sessions    |
+| 6    | sees "Shipping · 3 pull requests open"      | trusts green when it comes      | green only once everything merged                     |
+| 7    | comes back after a week                     | the record holds                | Done (n) collapsed; decisions in the knowledge store  |
 
 ## 9. Board and Inbox
 

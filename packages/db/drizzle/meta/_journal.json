@@ -169,6 +169,13 @@
       "when": 1793616637727,
       "tag": "0023_long_apocalypse",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1793620799874,
+      "tag": "0024_goal_visit_started_at",
+      "breakpoints": true
     }
   ]
 }
