@@ -29,6 +29,7 @@ import {
   getBatch,
   getProject,
   getTask,
+  getWorkstream,
   hasToolOp,
   listBatches,
   listEvidence,
@@ -152,6 +153,11 @@ export interface ShipperDeps extends DeliveryContext {
 export interface Shipper {
   checkBatch(batchId: BatchId): void;
   checkOpenBatches(): void;
+  /**
+   * Checks the open batches that still hold an attempt its task started over from: one waits for the
+   * replacement's cut (`members`), so each time a cut ends they are looked at again.
+   */
+  checkSupersededBatches(): void;
   resume(batchId: BatchId): void;
   /** A task drawer on the Board: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
   ship(batchId: BatchId): BatchDto;
@@ -200,14 +206,29 @@ function committed(db: DbReader, member: WorkstreamDto): boolean {
 }
 
 /**
+ * Whether the run that replaced a superseded member has not got going yet, so the attempt may still
+ * be the task's only one: the replacement's batch is still being cut (the cut may be refused), or
+ * its cut was refused and detached it from any batch, leaving it cancelled before it ran. In both
+ * cases the builder could still want the old batch to keep the attempt.
+ */
+function replacementUnsettled(db: DbReader, member: WorkstreamDto): boolean {
+  const current = getTask(db, member.taskId).workstreamId;
+  if (current === null) return false;
+  const next = getWorkstream(db, current);
+  if (next.batchId === null) return next.state === WorkstreamState.Cancelled;
+  return getBatch(db, next.batchId).state === BatchState.Cutting;
+}
+
+/**
  * A batch's members: each task's latest workstream in it, except a superseded one that committed
  * nothing. It holds nothing the batch should wait for, so the batch ships the work of the rest. One
  * that committed stays a member: its commits are on the branch and passed no gate or review, so the
  * batch ships them only through Ship anyway, and its tasks' notice says so (`supersededNotices`).
+ * One whose replacement is not yet cut stays too, until the cut has ended (`replacementUnsettled`).
  */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
   return latestPerTask(listWorkstreams(db, { batchId })).filter(
-    (m) => !superseded(db, m) || committed(db, m),
+    (m) => !superseded(db, m) || committed(db, m) || replacementUnsettled(db, m),
   );
 }
 
@@ -240,7 +261,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   function resume(batchId: BatchId): void {
     deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
-      shipSteps(batchId, signal),
+      // One operation: the checkout's git dirs are read once for the ship, not once per git call.
+      deps.git.operation(() => shipSteps(batchId, signal)),
     );
   }
 
@@ -1022,7 +1044,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
       const current = members(w.tx, batchId);
-      const left = current.filter((m) => superseded(w.tx, m)).map((m) => m.taskTitle);
+      const left = current
+        .filter((m) => superseded(w.tx, m) && committed(w.tx, m))
+        .map((m) => m.taskTitle);
       if (left.length > 0) setBatchNotice(w, batchId, supersededNotices.committed(batch, left));
       else clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
       if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Ready) return false;
@@ -1422,7 +1446,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     catchingUp.add(batchId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
-        await catchUpSteps(batchId, signal, cause);
+        await deps.git.operation(() => catchUpSteps(batchId, signal, cause));
       } finally {
         catchingUp.delete(batchId);
       }
@@ -1475,6 +1499,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     checkBatch,
     checkOpenBatches() {
       for (const batch of listBatches(db, { states: [BatchState.Open] })) checkBatch(batch.id);
+    },
+    checkSupersededBatches() {
+      for (const batch of listBatches(db, { states: [BatchState.Open] })) {
+        if (listWorkstreams(db, { batchId: batch.id }).some((m) => superseded(db, m)))
+          checkBatch(batch.id);
+      }
     },
     resume,
     ship,
