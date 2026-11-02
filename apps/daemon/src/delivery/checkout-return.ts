@@ -1,23 +1,11 @@
-import {
-  BatchState,
-  LANE_STATES,
-  WorkstreamState,
-  type BatchId,
-  type ProjectId,
-} from '@10db/contracts';
-import {
-  getBatch,
-  getBatchRow,
-  getProject,
-  listWorkstreams,
-  patchBatch,
-  type DbReader,
-} from '@10db/db';
+import { BatchState, type BatchId } from '@10db/contracts';
+import { getBatch, getBatchRow, getProject, patchBatch } from '@10db/db';
 import type { StateStore } from '../events';
 import type { CheckoutPlace, Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { checkoutCards, type Card } from './cards';
+import { lanesInProjectCheckout } from './checkout';
 import { raise } from './context';
 
 /** What a switch back needs; startup recovery has these without a delivery context. */
@@ -46,16 +34,6 @@ const FINISHED: readonly BatchState[] = [
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
-
-/** Workstreams of the project with work in hand, counted as Abandon counts them. */
-function runningIn(db: DbReader, projectId: ProjectId): number {
-  return listWorkstreams(db, { projectId }).filter(
-    (w) =>
-      LANE_STATES.includes(w.state) ||
-      w.state === WorkstreamState.TakenOver ||
-      (w.state === WorkstreamState.WaitingHuman && w.currentSessionId !== null),
-  ).length;
-}
 
 /**
  * After a shared batch ships, closes or is abandoned: switches the builder's checkout back to where
@@ -86,7 +64,8 @@ export async function returnCheckout(
     return 'left';
   };
 
-  const running = runningIn(db, project.id);
+  // Lanes in a separate copy edit other files and don't hold the checkout where it is.
+  const running = lanesInProjectCheckout(db, project);
   if (running > 0) return leave(checkoutCards.lanesRunning(batch, project, place, running));
   try {
     const outcome = await deps.git.switchBack(project.repoPath, row.branch, place);

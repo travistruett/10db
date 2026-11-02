@@ -1,3 +1,4 @@
+import { basename } from 'node:path';
 import {
   BatchState,
   CiStopped,
@@ -8,6 +9,7 @@ import {
 } from '@10db/contracts';
 import {
   deleteCuttingBatch,
+  findUnfinishedBatch,
   getBatch,
   getProject,
   getTask,
@@ -23,6 +25,7 @@ import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
 import { branchBehindBase, missingLandingBranch } from './landing';
+import { seedNotices } from './notices';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
@@ -197,23 +200,44 @@ export async function cutWorktree(
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
+    // A shared batch that is unfinished (CUTTING, OPEN, SHIPPING or FAILED) has lanes that may write
+    // the main checkout's ignored directories, `node_modules` included, and a clone would carry that
+    // into this copy's gate. Then nothing is cloned: in a pnpm project the install builds
+    // `node_modules` from the copy's own lockfile, and every seed directory left unmade is named in a
+    // notice on the batch's tasks (task placement spec §7, option b).
+    const seed = findUnfinishedBatch(db, project.id) === undefined;
+    let dirs: string[];
     try {
-      const seeded = await seedWorktree({
-        from: main,
-        to: path,
-        dirs: seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed),
-        signal,
-      });
-      ctx.logger.info(
-        { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
-        'worktree seeded',
-      );
+      dirs = seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed);
     } catch (error) {
       if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
       return;
     }
+    if (seed) {
+      try {
+        const seeded = await seedWorktree({ from: main, to: path, dirs, signal });
+        ctx.logger.info(
+          { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
+          'worktree seeded',
+        );
+      } catch (error) {
+        if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
+        return;
+      }
+    } else {
+      ctx.logger.info(
+        { batchId, path, dirs },
+        'worktree not seeded: a shared batch is unfinished; a pnpm install builds node_modules, and nothing else is made',
+      );
+    }
     if (stopped()) return;
-    const installed = await ctx.dependencies.refresh({ batch, project, path, signal });
+    const installed = await ctx.dependencies.refresh({
+      batch,
+      project,
+      path,
+      signal,
+      seeded: seed,
+    });
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':
@@ -232,6 +256,19 @@ export async function cutWorktree(
         break;
     }
     if (stopped()) return;
+    if (!seed) {
+      // The install makes every `node_modules` (a workspace's nested ones too), and nothing else.
+      const unmade = dirs.filter(
+        (dir) => installed.kind !== 'installed' || basename(dir) !== 'node_modules',
+      );
+      if (unmade.length > 0) {
+        try {
+          showNotice(ctx.state, batchId, seedNotices.skipped(unmade));
+        } catch (error) {
+          ctx.logger.warn({ batchId, err: error }, 'seed notice not written');
+        }
+      }
+    }
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });

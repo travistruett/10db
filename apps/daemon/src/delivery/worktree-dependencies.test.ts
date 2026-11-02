@@ -133,6 +133,28 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(requests).toEqual([]);
   });
 
+  it('installs into a worktree with no node_modules when the cut skipped the seed', async () => {
+    fakePnpm();
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    const result = await dependencies().refresh({
+      batch,
+      project,
+      path: worktree,
+      signal,
+      seeded: false,
+    });
+    expect(result.kind).toBe('installed');
+    expect(readFileSync(calls, 'utf8')).toContain('install --frozen-lockfile');
+  });
+
+  it('still runs nothing without a lockfile when the cut skipped the seed', async () => {
+    fakePnpm();
+    expect(
+      await dependencies().refresh({ batch, project, path: worktree, signal, seeded: false }),
+    ).toEqual({ kind: 'skipped' });
+    expect(existsSync(calls)).toBe(false);
+  });
+
   it('installs from the worktree’s own lockfile with scripts and the pnpmfile off', async () => {
     fakePnpm();
     withLockfileAndModules();
