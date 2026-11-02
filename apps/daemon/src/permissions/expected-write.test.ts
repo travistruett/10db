@@ -38,6 +38,28 @@ describe('editResult', () => {
     );
   });
 
+  it('edits a CRLF file as LF and writes it back as CRLF, as Claude Code does', () => {
+    const file = 'one\r\ntwo\r\nthree\r\n';
+    expect(editResult('Edit', { old_string: 'two\nthree', new_string: '2\n3\n4' }, file)).toBe(
+      'one\r\n2\r\n3\r\n4\r\n',
+    );
+    expect(editResult('Edit', { old_string: 'two', new_string: '' }, file)).toBe(
+      'one\r\nthree\r\n',
+    );
+    expect(
+      editResult('MultiEdit', { edits: [{ old_string: 'one\ntwo', new_string: '1\n2' }] }, file),
+    ).toBe('1\r\n2\r\nthree\r\n');
+    expect(
+      editResult('Edit', { old_string: 'o', new_string: '0\n', replace_all: true }, 'o\r\nto\r\n'),
+    ).toBe('0\r\n\r\nt0\r\n\r\n');
+  });
+
+  it('writes a file with mostly LF endings back as LF', () => {
+    expect(editResult('Edit', { old_string: 'b', new_string: 'x\ny' }, 'a\nb\r\nc\n')).toBe(
+      'a\nx\ny\nc\n',
+    );
+  });
+
   it('applies a MultiEdit one edit after another', () => {
     expect(
       editResult(
@@ -87,6 +109,14 @@ describe('allowedWriteHash', () => {
       sha('{"a":2}'),
     );
     expect(allowedWriteHash('Write', { content: 'x' }, join(dir, 'new'))).toBe(sha('x'));
+  });
+
+  it('hashes a CRLF file as Claude Code writes it back', () => {
+    const path = join(dir, 'crlf.txt');
+    writeFileSync(path, 'a\r\nb\r\n');
+    expect(allowedWriteHash('Edit', { old_string: 'a\nb', new_string: 'x\ny\nz' }, path)).toBe(
+      sha('x\r\ny\r\nz\r\n'),
+    );
   });
 
   it('is unknown for a relative path, or a call that would fail', () => {

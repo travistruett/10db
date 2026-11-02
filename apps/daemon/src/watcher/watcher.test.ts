@@ -61,6 +61,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { editResult } from '../permissions';
 import { ANSWERED_CARDS_READ, stampOrReason } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
@@ -2288,6 +2289,24 @@ describe('worktree checkouts', () => {
         await watcher.flush();
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it("excuses Alpha's multi-line Edit of a CRLF file, and cards another lane's LF write to it", async () => {
+        const a = running('Alpha', ['ui']);
+        running('Beta', ['api']);
+        watcher.sync();
+        const before = '{\r\n  "a": 1\r\n}\r\n';
+        const call = { old_string: '  "a": 1', new_string: '  "a": 1,\n  "b": 2' };
+        // Claude Code edits the file as LF and writes it back in its CRLF endings.
+        const written = editResult('Edit', call, before) ?? '';
+        expect(written).toBe('{\r\n  "a": 1,\r\n  "b": 2\r\n}\r\n');
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, written));
+        put(SENSITIVE_FILE, '{\n  "a": 1,\n  "b": 2\n}\n');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        put(SENSITIVE_FILE, written);
+        await watcher.flush();
+        expect(flags()).toHaveLength(1);
       });
 
       it('cards the write of a card that asks for an exact write but has none recorded for the lane', async () => {

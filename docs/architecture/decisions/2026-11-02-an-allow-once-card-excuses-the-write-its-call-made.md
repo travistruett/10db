@@ -13,9 +13,11 @@ SHA-256 of the result for that lane in `detail.allowedWrites[workstreamId]`. Cla
 next. As in Claude Code's `applyEditToFile`, an edit whose `new_string` is empty and whose `old_string`
 doesn't end in a newline deletes the newline after its text too, where the file has one there.
 
-Two cases where Claude Code's result differs from the broker's are not mirrored, and fail closed (the
-builder's allowed write is carded): a file with CRLF line endings, which Claude Code edits as LF and writes
-back as CRLF, and an `old_string` with straight quotes that Claude Code matches to curly quotes in the file.
+A file with CRLF line endings is mirrored: Claude Code reads it as LF, applies the edit, and writes it back in
+the file's own endings (CRLF when the first 4096 characters hold more CRLF than bare LF), so a multi-line
+`new_string` lands with `\r\n`. The broker does the same before hashing. One case where Claude Code's result
+differs from the broker's is not mirrored, and fails closed (the builder's allowed write is carded): an
+`old_string` with straight quotes that Claude Code matches to curly quotes in the file.
 
 The watcher excuses an unused allow-once card's write for a lane only when the file's content hash is the one
 recorded for that lane. Another lane's write to the path, in the same watch window or not, is carded, both
