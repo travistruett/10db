@@ -1329,6 +1329,30 @@ describe('judge routes', () => {
       expect(reached).toEqual([]);
     });
 
+    it('answers 413 for a declared Content-Length over the limit without reading the body', async () => {
+      const services = stubServices({ adoptGoal: track('adoptGoal') });
+      let pulls = 0;
+      // highWaterMark 0: the stream pulls only when something reads it.
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new TextEncoder().encode('x'));
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const res = await app(services).request(adoptPath, {
+        method: 'POST',
+        headers: { ...json.headers, 'content-length': String(MAX_BODY_BYTES + 1) },
+        body,
+        duplex: 'half',
+      });
+      expect(res.status).toBe(413);
+      expect(pulls).toBe(0);
+      expect(reached).toEqual([]);
+    });
+
     it('answers 401 before 413 for a request without the token', async () => {
       const res = await app().request(adoptPath, { method: 'POST', body: oversize });
       expect(res.status).toBe(401);
