@@ -1,5 +1,16 @@
 import { spawnSync } from 'node:child_process';
-import { describe, expect, it } from 'vitest';
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import { envWithoutGitVariables } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
@@ -188,5 +199,78 @@ describe('scripts/check-changed.mjs --precheck', () => {
   it('still formats a file whose name only contains .env', () => {
     const plan = precheckPlanFor('apps/daemon/src/sandbox/command-env.ts');
     expect(plan.format).toEqual(['apps/daemon/src/sandbox/command-env.ts']);
+  });
+});
+
+/**
+ * Runs a copy of the script in a temp directory with stub `pnpm`, `bash`, `cargo` and `make` as the
+ * only programs on PATH. Each logs its command line and exits 0, so the real format, lint,
+ * typecheck, drift and gate never run, and the log says which commands the script chose.
+ */
+describe('scripts/check-changed.mjs --precheck, run', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function runWithStubs(args: string[]): { stdout: string; commands: string[] } {
+    const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'scripts'));
+    copyFileSync(
+      join(repoRoot, 'scripts/check-changed.mjs'),
+      join(dir, 'scripts/check-changed.mjs'),
+    );
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const log = join(dir, 'commands.log');
+    for (const name of ['pnpm', 'bash', 'cargo', 'make']) {
+      const stub = join(bin, name);
+      writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "${name} $*" >> '${log}'\n`);
+      chmodSync(stub, 0o755);
+    }
+    // PATH holds only the stubs, so git is absent too: the script then finds no base to diff against.
+    const result = spawnSync(process.execPath, ['scripts/check-changed.mjs', ...args], {
+      cwd: dir,
+      encoding: 'utf8',
+      env: { PATH: bin },
+    });
+    let commands: string[] = [];
+    try {
+      commands = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+    } catch {
+      // nothing ran
+    }
+    return { stdout: result.stdout, commands };
+  }
+
+  const FOUR_STEPS = [
+    'pnpm run drift',
+    'pnpm run format:check',
+    'pnpm run lint',
+    'pnpm run typecheck',
+  ];
+
+  it('runs the four steps over every package, not the gate, for a file it cannot place', () => {
+    const run = runWithStubs(['--precheck', '--', 'pnpm-lock.yaml']);
+    expect(run.stdout).toContain('pre-check over every package');
+    expect(run.stdout).toContain('CHECK-CHANGED PASS');
+    expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
+    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+    // Drift regenerates files in the tree, so it runs last.
+    expect(run.commands.at(-1)).toBe('pnpm run drift');
+  });
+
+  it('runs the four steps over every package, not the gate, when there is no base', () => {
+    const run = runWithStubs(['--precheck']);
+    expect(run.stdout).toContain('no base branch to diff against');
+    expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
+    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+  });
+
+  it('does run the gate for the same unplaced file without --precheck', () => {
+    const run = runWithStubs(['--', 'pnpm-lock.yaml']);
+    expect(run.stdout).toContain('running the full gate');
+    expect(run.commands).toEqual([expect.stringMatching(/^bash .*scripts\/gate\.sh$/)]);
   });
 });

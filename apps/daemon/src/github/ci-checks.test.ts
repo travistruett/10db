@@ -24,9 +24,10 @@ const out = (exitCode: number, stdout = '', stderr = ''): GhOutput => ({
  * What gh prints for `gh pr checks --required --json name,state,bucket,link,workflow,description`: a
  * JSON list on stdout, with `description` "" when a check has none. Exit 0 when every check passed, 1
  * when one failed and 8 when one is pending (gh's documented codes); none is an error on stderr with
- * exit 1 and nothing on stdout. The `SPIKE_*` fixtures are verbatim from T3's spike with gh 2.83.2
- * (docs/architecture/research/spike-15-gh-ci-checks.md); pending, failing, cancelled, no checks at
- * all and a run in progress were not on hand then, so those follow gh 2.83.2's source and strings.
+ * exit 1 and nothing on stdout. The `SPIKE_*` fixtures are verbatim from T3's spike and its follow-up
+ * with gh 2.83.2 (docs/architecture/research/spike-15-gh-ci-checks.md). With `--json`, gh exits 0 for
+ * pending and failing lists alike, so the list decides, never the exit code. A cancelled check and a
+ * head with no checks at all were not on hand, so those follow gh 2.83.2's source and strings.
  */
 const check = (
   name: string,
@@ -53,6 +54,24 @@ const SPIKE_NO_REQUIRED = out(
   '',
   "no required checks reported on the 'fix/next-live-test-logger' branch\n",
 );
+/** Spike: `gh pr checks <#245> --required --json …` while two required checks were still running. */
+const SPIKE_PENDING = out(
+  0,
+  '[{"bucket":"pending","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889943","name":"desktop","state":"IN_PROGRESS","workflow":"ci"},{"bucket":"pending","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889888","name":"gate","state":"IN_PROGRESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889858","name":"policy","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889962","name":"dependency-review","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889923","name":"cargo-deny","state":"SUCCESS","workflow":"ci"}]\n',
+);
+/** Spike: the same on #242, whose required `gate` check failed. Exit 0, not 1. */
+const SPIKE_FAILING = out(
+  0,
+  '[{"bucket":"fail","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990697","name":"gate","state":"FAILURE","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990931","name":"desktop","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990937","name":"policy","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990907","name":"dependency-review","state":"SUCCESS","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990972","name":"cargo-deny","state":"SUCCESS","workflow":"ci"}]\n',
+);
+/** Spike: `gh run view --job 125101889888 --log-failed` while that job was still running. */
+const SPIKE_LOG_IN_PROGRESS = out(
+  1,
+  '',
+  'job 125101889888 is still in progress; logs will be available when it is complete\n',
+);
+/** Spike: `gh pr merge <#240> --auto --squash` with auto-merge already on, run twice: both alike. */
+const SPIKE_REARM_ARMED = out(0, '', '');
 /** Spike: any gh call with no sign-in. */
 const SPIKE_SIGNED_OUT = out(
   4,
@@ -160,6 +179,48 @@ describe('what the spike saw gh print', () => {
     expect(() => parseJobLog(['run', 'view'], SPIKE_SIGNED_OUT)).toThrow(
       expect.objectContaining({ name: 'GhError', kind: 'signed_out' }) as Error,
     );
+  });
+
+  it('reads a pending required check, exit 0, as pending with the running jobs', () => {
+    const read = parseRequiredChecks(['pr', 'checks'], SPIKE_PENDING);
+    expect(read.state).toBe('pending');
+    expect(read.failing).toEqual([]);
+    expect(read.pending.map((job) => [job.name, job.runId, job.jobId])).toEqual([
+      ['desktop', '41390916319', '125101889943'],
+      ['gate', '41390916319', '125101889888'],
+    ]);
+  });
+
+  it('reads a failed required check, exit 0, as failing with the failed job', () => {
+    expect(parseRequiredChecks(['pr', 'checks'], SPIKE_FAILING)).toEqual({
+      state: 'failing',
+      failing: [
+        {
+          name: 'gate',
+          link: 'https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990697',
+          runId: '41389319225',
+          jobId: '125096990697',
+          description: null,
+        },
+      ],
+      pending: [],
+    });
+  });
+
+  it('reads a log asked for while the job runs as not yet', () => {
+    expect(parseJobLog(['run', 'view'], SPIKE_LOG_IN_PROGRESS)).toEqual({ kind: 'not_yet' });
+  });
+
+  it('re-arms a pull request whose auto-merge is already on as a plain success', async () => {
+    const seen: (readonly string[])[] = [];
+    const exec: GhExec = (args) => {
+      seen.push(args);
+      return Promise.resolve(SPIKE_REARM_ARMED);
+    };
+    const pr = { repo: 'travistruett/10db', url: 'https://github.com/travistruett/10db/pull/240' };
+    await expect(createGh(exec).prAutoMerge(pr, CALL)).resolves.toBeUndefined();
+    await expect(createGh(exec).prAutoMerge(pr, CALL)).resolves.toBeUndefined();
+    expect(seen).toHaveLength(2);
   });
 
   it('reads a completed failed job’s log as it is, step names and byte order mark included', () => {

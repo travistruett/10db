@@ -2415,6 +2415,33 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * A lane's first launch brings its batch's copy up to the base as it is now, so the lane sees what
+   * merged while its task waited in the queue (a copy cut at an older base would send it to redo
+   * work that is already there). A copy with no work of its own is fast-forwarded and one with
+   * commits takes the base by 10db's base merge. A lane that already ran a session keeps its copy:
+   * its changes are in it. What kept the base out is a notice on the batch, never a stop to the lane.
+   * Stopped like a gate is.
+   */
+  async function baseFirst(id: WorkstreamId, ctl: Control): Promise<void> {
+    const row = getWorkstreamRow(db, id);
+    if (row.batchId === null || row.baseHead !== null) return;
+    if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
+    const abort = new AbortController();
+    ctl.gateAbort = abort;
+    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    try {
+      await opts.baseUpdates.atLaunch(row.batchId, abort.signal);
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'base not brought into the copy at launch',
+      );
+    } finally {
+      ctl.gateAbort = null;
+    }
+  }
+
+  /**
    * A run that holds the migrations hazard from its start (the task names it among its areas) takes
    * its base first, as request_claim does, so a migration it generates is numbered after the base's
    * latest. A branch that can't take its base gives the hazard back: the session runs without it, and
@@ -2446,6 +2473,7 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
+      await baseFirst(id, ctl);
       await migrationsBaseFirst(id, ctl);
       for (;;) {
         const row = getWorkstreamRow(db, id);
