@@ -7,6 +7,7 @@ import {
   patchBatch,
   patchWorkstream,
 } from '@10db/db';
+import { z } from 'zod';
 import type { BranchMerge } from '../git';
 import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import {
@@ -20,9 +21,23 @@ import {
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import { baseNotices, NOTICE_KEY } from './notices';
-import { startRef } from './start-refs';
+import { mergeRef, startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 import { generatedIn } from './worktree-generated';
+
+/**
+ * What 10db keeps (`Git.keepNote`, at `mergeRef`) while a base merge's conflict markers wait for a
+ * session: the merge commit, the base it brought in, the files with markers, and the generated
+ * directories to regenerate once the sources they come from are resolved. It is JSON read back from
+ * the git dir, so it is parsed.
+ */
+const PendingMerge = z.object({
+  from: z.string().min(1),
+  head: z.string().min(1),
+  marked: z.array(z.string().min(1)).min(1),
+  regenerate: z.array(z.object({ dir: z.string().min(1), dropped: z.array(z.string()) })),
+});
+type PendingMerge = z.infer<typeof PendingMerge>;
 
 /** What happened to a batch's branch before its gate (`decisions/2026-10-29-gate-with-base.md`). */
 export type BaseUpdate =
@@ -40,6 +55,17 @@ export type BaseUpdate =
    * only, says what in the branch kept the base out.
    */
   | { readonly kind: 'not_merged'; readonly note: string; readonly held?: BaseHeld }
+  /**
+   * The base is merged into the branch, but git's conflict markers are still in `paths`: no gate
+   * runs, because it would test a branch that cannot build. A session resolves them and commits;
+   * the next gate finds them gone (`decisions/2026-11-01-a-session-resolves-the-conflicts-of-the-base-merge.md`).
+   */
+  | {
+      readonly kind: 'conflicted';
+      readonly base: string;
+      readonly paths: readonly string[];
+      readonly note: string;
+    }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
 
@@ -57,6 +83,14 @@ export interface BeforeGateOptions {
    * branch that can't take the base says why in `held`.
    */
   readonly forMigrations?: { readonly task: string };
+  /**
+   * The caller can send a session to resolve conflicts, as a task's verify gate can: a conflict
+   * that only needs both sides' work put together is merged into the branch with its markers
+   * (`conflicted`), rather than shown as a notice with the gate running on the stale branch. The
+   * shipping gate has no session to send, so it never starts such a merge; it only finds one a
+   * task's gate started.
+   */
+  readonly inSession?: true;
 }
 
 export interface BaseUpdates {
@@ -87,6 +121,7 @@ export function gateNote(update: BaseUpdate): string | null {
     case 'up_to_date':
     case 'merged':
     case 'not_merged':
+    case 'conflicted':
       return update.note;
     case 'aborted':
       return null;
@@ -319,9 +354,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Regenerated> {
     const regenerating = merged.regenerate ?? [];
     const dirs = regenerating.map((r) => r.dir);
+    // Not the merge commit's: a session's commits resolving its markers come after it.
+    const current = await ctx.git.head(path);
     const unchanged = (problem: Unregenerated): Regenerated => ({
       kind: 'done',
-      head: merged.head,
+      head: current,
       problem,
     });
     const dirty = await ctx.git.changedPaths(path);
@@ -349,7 +386,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const changed = (await ctx.git.changedPaths(path)).filter((file) =>
       dirs.some((dir) => file.startsWith(dir)),
     );
-    let head = merged.head;
+    let head = current;
     if (changed.length > 0) {
       await ctx.git.commit({
         repo: path,
@@ -493,6 +530,81 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     return taken;
   }
 
+  /** The note of a merge whose markers wait for a session; null when there is none or it can't be read. */
+  async function pendingOf(batch: BatchDto, path: string): Promise<PendingMerge | null> {
+    const ref = mergeRef(ctx.worktreeRoot, batch.id);
+    try {
+      const text = await ctx.git.keptNote(path, ref);
+      if (text === null) return null;
+      const parsed = PendingMerge.safeParse(JSON.parse(text));
+      if (parsed.success) return parsed.data;
+      ctx.logger.warn({ batchId: batch.id, ref }, 'base merge note not understood');
+    } catch (error) {
+      ctx.logger.warn({ batchId: batch.id, ref, err: why(error) }, 'base merge note not read');
+    }
+    return null;
+  }
+
+  /** The branch holds the base with git's markers still in `paths`: no gate runs until a session resolves them. */
+  function conflicted(
+    batch: BatchDto,
+    base: string,
+    paths: readonly string[],
+    extra: string | null = null,
+  ): BaseUpdate {
+    return {
+      kind: 'conflicted',
+      base,
+      paths,
+      note:
+        joined(
+          `10db merged origin/${batch.baseBranch} into this branch and left git's conflict markers in ${named(paths)} for a session to resolve, so no gate ran on it.`,
+          extra,
+        ) ?? '',
+    };
+  }
+
+  /**
+   * The session committed a resolution of every file `pending` left with markers: the merge stands
+   * with the base as its second parent, so the gate tests the merged branch. The generated
+   * directories the merge took from the base are regenerated now, from the resolved sources.
+   */
+  async function resolved(batch: BatchDto, path: string, pending: PendingMerge): Promise<Merging> {
+    const ref = mergeRef(ctx.worktreeRoot, batch.id);
+    try {
+      await ctx.git.deleteKeptRef(path, ref);
+    } catch (error) {
+      ctx.logger.warn({ batchId: batch.id, ref, err: why(error) }, 'base merge note not dropped');
+    }
+    tell(batch, () => {
+      hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseConflict, NOTICE_KEY.baseKept]);
+    });
+    const head = await ctx.git.head(path);
+    ctx.logger.info(
+      { batchId: batch.id, base: pending.from, head, files: pending.marked },
+      'base conflicts resolved by a session',
+    );
+    return {
+      update: {
+        kind: 'merged',
+        base: pending.from,
+        head,
+        note: `10db merged origin/${batch.baseBranch} into this branch, and a session resolved its conflicts in ${named(pending.marked)}.`,
+      },
+      regenerate:
+        pending.regenerate.length > 0
+          ? {
+              kind: 'merged',
+              from: pending.from,
+              head: pending.head,
+              fastForward: false,
+              paths: pending.marked,
+              regenerate: pending.regenerate,
+            }
+          : null,
+    };
+  }
+
   /**
    * A worktree 10db made: the base is merged into its branch. The generated directories a settled
    * merge took from the base are left to regenerate after the install (`regenerate`).
@@ -508,6 +620,27 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const context = migrationsFor === undefined ? {} : { migrationsFor };
     const holding = (held: BaseHeld) => (migrationsFor === undefined ? {} : { held });
     const origin = `origin/${batch.baseBranch}`;
+    // An earlier gate merged the base and left markers: the merge stands, and what is left is whether
+    // a session has resolved them.
+    const pending = await pendingOf(batch, path);
+    if (pending !== null) {
+      const waiting = await ctx.git.conflictMarkers(path, pending.marked);
+      if (waiting.length > 0)
+        return alone(
+          migrationsFor === undefined
+            ? conflicted(batch, pending.from, waiting)
+            : {
+                ...notMerged(
+                  batch,
+                  `conflict markers in ${named(waiting)}`,
+                  `${origin} is merged into this branch, but its conflicts in ${named(waiting)} are not resolved yet, so this gate ran without waiting for them.`,
+                ),
+                ...holding({ reason: 'conflict', paths: waiting }),
+              },
+        );
+      // The hazard's merge leaves the regeneration to the next gate, which has a clean worktree.
+      if (migrationsFor === undefined) return resolved(batch, path, pending);
+    }
     let merged: BranchMerge;
     try {
       // Only the directories the project's own packages make, on the branch and on the base: in any
@@ -520,7 +653,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         message: `Merge ${origin} into ${branch}`,
         resolve:
           migrationsFor === undefined
-            ? { generated }
+            ? { generated, ...(options.inSession ? { leaveMarkers: true } : {}) }
             : { generated, generatedHeld: NOT_WHILE_WORKING },
       });
     } catch (error) {
@@ -604,6 +737,30 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       unmoved = `${held} but couldn't move the batch's base to it (${why(error)}), so this task's changes may still count ${origin}'s as its own.`;
     }
     if (merged.kind === 'up_to_date') return alone({ kind: 'up_to_date', note: unmoved });
+    const marked = merged.marked ?? [];
+    if (marked.length > 0) {
+      // The merge commit stands with git's markers in these files. The generated directories wait
+      // for the sources they come from, so 10db keeps what to regenerate until they are resolved.
+      const note: PendingMerge = {
+        from: merged.from,
+        head: merged.head,
+        marked: [...marked],
+        regenerate: (merged.regenerate ?? []).map((r) => ({ dir: r.dir, dropped: [...r.dropped] })),
+      };
+      try {
+        await ctx.git.keepNote(path, mergeRef(ctx.worktreeRoot, batch.id), JSON.stringify(note));
+      } catch (error) {
+        ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base merge note not kept');
+      }
+      ctx.logger.info(
+        { batchId: batch.id, base: merged.from, head: merged.head, files: marked },
+        'base merged with conflict markers left for a session',
+      );
+      tell(batch, () => {
+        showNotice(ctx.state, batch.id, baseNotices.resolving(batch, marked));
+      });
+      return alone(conflicted(batch, merged.from, marked, unmoved));
+    }
     ctx.logger.info(
       {
         batchId: batch.id,
@@ -742,6 +899,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const installed = await install(batch, project, path, signal);
     if (installed.kind === 'aborted' || stopped()) return stop();
     switch (merged.kind) {
+      // Installed now, so the session works with the merged packages; its markers are not regenerated from.
+      case 'conflicted':
+        return { ...merged, note: joined(merged.note, installed.note) ?? merged.note };
       case 'not_merged':
         return { kind: 'not_merged', note: joined(merged.note, installed.note) ?? merged.note };
       case 'up_to_date':

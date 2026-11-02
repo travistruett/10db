@@ -18,4 +18,4 @@ export { plainWordReadings } from './command-forms';
 export { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 export { hazardFor, hazardHit } from './hazards';
 export { firstUnread } from './unread-commands';
-export { hazardPrograms, unreadableHazard } from './unread-hazards';
+export { unreadableHazard } from './unread-hazards';

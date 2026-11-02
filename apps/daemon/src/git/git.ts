@@ -25,7 +25,7 @@ import {
   type ConfigRoots,
 } from './checkout-trust';
 import { parseScopedConfig, type ConfigEntry } from './config-trust';
-import { resolveAddedLines } from './conflict-text';
+import { BOTH_CHANGED, hasConflictMarkers, resolveAddedLines } from './conflict-text';
 import { equalOrUnder, insideAny, isPlainDirectory, samePath, surelyInside } from './lane-writable';
 import {
   branchOfRef,
@@ -150,6 +150,13 @@ export type BranchMerge =
         readonly dir: string;
         readonly dropped: readonly string[];
       }[];
+      /**
+       * Text files where both sides changed the same lines, committed with git's conflict markers in
+       * them because the caller asked for that (`resolve.leaveMarkers`): the merge commit stands, but
+       * these files are not resolved, and neither the generated directories nor a gate can be trusted
+       * until someone has resolved them.
+       */
+      readonly marked?: readonly string[];
     }
   /** Both sides changed these files in ways git can't combine; nothing was written. */
   | {
@@ -205,7 +212,17 @@ export interface MergeIntoBranchInput {
    * `generatedHeld`, for a caller that can't regenerate now, leaves every conflict in a directory of
    * `generated` a conflict for that reason instead: a generated file is never merged by line.
    */
-  readonly resolve?: { readonly generated: readonly string[]; readonly generatedHeld?: string };
+  readonly resolve?: {
+    readonly generated: readonly string[];
+    readonly generatedHeld?: string;
+    /**
+     * A text file where both sides changed the same lines is committed with git's conflict markers
+     * in it (`marked` in the result), when that is every conflict left; the merge commit then has
+     * the base as its second parent and someone resolves the markers in a commit of their own.
+     * Anything else that stays a conflict, a lockfile or a deleted file, still stops the merge.
+     */
+    readonly leaveMarkers?: boolean;
+  };
 }
 
 /** One line of `merge-tree`'s conflicted file info: a side's version of a conflicted path. */
@@ -343,6 +360,16 @@ export interface Git {
    * conflict.
    */
   mergedCommit(input: MergedCommitInput): Promise<string | null>;
+  /**
+   * The files among `paths` whose committed content at HEAD holds conflict markers (a line opening
+   * with seven `<` and one with seven `>`): those a merge left with `resolve.leaveMarkers` that
+   * nobody has resolved. A path HEAD lacks, or that isn't small text, holds none.
+   */
+  conflictMarkers(repo: string, paths: readonly string[]): Promise<string[]>;
+  /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
+  keepNote(repo: string, ref: string, text: string): Promise<void>;
+  /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
+  keptNote(repo: string, ref: string): Promise<string | null>;
   /** The refs under `prefix`, itself under `refs/10db/`, by full name and sorted. */
   keptRefs(repo: string, prefix: string): Promise<string[]>;
   /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
@@ -1415,7 +1442,7 @@ export function createGit(opts: GitOptions = {}): Git {
     tree: string,
     path: string,
     sides: ReadonlyMap<number, ConflictEntry>,
-  ): Promise<{ oid: string; mode: string } | { reason: string }> {
+  ): Promise<{ oid: string; mode: string } | { reason: string; markers?: true }> {
     if (path === 'pnpm-lock.yaml' || path.endsWith('/pnpm-lock.yaml'))
       return { reason: "pnpm's lockfile is made by pnpm, not merged by line" };
     // Both sides appending a migration only adds lines, so a line merge would number two alike.
@@ -1437,7 +1464,10 @@ export function createGit(opts: GitOptions = {}): Git {
     const text = await mergeableText(c, tree, path);
     if (text === null) return { reason: "it isn't a text file small enough to merge by line" };
     const resolution = resolveAddedLines(text);
-    if (resolution.kind === 'unresolved') return { reason: resolution.reason };
+    if (resolution.kind === 'unresolved')
+      return resolution.reason === BOTH_CHANGED
+        ? { reason: resolution.reason, markers: true }
+        : { reason: resolution.reason };
     if (path.endsWith('.json')) {
       try {
         JSON.parse(resolution.text);
@@ -1467,13 +1497,15 @@ export function createGit(opts: GitOptions = {}): Git {
     from: string,
     tree: string,
     entries: readonly ConflictEntry[],
-    { generated, generatedHeld }: NonNullable<MergeIntoBranchInput['resolve']>,
+    { generated, generatedHeld, leaveMarkers }: NonNullable<MergeIntoBranchInput['resolve']>,
   ): Promise<
     | {
         kind: 'resolved';
         tree: string;
         resolved: ResolvedConflict[];
         regenerate: { dir: string; dropped: string[] }[];
+        /** Conflicted text files left as git's markers wrote them (`leaveMarkers`). */
+        marked: string[];
       }
     | { kind: 'unresolved'; unresolved: UnresolvedConflict[] }
   > {
@@ -1485,6 +1517,7 @@ export function createGit(opts: GitOptions = {}): Git {
     }
     const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
     const unresolved: UnresolvedConflict[] = [];
+    const markable = new Set<string>();
     const merged: { path: string; oid: string; mode: string }[] = [];
     const dirs = new Set<string>();
     for (const [path, found] of [...sides].sort(([a], [b]) => byPath(a, b))) {
@@ -1498,10 +1531,15 @@ export function createGit(opts: GitOptions = {}): Git {
         continue;
       }
       const file = await resolveFile(c, tree, path, found);
-      if ('reason' in file) unresolved.push({ path, reason: file.reason });
-      else merged.push({ path, ...file });
+      if ('reason' in file) {
+        unresolved.push({ path, reason: file.reason });
+        if (file.markers) markable.add(path);
+      } else merged.push({ path, ...file });
     }
-    if (unresolved.length > 0) return { kind: 'unresolved', unresolved };
+    // Markers are left only when every conflict that stays is one they show: otherwise some of the
+    // merge is a choice no session can see in the files, and it stays the builder's.
+    const marking = leaveMarkers === true && unresolved.every((u) => markable.has(u.path));
+    if (unresolved.length > 0 && !marking) return { kind: 'unresolved', unresolved };
     const regenerate: { dir: string; dropped: string[] }[] = [];
     for (const dir of [...dirs].sort()) {
       const theirs = new Set(await filesUnder(c, from, dir));
@@ -1525,7 +1563,13 @@ export function createGit(opts: GitOptions = {}): Git {
       }
       return (await git(c, ['write-tree'], { env })).trim();
     });
-    return { kind: 'resolved', tree: settled, resolved, regenerate };
+    return {
+      kind: 'resolved',
+      tree: settled,
+      resolved,
+      regenerate,
+      marked: unresolved.map((u) => u.path),
+    };
   }
 
   /**
@@ -1688,6 +1732,7 @@ export function createGit(opts: GitOptions = {}): Git {
       let head = from;
       let resolved: ResolvedConflict[] = [];
       let regenerate: { dir: string; dropped: string[] }[] = [];
+      let marked: string[] = [];
       if (!fastForward) {
         const merging = await mergeTree(c, tip, from);
         let tree = merging.tree;
@@ -1712,6 +1757,7 @@ export function createGit(opts: GitOptions = {}): Git {
           tree = settled.tree;
           resolved = settled.resolved;
           regenerate = settled.regenerate;
+          marked = settled.marked;
         }
         const sign = signing(c, await configEntries(c));
         const settledNote = resolved.map((r) =>
@@ -1719,10 +1765,16 @@ export function createGit(opts: GitOptions = {}): Git {
             ? `- ${r.path}: taken from ${input.from}, to be regenerated`
             : `- ${r.path}: both sides' added lines kept`,
         );
-        const message =
-          settledNote.length === 0
-            ? input.message
-            : `${input.message}\n\n10db settled these conflicts:\n${settledNote.join('\n')}`;
+        const markedNote = marked.map((path) => `- ${path}: conflict markers left to resolve`);
+        const message = [
+          input.message,
+          ...(settledNote.length === 0
+            ? []
+            : [`10db settled these conflicts:\n${settledNote.join('\n')}`]),
+          ...(markedNote.length === 0
+            ? []
+            : [`10db left these conflicts for a session to resolve:\n${markedNote.join('\n')}`]),
+        ].join('\n\n');
         head = (
           await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip, '-p', from], {
             input: `${message}\n`,
@@ -1780,6 +1832,7 @@ export function createGit(opts: GitOptions = {}): Git {
         fastForward,
         paths,
         ...(resolved.length === 0 ? {} : { resolved, regenerate }),
+        ...(marked.length === 0 ? {} : { marked }),
       };
     });
   }
@@ -2327,6 +2380,29 @@ export function createGit(opts: GitOptions = {}): Git {
     commit,
     mergeIntoBranch,
     mergedCommit,
+    async conflictMarkers(repo, paths) {
+      const c = await pinned(repo);
+      const found: string[] = [];
+      for (const path of paths) {
+        const text = await mergeableText(c, 'HEAD', path).catch(() => null);
+        if (text !== null && hasConflictMarkers(text)) found.push(path);
+      }
+      return found;
+    },
+    async keepNote(repo, ref, text) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      const oid = (await git(c, ['hash-object', '-w', '--stdin'], { input: text })).trim();
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept note', ref, oid]);
+    },
+    async keptNote(repo, ref) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      if ((await git(c, ['cat-file', '-t', ref]).catch(() => '')).trim() !== 'blob') return null;
+      return git(c, ['cat-file', 'blob', ref]);
+    },
     async keptRefs(repo, prefix) {
       if (!prefix.startsWith(KEPT_REF_PREFIX))
         throw new InvalidError(`${prefix} is not under ${KEPT_REF_PREFIX}`);

@@ -547,6 +547,19 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).toContain('Commit each one through mcp__10db__commit');
   });
 
+  it('names the files the base merge left conflict markers in, and says to ask the builder about a choice', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      action: { kind: 'merge', base: 'origin/main', paths: ['packages/db/src/schema.ts', 'a.md'] },
+    });
+    expect(prompt).toContain('10db merged origin/main into your branch');
+    expect(prompt).toContain('- packages/db/src/schema.ts\n- a.md');
+    expect(prompt).toContain('commit each file you changed through mcp__10db__commit');
+    expect(prompt).toContain('mcp__10db__request_claim');
+    expect(prompt).toContain('Never edit a generated file');
+    expect(prompt).toContain('call mcp__10db__ask_human naming the files and why');
+  });
+
   it('carries earlier steps’ results as data, with their verdicts', () => {
     const prompt = buildSessionPrompt({
       ...base,
@@ -680,6 +693,7 @@ describe('the gate in a brief', () => {
     ['resumed answer', { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: 'p1' }],
     ['fix', { kind: 'fix', evidenceId: failed.id }],
     ['uncommitted', { kind: 'uncommitted', paths: ['src/ui/badge.tsx'] }],
+    ['merge', { kind: 'merge', base: 'origin/main', paths: ['src/ui/badge.tsx'] }],
     ['verify', { kind: 'verify' }],
     ['revise', { kind: 'revise', reviewStep: 0 }],
     ['builder review', { kind: 'builder_review', inboxId: mintId('InboxItem') }],

@@ -95,6 +95,18 @@ export const baseNotices = {
     };
   },
   /**
+   * 10db merged the base into the branch and left git's conflict markers in `paths` for a session to
+   * resolve: nothing is asked of the builder, and no gate runs until the markers are gone. Replaces
+   * the conflict notice, which it shares a key with; the next merge that finds the branch holding the
+   * base clears it.
+   */
+  resolving: (batch: BatchDto, paths: readonly string[]): Notice => ({
+    key: NOTICE_KEY.baseConflict,
+    tone: 'info',
+    line: `Resolving conflicts with ${batch.baseBranch}: ${shortPaths(paths)}`,
+    body: `${batch.baseBranch} on origin changed these files in ways that overlap the batch's own changes. 10db merged ${batch.baseBranch} into the batch's branch and left git's conflict markers in them for a session to resolve:\n${listPaths(paths)}\n\nThe session keeps both sides' work and commits the resolution; no gate runs on the branch until the markers are gone, so a gate never tests a branch without ${batch.baseBranch}'s newer commits. The builder is asked only if a resolution would change what either side does. This notice goes once the markers are resolved.`,
+  }),
+  /**
    * The batch shipped with its branch still in conflict with its base, and the worktree that held the
    * merge is gone: the open pull request conflicts, and only the builder can resolve it.
    */

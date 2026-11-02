@@ -68,6 +68,12 @@ describe('nextActionAfterCrash with builder input', () => {
       'p1',
       { kind: 'uncommitted', paths: ['src/api/a.ts'] },
     ],
+    [
+      'keeps a merge with its files, so the next session still resolves them',
+      { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
+      'p1',
+      { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
+    ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
   });
@@ -124,6 +130,13 @@ describe('nextActionOnAnotherAccount', () => {
       handoff,
       null,
       { kind: 'uncommitted', paths: ['a.txt'] },
+    ],
+    [
+      'leaves a merge alone',
+      { kind: 'merge', base: 'origin/main', paths: ['a.txt'] },
+      handoff,
+      null,
+      { kind: 'merge', base: 'origin/main', paths: ['a.txt'] },
     ],
     ['leaves verification alone', { kind: 'verify' }, handoff, null, { kind: 'verify' }],
     [
