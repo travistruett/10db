@@ -11,6 +11,7 @@ interface Plan {
   readonly outside?: readonly string[];
   readonly typecheck?: readonly string[];
   readonly drift?: readonly string[];
+  readonly format?: readonly string[];
   readonly rust?: boolean;
   readonly precheck?: boolean;
 }
@@ -173,5 +174,19 @@ describe('scripts/check-changed.mjs --precheck', () => {
 
   it('plans nothing for no changed file', () => {
     expect(precheckPlanFor()).toMatchObject({ full: false, changed: [], affected: [] });
+  });
+
+  it.each([
+    ['a .env template', 'apps/daemon/.env.example'],
+    ['a .env file', 'apps/daemon/.env'],
+    ['a desktop .env file', 'apps/desktop/.env.production'],
+  ])('never names %s to Prettier: the gate sandbox denies reading it', (_name, file) => {
+    const plan = precheckPlanFor(file, 'apps/daemon/src/runner/runner.ts');
+    expect(plan.format).toEqual(['apps/daemon/src/runner/runner.ts']);
+  });
+
+  it('still formats a file whose name only contains .env', () => {
+    const plan = precheckPlanFor('apps/daemon/src/sandbox/command-env.ts');
+    expect(plan.format).toEqual(['apps/daemon/src/sandbox/command-env.ts']);
   });
 });
