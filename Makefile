@@ -1,4 +1,4 @@
-.PHONY: setup gate check check-changed rust-check deny github-settings live-acceptance install-app rollback-app
+.PHONY: setup gate check check-changed precheck rust-check deny github-settings live-acceptance install-app rollback-app
 
 TAURI_DIR := apps/desktop/src-tauri
 # install-app takes REF from the make command line only; a REF exported by the shell is ignored.
@@ -19,6 +19,10 @@ check:
 ## check-changed: format, lint, typecheck, tests and drift of the packages the diff touches and their dependents; 10db runs it after each implement step. The full gate still runs before the push.
 check-changed:
 	@node scripts/check-changed.mjs
+
+## precheck: format and lint of the changed files, typecheck of the changed packages and their dependents, and drift of the changed packages; no tests, Rust checks or e2e, never the gate. Over every package where it cannot place a file.
+precheck:
+	@node scripts/check-changed.mjs --precheck
 
 ## rust-check: fmt, clippy (pedantic, warnings are errors) and tests for the Tauri shell.
 rust-check:

@@ -9,9 +9,17 @@
 // or with a changed file this script cannot place in a package or a docs-like path (a root config,
 // the lockfile, the gate script, CI), it runs the full gate: it never narrows what it cannot place.
 //
+// --precheck is the pre-check 10db runs in place of the gate when the pull request's base has
+// required checks on GitHub (`make precheck`): format and lint of the changed files, typecheck of the
+// changed packages and every package depending on one, and drift of the changed packages, with no
+// tests, Rust checks or e2e. Where it cannot place a file, or has no base, it runs those four steps over
+// every package instead of the gate: it never runs scripts/gate.sh. CI runs every test.
+//
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
-//   node scripts/check-changed.mjs --plan [-- file…] print the plan as JSON and run nothing; the
+//   node scripts/check-changed.mjs --precheck       run the pre-check (no tests, Rust or e2e)
+//   node scripts/check-changed.mjs --plan [--precheck] [-- file…]
+//                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, globSync, readFileSync } from 'node:fs';
@@ -40,6 +48,13 @@ const READ_BY_REPO_TESTS = [
   /^apps\/[^/]+\/(e2e|scripts)\//,
   /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
 ];
+
+/**
+ * `.env*` files, which the gate and lane sandboxes deny reading. Prettier stats every path it is
+ * named before it applies .prettierignore, so naming one fails the format step with EPERM, and git
+ * lists one as changed when it cannot stat it.
+ */
+const SANDBOX_DENIED = /(^|\/)\.env[^/]*$/;
 
 /**
  * @typedef {{ name: string, dir: string, deps: string[], scripts: string[] }} Pkg
@@ -89,8 +104,9 @@ function withDependents(packages, start) {
  * What to run for these changed files (repo-relative, still present or deleted).
  * @param {string[]} files
  * @param {Pkg[]} packages
+ * @param {boolean} [precheck] plan the pre-check: no tests, so no repo rule tests and no Rust
  */
-function planFor(files, packages) {
+function planFor(files, packages, precheck = false) {
   /** @type {Set<string>} */
   const changed = new Set();
   /** @type {string[]} */
@@ -112,13 +128,19 @@ function planFor(files, packages) {
     }
   }
   if (unplaced.length > 0) {
-    return { full: true, reason: `not in a package: ${unplaced.join(', ')}`, files };
+    return {
+      full: true,
+      reason: `not in a package: ${unplaced.join(', ')}`,
+      files,
+      ...(precheck ? { precheck } : {}),
+    };
   }
   // The repo-wide rule tests read docs, scripts, the agent files and some package files, so they
   // run for those.
   const testSeed = new Set(changed);
   const repoChecks = packages.find((p) => p.dir === 'tests/repo');
-  if ((outside.length > 0 || readByRepoTests) && repoChecks) testSeed.add(repoChecks.name);
+  if (!precheck && (outside.length > 0 || readByRepoTests) && repoChecks)
+    testSeed.add(repoChecks.name);
   const affected = withDependents(packages, new Set([...changed, ...testSeed]));
   const byName = (/** @type {Set<string>} */ set) =>
     packages.filter((p) => set.has(p.name)).map((p) => p.dir);
@@ -129,7 +151,9 @@ function planFor(files, packages) {
     changed: byName(changed),
     affected: byName(affected),
     outside,
-    rust,
+    rust: rust && !precheck,
+    ...(precheck ? { precheck } : {}),
+    format: files.filter((f) => !SANDBOX_DENIED.test(f)),
     drift: packages
       .filter((p) => changed.has(p.name) && p.scripts.includes('drift'))
       .map((p) => p.name),
@@ -226,6 +250,36 @@ async function runTogether(steps) {
   return results.filter((r) => !r.ok).map((r) => r.name);
 }
 
+/**
+ * The pre-check where the diff cannot be narrowed: format, lint, typecheck and drift over every
+ * package, as the gate's steps of those names run them, and never scripts/gate.sh.
+ * @param {string} reason
+ */
+async function runPrecheckEverywhere(reason) {
+  console.log(`check-changed: pre-check over every package (${reason})`);
+  const began = Date.now();
+  const pnpmRun = (/** @type {string} */ name) => ({
+    name,
+    command: 'pnpm',
+    args: ['run', name === 'format' ? 'format:check' : name],
+  });
+  // Drift regenerates files in the tree, so it runs after the three reads of the tree.
+  const failed = await runTogether([pnpmRun('format'), pnpmRun('lint'), pnpmRun('typecheck')]);
+  failed.push(...(await runTogether([pnpmRun('drift')])));
+  finish(failed, began);
+}
+
+/** @param {string[]} failed @param {number} began */
+function finish(failed, began) {
+  const seconds = Math.round((Date.now() - began) / 1000);
+  if (failed.length === 0) {
+    console.log(`\nCHECK-CHANGED PASS (${String(seconds)}s)`);
+  } else {
+    console.log(`\nCHECK-CHANGED FAIL: ${failed.join(' ')} (${String(seconds)}s)`);
+    process.exit(1);
+  }
+}
+
 /** @param {string} reason */
 function runFull(reason) {
   console.log(`check-changed: running the full gate (${reason})`);
@@ -239,6 +293,7 @@ function runFull(reason) {
 async function main() {
   const argv = process.argv.slice(2);
   const planOnly = argv.includes('--plan');
+  const precheck = argv.includes('--precheck');
   const dash = argv.indexOf('--');
   const packages = workspacePackages(root);
   let files;
@@ -247,20 +302,25 @@ async function main() {
   } else {
     const base = baseRef();
     if (base === null) {
+      const reason = 'no base branch to diff against';
       if (planOnly) {
-        console.log(JSON.stringify({ full: true, reason: 'no base branch to diff against' }));
+        console.log(JSON.stringify({ full: true, reason, ...(precheck ? { precheck } : {}) }));
         return;
       }
-      runFull('no base branch to diff against');
+      if (precheck) return runPrecheckEverywhere(reason);
+      runFull(reason);
     }
     files = changedFiles(base);
   }
-  const plan = planFor(files, packages);
+  const plan = planFor(files, packages, precheck);
   if (planOnly) {
     console.log(JSON.stringify(plan, null, 2));
     return;
   }
-  if (plan.full) runFull(plan.reason);
+  if (plan.full) {
+    if (precheck) return runPrecheckEverywhere(plan.reason);
+    runFull(plan.reason);
+  }
   const began = Date.now();
   if (files.length === 0) {
     console.log('CHECK-CHANGED PASS nothing changed');
@@ -270,17 +330,19 @@ async function main() {
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );
   const present = files.filter((f) => existsSync(join(root, f)));
-  const lintTargets = [
-    ...plan.changed,
-    ...plan.outside.filter((f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f) && existsSync(join(root, f))),
-  ];
+  const formatTargets = plan.format.filter((f) => existsSync(join(root, f)));
+  const lintable = (/** @type {string} */ f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f);
+  // The pre-check lints the changed files only; the changed-packages check lints whole packages.
+  const lintTargets = precheck
+    ? present.filter(lintable)
+    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && existsSync(join(root, f)))];
   /** @type {Step[]} */
   const together = [];
-  if (present.length > 0)
+  if (formatTargets.length > 0)
     together.push({
       name: 'format',
       command: 'pnpm',
-      args: ['exec', 'prettier', '--check', '--ignore-unknown', ...present],
+      args: ['exec', 'prettier', '--check', '--ignore-unknown', ...formatTargets],
     });
   if (lintTargets.length > 0)
     together.push({
@@ -300,11 +362,21 @@ async function main() {
   // lint beside them made them flake. Drift regenerates files in the tree, and the Rust checks build.
   /** @type {Step[]} */
   const alone = [
-    {
-      name: 'test',
-      command: 'pnpm',
-      args: ['exec', 'vitest', 'run', '--passWithNoTests', ...plan.affected.map((d) => `${d}/`)],
-    },
+    ...(precheck
+      ? []
+      : [
+          {
+            name: 'test',
+            command: 'pnpm',
+            args: [
+              'exec',
+              'vitest',
+              'run',
+              '--passWithNoTests',
+              ...plan.affected.map((d) => `${d}/`),
+            ],
+          },
+        ]),
     ...plan.drift.map((name) => ({
       name: `drift ${name}`,
       command: 'pnpm',
@@ -318,13 +390,7 @@ async function main() {
   )
     alone.push({ name: 'rust', command: 'make', args: ['-s', 'rust-check'] });
   for (const s of alone) failed.push(...(await runTogether([s])));
-  const seconds = Math.round((Date.now() - began) / 1000);
-  if (failed.length === 0) {
-    console.log(`\nCHECK-CHANGED PASS (${String(seconds)}s)`);
-  } else {
-    console.log(`\nCHECK-CHANGED FAIL: ${failed.join(' ')} (${String(seconds)}s)`);
-    process.exit(1);
-  }
+  finish(failed, began);
 }
 
 if (import.meta.main) await main();

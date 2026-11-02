@@ -42,6 +42,7 @@ import {
   endSession,
   getAccount,
   getAccountRow,
+  getBatch,
   getJudgeConfig,
   getEvidence,
   getInboxItem,
@@ -2037,6 +2038,46 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /**
+   * The base was merged into the branch and git left conflict markers in `update.paths`: the same
+   * step runs again as a session that resolves them, and the gate runs once they are gone. The
+   * session asks the builder (ask_human) only for a resolution that would change what a side does,
+   * so no card is raised here. A session that leaves them again counts against the retry limit.
+   */
+  function sendToMerge(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    update: Extract<BaseUpdate, { readonly kind: 'conflicted' }>,
+  ): void {
+    const attempt = row.attempt + 1;
+    const batch = row.batchId === null ? null : getBatch(db, row.batchId);
+    if (attempt > opts.limits.maxFixAttempts) {
+      fail(
+        id,
+        ctl.fence,
+        `The conflict markers of the merge of ${batch?.baseBranch ?? 'the base'} are still in ${update.paths.join(', ')} after ${String(attempt - 1)} sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+      );
+      return;
+    }
+    opts.state.write((ctx) => {
+      transitionWorkstream(ctx, id, {
+        to: S.Queued,
+        fence: ctl.fence,
+        patch: {
+          nextAction: {
+            kind: 'merge',
+            base: `origin/${batch?.baseBranch ?? 'main'}`,
+            paths: [...update.paths],
+          },
+          attempt,
+        },
+        reason: `conflict markers in ${String(update.paths.length)} file(s) from the merge of the base`,
+      });
+      clearLease(ctx, id);
+    });
+  }
+
   /** The facts the builder checks: where the task began, where it is now, and what it committed. */
   async function checkFacts(row: WorkstreamRow, checkout: string) {
     const head = await opts.git.head(checkout);
@@ -2164,9 +2205,13 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? {}
         : {
             beforeStart: async () => {
-              const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal);
+              // A task's gate has a session to send when the base's conflicts need one.
+              const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal, {
+                inSession: true,
+              });
               before.update = update;
-              return update.kind !== 'aborted';
+              // Markers left in the branch fail any gate; a session resolves them first.
+              return update.kind !== 'aborted' && update.kind !== 'conflicted';
             },
           }),
       project: projectAtCheckout(project, checkout),
@@ -2219,6 +2264,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     if (ctl.stopReason === 'cancelled') {
       cancelNow(id, ctl.fence);
+      return;
+    }
+    // The base merge left conflict markers: no gate ran, and a session resolves them.
+    if (before.update?.kind === 'conflicted' && ctl.stopReason !== 'shutdown') {
+      sendToMerge(id, ctl, row, before.update);
       return;
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.

@@ -1,4 +1,11 @@
-import { AccountDto, AccountId, AccountPatch, mintId, type AccountUsageDto } from '@10db/contracts';
+import {
+  AccountDto,
+  AccountId,
+  AccountPatch,
+  mintId,
+  type AccountPauseDto,
+  type AccountUsageDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -6,6 +13,7 @@ import { accountKeys } from '../../../daemon/account-queries';
 import {
   accountDto,
   accountIdentityDto,
+  accountPauseDto,
   accountSignInDto,
   accountUsageDto,
   DEFAULT_ACCOUNT,
@@ -20,6 +28,7 @@ import {
 } from '../../../test/daemon';
 import { daemonEvent } from '../../../test/fixtures';
 import { AccountDrawer } from './account-drawer';
+import { formatMoment } from './account-pause';
 
 interface Served {
   readonly patches: { id: string; body: unknown }[];
@@ -41,6 +50,8 @@ function serve(
     identityGate?: Promise<void>;
     patchRefusal?: { status: number; message: string };
     archiveRefusal?: { status: number; message: string };
+    /** The pauses the daemon reports. */
+    pauses?: AccountPauseDto[];
   } = {},
 ): Served {
   const patches: Served['patches'] = [];
@@ -60,6 +71,11 @@ function serve(
           accountUsageDto({ accountId: AccountId.parse(params['accountId']) }),
       ),
     ),
+    http.get(daemonUrl('/accounts/pauses'), () => HttpResponse.json(opts.pauses ?? [])),
+    http.post(daemonUrl('/accounts/:accountId/resume'), ({ params }) => {
+      resumes.push(String(params['accountId']));
+      return HttpResponse.json([]);
+    }),
     http.get(daemonUrl('/accounts/:accountId/signin'), ({ params }) =>
       HttpResponse.json(accountSignInDto({ accountId: AccountId.parse(params['accountId']) })),
     ),
@@ -143,13 +159,38 @@ const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve()
 
 const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
 
+/** The accounts a Resume button was pressed for. */
+const resumes: string[] = [];
+
 afterEach(() => {
+  resumes.length = 0;
   writeText.mockClear();
   if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard);
   else Reflect.deleteProperty(navigator, 'clipboard');
 });
 
 describe('AccountDrawer', () => {
+  it('shows the account’s pause with a Resume that lifts a refusal', async () => {
+    const pause = accountPauseDto({ accountId: DEFAULT_ACCOUNT.id, reason: 'refused' });
+    serve([DEFAULT_ACCOUNT], { pauses: [pause] });
+    const dialog = await openDrawer('Claude plan');
+    expect(await within(dialog).findByText(/Sessions refused/)).toBeTruthy();
+    expect(within(dialog).getByText(new RegExp(`since ${formatMoment(pause.since)}`))).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Resume Claude plan' }));
+    await waitFor(() => {
+      expect(resumes).toEqual([DEFAULT_ACCOUNT.id]);
+    });
+  });
+
+  it('shows a usage-limit pause in the drawer with no Resume', async () => {
+    serve([DEFAULT_ACCOUNT], {
+      pauses: [accountPauseDto({ reason: 'usage_limit', until: '2026-10-30T23:30:00.000Z' })],
+    });
+    const dialog = await openDrawer('Claude plan');
+    expect(await within(dialog).findByText(/Usage limit reached/)).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: /Resume/ })).toBeNull();
+  });
+
   it('shows a subscription’s sign-in command and copies it', async () => {
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
     serve([DEFAULT_ACCOUNT, accountDto({ label: 'Fresh login' })]);

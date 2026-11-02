@@ -297,6 +297,62 @@ describe('a hazard program with a word 10db cannot read asks while a hazard is u
   });
 });
 
+describe('a word the shell fills in, only as an argument to a fixed program, is read', () => {
+  it.each([
+    // The three read-only checks lanes ran on 2026-11-01.
+    'for f in packages/contracts/src/entities.ts packages/db/src/x.ts; do uptime | sed \'s/.*load/load/\'; s=$(date +%s); node scripts/check-changed.mjs --precheck -- "$f" > "$TMPDIR/pc.log" 2>&1; rc=$?; e=$(( $(date +%s) - s )); echo "$f rc=$rc e=$e"; done',
+    'cd /work/tree; pnpm exec prettier --check apps/daemon/src/guard/*.ts 2>&1 | tail -5; pnpm exec eslint apps/daemon/src/guard; pnpm exec vitest run --root apps/daemon src/guard 2>&1 | grep x; sed -n 72p apps/daemon/AGENTS.md | cut -c1-900',
+    "F=$(git status --short | awk '{print $2}'); pnpm exec prettier --check $F 2>&1 | tail -5; pnpm exec eslint $F",
+    'pnpm exec prettier --check $F',
+    'pnpm exec prettier --check "$f"',
+    'pnpm exec eslint $F',
+    'pnpm exec vitest run $F',
+    'pnpm exec tsc -p $P',
+    'pnpm exec node scripts/check.mjs $F',
+    'pnpm --filter @10db/daemon test $F',
+    'pnpm --filter @10db/daemon exec vitest run "$f"',
+    'pnpm -r --filter=@10db/daemon lint $F',
+    'env CI=1 pnpm exec prettier --check $F',
+    'pnpm prettier --check $F',
+  ])('%s', (command) => {
+    expect(bash(command)).toBe('allow');
+    expect(pre('Monitor', { command })).toBe('allow');
+  });
+});
+
+describe('a word the shell fills in that can pick the program or the pnpm subcommand still asks', () => {
+  it.each([
+    'pnpm $SUB x',
+    'pnpm exec $X y',
+    '$P add z',
+    'pnpm exec "$X" y',
+    'pnpm exec prettier $F && pnpm $SUB x',
+    'pnpm exec ${X} y',
+    'pnpm exec $(echo prettier) $F',
+    'pnpm exec drizzle-kit $x',
+    'pnpm exec pnpm $x',
+    'pnpm exec sh $F',
+    'pnpm exec env $F',
+    'pnpm exec xargs $F',
+    'pnpm exec node $F',
+    'pnpm exec {prettier,pnpm} $F',
+    'pnpm exec prettier* $F',
+    'pnpm --filter $P test',
+    'pnpm --filter @10db/daemon $SUB x',
+    'pnpm --filter @10db/daemon run $S',
+    'pnpm run $S',
+    'pnpm -r $SUB',
+    'pnpm recursive $SUB',
+    'pnpm dlx $X',
+    'pnpm lint$S',
+    'pnpm te$S',
+    'echo x | xargs pnpm exec prettier $F',
+  ])('%s', (command) => {
+    expect(bash(command)).toBe('ask');
+    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  });
+});
+
 describe('a command 10db cannot read asks while a hazard is unclaimed', () => {
   it.each(['~/bin/foo x', 'echo "unclosed'])('%s', (command) => {
     expect(bash(command)).not.toBe('allow');
