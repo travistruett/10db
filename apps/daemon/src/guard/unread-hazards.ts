@@ -203,7 +203,7 @@ function unreadableIn(command: string, known: Known, depth: number): string | nu
 }
 
 /** The programs the hazards' commands start with (`pnpm`, `drizzle-kit`), by base name. */
-export function hazardPrograms(hazards: readonly HazardDef[]): Set<string> {
+function hazardPrograms(hazards: readonly HazardDef[]): Set<string> {
   return new Set(
     hazards.flatMap((hazard) => hazard.commands.map((c) => baseName(c.split(' ')[0] ?? ''))),
   );
