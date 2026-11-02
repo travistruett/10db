@@ -8,7 +8,13 @@ import { comparablePath, samePath } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
-import { checkoutCards, CheckoutChoice, WorktreeChoice, worktreeCards } from './cards';
+import {
+  checkoutCards,
+  CheckoutChoice,
+  startCards,
+  WorktreeChoice,
+  worktreeCards,
+} from './cards';
 import { createWorktreeCardAnswers, recoverBatches } from './index';
 import { raise } from './context';
 
@@ -392,6 +398,22 @@ describe('every worktree and checkout card', () => {
         options.every((o) => o.description.length > 0),
         card.title,
       ).toBe(true);
+    }
+  });
+
+  it('the lanes-running cards name lanes in Your folder as what blocks a switch', async () => {
+    build('worktree');
+    const { batch } = await opened();
+    const place = { branch: 'main', sha: 'b'.repeat(40) };
+    const bodies = [
+      startCards.lanesRunning(h.project, 3).body,
+      checkoutCards.lanesRunning(batch, h.project, place, 3).body,
+    ];
+    for (const body of bodies) {
+      expect(body).toContain('Your folder');
+      expect(body).toContain('separate cop');
+      expect(body).toContain('3');
+      expect(body).not.toMatch(/no (lane|work) runs in the project/);
     }
   });
 });
