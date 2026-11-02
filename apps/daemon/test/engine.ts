@@ -230,6 +230,12 @@ export async function createTestEngine(
     stay: (projectId) => {
       moves.stay(projectId);
     },
+    // The engine has no preparer: it never probes an account.
+    recheck: () => undefined,
+    raiseCap: (id, toUsd, answering) => {
+      state.write((ctx) => patchAccount(ctx, id, { monthlyCapUsd: toUsd }));
+      accounts.saved(id, answering);
+    },
   });
   const guarded = protectedPaths({ dataDir: data.path, home: homedir(), loginConfigDir: null });
   const server = serve({
