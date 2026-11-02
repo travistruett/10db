@@ -271,7 +271,7 @@ function teamOf(tasks: readonly TaskRow[], facts: Facts): DigestTeamMember[] {
 /**
  * The first task that can start now, else the first that cannot yet and what it waits on. With no
  * unstarted task left, the queued task first in line for a lane (a queued task has started, so it
- * waits on nothing).
+ * waits on nothing). A parked queued task is passed over while one that isn't parked is queued.
  */
 function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNext | null {
   const unstarted = tasks.filter((t) => {
@@ -290,7 +290,11 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
         queued.push({ task, ws: run.workstream });
       }
     }
-    const firstInLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws))[0];
+    // The scheduler never starts a parked task, so one that isn't parked leads when there is one.
+    const startable = queued.filter((q) => q.task.boardColumnId === null);
+    const firstInLine = (startable.length > 0 ? startable : queued).toSorted((x, y) =>
+      queueOrder(x.ws, y.ws),
+    )[0];
     return firstInLine
       ? { taskId: firstInLine.task.id, title: firstInLine.task.title, waitsOn: [] }
       : null;
