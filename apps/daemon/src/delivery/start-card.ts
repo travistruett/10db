@@ -21,7 +21,8 @@ const Refused = z.object({ title: z.string().optional(), batchId: BatchId.option
  * tells the builder why, and one refused later in the background raises a fresh card. Cancel task
  * removes each task the card names, as removing it from the Board does, though a run the refused
  * cut cancelled before it had a session does not count as a start, and a task started again after a
- * failed run is closed as the Board's Close does; a task that has started since,
+ * failed run is closed as the Board's Close does, and one started again after a finished run (reopened)
+ * or a run cancelled after a session is removed with that run kept; a task that has started since,
  * or that another task waits on, throws and keeps the card open. Any other label changes
  * nothing.
  */
