@@ -65,7 +65,7 @@ The bridge reads no other 10db variable.
 | `list_flows`    | Flows, with ids.                                                                                               |
 | `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                           |
 | `create_task`   | Makes a task from a title, description, criteria, areas, dependencies, risk tags and flow, and returns its id. |
-| `edit_task`     | Changes a task's title, description, criteria, risk tags or flow.                                              |
+| `edit_task`     | Changes a task's title, description, criteria, risk tags, flow or areas (areas only before it has started).    |
 | `remove_task`   | Removes a task that has not started.                                                                           |
 | `start_task`    | Starts a **Ready** task; any other is refused.                                                                 |
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                               |

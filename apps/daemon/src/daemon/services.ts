@@ -351,7 +351,8 @@ export function createServices(deps: {
     async patchTask(id, patch) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       // The store refuses a task that has started; a join still pending has not written yet.
-      if (patch.workspaceMode !== undefined) deps.starter.refuseIfJoining(id);
+      if (patch.workspaceMode !== undefined || patch.areas !== undefined)
+        deps.starter.refuseIfJoining(id);
       return deps.state.write((ctx) => patchTask(ctx, id, patch));
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

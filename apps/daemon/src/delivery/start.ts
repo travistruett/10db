@@ -103,7 +103,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
 
   function joiningRefusal(task: TaskDto): ConflictError {
     return new ConflictError(
-      `${task.title} is joining a batch; where it works can't change, and it can't start again, until it has joined or been refused`,
+      `${task.title} is joining a batch; where it works and its areas can't change, and it can't start again, until it has joined or been refused`,
     );
   }
 

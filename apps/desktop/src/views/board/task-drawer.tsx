@@ -1,5 +1,6 @@
 import {
   isTerminal,
+  NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
@@ -94,6 +95,11 @@ export interface TaskDrawerProps {
    * task lands, and lets the builder change it until the task has run.
    */
   readonly pullRequestBase?: string;
+  /**
+   * The project's area names. With them, a task that has never started can have its areas changed
+   * here; without them, or once it has started, they show as they are.
+   */
+  readonly areaNames?: readonly string[];
   readonly onClose: () => void;
 }
 
@@ -111,6 +117,7 @@ export function TaskDrawer({
   onStart,
   place,
   pullRequestBase,
+  areaNames,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -124,6 +131,13 @@ export function TaskDrawer({
   const [criteria, setCriteria] = useState(initialCriteria);
   const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
   const [risks, setRisks] = useState<RiskTag[]>([...task.riskTags]);
+  // Areas are the claims the lane takes when it starts, so they change only before then.
+  const areasEditable =
+    areaNames !== undefined && task.workstreamId === null && task.status === TaskStatus.Open;
+  const [areas, setAreas] = useState<string[]>([...task.areas]);
+  const areasChanged =
+    areasEditable &&
+    (areas.length !== task.areas.length || areas.some((a) => !task.areas.includes(a)));
   const [error, setError] = useState<string | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const waitsOn = task.dependsOn.flatMap((id) => {
@@ -140,6 +154,7 @@ export function TaskDrawer({
     flowId !== task.flowId ||
     risks.length !== task.riskTags.length ||
     risks.some((r) => !task.riskTags.includes(r)) ||
+    areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
@@ -161,6 +176,10 @@ export function TaskDrawer({
       setError(NEW_TASK_NO_CRITERIA);
       return;
     }
+    if (areasEditable && areas.length === 0) {
+      setError(NEW_TASK_NO_AREAS);
+      return;
+    }
     const changesLanding =
       pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing);
     const where = landingFromDraft(landing);
@@ -179,6 +198,7 @@ export function TaskDrawer({
           acceptanceCriteria: lines,
           flowId,
           riskTags: risks,
+          ...(areasChanged ? { areas } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
       },
@@ -254,15 +274,26 @@ export function TaskDrawer({
           <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
             {columnName}
           </Badge>
-          {task.areas.map((area) => (
-            <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-              {area}
-            </Badge>
-          ))}
+          {areasEditable
+            ? null
+            : task.areas.map((area) => (
+                <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
+                  {area}
+                </Badge>
+              ))}
           {waitsOn.length > 0 ? (
             <Text size="xs" c="dimmed">{`Waits on ${waitsOn.join(', ')}`}</Text>
           ) : null}
         </Group>
+        {areasEditable ? (
+          <MultiSelect
+            label="Areas"
+            description="The parts of the project this task works in. They are fixed once it starts."
+            data={areaNames}
+            value={areas}
+            onChange={setAreas}
+          />
+        ) : null}
         <Textarea
           label="Description"
           autosize

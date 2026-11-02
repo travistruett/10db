@@ -490,6 +490,8 @@ export const TaskPatchFields = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   riskTags: z.array(z.enum(RiskTag)),
   flowId: FlowId.nullable(),
+  /** Replaces the task's areas; only while the task has never started, and only with the project's own. */
+  areas: z.array(Name).min(1),
 });
 
 /**

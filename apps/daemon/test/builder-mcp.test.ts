@@ -76,7 +76,10 @@ async function seedProject() {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: 'true',
-    areas: [{ name: 'src', globs: ['src/**'] }],
+    areas: [
+      { name: 'src', globs: ['src/**'] },
+      { name: 'docs', globs: ['docs/**'] },
+    ],
   });
 }
 const seedTask = (projectId: string, title: string, dependsOn: string[] = []) =>
@@ -144,7 +147,10 @@ describe('the builder MCP endpoint', () => {
     expect(projects[0]).toMatchObject({
       id: project.id,
       name: 'demo',
-      areas: [{ name: 'src', globs: ['src/**'] }],
+      areas: [
+        { name: 'src', globs: ['src/**'] },
+        { name: 'docs', globs: ['docs/**'] },
+      ],
       flowId: project.flowId,
       delivery: project.delivery,
     });
@@ -308,6 +314,33 @@ describe('the builder MCP endpoint', () => {
       await seedProject();
       const result = await call('edit_task', { taskId: mintId('Task'), title: 'x' });
       expect(result.isError).toBe(true);
+    });
+
+    it('sets the areas of an unstarted task and keeps its id', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'move');
+      await callJson('edit_task', { taskId: task.id, areas: ['docs', 'src'] });
+      const [after] = await tasksOf(project.id);
+      expect(after).toMatchObject({ id: task.id, areas: ['docs', 'src'] });
+    });
+
+    it('refuses an area the project does not have, naming it', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'keep');
+      const result = await call('edit_task', { taskId: task.id, areas: ['src', 'billing'] });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('billing');
+      expect((await tasksOf(project.id))[0]?.areas).toEqual(['src']);
+    });
+
+    it('refuses a task that has started, saying why', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'running');
+      await callJson('start_task', { taskId: task.id });
+      const result = await call('edit_task', { taskId: task.id, areas: ['docs'] });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain('has already started, so its areas are fixed');
+      expect((await tasksOf(project.id))[0]?.areas).toEqual(['src']);
     });
   });
 

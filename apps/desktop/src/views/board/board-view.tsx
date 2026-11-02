@@ -448,6 +448,7 @@ function BoardColumns({
           {...(openPlace !== undefined ? { place: openPlace } : {})}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
+          areaNames={project.areas.map((area) => area.name)}
           {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
           onStart={() => {
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
