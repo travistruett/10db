@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AreaCandidateKind, type AreaCandidate } from './area-candidates';
-import { areasFromModel, areasFromStructure } from './area-naming';
+import { areasFromModel, areasFromStructure, namingPrompt } from './area-naming';
 
 const candidate = (kind: AreaCandidateKind, label: string): AreaCandidate => ({
   kind,
@@ -12,6 +12,14 @@ const candidate = (kind: AreaCandidateKind, label: string): AreaCandidate => ({
 });
 
 const rest = (): AreaCandidate => ({ ...candidate(AreaCandidateKind.Rest, '.'), globs: ['*'] });
+
+describe('namingPrompt', () => {
+  it('says the kind=rest candidate holds every file no other area holds', () => {
+    const prompt = namingPrompt([candidate(AreaCandidateKind.Folder, 'a'), rest()]);
+    expect(prompt).toContain('kind=rest');
+    expect(prompt).toMatch(/kind=rest[^\n]*holds every file no other area holds/u);
+  });
+});
 
 describe('areasFromStructure names', () => {
   it.each([
