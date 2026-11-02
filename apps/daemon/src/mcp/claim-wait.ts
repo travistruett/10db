@@ -25,6 +25,7 @@ import {
 import { claimScopeOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
+import { deadlockAnswers } from './claim-deadlock';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
 export const CLAIM_POLL_MS = 2_000;
@@ -38,7 +39,13 @@ export const CLAIM_WAIT_SLICE_MS = 4 * 60_000;
 
 export type ClaimResult =
   | { readonly granted: true; readonly claim: ClaimRow }
-  | { readonly granted: false; readonly heldBy: WorkstreamId; readonly inboxId: InboxItemId };
+  | {
+      readonly granted: false;
+      readonly heldBy: WorkstreamId;
+      readonly inboxId: InboxItemId;
+      /** What the refused agent does next. */
+      readonly instruction: string;
+    };
 
 export interface Asking {
   readonly state: StateStore;
@@ -56,6 +63,8 @@ export interface Asking {
 /** Where a wait in progress stands: who holds the claim now. */
 export interface WaitState {
   readonly workstreamId: WorkstreamId;
+  readonly kind: ClaimKind;
+  readonly name: string;
   heldBy: WorkstreamId | null;
 }
 
@@ -86,7 +95,12 @@ export class ClaimWaits {
     const key = `${a.workstreamId}:${a.kind}:${a.name}`;
     const existing = this.#live.get(key);
     if (existing) return existing;
-    const state: WaitState = { workstreamId: a.workstreamId, heldBy: null };
+    const state: WaitState = {
+      workstreamId: a.workstreamId,
+      kind: a.kind,
+      name: a.name,
+      heldBy: null,
+    };
     const done = claimOrWait(a, state, this).finally(() => {
       this.#live.delete(key);
     });
@@ -117,6 +131,24 @@ export class ClaimWaits {
     const out: WorkstreamId[] = [];
     for (const { state } of this.#live.values())
       if (state.workstreamId === workstreamId && state.heldBy !== null) out.push(state.heldBy);
+    return out;
+  }
+
+  /**
+   * The claims `holder` holds that a wait is waiting for, among the waits of `start` and of everything
+   * `start` waits on through other waiters: what `holder` gives up to unblock `start`.
+   */
+  claimsAwaitedFrom(
+    holder: WorkstreamId,
+    start: WorkstreamId,
+  ): { readonly kind: ClaimKind; readonly name: string }[] {
+    const out: { readonly kind: ClaimKind; readonly name: string }[] = [];
+    for (const { state } of this.#live.values())
+      if (
+        state.heldBy === holder &&
+        (state.workstreamId === start || this.waitsOn(start, state.workstreamId))
+      )
+        out.push({ kind: state.kind, name: state.name });
     return out;
   }
 
@@ -189,19 +221,43 @@ function waitNotice(a: Asking, heldBy: WorkstreamId): Notice {
 
 const deadlockKey = (a: Asking): string => `${DEADLOCK_CARD}:${a.workstreamId}:${a.kind}:${a.name}`;
 
-/** One card per claim: a deadlock found again rewrites it, so the agent's retries raise no second card. */
-function deadlock(a: Asking, heldBy: WorkstreamId): ClaimResult {
+/**
+ * One card per claim: a deadlock found again rewrites it, so the agent's retries raise no second card.
+ * The builder answers which task yields its claim, or which is cancelled, and the daemon acts on it
+ * (`createClaimDeadlockAnswers`).
+ */
+function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): ClaimResult {
   const db = a.state.db;
+  const asker = taskTitleOf(db, a.workstreamId);
+  const holder = taskTitleOf(db, heldBy);
+  const { options, detail } = deadlockAnswers([
+    {
+      workstreamId: a.workstreamId,
+      title: asker,
+      yields: waits.claimsAwaitedFrom(a.workstreamId, heldBy),
+    },
+    { workstreamId: heldBy, title: holder, yields: [{ kind: a.kind, name: a.name }] },
+  ]);
+  const body = `Task "${holder}" holds ${a.kind} ${a.name} and is itself waiting for a claim that task "${asker}" holds, so neither can go on. Reason given: ${a.reason}`;
   const card = a.inbox.flag({
     projectId: a.projectId,
     workstreamId: a.workstreamId,
     title: `Claim deadlock: ${a.kind} ${a.name}`,
-    body: `Task "${taskTitleOf(db, heldBy)}" holds ${a.kind} ${a.name} and is itself waiting for a claim that task "${taskTitleOf(db, a.workstreamId)}" holds, so neither can go on. Reason given: ${a.reason}`,
-    detail: { heldBy },
+    body,
+    options,
+    detail: { heldBy, ...detail },
     foldKey: deadlockKey(a),
     refresh: true,
   });
-  return { granted: false, heldBy, inboxId: card.id };
+  // A repeat that folds keeps the options it was raised with; another holder needs other answers.
+  if (card.options.map((o) => o.label).join('\n') !== options.map((o) => o.label).join('\n'))
+    a.inbox.reword(card.id, body, { options, detail: { heldBy, ...detail } });
+  return {
+    granted: false,
+    heldBy,
+    inboxId: card.id,
+    instruction: `Waiting would deadlock: task "${holder}" holds ${a.kind} ${a.name} and waits for a claim you hold. The builder was asked in the Inbox which task yields its claim or is cancelled. Edit nothing in ${a.kind} ${a.name}. Once they answer, call request_claim again with a new opId: it is granted, or waits for the holder. A claim you held may have been released to resolve this: ask for it again before editing there.`,
+  };
 }
 
 /** A deadlock card for this claim describes a deadlock that is gone once a later ask needs no refusal. */
@@ -239,7 +295,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
     return grantedFrom(a, outcome.claims);
   }
   let heldBy = outcome.conflict.heldBy;
-  if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy);
+  if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy, waits);
   withdrawDeadlock(a);
   const shown = waitNotice(a, heldBy);
   a.state.write((ctx) => setWorkstreamNotice(ctx, a.workstreamId, shown));
@@ -256,7 +312,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
       if (!outcome.ok && outcome.conflict.heldBy !== heldBy) {
         heldBy = outcome.conflict.heldBy;
         wait.heldBy = heldBy;
-        if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy);
+        if (waits.waitsOn(heldBy, a.workstreamId)) return deadlock(a, heldBy, waits);
         const now = waitNotice(a, heldBy);
         a.state.write((ctx) => setWorkstreamNotice(ctx, a.workstreamId, now));
         waits.waitingOn();

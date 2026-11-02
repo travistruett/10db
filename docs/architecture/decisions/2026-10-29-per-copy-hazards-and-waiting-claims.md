@@ -57,7 +57,12 @@ and no second card, and two calls sharing a wait record one result.
 
 The one case that returns `granted: false, waiting: false` is a deadlock: the holder is itself waiting, directly
 or through other waiters, for a claim this task holds. Waiting would never end, so the call returns at once with
-a "Claim deadlock" card naming both tasks, and the agent decides (finish and release, or `ask_human`). It is
+a "Claim deadlock" card naming both tasks, and the builder decides. The card offers, for each of the two tasks,
+"<task> yields <claim>" (the daemon releases the claims the other side waits for, and the other task's wait takes
+them) and "Cancel <task>" (the runner cancels it, which frees everything it holds). The refused agent is told to edit
+nothing in the claim and to call `request_claim` again with a new opId once the builder has answered; if it was the
+one that yielded, it asks for its released claim again before editing there. The answers are stored in the card's
+detail, so a card answered after the tasks changed releases only what it named. It is
 checked when the wait starts and again whenever the holder changes. The waits it reads are the daemon's live
 waits, held in memory, not the cards: dismissing a wait card does not hide its wait, and a wait ends with the
 daemon that ran it. Startup withdraws the wait cards a stopped daemon left (`withdrawStaleClaimWaits`), and a new

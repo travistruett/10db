@@ -146,7 +146,7 @@ export function createToolHandlers(
               heldBy: settled.heldBy,
               inboxId: settled.inboxId,
               waiting: false,
-              instruction: null,
+              instruction: settled.instruction,
             },
         ctx,
       );

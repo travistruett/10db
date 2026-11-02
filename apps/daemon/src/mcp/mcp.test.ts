@@ -26,6 +26,7 @@ import {
   seedProject,
   setWorkstreamNotice,
   transitionBatch,
+  transitionWorkstream,
   type Store,
 } from '@10db/db';
 import {
@@ -44,7 +45,13 @@ import { createGit } from '../git';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { ClaimWaits, createMcpHandler, mintSessionToken, withdrawStaleClaimWaits } from './index';
+import {
+  ClaimWaits,
+  createClaimDeadlockAnswers,
+  createMcpHandler,
+  mintSessionToken,
+  withdrawStaleClaimWaits,
+} from './index';
 
 const GUARDED = protectedPaths({
   dataDir: join(tmpdir(), 'mcp-test-data'),
@@ -68,6 +75,10 @@ let sessionAbort = new AbortController();
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
 let claimWaits: ClaimWaits;
+/** What an answer to a flag card does; the daemon wires the same into its inbox. */
+let answerDeadlock: ReturnType<typeof createClaimDeadlockAnswers>;
+/** The workstreams the builder's answers cancelled, in order. */
+let cancelled: WorkstreamId[] = [];
 /** What bringing the base in before the migrations hazard answers; a test replaces it. */
 let takeMigrationsBase: MigrationsBase['take'];
 /** The workstreams the base was brought in for, in order. */
@@ -103,7 +114,24 @@ beforeEach(async () => {
   close = test.close;
   base = test.store;
   state = createStateStore(test.store, createEventBus());
-  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  cancelled = [];
+  inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswer: (item, answer) => {
+      answerDeadlock(item, answer);
+    },
+  });
+  answerDeadlock = createClaimDeadlockAnswers({
+    state,
+    // The runner's cancel ends the task and frees what it holds.
+    cancel: (id) => {
+      cancelled.push(id);
+      state.write((ctx) => releaseClaims(ctx, id));
+      return Promise.resolve();
+    },
+    log: capturingLogger,
+  });
   waitsStarted = 0;
   migrationsBaseTaken = [];
   takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
@@ -891,6 +919,102 @@ describe('MCP tools', () => {
     releaseHolder(other);
     expect((await second).json).toMatchObject({ granted: true });
     expect(openCards()).toEqual([]);
+  });
+
+  describe('a claim deadlock card', () => {
+    /** Alpha holds api and waits for ui; Beta holds ui and is refused api, which raises the card. */
+    async function deadlocked() {
+      const a = await seedSession(['api']);
+      const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
+      const alpha = a.call('request_claim', {
+        opId: 'op-deadlock-a',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(a)).not.toBeNull();
+      });
+      const refused = await b.call('request_claim', {
+        opId: 'op-deadlock-b',
+        kind: 'area',
+        name: 'api',
+        reason: 'badge',
+      });
+      const card = openCards().find((c) => c.title === 'Claim deadlock: area api');
+      if (!card) throw new Error('no deadlock card');
+      return { a, b, alpha, refused, card };
+    }
+
+    it('offers each task yielding its claim and cancelling each task, and tells the refused agent what comes next', async () => {
+      const { refused, card } = await deadlocked();
+      expect(card.options.map((o) => o.label)).toEqual([
+        'Beta yields area ui',
+        'Alpha yields area api',
+        'Cancel Beta',
+        'Cancel Alpha',
+      ]);
+      expect(card.options.every((o) => o.description.length > 0)).toBe(true);
+      expect(refused.json).toMatchObject({ granted: false, waiting: false, inboxId: card.id });
+      expect(String(refused.json?.['instruction'])).toContain('request_claim again');
+      sessionAbort.abort();
+    });
+
+    it('frees the waiting task when the asker yields its claim, and raises no second card', async () => {
+      const { a, b, alpha, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Beta yields area ui' });
+      expect((await alpha).json).toMatchObject({ granted: true });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(activeClaims(state.db, b.workstream.id)).toEqual([]);
+      expect(getInboxItem(state.db, card.id).state).toBe('RESOLVED');
+      // Beta asks again: Alpha waits for nothing, so this is a plain wait, with no card.
+      const again = b.call('request_claim', {
+        opId: 'op-deadlock-b2',
+        kind: 'area',
+        name: 'api',
+        reason: 'badge',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(b)?.line).toBe('Waiting for area api: task "Alpha" holds it');
+      });
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await again;
+    });
+
+    it('lets the asker have the claim when the holder yields it', async () => {
+      const { a, b, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Alpha yields area api' });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).not.toContain('api');
+      const again = await b.call('request_claim', {
+        opId: 'op-deadlock-b2',
+        kind: 'area',
+        name: 'api',
+        reason: 'badge',
+      });
+      expect(again.json).toMatchObject({ granted: true });
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+    });
+
+    it('cancels the chosen task, which frees what it held', async () => {
+      const { a, b, alpha, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Cancel Beta' });
+      expect(cancelled).toEqual([b.workstream.id]);
+      expect((await alpha).json).toMatchObject({ granted: true });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(openCards()).toEqual([]);
+    });
+
+    it('does not cancel a task that has already ended', async () => {
+      const { a, card } = await deadlocked();
+      state.write((ctx) => {
+        transitionWorkstream(ctx, a.workstream.id, { to: 'CANCELLED', fence: null });
+      });
+      inbox.answer(card.id, { choice: 'Cancel Alpha' });
+      expect(cancelled).toEqual([]);
+      sessionAbort.abort();
+    });
   });
 
   it('refuses at once, naming both tasks, when waiting would deadlock', async () => {
