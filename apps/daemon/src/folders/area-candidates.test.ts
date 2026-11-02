@@ -301,6 +301,20 @@ describe('deriveAreaCandidates', () => {
         'web/package.json',
       ],
     },
+    {
+      name: 'a backslash name beside the name its ? also matches',
+      tracked: [
+        ...files('a\\b', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('axb', ['one.ts', 'two.ts', 'three.ts']),
+      ],
+    },
+    {
+      name: 'expanding braces beside the name their ? also matches',
+      tracked: [
+        ...files('k{x,y}', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('kxx,yy', ['one.ts', 'two.ts', 'three.ts']),
+      ],
+    },
   ])(
     'gives every file to exactly one candidate, with globs a project accepts: $name',
     ({ tracked }) => {

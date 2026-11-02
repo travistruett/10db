@@ -172,8 +172,12 @@ describe('proposeAreas without a model', () => {
     expect(pair?.globs).toContain('two/**');
   });
 
-  it('puts each file in one area when folder names differ only where a glob cannot escape', async () => {
-    const tracked = ['a]b', 'axb', 'a[b'].flatMap((dir) =>
+  it.each([
+    ['a stray bracket', ['a]b', 'axb', 'a[b']],
+    ['a backslash', ['a\\b', 'axb']],
+    ['expanding braces', ['k{x,y}', 'kxx,yy']],
+  ])('puts each file in one area when folder names differ only at %s', async (_, dirs) => {
+    const tracked = dirs.flatMap((dir) =>
       ['1.ts', '2.ts', '3.ts'].map((f) => `${dir}/${f}`),
     );
     const repo = repoWith([['package.json', 'other/x.ts', 'other/y.ts', 'other/z.ts', ...tracked]]);
