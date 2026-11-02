@@ -6,6 +6,7 @@ import {
   bookkeepingAt,
   CLAUDE_CODE_BOOKKEEPING,
   ignoredBookkeepingWrite,
+  isInsideClaudeCodeBookkeeping,
 } from './claude-code-bookkeeping';
 
 let dir: TempDir;
@@ -91,6 +92,37 @@ describe('bookkeepingAt', () => {
     linkSync(join(dir.path, '.claude/settings.local.json'), join(dir.path, lock));
     expect(paths(lock)).toEqual([]);
     expect(paths('.claude')).toEqual([]);
+  });
+
+  it('names the bookkeeping in a .claude folder nested anywhere in the copy', () => {
+    const nested = '.claude/hooks/.claude';
+    mkdirSync(join(dir.path, nested, '.cc-writes'), { recursive: true });
+    writeFileSync(join(dir.path, nested, 'scheduled_tasks.lock'), '{}');
+    // The entries are the list's, whichever folder they were found in.
+    expect(paths(nested).sort()).toEqual(['.claude/.cc-writes', lock]);
+    expect(paths(`${nested}/.cc-writes`)).toEqual(['.claude/.cc-writes']);
+    expect(paths(`${nested}/.cc-writes/x.tmp`)).toEqual(['.claude/.cc-writes']);
+    expect(paths(`${nested}/scheduled_tasks.lock`)).toEqual([lock]);
+    expect(isInsideClaudeCodeBookkeeping(`${nested}/.cc-writes/x.tmp`)).toBe(true);
+    expect(isInsideClaudeCodeBookkeeping(`${nested}/.cc-writes`)).toBe(false);
+    expect(isInsideClaudeCodeBookkeeping('src/.claude/.cc-writes/x')).toBe(true);
+  });
+
+  it('gives none for a nested .claude that also holds a real file', () => {
+    const nested = '.claude/hooks/.claude';
+    mkdirSync(join(dir.path, nested, '.cc-writes'), { recursive: true });
+    writeFileSync(join(dir.path, nested, 'settings.json'), '{}');
+    expect(paths(nested)).toEqual([]);
+    expect(paths(`${nested}/settings.json`)).toEqual([]);
+  });
+
+  it('gives none for a nested lock that is a link, or a path that only looks alike', () => {
+    const nested = '.claude/hooks/.claude';
+    mkdirSync(join(dir.path, nested), { recursive: true });
+    symlinkSync(join(dir.path, 'elsewhere'), join(dir.path, nested, 'scheduled_tasks.lock'));
+    expect(paths(`${nested}/scheduled_tasks.lock`)).toEqual([]);
+    expect(paths('.claude/hooks/.cc-writes/x')).toEqual([]);
+    expect(paths('.claude/hooks/scheduled_tasks.lock')).toEqual([]);
   });
 
   it('gives none for an empty .claude or another directory', () => {

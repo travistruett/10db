@@ -32,7 +32,14 @@ import {
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
 import type { EventBus, StateStore } from '../events';
-import { existsAsEntry, GitTrustError, type Git } from '../git';
+import {
+  bookkeepingAt,
+  existsAsEntry,
+  GitTrustError,
+  ignoredBookkeepingWrite,
+  isInsideClaudeCodeBookkeeping,
+  type Git,
+} from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import {
@@ -45,11 +52,6 @@ import {
   ruleAllowances,
   writeStamp,
 } from './allowed-writes';
-import {
-  bookkeepingAt,
-  ignoredBookkeepingWrite,
-  isInsideClaudeCodeBookkeeping,
-} from './claude-code-bookkeeping';
 import {
   bulkFoldKey,
   findForeignClaimWrites,

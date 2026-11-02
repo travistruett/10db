@@ -19,6 +19,10 @@ interface BookkeepingEntry {
  * shows what the list hides. A file a new Claude Code release starts writing is not on it: it raises a "Write
  * outside every claim" card until it is added here with the behaviour that writes it.
  *
+ * Each entry applies in any `.claude/` folder of the copy: Claude Code keeps its bookkeeping under the working
+ * directory a command ran in, so `.claude/hooks/.claude/.cc-writes` is the same staging directory. The commit
+ * tool leaves these out of every commit (`leftOutOfCommits`).
+ *
  * - `directory`: a path inside it is judged like any other (dropped, with a log line, while git ignores it;
  *   checked against the claims when git reports it), since a file left there is still the agent's. The
  *   directory's own path is exempt only as a real directory.
@@ -50,16 +54,51 @@ export const CLAUDE_CODE_BOOKKEEPING: readonly BookkeepingEntry[] = [
   },
 ];
 
-const BOOKKEEPING_DIRECTORIES = CLAUDE_CODE_BOOKKEEPING.filter((e) => e.kind === 'directory').map(
-  (e) => e.path,
-);
+/**
+ * How `rel` stands to an entry's path, wherever in the copy that `.claude/` folder is. Claude Code writes its
+ * bookkeeping into the `.claude/` under its working directory, so a command run in `.claude/hooks` leaves
+ * `.claude/hooks/.claude/.cc-writes`. The entry's path must be the whole tail of `rel` (`at`), or `rel` must
+ * continue past it (`inside`); a path that stops short of it, on the way to it, is `way`. Segments are compared
+ * whole, so `.cc-writesx` and `x/.cc-writes` are none of these.
+ */
+function standing(rel: string, entryPath: string): 'at' | 'inside' | 'way' | null {
+  const segments = rel.split('/');
+  const wanted = entryPath.split('/');
+  const matches = (from: number, count: number): boolean =>
+    wanted.slice(0, count).every((s, i) => segments[from + i] === s);
+  for (let from = 0; from + wanted.length <= segments.length; from++) {
+    if (!matches(from, wanted.length)) continue;
+    return from + wanted.length === segments.length ? 'at' : 'inside';
+  }
+  for (let count = wanted.length - 1; count > 0; count--) {
+    if (segments.length >= count && matches(segments.length - count, count)) return 'way';
+  }
+  return null;
+}
 
 /**
- * A path inside a bookkeeping directory. The directory's own path is not: a link or a file there is not
- * what Claude Code makes, so only `bookkeepingAt`, which looks at it, exempts it.
+ * A path inside a bookkeeping directory, in any `.claude/` folder. The directory's own path is not: a link or
+ * a file there is not what Claude Code makes, so only `bookkeepingAt`, which looks at it, exempts it.
  */
 export function isInsideClaudeCodeBookkeeping(rel: string): boolean {
-  return BOOKKEEPING_DIRECTORIES.some((dir) => rel.startsWith(`${dir}/`));
+  return CLAUDE_CODE_BOOKKEEPING.some(
+    (e) => e.kind === 'directory' && standing(rel, e.path) === 'inside',
+  );
+}
+
+/**
+ * The bookkeeping entries a commit must leave out: a path inside a bookkeeping directory, or an entry that
+ * is a file (as `ignoredBookkeepingWrite` judges it), in any `.claude/` folder of the copy.
+ */
+export function leftOutOfCommits(root: string, rel: string): readonly BookkeepingEntry[] {
+  if (isInsideClaudeCodeBookkeeping(rel)) {
+    const dir = CLAUDE_CODE_BOOKKEEPING.find(
+      (e) => e.kind === 'directory' && standing(rel, e.path) === 'inside',
+    );
+    return dir ? [dir] : [];
+  }
+  const file = ignoredBookkeepingWrite(root, rel);
+  return file ? [file] : [];
 }
 
 function isRealDirectory(path: string): boolean {
@@ -76,7 +115,9 @@ function isRealDirectory(path: string): boolean {
  * (a second name for a file that may be config, such as `settings.local.json`), not a directory.
  */
 export function ignoredBookkeepingWrite(root: string, rel: string): BookkeepingEntry | null {
-  const entry = CLAUDE_CODE_BOOKKEEPING.find((e) => e.kind === 'file' && e.path === rel);
+  const entry = CLAUDE_CODE_BOOKKEEPING.find(
+    (e) => e.kind === 'file' && standing(rel, e.path) === 'at',
+  );
   if (!entry) return null;
   try {
     const st = lstatSync(join(root, rel));
@@ -88,11 +129,12 @@ export function ignoredBookkeepingWrite(root: string, rel: string): BookkeepingE
 
 /** The `directory` entry that `rel` under `root` is inside, or is itself as a real directory. */
 function bookkeepingDirectoryAt(root: string, rel: string): BookkeepingEntry | null {
-  const entry = CLAUDE_CODE_BOOKKEEPING.find(
-    (e) => e.kind === 'directory' && (rel === e.path || rel.startsWith(`${e.path}/`)),
-  );
-  if (!entry) return null;
-  return rel !== entry.path || isRealDirectory(join(root, rel)) ? entry : null;
+  for (const e of CLAUDE_CODE_BOOKKEEPING) {
+    if (e.kind !== 'directory') continue;
+    const where = standing(rel, e.path);
+    if (where === 'inside' || (where === 'at' && isRealDirectory(join(root, rel)))) return e;
+  }
+  return null;
 }
 
 /**
@@ -102,7 +144,7 @@ function bookkeepingDirectoryAt(root: string, rel: string): BookkeepingEntry | n
  * empty or unreadable one, or any other directory, gives none.
  */
 function heldBookkeeping(root: string, rel: string): BookkeepingEntry[] {
-  if (!CLAUDE_CODE_BOOKKEEPING.some((e) => e.path.startsWith(`${rel}/`))) return [];
+  if (!CLAUDE_CODE_BOOKKEEPING.some((e) => standing(rel, e.path) === 'way')) return [];
   if (!isRealDirectory(join(root, rel))) return [];
   try {
     const held: BookkeepingEntry[] = [];

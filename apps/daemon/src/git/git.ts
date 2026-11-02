@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { realPathOf, resolveInRepo } from '../guard';
+import { leftOutOfCommits } from './claude-code-bookkeeping';
 import {
   memoryPinStore,
   sameCheckoutIdentity,
@@ -531,6 +532,12 @@ export interface GitOptions {
    * a later call found it exactly as pinned (the move or the origin was put back). Once per refusal.
    */
   onTrusted?(repo: string): void;
+  /**
+   * Called with the paths a commit left out because they are Claude Code's own bookkeeping (a staging
+   * directory or lock in any `.claude/` folder), each with the behaviour that writes it, so the log can
+   * show what was dropped.
+   */
+  onBookkeepingDropped?(repo: string, dropped: readonly { rel: string; writtenBy: string }[]): void;
   /**
    * Real paths of checkouts refused before this `Git` was made whose cards are still open, so a
    * call that finds one as pinned again tells `onTrusted` too.
@@ -1464,11 +1471,25 @@ export function createGit(opts: GitOptions = {}): Git {
         );
       throw new InvalidError(`10db could not stage ${named.join(', ')}: ${error.message}`);
     }
-    const changed = (
+    let changed = (
       await git(c, ['diff-index', '--cached', '--name-only', '-z', '--no-renames', tip], { env })
     )
       .split('\0')
       .filter(Boolean);
+    // Claude Code's own bookkeeping, in any `.claude/` folder, never goes into a commit: it is put back as
+    // the tip has it, and the daemon log says what was left out.
+    const bookkeeping = changed.flatMap((rel) => {
+      const entries = leftOutOfCommits(real, rel);
+      return entries.length > 0
+        ? [{ rel, writtenBy: entries.map((e) => e.writtenBy).join(' ') }]
+        : [];
+    });
+    if (bookkeeping.length > 0) {
+      const left = new Set(bookkeeping.map((b) => b.rel));
+      await git(c, ['reset', '-q', tip, '--', ...left], { env });
+      changed = changed.filter((rel) => !left.has(rel));
+      opts.onBookkeepingDropped?.(real, bookkeeping);
+    }
     // Nothing staged: `ls-files` with no path would list the whole index, submodules and all.
     if (changed.length === 0) return [];
     // What this commit changes may not be a submodule or name a git dir; submodules already in the
