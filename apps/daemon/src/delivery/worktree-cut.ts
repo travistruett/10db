@@ -1,4 +1,5 @@
-import { basename } from 'node:path';
+import { rm } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 import {
   BatchState,
   CiStopped,
@@ -14,6 +15,7 @@ import {
   getProject,
   getTask,
   patchBatch,
+  sharedLaneRan,
   transitionBatch,
 } from '@10db/db';
 import { existsAsEntry, WORKTREE_LOCK_PREFIX } from '../git';
@@ -201,12 +203,15 @@ export async function cutWorktree(
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
-    // A shared batch that is unfinished (CUTTING, OPEN, SHIPPING or FAILED) has lanes that may write
-    // the main checkout's ignored directories, `node_modules` included, and a clone would carry that
-    // into this copy's gate. Then nothing is cloned: in a pnpm project the install builds
-    // `node_modules` from the copy's own lockfile, and every seed directory left unmade is named in a
-    // notice on the batch's tasks (task placement spec §7, option b).
-    const seed = findUnfinishedBatch(db, project.id) === undefined;
+    // A shared lane writes the main checkout's ignored directories, `node_modules` included, and a
+    // clone would carry that into this copy's gate. So nothing is cloned while a shared batch is
+    // unfinished (CUTTING, OPEN, SHIPPING or FAILED), nor once any shared lane has run in the project,
+    // since its writes outlive its batch. In a pnpm project the install then builds `node_modules`
+    // from the copy's own lockfile, and every seed directory left unmade is named in a notice on the
+    // batch's tasks (task placement spec §7, option b).
+    const sharedLanes = (): boolean =>
+      findUnfinishedBatch(db, project.id) !== undefined || sharedLaneRan(db, project.id);
+    let seed = !sharedLanes();
     let dirs: string[];
     try {
       dirs = seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed);
@@ -221,14 +226,25 @@ export async function cutWorktree(
           { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
           'worktree seeded',
         );
+        // The clone holds no lock the shared cut takes: a shared batch that started meanwhile may
+        // have launched a lane that wrote what the clone read. Asked again, the answer is final:
+        // a lane launches only after its batch has been cut, and the batch stays visible from its
+        // insert until it ends, after which the lane's session does.
+        if (sharedLanes()) {
+          await Promise.all(
+            dirs.map((dir) => rm(join(path, dir), { recursive: true, force: true })),
+          );
+          seed = false;
+        }
       } catch (error) {
         if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
         return;
       }
-    } else {
+    }
+    if (!seed) {
       ctx.logger.info(
         { batchId, path, dirs },
-        'worktree not seeded: a shared batch is unfinished; a pnpm install builds node_modules, and nothing else is made',
+        'worktree not seeded: a shared lane may have written the main checkout; a pnpm install builds node_modules, and nothing else is made',
       );
     }
     if (stopped()) return;

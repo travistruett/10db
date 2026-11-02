@@ -702,6 +702,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         const taken = await takenIn(path, merged.from, merged.conflicted ?? paths);
         // The batch's tasks show it; no card asks the builder anything about a conflict that stands.
         // A pull request's caller raises the one card instead.
+        // Whatever uncommitted changes a launch named are no longer what keeps the base out.
+        tell(batch, () => {
+          hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseUncommitted]);
+        });
         if (!forPullRequest)
           tell(batch, () => {
             showNotice(
@@ -721,6 +725,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       }
       case 'blocked': {
         const { changed, kept } = merged;
+        // Only a block that still names uncommitted changes keeps a launch's notice about them.
+        if (changed.length === 0)
+          tell(batch, () => {
+            hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseUncommitted]);
+          });
         if (kept.length > 0 && !forPullRequest)
           tell(batch, () => {
             showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
