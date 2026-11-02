@@ -13,6 +13,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  EventType,
   mintId,
   WorkstreamState,
   type BatchId,
@@ -1167,10 +1168,26 @@ describe('worktree checkouts', () => {
           patchWorkstream(ctx, lane.workstream.id, null, { baseHead: head });
         });
       };
-      /** Commits `rel` as the commit tool would. */
-      const commit = (root: string, rel: string) => {
-        git(root, 'add', rel);
-        git(root, 'commit', '-q', '-m', `Add ${rel}`);
+      /**
+       * Commits `rel` in the lane's copy as the commit tool would, and records the commit for the lane, or
+       * for `by`, another lane working in the same copy.
+       */
+      const commit = (
+        lane: { workstream: { id: WorkstreamId }; path: string },
+        rel: string,
+        by: { workstream: { id: WorkstreamId } } = lane,
+      ) => {
+        git(lane.path, 'add', rel);
+        git(lane.path, 'commit', '-q', '-m', `Add ${rel}`);
+        const sha = git(lane.path, 'rev-parse', 'HEAD').toString().trim();
+        state.write((ctx) => {
+          ctx.emit({
+            type: EventType.CommitRecorded,
+            entityType: 'workstream',
+            entityId: by.workstream.id,
+            data: { sha, paths: [rel], alreadyCommitted: false },
+          });
+        });
       };
 
       it('stays open when an unlisted path the lane committed is not covered', async () => {
@@ -1181,7 +1198,7 @@ describe('worktree checkouts', () => {
         writeAt(lane.path, 'zzz/last.ts');
         await watcher.flush();
         expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
-        commit(lane.path, 'zzz/last.ts');
+        commit(lane, 'zzz/last.ts');
         grant(lane, 'ui');
         await watcher.flush();
         expect(bulk()).toHaveLength(1);
@@ -1193,7 +1210,7 @@ describe('worktree checkouts', () => {
         watcher.sync();
         writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
         await watcher.flush();
-        commit(lane.path, 'src/ui/file-029.ts');
+        commit(lane, 'src/ui/file-029.ts');
         grant(lane, 'ui');
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -1215,13 +1232,36 @@ describe('worktree checkouts', () => {
         it("resolves once the lane's claim covers all its writes", async () => {
           const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
           baseAt(lane);
-          launchIn(lane.batch, 'Beta', 'docs');
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
           watcher.sync();
           writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
           await watcher.flush();
           expect(bulk()).toHaveLength(1);
           writeAt(lane.path, 'docs/b.md');
-          commit(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md', beta);
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('resolves after the other lane has committed and finished, releasing its claims', async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          // Beta commits in its own area through the commit tool, then ends and releases its claims.
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md', beta);
+          state.write((ctx) => {
+            transitionWorkstream(ctx, beta.workstream.id, {
+              to: WorkstreamState.Cancelled,
+              fence: null,
+            });
+            releaseClaims(ctx, beta.workstream.id);
+          });
           grant(lane, 'ui');
           await watcher.flush();
           expect(flags()).toEqual([]);
@@ -1237,8 +1277,8 @@ describe('worktree checkouts', () => {
           await watcher.flush();
           expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
           writeAt(lane.path, 'docs/b.md');
-          commit(lane.path, 'docs/b.md');
-          commit(lane.path, 'zzz/last.ts');
+          commit(lane, 'docs/b.md');
+          commit(lane, 'zzz/last.ts');
           grant(lane, 'ui');
           await watcher.flush();
           expect(bulk()).toHaveLength(1);

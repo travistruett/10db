@@ -24,6 +24,7 @@ import {
   listInbox,
   listPermissionRules,
   listProjects,
+  listWorkstreamCommitShas,
   listWorkstreams,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -421,7 +422,7 @@ export function createWatcher(deps: {
     let unlistedCovered: boolean | null = null;
     /**
      * Whether nothing the lane has changed since its base lies outside the claims, bar the sensitive paths
-     * with cards of their own. Committed changes count: a write the lane committed through the commit tool
+     * with cards of their own. The lane's own commits count: a write it committed through the commit tool
      * is gone from the working tree's status but is still a write outside every claim. A lane with no
      * recorded base has run no session, so its HEAD is the base.
      */
@@ -429,13 +430,19 @@ export function createWatcher(deps: {
       if (unlistedCovered !== null) return unlistedCovered;
       try {
         const base = getWorkstreamRow(db, lane).baseHead ?? 'HEAD';
-        const changed = withoutBookkeeping(
-          ws.projectId,
-          root,
-          await deps.git.changedFilesSince(root, base),
+        // The commits since the base hold what other lanes, 10db's own merges and the builder committed in
+        // this checkout too, none of it this lane's to answer for, and whether a path counts as covered must
+        // not hang on whether the lane that committed it still holds its claim. So only the commits this
+        // lane made through the commit tool count; what is uncommitted still counts whoever wrote it, since
+        // an uncommitted write has no author, and another watched lane's claim covers its own.
+        const mine = new Set(listWorkstreamCommitShas(db, lane));
+        const ownCommits = (await deps.git.commitsSince(root, base)).filter((sha) => mine.has(sha));
+        const committed = await Promise.all(
+          ownCommits.map((sha) => deps.git.filesChangedBetween(root, `${sha}^`, sha)),
         );
-        // The diff since the base holds what other lanes (or the builder) committed in this checkout; a path
-        // another watched lane's claim covers there is that lane's to answer for, so it counts as covered.
+        const changed = withoutBookkeeping(ws.projectId, root, [
+          ...new Set([...committed.flat(), ...(await deps.git.changedPaths(root))]),
+        ]);
         unlistedCovered =
           straysIn(
             project,
