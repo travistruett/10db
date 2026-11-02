@@ -1,23 +1,21 @@
-import type { WorkstreamDto, WorkstreamId } from '@10db/contracts';
+import type { WorkstreamDto } from '@10db/contracts';
 import {
   Alert,
   Button,
   Group,
   Loader,
-  Modal,
   Stack,
   Table,
   Text,
   Title,
   VisuallyHidden,
 } from '@mantine/core';
-import { useState } from 'react';
-import { useCancelWorkstream, useRetryWorkstream } from '../../daemon/queries';
+import { useRetryWorkstream } from '../../daemon/queries';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
 import { StepCell } from './step-cell';
-import { canCancel, canRetry } from './workstream-state';
+import { canRetry } from './workstream-state';
 
 export interface GoalSessionsProps {
   /** The goal's workstreams, one per task (its latest run). */
@@ -26,12 +24,12 @@ export interface GoalSessionsProps {
   readonly error: string | null;
 }
 
-/** A goal's sessions: its workstreams, each with Retry when it failed and Cancel while it can still stop. */
+/**
+ * A goal's sessions: its workstreams, each with Retry when it failed. A run is cancelled from its
+ * task's card menu or drawer on the Board, not from every row here.
+ */
 export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps) {
-  const cancel = useCancelWorkstream();
   const retry = useRetryWorkstream();
-  const [confirming, setConfirming] = useState<WorkstreamId | null>(null);
-  const confirmingRow = workstreams.find((ws) => ws.id === confirming);
 
   return (
     <Stack gap="xs">
@@ -109,18 +107,6 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
                         Retry
                       </Button>
                     ) : null}
-                    {canCancel(ws.state) ? (
-                      <Button
-                        size="xs"
-                        variant="subtle"
-                        color="red"
-                        onClick={() => {
-                          setConfirming(ws.id);
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                    ) : null}
                   </Group>
                 </Table.Td>
               </Table.Tr>
@@ -128,52 +114,6 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
           </Table.Tbody>
         </Table>
       ) : null}
-
-      <Modal
-        opened={confirming !== null}
-        onClose={() => {
-          setConfirming(null);
-          cancel.reset();
-        }}
-        title="Cancel this workstream?"
-      >
-        <Stack>
-          <Text size="sm">
-            The session stops and its claims are released.{' '}
-            {confirmingRow ? `Task: ${confirmingRow.taskTitle}` : ''}
-          </Text>
-          {cancel.error ? (
-            <Alert color="red" title="The daemon refused that">
-              {cancel.error.message}
-            </Alert>
-          ) : null}
-          <Group justify="flex-end">
-            <Button
-              variant="default"
-              onClick={() => {
-                setConfirming(null);
-                cancel.reset();
-              }}
-            >
-              Keep running
-            </Button>
-            <Button
-              color="red"
-              loading={cancel.isPending && cancel.variables === confirming}
-              onClick={() => {
-                if (!confirming) return;
-                cancel.mutate(confirming, {
-                  onSuccess: () => {
-                    setConfirming(null);
-                  },
-                });
-              }}
-            >
-              Cancel workstream
-            </Button>
-          </Group>
-        </Stack>
-      </Modal>
     </Stack>
   );
 }
