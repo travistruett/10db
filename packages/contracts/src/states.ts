@@ -266,6 +266,8 @@ export const BatchFailure = {
   DirtyCheckout: 'dirty_checkout',
   GateFailed: 'gate_failed',
   GateTimedOut: 'gate_timed_out',
+  /** The base merge left conflicts and no task could take them to a session. */
+  BaseConflict: 'base_conflict',
   PushRejected: 'push_rejected',
   GhUnavailable: 'gh_unavailable',
   Network: 'network',
