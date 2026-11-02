@@ -28,6 +28,7 @@ import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
 import { landingWarnings, missingLandingBranch, type SameStart } from './landing';
 import { seedNotices } from './notices';
+import { forgetStartSiblings } from './start-siblings';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
 import { unbuiltAllowedPackages } from './worktree-scripts';
@@ -90,6 +91,7 @@ export async function cutWorktree(
       await ctx.git.deleteBranchIfAt(main, branch, made.base).catch(log);
     ctx.state.write((w) => {
       deleteCuttingBatch(w, batchId, card.title);
+      forgetStartSiblings(w, batchId);
       // The row was the guard against making the same fix again, so the root stops fixing.
       if (batch.ciFixOf !== null) stopCiFixing(w, batch.ciFixOf, CiStopped.NoCut, card.title);
     });
@@ -314,6 +316,7 @@ export async function cutWorktree(
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });
+      forgetStartSiblings(w, batchId);
     });
     progress.opened = true;
     ctx.logger.info(

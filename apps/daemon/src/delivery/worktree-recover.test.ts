@@ -241,6 +241,67 @@ describe('recoverBatches with worktrees', () => {
       expect(getAppSetting(h.store.db, `start_siblings.${id}`)).toBeUndefined();
   });
 
+  /**
+   * A starter whose state notes, after every write, each of the ids that has left CUTTING while its
+   * start_siblings record is still set. A crash right after that write would leave the record for good.
+   */
+  function startersWatchingSiblings(): {
+    starter: ReturnType<typeof createBatchStarter>;
+    watch: (batches: readonly BatchDto[]) => void;
+    leaked: BatchId[];
+  } {
+    const leaked: BatchId[] = [];
+    const watched: BatchId[] = [];
+    const state: typeof h.state = {
+      db: h.state.db,
+      now: () => h.state.now(),
+      write: (fn) => {
+        const value = h.state.write(fn);
+        for (const id of watched) {
+          const row = listBatches(h.store.db).find((b) => b.id === id);
+          if (row?.state !== 'CUTTING' && getAppSetting(h.store.db, `start_siblings.${id}`))
+            leaked.push(id);
+        }
+        return value;
+      },
+    };
+    return {
+      starter: createBatchStarter({ ...h.ctx, state }),
+      watch: (batches) => watched.push(...batches.map((b) => b.id)),
+      leaked,
+    };
+  }
+
+  it('drops the record of a start in the write that opens its batch', async () => {
+    const { starter, watch, leaked } = startersWatchingSiblings();
+    const started = starter.startBatch(h.project.id, {
+      title: 'Together',
+      taskIds: [h.addTask('Alpha').id, h.addTask('Beta').id],
+    });
+    watch(started);
+    expect(started).toHaveLength(2);
+    await h.jobs.idle();
+
+    expect(started.map((b) => getBatch(h.store.db, b.id).state)).toEqual(['OPEN', 'OPEN']);
+    expect(leaked).toEqual([]);
+  });
+
+  it('drops the record of a start in the write that deletes a refused batch', async () => {
+    const { starter, watch, leaked } = startersWatchingSiblings();
+    // The landing branch is nowhere on origin, so each cut is refused.
+    const landing = { landing: { kind: 'branch', branch: 'feature/missing' } } as const;
+    const started = starter.startBatch(h.project.id, {
+      title: 'Together',
+      taskIds: [h.addTask('Alpha', landing).id, h.addTask('Beta', landing).id],
+    });
+    watch(started);
+    expect(started).toHaveLength(2);
+    await h.jobs.idle();
+
+    expect(listBatches(h.store.db)).toEqual([]);
+    expect(leaked).toEqual([]);
+  });
+
   it('still counts a batch of another start as use of the branch when a restart repeats a cut', async () => {
     h.teammatePush('feature/x', 'src/api/feature.txt');
     const noJobs: DeliveryJobs = {
