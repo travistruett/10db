@@ -17,7 +17,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GITHUB_ORIGIN } from '../../test/fixtures';
 import { GitTrustFailure } from '../git';
-import { batchBranchName } from './index';
+import { createInboxService } from '../inbox';
+import { batchBranchName, createStartCardAnswers, StartChoice } from './index';
 
 let h: DeliveryHarness;
 beforeEach(() => {
@@ -214,8 +215,13 @@ describe('cutting a branch', () => {
     expect(again.id).toBe(first.id);
     expect(again.body).toContain('- b.txt');
     expect(again.body).not.toContain('a.txt');
-    h.inbox.answer(first.id, { choice: 'dismiss' });
-    await refuse();
+    // Retry start closes the card; the start it repeats is refused again, so a new card is raised.
+    createInboxService({
+      state: h.state,
+      onParkedAnswer: () => undefined,
+      onFlagAnswer: createStartCardAnswers({ state: h.state, starter: h.starter }),
+    }).answer(first.id, { choice: StartChoice.Retry });
+    await h.jobs.idle();
     expect(h.only(h.cards()).id).not.toBe(first.id);
   });
 

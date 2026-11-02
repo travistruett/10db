@@ -33,9 +33,10 @@ import {
 } from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { GitTrustError } from '../git';
+import { createGit, GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
+import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createScheduler } from './index';
 
 let store: Store;
@@ -221,6 +222,78 @@ describe('scheduler', () => {
       await scheduler({ global: 1 }).tick();
       expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
       expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+    });
+
+    describe('after a restart', () => {
+      const restart = () =>
+        recoverOnStartup({
+          state,
+          inbox,
+          git: createGit(),
+          processes: systemProcesses,
+          maxRecoveryAttempts: 3,
+          logger: silentLogger,
+          cleanShutdown: true,
+        });
+      const interrupt = (id: WorkstreamId) => {
+        moveWorkstream(id, 'STARTING');
+        state.write((ctx) => transitionWorkstream(ctx, id, { to: 'RUNNING', fence: null }));
+      };
+
+      it('launches the workstream that was mid-session before tasks that never started, though it started after them', async () => {
+        const a = queue();
+        const b = queue();
+        clock.advance(1_000);
+        const interrupted = queue();
+        interrupt(interrupted.workstream.id);
+
+        const report = await restart();
+        expect(report.requeued).toEqual([interrupted.workstream.id]);
+
+        expect(await scheduler({ global: 1 }).tick()).toBe(1);
+        expect(launched.map((l) => l.id)).toEqual([interrupted.workstream.id]);
+        expect(getWorkstream(store.db, a.workstream.id).state).toBe('QUEUED');
+        expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+        // The place is used up like a press: when it is queued again it waits in start order.
+        expect(getWorkstream(store.db, interrupted.workstream.id).runNextAt).toBeNull();
+      });
+
+      it('keeps several interrupted workstreams in the order they started', async () => {
+        const fresh = queue();
+        const first = queue();
+        clock.advance(1_000);
+        const second = queue();
+        clock.advance(1_000);
+        const third = queue();
+        for (const w of [third, first, second]) interrupt(w.workstream.id);
+
+        await restart();
+
+        await scheduler({ global: 4 }).tick();
+        expect(launched.map((l) => l.id)).toEqual([
+          first.workstream.id,
+          second.workstream.id,
+          third.workstream.id,
+          fresh.workstream.id,
+        ]);
+      });
+
+      it('still lets a press after the restart go ahead of a recovered workstream', async () => {
+        const chosen = queue();
+        clock.advance(1_000);
+        const interrupted = queue();
+        interrupt(interrupted.workstream.id);
+        await restart();
+
+        clock.advance(1_000);
+        press(chosen.task.id);
+
+        await scheduler({ global: 2 }).tick();
+        expect(launched.map((l) => l.id)).toEqual([
+          chosen.workstream.id,
+          interrupted.workstream.id,
+        ]);
+      });
     });
 
     it('takes the latest press first when several tasks were pushed', async () => {
