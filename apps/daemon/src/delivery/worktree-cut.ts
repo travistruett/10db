@@ -83,7 +83,9 @@ export async function cutWorktree(
       // The row was the guard against making the same fix again, so the root stops fixing.
       if (batch.ciFixOf !== null) stopCiFixing(w, batch.ciFixOf, CiStopped.NoCut, card.title);
     });
-    raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
+    // A CI fix batch's start can't be repeated: the pull request's CI-stop card has the Retry.
+    const request = batch.ciFixOf === null ? { title: batch.title } : null;
+    raise(ctx.inbox, project.id, forTasks(card, plans.keys(), request));
   };
   // A function, so the checks after an await are not narrowed away by the one before it.
   const stopped = (): boolean => signal.aborted;
