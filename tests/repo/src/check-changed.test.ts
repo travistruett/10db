@@ -12,15 +12,25 @@ interface Plan {
   readonly typecheck?: readonly string[];
   readonly drift?: readonly string[];
   readonly rust?: boolean;
+  readonly precheck?: boolean;
 }
 
 /** What `scripts/check-changed.mjs --plan` says it would run for these changed files. */
 function planFor(...files: string[]): Plan {
-  const result = spawnSync('node', ['scripts/check-changed.mjs', '--plan', '--', ...files], {
-    cwd: repoRoot,
-    encoding: 'utf8',
-    env: envWithoutGitVariables(),
-  });
+  return planWith([], files);
+}
+
+/** …and with `--precheck`. */
+function precheckPlanFor(...files: string[]): Plan {
+  return planWith(['--precheck'], files);
+}
+
+function planWith(flags: string[], files: string[]): Plan {
+  const result = spawnSync(
+    'node',
+    ['scripts/check-changed.mjs', '--plan', ...flags, '--', ...files],
+    { cwd: repoRoot, encoding: 'utf8', env: envWithoutGitVariables() },
+  );
   expect(result.status, result.stderr).toBe(0);
   return JSON.parse(result.stdout) as Plan;
 }
@@ -112,5 +122,56 @@ describe('scripts/check-changed.mjs', () => {
     expect(readRepoFile('Makefile')).toMatch(
       /^check-changed:\n\t@node scripts\/check-changed\.mjs$/m,
     );
+  });
+
+  it('is what `make precheck` runs, with --precheck', () => {
+    expect(readRepoFile('Makefile')).toMatch(
+      /^precheck:\n\t@node scripts\/check-changed\.mjs --precheck$/m,
+    );
+  });
+});
+
+describe('scripts/check-changed.mjs --precheck', () => {
+  it('plans no tests, no Rust checks and no repo rule tests', () => {
+    const plan = precheckPlanFor('apps/desktop/src-tauri/src/main.rs', 'docs/README.md');
+    expect(plan).toMatchObject({
+      full: false,
+      precheck: true,
+      changed: ['apps/desktop'],
+      affected: ['apps/desktop'],
+      rust: false,
+    });
+  });
+
+  it('typechecks the changed packages and every dependent, and drifts only the changed ones', () => {
+    const plan = precheckPlanFor('packages/contracts/src/entities.ts');
+    expect(plan.full).toBe(false);
+    expect(plan.typecheck).toEqual(
+      expect.arrayContaining(['@10db/contracts', '@10db/db', '@10db/daemon', '@10db/desktop']),
+    );
+    expect(plan.drift).toEqual(['@10db/contracts']);
+  });
+
+  it('checks a daemon change and its dependents only', () => {
+    const plan = precheckPlanFor('apps/daemon/src/runner/runner.ts');
+    expect(plan.changed).toEqual(['apps/daemon']);
+    expect(plan.drift).toEqual([]);
+  });
+
+  it.each([
+    ['the lockfile', 'pnpm-lock.yaml'],
+    ['the root manifest', 'package.json'],
+    ['the lint config', 'eslint.config.js'],
+    ['the gate script', 'scripts/gate.sh'],
+    ['a CI workflow', '.github/workflows/ci.yml'],
+    ['the Makefile', 'Makefile'],
+  ])('puts every package in the plan for %s, never the gate', (_name, file) => {
+    const plan = precheckPlanFor('apps/desktop/src/app.tsx', file);
+    expect(plan).toMatchObject({ full: true, precheck: true });
+    expect(plan.reason).toContain(file);
+  });
+
+  it('plans nothing for no changed file', () => {
+    expect(precheckPlanFor()).toMatchObject({ full: false, changed: [], affected: [] });
   });
 });
