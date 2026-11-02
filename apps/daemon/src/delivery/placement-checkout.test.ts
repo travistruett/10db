@@ -411,7 +411,64 @@ describe('seeding a new copy', () => {
       });
 
       it('says nothing when the onlyBuiltDependencies list is empty: nothing builds', async () => {
+<<<<<<< 7cc6388af45571e1770ae34a0bdcd234049d776f
         pnpmField({ onlyBuiltDependencies: [] });
+||||||| 05fb582
+        allowing('onlyBuiltDependencies: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the empty list is in package.json', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { onlyBuiltDependencies: [] } }),
+        );
+=======
+        allowing('onlyBuiltDependencies: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('ignores an empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
+        );
+        allowing('onlyBuiltDependencies: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+        expect(notice.line).not.toContain('left-pad');
+      });
+
+      it('ignores a non-empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
+        );
+        allowing('onlyBuiltDependencies:\n  - left-pad\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+      });
+
+      it('says nothing when the empty list is in package.json', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { onlyBuiltDependencies: [] } }),
+        );
+>>>>>>> 1e050d60fb1b195ef83c55f52acca5997c48a32e
         allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
