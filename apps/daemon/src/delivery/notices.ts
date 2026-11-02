@@ -30,6 +30,8 @@ export const NOTICE_KEY = {
   landingBehind: 'landing-behind',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
+  /** A copy's install skipped the install scripts of packages the project allows to build. */
+  scriptsSkipped: 'install-scripts-skipped',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
 } as const;
@@ -64,6 +66,20 @@ export const seedNotices = {
       tone: 'warning',
       line: `This copy has no ${named}: Your folder had a batch open when it was made`,
       body: `A new copy usually gets a clone of Your folder's ignored ${dirs.length === 1 ? 'directory' : 'directories'} ${named}. A task in Your folder was unfinished when this copy was made, and a lane there can write those directories, so 10db cloned nothing into the copy. 10db can only rebuild node_modules, and only in a pnpm project, so ${named} ${dirs.length === 1 ? 'is' : 'are'} missing from the copy, and its gate may fail on that.\n\nTo get them, abandon this batch and start the task again once Your folder's batch has shipped or been abandoned, or make them in the copy yourself.`,
+    };
+  },
+  /**
+   * The install made `node_modules` but ran no install script, and the seed that would have carried
+   * the built output was skipped, so these packages the project allows to build are unbuilt.
+   */
+  scriptsSkipped: (names: readonly string[]): Notice => {
+    const named = names.join(', ');
+    const one = names.length === 1;
+    return {
+      key: NOTICE_KEY.scriptsSkipped,
+      tone: 'warning',
+      line: `${named} ${one ? 'is' : 'are'} not built in this copy: its install ran without install scripts`,
+      body: `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds), and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run pnpm rebuild ${named} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
     };
   },
 };

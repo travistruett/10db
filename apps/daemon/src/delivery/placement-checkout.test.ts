@@ -274,6 +274,65 @@ describe('seeding a new copy', () => {
     expect(batch.notices).toEqual([]);
   });
 
+  describe('install scripts the copy did not run', () => {
+    /** What an install of `name` leaves in a pnpm virtual store, with `scripts` in its package.json. */
+    const installed = (name: string, version: string, scripts: object): Record<string, string> => ({
+      [`node_modules/.pnpm/${name.replace('/', '+')}@${version}/node_modules/${name}/package.json`]:
+        JSON.stringify({ name, version, scripts }),
+    });
+    function allowing(workspace: string): void {
+      h.commit('.gitignore', 'node_modules/\n');
+      h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+      h.commit('pnpm-workspace.yaml', workspace);
+      h.git$('push', '-q', 'origin', 'main');
+      mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+      writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    }
+
+    it('names an allowed package whose install script was skipped', async () => {
+      allowing('allowBuilds:\n  prisma: true\n  "@scope/native": true\n  sharp: false\n');
+      h.pnpm.makes({
+        ...installed('prisma', '6.0.0', { postinstall: 'node build.js' }),
+        ...installed('@scope/native', '1.2.0', { install: 'node-gyp rebuild' }),
+        ...installed('sharp', '0.30.0', { install: 'node install.js' }),
+        ...installed('left-pad', '1.0.0', { postinstall: 'node x.js' }),
+      });
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.state).toBe('OPEN');
+      const notice = h.only(batch.notices);
+      expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+      expect(notice.line).toContain('prisma');
+      expect(notice.line).toContain('@scope/native');
+      expect(notice.line).not.toContain('sharp');
+      expect(notice.line).not.toContain('left-pad');
+      expect(notice.body).toContain('pnpm rebuild');
+    });
+
+    it('says nothing when an allowed package has no install script', async () => {
+      allowing('allowBuilds:\n  prisma: true\n');
+      h.pnpm.makes(installed('prisma', '6.0.0', { test: 'vitest' }));
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.notices).toEqual([]);
+    });
+
+    it('says nothing when the clone carried the built output', async () => {
+      allowing('allowBuilds:\n  prisma: true\n');
+      h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.notices).toEqual([]);
+    });
+
+    it('reads the older onlyBuiltDependencies list too', async () => {
+      allowing('onlyBuiltDependencies:\n  - puppeteer\n');
+      h.pnpm.makes(installed('puppeteer', '22.0.0', { postinstall: 'node install.js' }));
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(h.only(batch.notices).line).toContain('puppeteer');
+    });
+  });
+
   it('tells the batch when 10db cannot install what the clone would have brought', async () => {
     // npm's lockfile: 10db installs only pnpm projects, so the copy gets no node_modules.
     h.commit('.gitignore', 'node_modules/\n');
