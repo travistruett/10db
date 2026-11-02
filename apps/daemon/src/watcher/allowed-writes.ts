@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { constants, realpathSync, statSync } from 'node:fs';
+import { lstat, open } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -154,46 +155,64 @@ function deletionStamp(root: string, path: string): string | null {
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 const STAMP_ATTEMPTS = 3;
 
-/** The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. */
-function hashFile(path: string): string {
-  const hash = createHash('sha256');
-  const fd = openSync(path, 'r');
+/**
+ * How a file is opened to be stamped. A lane writes the path, so it may be a link (`O_NOFOLLOW` refuses one)
+ * or a FIFO swapped in after the check (`O_NONBLOCK` makes opening one return at once instead of waiting
+ * for a writer that may never come).
+ */
+const STAMP_OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
+
+/** What `readStamp` returns for a file that changed while it was read. */
+const CHANGED = Symbol('changed while read');
+
+/**
+ * Reads `path` once: its modification time, size and SHA-256, all from one open descriptor, so what is
+ * hashed is what the descriptor's metadata names. Null for anything but a regular file. The file is read a
+ * chunk at a time through the thread pool, so a large one neither is held whole nor stalls the event loop.
+ */
+async function readStamp(path: string): Promise<string | null | typeof CHANGED> {
+  const file = await open(path, STAMP_OPEN_FLAGS);
   try {
+    const before = await file.stat({ bigint: true });
+    if (!before.isFile()) return null;
+    const hash = createHash('sha256');
     const chunk = Buffer.allocUnsafe(1024 * 1024);
-    for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
-      hash.update(chunk.subarray(0, n));
+    for (;;) {
+      const { bytesRead } = await file.read(chunk, 0, chunk.length, null);
+      if (bytesRead === 0) break;
+      hash.update(chunk.subarray(0, bytesRead));
     }
+    // The file changed while it was read: the content may not be the one the time and size name.
+    const after = await file.stat({ bigint: true });
+    if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return CHANGED;
+    return `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}`;
   } finally {
-    closeSync(fd);
+    await file.close();
   }
-  return hash.digest('hex');
 }
 
 /**
  * What identifies the current write to a file: its modification time to the nanosecond, its size and a
  * hash of its content, so a file changed behind a restored modification time and size is another write.
  * A deletion's stamp for a file that is not there (`deletionStamp`). Null for one that can't be told apart
- * from another write: a directory or other non-file, one that can't be read, or one that kept changing
- * while it was read.
- * It reads the whole file, so it is called only for a path a card or an excused write names.
+ * from another write: a link (never followed), a directory or other non-file, one that can't be read, or
+ * one that kept changing while it was read.
+ * A lane controls the path, so it is opened without following a link and without waiting on a FIFO, and
+ * checked as a regular file on the descriptor itself; the content is read off the event loop. It reads the
+ * whole file, so it is called only for a path a card or an excused write names.
  */
-export function writeStamp(root: string, rel: string): string | null {
+export async function writeStamp(root: string, rel: string): Promise<string | null> {
   const path = resolve(root, rel);
   try {
-    lstatSync(path);
+    await lstat(path);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
     return code === 'ENOENT' || code === 'ENOTDIR' ? deletionStamp(root, path) : null;
   }
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
     try {
-      const before = statSync(path, { bigint: true });
-      if (!before.isFile()) return null;
-      const hash = hashFile(path);
-      // The file changed while it was read: the content may not be the one the time and size name.
-      const after = statSync(path, { bigint: true });
-      if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
-      return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
+      const stamp = await readStamp(path);
+      if (stamp !== CHANGED) return stamp;
     } catch {
       return null;
     }

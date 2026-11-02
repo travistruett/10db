@@ -445,12 +445,12 @@ export function createWatcher(deps: {
    * unchanged by the other (a deletion while the file stays gone), and a later write the live batch never
    * saw is carded at the step end.
    */
-  function allowedWrites(
+  async function allowedWrites(
     projectId: ProjectId,
     root: string,
     paths: readonly string[],
     lanes: readonly WorkstreamId[],
-  ): Set<string> {
+  ): Promise<Set<string>> {
     const allowed = new Set<string>();
     if (paths.length === 0 || lanes.length === 0) return allowed;
     forgetEndedLanes();
@@ -471,15 +471,20 @@ export function createWatcher(deps: {
         allowed.add(path);
         continue;
       }
-      const keys = lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
-      const unused = cards.find(
-        ({ rel, a }) =>
-          rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
-      );
+      const excusedKeys = () =>
+        lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
+      const unusedCard = () =>
+        cards.find(
+          ({ rel, a }) =>
+            rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
+        );
       // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
       // is read; any other write is carded as it is.
-      if (keys.length === 0 && unused === undefined) continue;
-      const stamp = writeStamp(root, path);
+      if (excusedKeys().length === 0 && unusedCard() === undefined) continue;
+      const stamp = await writeStamp(root, path);
+      // Stamping yields to other work, which may have used the card or changed the excused writes since.
+      const keys = excusedKeys();
+      const unused = unusedCard();
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
         continue;
@@ -740,13 +745,13 @@ export function createWatcher(deps: {
     }
     const outside = new Set([...strays, ...hidden]);
     // A write the builder allowed through its permission card needs no second card.
-    const allowed = allowedWrites(projectId, entry.root, [...outside], candidates);
+    const allowed = await allowedWrites(projectId, entry.root, [...outside], candidates);
     // A directory the allowed write created holds only that write, so it is allowed with it.
     for (const rel of outside) {
       if (allowed.has(rel) || !isRealDirectory(join(entry.root, rel))) continue;
       const files = filesUnder(entry.root, rel);
       if (files === null || files.length === 0) continue;
-      const fileAllowed = allowedWrites(projectId, entry.root, files, candidates);
+      const fileAllowed = await allowedWrites(projectId, entry.root, files, candidates);
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
     }
     raise(
@@ -851,21 +856,28 @@ export function createWatcher(deps: {
       // A write that can change what runs is flagged even inside the workstream's own claim.
       const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
       // Not a write its permission card allowed: the builder decided about that one already.
-      const allowed = allowedWrites(ws.projectId, root, written, [workstreamId]);
+      const allowed = await allowedWrites(ws.projectId, root, written, [workstreamId]);
       // Nor a file still showing the write another running lane's card excused: a stamp that matches means
       // nobody has written to it since, so it is that lane's write and not this lane's to answer for.
       const others = listWorkstreams(db, { states: WATCHED_STATES, projectId: ws.projectId })
         .map((other) => other.id)
         .filter((id) => id !== workstreamId);
-      const flagged = written.filter((rel) => {
-        if (allowed.has(rel)) return false;
-        if (others.length === 0) return true;
-        const stamp = writeStamp(root, rel);
-        return (
-          stamp === null ||
-          !others.some((id) => excusedWrites.get(excusedKey(root, rel, id))?.stamp === stamp)
-        );
-      });
+      const flagged: string[] = [];
+      for (const rel of written) {
+        if (allowed.has(rel)) continue;
+        // Only a path another lane's card excused is read to stamp it.
+        const excused = others.filter((id) => excusedWrites.has(excusedKey(root, rel, id)));
+        if (excused.length > 0) {
+          const stamp = await writeStamp(root, rel);
+          if (
+            stamp !== null &&
+            excused.some((id) => excusedWrites.get(excusedKey(root, rel, id))?.stamp === stamp)
+          ) {
+            continue;
+          }
+        }
+        flagged.push(rel);
+      }
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
       return flagged;
     },
