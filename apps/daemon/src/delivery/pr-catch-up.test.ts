@@ -172,6 +172,33 @@ describe('a shipped pull request that conflicts with its base', () => {
     ).toHaveLength(1);
   });
 
+  it('merges it after a restart once the builder settles a conflict 10db could not, when GitHub had refused the merge', async () => {
+    h.gh.noRequiredChecks = true;
+    h.gh.failNext.set(
+      'prMerge',
+      new GhError(
+        'failed',
+        'gh pr merge failed (exit 1): the merge commit cannot be cleanly created',
+      ),
+    );
+    const batch = await shipped('README.md', '# ours\n');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const url = conflicts(batch);
+    const stopped = await catchUp(batch);
+    expect(h.cards()).toHaveLength(1);
+    expect(stopped.notices).toEqual([]);
+
+    // The daemon restarts; the builder resolves the conflict on GitHub, as the card says.
+    h.restartShipper();
+    h.gh.setMergeBlocked(url, null);
+    h.gh.setMergeable(url, PrMergeable.Mergeable);
+    // The watch withdraws the open card in the round that reads the pull request clean, and says so.
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(h.gh.merged).toEqual([url]);
+  });
+
   it('does nothing once GitHub no longer says it conflicts', async () => {
     const batch = await shipped();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);

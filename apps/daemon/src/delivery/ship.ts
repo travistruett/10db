@@ -83,6 +83,7 @@ import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { mergeNotices, NOTICE_KEY, updateNotices } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
+import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
@@ -136,9 +137,10 @@ export interface Shipper {
   catchUp(batchId: BatchId): void;
   /**
    * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
-   * refused that earlier or 10db just pushed to it. Does nothing when no merge was refused.
+   * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
+   * that stopped (`catchUpCardWasOpen`). Does nothing when no merge is due.
    */
-  retryMerge(batchId: BatchId): void;
+  retryMerge(batchId: BatchId, opts?: RetryMergeOptions): void;
 }
 
 /** A batch's members: each task's latest workstream in it. */
@@ -942,7 +944,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
   /**
    * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
-   * they are clean. In memory: a restart forgets it, and a refused merge's notice still asks.
+   * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
+   * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
    */
   const mergeAgain = new Set<BatchId>();
   const lastMergeRetry = new Map<BatchId, number>();
@@ -1102,9 +1105,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     });
   }
 
-  function retryMerge(batchId: BatchId): void {
+  function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
     const batch = getBatch(db, batchId);
-    const again = mergeAgain.has(batchId);
+    const again = mergeAgain.has(batchId) || opts.catchUpCardWasOpen === true;
     if (!landsItself(batch) || catchingUp.has(batchId) || retrying.has(batchId)) return;
     if (!again && !batch.notices.some((n) => n.key === NOTICE_KEY.merge)) return;
     const startedAt = deps.clock.now().getTime();

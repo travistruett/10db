@@ -378,7 +378,8 @@ describe('the pull request watch', () => {
         intervalMs: INTERVAL,
         landing: {
           catchUp: (id) => asked.push(`catch-up ${id}`),
-          retryMerge: (id) => asked.push(`retry ${id}`),
+          retryMerge: (id, opts) =>
+            asked.push(opts?.catchUpCardWasOpen ? `retry ${id} after card` : `retry ${id}`),
         },
       });
       watches.push(watch);
@@ -439,6 +440,29 @@ describe('the pull request watch', () => {
       expect(h.cards()).toHaveLength(1);
       h.gh.setMergeable(prUrl, 'MERGEABLE');
       await round(watch);
+      expect(h.cards()).toEqual([]);
+    });
+
+    it('says the catch-up card was open when it asks for the merge in the round that withdraws it', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha');
+      h.gh.setMergeable(prUrl, 'CONFLICTING');
+      h.gh.setMergeBlocked(prUrl, 'conflicts');
+      const { asked, watch } = landing();
+      watch.start();
+      await watch.idle();
+      h.state.write((w) => {
+        raiseIn(w, h.project.id, {
+          title: 'Pull request conflicts',
+          body: 'x',
+          foldKey: prCardKey.catchUp(id),
+        });
+      });
+      h.gh.setMergeable(prUrl, 'MERGEABLE');
+      h.gh.setMergeBlocked(prUrl, null);
+      await round(watch);
+      await round(watch);
+      expect(asked).toEqual([`catch-up ${id}`, `retry ${id} after card`, `retry ${id}`]);
       expect(h.cards()).toEqual([]);
     });
   });

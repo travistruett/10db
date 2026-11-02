@@ -192,7 +192,13 @@ export interface DeliveryHarness {
   /** The delivery logger's lines: what daemon.log says about cuts, gates, pushes and PRs. */
   readonly logs: LogCapture;
   readonly starter: BatchStarter;
+  /** The shipper; `restartShipper` replaces it with a new one, as a daemon restart does. */
   readonly shipper: Shipper;
+  /**
+   * Builds a new shipper on the same store and makes it `shipper`: what it held in memory is gone.
+   * The ship trigger, when on, still calls the first one.
+   */
+  restartShipper(): Shipper;
   /** Where the shipper writes PR bodies and gate logs. */
   readonly dataDir: string;
   /** The daemon's worktree root (its hashed level), a real path not made until the first cut. */
@@ -312,17 +318,19 @@ export function createDeliveryHarness(
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
-  const shipper = createShipper({
-    ...ctx,
-    gate: opts.shipGate?.(shipGate) ?? shipGate,
-    baseUpdates: createBaseUpdates(ctx),
-    clock: new ManualClock(),
-    dataDir: data.path,
-    sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
-    identifyProcess: (pid) => systemProcesses.identify(pid),
-    isRunning: (id) => running.has(id),
-    ...(opts.load ? { load: opts.load } : {}),
-  });
+  const makeShipper = (): Shipper =>
+    createShipper({
+      ...ctx,
+      gate: opts.shipGate?.(shipGate) ?? shipGate,
+      baseUpdates: createBaseUpdates(ctx),
+      clock: new ManualClock(),
+      dataDir: data.path,
+      sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
+      identifyProcess: (pid) => systemProcesses.identify(pid),
+      isRunning: (id) => running.has(id),
+      ...(opts.load ? { load: opts.load } : {}),
+    });
+  let shipper = makeShipper();
   const unsubscribe =
     opts.trigger === false ? () => undefined : subscribeShipTrigger(bus, store.db, shipper);
   const run = (dir: string, args: string[]): string =>
@@ -344,7 +352,13 @@ export function createDeliveryHarness(
     ctx,
     logs,
     starter: createBatchStarter(ctx),
-    shipper,
+    get shipper() {
+      return shipper;
+    },
+    restartShipper() {
+      shipper = makeShipper();
+      return shipper;
+    },
     dataDir: data.path,
     worktreeRoot,
     running,

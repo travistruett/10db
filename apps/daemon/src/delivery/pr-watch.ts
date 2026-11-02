@@ -74,12 +74,19 @@ export interface PrWatch {
   idle(): Promise<void>;
 }
 
+export interface RetryMergeOptions {
+  readonly catchUpCardWasOpen?: boolean;
+}
+
 /** What the watch asks of the shipper for a pull request that merges by itself (`Shipper`). */
 export interface PullRequestLanding {
   /** The open pull request conflicts with its base. */
   catchUp(batchId: BatchId): void;
-  /** The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again. */
-  retryMerge(batchId: BatchId): void;
+  /**
+   * The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again.
+   * `catchUpCardWasOpen`: this round withdrew the card for a catch-up that stopped, so a merge is due.
+   */
+  retryMerge(batchId: BatchId, opts?: RetryMergeOptions): void;
 }
 
 const STATE_OF: Record<PrState, PullRequestState> = {
@@ -413,18 +420,25 @@ export function createPrWatch(input: {
           if (ghDown(error)) ended = { error, at: root.id };
         }
       }
+      // Whether this round withdrew the catch-up card: the stored sign that the merge is still to ask.
+      let catchUpCardWasOpen = false;
       ctx.state.write((write) => {
         for (const batch of members) {
           record(write, batch, answer(batch, read), batch.id === root.id);
           followConflict(write, batch, read);
         }
         if (read !== null) storeRequired(write, root, read, required);
-        // The catch-up card closes when the pull request merges cleanly or is gone.
+        // The catch-up card closes when the pull request merges cleanly or is gone. Not while it is
+        // behind: the merge below is asked only of a clean one, and the card is what says it is due.
         if (
           read !== null &&
-          (read.state !== PrState.Open || read.mergeable === PrMergeable.Mergeable)
-        )
-          withdrawIn(write, root.projectId, [prCardKey.catchUp(root.id)]);
+          (read.state !== PrState.Open ||
+            (read.mergeable === PrMergeable.Mergeable && read.mergeBlocked === null))
+        ) {
+          const key = prCardKey.catchUp(root.id);
+          catchUpCardWasOpen = findOpenByFoldKey(write.tx, root.projectId, key) !== undefined;
+          withdrawIn(write, root.projectId, [key]);
+        }
       });
       if (
         landing !== undefined &&
@@ -438,7 +452,7 @@ export function createPrWatch(input: {
         )
           landing.catchUp(root.id);
         else if (read.mergeable === PrMergeable.Mergeable && read.mergeBlocked === null)
-          landing.retryMerge(root.id);
+          landing.retryMerge(root.id, { catchUpCardWasOpen });
       }
       // A pull request that conflicts runs no workflow, so its failing checks are stale.
       if (
