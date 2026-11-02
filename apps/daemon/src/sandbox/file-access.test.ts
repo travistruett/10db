@@ -72,6 +72,12 @@ afterEach(() => {
 });
 
 describe('readAccess', () => {
+  /** Where Claude Code puts a session's background command output under the lane's temp dir. */
+  const taskDir = (
+    sessionId: string,
+    uidDir = `claude-${String(process.getuid?.())}`,
+    slug = checkout.replace(/[^a-zA-Z0-9]/g, '-'),
+  ) => join(root, 't', '10db-ownabc', uidDir, slug, sessionId, 'tasks');
   const own = () => join(configDir, 'projects', 'x', 'own-id', 'tool-results', 'a.txt');
   const other = () => join(configDir, 'projects', 'x', 'other-id', 'tool-results', 'a.txt');
   const rows: {
@@ -112,6 +118,73 @@ describe('readAccess', () => {
       },
       path: () => join(root, 't', '10db-ownabc', 'out.log'),
       expected: 'ask',
+    },
+    {
+      name: "a file in the session's own task output directory",
+      setup: () => mkdirSync(taskDir('own-id'), { recursive: true }),
+      path: () => join(taskDir('own-id'), 'bcjfopcut.output'),
+      expected: 'allowed',
+    },
+    {
+      name: 'a task output file that does not exist yet',
+      path: () => join(taskDir('own-id'), 'later.output'),
+      expected: 'allowed',
+    },
+    {
+      name: "another session's task output directory",
+      setup: () => mkdirSync(taskDir('other-id'), { recursive: true }),
+      path: () => join(taskDir('other-id'), 'bcjfopcut.output'),
+      expected: 'ask',
+    },
+    {
+      name: 'the own task output directory without a provider session id',
+      path: () => join(taskDir('own-id'), 'x.output'),
+      context: () => ({ providerSessionId: null }),
+      expected: 'ask',
+    },
+    {
+      name: 'a task output directory under another uid',
+      path: () => join(taskDir('own-id', 'claude-0'), 'x.output'),
+      expected: 'ask',
+    },
+    {
+      name: 'a task output directory under another checkout slug',
+      path: () => join(taskDir('own-id', undefined, 'elsewhere'), 'x.output'),
+      expected: 'ask',
+    },
+    {
+      name: 'a file below the task output directory',
+      path: () => join(taskDir('own-id'), 'sub', 'x.output'),
+      expected: 'ask',
+    },
+    {
+      name: 'the task output directory itself',
+      path: () => taskDir('own-id'),
+      expected: 'ask',
+    },
+    {
+      name: 'a link in the task output directory to a file outside it',
+      setup: () => {
+        mkdirSync(taskDir('own-id'), { recursive: true });
+        symlinkSync(join(sibling, 'secret'), join(taskDir('own-id'), 'link.output'));
+      },
+      path: () => join(taskDir('own-id'), 'link.output'),
+      expected: 'ask',
+    },
+    {
+      name: 'a .. that climbs out of the task output directory',
+      setup: () => mkdirSync(taskDir('own-id'), { recursive: true }),
+      path: () => `${taskDir('own-id')}/../../other-id/tasks/x.output`,
+      expected: 'ask',
+    },
+    {
+      name: 'a link in the checkout to a task output file',
+      setup: () => {
+        mkdirSync(taskDir('own-id'), { recursive: true });
+        symlinkSync(taskDir('own-id'), join(checkout, 'tasks-link'));
+      },
+      path: () => join(checkout, 'tasks-link', 'x.output'),
+      expected: 'allowed',
     },
     {
       name: 'a link in the checkout to a protected file',
@@ -431,6 +504,18 @@ describe('fileAccessJudge in the guard', () => {
     const judge = fileAccessJudge(context());
     expect(guard(judge, 'Read', { file_path: 'src/a.ts' })).toEqual({ decision: 'allow' });
     expect(guard(judge, 'Grep', { path: '../other' })).toEqual({ decision: 'allow' });
+  });
+
+  it('asks about a Read outside the lane, but not of its own task output', () => {
+    const judge = fileAccessJudge(context());
+    const slug = checkout.replace(/[^a-zA-Z0-9]/g, '-');
+    const tasks = (id: string) =>
+      join(root, 't', '10db-ownabc', `claude-${String(process.getuid?.())}`, slug, id, 'tasks');
+    expect(judge.readAsk('Read', { file_path: join(tasks('own-id'), 'b1.output') })).toBeNull();
+    expect(judge.readAsk('Read', { file_path: join(tasks('other-id'), 'b1.output') })).toContain(
+      'outside the paths a lane may read without asking',
+    );
+    expect(judge.readAsk('Read', { file_path: join(sibling, 'secret') })).toContain('outside');
   });
 
   it('refuses a Glob whose literal prefix reaches a protected directory', () => {

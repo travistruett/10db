@@ -25,15 +25,23 @@ import { closePauseCards } from './stale-cards';
 
 export interface AccountPause {
   readonly reason: AccountPauseReason;
+  /** When it began. */
+  readonly since: Date;
   /** When it ends; null until the account is saved or its card answered. */
   readonly until: Date | null;
 }
 
+/** A pause as asked for: the pauses stamp when it began. */
+export type PauseRequest = Pick<AccountPause, 'reason' | 'until'>;
+
 export interface AccountPauses {
-  /** Pauses the account unless a pause that outlasts this one holds it; the card is raised either way (it folds). */
+  /**
+   * Pauses the account unless a pause that outlasts this one holds it; the card is raised either way
+   * (it folds). A pause that replaces one in force keeps the account's `since`.
+   */
   pause(
     accountId: AccountId,
-    pause: AccountPause,
+    pause: PauseRequest,
     at: {
       readonly projectId: ProjectId;
       readonly card: AccountCard | null;
@@ -63,6 +71,8 @@ export interface AccountPauses {
 const PauseSetting = z.object({
   reason: z.enum(AccountPauseReason),
   until: z.iso.datetime().nullable(),
+  /** Absent from a pause stored before it was recorded: that one reads as beginning when it is restored. */
+  since: z.iso.datetime().optional(),
 });
 const settingKey = (id: AccountId): string => `account_pause.${id}`;
 
@@ -79,7 +89,7 @@ export function usageLimitEnd(pause: AccountPause | null): Date | null {
 }
 
 /** A pause with no end outranks one that ends; otherwise the later end wins. */
-function outlasts(next: AccountPause, current: AccountPause): boolean {
+function outlasts(next: PauseRequest, current: AccountPause): boolean {
   if (next.until === null) return current.until !== null;
   if (current.until === null) return false;
   return next.until > current.until;
@@ -160,10 +170,15 @@ export function createAccountPauses(opts: {
       if (!held) carded.set(id, new Set());
       const armed = !held || outlasts(pause, held);
       if (armed) {
-        arm(id, pause);
+        const since = held?.since ?? opts.clock.now();
+        arm(id, { reason: pause.reason, until: pause.until, since });
         opts.state.write((ctx) => {
           const until = pause.until?.toISOString() ?? null;
-          setAppSetting(ctx, settingKey(id), { reason: pause.reason, until });
+          setAppSetting(ctx, settingKey(id), {
+            reason: pause.reason,
+            until,
+            since: since.toISOString(),
+          });
           const data = { reason: pause.reason, until, ...at.data };
           ctx.emit({ type: EventType.AccountPaused, entityType: 'account', entityId: id, data });
           switch (pause.reason) {
@@ -224,7 +239,10 @@ export function createAccountPauses(opts: {
         if (!parsed.success) continue;
         const until = parsed.data.until === null ? null : new Date(parsed.data.until);
         if (until !== null && until <= opts.clock.now()) resume(account.id);
-        else arm(account.id, { reason: parsed.data.reason, until });
+        else {
+          const since = parsed.data.since ? new Date(parsed.data.since) : opts.clock.now();
+          arm(account.id, { reason: parsed.data.reason, until, since });
+        }
       }
     },
     stop() {

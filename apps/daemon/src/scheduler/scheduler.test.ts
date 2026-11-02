@@ -1,5 +1,5 @@
 import { rmSync } from 'node:fs';
-import type { AccountId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
+import type { AccountId, BatchId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
   countLanes,
   createTestStore,
@@ -33,9 +33,10 @@ import {
 } from '../accounts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { GitTrustError } from '../git';
+import { createGit, GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
+import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createScheduler } from './index';
 
 let store: Store;
@@ -221,6 +222,78 @@ describe('scheduler', () => {
       await scheduler({ global: 1 }).tick();
       expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
       expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+    });
+
+    describe('after a restart', () => {
+      const restart = () =>
+        recoverOnStartup({
+          state,
+          inbox,
+          git: createGit(),
+          processes: systemProcesses,
+          maxRecoveryAttempts: 3,
+          logger: silentLogger,
+          cleanShutdown: true,
+        });
+      const interrupt = (id: WorkstreamId) => {
+        moveWorkstream(id, 'STARTING');
+        state.write((ctx) => transitionWorkstream(ctx, id, { to: 'RUNNING', fence: null }));
+      };
+
+      it('launches the workstream that was mid-session before tasks that never started, though it started after them', async () => {
+        const a = queue();
+        const b = queue();
+        clock.advance(1_000);
+        const interrupted = queue();
+        interrupt(interrupted.workstream.id);
+
+        const report = await restart();
+        expect(report.requeued).toEqual([interrupted.workstream.id]);
+
+        expect(await scheduler({ global: 1 }).tick()).toBe(1);
+        expect(launched.map((l) => l.id)).toEqual([interrupted.workstream.id]);
+        expect(getWorkstream(store.db, a.workstream.id).state).toBe('QUEUED');
+        expect(getWorkstream(store.db, b.workstream.id).state).toBe('QUEUED');
+        // The place is used up like a press: when it is queued again it waits in start order.
+        expect(getWorkstream(store.db, interrupted.workstream.id).runNextAt).toBeNull();
+      });
+
+      it('keeps several interrupted workstreams in the order they started', async () => {
+        const fresh = queue();
+        const first = queue();
+        clock.advance(1_000);
+        const second = queue();
+        clock.advance(1_000);
+        const third = queue();
+        for (const w of [third, first, second]) interrupt(w.workstream.id);
+
+        await restart();
+
+        await scheduler({ global: 4 }).tick();
+        expect(launched.map((l) => l.id)).toEqual([
+          first.workstream.id,
+          second.workstream.id,
+          third.workstream.id,
+          fresh.workstream.id,
+        ]);
+      });
+
+      it('still lets a press after the restart go ahead of a recovered workstream', async () => {
+        const chosen = queue();
+        clock.advance(1_000);
+        const interrupted = queue();
+        interrupt(interrupted.workstream.id);
+        await restart();
+
+        clock.advance(1_000);
+        press(chosen.task.id);
+
+        await scheduler({ global: 2 }).tick();
+        expect(launched.map((l) => l.id)).toEqual([
+          chosen.workstream.id,
+          interrupted.workstream.id,
+        ]);
+      });
     });
 
     it('takes the latest press first when several tasks were pushed', async () => {
@@ -782,5 +855,73 @@ describe('worktree batches', () => {
     expect(branchReads).toEqual([]);
     expect(launched).toEqual([]);
     expect(missing).toEqual([]);
+  });
+});
+
+describe('shared and separate-copy work in one project', () => {
+  const BRANCH = '10db/greetings-0a1b2c3d';
+  let dirs: TempDir[];
+  beforeEach(() => {
+    dirs = [];
+  });
+  afterEach(() => {
+    for (const dir of dirs) dir.cleanup();
+  });
+
+  const seed = () =>
+    seedProject(store, { delivery: 'pull_request', prTitlePrefix: 'feat(app)', maxLanes: 3 });
+
+  /** An OPEN batch, in the project's own checkout or in a copy, with one QUEUED task claiming `area`. */
+  function openBatch(project: ReturnType<typeof seed>, where: 'shared' | 'copy') {
+    const dir = where === 'copy' ? tempDir('worktree') : null;
+    if (dir) dirs.push(dir);
+    const batch = state.write((ctx) => {
+      const b = insertBatch(ctx, {
+        projectId: project.id,
+        title: where,
+        baseBranch: 'main',
+        ...(dir ? { worktreePath: dir.path } : {}),
+      });
+      transitionBatch(ctx, b.id, { to: 'OPEN' });
+      patchBatch(ctx, b.id, { branch: BRANCH, baseSha: 'a'.repeat(40) });
+      return b;
+    });
+    branchOf.set(dir?.path ?? project.repoPath, BRANCH);
+    return batch;
+  }
+  function queued(project: ReturnType<typeof seed>, batchId: BatchId, area: string, copy = false) {
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: area,
+        acceptanceCriteria: ['x'],
+        areas: [area],
+        workspaceMode: copy ? 'worktree' : 'shared',
+      }),
+    );
+    return state.write((ctx) => insertWorkstream(ctx, task.id, { batchId }));
+  }
+
+  it('launches a shared task and a copy task on the same area in one tick', async () => {
+    const project = seed();
+    const shared = queued(project, openBatch(project, 'shared').id, 'ui');
+    const copy = queued(project, openBatch(project, 'copy').id, 'ui', true);
+    expect(await scheduler({ global: 4 }).tick()).toBe(2);
+    expect(launched.map((l) => l.id).sort()).toEqual([shared.id, copy.id].sort());
+  });
+
+  it('launches one of two shared tasks on overlapping areas', async () => {
+    const project = seed();
+    const batch = openBatch(project, 'shared');
+    queued(project, batch.id, 'ui');
+    queued(project, batch.id, 'ui');
+    expect(await scheduler({ global: 4 }).tick()).toBe(1);
+  });
+
+  it('launches two shared tasks on disjoint areas in one tick', async () => {
+    const project = seed();
+    const batch = openBatch(project, 'shared');
+    queued(project, batch.id, 'ui');
+    queued(project, batch.id, 'api');
+    expect(await scheduler({ global: 4 }).tick()).toBe(2);
   });
 });

@@ -70,9 +70,17 @@ afterEach(() => {
 /** Moves a fresh workstream through `states` and leaves a live session and a stale lease behind. */
 function inState(
   states: readonly WorkstreamState[],
-  opts: { title?: string; pid?: number | null; pidStart?: string | null } = {},
+  opts: {
+    title?: string;
+    pid?: number | null;
+    pidStart?: string | null;
+    project?: ProjectDto;
+  } = {},
 ) {
-  const seeded = seedWorkstream(base, { title: opts.title ?? 'Alpha', repoPath: repo.path });
+  const seeded = seedWorkstream(base, {
+    title: opts.title ?? 'Alpha',
+    ...(opts.project ? { project: opts.project } : { repoPath: repo.path }),
+  });
   const session = state.write((ctx) => {
     for (const to of states) transitionWorkstream(ctx, seeded.workstream.id, { to, fence: null });
     const s = insertSession(ctx, {
@@ -269,6 +277,40 @@ describe('recoverOnStartup', () => {
       }
     },
   );
+
+  it('puts every re-queued workstream first in line, all with one stamp, and leaves queued work unstamped', async () => {
+    const queued = seedWorkstream(base, { title: 'Never started', repoPath: repo.path });
+    const running = inState(['STARTING', 'RUNNING'], { title: 'Running', project: queued.project });
+    const verifying = inState(['STARTING', 'RUNNING', 'VERIFYING'], {
+      title: 'Verifying',
+      project: queued.project,
+    });
+    const report = await recover({ cleanShutdown: true });
+
+    expect(report.requeued).toEqual([running.workstream.id, verifying.workstream.id]);
+    const stamp = getWorkstream(state.db, running.workstream.id).runNextAt;
+    expect(stamp).not.toBeNull();
+    expect(getWorkstream(state.db, verifying.workstream.id).runNextAt).toBe(stamp);
+    expect(getWorkstream(state.db, queued.workstream.id).runNextAt).toBeNull();
+  });
+
+  it('does not stamp a workstream that recovery fails or parks', async () => {
+    const failing = inState(['STARTING', 'RUNNING'], { title: 'Failing' });
+    state.write((ctx) => {
+      patchWorkstream(ctx, failing.workstream.id, null, { recoveryAttempts: 3 });
+    });
+    const waiting = inState(['STARTING', 'RUNNING', 'WAITING_HUMAN'], {
+      title: 'Waiting',
+      project: failing.project,
+    });
+    ask(waiting, 'Which way?', new AbortController().signal);
+    const report = await recover();
+
+    expect(report.failed).toEqual([failing.workstream.id]);
+    expect(report.parked).toEqual([waiting.workstream.id]);
+    expect(getWorkstream(state.db, failing.workstream.id).runNextAt).toBeNull();
+    expect(getWorkstream(state.db, waiting.workstream.id).runNextAt).toBeNull();
+  });
 
   it('records HEAD, the dirty files and the last acknowledged operation in the recovery event', async () => {
     const ws = inState(['STARTING', 'RUNNING']);

@@ -17,7 +17,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GITHUB_ORIGIN } from '../../test/fixtures';
 import { GitTrustFailure } from '../git';
-import { batchBranchName } from './index';
+import { createInboxService } from '../inbox';
+import { batchBranchName, createStartCardAnswers, StartChoice } from './index';
 
 let h: DeliveryHarness;
 beforeEach(() => {
@@ -179,7 +180,10 @@ describe('cutting a branch', () => {
     expect(h.only(h.cards()).detail).toMatchObject({ taskIds: [task.id] });
     expect(h.git$('rev-parse', 'HEAD')).toBe(head);
     expect(h.git$('branch', '--show-current')).toBe(branch);
-    expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
+    // The workstream the start inserted with the row is cancelled with it, so the task can start again.
+    expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toMatchObject([
+      { state: 'CANCELLED', batchId: null },
+    ]);
   });
 
   it('names the files in the way, in plain words, when the checkout has uncommitted changes', async () => {
@@ -211,8 +215,13 @@ describe('cutting a branch', () => {
     expect(again.id).toBe(first.id);
     expect(again.body).toContain('- b.txt');
     expect(again.body).not.toContain('a.txt');
-    h.inbox.answer(first.id, { choice: 'dismiss' });
-    await refuse();
+    // Retry start closes the card; the start it repeats is refused again, so a new card is raised.
+    createInboxService({
+      state: h.state,
+      onParkedAnswer: () => undefined,
+      onFlagAnswer: createStartCardAnswers({ state: h.state, starter: h.starter }),
+    }).answer(first.id, { choice: StartChoice.Retry });
+    await h.jobs.idle();
     expect(h.only(h.cards()).id).not.toBe(first.id);
   });
 

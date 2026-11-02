@@ -59,7 +59,13 @@ async function opened(): Promise<{ batch: BatchDto; ws: WorkstreamDto }> {
 }
 
 /** Writes and commits a file on the batch branch where its work is, as the commit tool does. */
-async function commitOnBatch(batch: BatchDto, path: string, content = `${path}\n`) {
+async function commitOnBatch(
+  batch: BatchDto,
+  path: string,
+  content = `${path}\n`,
+  /** Tells a second commit of the same path from the first, which a retried operation would repeat. */
+  again = '',
+) {
   const checkout = batch.worktreePath ?? h.repo;
   const file = join(checkout, path);
   mkdirSync(dirname(file), { recursive: true });
@@ -68,7 +74,7 @@ async function commitOnBatch(batch: BatchDto, path: string, content = `${path}\n
     repo: checkout,
     paths: [path],
     message: `Add ${path}`,
-    opId: `op-${path.replaceAll('/', '-')}`,
+    opId: `op-${path.replaceAll('/', '-')}${again}`,
     branch: batch.branch ?? '',
   });
   return sha;
@@ -786,6 +792,157 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.only(getBatch(h.store.db, batch.id).notices).body).toContain(
         "- pnpm-lock.yaml: pnpm's lockfile is made by pnpm, not merged by line",
       );
+    });
+
+    describe('leaving conflict markers for a lane session to resolve', () => {
+      const inSession = { inSession: true } as const;
+
+      /** Both sides changed the one line of README.md; the batch has its own commit first. */
+      async function overlapping() {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const { batch, ws } = await opened();
+        const own = await commitOnBatch(batch, 'README.md', '# ours\n');
+        const teammate = h.teammatePush('main', 'README.md', '# theirs\n');
+        return { batch, ws, own, teammate, path: pathOf(batch) };
+      }
+
+      it('merges the base with its markers in the files, committed with the base as second parent, and runs no gate on the branch', async () => {
+        const { batch, ws, own, teammate, path } = await overlapping();
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, inSession);
+        expect(update).toMatchObject({ kind: 'conflicted', paths: ['README.md'] });
+        expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
+        expect(readFileSync(join(path, 'README.md'), 'utf8')).toContain('<<<<<<< ');
+        expect(state(path).status).toBe('');
+        expect(getBatch(h.store.db, batch.id).baseSha).toBe(teammate);
+        expect(getWorkstreamRow(h.store.db, ws.id).baseHead).toBe(teammate);
+        expect(h.cards()).toEqual([]);
+        expect(h.only(getBatch(h.store.db, batch.id).notices)).toMatchObject({
+          key: 'base-conflict',
+          tone: 'info',
+          line: 'Resolving conflicts with main: README.md',
+        });
+      });
+
+      it('keeps asking for the resolution, without merging again, for the gates that find the markers still there', async () => {
+        const { batch, path } = await overlapping();
+        const updates = createBaseUpdates(h.ctx);
+        await updates.beforeGate(batch.id, signal, inSession);
+        const head = gitIn(path, 'rev-parse', 'HEAD');
+        h.teammatePush('main', 'src/more.txt');
+        expect(await updates.beforeGate(batch.id, signal, inSession)).toMatchObject({
+          kind: 'conflicted',
+          paths: ['README.md'],
+        });
+        // A gate with no session to send, the shipping gate's, finds them too and does not merge.
+        expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
+          kind: 'conflicted',
+          paths: ['README.md'],
+        });
+        expect(gitIn(path, 'rev-parse', 'HEAD')).toBe(head);
+        expect(h.cards()).toEqual([]);
+      });
+
+      it('runs the gate on the merged branch once the session has committed the resolution, and clears the notice', async () => {
+        const { batch, teammate, path } = await overlapping();
+        const updates = createBaseUpdates(h.ctx);
+        await updates.beforeGate(batch.id, signal, inSession);
+        await commitOnBatch(batch, 'README.md', '# ours and theirs\n', '-resolved');
+        const update = await updates.beforeGate(batch.id, signal, inSession);
+        expect(update).toMatchObject({
+          kind: 'merged',
+          base: teammate,
+          head: gitIn(path, 'rev-parse', 'HEAD'),
+        });
+        expect(update.kind === 'merged' && update.note).toMatch(/a session resolved .*README\.md/);
+        expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+        expect(h.cards()).toEqual([]);
+        expect(await h.git.keptRefs(path, 'refs/10db/')).toEqual([]);
+        // The branch holds the base now, and the next gate has nothing to bring in.
+        expect((await updates.beforeGate(batch.id, signal, inSession)).kind).toBe('up_to_date');
+      });
+
+      it('still shows a conflict a session cannot see in markers to the builder as a notice, and merges nothing', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        h.commit('pnpm-lock.yaml', 'a\nz\n');
+        h.git$('push', '-q', 'origin', 'main');
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'pnpm-lock.yaml', 'a\nb\nz\n');
+        h.teammatePush('main', 'pnpm-lock.yaml', 'a\nc\nz\n');
+        const before = state(pathOf(batch));
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, inSession);
+        expect(update.kind).toBe('not_merged');
+        expect(state(pathOf(batch))).toEqual(before);
+        expect(h.only(getBatch(h.store.db, batch.id).notices).line).toBe(
+          'Conflicts with main: pnpm-lock.yaml',
+        );
+      });
+
+      it('regenerates the generated files only once the session has resolved the sources they come from', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        seedMain(true);
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'src/index.ts', "import a from './mine';\nexport {};\n");
+        await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
+        await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
+        h.teammatePush('main', 'src/index.ts', "import a from './theirs';\nexport {};\n");
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        const run = { ran: 0 };
+        const regenerated = {
+          [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+          [`${DB}/0002_mine.sql`]: MINE,
+        };
+        const updates = createBaseUpdates({ ...h.ctx, generators: generating(regenerated, run) });
+        const first = await updates.beforeGate(batch.id, signal, inSession);
+        expect(first).toMatchObject({ kind: 'conflicted', paths: ['src/index.ts'] });
+        // The generators would read the markers.
+        expect(run.ran).toBe(0);
+        await commitOnBatch(
+          batch,
+          'src/index.ts',
+          "import a from './theirs';\nexport {};\n",
+          '-resolved',
+        );
+        const update = await updates.beforeGate(batch.id, signal, inSession);
+        const path = pathOf(batch);
+        expect(run.ran).toBe(1);
+        expect(update).toMatchObject({ kind: 'merged', head: gitIn(path, 'rev-parse', 'HEAD') });
+        expect(gitIn(path, 'log', '-1', '--format=%s')).toBe(
+          `Regenerate ${DB}/ after merging origin/main`,
+        );
+        expect(readFileSync(join(path, DB, 'meta/_journal.json'), 'utf8')).toBe(
+          regenerated[`${DB}/meta/_journal.json`],
+        );
+        expect(existsSync(join(path, DB, '0001_mine.sql'))).toBe(false);
+        expect(h.cards()).toEqual([]);
+      });
+
+      it('raises one card naming the generated directories when the merge note cannot be kept, since nothing else would regenerate them', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        seedMain(true);
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'src/index.ts', "import a from './mine';\nexport {};\n");
+        await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
+        await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
+        h.teammatePush('main', 'src/index.ts', "import a from './theirs';\nexport {};\n");
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        const git = {
+          ...h.git,
+          keepNote: () => Promise.reject(new Error('update-ref failed')),
+        } as typeof h.git;
+        const update = await createBaseUpdates({ ...h.ctx, git }).beforeGate(
+          batch.id,
+          signal,
+          inSession,
+        );
+        expect(update).toMatchObject({ kind: 'conflicted', paths: ['src/index.ts'] });
+        expect(update.kind === 'conflicted' && update.note).toContain('update-ref failed');
+        const card = h.only(h.cards());
+        expect(card.title).toContain("couldn't regenerate");
+        expect(card.body).toContain(`${DB}/`);
+        expect(card.body).toContain('update-ref failed');
+      });
     });
   });
 

@@ -1,5 +1,5 @@
 import { basename } from 'node:path';
-import { NotFoundError, WorkstreamId } from '@10db/contracts';
+import { BatchId, NotFoundError, WorkstreamId } from '@10db/contracts';
 import { getBatch, getWorkstream, type DbReader } from '@10db/db';
 import type { Git } from '../git';
 import type { Logger } from '../log';
@@ -15,6 +15,29 @@ export const startRefs = (worktreeRoot: string): string =>
 
 export const startRef = (worktreeRoot: string, id: WorkstreamId): string =>
   `${startRefs(worktreeRoot)}${id}`;
+
+/**
+ * Where this daemon keeps the note of a base merge that left conflict markers in a batch's branch
+ * (`Git.keepNote`), one per batch, until a session has resolved them: the merge commit, the base it
+ * brought in, the files with markers, and the generated directories to regenerate after.
+ */
+export const mergeRefs = (worktreeRoot: string): string =>
+  `refs/10db/${basename(worktreeRoot)}/merges/`;
+
+export const mergeRef = (worktreeRoot: string, id: BatchId): string =>
+  `${mergeRefs(worktreeRoot)}${id}`;
+
+/** True when the batch the ref names still has its worktree. */
+function isLiveBatch(db: DbReader, prefix: string, ref: string): boolean {
+  const id = BatchId.safeParse(ref.slice(prefix.length));
+  if (!id.success) return false;
+  try {
+    return getBatch(db, id.data).worktreePath !== null;
+  } catch (error) {
+    if (error instanceof NotFoundError) return false;
+    throw error;
+  }
+}
 
 /** True when the workstream the ref names belongs to a batch that still has its worktree. */
 function isLive(db: DbReader, prefix: string, ref: string): boolean {
@@ -43,17 +66,22 @@ export async function dropOrphanStarts(
   },
   main: string,
 ): Promise<void> {
-  const prefix = startRefs(deps.worktreeRoot);
-  for (const ref of await deps.git.keptRefs(main, prefix)) {
-    if (isLive(deps.db, prefix, ref)) continue;
-    try {
-      await deps.git.deleteKeptRef(main, ref);
-      deps.logger.info({ ref }, 'orphaned task start dropped');
-    } catch (error) {
-      deps.logger.warn(
-        { ref, err: error instanceof Error ? error.message : String(error) },
-        'orphaned task start kept',
-      );
+  const kinds = [
+    { prefix: startRefs(deps.worktreeRoot), live: isLive, what: 'task start' },
+    { prefix: mergeRefs(deps.worktreeRoot), live: isLiveBatch, what: 'base merge note' },
+  ];
+  for (const { prefix, live, what } of kinds) {
+    for (const ref of await deps.git.keptRefs(main, prefix)) {
+      if (live(deps.db, prefix, ref)) continue;
+      try {
+        await deps.git.deleteKeptRef(main, ref);
+        deps.logger.info({ ref }, `orphaned ${what} dropped`);
+      } catch (error) {
+        deps.logger.warn(
+          { ref, err: error instanceof Error ? error.message : String(error) },
+          `orphaned ${what} kept`,
+        );
+      }
     }
   }
 }

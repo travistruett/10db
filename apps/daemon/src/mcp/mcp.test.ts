@@ -26,6 +26,7 @@ import {
   seedProject,
   setWorkstreamNotice,
   transitionBatch,
+  transitionWorkstream,
   type Store,
 } from '@10db/db';
 import {
@@ -44,7 +45,13 @@ import { createGit } from '../git';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { ClaimWaits, createMcpHandler, mintSessionToken, withdrawStaleClaimWaits } from './index';
+import {
+  ClaimWaits,
+  createClaimDeadlockAnswers,
+  createMcpHandler,
+  mintSessionToken,
+  withdrawStaleClaimWaits,
+} from './index';
 
 const GUARDED = protectedPaths({
   dataDir: join(tmpdir(), 'mcp-test-data'),
@@ -64,10 +71,16 @@ const git = createGit();
 let workstreamBranch: string | null = 'main';
 /** The signal every session's waits listen to; a test aborts it to end the session. */
 let sessionAbort = new AbortController();
+/** One session's own stop, beside `sessionAbort`; a test aborts it to end only that session. */
+const sessionStops = new Map<string, AbortController>();
 /** How long one request_claim call waits before answering "still waiting"; a test shortens it. */
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
 let claimWaits: ClaimWaits;
+/** What an answer to a flag card does; the daemon wires the same into its inbox. */
+let answerDeadlock: ReturnType<typeof createClaimDeadlockAnswers>;
+/** The workstreams the builder's answers cancelled, in order. */
+let cancelled: WorkstreamId[] = [];
 /** What bringing the base in before the migrations hazard answers; a test replaces it. */
 let takeMigrationsBase: MigrationsBase['take'];
 /** The workstreams the base was brought in for, in order. */
@@ -96,6 +109,7 @@ const JsonObject = z.record(z.string(), z.unknown());
 beforeEach(async () => {
   logged.length = 0;
   sessionAbort = new AbortController();
+  sessionStops.clear();
   claimWaitSliceMs = 60_000;
   workstreamBranch = 'main';
   repo = createTempRepo();
@@ -103,7 +117,27 @@ beforeEach(async () => {
   close = test.close;
   base = test.store;
   state = createStateStore(test.store, createEventBus());
-  inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+  cancelled = [];
+  inbox = createInboxService({
+    state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswer: (item, answer) => {
+      answerDeadlock(item, answer);
+    },
+  });
+  answerDeadlock = createClaimDeadlockAnswers({
+    state,
+    // The runner's cancel ends the task and frees what it holds.
+    cancel: (id) => {
+      cancelled.push(id);
+      state.write((ctx) => releaseClaims(ctx, id));
+      return Promise.resolve();
+    },
+    get waits() {
+      return claimWaits;
+    },
+    log: capturingLogger,
+  });
   waitsStarted = 0;
   migrationsBaseTaken = [];
   takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
@@ -119,7 +153,10 @@ beforeEach(async () => {
     git,
     log: capturingLogger,
     waitObserverFor: () => undefined,
-    sessionSignal: () => sessionAbort.signal,
+    sessionSignal: (id) => {
+      const own = sessionStops.get(id);
+      return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
+    },
     claimWaits,
     claimPollMs: 5,
     get claimWaitSliceMs() {
@@ -210,6 +247,8 @@ async function seedSession(
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   await client.connect(transport);
+  const stop = new AbortController();
+  sessionStops.set(session.id, stop);
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = await client.callTool({ name, arguments: args });
     const text = ToolContent.parse(result.content)
@@ -221,7 +260,11 @@ async function seedSession(
       json: result.isError === true ? null : JsonObject.parse(JSON.parse(text)),
     };
   };
-  return { ...seeded, session, token, client, call };
+  /** Ends this session only, as a lane stop or handoff does. */
+  const stopSession = (): void => {
+    stop.abort();
+  };
+  return { ...seeded, session, token, client, call, stopSession };
 }
 
 const writeRepoFile = (rel: string, text: string) => {
@@ -693,16 +736,18 @@ describe('MCP tools', () => {
     await vi.waitFor(() => {
       expect(noticeOf(a)).not.toBeNull();
     });
+    claimWaitSliceMs = 50;
     for (const opId of ['op-dfold-b1', 'op-dfold-b2'])
       expect(
         (await b.call('request_claim', { opId, kind: 'area', name: 'api', reason: 'x' })).json,
-      ).toMatchObject({ granted: false, waiting: false });
+      ).toMatchObject({ granted: false, waiting: true });
     expect(openCards().filter((c) => c.title === 'Claim deadlock: area api')).toHaveLength(1);
-    // Beta lets ui go, so Alpha gets it and waits for nothing; Beta's next ask is a plain wait.
+    // Beta lets ui go, so Alpha gets it and waits for nothing; Beta's wait goes on as a plain one.
     state.write((ctx) => releaseClaims(ctx, b.workstream.id));
+    claimWaitSliceMs = 60_000;
     expect((await waiting).json).toMatchObject({ granted: true });
     const again = b.call('request_claim', {
-      opId: 'op-dfold-b3',
+      opId: 'op-dfold-b2',
       kind: 'area',
       name: 'api',
       reason: 'x',
@@ -893,7 +938,245 @@ describe('MCP tools', () => {
     expect(openCards()).toEqual([]);
   });
 
-  it('refuses at once, naming both tasks, when waiting would deadlock', async () => {
+  describe('a claim deadlock card', () => {
+    /**
+     * Alpha holds api and waits for ui; Beta holds ui and asks for api, which raises the card. Beta's
+     * call waits on the card.
+     */
+    async function deadlocked() {
+      const a = await seedSession(['api']);
+      const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
+      const alpha = a.call('request_claim', {
+        opId: 'op-deadlock-a',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(a)).not.toBeNull();
+      });
+      const beta = b.call('request_claim', {
+        opId: 'op-deadlock-b',
+        kind: 'area',
+        name: 'api',
+        reason: 'badge',
+      });
+      const card = await vi.waitFor(() => {
+        const found = openCards().find((c) => c.title === 'Claim deadlock: area api');
+        if (!found) throw new Error('no deadlock card');
+        return found;
+      });
+      return { a, b, alpha, beta, card };
+    }
+
+    it('offers each task yielding its claim and cancelling each task', async () => {
+      const { alpha, beta, card } = await deadlocked();
+      expect(card.options.map((o) => o.label)).toEqual([
+        'Beta yields area ui',
+        'Alpha yields area api',
+        'Cancel Beta',
+        'Cancel Alpha',
+      ]);
+      expect(card.options.every((o) => o.description.length > 0)).toBe(true);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('keeps the refused call waiting on the card, and says so when a slice ends', async () => {
+      claimWaitSliceMs = 50;
+      const { a, alpha, beta, card } = await deadlocked();
+      const answered = (await beta).json;
+      expect(answered).toMatchObject({
+        granted: false,
+        waiting: true,
+        heldBy: a.workstream.id,
+        inboxId: card.id,
+      });
+      expect(String(answered?.['instruction'])).toContain('same opId');
+      sessionAbort.abort();
+      await alpha;
+    });
+
+    it('frees the waiting task when the asker yields its claim, and tells the asker what it gave up', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Beta yields area ui' });
+      expect((await alpha).json).toMatchObject({ granted: true });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(activeClaims(state.db, b.workstream.id)).toEqual([]);
+      expect(getInboxItem(state.db, card.id).state).toBe('RESOLVED');
+      const told = (await beta).json;
+      expect(told).toMatchObject({ granted: false, waiting: false });
+      expect(String(told?.['instruction'])).toContain('area ui');
+      // Beta asks again: Alpha waits for nothing, so this is a plain wait, with no card.
+      const again = b.call('request_claim', {
+        opId: 'op-deadlock-b2',
+        kind: 'area',
+        name: 'api',
+        reason: 'badge',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(b)?.line).toBe('Waiting for area api: task "Alpha" holds it');
+      });
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await again;
+    });
+
+    it('gives the asker the claim in its pending call when the holder yields it, and tells the holder', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Alpha yields area api' });
+      expect((await beta).json).toMatchObject({ granted: true });
+      expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('api');
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).not.toContain('api');
+      // Alpha's own wait ends with what it gave up, before it edits there again.
+      const told = (await alpha).json;
+      expect(told).toMatchObject({ granted: false, waiting: false });
+      expect(String(told?.['instruction'])).toContain('area api');
+      expect(String(told?.['instruction'])).toContain('request_claim');
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+    });
+
+    it('tells the yielding task at its next ask when its wait ended between calls', async () => {
+      claimWaitSliceMs = 50;
+      const { a, b, alpha, beta, card } = await deadlocked();
+      // Both calls answer "still waiting", and neither agent has called again yet.
+      expect((await alpha).json).toMatchObject({ granted: false, waiting: true });
+      expect((await beta).json).toMatchObject({ granted: false, waiting: true });
+      inbox.answer(card.id, { choice: 'Alpha yields area api' });
+      await vi.waitFor(() => {
+        expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('api');
+        expect(claimWaits.holdersAwaitedBy(a.workstream.id)).toEqual([]);
+      });
+      claimWaitSliceMs = 60_000;
+      const told = (
+        await a.call('request_claim', {
+          opId: 'op-deadlock-a',
+          kind: 'area',
+          name: 'ui',
+          reason: 'x',
+        })
+      ).json;
+      expect(told).toMatchObject({ granted: false, waiting: false });
+      expect(String(told?.['instruction'])).toContain('area api');
+      sessionAbort.abort();
+    });
+
+    it('cancels the chosen task, which frees what it held', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Cancel Beta' });
+      expect(cancelled).toEqual([b.workstream.id]);
+      expect((await alpha).json).toMatchObject({ granted: true });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await beta;
+    });
+
+    it('gives the asker the claim in its pending call when the holder is cancelled', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      inbox.answer(card.id, { choice: 'Cancel Alpha' });
+      expect(cancelled).toEqual([a.workstream.id]);
+      expect((await beta).json).toMatchObject({ granted: true });
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await alpha;
+    });
+
+    it('withdraws the card when the wait that raised it ends without the claim', async () => {
+      const { b, alpha, beta, card } = await deadlocked();
+      b.stopSession();
+      expect((await beta).isError).toBe(true);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await alpha;
+    });
+
+    it('withdraws the card when the other task’s wait ends, though nobody asks again', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      a.stopSession();
+      expect((await alpha).isError).toBe(true);
+      await vi.waitFor(() => {
+        expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      });
+      // Beta's wait goes on as a plain one: Alpha waits for nothing now.
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await beta;
+    });
+
+    it.each([
+      ['the task that holds the claim', 'a'],
+      ['the task that raised the card', 'b'],
+    ] as const)(
+      'withdraws the card when %s reaches a terminal state while its wait is still live',
+      async (_who, which) => {
+        const { a, b, alpha, beta, card } = await deadlocked();
+        const ended = which === 'a' ? a : b;
+        state.write((ctx) => {
+          transitionWorkstream(ctx, ended.workstream.id, { to: 'CANCELLED', fence: null });
+        });
+        await vi.waitFor(() => {
+          expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+        });
+        expect(openCards()).toEqual([]);
+        sessionAbort.abort();
+        await Promise.all([alpha, beta]);
+      },
+    );
+
+    it('refuses and withdraws an answer once no wait waits on the card', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      // The daemon restarted: its waits are gone, and the card is still open.
+      const live = claimWaits;
+      claimWaits = new ClaimWaits();
+      expect(() => {
+        inbox.answer(card.id, { choice: 'Beta yields area ui' });
+      }).toThrow(/already ended/);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('api');
+      claimWaits = live;
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('refuses a cancel once no wait waits on the card', async () => {
+      const { alpha, beta, card } = await deadlocked();
+      const live = claimWaits;
+      claimWaits = new ClaimWaits();
+      expect(() => {
+        inbox.answer(card.id, { choice: 'Cancel Alpha' });
+      }).toThrow(/already ended/);
+      expect(cancelled).toEqual([]);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      claimWaits = live;
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('is withdrawn at startup, since the waits it belongs to ended with the daemon', async () => {
+      const { alpha, beta, card } = await deadlocked();
+      withdrawStaleClaimWaits(state, inbox);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('does not cancel a task that has already ended', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      state.write((ctx) => {
+        transitionWorkstream(ctx, a.workstream.id, { to: 'CANCELLED', fence: null });
+      });
+      inbox.answer(card.id, { choice: 'Cancel Alpha' });
+      expect(cancelled).toEqual([]);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+  });
+
+  it('raises a card naming both tasks, and no wait notice, when waiting would deadlock', async () => {
     const a = await seedSession(['api']);
     const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
     // Alpha waits for ui, which Beta holds.
@@ -906,19 +1189,23 @@ describe('MCP tools', () => {
     await vi.waitFor(() => {
       expect(noticeOf(a)).not.toBeNull();
     });
-    const refused = await b.call('request_claim', {
+    const refused = b.call('request_claim', {
       opId: 'op-dlock-b',
       kind: 'area',
       name: 'api',
       reason: 'badge',
     });
-    expect(refused.json).toMatchObject({ granted: false, heldBy: a.workstream.id });
-    expect(openCards().map((c) => c.title)).toEqual(['Claim deadlock: area api']);
+    await vi.waitFor(() => {
+      expect(openCards().map((c) => c.title)).toEqual(['Claim deadlock: area api']);
+    });
+    expect(openCards()[0]?.body).toContain('"Alpha"');
+    expect(openCards()[0]?.body).toContain('"Beta"');
+    expect(noticeOf(b)).toBeNull();
     sessionAbort.abort();
-    await waiting;
+    await Promise.all([waiting, refused]);
   });
 
-  it('refuses a wait whose new holder turns out to wait for this task', async () => {
+  it('raises a card for a wait whose new holder turns out to wait for this task', async () => {
     const a = await seedSession(['api']);
     const b = await seedSession(['ui'], undefined, { project: a.project, title: 'Beta' });
     const other = seedWorkstream(base, {
@@ -956,11 +1243,12 @@ describe('MCP tools', () => {
         leaseExpiresAt: ctx.now,
       });
     });
-    expect((await alpha).json).toMatchObject({ granted: false, heldBy: b.workstream.id });
-    expect(openCards().map((c) => c.title)).toEqual(['Claim deadlock: hazard migrations']);
+    await vi.waitFor(() => {
+      expect(openCards().map((c) => c.title)).toEqual(['Claim deadlock: hazard migrations']);
+    });
     expect(noticeOf(a)).toBeNull();
     sessionAbort.abort();
-    await beta;
+    await Promise.all([alpha, beta]);
   });
 
   it('a wait left by a crashed daemon causes no refusal, and startup clears its notice and withdraws its old card', async () => {

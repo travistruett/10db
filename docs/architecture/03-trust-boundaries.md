@@ -77,7 +77,8 @@ Out of scope:
 | **The rest of the guard** (`PreToolUse`)                                                                                                                                                                                                                                          | no, it is policy              | claims, commits only through `commit`, the delivery and `gh` rules, hazard claims, clear refusal reasons                                                                                                            | yes                                                                                                                 |
 
 A policy layer may refuse more than the boundaries, never less. Whatever a card or an allow rule lets through
-still runs inside the boundaries. The guard's shell-text parsing reduces prompts and explains refusals. A way
+still runs inside the boundaries. The guard's shell-text parsing reduces prompts and explains refusals; it no
+longer reads shell text for credentials (D12, built: `decisions/2026-11-01-guard-drops-shell-text-credential-rules.md`). A way
 past it is a bug in a convenience, not a breach, and the broker's Bash scan is judged by the same rule
 (`decisions/2026-10-29-sandbox-is-the-boundary.md`). The parked findings in §9 are judged by that rule. Claims,
 commits only through `commit` and hazard cards are workflow policy too. A lane can run git from an interpreter.
@@ -752,15 +753,17 @@ guard task tests each one.
   permission checks, the broker and the guard's resolved-path check, not on the kernel. A flaw in any of them
   is a flaw in R4. Wrapping the whole process would make it the kernel's, and lane sandbox spec D10 says when
   that is possible.
-- **The guard's shell-text checks are a tripwire; the sandbox is the boundary.** A text-level guard can't be
-  complete against bash and zsh. The kernel bounds what a lane's command reads and writes; these gaps stay open
-  wherever lane-written code runs outside it:
+- **The guard's shell-text checks are policy; the sandbox is the boundary.** D12 is built: the guard no longer
+  reads shell text for Keychain commands, environment dumps, secret variables or protected paths, so a lane's
+  Bash command is never refused or carded for them and the kernel decides what it reads. A text-level guard
+  can't be complete against bash and zsh. The checks that remain (claims, hazards, `rm -r`, `git`, `gh`,
+  deploys) have these gaps wherever lane-written code runs outside the kernel's reach:
   - shell indirection: `xargs`, `$(...)`, `$x`, `find -delete` and other `rm` binaries;
   - programs that run a string as shell: `watch`, `script`, `fish`, `ssh`, `su`, `flock`, `trap`, `tmux` and
     `screen`;
   - a script written to a file and then run, fifos, and `sqlite3`'s `.shell`;
-  - same-command filesystem changes: `ln -s ~ h && cat h/.claude.json`, or `rm -rf dist && ln -s . dist &&
-rm -rf dist/*`. The guard judges a command before it runs.
+  - same-command filesystem changes: `rm -rf dist && ln -s . dist && rm -rf dist/*`. The guard judges a
+    command before it runs.
 - **The guard refuses what it doesn't model.** Stepped and zero-padded brace sequences (`{1..5..2}`, `{01..10}`),
   brace bodies with an unmodelled `..`, and here-doc brace groups on any line that also uses process
   substitution, `exec` redirection or `coproc` are refused. A brace-heavy data here-doc may be refused too, and
@@ -865,6 +868,9 @@ Accounts Task 7 parked these findings for the re-scoped guard task. Each closes 
 
 - **moot:** the kernel denies the read, whatever the shell text says;
 - **fix:** policy correctness, because the guard and the permission matcher share one scanner.
+
+D12 is built, so the guard's credential rules are deleted and every row closed as moot (R3) no longer has
+anything in the guard to fix. The file tools' resolved-path check stays.
 
 | Finding                                                                                                                                                                                                           | Closes as                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

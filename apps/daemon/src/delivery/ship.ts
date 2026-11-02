@@ -136,8 +136,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
   const db = deps.state.db;
 
   function resume(batchId: BatchId): void {
-    const project = getProject(db, getBatch(db, batchId).projectId);
-    deps.jobs.run(jobKey(project, JobQueue.Ship), (signal) => shipSteps(batchId, signal));
+    deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
+      shipSteps(batchId, signal),
+    );
   }
 
   function fail(batch: BatchDto, outcome: ShipFailure): void {
@@ -677,6 +678,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun]);
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
+        // Set when the base merge before the gate left git's markers in the branch: no gate runs.
+        const marked: { paths: readonly string[] | null } = { paths: null };
         const gateOnce = async (): Promise<{
           gate: GateResult;
           note: string | null;
@@ -692,7 +695,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
               before.startedAt = deps.clock.now();
               const update = await deps.baseUpdates.beforeGate(batchId, signal);
               before.update = update;
-              return update.kind !== 'aborted';
+              // Markers fail any gate, and this one has no session to resolve them.
+              if (update.kind === 'conflicted') marked.paths = update.paths;
+              return update.kind !== 'aborted' && update.kind !== 'conflicted';
             }),
           );
           if (gate === null) return null;
@@ -709,7 +714,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return run.note === null ? overloadNote(load) : `${run.note}\n\n${overloadNote(load)}`;
         };
         const first = await gateOnce();
-        if (first === null) return;
+        if (first === null) {
+          if (marked.paths !== null && !stopped())
+            fail(batch, shipCards.baseMarkers(batch, marked.paths));
+          return;
+        }
         if (first.gate.timedOut) {
           fail(
             batch,
@@ -739,7 +748,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
             'ship gate failed only in tests the batch did not change; running it again',
           );
           const second = await gateOnce();
-          if (second === null) return;
+          if (second === null) {
+            if (marked.paths !== null && !stopped())
+              fail(batch, shipCards.baseMarkers(batch, marked.paths));
+            return;
+          }
           if (second.gate.timedOut) {
             fail(
               batch,
@@ -933,8 +946,23 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
+<<<<<<< 532f791776f34801663101f8ff57ff9f6b390691
       const project = getProject(db, batch.projectId);
       deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+||||||| 2c6e84e
+      const done = members(db, batchId)
+        .filter((m) => m.state === WorkstreamState.Done)
+        .map((m) => m.taskTitle);
+      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
+      const project = getProject(db, batch.projectId);
+      deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
+=======
+      const done = members(db, batchId)
+        .filter((m) => m.state === WorkstreamState.Done)
+        .map((m) => m.taskTitle);
+      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
+      deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
+>>>>>>> 1f2c6196d139d6c328a5e0fad579d5d262214c23
         await afterEnd(batchId, abandoned.worktreePath);
       });
       return abandoned;

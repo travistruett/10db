@@ -9,14 +9,17 @@ import {
   type HazardDef,
   InvalidError,
   mintId,
+  STOCK_HAZARD_REVISIONS,
   type InboxItemDto,
   type InboxTarget,
   type ProposalId,
   type ProposalKind,
 } from '@10db/contracts';
 import {
+  addStockHazardCommands,
   createTestStore,
   getInboxItem,
+  getProject,
   getProposal,
   insertInboxItem,
   insertPermissionRule,
@@ -26,6 +29,7 @@ import {
   listInbox,
   listPermissionRules,
   listTasks,
+  patchProject,
   schema,
   searchDecisions,
   seedProject,
@@ -318,6 +322,28 @@ describe('proposal verdicts', () => {
       { projectId: ws.project.id, description: 'Cache the query.', status: 'open' },
     );
   });
+
+  it.each([
+    ['a project whose default is a separate copy', 'pull_request', 'worktree', 'worktree'],
+    ['a pull request project whose default is Your folder', 'pull_request', 'shared', 'shared'],
+    ['a project with local delivery', 'local', 'shared', 'shared'],
+  ] as const)(
+    'files an accepted new task with the placement proposed for %s, and no reason',
+    (_name, delivery, projectMode, expected) => {
+      const project = seedProject(base, {
+        delivery,
+        workspaceMode: projectMode,
+        ...(delivery === 'pull_request' ? { prTitlePrefix: 'feat(app)' } : {}),
+      });
+      const ws = seedWorkstream(base, { project });
+      const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        workspaceMode: expected,
+        placementReason: null,
+      });
+    },
+  );
 
   it('links the filed task to its proposal and the task.created event carries the link', () => {
     const ws = seedWorkstream(base);
@@ -821,6 +847,51 @@ describe('permission broker in a sandboxed lane', () => {
     ).toEqual(['pnpm add evil-pkg', 'pnpm add zod']);
   });
 
+  describe('in a project added before the 2026-10-31 stock commands', () => {
+    const latest = new Set(Object.values(STOCK_HAZARD_REVISIONS.at(-1) ?? {}).flat());
+    const stored = DEFAULT_HAZARDS.map((h) => ({
+      ...h,
+      commands: h.commands.filter((c) => !latest.has(c)),
+    }));
+    const isCard = async (ws: ReturnType<typeof seedWorkstream>, command: string) => {
+      const hazards = getProject(state.db, ws.project.id).hazards;
+      const pending = sandboxed(ws, true, hazards)(request('Bash', { command }));
+      const card = openCards().find((c) => c.detail?.['summary'] === command);
+      if (!card) return (await pending).behavior;
+      inbox.answer(card.id, { choice: 'deny' });
+      await pending;
+      return 'card';
+    };
+    function oldProject(): ReturnType<typeof seedWorkstream> {
+      const ws = seedWorkstream(base);
+      state.write((ctx) => patchProject(ctx, ws.project.id, { hazards: stored }));
+      state.write((ctx) => {
+        addStockHazardCommands(ctx);
+      });
+      return ws;
+    }
+
+    it.each(['npm r left-pad', 'bun add x', 'pnpm add x'])(
+      'cards %s as the dependency hazard',
+      async (command) => {
+        expect(await isCard(oldProject(), command)).toBe('card');
+      },
+    );
+
+    it('keeps a command the builder removed off the list', async () => {
+      const ws = oldProject();
+      const trimmed = getProject(state.db, ws.project.id).hazards.map((h) =>
+        h.name === 'deps' ? { ...h, commands: h.commands.filter((c) => c !== 'bun add') } : h,
+      );
+      state.write((ctx) => patchProject(ctx, ws.project.id, { hazards: trimmed }));
+      state.write((ctx) => {
+        addStockHazardCommands(ctx);
+      });
+      expect(getProject(state.db, ws.project.id).hazards).toEqual(trimmed);
+      expect(await isCard(ws, 'bun add x')).toBe('allow');
+    });
+  });
+
   it('cards a hazard hidden in sh -c', () => {
     const ws = seedWorkstream(base);
     void sandboxed(ws)(request('Bash', { command: "sh -c 'pnpm add x'" })).catch(() => undefined);
@@ -988,9 +1059,19 @@ describe('permission broker in a sandboxed lane', () => {
     },
     { name: 'a subshell after then', command: 'if true; then (cd $d && ls); fi', outcome: 'allow' },
     { name: 'a variable argument to echo', command: 'echo "$HOME" "$(date)"', outcome: 'allow' },
-    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'card' },
+    // A word the shell fills in, only as an argument to a fixed pnpm script or program.
+    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'allow' },
+    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'allow' },
+    {
+      name: 'a variable after a filtered script',
+      command: 'pnpm --filter @10db/daemon test $x',
+      outcome: 'allow',
+    },
+    // A word that can pick the program or pnpm's subcommand.
     { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'card' },
-    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'card' },
+    { name: 'a variable as the pnpm subcommand', command: 'pnpm $SUB x', outcome: 'card' },
+    { name: 'a variable after pnpm exec', command: 'pnpm exec $X y', outcome: 'card' },
+    { name: 'a variable program with add', command: '$P add z', outcome: 'card' },
     {
       name: 'a redirection after the command',
       command: 'pnpm test 2>&1 | grep $x',

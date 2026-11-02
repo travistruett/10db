@@ -19,9 +19,31 @@ const EXPANSION = /[$`]/;
 /** Parameters that always hold a number: `$#`, `$?`, `$$`, `$!` and `${#name}` of a name or element. */
 const NUMERIC_PARAMETER = /\$[#?$!]|\$\{#[A-Za-z_]\w*(?:\[[@*]\])?\}/g;
 
-/** Whether an expression holds only numeric literals and operators. */
-export function isNumericExpression(expression: string): boolean {
-  return NUMERIC.test(expression.replace(HEX_LITERAL, '0').replace(NUMERIC_PARAMETER, '0'));
+/** A command substitution whose output is always a number: the seconds since the epoch. */
+export const NUMERIC_SUBSTITUTION = /\$\(date \+%s\)/g;
+/** A variable read as `${name}`, `$name`, or bare as arithmetic reads it. */
+const NAME_READ = /\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)|(?<![\w$])([A-Za-z_]\w*)(?!\w)/g;
+const NO_NAMES: ReadonlySet<string> = new Set();
+
+/**
+ * Whether an expression holds only numeric literals and operators. `names` are variables the
+ * whole command sets only to numbers (`numericNames`): read as `$name`, `${name}` or bare, each is
+ * a number. `$(date +%s)` is one too.
+ */
+export function isNumericExpression(
+  expression: string,
+  names: ReadonlySet<string> = NO_NAMES,
+): boolean {
+  let text = expression
+    .replace(HEX_LITERAL, '0')
+    .replace(NUMERIC_PARAMETER, '0')
+    .replace(NUMERIC_SUBSTITUTION, '0');
+  if (names.size > 0) {
+    text = text.replace(NAME_READ, (word, braced?: string, plain?: string, bare?: string) =>
+      names.has(braced ?? plain ?? bare ?? '') ? '0' : word,
+    );
+  }
+  return NUMERIC.test(text);
 }
 
 /** A subscript that is safe to evaluate: a number, or `@` and `*` for all elements. */
@@ -32,11 +54,11 @@ const safeSubscript = (subscript: string): boolean =>
  * Whether a word holds an arithmetic context the scan cannot read, in any command: an arithmetic
  * expansion, `$[…]`, a subscript on a name being assigned or expanded, or a substring offset.
  */
-export function unreadArithmeticIn(word: string): boolean {
+export function unreadArithmeticIn(word: string, names: ReadonlySet<string> = NO_NAMES): boolean {
   const expansion = /\$\(\((.*)\)\)/s.exec(word);
-  if (expansion !== null && !isNumericExpression(expansion[1] ?? '')) return true;
+  if (expansion !== null && !isNumericExpression(expansion[1] ?? '', names)) return true;
   const bracket = /\$\[(.*)\]/s.exec(word);
-  if (bracket !== null && !isNumericExpression(bracket[1] ?? '')) return true;
+  if (bracket !== null && !isNumericExpression(bracket[1] ?? '', names)) return true;
   // Every subscript and offset, whatever the name: `${!a[n]}`, `${#a[n]}`, `${1:n}`, `${a[@]:n}`.
   for (const match of word.matchAll(/\$\{[^}[]*\[([^\]]*)\]/g)) {
     if (!safeSubscript(match[1] ?? '')) return true;

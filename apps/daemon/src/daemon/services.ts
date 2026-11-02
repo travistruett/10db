@@ -60,6 +60,7 @@ import {
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
@@ -194,7 +195,18 @@ export function createServices(deps: {
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) => insertTask(ctx, projectId, input));
+      const task = deps.state.write((ctx) =>
+        insertTask(
+          ctx,
+          projectId,
+          input,
+          proposePlacement(getProject(ctx.tx, projectId), {
+            areas: input.areas,
+            riskTags: input.riskTags ?? [],
+            workspaceMode: input.workspaceMode,
+          }),
+        ),
+      );
       deps.scheduler.requestTick();
       return task;
     },
@@ -319,6 +331,8 @@ export function createServices(deps: {
     accountSignIn: (id) => deps.accounts.signIn(id),
     accountIdentity: (id) => deps.accounts.identity(id),
     accountUsage: (id, month) => deps.accounts.usage(id, month),
+    listAccountPauses: () => deps.accounts.pauses(),
+    resumeAccount: (id) => deps.accounts.resume(id),
     getTeam(projectId) {
       getProject(db, projectId);
       return getTeam(db, projectId);
@@ -336,6 +350,8 @@ export function createServices(deps: {
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     async patchTask(id, patch) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
+      // The store refuses a task that has started; a join still pending has not written yet.
+      if (patch.workspaceMode !== undefined) deps.starter.refuseIfJoining(id);
       return deps.state.write((ctx) => patchTask(ctx, id, patch));
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
