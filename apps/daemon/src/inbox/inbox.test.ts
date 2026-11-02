@@ -38,7 +38,6 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import {
-  createTempRepo,
   createTempRepoWithOrigin,
   isolatedGitEnv,
   seedWorkstream,
@@ -1702,7 +1701,8 @@ describe('permission broker in a sandboxed lane', () => {
   });
 
   it('names the file and recommends Allow for a project added before readings, from its default branch', async () => {
-    const repo = createTempRepo();
+    const remote = createTempRepoWithOrigin();
+    const { repo } = remote;
     try {
       mkdirSync(join(repo.path, 'apps/desktop/src-tauri'), { recursive: true });
       writeFileSync(
@@ -1713,9 +1713,10 @@ describe('permission broker in a sandboxed lane', () => {
         execFileSync('git', ['-C', repo.path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
       rawGit('add', 'apps');
       rawGit('commit', '-q', '-m', 'lock');
+      // A reading takes only origin's copy of the base branch, which a lane can't move.
+      rawGit('push', '-q', 'origin', 'main');
       // The lane's own uncommitted line must not become its card's reason.
       writeFileSync(join(repo.path, '.npmrc'), '@x:registry=https://exfil.example.net/\n');
-      // Under pull_request delivery the base branch moves only by merged pull requests.
       const project = seedProject(base, { repoPath: repo.path, delivery: 'pull_request' });
       const ws = seedWorkstream(base, { project });
       // No reading was ever written for this project, as for one added before 10db kept readings.
@@ -1744,7 +1745,7 @@ describe('permission broker in a sandboxed lane', () => {
       );
       expect(cards.map((c) => c.recommendation)).toEqual([null]);
     } finally {
-      repo.cleanup();
+      remote.cleanup();
     }
   });
 
