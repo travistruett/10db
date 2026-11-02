@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto, InboxItemDto } from '@10db/contracts';
-import { getBatch, getBatchRow } from '@10db/db';
+import { clearWorktreePath, getBatch, getBatchRow } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { comparablePath, samePath } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
@@ -165,6 +166,70 @@ describe('a worktree 10db kept', () => {
     await h.jobs.idle();
 
     expect(existsSync(path)).toBe(false);
+  });
+});
+
+describe('a worktree no batch uses any more', () => {
+  beforeEach(() => {
+    build('worktree');
+  });
+
+  /** Opens a batch, then clears its worktree path so its locked worktree is an orphan. */
+  async function orphaned() {
+    const { batch, path } = await opened();
+    h.state.write((c) => {
+      clearWorktreePath(c, batch.id);
+    });
+    return { batch, path };
+  }
+
+  const listed = async (path: string): Promise<boolean> =>
+    (await h.git.listWorktrees(h.repo)).some((e) => samePath(comparablePath(e.path), path));
+
+  it('removes it with its changes and withdraws its cards on Remove worktree', async () => {
+    const { batch, path } = await orphaned();
+    writeFileSync(join(path, 'notes.txt'), 'not committed\n');
+    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
+    const card = h.only(h.cards());
+    expect(labels(card)).toEqual([WorktreeChoice.Remove, WorktreeChoice.Keep]);
+
+    inbox.answer(card.id, { choice: WorktreeChoice.Remove });
+    await h.jobs.idle();
+
+    expect(existsSync(path)).toBe(false);
+    expect(await listed(path)).toBe(false);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('says nothing was removed, and why, when a batch holds the worktree again', async () => {
+    const { batch, path } = await opened();
+    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
+    const card = h.only(h.cards());
+
+    inbox.answer(card.id, { choice: WorktreeChoice.Remove });
+    await h.jobs.idle();
+
+    expect(existsSync(path)).toBe(true);
+    expect(await listed(path)).toBe(true);
+    const notice = h.only(h.cards());
+    expect(notice.id).not.toBe(card.id);
+    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(notice.body).toContain('a batch uses it');
+  });
+
+  it('says nothing was removed when git no longer lists the path', async () => {
+    const { batch, path } = await orphaned();
+    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
+    const card = h.only(h.cards());
+    h.git$('worktree', 'unlock', path);
+    h.git$('worktree', 'remove', '--force', path);
+
+    inbox.answer(card.id, { choice: WorktreeChoice.Remove });
+    await h.jobs.idle();
+
+    const notice = h.only(h.cards());
+    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(notice.body).toContain('git no longer lists');
   });
 });
 

@@ -70,12 +70,25 @@ function findBatch(state: StateStore, id: BatchId): BatchDto | undefined {
  * cleared or names another place; null for anything else.
  */
 function orphanOf(state: StateStore, entry: WorktreeEntry, root: string): Orphan | null {
-  if (entry.bare) return null;
+  const verdict = orphanVerdict(state, entry, root);
+  return 'why' in verdict ? null : verdict;
+}
+
+/** Why a worktree is not an orphan, in words the builder can read after "10db removed nothing: ". */
+interface NotOrphan {
+  readonly why: string;
+}
+
+function orphanVerdict(state: StateStore, entry: WorktreeEntry, root: string): Orphan | NotOrphan {
+  if (entry.bare) return { why: 'it is a bare repository entry' };
   // The lock reason is git's output: parse the id it names.
   const parsed = BatchId.safeParse(lockedBatchId(entry));
-  if (!parsed.success || !underRoot(entry.path, root)) return null;
+  if (!parsed.success)
+    return { why: '10db no longer has it locked (its lock reason does not name a batch)' };
+  if (!underRoot(entry.path, root)) return { why: "it is outside 10db's worktree root" };
   const live = findBatch(state, parsed.data)?.worktreePath ?? null;
-  if (live !== null && samePath(comparablePath(live), comparablePath(entry.path))) return null;
+  if (live !== null && samePath(comparablePath(live), comparablePath(entry.path)))
+    return { why: 'a batch uses it again' };
   return { batchId: parsed.data, ownsPin: live === null };
 }
 
@@ -97,19 +110,20 @@ async function changesIn(deps: SweepDeps, main: string, path: string): Promise<s
  * The builder's Remove worktree answer on an orphan's card: removes the orphan at `path` whatever it
  * holds, uncommitted changes and git-ignored files included, and withdraws its cards. Only an orphan
  * the sweep itself would consider (locked by 10db, under the root, held by no batch); anything else
- * is left and reported as false.
+ * is left and answered with the reason (`why`), for the builder to read.
  */
 export async function removeOrphanedWorktree(
   deps: SweepDeps,
   project: ProjectDto,
   path: string,
-): Promise<boolean> {
+): Promise<{ readonly removed: true } | { readonly removed: false; readonly why: string }> {
   const main = project.repoPath;
   const entry = (await deps.git.listWorktrees(main)).find((e) =>
     samePath(comparablePath(e.path), comparablePath(path)),
   );
-  const orphan = entry === undefined ? null : orphanOf(deps.state, entry, deps.root);
-  if (entry === undefined || orphan === null) return false;
+  if (entry === undefined) return { removed: false, why: 'git no longer lists it as a worktree' };
+  const orphan = orphanVerdict(deps.state, entry, deps.root);
+  if ('why' in orphan) return { removed: false, why: orphan.why };
   await deps.git.removeWorktree(main, entry.path);
   withdraw(deps.state, deps.inbox, project.id, [
     keptWorktreeKey.orphanChanges(path),
@@ -120,7 +134,7 @@ export async function removeOrphanedWorktree(
       deleteAppSetting(w, worktreePinKey(orphan.batchId));
     });
   deps.logger.info({ projectId: project.id, path }, 'orphaned worktree removed by the builder');
-  return true;
+  return { removed: true };
 }
 
 /** Sweeps one project's main checkout; resolves with the paths removed. */
