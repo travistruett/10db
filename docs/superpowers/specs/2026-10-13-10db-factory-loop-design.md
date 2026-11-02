@@ -449,6 +449,9 @@ becomes an instruction.
   - *Brainstorm* opens a PM side panel that streams proposal cards.
   - *Start N* opens the batch approval sheet (§5.2).
 - **Factory:**
+  - Goals supersede this section's Factory: it is one list of the project's goals, with the workstream rows
+    moved into each goal's detail (`2026-10-29-10db-goals-design.md` §8, and
+    `docs/architecture/decisions/2026-11-02-goals-and-the-brief.md`). What follows is the original design.
   - One row per active workstream: state, step and persona, session count, a context gauge and last
     activity.
   - The detail view has an activity feed with tool noise collapsed, a handoff timeline, changes and evidence,
