@@ -73,8 +73,9 @@
       it is made (`placement/`), start by placement, and the shared cut and switch back counting only lanes in the
       main checkout, so a shared batch and separate copies run together, with a copy cut beside an unfinished
       shared batch skipping the seed clone, installing `node_modules` in a pnpm project, and naming any seed
-      directory left unmade in a notice (the spec's §7, option b, which covers only the time a shared batch is
-      unfinished; see `03-trust-boundaries.md`). Stays open, each its own item: a port block per copy and parallel ships (both above and below);
+      directory left unmade in a notice (the spec's §7, option b; the skip also holds once any shared lane has
+      run in the project, and a clone made while a shared batch started is thrown away; see
+      `03-trust-boundaries.md`). Stays open, each its own item: a port block per copy and parallel ships (both above and below);
       and the desktop's badge, drawer and sheet controls and the Board's strip, the spec's T4:
 - [ ] Task placement: the desktop shows where a task will run ("Your folder" or "Separate copy") while it can change,
       lets the builder change it in the task drawer and the batch sheet, and lists a copy's open batch beside the

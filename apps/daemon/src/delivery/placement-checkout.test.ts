@@ -11,7 +11,14 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { WorkspaceMode, type BatchDto, type TaskDto } from '@10db/contracts';
-import { getBatch, insertWorkstream, listBatches, listWorkstreams } from '@10db/db';
+import {
+  getBatch,
+  getTask,
+  insertWorkstream,
+  listBatches,
+  listWorkstreams,
+  patchTask,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -274,6 +281,104 @@ describe('seeding a new copy', () => {
     expect(batch.notices).toEqual([]);
   });
 
+  describe('install scripts the copy did not run', () => {
+    /** What an install of `name` leaves in a pnpm virtual store, with `scripts` in its package.json. */
+    const installed = (name: string, version: string, scripts: object): Record<string, string> => ({
+      [`node_modules/.pnpm/${name.replace('/', '+')}@${version}/node_modules/${name}/package.json`]:
+        JSON.stringify({ name, version, scripts }),
+    });
+    function allowing(workspace: string): void {
+      h.commit('.gitignore', 'node_modules/\n');
+      h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+      h.commit('pnpm-workspace.yaml', workspace);
+      h.git$('push', '-q', 'origin', 'main');
+      mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+      writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    }
+
+    it('names an allowed package whose install script was skipped', async () => {
+      allowing('allowBuilds:\n  prisma: true\n  "@scope/native": true\n  sharp: false\n');
+      h.pnpm.makes({
+        ...installed('prisma', '6.0.0', { postinstall: 'node build.js' }),
+        ...installed('@scope/native', '1.2.0', { install: 'node-gyp rebuild' }),
+        ...installed('sharp', '0.30.0', { install: 'node install.js' }),
+        ...installed('left-pad', '1.0.0', { postinstall: 'node x.js' }),
+      });
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.state).toBe('OPEN');
+      const notice = h.only(batch.notices);
+      expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+      expect(notice.line).toContain('prisma');
+      expect(notice.line).toContain('@scope/native');
+      expect(notice.line).not.toContain('sharp');
+      expect(notice.line).not.toContain('left-pad');
+      expect(notice.body).toContain('pnpm rebuild');
+    });
+
+    it('says nothing when an allowed package has no install script', async () => {
+      allowing('allowBuilds:\n  prisma: true\n');
+      h.pnpm.makes(installed('prisma', '6.0.0', { test: 'vitest' }));
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.notices).toEqual([]);
+    });
+
+    it('says nothing when the clone carried the built output', async () => {
+      allowing('allowBuilds:\n  prisma: true\n');
+      h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
+      const batch = await startedOne(copy('Copied'));
+      expect(batch.notices).toEqual([]);
+    });
+
+    it('reads the older onlyBuiltDependencies list too', async () => {
+      allowing('onlyBuiltDependencies:\n  - puppeteer\n');
+      h.pnpm.makes(installed('puppeteer', '22.0.0', { postinstall: 'node install.js' }));
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      expect(h.only(batch.notices).line).toContain('puppeteer');
+    });
+
+    it('names every package with an install script when all builds are allowed', async () => {
+      allowing('dangerouslyAllowAllBuilds: true\nignoredBuiltDependencies:\n  - sharp\n');
+      h.pnpm.makes({
+        ...installed('prisma', '6.0.0', { postinstall: 'node build.js' }),
+        ...installed('@scope/native', '1.2.0', { install: 'node-gyp rebuild' }),
+        ...installed('sharp', '0.30.0', { install: 'node install.js' }),
+        ...installed('left-pad', '1.0.0', { test: 'x' }),
+      });
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      const notice = h.only(batch.notices);
+      expect(notice.key).toBe('install-scripts-skipped');
+      expect(notice.line).toContain('prisma');
+      expect(notice.line).toContain('@scope/native');
+      expect(notice.line).not.toContain('sharp');
+      expect(notice.line).not.toContain('left-pad');
+    });
+
+    it('reads dangerouslyAllowAllBuilds from package.json too, and caps a long list', async () => {
+      h.commit(
+        'package.json',
+        JSON.stringify({ name: 'app', pnpm: { dangerouslyAllowAllBuilds: true } }),
+      );
+      allowing('packages: []\n');
+      const many: Record<string, string> = {};
+      for (let i = 0; i < 15; i++)
+        Object.assign(
+          many,
+          installed(`pkg${String(i).padStart(2, '0')}`, '1.0.0', { postinstall: 'x' }),
+        );
+      h.pnpm.makes(many);
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      const notice = h.only(batch.notices);
+      expect(notice.line).toContain('pkg00');
+      expect(notice.line).not.toContain('pkg14');
+      expect(notice.line).toContain('5 more');
+    });
+  });
+
   it('tells the batch when 10db cannot install what the clone would have brought', async () => {
     // npm's lockfile: 10db installs only pnpm projects, so the copy gets no node_modules.
     h.commit('.gitignore', 'node_modules/\n');
@@ -333,6 +438,40 @@ describe('seeding a new copy', () => {
     const batch = getBatch(h.store.db, started.id);
     release();
     await h.jobs.idle();
+    expect(batch.state).toBe('OPEN');
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+  });
+
+  it('does not clone after a shared lane ran, even once its batch has ended', async () => {
+    withInstalledProject();
+    const sharedBatch = await startedOne(shared('Alpha'));
+    const lane = h.only(listWorkstreams(h.store.db, { batchId: sharedBatch.id }));
+    h.settle(lane.id, 'DONE');
+    // The lane's write to a dependency in Your folder is still there after its batch is gone.
+    writeFileSync(join(h.repo, 'node_modules/pkg/index.js'), 'module.exports = "lane";\n');
+    h.shipper.abandon(sharedBatch.id);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, sharedBatch.id).state).toBe('ABANDONED');
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+  });
+
+  it('does not clone after a shared lane ran, even once its task has moved to a copy', async () => {
+    withInstalledProject();
+    const alpha = shared('Alpha');
+    const sharedBatch = await startedOne(alpha);
+    const lane = h.only(listWorkstreams(h.store.db, { batchId: sharedBatch.id }));
+    h.settle(lane.id, 'FAILED');
+    writeFileSync(join(h.repo, 'node_modules/pkg/index.js'), 'module.exports = "lane";\n');
+    // Its run has ended and the task is still open, so the builder may send it to a copy.
+    h.state.write((c) => patchTask(c, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    expect(getTask(h.store.db, alpha.id).workspaceMode).toBe(WorkspaceMode.Worktree);
+    h.shipper.abandon(sharedBatch.id);
+    await h.jobs.idle();
+    const batch = await startedOne(copy('Copied'));
     expect(batch.state).toBe('OPEN');
     expect(cloned(batch)).toBe(false);
     expect(installsIn(batch)).toHaveLength(1);
