@@ -68,6 +68,7 @@ export class FakeGh implements Gh {
       pr: { url: string; state: PrState };
       headSha: string | null;
       mergeBlocked: MergeBlocked | null;
+      blockedOnChecks: boolean;
       mergeable: PrMergeable;
       body: string;
       create: PrCreateCall | null;
@@ -130,6 +131,7 @@ export class FakeGh implements Gh {
               ...found.pr,
               headSha: found.headSha,
               mergeBlocked: found.mergeBlocked,
+              blockedOnChecks: found.blockedOnChecks,
               mergeable: found.mergeable,
               ...summariseChecks(found.rollup),
             }
@@ -227,6 +229,13 @@ export class FakeGh implements Gh {
     found.mergeBlocked = blocked;
   }
 
+  /** Whether GitHub says the PR waits on a required check (BLOCKED, not for a review) from now on; a new PR does not. */
+  setBlockedOnChecks(url: string, blocked: boolean): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.blockedOnChecks = blocked;
+  }
+
   /** The required checks `prRequiredChecks` reports for the PR from now on; a new PR has none. */
   setRequiredChecks(url: string, checks: RequiredChecks): void {
     this.required.set(url, checks);
@@ -265,6 +274,7 @@ export class FakeGh implements Gh {
       pr: { url, state },
       headSha: null,
       mergeBlocked: null,
+      blockedOnChecks: false,
       mergeable: PrMergeable.Mergeable,
       body,
       create,

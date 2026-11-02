@@ -48,7 +48,7 @@ function decide(question: string) {
 }
 
 describe('the goal services', () => {
-  it('answers a digest that parses and marks the goal viewed, so the next one starts there', () => {
+  it('answers a digest that parses and marks the goal viewed, and a refresh keeps its Δ rows', () => {
     const { id } = goal();
     decide('Areas follow packages?');
     const services = goalServices();
@@ -62,10 +62,10 @@ describe('the goal services', () => {
     const mark = lastGoalView(h.state.db, id, builder.id);
     expect(mark).not.toBeNull();
 
+    // A second opening in the same visit answers the same Δ rows.
     const second = services.openGoalDigest(id);
-    expect(second.since).toBe(mark);
-    expect(second.decisions.recent).toEqual([]);
-    expect(second.decisions.earlier).toHaveLength(1);
+    expect(second.since).toBeNull();
+    expect(second.decisions).toEqual(first.decisions);
   });
 
   it('refuses a goal that does not exist', () => {

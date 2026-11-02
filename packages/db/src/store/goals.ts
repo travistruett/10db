@@ -280,8 +280,18 @@ export function lastGoalView(db: DbReader, goalId: GoalId, personId: PersonId): 
 }
 
 /**
- * Marks the goal opened by the person now and answers the previous mark (null on the first
- * visit), so the digest computes its Δ rows from the window that just closed (§8).
+ * A visit lasts while the goal is opened again within this long of its last opening. A refetch or
+ * a remount during it answers the window the visit began with; after a quiet spell the next
+ * opening starts a new visit.
+ */
+export const VISIT_GAP_MS = 30 * 60_000;
+
+/**
+ * Marks the goal opened by the person now and answers where the Δ window starts: the mark before
+ * this visit began (null on the first visit). An opening within `VISIT_GAP_MS` of the last one
+ * continues its visit, so a refresh keeps the rows the builder was reading (§8); otherwise the
+ * last mark closes and the window starts there. `openedAt` always moves to now, which keeps the
+ * goal list's count of new items at zero after an opening.
  */
 export function markGoalViewed(
   ctx: WriteContext,
@@ -290,14 +300,21 @@ export function markGoalViewed(
 ): string | null {
   getGoal(ctx.tx, goalId);
   getPerson(ctx.tx, personId);
-  const previous = lastGoalView(ctx.tx, goalId, personId);
+  const row = ctx.tx
+    .select()
+    .from(schema.goalViews)
+    .where(and(eq(schema.goalViews.goalId, goalId), eq(schema.goalViews.personId, personId)))
+    .get();
+  const continuing =
+    row !== undefined && Date.parse(ctx.now) - Date.parse(row.openedAt) <= VISIT_GAP_MS;
+  const since = row === undefined ? null : continuing ? row.visitSince : row.openedAt;
   ctx.tx
     .insert(schema.goalViews)
-    .values({ goalId, personId, openedAt: ctx.now })
+    .values({ goalId, personId, openedAt: ctx.now, visitSince: since })
     .onConflictDoUpdate({
       target: [schema.goalViews.goalId, schema.goalViews.personId],
-      set: { openedAt: ctx.now },
+      set: { openedAt: ctx.now, visitSince: since },
     })
     .run();
-  return previous;
+  return since;
 }
