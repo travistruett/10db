@@ -287,11 +287,18 @@ export function lastGoalView(db: DbReader, goalId: GoalId, personId: PersonId): 
 export const VISIT_GAP_MS = 30 * 60_000;
 
 /**
+ * A visit also ends this long after it began, however often the goal is opened in between (every
+ * row click opens it), so 'since you left' never reaches back past hours of viewing.
+ */
+export const VISIT_MAX_MS = 2 * 60 * 60_000;
+
+/**
  * Marks the goal opened by the person now and answers where the Δ window starts: the mark before
  * this visit began (null on the first visit). An opening within `VISIT_GAP_MS` of the last one
- * continues its visit, so a refresh keeps the rows the builder was reading (§8); otherwise the
- * last mark closes and the window starts there. `openedAt` always moves to now, which keeps the
- * goal list's count of new items at zero after an opening.
+ * continues its visit, so a refresh keeps the rows the builder was reading (§8), unless the visit
+ * began more than `VISIT_MAX_MS` ago; otherwise the last mark closes and the window starts there.
+ * `openedAt` always moves to now, which keeps the goal list's count of new items at zero after an
+ * opening.
  */
 export function markGoalViewed(
   ctx: WriteContext,
@@ -305,15 +312,19 @@ export function markGoalViewed(
     .from(schema.goalViews)
     .where(and(eq(schema.goalViews.goalId, goalId), eq(schema.goalViews.personId, personId)))
     .get();
+  const now = Date.parse(ctx.now);
   const continuing =
-    row !== undefined && Date.parse(ctx.now) - Date.parse(row.openedAt) <= VISIT_GAP_MS;
+    row !== undefined &&
+    now - Date.parse(row.openedAt) <= VISIT_GAP_MS &&
+    now - Date.parse(row.visitStartedAt ?? row.openedAt) <= VISIT_MAX_MS;
   const since = row === undefined ? null : continuing ? row.visitSince : row.openedAt;
+  const visitStartedAt = continuing ? (row.visitStartedAt ?? row.openedAt) : ctx.now;
   ctx.tx
     .insert(schema.goalViews)
-    .values({ goalId, personId, openedAt: ctx.now, visitSince: since })
+    .values({ goalId, personId, openedAt: ctx.now, visitSince: since, visitStartedAt })
     .onConflictDoUpdate({
       target: [schema.goalViews.goalId, schema.goalViews.personId],
-      set: { openedAt: ctx.now, visitSince: since },
+      set: { openedAt: ctx.now, visitSince: since, visitStartedAt },
     })
     .run();
   return since;
