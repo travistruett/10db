@@ -1,13 +1,16 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
+import { gitWrapper } from './git-wrapper';
 import {
   buildRepoTemplate,
   createTempClone,
   createTempRepo,
   createTempRepoWithOrigin,
   isolatedGitEnv,
+  tempDir,
   type TempDir,
 } from './fixtures';
 
@@ -138,6 +141,24 @@ describe('buildRepoTemplate', () => {
   });
 });
 
+describe('createTempClone', () => {
+  it("commits as the teammate and keeps the test repository's maintenance off, from the clone itself", () => {
+    const remote = createTempRepoWithOrigin();
+    const clone = createTempClone(remote.origin.path);
+    try {
+      expect(gitIn(clone.path, 'config', '--local', 'user.name')).toBe('teammate');
+      expect(gitIn(clone.path, 'config', '--local', 'user.email')).toBe('teammate@10db.invalid');
+      expect(gitIn(clone.path, 'config', '--local', 'commit.gpgsign')).toBe('false');
+      expect(gitIn(clone.path, 'config', '--local', 'gc.auto')).toBe('0');
+      gitIn(clone.path, 'commit', '-q', '--allow-empty', '-m', 'probe');
+      expect(gitIn(clone.path, 'log', '-1', '--format=%an')).toBe('teammate');
+    } finally {
+      clone.cleanup();
+      remote.cleanup();
+    }
+  });
+});
+
 describe('createTempRepoWithOrigin', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -160,6 +181,47 @@ describe('createTempRepoWithOrigin', () => {
       expect(push.stderr).not.toMatch(/run_command: git (maintenance|gc)\b/);
     } finally {
       remote.cleanup();
+    }
+  });
+
+  // Each git process costs a spawn, and under the gate's load a spawn is slow: a delivery test makes
+  // one of these per harness and has a 30 s limit, so a copy of a template pair stands in for the
+  // dozen calls that used to build it.
+  it('runs no git process: it copies a template pair and points the repository at the copy', () => {
+    const log = tempDir('git-calls');
+    const calls = join(log.path, 'calls.log');
+    const wrapper = gitWrapper(`echo "$*" >> '${calls}'\nexec "$GIT" "$@"`);
+    vi.stubEnv('PATH', wrapper.path);
+    let remote: ReturnType<typeof createTempRepoWithOrigin> | undefined;
+    try {
+      remote = createTempRepoWithOrigin();
+      vi.unstubAllEnvs();
+      expect(existsSync(calls) ? readFileSync(calls, 'utf8') : '').toBe('');
+      const repo = remote.repo.path;
+      const origin = remote.origin.path;
+      expect(gitIn(repo, 'remote', 'get-url', 'origin')).toBe(origin);
+      expect(gitIn(repo, 'rev-parse', 'refs/remotes/origin/main')).toBe(
+        gitIn(repo, 'rev-parse', 'HEAD'),
+      );
+      expect(gitIn(repo, 'status', '--porcelain')).toBe('');
+      expect(gitIn(repo, 'config', 'user.name')).toBe('10db test');
+      for (const [key, value] of [
+        ['maintenance.auto', 'false'],
+        ['gc.auto', '0'],
+        ['receive.autogc', 'false'],
+        ['user.name', 'github'],
+        ['commit.gpgsign', 'false'],
+      ] as const)
+        expect(gitIn(origin, 'config', key)).toBe(value);
+      // A push from the copy lands in the copy's own origin.
+      gitIn(repo, 'commit', '-q', '--allow-empty', '-m', 'probe');
+      gitIn(repo, 'push', '-q', 'origin', 'main');
+      expect(gitIn(origin, 'rev-parse', 'refs/heads/main')).toBe(gitIn(repo, 'rev-parse', 'HEAD'));
+    } finally {
+      vi.unstubAllEnvs();
+      remote?.cleanup();
+      wrapper.cleanup();
+      log.cleanup();
     }
   });
 
