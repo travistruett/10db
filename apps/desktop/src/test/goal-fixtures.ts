@@ -4,6 +4,7 @@ import {
   GoalListDto,
   GoalSummaryDto,
   mintId,
+  type GoalCriterionDto,
   type GoalId,
 } from '@10db/contracts';
 
@@ -27,6 +28,27 @@ export function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
     updatedAt: AT,
     ...overrides,
   });
+}
+
+export function goalCriterionDto(
+  goalId: GoalId,
+  overrides: Partial<GoalCriterionDto> = {},
+): GoalCriterionDto {
+  return {
+    id: mintId('GoalCriterion'),
+    goalId,
+    text: 'The greeting names the visitor',
+    check: 'accept',
+    taskId: null,
+    command: null,
+    commandApproved: false,
+    personId: null,
+    state: 'unproven',
+    proof: [],
+    provenAt: null,
+    provenBy: null,
+    ...overrides,
+  };
 }
 
 function digestFor(goalId: GoalId, overrides: Partial<GoalDigestDto>): GoalDigestDto {

@@ -325,7 +325,7 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
 
 ## 9. Board and Inbox
 
-**Built:** the Board's task cards, drawer and Start Ready Tasks…; the Inbox's cards with an assignee field.
+**Built:** the Board's task cards, drawer and Start Ready Tasks…; the Inbox's cards with an assignee field; the Board's goal strips, goal drawer, goal label on cards, goal filter and goal-scoped Start Ready Tasks (phase 1).
 
 **Designed.**
 
