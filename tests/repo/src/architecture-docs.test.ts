@@ -8,6 +8,7 @@ import { readRepoFile, repoRoot } from './workspace';
 
 /** Every note allowed in docs/architecture/research. A new note is read through before it joins. */
 const PUBLIC_RESEARCH = [
+  'delivery-test-timings.md',
   'external-research.md',
   'external-research-recheck.md',
   'gbrain-lessons.md',

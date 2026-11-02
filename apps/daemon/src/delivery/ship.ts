@@ -1111,6 +1111,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /** Each pull request's last catch-up: the head it conflicted at, and when it ran. */
   const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
   /**
+   * Each pull request's merge a catch-up wrote, did not push, and could not put back: the one tip
+   * ahead of GitHub's head a later catch-up may rewind. In memory: after a restart that tip gets the card.
+   */
+  const unpushedHead = new Map<BatchId, string>();
+  /**
    * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
    * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
    * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
@@ -1222,15 +1227,27 @@ export function createShipper(deps: ShipperDeps): Shipper {
               message: `Merge the pull request's branch ${branch} from GitHub`,
             });
           else await deps.git.fastForwardBranch(main, branch, head);
-        } else if (await deps.git.isAncestor(main, head, tip))
-          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+        } else if (await deps.git.isAncestor(main, head, tip)) {
+          // Only the merge an earlier catch-up of this run wrote, and neither pushed nor put back, goes:
+          // this one starts from the head. Anything else, a merge the builder made included, stays.
+          if (unpushedHead.get(batchId) !== tip) {
+            const extra = (await deps.git.commitsSince(main, head, tip)).reverse();
+            const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
+            const one = extra.length === 1;
+            stop({
+              kind: 'other',
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
+            });
+            return;
+          }
+          unpushedHead.delete(batchId);
           await deps.git.rewindBranch(
             kept && batch.worktreePath !== null ? batch.worktreePath : main,
             branch,
             tip,
             head,
           );
-        else {
+        } else {
           stop({
             kind: 'other',
             why: `${branch} here and the pull request's branch on GitHub each have commits the other lacks, so 10db can't tell which is current.`,
@@ -1323,7 +1340,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (made) await retire(batchId);
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
-      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+      if (pushed) unpushedHead.delete(batchId);
+      else if (before !== null) await rewind(batchId, main, branch, before, keptAt);
     }
   }
 
@@ -1335,11 +1353,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
     to: string,
     keptAt: string | null,
   ): Promise<void> {
+    let tip: string | null = null;
     try {
-      const tip = await deps.git.branchTip(main, branch);
+      tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
+      unpushedHead.delete(batchId);
     } catch (error) {
+      // The merge stays on the branch: the next catch-up of this run may take it back from GitHub's head.
+      if (tip !== null && tip !== to) unpushedHead.set(batchId, tip);
       deps.logger.warn(
         { batchId, branch, err: detailOf(error) },
         'branch not put back after a catch-up that was not pushed',

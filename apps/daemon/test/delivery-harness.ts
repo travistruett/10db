@@ -200,6 +200,8 @@ export interface DeliveryHarness {
    * The ship trigger, when on, still calls the first one.
    */
   restartShipper(): Shipper;
+  /** The current shipper's clock: advancing it lets a throttled catch-up run again. */
+  readonly shipClock: ManualClock;
   /** Where the shipper writes PR bodies and gate logs. */
   readonly dataDir: string;
   /** The daemon's worktree root (its hashed level), a real path not made until the first cut. */
@@ -321,12 +323,13 @@ export function createDeliveryHarness(
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
+  let shipClock = new ManualClock();
   const makeShipper = (): Shipper =>
     createShipper({
       ...ctx,
       gate: opts.shipGate?.(shipGate) ?? shipGate,
       baseUpdates: createBaseUpdates(ctx),
-      clock: new ManualClock(),
+      clock: (shipClock = new ManualClock()),
       dataDir: data.path,
       sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
       identifyProcess: (pid) => systemProcesses.identify(pid),
@@ -361,6 +364,9 @@ export function createDeliveryHarness(
     restartShipper() {
       shipper = makeShipper();
       return shipper;
+    },
+    get shipClock() {
+      return shipClock;
     },
     dataDir: data.path,
     worktreeRoot,
