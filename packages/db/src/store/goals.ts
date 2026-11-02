@@ -140,7 +140,7 @@ function personNamed(db: DbReader, name: string, where: string): PersonId {
 
 /**
  * The brief's tasks, each after the tasks it depends on and otherwise in brief order. Refuses a
- * repeated key, a dependency on a key no task has, and a cycle.
+ * repeated key, a dependency on a key no task has, a dependency listed twice, and a cycle.
  */
 function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
   const byKey = new Map<string, GoalBriefTask>();
@@ -148,10 +148,15 @@ function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
     if (byKey.has(task.key)) throw new InvalidError(`Two tasks have the key ${task.key}`);
     byKey.set(task.key, task);
   }
-  for (const task of tasks)
-    for (const key of task.depends_on)
+  for (const task of tasks) {
+    const seen = new Set<string>();
+    for (const key of task.depends_on) {
       if (!byKey.has(key))
         throw new InvalidError(`Task ${task.key} depends on ${key}, and no task has that key`);
+      if (seen.has(key)) throw new InvalidError(`Task ${task.key} depends on ${key} twice`);
+      seen.add(key);
+    }
+  }
 
   const ordered: GoalBriefTask[] = [];
   const done = new Set<string>();

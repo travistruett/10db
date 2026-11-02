@@ -163,6 +163,15 @@ describe('insertGoal', () => {
       { tasks: [{ key: 'a', title: 'A', areas: ['api'], depends_on: ['drawer-editr'] }] },
     ],
     [
+      'a task depending on the same key twice',
+      {
+        tasks: [
+          { key: 'patch', title: 'Patch', areas: ['api'] },
+          { key: 'a', title: 'A', areas: ['api'], depends_on: ['patch', 'patch'] },
+        ],
+      },
+    ],
+    [
       'a dependency cycle',
       {
         tasks: [
