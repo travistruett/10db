@@ -116,6 +116,64 @@ describe('a git operation', () => {
     expect(error).toBeInstanceOf(GitTrustError);
   });
 
+  it('ends when its function settles: a callback it scheduled reads the git dirs again', async () => {
+    const git = createGit({ bin: bin() });
+    let later: Promise<void> = Promise.resolve();
+    await git.operation(async () => {
+      await git.head(repo.path);
+      // As a bus listener or a timer started inside it would: it keeps the async context.
+      later = new Promise<void>((resolve, reject) => {
+        setTimeout(() => {
+          writeFileSync(log, '');
+          git
+            .operation(async () => {
+              await git.head(repo.path);
+              await git.currentBranch(repo.path);
+            })
+            .then(() => git.head(repo.path))
+            .then(() => {
+              resolve();
+            }, reject);
+        }, 0);
+      });
+    });
+    await later;
+    // One for the fresh operation's first call, one for the call outside any operation.
+    expect(spawned('--absolute-git-dir')).toBe(2);
+  });
+
+  it('honours a retrust made between two of its calls', async () => {
+    execFileSync(
+      'git',
+      ['-C', repo.path, 'remote', 'add', 'origin', 'https://github.com/acme/widgets.git'],
+      { env: isolatedGitEnv() },
+    );
+    const trusted: string[] = [];
+    const git = createGit({
+      bin: bin(),
+      onTrusted: (real) => {
+        trusted.push(real);
+      },
+    });
+    await git.operation(async () => {
+      await git.pinnedPushUrl(repo.path);
+      execFileSync(
+        'git',
+        ['-C', repo.path, 'remote', 'set-url', 'origin', 'https://github.com/acme/moved.git'],
+        { env: isolatedGitEnv() },
+      );
+      const refused: unknown = await git
+        .pinnedPushUrl(repo.path)
+        .catch((caught: unknown) => caught);
+      expect(refused).toBeInstanceOf(GitTrustError);
+      const { detail } = refused as GitTrustError;
+      if (detail.kind !== 'origin') throw new Error('expected a changed origin');
+      await git.retrust(repo.path, detail.candidate);
+      expect(await git.pinnedPushUrl(repo.path)).toBe('https://github.com/acme/moved.git');
+    });
+    expect(trusted).toHaveLength(1);
+  });
+
   it('refuses a .git replaced before its first call, and caches nothing of a refusal', async () => {
     const git = createGit({ bin: bin() });
     await git.head(repo.path);

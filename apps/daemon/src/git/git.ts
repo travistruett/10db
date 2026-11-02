@@ -277,7 +277,12 @@ export interface Git {
    * each checkout's git dirs once, at the first call, and read origin's URL once per direction,
    * instead of once per call. Every call still checks that those directories are the same ones, by
    * device and inode, and that nothing in them borrows objects or sets attributes; a `.git` replaced
-   * meanwhile is refused as it is outside an operation. Nested operations join the outer one.
+   * meanwhile is refused as it is outside an operation. In a linked worktree, whose `.git` is a file
+   * naming a git dir under the main repository, a swapped `.git` file is only found by the next
+   * operation: the calls in this one keep running in the pinned git dir, which is still there.
+   * A pin the store no longer holds (a `retrust` since) or a refused checkout is checked in full.
+   * Nested operations join the outer one while it runs. The operation ends when `fn` settles: a
+   * callback, timer or job `fn` started that runs later shares nothing with it.
    */
   operation<T>(fn: () => Promise<T>): Promise<T>;
   /** The branch HEAD names; null when HEAD is detached. */
@@ -561,6 +566,11 @@ interface Pinned extends Site {
 
 /** What the calls of one `Git.operation` share, by the checkout's real path. */
 interface Operation {
+  /**
+   * Set once its function settles. A callback, timer or job started inside it (a bus listener, the
+   * PR watch's next round) still sees it as the async context, but no longer shares anything.
+   */
+  finished: boolean;
   readonly pinned: Map<string, Pinned>;
   /** origin's URL by checkout and direction, with the config text it was read against. */
   readonly origin: Map<string, { readonly config: string; readonly url: string | null }>;
@@ -743,6 +753,11 @@ export function createGit(opts: GitOptions = {}): Git {
   const refused = new Set(opts.refusedCheckouts);
   // What the calls of one `operation` share: each checkout's pin check and origin's URLs, read once.
   const operations = new AsyncLocalStorage<Operation>();
+  /** The operation running now, or undefined outside one or in a context an ended one left. */
+  function currentOperation(): Operation | undefined {
+    const op = operations.getStore();
+    return op && !op.finished ? op : undefined;
+  }
 
   function refusal(repo: string, detail: GitTrustDetail): GitTrustError {
     const error = new GitTrustError(repo, detail);
@@ -918,11 +933,13 @@ export function createGit(opts: GitOptions = {}): Git {
    */
   async function pinned(repo: string): Promise<Pinned> {
     const real = realpathSync(repo);
-    const op = operations.getStore();
+    const op = currentOperation();
     const held = op?.pinned.get(real);
-    if (held && stillThere(held)) {
-      // Found as pinned by the operation's first call. The git dirs' identity and the files in them
-      // are read again, as they cost no spawn; only `rev-parse` is skipped.
+    if (held && !refused.has(real) && samePin(pins.get(real), held.pin) && stillThere(held)) {
+      // Found as pinned by the operation's first call, and the pin store still holds that pin (a
+      // `retrust` since replaces it). The git dirs' identity and the files in them are read again,
+      // as they cost no spawn; only `rev-parse` is skipped. A refused checkout always takes the full
+      // path, so a call that finds it as pinned again closes its card.
       checkGitDirFiles(real, held.dirs);
       return held;
     }
@@ -958,6 +975,17 @@ export function createGit(opts: GitOptions = {}): Git {
     return checked;
   }
 
+  /** Whether the pin store's pin is the one held, field by field (a database store parses anew). */
+  function samePin(stored: CheckoutPin | undefined, held: CheckoutPin): boolean {
+    return (
+      stored?.id === held.id &&
+      stored.gitDir === held.gitDir &&
+      stored.commonDir === held.commonDir &&
+      stored.fetchUrl === held.fetchUrl &&
+      stored.pushUrl === held.pushUrl
+    );
+  }
+
   /**
    * Whether the git dirs a checkout was found with are still those directories, by device and inode.
    * A `.git` moved aside and replaced, or gone, is not: the full check then runs and refuses it.
@@ -991,7 +1019,7 @@ export function createGit(opts: GitOptions = {}): Git {
    * Outside an operation every call reads.
    */
   async function originUrlOnce(c: Pinned, push: boolean): Promise<string | null> {
-    const op = operations.getStore();
+    const op = currentOperation();
     if (!op) return originUrl(c, push);
     const config = ['config', 'config.worktree']
       .map((name) =>
@@ -2355,9 +2383,14 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   return {
-    operation(fn) {
-      if (operations.getStore()) return fn();
-      return operations.run({ pinned: new Map(), origin: new Map() }, fn);
+    async operation(fn) {
+      if (currentOperation()) return fn();
+      const op: Operation = { finished: false, pinned: new Map(), origin: new Map() };
+      try {
+        return await operations.run(op, fn);
+      } finally {
+        op.finished = true;
+      }
     },
     async currentBranch(repo) {
       return currentBranch(await pinned(repo));
