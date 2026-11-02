@@ -916,6 +916,33 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         expect(existsSync(join(path, DB, '0001_mine.sql'))).toBe(false);
         expect(h.cards()).toEqual([]);
       });
+
+      it('raises one card naming the generated directories when the merge note cannot be kept, since nothing else would regenerate them', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        seedMain(true);
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'src/index.ts', "import a from './mine';\nexport {};\n");
+        await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
+        await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
+        h.teammatePush('main', 'src/index.ts', "import a from './theirs';\nexport {};\n");
+        h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        const git = {
+          ...h.git,
+          keepNote: () => Promise.reject(new Error('update-ref failed')),
+        } as typeof h.git;
+        const update = await createBaseUpdates({ ...h.ctx, git }).beforeGate(
+          batch.id,
+          signal,
+          inSession,
+        );
+        expect(update).toMatchObject({ kind: 'conflicted', paths: ['src/index.ts'] });
+        expect(update.kind === 'conflicted' && update.note).toContain('update-ref failed');
+        const card = h.only(h.cards());
+        expect(card.title).toContain("couldn't regenerate");
+        expect(card.body).toContain(`${DB}/`);
+        expect(card.body).toContain('update-ref failed');
+      });
     });
   });
 
