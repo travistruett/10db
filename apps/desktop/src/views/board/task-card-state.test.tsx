@@ -1,6 +1,6 @@
 import { mintId } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { theme } from '../../theme';
@@ -13,6 +13,51 @@ function card(props: Partial<Parameters<typeof TaskCard>[0]>) {
     </MantineProvider>,
   );
 }
+
+describe('TaskCard placement', () => {
+  it.each([
+    { mode: 'shared', label: 'Your folder' },
+    { mode: 'worktree', label: 'Separate copy' },
+  ] as const)('shows $label for a $mode task while its placement is open', ({ mode, label }) => {
+    card({ task: taskDto({ workspaceMode: mode }), placementShown: true });
+    expect(screen.getByTestId('placement-badge').textContent).toBe(label);
+  });
+
+  it('shows no badge once the placement is past changing', () => {
+    card({ task: taskDto({ workspaceMode: 'worktree' }), placementShown: false });
+    expect(screen.queryByTestId('placement-badge')).toBeNull();
+    card({ task: taskDto({ workspaceMode: 'worktree' }) });
+    expect(screen.queryByTestId('placement-badge')).toBeNull();
+  });
+
+  it('gives the reason as the badge tooltip when there is one', async () => {
+    card({
+      task: taskDto({ workspaceMode: 'worktree', placementReason: 'touches migrations' }),
+      placementShown: true,
+    });
+    expect(screen.queryByText('touches migrations')).toBeNull();
+    fireEvent.mouseEnter(screen.getByTestId('placement-badge'));
+    expect(await screen.findByText('touches migrations')).toBeTruthy();
+  });
+
+  it('speaks the placement in the card summary', () => {
+    expect(
+      cardSummary(
+        taskDto(),
+        undefined,
+        new Map(),
+        undefined,
+        null,
+        null,
+        null,
+        undefined,
+        [],
+        'Separate copy',
+      ),
+    ).toContain('Runs in Separate copy.');
+    expect(cardSummary(taskDto(), undefined, new Map())).not.toContain('Runs in');
+  });
+});
 
 describe('TaskCard state', () => {
   it('says a running task once, in one plain line, with no badge or persona line', () => {

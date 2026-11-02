@@ -2,6 +2,7 @@ import {
   BatchState,
   WorkstreamState,
   type BatchDto,
+  type BatchId,
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -21,10 +22,12 @@ export interface FailedRestarts {
   /**
    * Before a task starts over from the base branch: abandons the batch that holds only the task's
    * failed attempt, so no open batch is left holding work nothing will finish. A batch that holds
-   * other tasks' work stays. Refuses while a run in the batch is live, and, before it abandons
-   * anything, when the start that follows would be refused, so the attempt stays to be retried.
+   * other tasks' work stays, and its id is returned: once the task has started again the batch no
+   * longer waits on the superseded attempt, so the caller checks it for shipping (`Shipper.checkBatch`).
+   * Refuses while a run in the batch is live, and, before it abandons anything, when the start that
+   * follows would be refused, so the attempt stays to be retried.
    */
-  supersede(taskId: TaskId): void;
+  supersede(taskId: TaskId): BatchId | null;
 }
 
 export function createFailedRestarts(deps: {
@@ -58,13 +61,14 @@ export function createFailedRestarts(deps: {
     },
     supersede(taskId) {
       const failed = failedRun(taskId);
-      if (!failed) return;
+      if (!failed) return null;
       const members = listWorkstreams(db, { batchId: failed.batch.id });
-      if (members.some((w) => w.taskId !== taskId)) return;
+      if (members.some((w) => w.taskId !== taskId)) return failed.batch.id;
       deps.starter.refuseStart(taskId, failed.batch.id);
       deps.shipper.abandon(failed.batch.id);
       // abandon cancels only unfinished runs' cards; this run is FAILED, which is terminal.
       deps.inbox.cancelForWorkstream(failed.workstream.id);
+      return null;
     },
   };
 }

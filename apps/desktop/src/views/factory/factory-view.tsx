@@ -19,13 +19,17 @@ import {
   useRetryWorkstream,
   useWorkstreams,
 } from '../../daemon/queries';
+import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
+import { AdoptPlanButton, RefusalModal, TypedPathModal } from './adopt-plan';
 import { BatchHistory } from './batch-history';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { ContextGauge } from './context-gauge';
+import { GoalList } from './goal-list';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
 import { StepCell } from './step-cell';
+import { useAdoptPlan } from './use-adopt-plan';
 import { canCancel, canRetry } from './workstream-state';
 
 export function FactoryView() {
@@ -37,6 +41,8 @@ export function FactoryView() {
   const { project } = useSelectedProject();
   const batches = useBatches(project?.id ?? null);
   const batchList = batches.data ?? [];
+  const goals = useGoals(project?.id ?? null);
+  const adoption = useAdoptPlan(project?.id ?? null);
   const rows = workstreams.data ?? [];
   const confirmingRow = rows.find((ws) => ws.id === confirming);
 
@@ -47,14 +53,28 @@ export function FactoryView() {
           <Title order={2}>Factory</Title>
           <BenchmarkSyncNote />
         </Group>
-        <Switch
-          label="Show finished"
-          checked={showFinished}
-          onChange={(e) => {
-            setShowFinished(e.currentTarget.checked);
-          }}
-        />
+        <Group gap="md">
+          <Switch
+            label="Show finished"
+            checked={showFinished}
+            onChange={(e) => {
+              setShowFinished(e.currentTarget.checked);
+            }}
+          />
+          <AdoptPlanButton adoption={adoption} />
+        </Group>
       </Group>
+      {adoption.problem ? (
+        <Alert color="red" title="Couldn't adopt that plan">
+          {adoption.problem}
+        </Alert>
+      ) : null}
+      {goals.isError ? (
+        <Alert color="red" title="Couldn't load the goals">
+          {goals.error.message}
+        </Alert>
+      ) : null}
+      {goals.isSuccess ? <GoalList goals={goals.data.goals} /> : null}
       {workstreams.isError ? (
         <Alert color="red" title="Couldn't load the workstreams">
           {workstreams.error.message}
@@ -152,6 +172,9 @@ export function FactoryView() {
         </Alert>
       ) : null}
       {batchList.length > 0 ? <BatchHistory batches={batchList} /> : null}
+
+      <RefusalModal adoption={adoption} />
+      <TypedPathModal adoption={adoption} />
 
       <Modal
         opened={confirming !== null}
