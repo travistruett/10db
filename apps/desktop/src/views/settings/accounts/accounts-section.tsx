@@ -17,6 +17,7 @@ import { useRef, useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
+import { AccountPause } from './account-pause';
 import { AddAccountModal } from './add-account-modal';
 import { ACCOUNT_STATUS_LABEL, AccountStatus, accountStatus } from './account-status';
 import { capShare, formatTokens, formatUsd } from './usage-text';
@@ -91,6 +92,7 @@ function AccountRow({
           <Text size="xs" c="dimmed">
             {account.expectedIdentity ?? 'No identity yet'}
           </Text>
+          {account.archived ? null : <AccountPause account={account} />}
         </Stack>
       </Table.Td>
       <Table.Td>

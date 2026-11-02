@@ -2,6 +2,7 @@ import {
   AccountCreatedDto,
   AccountDto,
   AccountIdentityDto,
+  AccountPauseDto,
   AccountSignInDto,
   AccountUsageDto,
   type AccountId,
@@ -20,12 +21,14 @@ import { queryKeys } from './queries';
  */
 export const accountKeys = {
   all: ['accounts'],
+  pauses: ['accounts', 'pauses'],
   usage: ['accounts', 'usage'],
   usageOf: (id: AccountId) => ['accounts', 'usage', id] as const,
   signInOf: (id: AccountId) => ['accounts', 'signin', id] as const,
 } as const;
 
 const AccountList = z.array(AccountDto);
+const AccountPauseList = z.array(AccountPauseDto);
 
 export function useAccounts() {
   const { client } = useDaemon();
@@ -59,6 +62,30 @@ export function useAccountSignIn(id: AccountId, enabled: boolean) {
         AccountSignInDto,
       ),
     enabled,
+  });
+}
+
+/** The accounts paused now; `account.paused` and `account.resumed` events refresh it with the rest. */
+export function useAccountPauses() {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: accountKeys.pauses,
+    queryFn: async () => readJson(await client.accounts.pauses.$get(), AccountPauseList),
+  });
+}
+
+/** Lifts a refused or monthly-cap pause, as saving the account unchanged does. */
+export function useResumeAccount() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: AccountId) =>
+      readJson(
+        await client.accounts[':accountId'].resume.$post({ param: { accountId: id } }),
+        AccountPauseList,
+      ),
+    // The workstreams and the inbox follow from the daemon's events.
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: accountKeys.all }),
   });
 }
 

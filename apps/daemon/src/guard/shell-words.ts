@@ -22,8 +22,6 @@ export interface ShellSegment {
   readonly dynamicWords: boolean[];
   /** The operator that ended the segment: `&&`, `||`, `;`, `|`, `&`, `(`, `)`, newline, or empty at the end. */
   readonly separator: string;
-  /** The subshells around the segment, outermost first, each numbered in the order it opens. */
-  readonly subshells: readonly number[];
   /**
    * Scripts the shell runs for the segment, in the directory the segment runs in: the bodies of its
    * `$(…)`, backtick, `<(…)` and `>(…)` substitutions, and its here-documents.
@@ -65,7 +63,7 @@ interface ShellParse {
   /**
    * Every parenthesis opens a subshell where a command starts, opens a substitution, or closes one
    * of those, and every quote, parenthesis and substitution is closed. Otherwise a `)` may not end
-   * the subshell it seems to, and a directory change inside may outlive it.
+   * the subshell it seems to, and the order in which the segments run is not certain.
    */
   readonly certain: boolean;
 }
@@ -202,15 +200,14 @@ const GROUP_LEADERS: ReadonlySet<string> = new Set([...BEFORE_COMMAND, 'time']);
  */
 function scan(command: string, from: number, substitution: boolean): Scan {
   const segments: ShellSegment[] = [];
-  // Open parentheses: a subshell's number, or null for one that is not a subshell.
-  const parens: (number | null)[] = [];
   const pending: HereDocument[] = [];
   let certain = true;
   let wordsCertain = true;
   let bracesCertain = true;
   // The segment holds a `>(…)` or `<(…)`, so what it reads or writes reaches another command.
   let processSubstitution = false;
-  // The index of the first segment inside each open group or parenthesis, innermost last.
+  // The index of the first segment inside each open group or parenthesis, innermost last; the
+  // length of `parenStarts` is how many parentheses are open.
   const groupStarts: number[] = [];
   const parenStarts: number[] = [];
   // Segment index ranges of the groups and subshells closed since the last separator: the next
@@ -218,7 +215,6 @@ function scan(command: string, from: number, substitution: boolean): Scan {
   let pendingCloses: [number, number][] = [];
   // Segment index ranges inside a group or subshell whose output is piped.
   const forwardedRanges: [number, number][] = [];
-  let opened = 0;
   let raw = '';
   let word = '';
   let inWord = false;
@@ -319,14 +315,12 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     flushWord();
     const text = raw.trim();
     if (text !== '') {
-      const subshells = parens.filter((p): p is number => p !== null);
       segments.push({
         raw: text,
         words,
         separator,
         singleWords,
         dynamicWords,
-        subshells,
         nested,
         hereDocuments,
         quotedHereDocuments,
@@ -532,22 +526,18 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         // subshell. `((` is arithmetic, where `<<` shifts instead of opening a here-document.
         if (next === '(') certain = false;
         flush('(');
-        opened += 1;
-        parens.push(opened);
         parenStarts.push(segments.length);
       } else {
         // A function's `()`, an array or a case pattern: not a subshell.
         certain = false;
         flush('(');
-        parens.push(null);
         parenStarts.push(segments.length);
       }
       continue;
     }
     if (ch === ')') {
-      if (parens.length > 0) {
+      if (parenStarts.length > 0) {
         flush(')');
-        parens.pop();
         closeRange(parenStarts.pop());
       } else if (substitution) {
         flush('');
@@ -587,7 +577,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     }
   }
   flush('');
-  if (parens.length > 0 || quote !== null) certain = false;
+  if (parenStarts.length > 0 || quote !== null) certain = false;
   return { segments: withForwarding(), certain, end: command.length, closed: false };
 }
 
@@ -639,17 +629,14 @@ export function redirectionSpan(words: readonly string[], at: number): number {
 
 /**
  * The words of a segment from its command on, past the reserved words and the redirections before
- * it (`2>/dev/null rm` runs `rm`): whether a `!` inverts its status, and whether it belongs to a
- * loop or a function.
+ * it (`2>/dev/null rm` runs `rm`): whether it belongs to a loop or a function.
  */
 export function leadingWords(words: readonly string[]): {
   readonly command: string[];
-  readonly negated: boolean;
   readonly outOfOrder: boolean;
   /** A word before the command holds a `<` or `>` that is not a redirection the guard reads. */
   readonly hiddenByRedirection: boolean;
 } {
-  let negated = false;
   let outOfOrder = false;
   let hiddenByRedirection = false;
   let i = 0;
@@ -663,10 +650,9 @@ export function leadingWords(words: readonly string[]): {
     if (ANGLE.test(word)) hiddenByRedirection = true;
     if (OUT_OF_ORDER.has(word)) outOfOrder = true;
     if (!BEFORE_COMMAND.has(word)) break;
-    if (word === '!') negated = true;
     i += 1;
   }
-  return { command: words.slice(i), negated, outOfOrder, hiddenByRedirection };
+  return { command: words.slice(i), outOfOrder, hiddenByRedirection };
 }
 
 interface Wrapper {

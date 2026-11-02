@@ -15,7 +15,6 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { createTempClone, isolatedGitEnv } from '../../test/fixtures';
 import { GhError, PrState } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
-import { recordCuttingTasks } from './cutting-tasks';
 import { worktreePathFor } from './worktree-path';
 import { cutWorktree } from './worktree-cut';
 
@@ -128,7 +127,6 @@ function fixBatchOf(
     });
     patchBatch(w, id, { branch: branchOf(root) });
     for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, id);
-    recordCuttingTasks(w, id, plans.keys());
     return inserted;
   });
   return { fix, plans };

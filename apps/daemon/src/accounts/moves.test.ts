@@ -43,7 +43,7 @@ import {
   type MoveBack,
 } from './index';
 import { recordedCard, refusedCard, usageHighCard } from './cards';
-import type { AccountPause } from './pauses';
+import type { PauseRequest } from './pauses';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
 
@@ -355,7 +355,7 @@ describe('moving a project', () => {
     expect(getProject(state.db, project.id).accountId).toBe(second.id);
   });
 
-  it.each<[string, AccountPause, string]>([
+  it.each<[string, PauseRequest, string]>([
     [
       'its monthly cap',
       { reason: 'monthly_cap', until: new Date(2026, 10, 1) },
@@ -381,7 +381,7 @@ describe('moving a project', () => {
     },
   );
 
-  it.each<[string, AccountPause, () => void]>([
+  it.each<[string, PauseRequest, () => void]>([
     [
       'its monthly cap',
       { reason: 'monthly_cap', until: new Date(2026, 10, 1) },
