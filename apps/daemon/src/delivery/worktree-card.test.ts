@@ -46,6 +46,7 @@ const recover = () =>
     inbox: h.inbox,
     processes: systemProcesses,
     shipper: h.shipper,
+    starter: h.starter,
     logger: silentLogger,
     worktrees: { ctx: h.ctx, root: h.worktreeRoot },
   });
