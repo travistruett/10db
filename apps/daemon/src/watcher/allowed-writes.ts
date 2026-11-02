@@ -29,6 +29,8 @@ export interface EditAllowance {
   /** The card behind it; null for a stored rule. */
   readonly cardId: InboxItemId | null;
   readonly workstreamId: WorkstreamId | null;
+  /** What names this allowance's single use; null for a stored rule. */
+  readonly useKey: string | null;
   /** The file, as the card or rule names it: absolute, or relative to the lane's checkout. */
   readonly path: string;
   /** Whether it covers every write to the path (a stored rule, or a choice that stored one), not one. */
@@ -63,10 +65,29 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
     // stored none, such as a sandboxed path with a glob character, behaves as allow-once.
     const summary = item.detail?.['summary'];
     const stored = typeof summary === 'string' && storableRule(tool, summary) !== undefined;
-    const workstreamId = item.targets[0]?.workstreamId ?? null;
-    allowed.push({ cardId: item.id, workstreamId, path, standing: !once && stored });
+    // The inbox folds identical cards from several lanes into one, with a target for each lane; the
+    // builder's answer allows each of those lanes' write.
+    for (const target of item.targets) {
+      allowed.push({
+        cardId: item.id,
+        workstreamId: target.workstreamId,
+        useKey: useKey(item.id, target.workstreamId),
+        path,
+        standing: !once && stored,
+      });
+    }
   }
   return allowed;
+}
+
+/** What names one lane's use of an allow-once card: a folded card allows one write for each lane it targets. */
+export function useKey(cardId: InboxItemId, workstreamId: WorkstreamId | null): string {
+  return `${cardId}\0${workstreamId ?? ''}`;
+}
+
+/** The use keys of every lane the cards target, whether or not they allow an edit. */
+export function cardUseKeys(items: readonly InboxItemDto[]): string[] {
+  return items.flatMap((i) => i.targets.map((t) => useKey(i.id, t.workstreamId)));
 }
 
 /** The stored rules that allow one file's edits: an edit tool's rule scoped to an absolute path. */
@@ -76,6 +97,7 @@ export function ruleAllowances(rules: readonly PermissionRuleDto[]): EditAllowan
     .map((r) => ({
       cardId: null,
       workstreamId: r.workstreamId,
+      useKey: null,
       path: r.pattern ?? '',
       standing: true,
     }));
