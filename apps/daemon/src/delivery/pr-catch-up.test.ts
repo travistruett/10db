@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchProject } from '@10db/db';
+import { getBatch, listWorkstreams, patchBatch, patchProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError, PrMergeable } from '../github';
@@ -351,6 +351,57 @@ describe('a shipped pull request that conflicts with its base', () => {
       // Not asked again for the same head.
       await catchUp(now);
       expect(h.cards()).toHaveLength(1);
+    } finally {
+      rmSync(byHand, { recursive: true, force: true });
+    }
+  });
+
+  /** A second batch whose worktree, made by hand at `where`, holds the shipped batch's branch. */
+  function holdBy(
+    batch: BatchDto,
+    where: string,
+    patch: { readonly state: 'OPEN' | 'FAILED'; readonly ciFixOf: BatchDto['id'] | null },
+  ): void {
+    h.git$('worktree', 'add', '-q', where, batch.branch ?? '');
+    const other = h.starter.startTask(h.addTask('Beta').id);
+    h.state.write((w) => patchBatch(w, other.id, { ...patch, worktreePath: where }));
+  }
+
+  it('raises its card when the batch that holds the branch in a kept worktree has failed', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const before = onOrigin(batch.branch);
+    conflicts(batch);
+    const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
+    try {
+      holdBy(batch, join(byHand, 'wt'), { state: 'FAILED', ciFixOf: batch.id });
+
+      const now = await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
+      expect(card.body).toContain(`${batch.branch ?? ''} is checked out at`);
+      expect(now.notices).toEqual([]);
+    } finally {
+      rmSync(byHand, { recursive: true, force: true });
+    }
+  });
+
+  it('says on its tasks that it conflicts while a running CI fix holds the branch, and asks again', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const before = onOrigin(batch.branch);
+    conflicts(batch);
+    const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
+    try {
+      holdBy(batch, join(byHand, 'wt'), { state: 'OPEN', ciFixOf: batch.id });
+
+      const now = await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      expect(now.notices.map((n) => n.key)).toEqual(['base-conflict']);
+      expect(now.notices[0]?.line).toContain('conflicts with main');
+      expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
     } finally {
       rmSync(byHand, { recursive: true, force: true });
     }

@@ -172,6 +172,13 @@ export const gateNotices = {
 
 /** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
 export const updateNotices = {
+  /** The pull request conflicts, and a CI fix still running holds its branch, so the merge waits for it. */
+  waiting: (batch: BatchDto): Notice => ({
+    key: NOTICE_KEY.baseConflict,
+    tone: 'warning',
+    line: `Pull request conflicts with ${batch.baseBranch}; 10db merges it after the CI fix ends`,
+    body: `${batch.baseBranch} on origin changed files in ways that conflict with the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`}. A CI fix of it is still running in a checkout that holds the branch, so 10db can't merge ${batch.baseBranch} into it yet.\n\n10db tries again once that fix ends, and raises a card if it can't settle the conflict.`,
+  }),
   /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
   merged: (
     batch: BatchDto,
