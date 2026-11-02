@@ -295,7 +295,7 @@ Network hosts takes the same shape (host, source, Remove as a default button); i
 Each is a 10db task; dependencies in brackets. Tasks with a model path test it with the fake adapter (the boundary
 in `apps/daemon/AGENTS.md`) and add a `TENDB_LIVE_CLAUDE=1` live test that never runs in `make gate`.
 
-1. **Contracts and db:** `AreaDef` and `HazardDef` fields of §3, `TaskPatch.areas` refused while active, the
+1. **Contracts and db:** `AreaDef` and `HazardDef` fields of §3, `TaskPatch.areas` refused while active,
    a regenerated baseline (no reserved `rest` name: the catch-all is a flag, §5). (none)
 2. **The rest, as a catch-all area:** built; `classifyPath` puts a path no other area matches in the
    catch-all (§5). (1)

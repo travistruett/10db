@@ -28,7 +28,7 @@ export const NOTICE_KEY = {
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
   landingBehind: 'landing-behind',
-  /** The branch the batch lands in is used by no other open task or batch, and isn't the project's base. */
+  /** The branch the batch lands in is used by no other task under way or unfinished batch, and isn't the project's base. */
   landingUnused: 'landing-unused',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
@@ -103,12 +103,12 @@ export const landingNotices = {
     line: `${branch} lacks ${String(missing)} commit${missing === 1 ? '' : 's'} ${base} has`,
     body: `This work lands in ${branch}, and is built from it, but origin/${branch} doesn't hold ${String(missing)} commit${missing === 1 ? '' : 's'} that origin/${base} has, so the batch lacks any fix made there. Work landed in ${branch} also won't reach ${base} unless ${branch} is merged into it.\n\nIf ${branch} is no longer in use, change where this task lands to the base and start it again. Otherwise merge ${base} into ${branch} on origin first.`,
   }),
-  /** The branch is not the project's default, and no other open task or batch lands in it. */
+  /** The branch is not the project's default, and no other task under way or unfinished batch lands in it. */
   unused: (branch: string, base: string): Notice => ({
     key: NOTICE_KEY.landingUnused,
     tone: 'warning',
-    line: `Nothing else open lands in ${branch}`,
-    body: `This work lands in ${branch}, which isn't ${base}, the project's base branch, and no other open task or batch lands in it. A branch kept for a run of work is often retired once its last piece merges, and work landed in a retired branch never reaches ${base}.\n\nIf ${branch} is still in use, carry on. If it is retired, change where this task lands to the base and start it again.`,
+    line: `Nothing else under way lands in ${branch}`,
+    body: `This work lands in ${branch}, which isn't ${base}, the project's base branch, and no other task under way or unfinished batch lands in it. Tasks only filed against it, not started, don't count. A branch kept for a run of work is often retired once its last piece merges, and work landed in a retired branch never reaches ${base}.\n\nIf ${branch} is still in use, carry on. If it is retired, change where this task lands to the base and start it again.`,
   }),
 };
 
