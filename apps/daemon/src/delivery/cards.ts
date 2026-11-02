@@ -759,6 +759,8 @@ export const prCardKey = {
   closed: (batchId: BatchId): string => `pr-closed:${batchId}`,
   /** Fixing the pull request's failing required checks stopped: the root batch's id. */
   ciStopped: (batchId: BatchId): string => `ci-stopped:${batchId}`,
+  /** 10db could not bring the base into the conflicting pull request: the root batch's id. */
+  catchUp: (batchId: BatchId): string => `pr-catch-up:${batchId}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -788,8 +790,53 @@ const CI_STOP_REASON: Record<CiStopped, (fixes: number, note: string | null) => 
     `10db could not set up a fix session on the pull request's branch${note === null ? '' : `: ${note}`}. It ran ${fixesOf(fixes)} and starts no more.`,
 };
 
+/** What stopped 10db from bringing a conflicting pull request's base into it. */
+export type CatchUpStop =
+  /** Both sides changed these files in ways 10db can't combine. */
+  | { readonly kind: 'conflict'; readonly paths: readonly string[]; readonly reasons?: string }
+  /** The base merged, and the check before shipping failed on the result (nothing was pushed). */
+  | { readonly kind: 'gate'; readonly name: ShipCheckName; readonly logPath: string | null }
+  /** Something else kept the base out, or the update could not finish: `why` says what. */
+  | { readonly kind: 'other'; readonly why: string };
+
 /** What the pull request watch tells the builder about a shipped pull request. */
 export const prCards = {
+  /**
+   * 10db tried to bring the base into the pull request that conflicts with it, and couldn't. One
+   * card, which names the files; it closes by itself when GitHub says the pull request merges.
+   */
+  catchUpStopped: (batch: BatchDto, stop: CatchUpStop): Card => {
+    const prUrl = batch.prUrl ?? '(no pull request)';
+    const base = batch.baseBranch;
+    const resolveOnGitHub = `Resolve it on GitHub (Update branch, then Resolve conflicts), or merge ${base} into ${batch.branch ?? 'the branch'} yourself and push it. 10db merges the pull request once GitHub says it can be merged.`;
+    switch (stop.kind) {
+      case 'conflict':
+        return {
+          title: `Pull request for "${batch.title}" conflicts with ${base}`,
+          body: `${prUrl}\n\n${base} changed these files in ways that conflict with the batch's own changes, and 10db couldn't settle them itself:\n${listPaths(stop.paths)}${stop.reasons ? `\n\n${stop.reasons}` : ''}\n\n${resolveOnGitHub}`,
+          foldKey: prCardKey.catchUp(batch.id),
+          refresh: true,
+          detail: prDetail(batch, prUrl),
+        };
+      case 'gate':
+        return {
+          title: `Pull request for "${batch.title}" not updated: the ${stop.name} failed after merging ${base}`,
+          body: `${prUrl}\n\nThe pull request conflicted with ${base}. 10db merged ${base} into the batch's branch, and the ${stop.name} failed on the result, so it pushed nothing.${stop.logPath === null ? '' : ` The log: ${stop.logPath}`}\n\n${resolveOnGitHub}`,
+          foldKey: prCardKey.catchUp(batch.id),
+          refresh: true,
+          detail: prDetail(batch, prUrl),
+        };
+      case 'other':
+        return {
+          title: `Pull request for "${batch.title}" conflicts with ${base} and 10db couldn't update it`,
+          body: `${prUrl}\n\n${stop.why}\n\n${resolveOnGitHub}`,
+          foldKey: prCardKey.catchUp(batch.id),
+          refresh: true,
+          detail: prDetail(batch, prUrl),
+        };
+    }
+  },
+
   /**
    * Fixing stopped and the task is Blocked. Names each failing check with its link, and offers to
    * rerun the failed jobs of each failing Actions run on GitHub. `fixes` is how many ran; `note` is

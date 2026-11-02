@@ -16,10 +16,14 @@ export const NOTICE_KEY = {
   baseConflict: 'base-conflict',
   /** Files git doesn't track keep the base out. */
   baseKept: 'base-kept',
+  /** A lane launched without the base's newer commits because origin could not be fetched. */
+  baseFetch: 'base-fetch',
   /** The pull request waits for the builder to merge it. */
   merge: 'pull-request-merge',
   /** The shipping gate failed once, in tests the batch didn't change, and passed when run again. */
   gateRerun: 'gate-rerun',
+  /** 10db merged the base into the open pull request's branch. */
+  update: 'pull-request-update',
 } as const;
 
 /** Why a base notice was written beyond the gate, and what more it found. */
@@ -119,6 +123,16 @@ export const baseNotices = {
     line: `Pull request conflicts with ${batch.baseBranch}`,
     body: `${batch.baseBranch} on origin changed files in ways that conflict with the batch's own changes, and the batch shipped anyway: the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} can't merge until the conflict is resolved.\n\nResolve it on GitHub (Update branch, then Resolve conflicts). 10db never resolves a conflict in a pull request.`,
   }),
+  /**
+   * A lane launched on the batch's copy as it is, because the base could not be fetched: anything
+   * that merged into the base since the copy was cut is not in it. The next fetch that works clears it.
+   */
+  fetchFailed: (batch: BatchDto, error: unknown): Notice => ({
+    key: NOTICE_KEY.baseFetch,
+    tone: 'warning',
+    line: `Couldn't fetch ${batch.baseBranch}: this lane started on the copy as it is`,
+    body: `10db brings ${batch.baseBranch} into a batch's copy when a lane launches, so the lane sees what merged while it waited. It couldn't fetch ${batch.baseBranch} from origin (${detailOf(error)}), so this lane started on the copy as it is, without any commits that merged into ${batch.baseBranch} since the copy was cut.\n\nThe next launch or gate fetches again, and this notice goes once a fetch works.`,
+  }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
   kept: (
     batch: BatchDto,
@@ -142,6 +156,30 @@ export const gateNotices = {
     line: 'The gate passed when 10db ran it again',
     body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
   }),
+};
+
+/** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
+export const updateNotices = {
+  /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
+  merged: (
+    batch: BatchDto,
+    resolved: readonly { readonly path: string; readonly how: 'kept_both' | 'regenerated' }[],
+  ): Notice => {
+    const base = batch.baseBranch;
+    const files =
+      resolved.length === 0
+        ? `Git merged ${base} without a conflict left to settle.`
+        : `10db settled these conflicts itself:\n${listPaths(resolved.map((r) => `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "both sides' added lines kept"})`))}`;
+    return {
+      key: NOTICE_KEY.update,
+      tone: 'info',
+      line:
+        resolved.length === 0
+          ? `10db merged ${base} into the pull request`
+          : `10db merged ${base} into the pull request, resolving ${shortPaths(resolved.map((r) => r.path))}`,
+      body: `The pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} conflicted with ${base}. 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it onto the pull request.\n\n${files}\n\nThe merge commit lists them. The pull request merges once GitHub has checked the new head.`,
+    };
+  },
 };
 
 /** gh's own words, cut so the notice keeps room for the link and the rest of what it says. */

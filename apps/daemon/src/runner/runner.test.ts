@@ -4265,6 +4265,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
             order.push(`batch gate ${batchId}`);
             return run();
           },
+          atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
         };
       }
 
@@ -4326,6 +4327,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         // A sibling's gate holds the batch's turn for as long as this test runs.
         const behindASibling: BaseUpdates = {
           beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+          atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
           gate: (_batchId, gateSignal) =>
             new Promise((resolve) => {
               entered();
@@ -4392,6 +4394,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
             order.push(`batch gate ${batchId}`);
             return go();
           },
+          atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
         };
         const restore = watchGates(order);
         try {
@@ -4473,6 +4476,78 @@ describe('the base before a task that holds the migrations hazard from its start
     const { asked, migrationsBase } = recordingMigrationsBase({ kind: 'ready' });
     await run(migrationsBase, ['api']);
     expect(asked).toEqual([]);
+    expect(engine.adapter.prompts).toHaveLength(1);
+  });
+});
+
+describe("the batch's base when a lane launches", () => {
+  /** Answers `answer`, recording each launch and how many sessions had started by then. */
+  function launching(answer: BaseUpdate | Error) {
+    const launches: { batch: string; sessions: number }[] = [];
+    const baseUpdates: BaseUpdates = {
+      beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+      gate: (_batchId, _signal, run) => run(),
+      atLaunch: (batchId) => {
+        launches.push({ batch: batchId, sessions: engine.adapter.prompts.length });
+        return answer instanceof Error ? Promise.reject(answer) : Promise.resolve(answer);
+      },
+    };
+    return { launches, baseUpdates };
+  }
+
+  async function run(baseUpdates: BaseUpdates, inBatch: boolean, started = false) {
+    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { baseUpdates });
+    const batch = inBatch
+      ? engine.state.write((ctx) =>
+          insertBatch(ctx, {
+            projectId: engine.project.id,
+            title: 'Greetings',
+            baseBranch: 'main',
+          }),
+        )
+      : null;
+    const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, batch?.id);
+    // A lane that ran a session before has recorded where it started.
+    if (started)
+      engine.state.write((ctx) => {
+        patchWorkstream(ctx, workstream.id, null, { baseHead: 'abc' });
+      });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    return { workstream, batch };
+  }
+
+  it("is brought into the batch's copy before the lane's first session starts", async () => {
+    const { launches, baseUpdates } = launching({ kind: 'up_to_date', note: null });
+    const { batch } = await run(baseUpdates, true);
+    expect(launches).toEqual([{ batch: batch?.id, sessions: 0 }]);
+    expect(engine.adapter.prompts).toHaveLength(1);
+  });
+
+  it('is not brought in again for a lane that already ran a session, whose changes are in the copy', async () => {
+    const { launches, baseUpdates } = launching({ kind: 'up_to_date', note: null });
+    await run(baseUpdates, true, true);
+    expect(launches).toEqual([]);
+    expect(engine.adapter.prompts).toHaveLength(1);
+  });
+
+  it('is not asked for work outside a batch', async () => {
+    const { launches, baseUpdates } = launching({ kind: 'up_to_date', note: null });
+    await run(baseUpdates, false);
+    expect(launches).toEqual([]);
+    expect(engine.adapter.prompts).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      name: 'could not be brought in',
+      answer: { kind: 'not_merged', note: 'fetch failed' } as const,
+    },
+    { name: 'threw', answer: new Error('git is gone') },
+  ])('starts the lane on the copy as it is when the base $name', async ({ answer }) => {
+    const { launches, baseUpdates } = launching(answer);
+    await run(baseUpdates, true);
+    expect(launches).toHaveLength(1);
     expect(engine.adapter.prompts).toHaveLength(1);
   });
 });
