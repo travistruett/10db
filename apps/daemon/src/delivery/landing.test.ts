@@ -475,4 +475,35 @@ describe('in worktree mode', () => {
     expect(refused.id).not.toBe(batch.id);
     expect(h.only(h.cards()).title).toBe('Not started: origin has no branch named feature/nope');
   });
+
+  it('says so on the batch, naming the branch, when its landing branch lacks commits the base has, and still cuts', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    h.teammatePush('main', 'src/api/fix.txt');
+    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    expect(batch.state).toBe('OPEN');
+    expect(batch.notices).toMatchObject([
+      {
+        key: 'landing-behind',
+        tone: 'warning',
+        line: expect.stringContaining('feature/x') as unknown,
+        body: expect.stringContaining('main') as unknown,
+      },
+    ]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('says nothing when its landing branch holds everything the base has', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    expect(batch.state).toBe('OPEN');
+    expect(batch.notices).toEqual([]);
+  });
 });
