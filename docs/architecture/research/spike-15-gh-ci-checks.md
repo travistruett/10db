@@ -1,12 +1,12 @@
 # Spike 15: What gh prints for required checks, a failed job's log and auto-merge
 
-- **Status:** PARTIAL. VERIFIED against travistruett/10db: passing, pending and failing checks, no required
-  checks, a completed failed job's log, a log asked for while the job runs, `gh pr merge --auto` with
-  auto-merge already on, and signed out. Not yet observed: a cancelled required check and a head with no
-  checks at all. No pull request was in either state on 2026-11-02, and the builder chose not to make a
-  throwaway one. Those two rows come from gh's source and the message strings in its binary, and are marked
-  that way.
-- **Date:** 2026-10-31. Pending, failing, in progress and re-arm were captured 2026-11-02T04:56Z.
+- **Status:** PARTIAL, one row left. VERIFIED against travistruett/10db: passing, pending, failing and
+  cancelled checks, no required checks, a completed failed job's log, a log asked for while the job runs,
+  `gh pr merge --auto` with auto-merge already on, and signed out. Not yet observed: a head with no checks at
+  all. No pull request was in that state on 2026-11-02, and the builder chose not to make a throwaway one.
+  That row comes from gh's source and the message strings in its binary, and is marked that way.
+- **Date:** 2026-10-31. Pending, failing, in progress and re-arm were captured 2026-11-02T04:56Z, cancelled
+  at 2026-11-02T12:50Z.
 - **Versions:** gh 2.83.2 (2025-12-10)
 - **Command:** each command below, with its exit code, stdout and stderr recorded verbatim. The builder (or
   the orchestrator) ran them with a signed-in gh. The lane's gh is signed out, its sandbox blocks GitHub,
@@ -26,7 +26,7 @@ and §6 (build task T3). The parsers are `parseRequiredChecks` and `parseJobLog`
 | signed out                              | 4    | empty                       | `To get started with GitHub CLI, please run:  gh auth login` and a GH_TOKEN line | observed | unknown (`signed_out`) |
 | two required checks running (#245)      | 0    | JSON list, bucket `pending` | empty                                                                            | observed | `pending`              |
 | one required check failed (#242)        | 0    | JSON list, bucket `fail`    | empty                                                                            | observed | `failing`              |
-| one cancelled                           | 1    | JSON list, bucket `cancel`  | empty                                                                            | gh docs  | `pending`              |
+| one required check cancelled (#333)     | 0    | JSON list, bucket `cancel`  | empty                                                                            | observed | `pending`              |
 | the head has no checks at all           | 1    | empty                       | `no checks reported on the '<branch>' branch`                                    | binary   | `none`                 |
 
 Observed:
@@ -46,10 +46,14 @@ Observed:
   A failing one is
   `{"bucket":"fail","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990697","name":"gate","state":"FAILURE","workflow":"ci"}`.
   The full lists are `SPIKE_PENDING` and `SPIKE_FAILING` in `ci-checks.test.ts`.
+- **A cancelled check exits 0 too.** On #333 GitHub cancelled the required `desktop` check (job
+  125201910780, completed and cancelled before any step ran) while the other four passed. gh exited 0, not
+  the 1 its docs give, and printed nothing on stderr. The cancelled entry is
+  `{"bucket":"cancel","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910780","name":"desktop","state":"CANCELLED","workflow":"ci"}`.
+  The parser reads bucket `cancel` as `pending` (spec §4) and already takes exit 0, so nothing in it changed.
+  The full list is `SPIKE_CANCELLED` in `ci-checks.test.ts`.
 
-Not observed yet (no pull request was in either state, and none was made to try it):
-
-- **One cancelled.** The `cancel` bucket is in gh's source. It is read as `pending` (spec §4).
+Not observed yet (no pull request was in that state, and none was made to try it):
 
 - **No checks at all.** gh 2.83.2's binary has both `no checks reported on the '%s' branch` and
   `no required checks reported on the '%s' branch`. In gh's source the first comes when the head commit has no

@@ -22,6 +22,7 @@ import { batchCheckout } from './checkout';
 import { stopCiFixing } from './ci-stop';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
+import { forgetStartSiblings } from './start-siblings';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
@@ -156,6 +157,7 @@ export async function recoverBatches(deps: {
       deleteCuttingBatch(w, batch.id, reason);
       deleteAppSetting(w, worktreePinKey(batch.id));
       forgetCuttingTasks(w, batch.id);
+      forgetStartSiblings(w, batch.id);
       // The row was the guard against making the same fix again, so the root stops fixing; the
       // pull request's CI-stop card has the Retry.
       if (batch.ciFixOf !== null) stopCiFixing(w, batch.ciFixOf, CiStopped.NoCut, card.title);
