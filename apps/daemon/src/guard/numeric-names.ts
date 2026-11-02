@@ -85,8 +85,8 @@ const BUILTINS: ReadonlySet<string> = new Set(
  * the command after them, which is checked in turn. `declare`, `typeset`, `local` and their zsh
  * kin `integer`, `float` and `private` are read except for a nameref or a flag the scan cannot
  * read, `printf` except for `-v`, and `print` except for a flag cluster with `v`, which sets a
- * name. `whence`, `where` and `which` only report. `repeat` runs the command after its count,
- * which is read in turn like any other. `foreach` sets its variable from a word list the scan does
+ * name. `whence`, `where` and `which` only report. `repeat` runs the command after its count, and
+ * zsh's `-` modifier the command after it; `commandHeads` reads that command in turn. `foreach` sets its variable from a word list the scan does
  * not read, so it is not understood.
  */
 const UNDERSTOOD: ReadonlySet<string> = new Set(
@@ -99,13 +99,14 @@ const UNDERSTOOD: ReadonlySet<string> = new Set(
 
 /**
  * Names a builtin or keyword sets without naming them as a word: `read` and `select` with no name
- * write `REPLY`; `cd`, `pushd` and `popd` write `PWD`, `OLDPWD` and `DIRSTACK`; `=~` writes
- * `BASH_REMATCH` in bash and `MATCH`, `match`, `MBEGIN` and `MEND` in zsh. The scan treats them as
- * set to text whenever the word appears, with a named operand or without.
+ * write `REPLY` (zsh `read -A`, `-c` and `-l` write `reply`); `cd`, `pushd` and `popd` write
+ * `PWD`, `OLDPWD` and `DIRSTACK` (zsh's `dirstack`); `=~` writes `BASH_REMATCH` in bash and
+ * `MATCH`, `match`, `MBEGIN` and `MEND` in zsh. The scan treats them as set to text whenever the
+ * word appears, with a named operand or without.
  */
-const DIRECTORY_NAMES = ['PWD', 'OLDPWD', 'DIRSTACK'];
+const DIRECTORY_NAMES = ['PWD', 'OLDPWD', 'DIRSTACK', 'dirstack'];
 const IMPLICIT: ReadonlyMap<string, readonly string[]> = new Map([
-  ['read', ['REPLY']],
+  ['read', ['REPLY', 'reply']],
   ['select', ['REPLY']],
   ['cd', DIRECTORY_NAMES],
   ['chdir', DIRECTORY_NAMES],
@@ -202,12 +203,7 @@ export function isNumericArithmetic(
  * makes `r=…` write `s`), a flag the scan cannot read, `printf -v`, or a builtin it does not understand.
  */
 function rebindsNames(words: readonly string[]): boolean {
-  const stripped = stripCommandPrefixes(words, {
-    lookThroughRunners: true,
-    skipRedirections: true,
-    keepCommandPath: true,
-  });
-  const heads = [words[0], stripped[0]].map((word) => commandName(word ?? ''));
+  const { heads, command } = commandHeads(words);
   if (heads.some((head) => BUILTINS.has(head) && !UNDERSTOOD.has(head))) return true;
   // A declaring builtin anywhere in the command, behind any wrapper, with a flag naming `n`, or a
   // word the shell expands that is not an assignment, which may expand to a flag: `declare -gn r=s`,
@@ -218,15 +214,54 @@ function rebindsNames(words: readonly string[]): boolean {
   }
   if (heads.includes('printf') && words.some((word) => word.startsWith('-v'))) return true;
   // zsh `print -v name` stores the text in `name`; the flags may be a cluster (`-rv`) or carry the name.
-  return heads.includes('print') && words.some((word) => /^-[a-zA-Z]*v/.test(word));
+  if (heads.includes('print') && words.some((word) => /^-[a-zA-Z]*v/.test(word))) return true;
+  // A word the shell expands where print or printf still reads options may expand to `-v`:
+  // `F=-v; print $F s x` sets `s`.
+  const head = commandName(command[0] ?? '');
+  return (head === 'print' || head === 'printf') && expandsInOptions(command.slice(1));
+}
+
+/** Whether a word in option position (before `--`, `-` or the first operand) is expanded. */
+function expandsInOptions(args: readonly string[]): boolean {
+  for (const word of args) {
+    if (word === '--' || word === '-') return false;
+    if (/[$`]/.test(word)) return true;
+    if (!word.startsWith('-')) return false;
+  }
+  return false;
+}
+
+/**
+ * Every word that may name the command a segment runs: the first word, the word after `command`,
+ * `exec`, `time` and the runners `stripCommandPrefixes` knows, and the word after zsh's `repeat N`
+ * and `-` precommand modifier, in any nesting. `command` is the words of the command finally run.
+ */
+function commandHeads(words: readonly string[]): { heads: string[]; command: readonly string[] } {
+  const heads: string[] = [];
+  let rest = words;
+  for (;;) {
+    heads.push(commandName(rest[0] ?? ''));
+    const stripped = stripCommandPrefixes(rest, {
+      lookThroughRunners: true,
+      skipRedirections: true,
+      keepCommandPath: true,
+    });
+    const head = commandName(stripped[0] ?? '');
+    heads.push(head);
+    if (head === 'repeat') rest = stripped.slice(2);
+    else if (head === '-') rest = stripped.slice(1);
+    else return { heads, command: stripped };
+    if (rest.length === 0) return { heads, command: rest };
+  }
 }
 
 /** Whether a word sets or rebinds `name` in a way other than a plain assignment before a command. */
 function setsName(word: string, name: string, arithmetic: boolean): boolean {
   if (word === name || word.startsWith(`${name}=`) || word.startsWith(`${name}+=`)) return true;
   if (word.startsWith(`${name}[`)) return true;
-  // `${name:=x}`, `${name=x}`, `${name[0]}`, `${name%x}`: anything but the plain `${name}` read.
-  if (new RegExp(`\\$\\{${name}(?![\\w}])`).test(word)) return true;
+  // `${name:=x}`, `${name=x}`, `${name[0]}`, `${name%x}`: anything but the plain `${name}` read,
+  // behind any zsh flags and prefix characters (`${(L)name::=x}`, `${=name::=x}`, `${^name:=x}`).
+  if (new RegExp(`\\$\\{(?:\\([^)]*\\)|[=~^+#])*${name}(?![\\w}])`).test(word)) return true;
   if (!arithmetic) return false;
   const bare = `(?<![\\w$])${name}(?!\\w)`;
   return [

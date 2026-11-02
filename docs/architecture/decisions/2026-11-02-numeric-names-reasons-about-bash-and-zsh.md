@@ -19,6 +19,14 @@ A command named by a builtin is understood only when it is on the `UNDERSTOOD` l
 from an expansion, still gives up). `foreach` sets its variable from a word list the scan does not read, so it
 gives up.
 
+The scan looks through `repeat N` and zsh's `-` precommand modifier, in any nesting, to the command they run,
+so `repeat 1 print -vs x` and `- vared s` give up like the bare command. `print` and `printf` also give up
+when a word the shell expands sits where they still read options (`F=-v; print $F s x`). An assignment inside
+a parameter expansion counts behind zsh flags and prefix characters (`${(L)s::=x}`, `${=s::=x}`, `${^s:=x}`).
+zsh's implicit names are added: `reply` (`read -A`, `-c`, `-l` with no name) and `dirstack` (`cd`, `pushd`,
+`popd`). Glob qualifiers that run code (`*(e:…:)`, `*(+fn)`) make the parse uncertain, as any word holding
+`(` does today, so the scan gives up; tests pin that.
+
 `expandsIndirectly` also reads zsh's `${(P)name}` (looks up the variable `name` holds), `${(e)name}` (expands
 the value again, running substitutions in it) and `${(%)name}` (expands it as a prompt) as indirection, as it
 reads `${!name}`: `numericNames` returns no names, and `declaresIntegerAnywhere` (unread-commands.ts) counts a command with such

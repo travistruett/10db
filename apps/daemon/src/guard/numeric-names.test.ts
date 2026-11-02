@@ -81,6 +81,18 @@ describe('numericNames', () => {
       ['${(P)name} in a substitution', 's=1; echo $(echo ${(P)r}); echo $((s))'],
       ['${(e)name} evaluates the value', 's=1; echo ${(e)r}; echo $((s))'],
       ['${(%)name} expands the value as a prompt', 's=1; echo ${(%)r}; echo $((s))'],
+      ['${(L)name::=x} assigns', "s=1; : ${(L)s::='a[$(touch y)]'}; echo $((s))"],
+      ['${(A)name=x} assigns', 's=1; : ${(A)s=x}; echo $((s))'],
+      ['${=name::=x} assigns', 's=1; : ${=s::=x}; echo $((s))'],
+      ['${^name:=x} assigns', 's=1; : ${^s:=x}; echo $((s))'],
+      ['${~name=x} assigns', 's=1; : ${~s=x}; echo $((s))'],
+      ['${+name} with flags and a prefix', 's=1; : ${(U)==s::=x}; echo $((s))'],
+      ['${#name::=x} assigns', 's=1; : ${#s::=x}; echo $((s))'],
+      // A word holding `(` makes the parse uncertain today, so these give up; the rows pin it.
+      ['a glob qualifier runs code', "s=1; echo /*(e:'s=x':); echo $((s))"],
+      ['a glob qualifier in a longer word', "s=1; echo /tmp/*.log(Ne:'s=x':); echo $((s))"],
+      ['a glob qualifier calls a function', 's=1; echo /*(+f); echo $((s))'],
+      ['a glob qualifier with other flags first', 's=1; echo /*(.+f); echo $((s))'],
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
@@ -125,6 +137,22 @@ describe('numericNames', () => {
       ['zsh -c', 's=1; zsh -c "s=x"; echo $((s))'],
       ['behind command', 's=1; command vared s; echo $((s))'],
       ['behind a runner', 's=1; env -i print -v s x; echo $((s))'],
+      ['print -v behind repeat', "s=1; repeat 1 print -vs 'a[$(touch y)]'; echo $((s))"],
+      ['printf -v behind repeat', 's=1; repeat 1 printf -vs x; echo $((s))'],
+      ['zparseopts behind repeat', 's=1; repeat 1 zparseopts -D -E -- a=s; echo $((s))'],
+      ['print -v behind repeat with a counted name', 's=1; repeat $n print -vs x; echo $((s))'],
+      ['print -v behind nested repeat', 's=1; repeat 1 repeat 2 print -vs x; echo $((s))'],
+      ['print -v behind the - modifier', 's=1; - print -vs x; echo $((s))'],
+      ['vared behind the - modifier', 's=1; - vared s; echo $((s))'],
+      ['print -v behind command and repeat', 's=1; command - print -vs x; echo $((s))'],
+      [
+        'print with a flag from a name',
+        "s=1; F=-v; N=x; print $F ${N/x/s} 'a[$(touch y)]'; echo $((s))",
+      ],
+      ['print with a flag from a substitution', 's=1; print $(echo -v) s x; echo $((s))'],
+      ['print with a quoted flag from a name', 's=1; print "$F" s x; echo $((s))'],
+      ['printf with a flag from a name', 's=1; printf $F s x; echo $((s))'],
+      ['print with a flag from backticks', 's=1; print `echo -v` s x; echo $((s))'],
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
@@ -135,6 +163,10 @@ describe('numericNames', () => {
     it('keeps the names of a command using print without -v', () => {
       expect(names('s=1; print -r -- hello; echo $((s))')).toEqual(['s']);
       expect(names('s=1; print hello; whence -p node; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; repeat 2 print -r hi; - print hi; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; f=x; print -r -- $f; printf %s $f; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; echo ${#f} ${=f} ${#s} ${=s}; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; print - $f; print -r hi $f; echo $((s))')).toEqual(['s']);
     });
 
     it('reads integer and float like declare', () => {
@@ -165,6 +197,10 @@ describe('numericNames', () => {
       ['=~ sets zsh MBEGIN', 'MBEGIN=1; [[ x =~ y ]]; echo $((MBEGIN))'],
       ['=~ sets zsh MEND', 'MEND=1; [[ x =~ y ]]; echo $((MEND))'],
       ['cd sets PWD and OLDPWD', 'PWD=1; OLDPWD=1; cd x; echo $((PWD + OLDPWD))'],
+      ['zsh read -A with no name sets reply', 'reply=1; read -A < f; echo $((reply))'],
+      ['zsh read -c with no name sets reply', 'reply=1; read -c < f; echo $((reply))'],
+      ['zsh cd sets dirstack', 'dirstack=1; cd x; echo $((dirstack))'],
+      ['zsh pushd sets dirstack', 'dirstack=1; pushd x; echo $((dirstack))'],
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
