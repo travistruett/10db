@@ -61,6 +61,18 @@ export function RefusalModal({ adoption }: { readonly adoption: AdoptPlan }) {
 
 /** The browser has no native panel, so the plan's path is typed. */
 export function TypedPathModal({ adoption }: { readonly adoption: AdoptPlan }) {
+  return (
+    <Modal opened={adoption.typing} onClose={adoption.dismissTyping} title="Adopt a plan">
+      <TypedPathForm adoption={adoption} />
+    </Modal>
+  );
+}
+
+/**
+ * The modal itself stays mounted while closed, but its body does not, so the typed path and the
+ * field error live here and start empty on each open.
+ */
+function TypedPathForm({ adoption }: { readonly adoption: AdoptPlan }) {
   const [path, setPath] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const submit = () => {
@@ -73,37 +85,35 @@ export function TypedPathModal({ adoption }: { readonly adoption: AdoptPlan }) {
     adoption.adoptPath(trimmed);
   };
   return (
-    <Modal opened={adoption.typing} onClose={adoption.dismissTyping} title="Adopt a plan">
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <Stack>
-          <TextInput
-            label="Plan path"
-            description="The full path of a .md file on this Mac."
-            placeholder="/Users/you/plans/importer.md"
-            value={path}
-            error={fieldError}
-            onChange={(event) => {
-              setPath(event.currentTarget.value);
-              setFieldError(null);
-            }}
-            data-autofocus
-          />
-          <AdoptProblem adoption={adoption} />
-          <Group justify="flex-end">
-            <Button variant="default" onClick={adoption.dismissTyping}>
-              Cancel
-            </Button>
-            <Button type="submit" loading={adoption.adopting}>
-              Adopt
-            </Button>
-          </Group>
-        </Stack>
-      </form>
-    </Modal>
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        submit();
+      }}
+    >
+      <Stack>
+        <TextInput
+          label="Plan path"
+          description="The full path of a .md file on this Mac."
+          placeholder="/Users/you/plans/importer.md"
+          value={path}
+          error={fieldError}
+          onChange={(event) => {
+            setPath(event.currentTarget.value);
+            setFieldError(null);
+          }}
+          data-autofocus
+        />
+        <AdoptProblem adoption={adoption} />
+        <Group justify="flex-end">
+          <Button variant="default" onClick={adoption.dismissTyping}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={adoption.adopting}>
+            Adopt
+          </Button>
+        </Group>
+      </Stack>
+    </form>
   );
 }
