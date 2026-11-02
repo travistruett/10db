@@ -69,8 +69,13 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
     worktreeSeed: sameList(current.worktreeSeed, seed.worktreeSeed)
       ? next.worktreeSeed
       : current.worktreeSeed,
+    isolate: sameList(current.isolate, seed.isolate) ? next.isolate : current.isolate,
   };
 }
+
+/** Said under the default, whichever it is: the default moves no task and needs no idle project. */
+const DEFAULT_CHANGE_NOTE =
+  'It applies to tasks made from now on and can change while work runs; tasks that already exist keep their own.';
 
 const landingChoice = (value: string): ProjectLanding =>
   value === ProjectLanding.Hold
@@ -335,20 +340,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         {pullRequests ? (
           <SettingRow
-            label="Where tasks work"
-            description={
+            label="Default for new tasks"
+            description={`${
               values.workspaceMode === WorkspaceMode.Worktree
-                ? 'Separate copies: each task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.'
-                : 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself.'
-            }
+                ? 'Separate copy: each new task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.'
+                : 'Your folder: new tasks change files in your checkout, so you can watch them land in your editor and dev server. While they run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself.'
+            } ${DEFAULT_CHANGE_NOTE}`}
           >
             <SegmentedControl
-              aria-label="Where tasks work"
+              aria-label="Default for new tasks"
               fullWidth
               value={values.workspaceMode}
               data={[
                 { value: WorkspaceMode.Shared, label: 'Your folder' },
-                { value: WorkspaceMode.Worktree, label: 'Separate copies' },
+                { value: WorkspaceMode.Worktree, label: 'Separate copy' },
               ]}
               onChange={(value) => {
                 set({
@@ -361,7 +366,22 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             />
           </SettingRow>
         ) : null}
-        {pullRequests && values.workspaceMode === WorkspaceMode.Worktree ? (
+        {pullRequests ? (
+          <SettingRow
+            label="Separate copy for these areas"
+            description="Area and hazard names, such as migrations or deps. A new task that names one is proposed a separate copy, and its card says why. Changing the list moves no task that already exists."
+          >
+            <TagsInput
+              aria-label="Separate copy for these areas"
+              value={[...values.isolate]}
+              error={errors.isolate}
+              onChange={(isolate) => {
+                set({ isolate });
+              }}
+            />
+          </SettingRow>
+        ) : null}
+        {pullRequests ? (
           <SettingRow
             label="Copy into each task's copy"
             description="Ignored folders, such as node_modules, copied from this checkout."

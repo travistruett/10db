@@ -76,6 +76,21 @@ describe('checkGeneral', () => {
       expected: { ok: false, errors: { worktreeSeed: expect.any(String) as string } },
     },
     {
+      name: 'an isolate list with an added area, trimmed and without blanks',
+      change: { isolate: ['migrations', 'deps', ' contracts ', ''] },
+      expected: { ok: true, patch: { isolate: ['migrations', 'deps', 'contracts'] } },
+    },
+    {
+      name: 'an emptied isolate list',
+      change: { isolate: [] },
+      expected: { ok: true, patch: { isolate: [] } },
+    },
+    {
+      name: 'an isolate name that is not a name',
+      change: { isolate: ['src/**'] },
+      expected: { ok: false, errors: { isolate: expect.any(String) as string } },
+    },
+    {
       name: 'a worktree per task in local delivery',
       change: { workspaceMode: 'worktree' },
       expected: {

@@ -12,6 +12,7 @@ import {
   Text,
 } from '@mantine/core';
 import { useFlows, usePatchTask } from '../../../daemon/queries';
+import { PlacementChoice } from '../placement-choice';
 import { BatchSteps } from './batch-steps';
 
 const RISK_TAGS: readonly RiskTag[] = Object.values(RiskTag);
@@ -19,12 +20,19 @@ const isRiskTag = (value: string): value is RiskTag => RISK_TAGS.some((t) => t =
 
 export interface BatchCandidateProps {
   readonly candidate: PickerCandidate;
+  /** Whether the project delivers by pull request, the only delivery with a separate copy to choose. */
+  readonly placementEditable: boolean;
   readonly ticked: boolean;
   readonly onToggle: () => void;
 }
 
-/** One Ready task on the sheet: its tick, why the picker placed it, its flow and risk tags, its steps. */
-export function BatchCandidate({ candidate, ticked, onToggle }: BatchCandidateProps) {
+/** One Ready task on the sheet: its tick, why the picker placed it, where it runs, its flow and risk tags, its steps. */
+export function BatchCandidate({
+  candidate,
+  placementEditable,
+  ticked,
+  onToggle,
+}: BatchCandidateProps) {
   const { task } = candidate;
   const flows = useFlows();
   const patch = usePatchTask();
@@ -63,6 +71,15 @@ export function BatchCandidate({ candidate, ticked, onToggle }: BatchCandidatePr
             </Code>
           ))}
         </Group>
+        {placementEditable ? (
+          <PlacementChoice
+            task={task}
+            pending={patch.isPending}
+            onChange={(workspaceMode) => {
+              patch.mutate({ taskId: task.id, patch: { workspaceMode } });
+            }}
+          />
+        ) : null}
         <Group grow>
           <Select
             aria-label={`Flow for ${task.title}`}
