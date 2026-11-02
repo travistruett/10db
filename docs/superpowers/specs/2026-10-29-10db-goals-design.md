@@ -87,7 +87,8 @@ people (§10), tasks, a budget (§6) and a state (§6).
   Factory's status is derived (§8) until phase 2 wires the transitions.
 
 - A task belongs to at most one goal. A goal's task can still be started by hand from its card and runs as it
-  would alone; starting one doesn't change the goal's state. **(spec's call)**
+  would alone, with the existing dependency refusal; starting one doesn't change the goal's state.
+  **(spec's call; confirmed by the builder, 2026-10-30, §14)**
 - Delivery stays per task, as the project sets it (one pull request per task in worktree mode).
 - Two ways in: **Adopt a Plan** (§11, phase 1) and **New Goal** from chat, assets or a form (phase 4).
 
@@ -114,8 +115,9 @@ measure.
   to `waiting` with an owner card listing its blocked dependents and the unproven criteria, with the
   exhausted-tasks choices.
 - **Criteria proven, tasks left:** the goal is done. Unstarted tasks stay on the Board, outside the goal's
-  progress, and are listed on the done card; running ones run to their own end, and the done card offers to
-  cancel them. **(spec's call)**
+  progress, and are listed on the done card; running ones run to their own end. The done card offers to remove
+  the unstarted ones (the remove-unstarted route) as well as to cancel the running ones; nothing is removed or
+  cancelled unless the builder chooses it. **(spec's call; confirmed by the builder, 2026-10-30, §14)**
 
 Criteria are stored in a `goal_criteria` table (goal, text, check kind, the named task, command or person,
 state, proof as a list of evidence ids, pull request URLs or file paths, proven at, proven by). Phase 1 creates
@@ -439,6 +441,9 @@ tasks:
 Notes below the front matter are kept as the goal's description.
 ```
 
+The brief is import only (the builder, 2026-10-30): it is not written into the repository, and 10db keeps it as
+the rows it produced, not as a second copy of the file.
+
 The first goal is **Real areas**, from the build order in the spec PR #131 (its first slice is PR #138),
 converted into a brief by hand. Its tasks use the project's current areas (`repo` over `**` today) until the
 areas work it builds lands. Extraction from a free-form document by an LLM is phase 4.
@@ -481,8 +486,16 @@ one-way changes, and the builder re-grades the two-way calls.
 - **Where a goal's detail lives (settle live).** Phase 1 expands it in Factory (§8). Once Real areas has run, try
   it against a drawer or a goal page and keep what reads best.
 - **The name Factory.** Factory.ai uses "Missions" and "Mission Control". Keep "Factory" for the tab?
-- **The brief in the repository.** Import only, or also kept in the repository as a record?
 - **Defaults to tune with data:** N = 3, the per-person message limit, first-message approval.
-- **The spec's calls to confirm:** hand-starting a goal's task (§4), what done does to leftover tasks (§5),
-  scheduling order (§6), the class paths and patterns (§7), N (§7), stakeholder authority and the outbound
-  policy (§10).
+- **The spec's calls still to confirm:** scheduling order (§6), the class paths and patterns (§7), N (§7),
+  stakeholder authority and the outbound policy (§10).
+
+**Answered by the builder (2026-10-30)**, recorded in `docs/architecture/decisions/2026-11-02-goals-and-the-brief.md`:
+
+- **The brief in the repository:** import only. Nothing is written into the repository, and 10db keeps the
+  brief as the rows it produced (§11).
+- **Hand-starting a goal's task (§4):** confirmed. A goal's task can be started by hand from its card and runs
+  as it would alone, with the existing dependency refusal.
+- **What done does to leftover tasks (§5):** they stay on the Board. The done card offers to remove the
+  unstarted ones as well as to cancel the running ones; nothing is removed or cancelled without the builder
+  choosing it.
