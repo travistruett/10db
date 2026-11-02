@@ -312,6 +312,34 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.gh.merged).toEqual([url]);
   });
 
+  it('shows the refused notice when auto-merge errors on a retry and was never armed', async () => {
+    // GitHub refused the first arm, so the pull request was never set to merge.
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): auto-merge is not allowed'),
+    );
+    const batch = await shipped('README.md', '# ours\n');
+    expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const url = conflicts(batch);
+    const stopped = await catchUp(batch);
+    expect(stopped.notices).toEqual([]);
+
+    // The builder resolves the conflict; the watch withdraws the card and asks for the merge again.
+    h.gh.setMergeBlocked(url, null);
+    h.gh.setMergeable(url, PrMergeable.Mergeable);
+    h.gh.failNext.set(
+      'prAutoMerge',
+      new GhError('failed', 'gh pr merge failed (exit 1): HTTP 403: Resource not accessible'),
+    );
+    h.shipper.retryMerge(batch.id, { catchUpCardWasOpen: true });
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id).notices.map((n) => n.key)).toEqual([
+      'pull-request-merge',
+    ]);
+  });
+
   it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {
     const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';

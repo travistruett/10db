@@ -351,16 +351,21 @@ export function createApp(deps: ApiDeps) {
     )
     .get(
       '/projects/:projectId/candidates',
-      validator('query', (query): { size?: string } =>
-        typeof query['size'] === 'string' ? { size: query['size'] } : {},
-      ),
-      (c) =>
-        c.json(
+      validator('query', (query): { size?: string; goalId?: string } => ({
+        ...(typeof query['size'] === 'string' ? { size: query['size'] } : {}),
+        ...(typeof query['goalId'] === 'string' ? { goalId: query['goalId'] } : {}),
+      })),
+      (c) => {
+        const { size, goalId } = c.req.valid('query');
+        return c.json(
           deps.services.proposeCandidates(
             ProjectId.parse(c.req.param('projectId')),
-            PickSize.parse(c.req.valid('query').size),
+            PickSize.parse(size),
+            // Absent means the whole project; a malformed id is a 400, not the whole project.
+            goalId === undefined ? undefined : GoalId.parse(goalId),
           ),
-        ),
+        );
+      },
     )
     .get('/personas', (c) => c.json(deps.services.listPersonas()))
     .post(

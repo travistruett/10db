@@ -4,6 +4,7 @@ import {
   GoalDigestDto,
   GoalListDto,
   HealthResponse,
+  InvalidError,
   mintId,
   InboxAnswerRefused,
   NotFoundError,
@@ -1106,6 +1107,40 @@ describe('candidate routes', () => {
     ).request(`/projects/${projectId}/candidates?size=3`, auth);
     expect(res.status).toBe(200);
     expect(seen).toEqual([3]);
+  });
+
+  it('passes a goalId to its service, and none when the query has none', async () => {
+    const goalId = mintId('Goal');
+    const seen: (string | undefined)[] = [];
+    const services = stubServices({
+      proposeCandidates: (_id, size, goal) => {
+        seen.push(goal);
+        return { projectId, size, candidates: [] };
+      },
+    });
+    await app(services).request(`/projects/${projectId}/candidates?size=2&goalId=${goalId}`, auth);
+    await app(services).request(`/projects/${projectId}/candidates?size=2`, auth);
+    expect(seen).toEqual([goalId, undefined]);
+  });
+
+  it('answers 400 for a goalId of another project', async () => {
+    const res = await app(
+      stubServices({
+        proposeCandidates: () => {
+          throw new InvalidError('Goal is not in this project');
+        },
+      }),
+    ).request(`/projects/${projectId}/candidates?size=2&goalId=${mintId('Goal')}`, auth);
+    expect(res.status).toBe(400);
+  });
+
+  it('answers 400 for a malformed goalId without calling the service', async () => {
+    const res = await app().request(
+      `/projects/${projectId}/candidates?size=2&goalId=${mintId('Task')}`,
+      auth,
+    );
+    expect(res.status).toBe(400);
+    expect(reached).toEqual([]);
   });
 
   it.each([
