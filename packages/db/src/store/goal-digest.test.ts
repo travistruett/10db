@@ -1,0 +1,656 @@
+import {
+  BatchState,
+  Effort,
+  GoalStatus,
+  InboxKind,
+  InboxState,
+  PullRequestState,
+  QuestionCategory,
+  Severity,
+  SourceKind,
+  StepRole,
+  StepStatus,
+  TaskStatus,
+  ToolAccess,
+  Urgency,
+  WorkstreamState,
+  ScoreKind,
+  type BatchId,
+  type GoalDto,
+  type PersonDto,
+  type ProjectDto,
+  type TaskId,
+  type WorkstreamId,
+  type WorkstreamStep,
+} from '@10db/contracts';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as schema from '../schema';
+import { eq } from 'drizzle-orm';
+import { goalDigest, listGoalSummaries, openGoalDigest, ungroupedDigest } from './goal-digest';
+import { insertGoal, lastGoalView } from './goals';
+import { insertInboxItem } from './inbox';
+import { insertDecision, insertDeviation, insertSource } from './knowledge';
+import { insertSession, updateSessionUsage } from './sessions';
+import type { Store } from './store';
+import { insertTask, setTaskStatus } from './tasks';
+import { BUILDER_HANDLE, insertPerson } from './team';
+import { createTestStore, seedProject } from './test-support';
+import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
+import { insertWorkstream } from './workstreams';
+
+let store: Store;
+let close: () => void;
+let clock: Date;
+let project: ProjectDto;
+let builder: PersonDto;
+
+const at = (hours: number) => new Date(Date.UTC(2026, 10, 1, hours)).toISOString();
+const setClock = (hours: number) => {
+  clock = new Date(at(hours));
+};
+
+beforeEach(() => {
+  clock = new Date(at(8));
+  ({ store, close } = createTestStore(() => clock));
+  project = seedProject(store);
+  builder = store.write((ctx) =>
+    insertPerson(ctx, { handle: BUILDER_HANDLE, name: 'You', isBuilder: true }),
+  ).value;
+});
+afterEach(() => {
+  close();
+});
+
+/** Three tasks: `a`, then `b` after `a`, and `c` after `b`. */
+function adopt(projectId = project.id): { goal: GoalDto; a: TaskId; b: TaskId; c: TaskId } {
+  const goal = store.write((ctx) =>
+    insertGoal(ctx, projectId, {
+      brief: {
+        title: 'Real areas',
+        objective: 'Areas.',
+        tasks: [
+          { key: 'a', title: 'Patch route', areas: ['api'] },
+          { key: 'b', title: 'Drawer', areas: ['ui'], depends_on: ['a'] },
+          { key: 'c', title: 'Proposal', areas: ['api'], depends_on: ['b'] },
+        ],
+      },
+    }),
+  ).value;
+  const [a, b, c] = goal.taskIds;
+  if (!a || !b || !c) throw new Error('the brief makes three tasks');
+  return { goal, a, b, c };
+}
+
+const step = (over: Partial<WorkstreamStep> = {}): WorkstreamStep => ({
+  role: StepRole.Implement,
+  personaId: null,
+  personaName: 'Implementer',
+  tools: ToolAccess.Edit,
+  score: ScoreKind.Coding,
+  profileId: null,
+  model: 'sonnet-5.5',
+  effort: Effort.High,
+  need: 0,
+  reason: 'test',
+  overBudget: false,
+  pinned: false,
+  status: StepStatus.Running,
+  attempts: 0,
+  startedAt: null,
+  sessionFloor: 0,
+  result: null,
+  earlier: [],
+  sentBack: 0,
+  ...over,
+});
+
+/** Starts the task and forces its workstream into `state`, with `steps` when given. */
+function run(
+  taskId: TaskId,
+  state: WorkstreamState,
+  opts: { steps?: WorkstreamStep[]; stepIndex?: number; batchId?: BatchId } = {},
+): WorkstreamId {
+  const id = store.write((ctx) =>
+    insertWorkstream(ctx, taskId, opts.batchId ? { batchId: opts.batchId } : {}),
+  ).value.id;
+  store.write((ctx) => {
+    ctx.tx
+      .update(schema.workstreams)
+      .set({ state, steps: opts.steps ?? [], stepIndex: opts.stepIndex ?? 0 })
+      .where(eq(schema.workstreams.id, id))
+      .run();
+  });
+  return id;
+}
+
+const finish = (taskId: TaskId) =>
+  store.write((ctx) => {
+    setTaskStatus(ctx, taskId, TaskStatus.Done);
+  });
+
+function card(workstreamId: WorkstreamId, title = 'Which name reads best?') {
+  return store.write((ctx) =>
+    insertInboxItem(ctx, {
+      projectId: project.id,
+      kind: InboxKind.Question,
+      title,
+      body: '',
+      options: [],
+      recommendation: null,
+      category: QuestionCategory.Design,
+      urgency: Urgency.Normal,
+      detail: null,
+      foldKey: null,
+      targets: [{ workstreamId, sessionId: null }],
+    }),
+  ).value;
+}
+
+function source() {
+  return store.write((ctx) => insertSource(ctx, SourceKind.Agent, {})).value;
+}
+
+function deviation(workstreamId: WorkstreamId | null, cause: string) {
+  const sourceId = source();
+  store.write((ctx) =>
+    insertDeviation(ctx, {
+      projectId: project.id,
+      workstreamId,
+      cause,
+      severity: Severity.Info,
+      signedReason: 'too big for one review',
+      sourceId,
+    }),
+  );
+}
+
+function decision(question: string, projectId: ProjectDto['id'] | null = project.id) {
+  const sourceId = source();
+  store.write((ctx) =>
+    insertDecision(ctx, {
+      projectId,
+      question,
+      choice: 'Workspace packages',
+      rationale: 'why',
+      decidedBy: 'you',
+      scope: 'project',
+      area: null,
+      sourceId,
+    }),
+  );
+}
+
+describe('a goal’s status', () => {
+  it('is not started while nothing has run, and offers the first ready task next', () => {
+    const { goal, a } = adopt();
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.NotStarted);
+    expect(digest.progress).toEqual({ done: 0, total: 3, cancelled: [] });
+    expect(digest.next).toEqual({ taskId: a, title: 'Patch route', waitsOn: [] });
+    expect(digest.workingNow).toEqual([]);
+    expect(digest.since).toBeNull();
+  });
+
+  it('is running while a task’s workstream is active', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Running);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
+  });
+
+  it('is waiting on you while an open card is on one of its tasks, ahead of running', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Running);
+    card(run(b, WorkstreamState.WaitingHuman));
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.WaitingOnYou);
+    expect(digest.waitingOn.recent).toEqual([
+      expect.objectContaining({ taskId: b, title: 'Which name reads best?', assigneeName: 'You' }),
+    ]);
+  });
+
+  it('ignores a card that was answered', () => {
+    const { goal, a } = adopt();
+    const item = card(run(a, WorkstreamState.Running));
+    store.write((ctx) => {
+      ctx.tx
+        .update(schema.inboxItems)
+        .set({ state: InboxState.Resolved })
+        .where(eq(schema.inboxItems.id, item.id))
+        .run();
+    });
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Running);
+    expect(digest.waitingOn).toEqual({ recent: [], earlier: [] });
+  });
+
+  it('is failed when a task failed, even while another task waits on the builder', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Failed);
+    card(run(b, WorkstreamState.WaitingHuman));
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Failed);
+  });
+
+  it('is no longer failed once the task is retried', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Failed);
+    clock = new Date(at(9));
+    run(a, WorkstreamState.Running);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
+  });
+
+  it('is done once every task that was not cancelled is done, in a project without pull requests', () => {
+    const { goal, a, b, c } = adopt();
+    store.write((ctx) => {
+      setTaskStatus(ctx, c, TaskStatus.Cancelled);
+    });
+    run(a, WorkstreamState.Done);
+    run(b, WorkstreamState.Done);
+    finish(a);
+    finish(b);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Done);
+    expect(digest.progress).toMatchObject({
+      done: 2,
+      total: 2,
+      cancelled: [{ taskId: c, title: 'Proposal' }],
+    });
+  });
+
+  it('counts the done tasks over the tasks that are not cancelled', () => {
+    const { goal, a, c } = adopt();
+    store.write((ctx) => {
+      setTaskStatus(ctx, c, TaskStatus.Cancelled);
+    });
+    run(a, WorkstreamState.Done);
+    finish(a);
+    expect(goalDigest(store.db, goal.id, null).progress).toMatchObject({ done: 1, total: 2 });
+  });
+});
+
+describe('a goal in a project with pull requests', () => {
+  let prProject: ProjectDto;
+  beforeEach(() => {
+    prProject = seedProject(store, { delivery: 'pull_request', name: 'prs' });
+  });
+
+  function shippedBatch(title: string, state: PullRequestState | null): BatchId {
+    const id = store.write((ctx) =>
+      insertBatch(ctx, {
+        projectId: prProject.id,
+        title,
+        baseBranch: 'main',
+        worktreePath: `/tmp/wt/${title}`,
+      }),
+    ).value.id;
+    for (const to of [BatchState.Open, BatchState.Shipping])
+      store.write((ctx) => transitionBatch(ctx, id, { to }));
+    store.write((ctx) =>
+      transitionBatch(ctx, id, {
+        to: BatchState.Shipped,
+        patch: { prUrl: `https://github.com/o/r/pull/${title}` },
+      }),
+    );
+    if (state)
+      store.write((ctx) =>
+        recordPullRequestStatus(ctx, id, {
+          state,
+          checks: 'passing',
+          failingChecks: [],
+          checkedAt: at(8),
+          unknownReason: null,
+        }),
+      );
+    return id;
+  }
+
+  const merge = (id: BatchId) =>
+    store.write((ctx) =>
+      recordPullRequestStatus(ctx, id, {
+        state: PullRequestState.Merged,
+        checks: 'passing',
+        failingChecks: [],
+        checkedAt: at(9),
+        unknownReason: null,
+      }),
+    );
+
+  it('is shipping while a pull request is open, and done only after every one merges', () => {
+    const { goal, a, b, c } = adopt(prProject.id);
+    const one = shippedBatch('one', PullRequestState.Open);
+    const two = shippedBatch('two', PullRequestState.Open);
+    run(a, WorkstreamState.Done, { batchId: one });
+    run(b, WorkstreamState.Done, { batchId: one });
+    run(c, WorkstreamState.Done, { batchId: two });
+    for (const id of [a, b, c]) finish(id);
+
+    let digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Shipping);
+    expect(digest.openPullRequests).toBe(2);
+    expect(digest.progress).toMatchObject({ done: 3, total: 3 });
+
+    merge(one);
+    digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Shipping);
+    expect(digest.openPullRequests).toBe(1);
+
+    merge(two);
+    digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Done);
+    expect(digest.openPullRequests).toBe(0);
+  });
+
+  it('counts a task whose batch closed with nothing to ship as on the base', () => {
+    const { goal, a, b, c } = adopt(prProject.id);
+    const closed = store.write((ctx) =>
+      insertBatch(ctx, {
+        projectId: prProject.id,
+        title: 'closed',
+        baseBranch: 'main',
+        worktreePath: '/tmp/wt/closed',
+      }),
+    ).value.id;
+    for (const to of [BatchState.Open, BatchState.Shipping])
+      store.write((ctx) => transitionBatch(ctx, closed, { to }));
+    store.write((ctx) =>
+      transitionBatch(ctx, closed, { to: BatchState.Closed, reason: 'no commits beyond the base' }),
+    );
+    const open = shippedBatch('open', PullRequestState.Open);
+    run(a, WorkstreamState.Done, { batchId: closed });
+    run(b, WorkstreamState.Done, { batchId: open });
+    run(c, WorkstreamState.Done, { batchId: open });
+    for (const id of [a, b, c]) finish(id);
+
+    let digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Shipping);
+    expect(digest.openPullRequests).toBe(1);
+
+    merge(open);
+    digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Done);
+    expect(digest.openPullRequests).toBe(0);
+  });
+
+  it('is shipping while a finished task’s batch has no pull request yet', () => {
+    const { goal, a, b, c } = adopt(prProject.id);
+    const unshipped = store.write((ctx) =>
+      insertBatch(ctx, {
+        projectId: prProject.id,
+        title: 'unshipped',
+        baseBranch: 'main',
+        worktreePath: '/tmp/wt/unshipped',
+      }),
+    ).value.id;
+    for (const id of [a, b, c]) {
+      run(id, WorkstreamState.Done, { batchId: unshipped });
+      finish(id);
+    }
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Shipping);
+    expect(digest.openPullRequests).toBe(0);
+  });
+});
+
+describe('the rows', () => {
+  it('lists the running workstreams with their persona, model, effort and step', () => {
+    const { goal, a, b } = adopt();
+    const steps = [
+      step({ personaName: 'Planner', model: 'fable-5.1', status: StepStatus.Done }),
+      step({ personaName: 'Implementer' }),
+      step({
+        role: StepRole.Review,
+        personaName: 'Reviewer',
+        model: 'opus-5.5',
+        status: StepStatus.Pending,
+      }),
+    ];
+    const ws = run(a, WorkstreamState.Running, { steps, stepIndex: 1 });
+    run(b, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.workingNow).toEqual([
+      {
+        workstreamId: ws,
+        taskId: a,
+        taskTitle: 'Patch route',
+        persona: 'Implementer',
+        model: 'sonnet-5.5',
+        effort: Effort.High,
+        stepNumber: 2,
+        stepCount: 3,
+      },
+    ]);
+    expect(digest.team).toEqual([
+      { persona: 'Planner', model: 'fable-5.1', effort: Effort.High },
+      { persona: 'Implementer', model: 'sonnet-5.5', effort: Effort.High },
+      { persona: 'Reviewer', model: 'opus-5.5', effort: Effort.High },
+    ]);
+  });
+
+  it('names the next task and the open tasks it waits on once none is ready', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Running);
+    expect(goalDigest(store.db, goal.id, null).next).toEqual({
+      taskId: b,
+      title: 'Drawer',
+      waitsOn: [{ taskId: a, title: 'Patch route' }],
+    });
+  });
+
+  it('has no next task once every task has started', () => {
+    const { goal, a, b, c } = adopt();
+    for (const id of [a, b, c]) run(id, WorkstreamState.Running);
+    expect(goalDigest(store.db, goal.id, null).next).toBeNull();
+  });
+
+  it('sums tokens over the goal’s sessions, and dollars only where a session has them', () => {
+    const { goal, a, b } = adopt();
+    const wsA = run(a, WorkstreamState.Running);
+    const wsB = run(b, WorkstreamState.Running);
+    const open = (
+      workstreamId: WorkstreamId,
+      input: number,
+      output: number,
+      cost: number | null,
+    ) => {
+      const session = store.write((ctx) =>
+        insertSession(ctx, {
+          workstreamId,
+          provider: 'claude',
+          model: 'sonnet',
+          effort: Effort.High,
+          mode: 'managed',
+          mcpTokenHash: `hash-${workstreamId}-${String(input)}`,
+        }),
+      ).value;
+      store.write((ctx) => {
+        updateSessionUsage(ctx, session.id, { inputTokens: input, outputTokens: output });
+        ctx.tx
+          .update(schema.sessions)
+          .set({ costUsd: cost })
+          .where(eq(schema.sessions.id, session.id))
+          .run();
+      });
+    };
+    open(wsA, 1000, 500, null);
+    expect(goalDigest(store.db, goal.id, null).cost).toEqual({
+      tokens: 1500,
+      dollars: null,
+      sessions: 1,
+    });
+    open(wsA, 200, 100, 0.5);
+    open(wsB, 10, 5, 0.25);
+    expect(goalDigest(store.db, goal.id, null).cost).toEqual({
+      tokens: 1815,
+      dollars: 0.75,
+      sessions: 3,
+    });
+  });
+});
+
+describe('the window', () => {
+  it('leaves what was recorded before the previous view out of the Δ rows', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(9);
+    deviation(ws, 'Split A in two');
+    decision('Areas follow packages?');
+    setClock(11);
+    deviation(ws, 'Split B in two');
+    decision('Names read how?');
+
+    const digest = goalDigest(store.db, goal.id, at(10));
+    expect(digest.since).toBe(at(10));
+    expect(digest.deviations.recent.map((d) => d.summary)).toEqual([
+      'Split B in two: too big for one review',
+    ]);
+    expect(digest.deviations.earlier.map((d) => d.summary)).toEqual([
+      'Split A in two: too big for one review',
+    ]);
+    expect(digest.decisions.recent.map((d) => d.question)).toEqual(['Names read how?']);
+    expect(digest.decisions.earlier.map((d) => d.question)).toEqual(['Areas follow packages?']);
+  });
+
+  it('counts every item as recent on the first visit', () => {
+    const { goal, a } = adopt();
+    deviation(run(a, WorkstreamState.Running), 'Split A in two');
+    decision('Areas follow packages?');
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.deviations.recent).toHaveLength(1);
+    expect(digest.decisions.recent).toHaveLength(1);
+    expect(digest.deviations.earlier).toEqual([]);
+  });
+
+  it('reads only the deviations of the goal’s workstreams and the project’s decisions', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Running);
+    const other = insertGoalFreeTask();
+    deviation(run(other, WorkstreamState.Running), 'Someone else’s');
+    deviation(null, 'No workstream');
+    const elsewhere = seedProject(store, { name: 'elsewhere' });
+    decision('Another project', elsewhere.id);
+    decision('Global', null);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.deviations).toEqual({ recent: [], earlier: [] });
+    expect(digest.decisions).toEqual({ recent: [], earlier: [] });
+  });
+
+  it('opening a goal answers the previous mark, then advances it', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(9);
+    deviation(ws, 'Split A in two');
+
+    setClock(10);
+    const first = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(first.since).toBeNull();
+    expect(first.deviations.recent).toHaveLength(1);
+    expect(lastGoalView(store.db, goal.id, builder.id)).toBe(at(10));
+
+    setClock(11);
+    deviation(ws, 'Split B in two');
+    setClock(12);
+    const second = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(second.since).toBe(at(10));
+    expect(second.deviations.recent.map((d) => d.summary)).toEqual([
+      'Split B in two: too big for one review',
+    ]);
+    expect(second.deviations.earlier).toHaveLength(1);
+    expect(lastGoalView(store.db, goal.id, builder.id)).toBe(at(12));
+  });
+});
+
+describe('the goal list', () => {
+  it('counts each goal’s new items from its own previous view without advancing it', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(9);
+    deviation(ws, 'Split A in two');
+    decision('Areas follow packages?');
+    card(ws);
+
+    setClock(10);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    setClock(11);
+    deviation(ws, 'Split B in two');
+
+    setClock(12);
+    const list = listGoalSummaries(store.db, project.id);
+    expect(list.goals).toHaveLength(1);
+    expect(list.goals[0]).toMatchObject({ newItems: 1 });
+    expect(list.goals[0]?.digest.status).toBe(GoalStatus.WaitingOnYou);
+    expect(list.goals[0]?.digest.ungrouped).toBeNull();
+    // Asking again changes nothing: only opening a goal advances its mark.
+    expect(listGoalSummaries(store.db, project.id).goals[0]?.newItems).toBe(1);
+    expect(lastGoalView(store.db, goal.id, builder.id)).toBe(at(10));
+  });
+
+  it('counts everything as new for a goal never opened', () => {
+    const { a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    deviation(ws, 'Split A in two');
+    decision('Areas follow packages?');
+    expect(listGoalSummaries(store.db, project.id).goals[0]?.newItems).toBe(2);
+  });
+
+  it('carries the Ungrouped group', () => {
+    adopt();
+    const loose = insertGoalFreeTask();
+    run(loose, WorkstreamState.Failed);
+    expect(listGoalSummaries(store.db, project.id).ungrouped).toMatchObject({ failed: 1 });
+  });
+});
+
+function insertGoalFreeTask(title = 'Loose task'): TaskId {
+  return store.write((ctx) =>
+    insertTask(ctx, project.id, { title, areas: ['api'], acceptanceCriteria: ['It works'] }),
+  ).value.id;
+}
+
+describe('the Ungrouped group', () => {
+  it('is null when no task without a goal is running or failed', () => {
+    adopt();
+    insertGoalFreeTask();
+    const done = insertGoalFreeTask('Done task');
+    run(done, WorkstreamState.Done);
+    finish(done);
+    expect(ungroupedDigest(store.db, project.id)).toBeNull();
+  });
+
+  it('lists a failed task with no goal', () => {
+    const { a } = adopt();
+    run(a, WorkstreamState.Failed);
+    const loose = insertGoalFreeTask();
+    const ws = run(loose, WorkstreamState.Failed);
+    expect(ungroupedDigest(store.db, project.id)).toEqual({
+      goalId: null,
+      status: GoalStatus.Failed,
+      running: 0,
+      failed: 1,
+      workstreams: [
+        { workstreamId: ws, taskId: loose, taskTitle: 'Loose task', state: WorkstreamState.Failed },
+      ],
+    });
+  });
+
+  it('reports running tasks, and failed ahead of running', () => {
+    const one = insertGoalFreeTask('One');
+    const two = insertGoalFreeTask('Two');
+    run(one, WorkstreamState.Running);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({
+      status: GoalStatus.Running,
+      running: 1,
+      failed: 0,
+    });
+    run(two, WorkstreamState.Failed);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({
+      status: GoalStatus.Failed,
+      running: 1,
+      failed: 1,
+    });
+  });
+
+  it('comes with a goal’s digest', () => {
+    const { goal } = adopt();
+    run(insertGoalFreeTask(), WorkstreamState.Failed);
+    expect(goalDigest(store.db, goal.id, null).ungrouped).toMatchObject({ failed: 1 });
+  });
+});

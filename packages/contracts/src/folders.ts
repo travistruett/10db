@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AreaDef, FoundHostDto } from './entities';
+import { AreaDef, atMostOneCatchAll, FoundHostDto, ONE_CATCH_ALL } from './entities';
 
 /** Where a candidate gate command was found in a folder. */
 export const GateSource = {
@@ -84,7 +84,8 @@ export const AreaProposalSource = {
 export type AreaProposalSource = (typeof AreaProposalSource)[keyof typeof AreaProposalSource];
 
 export const AreaProposal = z.object({
-  areas: z.array(ProposedArea).min(1),
+  /** The rest of the repository's files are the `catchAll` area's; a file added later falls in it. */
+  areas: z.array(ProposedArea).min(1).refine(atMostOneCatchAll, { message: ONE_CATCH_ALL }),
   namedBy: z.enum(AreaProposalSource),
 });
 export type AreaProposal = z.infer<typeof AreaProposal>;

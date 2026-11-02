@@ -177,6 +177,9 @@ export function isWithinOnEveryReading(dir: string, target: string): boolean {
 /** Stands in for a dot while an area glob is matched, so `*`, `?` and `**` read a dot name like any other. */
 const DOT = '';
 
+/** Whether a path has a `.git` part: git internals, which no area covers. */
+const isGitPath = (path: string): boolean => path.split(/[\\/]/).includes('.git');
+
 /**
  * Whether an area glob covers `path`. Node's `matchesGlob` has no `dot` option and lets no `*` or
  * `**` match a name that starts with a dot, so both sides are matched with every dot swapped for a
@@ -184,7 +187,7 @@ const DOT = '';
  * A path with a `.git` part is in no area, so a claim never reaches git internals (hooks, config).
  */
 function areaMatches(path: string, glob: string): boolean {
-  if (path.split(/[\\/]/).includes('.git')) return false;
+  if (isGitPath(path)) return false;
   if (path.includes(DOT) || glob.includes(DOT)) return matchesGlob(path, glob);
   return matchesGlob(path.replaceAll('.', DOT), glob.replaceAll('.', DOT));
 }
@@ -192,6 +195,10 @@ function areaMatches(path: string, glob: string): boolean {
 /**
  * The areas and hazards a repo-relative path falls in. An area glob covers dot names (`**` takes in
  * `.gitignore`); a hazard glob does not, as `matchesGlob` reads it.
+ *
+ * The catch-all area (`catchAll`) is in the list only when no other area matches the path, even if
+ * its own globs match it; a path with a `.git` part is in no area, the catch-all's included. A
+ * project with no catch-all lists exactly the areas whose globs match.
  */
 export function classifyPath(
   rel: string,
@@ -201,5 +208,12 @@ export function classifyPath(
   const path = fold(rel);
   const hits = (defs: readonly AreaDef[], matches: (path: string, glob: string) => boolean) =>
     defs.filter((d) => d.globs.some((g) => matches(path, fold(g)))).map((d) => d.name);
-  return { areas: hits(areas, areaMatches), hazards: hits(hazards, matchesGlob) };
+  const ordinary = areas.filter((a) => a.catchAll !== true);
+  const held = hits(ordinary, areaMatches);
+  const rest = areas.find((a) => a.catchAll === true);
+  const fallsThrough = held.length === 0 && rest !== undefined && !isGitPath(path);
+  return {
+    areas: fallsThrough ? [rest.name] : held,
+    hazards: hits(hazards, matchesGlob),
+  };
 }

@@ -181,9 +181,6 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
-    .get('/projects/:projectId/goals', (c) =>
-      c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
-    )
     .post(
       '/projects/:projectId/goals/adopt',
       validator('json', (value): GoalAdoptInput => GoalAdoptInput.parse(value)),
@@ -205,6 +202,12 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/batches', (c) =>
       c.json(deps.services.listBatches(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/goals', (c) =>
+      c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/goals/:goalId/digest', (c) =>
+      c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),
     )
     .post(
       '/projects/:projectId/batches',

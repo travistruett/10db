@@ -838,6 +838,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     processes,
     shipper,
+    starter,
     logger: logger.child({ component: 'delivery' }),
     worktrees: { ctx: delivery, root: worktreeRoot },
   });

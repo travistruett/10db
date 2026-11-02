@@ -72,6 +72,13 @@ const union = (candidates: readonly AreaCandidate[]) => [
 ];
 
 /**
+ * The area that holds the rest candidate is the project's catch-all, so a file added later in a
+ * new package, a new top-level folder or a first dotfile falls in it. Absent for every other area.
+ */
+const catchAllOf = (members: readonly AreaCandidate[]): { catchAll?: true } =>
+  members.some((m) => m.kind === AreaCandidateKind.Rest) ? { catchAll: true } : {};
+
+/**
  * The areas a model's answer makes of `candidates`, or null when the answer is not usable: not the
  * agreed JSON, a candidate missing or used twice, two units merged, a bad or repeated name, or a
  * reason with nothing in it. Nothing the model says is taken on trust beyond that.
@@ -98,7 +105,7 @@ export function areasFromModel(
     const reason = oneLine(entry.reason);
     if (!NAME.test(name) || RESERVED.has(name) || names.has(name) || reason === '') return null;
     names.add(name);
-    areas.push({ name, reason, globs: union(members) });
+    areas.push({ name, reason, globs: union(members), ...catchAllOf(members) });
   }
   return used.size === candidates.length ? areas : null;
 }
@@ -156,7 +163,7 @@ function reasonFor(candidate: AreaCandidate): string {
     case AreaCandidateKind.Folder:
       return oneLine(`${candidate.label} is a folder of its own (${count}).`);
     case AreaCandidateKind.Rest:
-      return `The top of the repository and its small folders (${count}).`;
+      return `The top of the repository, its small folders and any file no other area holds (${count}).`;
   }
 }
 
@@ -166,6 +173,11 @@ export function areasFromStructure(candidates: readonly AreaCandidate[]): Propos
   return candidates.map((candidate) => {
     const name = nameFor(candidate, taken);
     taken.add(name);
-    return { name, reason: reasonFor(candidate), globs: [...candidate.globs] };
+    return {
+      name,
+      reason: reasonFor(candidate),
+      globs: [...candidate.globs],
+      ...catchAllOf([candidate]),
+    };
   });
 }
