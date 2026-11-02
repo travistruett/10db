@@ -570,6 +570,19 @@ export const shipCards = {
     };
   },
   /**
+   * The branch still holds git's conflict markers from 10db's merge of the base, in `paths`: the
+   * shipping gate has no session to resolve them, so it didn't run. The batch records `GateFailed`,
+   * the nearest code it has: the check couldn't pass, and a retry runs it once the markers are gone.
+   */
+  baseMarkers: (batch: BatchDto, paths: readonly string[]): ShipFailure => ({
+    failure: BatchFailure.GateFailed,
+    card: {
+      title: `${notShipped(batch)}: conflict markers from the merge of ${batch.baseBranch} are still in the branch`,
+      body: `10db merged origin/${batch.baseBranch} into the branch for a task's gate and left git's conflict markers for a session to resolve. They are still in:\n${listPaths(paths)}\n\nNo gate ran and nothing was pushed. Start a fix task in the batch to resolve them (it reopens the batch), or resolve them by hand in the batch's worktree and commit, then press Retry in a task's drawer on the Board to ship again.`,
+      detail: { batchId: batch.id },
+    },
+  }),
+  /**
    * The second run 10db made by itself failed in tests the batch didn't change too: the failure looks
    * like the batch's surroundings, so the card offers Retry and Abandon and no fix task.
    */

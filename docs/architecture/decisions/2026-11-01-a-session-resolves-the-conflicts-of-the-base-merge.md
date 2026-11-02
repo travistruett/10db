@@ -53,9 +53,11 @@ fails on it.
 ## Left open
 
 - The shipping gate has no session to send. It never starts such a merge (a conflict that appears only then is the
-  `base-conflict` notice with the gate on the stale branch, as before), and finding markers left by an earlier gate
-  it runs the gate anyway, which fails on them and raises the gate-failed card. A follow-up can reopen the batch's
-  last task with the `merge` action.
+  `base-conflict` notice with the gate on the stale branch, as before). Finding markers left by an earlier gate
+  (Ship anyway after the member sent to merge failed at its retry limit), it runs no gate and pushes nothing: the
+  batch fails with one card naming the marked files (`shipCards.baseMarkers`; the batch records `gate_failed`, the
+  nearest failure code), which offers a fix task in the batch or a hand resolution, then Retry. A follow-up can
+  reopen the batch's last task with the `merge` action instead.
 - A resolution is judged by the gate that tests the merged result, as a union of added lines is: 10db checks that
   the markers are gone, not that the code is right.
 - Conflicts without markers in the tree (a deletion on one side, a binary file) stay the builder's.
