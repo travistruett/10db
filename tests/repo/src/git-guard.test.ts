@@ -463,6 +463,32 @@ describe('git guard with a wrapper option before the command', () => {
   it.each(['-c', '-g', '-u'])('sudo %s attached to its value', (option) => {
     expect(runHook(bash(`sudo ${option}V git add -A`, clean)).outcome).toBe('deny');
   });
+
+  // A flag whose whole name is a prefix of a value option (sudo --login, --login-class) is that
+  // flag: getopt_long prefers an exact match, so the next word is the command.
+  it.each<[string, string, Outcome]>([
+    ['sudo --login, then a bulk add', 'sudo --login git add -A', 'deny'],
+    ['sudo --login, then a force push', 'sudo --login git push --force origin main', 'ask'],
+    ['sudo --login, then a read-only git', 'sudo --login git status', 'allow'],
+  ])('%s', (_name, command, expected) => {
+    expect(runHook(bash(command, clean)).outcome).toBe(expected);
+  });
+
+  // Value options of xargs and env take the next word, so the command after the value is seen.
+  it.each<[string, string]>([
+    ['xargs --process-slot-var NAME', 'echo x | xargs --process-slot-var V git add -A'],
+    ['env -a NAME', 'env -a name git add -A'],
+    ['env --argv0 NAME', 'env --argv0 name git add -A'],
+  ])('%s leaves the command visible', (_name, command) => {
+    expect(runHook(bash(command, clean)).outcome).toBe('deny');
+  });
+
+  it.each<[string, string]>([
+    ['env -a NAME', 'env -a name git status'],
+    ['env --argv0 NAME', 'env --argv0 name git status'],
+  ])('%s with a read-only git is allowed', (_name, command) => {
+    expect(runHook(bash(command, clean)).outcome).toBe('allow');
+  });
 });
 
 describe("git guard with another session's work already staged", () => {

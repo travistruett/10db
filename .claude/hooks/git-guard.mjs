@@ -530,6 +530,8 @@ const ENV_WRAPPER = /** @type {Wrapper} */ (WRAPPERS.get('env'));
  * comes next only when the option that takes one is last, and what follows a value option is its
  * value. A long option takes its value in the next word unless it carries `=`, and getopt_long
  * accepts any unambiguous prefix of a name, so a prefix of a listed long option counts (`--ch DIR`).
+ * An exact name wins over a prefix, as in getopt_long: sudo's `--login` is a flag even though it
+ * is also a prefix of the value option `--login-class`.
  * @param {string} word
  * @param {Wrapper} wrapper
  * @returns {{ known: boolean, takesNext: boolean }}
@@ -537,6 +539,8 @@ const ENV_WRAPPER = /** @type {Wrapper} */ (WRAPPERS.get('env'));
 function readOption(word, wrapper) {
   if (word.startsWith('--')) {
     const name = word.split('=')[0];
+    if (wrapper.valueOptions.includes(name)) return { known: true, takesNext: !word.includes('=') };
+    if (wrapper.flags.includes(name)) return { known: true, takesNext: false };
     const prefixes = (/** @type {string[]} */ list) =>
       list.some((option) => option.startsWith('--') && option.startsWith(name));
     return {
