@@ -37,11 +37,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import {
-  createTempRepoWithOrigin,
-  isolatedGitEnv,
-  seedWorkstream,
-} from '../../test/fixtures';
+import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, type Git } from '../git';
 import { silentLogger } from '../log';
