@@ -17,7 +17,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import type { z } from 'zod';
-import { and, asc, eq, or } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -128,13 +128,29 @@ function builderId(db: DbReader): PersonId {
   return builder.id;
 }
 
+/**
+ * An exact handle (unique) wins. Otherwise the name must belong to exactly one person: a name
+ * is not unique, and guessing between two people would hand the acceptance to the wrong one.
+ */
 function personNamed(db: DbReader, name: string, where: string): PersonId {
-  const person = db
+  const byHandle = db
     .select({ id: schema.people.id })
     .from(schema.people)
-    .where(or(eq(schema.people.handle, name), eq(schema.people.name, name)))
+    .where(eq(schema.people.handle, name))
     .get();
+  if (byHandle) return byHandle.id;
+  const byName = db
+    .select({ id: schema.people.id })
+    .from(schema.people)
+    .where(eq(schema.people.name, name))
+    .limit(2)
+    .all();
+  const [person, other] = byName;
   if (!person) throw new InvalidError(`${where}: nobody is called ${name}`);
+  if (other)
+    throw new InvalidError(
+      `${where}: more than one person is called ${name}; name them by handle instead`,
+    );
   return person.id;
 }
 
