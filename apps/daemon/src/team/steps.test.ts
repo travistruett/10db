@@ -142,6 +142,29 @@ describe('startTaskWithPlan', () => {
     expect(listWorkstreams(state.db, {})).toEqual([]);
   });
 
+  it('starts a task that was refused for having no areas once its areas are set, keeping its id', () => {
+    const task = state.write((ctx) =>
+      insertTaskFromProposal(ctx, {
+        proposalId: insertProposal(ctx, {
+          projectId: project.id,
+          kind: 'new_task',
+          title: 'No areas',
+          body: '',
+          sourceId: insertSource(ctx, 'agent', {}),
+        }),
+        projectId: project.id,
+        title: 'No areas',
+        description: '',
+      }),
+    );
+    expect(() => startTaskWithPlan(state, task.id)).toThrow(NEW_TASK_NO_AREAS);
+    const set = state.write((ctx) => patchTask(ctx, task.id, { areas: ['api'] }));
+    expect(set).toMatchObject({ id: task.id, areas: ['api'] });
+    const started = startTaskWithPlan(state, task.id);
+    expect(started.taskId).toBe(task.id);
+    expect(listWorkstreams(state.db, {})).toHaveLength(1);
+  });
+
   it('refuses to start a task over budget, naming the step', () => {
     measureForTests(state);
     const task = addTask();

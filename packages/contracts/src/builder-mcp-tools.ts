@@ -93,6 +93,7 @@ export const BuilderToolInputs = {
       acceptanceCriteria: z.array(z.string()).optional(),
       riskTags: z.array(z.string()).optional(),
       flowId: z.string().nullable().optional(),
+      areas: z.array(z.string()).optional(),
     })
     .refine(changesSomething, { message: CHANGE_NOTHING }),
   [BuilderToolName.RemoveTask]: z.object({ taskId: TaskId }),
@@ -146,7 +147,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
   [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects. Add dependsOn and riskTags only when needed, and omit flowId for the project default. Refuses what the New Task form refuses, in the same words.`,
-  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, description, acceptanceCriteria (replaces the list), riskTags or flowId. ${DRAFTING} Send only the fields to change.`,
+  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, description, acceptanceCriteria (replaces the list), riskTags, flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:

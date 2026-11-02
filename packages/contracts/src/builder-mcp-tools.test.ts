@@ -194,6 +194,17 @@ describe('the drafting guidance', () => {
     expect(edit?.description).toContain('seen or measured');
   });
 
+  it('edit_task takes areas, and says they change only before the task starts', () => {
+    const taskId = mintId('Task');
+    expect(BuilderToolInputs.edit_task.parse({ taskId, areas: ['api'] })).toMatchObject({
+      areas: ['api'],
+    });
+    const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
+    expect(edit?.description).toContain('areas');
+    expect(edit?.description).toContain('before it starts');
+    expect(JSON.stringify(edit?.inputSchema)).toContain('"areas"');
+  });
+
   it('list_tasks says it returns open tasks only', () => {
     const tool = builderToolList().find((t) => t.name === BuilderToolName.ListTasks);
     expect(tool?.description).toContain('open');
