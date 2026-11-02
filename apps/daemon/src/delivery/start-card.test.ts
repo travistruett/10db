@@ -4,6 +4,7 @@ import { ConflictError, TaskStatus } from '@10db/contracts';
 import {
   getBatch,
   getTask,
+  insertSession,
   insertWorkstream,
   listBatches,
   listInbox,
@@ -95,6 +96,46 @@ describe('the answers of a refused start', () => {
     expect(h.cards()).toEqual([]);
     // The failed run stays as history.
     expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toContain(earlier.id);
+  });
+
+  it('cancels a task whose latest run was cancelled in Factory, when its restart is refused', async () => {
+    const task = h.addTask('Alpha', { areas: ['api'] });
+    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
+    h.state.write((w) =>
+      insertSession(w, {
+        workstreamId: earlier.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'hash-factory-cancel',
+      }),
+    );
+    h.settle(earlier.id, 'CANCELLED');
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    inbox.answer(card.id, { choice: StartChoice.Cancel });
+    expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('cancels a reopened task, whose latest run finished, when its restart is refused', async () => {
+    const task = h.addTask('Alpha', { areas: ['api'] });
+    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
+    h.settle(earlier.id, 'DONE');
+    // reopenTask leaves the task open with its finished run as the latest.
+    h.state.write((w) => {
+      setTaskStatus(w, task.id, 'open');
+    });
+    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+    h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    inbox.answer(card.id, { choice: StartChoice.Cancel });
+    expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(h.cards()).toEqual([]);
   });
 
   it('titles a repeated start after its first task, and keeps the title within 200 characters', () => {
