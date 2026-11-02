@@ -166,6 +166,17 @@ function heldBookkeeping(root: string, rel: string): BookkeepingEntry[] {
  * directory that holds bookkeeping and nothing else.
  */
 export function bookkeepingAt(root: string, rel: string): BookkeepingEntry[] {
+  const own = bookkeepingEntryAt(root, rel);
+  return own.length > 0 ? own : heldBookkeeping(root, rel);
+}
+
+/**
+ * The entry `rel` under `root` is by itself, empty when it is not: a path inside a bookkeeping directory, one
+ * itself as a real directory, or a `file` entry as `ignoredBookkeepingWrite` judges it. A directory that merely
+ * holds bookkeeping is not (`bookkeepingAt` judges that). The commit tool leaves such a path out of what it
+ * names to `git add`, since git refuses a named path an ignore rule covers.
+ */
+export function bookkeepingEntryAt(root: string, rel: string): BookkeepingEntry[] {
   const entry = bookkeepingDirectoryAt(root, rel) ?? ignoredBookkeepingWrite(root, rel);
-  return entry ? [entry] : heldBookkeeping(root, rel);
+  return entry ? [entry] : [];
 }

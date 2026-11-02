@@ -48,13 +48,20 @@ export function tempDir(prefix: string): TempDir {
 /**
  * An environment for a git child process that only the repository it runs in can steer: no
  * inherited `GIT_*` variable (git exports `GIT_DIR`, `GIT_INDEX_FILE` and more to a hook, which would
- * redirect the child to the outer repository) and no system or global config.
+ * redirect the child to the outer repository) and no system or global config. Git's default excludes file
+ * (`$XDG_CONFIG_HOME/git/ignore`, by default `~/.config/git/ignore`) is read even with the global config off,
+ * so `core.excludesFile` is pinned to `/dev/null` too: what a contributor ignores can't change a result.
+ * (The daemon's own git drops `GIT_CONFIG_COUNT`; there `tests/git-isolation.setup.ts` points
+ * `XDG_CONFIG_HOME` at a private directory.)
  */
 export function isolatedGitEnv(): NodeJS.ProcessEnv {
   return {
     ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
     GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.excludesFile',
+    GIT_CONFIG_VALUE_0: '/dev/null',
   };
 }
 

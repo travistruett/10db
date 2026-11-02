@@ -208,7 +208,32 @@ runs whichever pnpm the builder's PATH holds, so the cut reads the version pnpm 
 `node_modules/.modules.yaml` (`packageManager: pnpm@9.x`). Below 10 it ignores `allowBuilds` (pnpm 9 doesn't read
 it) and, with no `onlyBuiltDependencies` list, names every package in the store that has an install script or a
 `binding.gyp`, less the `neverBuiltDependencies` ones. Under pnpm 10 with no list nothing builds by default, so
-nothing is named; a `.modules.yaml` with no version also names nothing.
+nothing is named; a `.modules.yaml` with no version also names nothing. Below 10 the lists
+(`neverBuiltDependencies`, `onlyBuiltDependencies`) are read only from package.json's `pnpm` field;
+`pnpm-workspace.yaml` is ignored for build settings there (pnpm 9 reads only `packages` and catalogs from it).
+This is unverified against pnpm 9's source (`getOptionsFromRootManifest` in its config package): the source
+could not be fetched when this was written, so check it before relying on it.
+
+The allow list can also live in a file. `onlyBuiltDependenciesFile` (in `pnpm-workspace.yaml`, or in
+`package.json`'s `pnpm` field) names a file of package names, and the cut reads it as data along with
+`onlyBuiltDependencies`. It reads the file only when its path stays inside the copy's root, the file is not
+itself a link, and no linked directory on the way leads out of the root (the cut compares the real path of the
+file with the real path of the root). A linked directory that stays inside the root is followed. So the notice
+never reads a file the project's own tree doesn't hold. A path that leads above the root, a file that is a link,
+or a linked directory that leads outside is not read, and it adds no names.
+
+Under pnpm 9 and earlier only the setting in `package.json`'s `pnpm` field is read; one in
+`pnpm-workspace.yaml` is ignored there, as `allowBuilds` is (pnpm 9 reads no build settings from that file). So
+under pnpm 9 a project whose `onlyBuiltDependenciesFile` is set only in `pnpm-workspace.yaml` has no list, and
+the notice names every package in the store with an install script, less the `neverBuiltDependencies` ones.
+Where the setting is read (the `pnpm` field under pnpm 9, either place under pnpm 10), it counts as a list that
+limits builds whether or not the file can be read: under pnpm 9 a missing, unreadable or empty file is a list
+that builds nothing, so with such a file the cut names no package (and not the whole store, as it does with no
+list at all). A non-empty `neverBuiltDependencies` list still wins under pnpm 9: pnpm then builds everything the
+list doesn't name and ignores `onlyBuiltDependencies` and `onlyBuiltDependenciesFile`, so the notice names every
+package with an install script less those. So a reader sees the notice name the listed packages when the
+setting is read, the file is inside the copy and holds those names, the file is not a link and no linked
+directory on its path leads out of the root; with the file unread, the notice names nothing from it.
 
 Nothing else is new. A copy's lane profile is today's. The shared cut and the switch back keep their git rules
 (decision 129 and `decisions/2026-10-29-shared-checkout-switch-back.md`).

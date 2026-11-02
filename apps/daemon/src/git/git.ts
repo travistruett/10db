@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
 import { InvalidError } from '@10db/contracts';
 import { realPathOf, resolveInRepo } from '../guard';
-import { leftOutOfCommits } from './claude-code-bookkeeping';
+import { bookkeepingEntryAt, leftOutOfCommits } from './claude-code-bookkeeping';
 import {
   memoryPinStore,
   sameCheckoutIdentity,
@@ -1452,32 +1452,45 @@ export function createGit(opts: GitOptions = {}): Git {
   async function stage(
     c: Pinned,
     env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
-    named: readonly string[],
+    allNamed: readonly string[],
     tip: string,
   ): Promise<string[]> {
     const { real } = c;
+    // Claude Code's bookkeeping is never named to `git add`: git refuses a named path an ignore rule covers
+    // (a .gitignore, or the user's default excludes file), so an ignore rule would decide whether the commit
+    // works. What is left out here is logged with what is put back below.
+    const left: { rel: string; writtenBy: string }[] = [];
+    const named = allNamed.filter((rel) => {
+      const entries = bookkeepingEntryAt(real, rel);
+      if (entries.length === 0) return true;
+      left.push({ rel, writtenBy: entries.map((e) => e.writtenBy).join(' ') });
+      return false;
+    });
     for (const name of named) {
       const embedded = embeddedRepository(real, name);
       if (embedded !== null)
         throw refusal(real, { kind: GitTrustFailure.Embedded, path: embedded });
     }
-    try {
-      await git(c, ['add', '-A', '--', ...named], { env });
-    } catch (error) {
-      if (!(error instanceof GitError)) throw error;
-      if (/pathspec .* did not match/i.test(error.stderr))
-        throw new InvalidError(
-          `No file or change at ${named.join(', ')}: a path must exist or have been deleted since the last commit`,
-        );
-      throw new InvalidError(`10db could not stage ${named.join(', ')}: ${error.message}`);
+    // With nothing left to name, `git add -A --` would stage the whole tree.
+    if (named.length > 0) {
+      try {
+        await git(c, ['add', '-A', '--', ...named], { env });
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        if (/pathspec .* did not match/i.test(error.stderr))
+          throw new InvalidError(
+            `No file or change at ${allNamed.join(', ')}: a path must exist or have been deleted since the last commit`,
+          );
+        throw new InvalidError(`10db could not stage ${allNamed.join(', ')}: ${error.message}`);
+      }
     }
     let changed = (
       await git(c, ['diff-index', '--cached', '--name-only', '-z', '--no-renames', tip], { env })
     )
       .split('\0')
       .filter(Boolean);
-    // Claude Code's own bookkeeping, in any `.claude/` folder, never goes into a commit: it is put back as
-    // the tip has it, and the daemon log says what was left out.
+    // Bookkeeping that a named folder held, in any `.claude/` folder, never goes into a commit either: it is
+    // put back as the tip has it.
     const bookkeeping = changed.flatMap((rel) => {
       const entries = leftOutOfCommits(real, rel);
       return entries.length > 0
@@ -1485,11 +1498,13 @@ export function createGit(opts: GitOptions = {}): Git {
         : [];
     });
     if (bookkeeping.length > 0) {
-      const left = new Set(bookkeeping.map((b) => b.rel));
-      await git(c, ['reset', '-q', tip, '--', ...left], { env });
-      changed = changed.filter((rel) => !left.has(rel));
-      opts.onBookkeepingDropped?.(real, bookkeeping);
+      const putBack = new Set(bookkeeping.map((b) => b.rel));
+      await git(c, ['reset', '-q', tip, '--', ...putBack], { env });
+      changed = changed.filter((rel) => !putBack.has(rel));
+      left.push(...bookkeeping);
     }
+    // The daemon log says what was left out.
+    if (left.length > 0) opts.onBookkeepingDropped?.(real, left);
     // Nothing staged: `ls-files` with no path would list the whole index, submodules and all.
     if (changed.length === 0) return [];
     // What this commit changes may not be a submodule or name a git dir; submodules already in the
