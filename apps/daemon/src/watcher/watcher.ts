@@ -863,7 +863,7 @@ export function createWatcher(deps: {
         const stamp = writeStamp(root, rel);
         return (
           stamp === null ||
-          !others.some((id) => excusedWrites.get(excusedKey(root, id, rel)) === stamp)
+          !others.some((id) => excusedWrites.get(excusedKey(root, rel, id))?.stamp === stamp)
         );
       });
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);

@@ -2100,24 +2100,25 @@ describe('worktree checkouts', () => {
         watcher.sync();
       };
 
-      it("does not excuse another lane's step end write to the same unchanged file", async () => {
-        const a = running('Alpha', ['api']);
-        const b = running('Beta', ['ui']);
-        watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once');
-        await write(SENSITIVE_FILE);
-        expect(flags()).toEqual([]);
-        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
-        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
-      });
-
-      it("does not excuse another lane's step end write after a restart", async () => {
+      it("still leaves another lane's unchanged excused write out of a step end after a restart", async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once');
         await write(SENSITIVE_FILE);
         restartAndResume(a);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it("cards at a step end after a restart another lane's excused file once its content changed", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restartAndResume(a);
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by lane Beta');
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
 
