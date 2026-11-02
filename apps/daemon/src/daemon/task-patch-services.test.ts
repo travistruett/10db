@@ -67,6 +67,18 @@ describe('a risk tag edit through the task service', () => {
     });
   });
 
+  it('refreshes the reason when the tag changes, and clears it with the tag', async () => {
+    const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
+    await taskService().patchTask(task.id, { riskTags: [RiskTag.Migration] });
+    const changed = await taskService().patchTask(task.id, { riskTags: [RiskTag.Dependency] });
+    expect(changed).toMatchObject({
+      workspaceMode: WorkspaceMode.Worktree,
+      placementReason: 'touches dependencies',
+    });
+    const cleared = await taskService().patchTask(task.id, { riskTags: [] });
+    expect(cleared).toMatchObject({ workspaceMode: WorkspaceMode.Shared, placementReason: null });
+  });
+
   it('leaves a placement the builder chose, and a tag that the rule ignores, alone', async () => {
     const chosen = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
     await taskService().patchTask(chosen.id, { workspaceMode: WorkspaceMode.Shared });
