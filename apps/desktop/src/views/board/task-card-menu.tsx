@@ -50,7 +50,7 @@ export interface TaskCardMenuProps {
   readonly onRemove?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
-  /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
+  /** Present when the task's batch is open or not shipped; abandoning deletes the branch when nothing is committed on it, keeps it otherwise, and cancels its unfinished tasks. */
   readonly onAbandon?: () => void;
   /** Why Abandon is held back: a run on the branch is live, and the daemon won't cut it short. */
   readonly abandonRefusal?: string | null;

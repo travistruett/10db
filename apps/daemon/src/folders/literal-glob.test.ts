@@ -1,7 +1,7 @@
 import { matchesGlob } from 'node:path';
 import { PathPattern } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { literalGlob } from './literal-glob';
+import { isLooseGlob, literalGlob } from './literal-glob';
 
 describe('literalGlob', () => {
   it.each([
@@ -27,5 +27,21 @@ describe('literalGlob', () => {
     expect(PathPattern.safeParse(glob).success).toBe(true);
     expect(matchesGlob(`${path}/f.ts`, `${glob}/**`)).toBe(true);
     expect(matchesGlob(`${other}/f.ts`, `${glob}/**`)).toBe(false);
+  });
+});
+
+describe('isLooseGlob', () => {
+  it.each([
+    { path: 'apps/daemon', loose: false },
+    { path: 'app/[orgId]', loose: false },
+    { path: 'x?y', loose: false },
+    { path: '{{cookiecutter.slug}}', loose: false },
+    { path: 'a\\b', loose: true },
+    { path: 'k{x,y}', loose: true },
+    { path: '{1..3}', loose: true },
+    { path: 'a]b', loose: true },
+    { path: 'c:drive', loose: true },
+  ])('$path is loose: $loose', ({ path, loose }) => {
+    expect(isLooseGlob(path)).toBe(loose);
   });
 });
