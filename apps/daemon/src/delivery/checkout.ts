@@ -1,5 +1,19 @@
-import type { BatchDto, BatchId, ProjectId } from '@10db/contracts';
-import { getBatch, getProject, listLiveWorktrees, listProjects, type DbReader } from '@10db/db';
+import {
+  LANE_STATES,
+  WorkstreamState,
+  type BatchDto,
+  type BatchId,
+  type ProjectDto,
+  type ProjectId,
+} from '@10db/contracts';
+import {
+  getBatch,
+  getProject,
+  listLiveWorktrees,
+  listProjects,
+  listWorkstreams,
+  type DbReader,
+} from '@10db/db';
 
 /** Where a workstream works: its batch's worktree when it has one, else the project's checkout. */
 export function checkoutOf(
@@ -11,6 +25,22 @@ export function checkoutOf(
     if (batch.worktreePath !== null) return batch.worktreePath;
   }
   return getProject(db, ws.projectId).repoPath;
+}
+
+/**
+ * Workstreams with work in hand in the project's own checkout: the lanes that write the files a
+ * branch switch would move. A lane in a separate copy edits other files and is not counted
+ * (task placement spec, P6). Counted as Abandon counts them: a lane state, a taken-over session, or
+ * a waiting one that still holds a session.
+ */
+export function lanesInProjectCheckout(db: DbReader, project: ProjectDto): number {
+  return listWorkstreams(db, { projectId: project.id }).filter(
+    (w) =>
+      (LANE_STATES.includes(w.state) ||
+        w.state === WorkstreamState.TakenOver ||
+        (w.state === WorkstreamState.WaitingHuman && w.currentSessionId !== null)) &&
+      checkoutOf(db, w) === project.repoPath,
+  ).length;
 }
 
 /**

@@ -228,19 +228,41 @@ describe('cancelRefusedStartTask', () => {
     );
   });
 
-  it.each(['RUNNING', 'FAILED', 'QUEUED'])(
-    'refuses a task whose run is %s with TaskStartedError',
-    (name) => {
-      const project = seedProject(store);
-      const task = seedTask(project.id);
-      const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
-      for (const to of PATHS[name] ?? [])
-        store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
-      expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
-        TaskStartedError,
-      );
-    },
-  );
+  it('closes a task whose latest run failed, as a refused restart leaves it', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of PATHS['FAILED'] ?? [])
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+    expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
+      TaskStatus.Cancelled,
+    );
+    expect(listWorkstreams(store.db, {}).map((w) => [w.id, w.state])).toEqual([[ws.id, S.Failed]]);
+  });
+
+  it('removes a restarted task whose newest run was cancelled before a session, after a failed one', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const first = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of PATHS['FAILED'] ?? [])
+      store.write((ctx) => transitionWorkstream(ctx, first.id, { to, fence: null }));
+    const second = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    store.write((ctx) => transitionWorkstream(ctx, second.id, { to: S.Cancelled, fence: null }));
+    expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
+      TaskStatus.Cancelled,
+    );
+  });
+
+  it.each(['RUNNING', 'QUEUED'])('refuses a task whose run is %s with TaskStartedError', (name) => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of PATHS[name] ?? [])
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+    expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
+      TaskStartedError,
+    );
+  });
 
   it('refuses a task whose cancelled run had a session', () => {
     const project = seedProject(store);

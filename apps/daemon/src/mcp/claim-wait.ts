@@ -1,14 +1,16 @@
 import {
+  EventType,
   InboxKind,
   InboxState,
   InvalidError,
   isTerminal,
+  WorkstreamId,
+  WorkstreamState,
   type ClaimKind,
   type InboxItemDto,
   type InboxItemId,
   type Notice,
   type ProjectId,
-  type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireClaims,
@@ -26,7 +28,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
-import type { StateStore } from '../events';
+import type { EventBus, StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import { DEADLOCK_DETAIL, deadlockAnswers } from './claim-deadlock';
 
@@ -167,6 +169,15 @@ export class ClaimWaits {
   }
 
   /**
+   * The task reached a terminal state. A yield its agent never heard about dies with it: nobody will ask
+   * again, and a later session of the workstream (a retry) would otherwise get its first claim answer
+   * from an old refusal.
+   */
+  ended(workstreamId: WorkstreamId): void {
+    this.#yields.delete(workstreamId);
+  }
+
+  /**
    * Whether a wait in progress waits on this deadlock card. One that none waits on describes a deadlock
    * that has ended (or a daemon that stopped), so an answer to it would act on nothing.
    */
@@ -242,6 +253,19 @@ export class ClaimWaits {
     }
     return false;
   }
+}
+
+/**
+ * Drops a task's pending yield (`ClaimWaits.ended`) when the task reaches a terminal state. Returns the
+ * function that ends the subscription.
+ */
+export function forgetEndedYields(bus: EventBus, waits: ClaimWaits): () => void {
+  return bus.subscribe((event) => {
+    if (event.type !== EventType.WorkstreamChanged) return;
+    const to = Object.values(WorkstreamState).find((s) => s === event.data['to']);
+    const id = WorkstreamId.safeParse(event.entityId);
+    if (to !== undefined && id.success && isTerminal(to)) waits.ended(id.data);
+  });
 }
 
 /**
