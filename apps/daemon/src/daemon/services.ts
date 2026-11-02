@@ -233,10 +233,8 @@ export function createServices(deps: {
       }
       // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
       // the builder asked to start over: then the batch holding only that attempt ends first.
-      let superseded: WorkstreamId | null = null;
       if (input?.fresh) {
         restarts.supersede(taskId);
-        if (held?.state === WorkstreamState.Failed) superseded = held.id;
       } else {
         const retried = restarts.continueRun(taskId);
         if (retried) {
@@ -244,6 +242,10 @@ export function createServices(deps: {
           return { kind: 'workstream', workstream: retried };
         }
       }
+      // Here a new run replaces the failed one, whether the builder started over or its batch
+      // couldn't take it again (none, or no longer open).
+      const superseded: WorkstreamId | null =
+        held?.state === WorkstreamState.Failed ? held.id : null;
       const project = getProject(db, getTask(db, taskId).projectId);
       const started: TaskStarted =
         project.delivery === Delivery.PullRequest

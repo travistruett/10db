@@ -165,6 +165,81 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     );
   });
 
+  it('closes the failed card when Start over begins a new run beside a done task in a shared batch', async () => {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [
+        { name: 'src', globs: ['src/**'] },
+        { name: 'ui', globs: ['ui/**'] },
+      ],
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    const add = (title: string, area: string) =>
+      api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title,
+        acceptanceCriteria: ['x'],
+        areas: [area],
+      });
+    const alpha = await add('Alpha', 'src');
+    const beta = await add('Beta', 'ui');
+    const { batchId, workstreamId } = daemon.state.write((ctx) => {
+      const batch = insertBatch(ctx, { projectId: project.id, title: 'Both', baseBranch: 'main' });
+      transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/both' } });
+      const done = insertWorkstream(ctx, beta.id, { batchId: batch.id });
+      for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
+        transitionWorkstream(ctx, done.id, { to, fence: null });
+      const ws = insertWorkstream(ctx, alpha.id, { batchId: batch.id });
+      for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+      return { batchId: batch.id, workstreamId: ws.id };
+    });
+    const card = failedCard(project.id, workstreamId);
+
+    const res = await startTask(alpha.id, { fresh: true });
+
+    expect(res.status).toBe(202);
+    // The batch still holds Beta's work, so the new run joins it rather than continuing the old one.
+    expect(BatchDto.parse(res.body).id).toBe(batchId);
+    expect(cardState(card)).not.toBe('OPEN');
+    const runs = await api().get('/workstreams?active=true', z.array(WorkstreamDto));
+    const fresh = runs.filter((w) => w.taskId === alpha.id);
+    expect(fresh.map((w) => w.id)).not.toContain(workstreamId);
+    for (const w of fresh) await api().post(`/workstreams/${w.id}/cancel`, WorkstreamDto);
+  });
+
+  it('closes the failed card when Start begins a new run of a failed local-delivery task', async () => {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      delivery: 'local',
+    });
+    const task = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+      title: 'Alpha',
+      acceptanceCriteria: ['x'],
+      areas: ['src'],
+    });
+    const workstreamId = daemon.state.write((ctx) => {
+      const ws = insertWorkstream(ctx, task.id, { batchId: null });
+      for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+      return ws.id;
+    });
+    const card = failedCard(project.id, workstreamId);
+
+    const res = await startTask(task.id, {});
+
+    expect(res.status).toBe(201);
+    const started = WorkstreamDto.parse(res.body);
+    expect(started.id).not.toBe(workstreamId);
+    expect(cardState(card)).not.toBe('OPEN');
+    await api().post(`/workstreams/${started.id}/cancel`, WorkstreamDto);
+  });
+
   it('refuses a fresh start the starter would refuse and leaves the batch open, so Retry still works', async () => {
     // Alpha now waits on Beta, which has not finished (it was reopened, say): a new start is refused.
     const { project, task, batchId, workstreamId } = await failedInOpenBatch(['Beta']);

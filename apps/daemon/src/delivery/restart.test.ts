@@ -143,7 +143,8 @@ describe('the failed card of a task that is started again', () => {
 
     restarts.supersede(a.taskId);
 
-    // supersede leaves the shared batch alone; the later start continues the run, which closes the card.
+    // supersede leaves the shared batch alone; the start that follows begins a new run and closes
+    // the card (restart-failed-api.test.ts).
     expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
   });
 });
