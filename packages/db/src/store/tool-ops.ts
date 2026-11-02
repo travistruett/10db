@@ -1,5 +1,11 @@
-import { mintId, type SessionId, type WorkstreamId } from '@10db/contracts';
-import { and, desc, eq } from 'drizzle-orm';
+import {
+  currentStep,
+  mintId,
+  type SessionId,
+  type StepPosition,
+  type WorkstreamId,
+} from '@10db/contracts';
+import { and, count, desc, eq, gt } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import type { DbReader, WriteContext } from './store';
@@ -18,6 +24,34 @@ export function findToolOp(
     .from(schema.toolOps)
     .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.opId, opId)))
     .get();
+}
+
+/**
+ * How many calls of a tool the workstream's current step has recorded, across every session
+ * of the step (a handoff, re-launch or recovery starts a new session in the same step): the
+ * sessions after the step's `sessionFloor`, as the runner counts them. A replayed opId is one
+ * record, not two. A retry keeps the floor, so it does not reset the count.
+ */
+export function countStepToolOps(
+  db: DbReader,
+  ws: StepPosition & { readonly id: WorkstreamId },
+  tool: string,
+): number {
+  const floor = currentStep(ws).sessionFloor;
+  return (
+    db
+      .select({ n: count() })
+      .from(schema.toolOps)
+      .innerJoin(schema.sessions, eq(schema.sessions.id, schema.toolOps.sessionId))
+      .where(
+        and(
+          eq(schema.toolOps.workstreamId, ws.id),
+          eq(schema.toolOps.tool, tool),
+          gt(schema.sessions.sequence, floor),
+        ),
+      )
+      .get()?.n ?? 0
+  );
 }
 
 export function insertToolOp(
