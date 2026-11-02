@@ -4,6 +4,7 @@ import { batchCardFields } from './batch-card';
 import { GhError } from '../github';
 import {
   checkoutCards,
+  prCards,
   shipCards,
   worktreeCards,
   wrongBranchCard,
@@ -46,13 +47,32 @@ const gate = {
   blockedHosts: [],
 };
 
+// A worktree card carries its own answers, which the daemon acts on, so it names no drawer.
+const worktreeAnswered: Record<string, { card: Card; labels: string[] }> = {
+  'worktree missing, waits': {
+    card: worktreeCards.missing(batch, '/wt/greetings', 'waits'),
+    labels: ['Abandon batch'],
+  },
+  'worktree missing, failed': {
+    card: worktreeCards.missing(batch, '/wt/greetings', 'failed'),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree in the way': {
+    card: worktreeCards.inTheWay(batch, '/wt/greetings', 'a file'),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree not reopened': {
+    card: worktreeCards.notReopened(batch, new Error('boom')),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree not whole': {
+    card: worktreeCards.notWhole(batch, '/wt/greetings', 'main', ['a.ts']),
+    labels: ['Retry', 'Abandon batch'],
+  },
+};
+
 // Every card that tells the builder to Retry or Abandon a batch from the Board.
 const cards: Record<string, Card> = {
-  'worktree missing, waits': worktreeCards.missing(batch, '/wt/greetings', 'waits'),
-  'worktree missing, failed': worktreeCards.missing(batch, '/wt/greetings', 'failed'),
-  'worktree in the way': worktreeCards.inTheWay(batch, '/wt/greetings', 'a file'),
-  'worktree not reopened': worktreeCards.notReopened(batch, new Error('boom')),
-  'worktree not whole': worktreeCards.notWhole(batch, '/wt/greetings', 'main', ['a.ts']),
   'wrong branch, waits': wrongBranchCard(batch, 'main', '/repo', 'waits'),
   'wrong branch, failed': wrongBranchCard(batch, 'main', '/repo', 'failed'),
   'wrong branch, not shipped': wrongBranchCard(batch, 'main', '/repo', 'not_shipped'),
@@ -71,6 +91,15 @@ describe('batch cards', () => {
     expect(card.body).not.toMatch(/strip/i);
     expect(card.body).toContain("task's drawer on the Board");
   });
+
+  it.each(Object.entries(worktreeAnswered))(
+    '%s offers its answers on the card',
+    (_name, { card, labels }) => {
+      expect(card.body).not.toMatch(/strip/i);
+      expect(card.options?.map((o) => o.label)).toEqual(labels);
+      expect(card.detail).toMatchObject({ batchId: batch.id });
+    },
+  );
 
   it('the failed-workstream card defers to the drawer, not a strip', () => {
     const fields = batchCardFields({ id: mintId('Workstream'), batchId: batch.id });
@@ -124,5 +153,29 @@ describe('the cards that say why a checkout stays on its branch', () => {
     const card = checkoutCards.dirty(shipped, { name: 'App', repoPath }, place, ['a.ts']);
     expect(card.body).toContain(command);
     expect(card.body).not.toContain(`-C ${repoPath}`);
+  });
+});
+
+describe('the card for a pull request not updated after the base merged', () => {
+  const gateStop = { kind: 'gate' as const, name: 'pre-check' as const, logPath: null };
+
+  it('names the files 10db settled itself', () => {
+    const card = prCards.catchUpStopped(batch, {
+      ...gateStop,
+      settled: ['apps/daemon/src/api/app.ts', 'apps/daemon/src/api/services.ts'],
+    });
+    expect(card.title).toBe(
+      'Pull request for "Greetings" not updated: the pre-check failed after merging main',
+    );
+    expect(card.body).toContain('10db settled these files itself');
+    expect(card.body).toContain('apps/daemon/src/api/app.ts');
+    expect(card.body).toContain('apps/daemon/src/api/services.ts');
+  });
+
+  it('says nothing of settled files when 10db settled none', () => {
+    expect(prCards.catchUpStopped(batch, gateStop).body).not.toContain('settled');
+    expect(prCards.catchUpStopped(batch, { ...gateStop, settled: [] }).body).not.toContain(
+      'settled',
+    );
   });
 });

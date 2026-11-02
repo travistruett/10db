@@ -93,6 +93,36 @@ async function changesIn(deps: SweepDeps, main: string, path: string): Promise<s
   }
 }
 
+/**
+ * The builder's Remove worktree answer on an orphan's card: removes the orphan at `path` whatever it
+ * holds, uncommitted changes and git-ignored files included, and withdraws its cards. Only an orphan
+ * the sweep itself would consider (locked by 10db, under the root, held by no batch); anything else
+ * is left and reported as false.
+ */
+export async function removeOrphanedWorktree(
+  deps: SweepDeps,
+  project: ProjectDto,
+  path: string,
+): Promise<boolean> {
+  const main = project.repoPath;
+  const entry = (await deps.git.listWorktrees(main)).find((e) =>
+    samePath(comparablePath(e.path), comparablePath(path)),
+  );
+  const orphan = entry === undefined ? null : orphanOf(deps.state, entry, deps.root);
+  if (entry === undefined || orphan === null) return false;
+  await deps.git.removeWorktree(main, entry.path);
+  withdraw(deps.state, deps.inbox, project.id, [
+    keptWorktreeKey.orphanChanges(path),
+    keptWorktreeKey.orphanIgnored(path),
+  ]);
+  if (orphan.ownsPin)
+    deps.state.write((w) => {
+      deleteAppSetting(w, worktreePinKey(orphan.batchId));
+    });
+  deps.logger.info({ projectId: project.id, path }, 'orphaned worktree removed by the builder');
+  return true;
+}
+
 /** Sweeps one project's main checkout; resolves with the paths removed. */
 async function sweepProject(deps: SweepDeps, project: ProjectDto): Promise<string[]> {
   const main = project.repoPath;
