@@ -23,7 +23,7 @@ export interface TaskState {
   readonly line: string;
   readonly color: MantineColor;
   /** Where the line's CI result lives: a job's page or the pull request's checks. */
-  readonly link?: CiLink;
+  readonly link?: CiLink | null;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */

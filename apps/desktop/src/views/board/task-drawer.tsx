@@ -435,7 +435,7 @@ function CiStatusLine({
       <Text size="sm" c={ci.color}>
         {ci.line}
       </Text>
-      <ExternalLink url={ci.link.url} label={ci.link.label} />
+      {ci.link ? <ExternalLink url={ci.link.url} label={ci.link.label} /> : null}
     </Group>
   );
 }

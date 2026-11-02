@@ -325,7 +325,7 @@ function BoardColumns({
               return (
                 <Group gap="sm" wrap="nowrap">
                   <PullRequestLink url={url} />
-                  {ci && ci.link.url !== url ? (
+                  {ci?.link && ci.link.url !== url ? (
                     <ExternalLink url={ci.link.url} label={ci.link.label} />
                   ) : null}
                 </Group>

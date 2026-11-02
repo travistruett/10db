@@ -86,6 +86,44 @@ describe('ciLine', () => {
     );
   });
 
+  it('does not say fixing for a fix batch whose ship failed', () => {
+    const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+    const fix = batchDto({ state: 'FAILED', ciFixOf: root.id, ciFixHead: 'abc' });
+    expect(ciLine(root, [root, fix])?.line).toBe('Pull request open · CI failed: build');
+  });
+
+  it.each(['CUTTING', 'OPEN', 'SHIPPING'] as const)(
+    'says fixing while a fix batch is %s',
+    (state) => {
+      const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+      const fix = batchDto({ title: 'Fix', state, ciFixOf: root.id, ciFixHead: 'abc' });
+      expect(ciLine(root, [root, fix])?.line).toContain('fixing in');
+    },
+  );
+
+  it('links nothing outside https github.com for the checks or a conflict', () => {
+    for (const prUrl of [
+      'http://github.com/acme/widgets/pull/9',
+      'https://github.com.example.net/acme/widgets/pull/9',
+      'https://ci.example.com/pull/9',
+      'not a url',
+    ]) {
+      const cases = [
+        required('passing'),
+        required('pending', { pending: [job('build', null)] }),
+        required('failing', { failing: [job('build', null)] }),
+      ];
+      for (const prRequired of cases) {
+        const batch = shipped({ prUrl, prRequired });
+        expect(ciLine(batch, [batch])?.link ?? null).toBeNull();
+        const conflicted = shipped({ prUrl, prRequired, prMergeBlocked: 'conflicts' });
+        expect(ciLine(conflicted, [conflicted])?.link ?? null).toBeNull();
+      }
+      const merged = shipped({ prUrl, pr: read('merged'), prRequired: required('pending') });
+      expect(ciLine(merged, [merged])?.link ?? null).toBeNull();
+    }
+  });
+
   it('says how many fixes ran once fixing stopped', () => {
     const root = shipped({
       prRequired: required('failing', { failing: [job('build', null)] }),
