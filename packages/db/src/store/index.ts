@@ -24,5 +24,6 @@ export * from './usage';
 export * from './workstreams';
 export { createTestStore, seedAccount, seedProject, TEST_ACCOUNT_EMAIL } from './test-support';
 export * from './settings';
+export * from './stock-hazards';
 export * from './judge-calls';
 export * from './judge-config';

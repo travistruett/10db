@@ -9,14 +9,17 @@ import {
   type HazardDef,
   InvalidError,
   mintId,
+  STOCK_HAZARD_REVISIONS,
   type InboxItemDto,
   type InboxTarget,
   type ProposalId,
   type ProposalKind,
 } from '@10db/contracts';
 import {
+  addStockHazardCommands,
   createTestStore,
   getInboxItem,
+  getProject,
   getProposal,
   insertInboxItem,
   insertPermissionRule,
@@ -26,6 +29,7 @@ import {
   listInbox,
   listPermissionRules,
   listTasks,
+  patchProject,
   schema,
   searchDecisions,
   seedProject,
@@ -819,6 +823,51 @@ describe('permission broker in a sandboxed lane', () => {
         .map((card) => card.detail?.['summary'])
         .sort(),
     ).toEqual(['pnpm add evil-pkg', 'pnpm add zod']);
+  });
+
+  describe('in a project added before the 2026-10-31 stock commands', () => {
+    const latest = new Set(Object.values(STOCK_HAZARD_REVISIONS.at(-1) ?? {}).flat());
+    const stored = DEFAULT_HAZARDS.map((h) => ({
+      ...h,
+      commands: h.commands.filter((c) => !latest.has(c)),
+    }));
+    const isCard = async (ws: ReturnType<typeof seedWorkstream>, command: string) => {
+      const hazards = getProject(state.db, ws.project.id).hazards;
+      const pending = sandboxed(ws, true, hazards)(request('Bash', { command }));
+      const card = openCards().find((c) => c.detail?.['summary'] === command);
+      if (!card) return (await pending).behavior;
+      inbox.answer(card.id, { choice: 'deny' });
+      await pending;
+      return 'card';
+    };
+    function oldProject(): ReturnType<typeof seedWorkstream> {
+      const ws = seedWorkstream(base);
+      state.write((ctx) => patchProject(ctx, ws.project.id, { hazards: stored }));
+      state.write((ctx) => {
+        addStockHazardCommands(ctx);
+      });
+      return ws;
+    }
+
+    it.each(['npm r left-pad', 'bun add x', 'pnpm add x'])(
+      'cards %s as the dependency hazard',
+      async (command) => {
+        expect(await isCard(oldProject(), command)).toBe('card');
+      },
+    );
+
+    it('keeps a command the builder removed off the list', async () => {
+      const ws = oldProject();
+      const trimmed = getProject(state.db, ws.project.id).hazards.map((h) =>
+        h.name === 'deps' ? { ...h, commands: h.commands.filter((c) => c !== 'bun add') } : h,
+      );
+      state.write((ctx) => patchProject(ctx, ws.project.id, { hazards: trimmed }));
+      state.write((ctx) => {
+        addStockHazardCommands(ctx);
+      });
+      expect(getProject(state.db, ws.project.id).hazards).toEqual(trimmed);
+      expect(await isCard(ws, 'bun add x')).toBe('allow');
+    });
   });
 
   it('cards a hazard hidden in sh -c', () => {
