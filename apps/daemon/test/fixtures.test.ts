@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDecoyRepo } from './decoy-repo';
 import { gitWrapper } from './git-wrapper';
 import {
+  buildRemoteTemplate,
   buildRepoTemplate,
   createTempClone,
   createTempRepo,
@@ -136,6 +137,42 @@ describe('buildRepoTemplate', () => {
       expect(gitIn(path, 'config', 'maintenance.auto')).toBe('false');
     } finally {
       template?.cleanup();
+      decoy.cleanup();
+    }
+  });
+});
+
+describe('buildRemoteTemplate', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('builds its own repository and origin when git hook variables point at another one', () => {
+    const decoy = createDecoyRepo();
+    let pair: ReturnType<typeof buildRemoteTemplate> | undefined;
+    try {
+      const before = decoy.snapshot();
+      for (const [name, value] of Object.entries(decoy.hookVariables)) vi.stubEnv(name, value);
+      let failure: unknown;
+      try {
+        pair = buildRemoteTemplate();
+      } catch (error) {
+        failure = error;
+      }
+      vi.unstubAllEnvs();
+
+      expect(decoy.snapshot()).toEqual(before);
+      expect(failure).toBeUndefined();
+      const repo = pair?.repo.path ?? '';
+      const origin = pair?.origin.path ?? '';
+      expect(gitIn(repo, 'rev-parse', '--abbrev-ref', 'HEAD')).toBe('main');
+      expect(gitIn(repo, 'rev-list', '--count', 'HEAD')).toBe('1');
+      expect(gitIn(origin, 'rev-parse', 'refs/heads/main')).toBe(gitIn(repo, 'rev-parse', 'HEAD'));
+      expect(gitIn(repo, 'rev-parse', 'refs/remotes/origin/main')).toBe(
+        gitIn(repo, 'rev-parse', 'HEAD'),
+      );
+    } finally {
+      pair?.cleanup();
       decoy.cleanup();
     }
   });
