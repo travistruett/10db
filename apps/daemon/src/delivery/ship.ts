@@ -1241,13 +1241,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
             const extra = (await deps.git.commitsSince(main, ownMerge ?? head, tip)).reverse();
             const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
             const one = extra.length === 1;
-            const own =
+            const them = one ? 'it' : 'them';
+            // Pushing commits that sit on 10db's merge would push the merge too: they move onto the head first.
+            const action =
               ownMerge === null
-                ? ''
-                : ` It also has 10db's own unpushed merge ${ownMerge.slice(0, 7)}, which was not gated: don't push it.`;
+                ? ` Push ${them} to the pull request, or drop ${them} from the local branch.`
+                : ` ${one ? 'It sits' : 'They sit'} on 10db's own unpushed merge ${ownMerge.slice(0, 7)}, which was not gated: pushing ${them} as ${one ? 'it is' : 'they are'} would push that merge too. Move ${them} onto the pull request's head with \`git rebase --onto ${head.slice(0, 7)} ${ownMerge.slice(0, 7)} ${branch}\` and push, or drop ${them} from the local branch.`;
             stop({
               kind: 'other',
-              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks that 10db did not write (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone.${own} Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks that 10db did not write (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone.${action}`,
             });
             return;
           }

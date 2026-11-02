@@ -510,6 +510,10 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(card.body).toContain(`10db's own unpushed merge ${merge.slice(0, 7)}`);
     expect(card.body).not.toContain(`(${merge.slice(0, 7)}`);
     expect(card.body).not.toContain(`, ${merge.slice(0, 7)}`);
+    // Pushing the builder's commit would push the merge under it: the card moves it onto the head first.
+    const head = onOrigin(branch);
+    expect(card.body).toContain(`git rebase --onto ${head.slice(0, 7)} ${merge.slice(0, 7)} ${branch}`);
+    expect(card.body).not.toContain('Push it to the pull request');
     expect(kept).not.toBe('');
   });
 
