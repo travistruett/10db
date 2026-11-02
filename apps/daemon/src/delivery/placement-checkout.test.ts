@@ -383,11 +383,13 @@ describe('seeding a new copy', () => {
         expect(notice.body).toContain('pnpm 9');
       });
 
+      /** Build settings where pnpm 9 reads them: package.json's `pnpm` field. */
+      const pnpmField = (field: object): void => {
+        h.commit('package.json', JSON.stringify({ name: 'app', pnpm: field }));
+      };
+
       it('leaves out the packages neverBuiltDependencies names', async () => {
-        h.commit(
-          'package.json',
-          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
-        );
+        pnpmField({ neverBuiltDependencies: ['sharp'] });
         allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('8.6.0'), ...natives });
         await startedOne(shared('Alpha'));
@@ -398,7 +400,8 @@ describe('seeding a new copy', () => {
       });
 
       it('names only the onlyBuiltDependencies list when the project has one', async () => {
-        allowing('onlyBuiltDependencies:\n  - prisma\n');
+        pnpmField({ onlyBuiltDependencies: ['prisma'] });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -408,7 +411,8 @@ describe('seeding a new copy', () => {
       });
 
       it('says nothing when the onlyBuiltDependencies list is empty: nothing builds', async () => {
-        allowing('onlyBuiltDependencies: []\n');
+        pnpmField({ onlyBuiltDependencies: [] });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -416,11 +420,8 @@ describe('seeding a new copy', () => {
       });
 
       it('ignores an empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
-        h.commit(
-          'package.json',
-          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
-        );
-        allowing('onlyBuiltDependencies: []\n');
+        pnpmField({ neverBuiltDependencies: ['sharp'], onlyBuiltDependencies: [] });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -431,11 +432,8 @@ describe('seeding a new copy', () => {
       });
 
       it('ignores a non-empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
-        h.commit(
-          'package.json',
-          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
-        );
-        allowing('onlyBuiltDependencies:\n  - left-pad\n');
+        pnpmField({ neverBuiltDependencies: ['sharp'], onlyBuiltDependencies: ['left-pad'] });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -444,12 +442,9 @@ describe('seeding a new copy', () => {
         expect(notice.line).not.toContain('sharp');
       });
 
-      it('says nothing when the empty list is in package.json', async () => {
-        h.commit(
-          'package.json',
-          JSON.stringify({ name: 'app', pnpm: { onlyBuiltDependencies: [] } }),
-        );
-        allowing('packages: []\n');
+      it('says nothing when an empty list is in package.json and neverBuiltDependencies is in the workspace file', async () => {
+        pnpmField({ onlyBuiltDependencies: [] });
+        allowing('neverBuiltDependencies:\n  - sharp\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -457,7 +452,8 @@ describe('seeding a new copy', () => {
       });
 
       it('says nothing when the list holds only names that are not packages', async () => {
-        allowing('onlyBuiltDependencies:\n  - "../evil"\n  - "Bad Name"\n');
+        pnpmField({ onlyBuiltDependencies: ['../evil', 'Bad Name'] });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -465,7 +461,8 @@ describe('seeding a new copy', () => {
       });
 
       it('says nothing when the list is in a file, which is not read', async () => {
-        allowing('onlyBuiltDependenciesFile: allowed.json\n');
+        pnpmField({ onlyBuiltDependenciesFile: 'allowed.json' });
+        allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
@@ -473,7 +470,18 @@ describe('seeding a new copy', () => {
       });
 
       it('does not apply ignoredBuiltDependencies, which pnpm 9 does not read', async () => {
-        allowing('ignoredBuiltDependencies:\n  - sharp\n');
+        pnpmField({ ignoredBuiltDependencies: ['sharp'] });
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).toContain('sharp');
+      });
+
+      it('does not read build settings from pnpm-workspace.yaml, which pnpm 9 reads only for packages and catalogs', async () => {
+        allowing('onlyBuiltDependencies:\n  - prisma\nneverBuiltDependencies:\n  - sharp\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));

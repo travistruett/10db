@@ -219,11 +219,12 @@ describe('what the spike saw gh print', () => {
     });
   });
 
-  it('reads a cancelled required check, exit 0, as pending with the cancelled job', () => {
+  it('reads a cancelled required check, exit 0, as cancelled with the cancelled job', () => {
     expect(parseRequiredChecks(['pr', 'checks'], SPIKE_CANCELLED)).toEqual({
-      state: 'pending',
+      state: 'cancelled',
       failing: [],
-      pending: [
+      pending: [],
+      cancelled: [
         {
           name: 'desktop',
           link: 'https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910780',

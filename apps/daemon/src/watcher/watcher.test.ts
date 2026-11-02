@@ -2100,7 +2100,19 @@ describe('worktree checkouts', () => {
         watcher.sync();
       };
 
-      it("still leaves another lane's unchanged excused write out of a step end after a restart", async () => {
+      // A file still showing the write A's card excused is A's write, not B's: B's step end leaves it out.
+      it("does not card another lane's step end for the file still showing the excused write", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it("does not card another lane's step end for that file after a restart", async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);
         watcher.sync();
@@ -2111,7 +2123,7 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
       });
 
-      it("cards at a step end after a restart another lane's excused file once its content changed", async () => {
+      it("cards another lane's step end once it changed the file after a restart", async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);
         watcher.sync();
