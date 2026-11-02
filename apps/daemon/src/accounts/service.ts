@@ -43,6 +43,7 @@ import {
   type SeenAccount,
   type SessionAdapter,
 } from '../sessions';
+import { capStatus } from './cap';
 import { monthOf, monthWindow, usageWindow } from './month';
 import type { AccountPauses } from './pauses';
 import type { AccountRuntime } from './runtime';
@@ -61,7 +62,8 @@ export interface AccountService {
   pauses(): AccountPauseDto[];
   /**
    * Lifts a refused or monthly-cap pause, as saving the account unchanged does, and answers the pauses
-   * still in force. A usage-limit pause ends by itself, so resuming it is a conflict.
+   * still in force. A usage-limit pause ends by itself, so resuming it is a conflict; so is a monthly-cap
+   * pause while spend is still at the cap (raise the cap first).
    */
   resume(id: AccountId): AccountPauseDto[];
 }
@@ -138,7 +140,17 @@ export function createAccountService(deps: {
             throw new ConflictError(
               `Account "${row.label}" is paused by its usage limit, which ends by itself`,
             );
-          case AccountPauseReason.MonthlyCap:
+          case AccountPauseReason.MonthlyCap: {
+            // Lifting it now would only pause the account again at its next start, with a new card.
+            const cap = capStatus(db, row, deps.clock.now());
+            if (cap && cap.spentUsd >= cap.capUsd)
+              throw new ConflictError(
+                `Account "${row.label}" has spent $${cap.spentUsd.toFixed(2)} of its $${cap.capUsd.toFixed(2)} monthly cap: raise the cap or wait for next month`,
+              );
+            deps.pauses.resume(id, { only: held.reason });
+            deps.onSaved();
+            break;
+          }
           case AccountPauseReason.Refused:
             deps.pauses.resume(id, { only: held.reason });
             deps.onSaved();

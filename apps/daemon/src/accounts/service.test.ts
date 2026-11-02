@@ -5,9 +5,9 @@ import {
   ConflictError,
   type AccountId,
 } from '@10db/contracts';
-import { createTestStore } from '@10db/db';
+import { createTestStore, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createMemoryKeychain, tempDir, waitFor } from '../../test/fixtures';
+import { createMemoryKeychain, seedSpend, tempDir, waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createLauncher } from '../environment';
 import { createEventBus, createStateStore } from '../events';
@@ -21,6 +21,7 @@ let close: () => void;
 let adapter: FakeAdapter;
 let gate: StartGate;
 let service: AccountService;
+let store: Store;
 const activePauses = new Map<AccountId, AccountPause>();
 const lifted: AccountId[] = [];
 
@@ -31,6 +32,7 @@ beforeEach(() => {
   const clock = new ManualClock(new Date(2026, 9, 20));
   const test = createTestStore(() => clock.now());
   close = test.close;
+  store = test.store;
   adapter = new FakeAdapter({});
   gate = createStartGate();
   const keychain = createMemoryKeychain();
@@ -126,6 +128,32 @@ describe('pauses', () => {
       expect(lifted).toEqual([account.id]);
     },
   );
+
+  it('refuses to resume a monthly-cap pause while spend is still at the cap, naming the fix', () => {
+    const account = service.create(
+      AccountInput.parse({ kind: AccountKind.AnthropicApiKey, label: 'Capped', monthlyCapUsd: 5 }),
+    ).account;
+    const project = seedProject(store, { accountId: account.id });
+    seedSpend(store, project, 5);
+    activePauses.set(account.id, { reason: AccountPauseReason.MonthlyCap, until: null, since });
+    const attempt = () => service.resume(account.id);
+    expect(attempt).toThrow(ConflictError);
+    expect(attempt).toThrow(/raise the cap or wait for next month/);
+    expect(lifted).toEqual([]);
+    expect(activePauses.has(account.id)).toBe(true);
+  });
+
+  it('resumes a monthly-cap pause once the cap is raised above the spend', () => {
+    const account = service.create(
+      AccountInput.parse({ kind: AccountKind.AnthropicApiKey, label: 'Capped', monthlyCapUsd: 5 }),
+    ).account;
+    const project = seedProject(store, { accountId: account.id });
+    seedSpend(store, project, 5);
+    activePauses.set(account.id, { reason: AccountPauseReason.MonthlyCap, until: null, since });
+    service.patch(account.id, { monthlyCapUsd: 10 });
+    expect(service.resume(account.id)).toEqual([]);
+    expect(lifted).toEqual([account.id]);
+  });
 
   it('refuses to resume a usage-limit pause, which ends by itself', () => {
     const account = keyed('A');
