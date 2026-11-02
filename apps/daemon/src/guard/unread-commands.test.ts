@@ -51,6 +51,18 @@ const ROWS: readonly Row[] = [
   { name: 'a nameref', command: 'declare -n r=x', reason: UnreadReason.Script },
   { name: 'a local nameref', command: 'local -n r', reason: UnreadReason.Script },
   {
+    name: 'a declare word that may glob to a flag',
+    command: 'declare ?n r=s',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a declare word that may glob to a flag: *',
+    command: 'typeset *n r',
+    reason: UnreadReason.Script,
+  },
+  { name: 'a declare word in quotes is not a glob', command: "declare '?n'=1", reason: null },
+  { name: 'a declare assignment value may hold a glob', command: 'declare x=*', reason: null },
+  {
     name: 'a nameref behind a runner',
     command: 'command typeset -n r',
     reason: UnreadReason.Script,

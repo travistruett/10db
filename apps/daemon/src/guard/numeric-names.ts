@@ -1,4 +1,9 @@
-import { expandsIndirectly, isNumericExpression } from './arithmetic-words';
+import {
+  expandsIndirectly,
+  isNumericExpression,
+  mayExpandToFlag,
+  NAMEREF_BUILTINS,
+} from './arithmetic-words';
 import { commandName, leadingWords, parseShell, stripCommandPrefixes } from './shell-words';
 
 /**
@@ -116,15 +121,6 @@ const IMPLICIT: ReadonlyMap<string, readonly string[]> = new Map([
   ['=~', ['BASH_REMATCH', 'MATCH', 'match', 'MBEGIN', 'MEND']],
 ]);
 
-const NAMEREF_BUILTINS: ReadonlySet<string> = new Set([
-  'declare',
-  'typeset',
-  'local',
-  'integer',
-  'float',
-  'private',
-]);
-
 interface Assignment {
   readonly name: string;
   readonly value: string;
@@ -140,6 +136,8 @@ interface Collected {
   readonly all: string[];
   /** The words of each command, after its leading assignments. */
   readonly commands: string[][];
+  /** For each of `commands`, whether each word is dynamic: the shell expands it, so it is not the text written. */
+  readonly dynamic: boolean[][];
 }
 
 /** Gathers every segment of the command and of the substitutions in it; false when it cannot be read. */
@@ -170,6 +168,7 @@ function collect(command: string, depth: number, into: Collected, arithmetic = f
     into.others.push(...segment.words.slice(0, offset), ...segment.words.slice(at));
     into.all.push(...segment.words);
     into.commands.push(segment.words.slice(at));
+    into.dynamic.push(segment.dynamicWords.slice(at));
     for (const body of segment.nested) {
       // The parser hands `$((expr))` over as the subshell `(expr)`.
       const isArithmetic =
@@ -203,15 +202,16 @@ export function isNumericArithmetic(
  * Whether a command can rebind a name in a way `setsName` does not see: a nameref (`declare -n r=s`
  * makes `r=…` write `s`), a flag the scan cannot read, `printf -v`, or a builtin it does not understand.
  */
-function rebindsNames(words: readonly string[]): boolean {
+function rebindsNames(words: readonly string[], dynamic: readonly boolean[]): boolean {
   const { heads, command } = commandHeads(words);
   if (heads.some((head) => BUILTINS.has(head) && !UNDERSTOOD.has(head))) return true;
   // A declaring builtin anywhere in the command, behind any wrapper, with a flag naming `n`, or a
   // word the shell expands that is not an assignment, which may expand to a flag: `declare -gn r=s`,
-  // `declare -$f r`, `declare $x r=s`, `local +n r`.
+  // `declare -$f r`, `declare $x r=s`, `local +n r`, `declare ?n r=s` (a glob matching a file `-n`).
   if (words.some((word) => NAMEREF_BUILTINS.has(commandName(word)))) {
     if (words.some((word) => /^[-+]/.test(word) && word.includes('n'))) return true;
     if (words.some((word) => !ASSIGNMENT.test(word) && /[$`]/.test(word))) return true;
+    if (words.some((word, at) => mayExpandToFlag(word, dynamic[at] === true))) return true;
   }
   if (heads.includes('printf') && words.some((word) => word.startsWith('-v'))) return true;
   // zsh `print -v name` stores the text in `name`; the flags may be a cluster (`-rv`) or carry the name.
@@ -290,6 +290,7 @@ export function numericNames(command: string): ReadonlySet<string> {
     spoiled: new Set(),
     all: [],
     commands: [],
+    dynamic: [],
   };
   const none: ReadonlySet<string> = new Set();
   try {
@@ -302,7 +303,7 @@ export function numericNames(command: string): ReadonlySet<string> {
   // `${!name}` reads the variable another one names; `name() {` defines a function whose body runs
   // later; either can reach a name by a path the scan does not follow.
   if (into.all.some((word) => expandsIndirectly(word) || word.includes('()'))) return none;
-  if (into.commands.some(rebindsNames)) return none;
+  if (into.commands.some((words, at) => rebindsNames(words, into.dynamic[at] ?? []))) return none;
   for (const word of into.all) {
     for (const name of IMPLICIT.get(commandName(word)) ?? []) into.spoiled.add(name);
   }
