@@ -55,11 +55,14 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
  * `text` with whitespace, line breaks and every other control character (an escape sequence, a NUL)
  * collapsed to single spaces and cut to one short line. Format characters (a bidi override or
  * isolate, a zero-width space or joiner, a BOM) are dropped: they draw nothing, but can reorder or
- * hide the text around them where the reason is shown.
+ * hide the text around them where the reason is shown. Lone surrogates (a model's "\ud800" escape
+ * survives JSON.parse as one) are dropped too: they are not text, the desktop draws U+FFFD for them
+ * and a strict UTF-8 encoder may refuse the string. With the `u` flag a paired astral character is
+ * one code point, so only an unpaired half matches \p{Cs}.
  */
 function oneLine(text: string): string {
   const line = text
-    .replace(/\p{Cf}+/gu, '')
+    .replace(/[\p{Cf}\p{Cs}]+/gu, '')
     .replace(/[\s\p{Cc}]+/gu, ' ')
     .trim();
   if (line.length <= MAX_REASON) return line;
