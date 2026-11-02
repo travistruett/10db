@@ -47,10 +47,20 @@ export function envWithoutGitVariables(): NodeJS.ProcessEnv {
 /**
  * The environment for a throwaway repository: no `GIT_*` repository variables, and no global or
  * system git config. A contributor's `commit.gpgsign`, `core.hooksPath` or identity would
- * otherwise reach every commit a test makes.
+ * otherwise reach every commit a test makes. Nor does git's default excludes file
+ * (`$XDG_CONFIG_HOME/git/ignore`, by default `~/.config/git/ignore`), which git reads even with the global
+ * config off: `core.excludesFile` is pinned to `/dev/null`, so what a contributor ignores can't change a
+ * result.
  */
 export function isolatedGitEnvironment(): NodeJS.ProcessEnv {
-  return { ...envWithoutGitVariables(), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
+  return {
+    ...envWithoutGitVariables(),
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_COUNT: '1',
+    GIT_CONFIG_KEY_0: 'core.excludesFile',
+    GIT_CONFIG_VALUE_0: '/dev/null',
+  };
 }
 
 /** The SHA-256 of every file under `dir`, keyed by relative path: two equal snapshots mean no byte changed. */

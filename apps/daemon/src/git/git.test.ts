@@ -140,6 +140,65 @@ describe('commit', () => {
       ]);
     });
 
+    describe('when an ignore rule covers it', () => {
+      const named = [
+        'a.txt',
+        `${nested}/.cc-writes/x.tmp`,
+        `${nested}/.cc-writes`,
+        `${nested}/scheduled_tasks.lock`,
+      ];
+      const expectOnlyAStaged = async () => {
+        const dropped: string[] = [];
+        const logging = createGit({
+          onBookkeepingDropped: (_repo, left) => dropped.push(...left.map((l) => l.rel)),
+        });
+        await logging.commit({
+          repo: repo.path,
+          paths: named,
+          message: 'Add a',
+          opId: 'op-bookkeeping-ign',
+          branch: 'main',
+        });
+        expect(tracked()).toContain('a.txt');
+        expect(tracked().filter((p) => p.startsWith('.claude'))).toEqual([]);
+        expect(dropped).toEqual(expect.arrayContaining([`${nested}/.cc-writes/x.tmp`]));
+      };
+
+      it("commits when the repository's .gitignore covers the named bookkeeping", async () => {
+        writeNested();
+        write('.gitignore', '.cc-writes/\nscheduled_tasks.lock\n');
+        await expectOnlyAStaged();
+      });
+
+      it("commits when the user's default excludes file covers it", async () => {
+        const config = tempDir('git-xdg');
+        try {
+          mkdirSync(join(config.path, 'git'));
+          writeFileSync(join(config.path, 'git', 'ignore'), '**/.claude/.cc-writes/\n');
+          vi.stubEnv('XDG_CONFIG_HOME', config.path);
+          writeNested();
+          await expectOnlyAStaged();
+        } finally {
+          vi.unstubAllEnvs();
+          config.cleanup();
+        }
+      });
+
+      it('still fails with the stage error for an ignored path that is not bookkeeping', async () => {
+        write('.gitignore', 'secret.txt\n');
+        write('secret.txt', 's');
+        await expect(
+          git.commit({
+            repo: repo.path,
+            paths: ['secret.txt'],
+            message: 'x',
+            opId: 'op-bookkeeping-ign2',
+            branch: 'main',
+          }),
+        ).rejects.toThrow(/10db could not stage secret\.txt/);
+      });
+    });
+
     it('commits nothing when only bookkeeping is named', async () => {
       writeNested();
       await expect(

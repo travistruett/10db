@@ -22,6 +22,11 @@ const globalConfig = join(configDir, 'gitconfig');
 writeFileSync(globalConfig, '');
 process.env['GIT_CONFIG_NOSYSTEM'] = '1';
 process.env['GIT_CONFIG_GLOBAL'] = globalConfig;
+// Git also reads a default excludes file, `$XDG_CONFIG_HOME/git/ignore` (`~/.config/git/ignore` when that
+// is unset), whatever GIT_CONFIG_GLOBAL says. Claude Code writes `**/.claude/.cc-writes/` there, so a
+// contributor's ignore rules would change what a test's git stages. The private config dir has no `git/`
+// folder, and the daemon's git, which drops GIT_CONFIG_COUNT and its pairs, inherits this variable.
+process.env['XDG_CONFIG_HOME'] = configDir;
 
 afterAll(() => {
   rmSync(configDir, { recursive: true, force: true });

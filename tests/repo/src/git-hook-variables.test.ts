@@ -17,6 +17,7 @@ import { z } from 'zod';
 import {
   createBareRepo,
   createThrowawayRepo,
+  envWithoutGitVariables,
   isolatedGitEnvironment,
   snapshotFiles,
   type BareRepo,
@@ -241,6 +242,38 @@ describe('the test process environment', () => {
     expect(names.sort()).toEqual(['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM']);
     expect(process.env['GIT_CONFIG_NOSYSTEM']).toBe('1');
     expect(readFileSync(process.env['GIT_CONFIG_GLOBAL'] ?? '', 'utf8')).toBe('');
+  });
+
+  // Git reads `$XDG_CONFIG_HOME/git/ignore` (default `~/.config/git/ignore`) even with
+  // GIT_CONFIG_GLOBAL=/dev/null; Claude Code adds `**/.claude/.cc-writes/` there on the builder's Mac.
+  it('is not affected by the contributor’s default excludes file', () => {
+    const home = mkdtempSync(join(tmpdir(), '10db-excludes-'));
+    try {
+      mkdirSync(join(home, 'git'));
+      writeFileSync(join(home, 'git', 'ignore'), '**/.claude/.cc-writes/\n');
+      const repo = join(home, 'repo');
+      mkdirSync(repo);
+      execFileSync('git', ['init', '-q'], { cwd: repo, env: isolatedGitEnvironment() });
+      const ignored = (env: NodeJS.ProcessEnv) =>
+        spawnSync('git', ['check-ignore', '-q', '--no-index', '.claude/.cc-writes/x.tmp'], {
+          cwd: repo,
+          env,
+        }).status === 0;
+      // The premise: a git run that reads the file does ignore the path.
+      expect(ignored({ ...envWithoutGitVariables(), HOME: home, XDG_CONFIG_HOME: home })).toBe(
+        true,
+      );
+      // The helper's environment keeps that file out, even when it points at one ...
+      expect(ignored({ ...isolatedGitEnvironment(), HOME: home, XDG_CONFIG_HOME: home })).toBe(
+        false,
+      );
+      // ... and the test process's own environment names no such file.
+      const xdg = process.env['XDG_CONFIG_HOME'] ?? '';
+      expect(xdg).not.toBe('');
+      expect(statSync(join(xdg, 'git', 'ignore'), { throwIfNoEntry: false })).toBeUndefined();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   // Every entry the root config runs, however it is written: a path to a directory or config file,
