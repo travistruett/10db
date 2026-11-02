@@ -105,6 +105,34 @@ describe('a pull request that lands in another branch', () => {
     expect(h.gh.autoMerged).toEqual([shipped.prUrl]);
   });
 
+  it('says so on the batch, naming the branch, when it lacks commits the base has, and still starts', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    h.teammatePush('main', 'src/api/fix.txt');
+    const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = await start('Greetings', task);
+    expect(batch.state).toBe('OPEN');
+    expect(batch.notices).toMatchObject([
+      {
+        key: 'landing-behind',
+        tone: 'warning',
+        line: expect.stringContaining('feature/x') as unknown,
+        body: expect.stringContaining('main') as unknown,
+      },
+    ]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('says nothing when the branch holds everything the base has', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const batch = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(batch.notices).toEqual([]);
+  });
+
   it('refuses a branch origin does not have, in plain words, before anything starts', async () => {
     h = createDeliveryHarness();
     const before = h.git$('rev-parse', 'HEAD');

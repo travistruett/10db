@@ -339,7 +339,8 @@ function originLine(origin: FollowUpOrigin, source: TaskDto): string {
 /**
  * Files a follow-up for `sourceId`: an open task in the same project, parked in the Icebox column
  * (the project's first column when the builder renamed it, the derived board when it has none),
- * landing where the source lands and touching the same areas. Its description names the source and
+ * landing where the project's tasks land now (`taskLandingFor`, not the source's landing, which may
+ * name a branch since retired) and touching the same areas. Its description names the source and
  * says whether a step found it or the source's implementer left it. It depends on nothing, so it
  * never holds the source up.
  */
@@ -354,9 +355,10 @@ export function insertFollowUpTask(
   const columns = listBoardColumns(ctx.tx, source.projectId);
   const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
   const origin = originLine(how, source);
+  const project = getProject(ctx.tx, source.projectId);
   return writeTask(ctx, source.projectId, {
-    landing: source.landing,
-    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     reason: null,
     title: Title.parse(fields.title),
     description: `${origin}\n\n${fields.description}`,
@@ -383,8 +385,8 @@ const TITLE_MAX = 200;
 
 /**
  * Files the findings of a rejection that used up the retry limit, for a task that shipped with them
- * open: a task in the project's Ready column (planned, no human column), landing where the source
- * landed and touching the same areas, with one acceptance criterion per finding. Its description
+ * open: a task in the project's Ready column (planned, no human column), landing where the
+ * project's tasks land now and touching the same areas, with one acceptance criterion per finding. Its description
  * names the source. It depends on nothing, so it never holds the source up.
  */
 export function insertRetryLimitFollowUp(
@@ -396,9 +398,10 @@ export function insertRetryLimitFollowUp(
   const findings = parseFindings(found.notes);
   const quoted = `"${source.title}"`;
   const title = `${LIMIT_TITLE_PREFIX}${quoted}`;
+  const project = getProject(ctx.tx, source.projectId);
   return writeTask(ctx, source.projectId, {
-    landing: source.landing,
-    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     reason: null,
     // Cut by characters, so the title stays one line within its limit however long the source's is.
     title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
