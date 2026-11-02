@@ -62,7 +62,22 @@ const AGENT_DOCS_TEST = 'tests/repo/src/agent-docs.test.ts';
 /** @type {[RegExp, string][]} */
 const REPO_DOC_TESTS = [
   [/^docs\/|\.md$/, ARCHITECTURE_DOCS_TEST],
-  [/(^|\/)AGENTS\.md$|^\.claude\/|^\.codex\//, AGENT_DOCS_TEST],
+  [
+    new RegExp(
+      [
+        // The agent instruction files and tooling config the test reads.
+        String.raw`(^|/)AGENTS\.md$|^\.claude/|^\.codex/`,
+        // 'has no CLAUDE.md anywhere'.
+        String.raw`(^|/)CLAUDE\.md$`,
+        // 'never lets a package depend on an app', and a manifest makes a directory an app or
+        // package that needs an AGENTS.md. A directory with no manifest is unplaced: a full run.
+        String.raw`^(apps|packages)/[^/]+/package\.json$`,
+        // 'has no grab-bag modules'.
+        String.raw`^(apps|packages)/(.*/)?(utils|helpers|misc|common)\.tsx?$`,
+      ].join('|'),
+    ),
+    AGENT_DOCS_TEST,
+  ],
 ];
 /** Every repo rule test the pre-check runs, for the runs that cannot narrow. */
 const ALL_REPO_DOC_TESTS = [AGENT_DOCS_TEST, ARCHITECTURE_DOCS_TEST];
