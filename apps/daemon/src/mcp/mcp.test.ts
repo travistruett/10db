@@ -1093,6 +1093,39 @@ describe('MCP tools', () => {
       await alpha;
     });
 
+    it('withdraws the card when the other task’s wait ends, though nobody asks again', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      a.stopSession();
+      expect((await alpha).isError).toBe(true);
+      await vi.waitFor(() => {
+        expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      });
+      // Beta's wait goes on as a plain one: Alpha waits for nothing now.
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await beta;
+    });
+
+    it.each([
+      ['the task that holds the claim', 'a'],
+      ['the task that raised the card', 'b'],
+    ] as const)(
+      'withdraws the card when %s reaches a terminal state while its wait is still live',
+      async (_who, which) => {
+        const { a, b, alpha, beta, card } = await deadlocked();
+        const ended = which === 'a' ? a : b;
+        state.write((ctx) => {
+          transitionWorkstream(ctx, ended.workstream.id, { to: 'CANCELLED', fence: null });
+        });
+        await vi.waitFor(() => {
+          expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+        });
+        expect(openCards()).toEqual([]);
+        sessionAbort.abort();
+        await Promise.all([alpha, beta]);
+      },
+    );
+
     it('refuses and withdraws an answer once no wait waits on the card', async () => {
       const { a, b, alpha, beta, card } = await deadlocked();
       // The daemon restarted: its waits are gone, and the card is still open.

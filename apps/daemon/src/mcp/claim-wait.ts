@@ -2,6 +2,7 @@ import {
   InboxKind,
   InboxState,
   InvalidError,
+  isTerminal,
   type ClaimKind,
   type InboxItemDto,
   type InboxItemId,
@@ -189,10 +190,16 @@ export class ClaimWaits {
     return out;
   }
 
-  /** The workstreams `workstreamId` is waiting on now. */
-  holdersAwaitedBy(workstreamId: WorkstreamId): WorkstreamId[] {
+  /**
+   * The workstreams `workstreamId` is waiting on now. A task `ended` (finished, failed or cancelled)
+   * waits for nothing, whatever its session still shows.
+   */
+  holdersAwaitedBy(
+    workstreamId: WorkstreamId,
+    ended: (id: WorkstreamId) => boolean = () => false,
+  ): WorkstreamId[] {
     const out: WorkstreamId[] = [];
-    if (this.#cancelled.has(workstreamId)) return out;
+    if (this.#cancelled.has(workstreamId) || ended(workstreamId)) return out;
     for (const { state } of this.#live.values())
       if (state.workstreamId === workstreamId && state.heldBy !== null) out.push(state.heldBy);
     return out;
@@ -216,15 +223,22 @@ export class ClaimWaits {
     return out;
   }
 
-  /** Whether `holder` waits, directly or through other waiters, for something `me` holds. */
-  waitsOn(holder: WorkstreamId, me: WorkstreamId): boolean {
+  /**
+   * Whether `holder` waits, directly or through other waiters, for something `me` holds. Tasks `ended`
+   * wait for nothing, so a chain through one is no deadlock.
+   */
+  waitsOn(
+    holder: WorkstreamId,
+    me: WorkstreamId,
+    ended: (id: WorkstreamId) => boolean = () => false,
+  ): boolean {
     const seen = new Set<WorkstreamId>();
     const todo = [holder];
     for (let current = todo.pop(); current !== undefined; current = todo.pop()) {
       if (current === me) return true;
       if (seen.has(current)) continue;
       seen.add(current);
-      todo.push(...this.holdersAwaitedBy(current));
+      todo.push(...this.holdersAwaitedBy(current, ended));
     }
     return false;
   }
@@ -356,6 +370,12 @@ export function yieldRefusal(
   };
 }
 
+/** Whether the task reached a terminal state: it takes no part in a deadlock any more. */
+const taskEnded =
+  (db: DbReader) =>
+  (id: WorkstreamId): boolean =>
+    isTerminal(getWorkstreamRow(db, id).state);
+
 const cardOpen = (a: Asking, id: InboxItemId): boolean =>
   getInboxItem(a.state.db, id).state === InboxState.Open;
 
@@ -396,6 +416,7 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  */
 async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promise<ClaimResult> {
   const noticeKey = waitNoticeKey(a);
+  const ended = taskEnded(a.state.db);
   let heldBy: WorkstreamId | null = null;
   let noticeShown = false;
   const showNotice = (notice: Notice | null): void => {
@@ -411,6 +432,10 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
     for (;;) {
       if (waits.isCancelled(a.workstreamId))
         throw new InvalidError('The builder cancelled this task. End your turn.');
+      if (ended(a.workstreamId))
+        throw new InvalidError(
+          'This task has ended, so it no longer waits for the claim. End your turn.',
+        );
       const given = waits.pendingYield(a.workstreamId);
       if (given) return yieldRefusal(given, a);
       const outcome = tryAcquire(a);
@@ -421,7 +446,7 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
       const holder = outcome.conflict.heldBy;
       const changed = holder !== heldBy;
       if (changed || wait.inboxId !== null) {
-        if (!waits.waitsOn(holder, a.workstreamId)) {
+        if (!waits.waitsOn(holder, a.workstreamId, ended)) {
           withdrawDeadlock(a);
           wait.inboxId = null;
           showNotice(waitNotice(a, holder));
