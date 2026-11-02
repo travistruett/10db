@@ -91,6 +91,11 @@ export interface BeforeGateOptions {
    * task's gate started.
    */
   readonly inSession?: true;
+  /**
+   * A lane is launching on the copy, not a gate starting: a fetch that fails also leaves a notice on
+   * the batch, since no gate note will say that the lane started without the base's newer commits.
+   */
+  readonly atLaunch?: true;
 }
 
 export interface BaseUpdates {
@@ -113,6 +118,15 @@ export interface BaseUpdates {
    * before its turn; the gates behind it keep their order.
    */
   gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null>;
+  /**
+   * Brings the base into the batch's copy as a lane launches on it, so the lane sees what merged
+   * while its task waited in the queue (`decisions/2026-11-02-a-lane-starts-on-the-base-as-it-is-now.md`).
+   * It is `beforeGate` taking its turn among the batch's gates: a copy with no work of its own is
+   * fast-forwarded, one with commits gets the base merged in by the same merge, never reset. A fetch
+   * that fails leaves a notice on the batch and the copy as it is. A batch in the builder's own
+   * checkout, and a CI fix batch, whose branch is the pull request's, are left alone. Never throws.
+   */
+  atLaunch(batchId: BatchId, signal: AbortSignal): Promise<BaseUpdate>;
 }
 
 /** What a gate's evidence or card says about its base and packages; null when there is nothing. */
@@ -872,6 +886,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (stopped()) return { kind: 'aborted' };
+      if (options.atLaunch)
+        try {
+          showNotice(ctx.state, batch.id, baseNotices.fetchFailed(batch, error));
+        } catch (noticeError) {
+          ctx.logger.warn({ batchId, err: why(noticeError) }, 'fetch notice not written');
+        }
       merging = alone(
         notMerged(
           batch,
@@ -880,6 +900,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         ),
       );
     }
+    if (merging === null)
+      try {
+        hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseFetch]);
+      } catch (error) {
+        ctx.logger.warn({ batchId, err: why(error) }, 'fetch notice not cleared');
+      }
     if (stopped()) return { kind: 'aborted' };
     merging ??=
       batch.worktreePath === null
@@ -931,7 +957,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   /** Each batch's latest gate, which the next one waits for. */
   const gates = new Map<BatchId, Promise<unknown>>();
 
-  return {
+  const baseUpdates: BaseUpdates = {
     gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null> {
       const ahead = gates.get(batchId) ?? Promise.resolve();
       const turn = new Promise<boolean>((resolve) => {
@@ -976,5 +1002,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         };
       }
     },
+    async atLaunch(batchId, signal) {
+      const batch = getBatch(db, batchId);
+      // The builder's own checkout is never merged into, and a CI fix batch's branch is the pull
+      // request's, which stays at the head CI failed on.
+      if (batch.worktreePath === null || batch.ciFixOf !== null)
+        return { kind: 'up_to_date', note: null };
+      const update = await baseUpdates.gate(batchId, signal, () =>
+        baseUpdates.beforeGate(batchId, signal, { atLaunch: true }),
+      );
+      return update ?? { kind: 'aborted' };
+    },
   };
+  return baseUpdates;
 }

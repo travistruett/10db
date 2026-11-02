@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
-import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream } from '@10db/db';
+import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream, schema } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -1103,6 +1103,79 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, stop.signal)).toEqual({
       kind: 'aborted',
     });
+    expect(state(pathOf(batch))).toEqual(before);
+  });
+});
+
+describe("bringing a queued batch's copy up to its base when a lane launches", () => {
+  it('starts a lane on a copy with no work of its own at the base as it is now', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch, ws } = await opened();
+    // The task was started at the old main; main moves while its lane waits in the queue.
+    const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
+    const path = pathOf(batch);
+    expect(gitIn(path, 'rev-parse', 'HEAD')).toBe(batch.baseSha);
+    const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(update).toMatchObject({ kind: 'merged', base: teammate });
+    expect(gitIn(path, 'rev-parse', 'HEAD')).toBe(teammate);
+    expect(readFileSync(join(path, 'src/ui/teammate.txt'), 'utf8')).toBe('src/ui/teammate.txt\n');
+    expect(getBatch(h.store.db, batch.id).baseSha).toBe(teammate);
+    expect(getWorkstreamRow(h.store.db, ws.id).baseHead).toBe(teammate);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it("merges the base into a copy that holds the task's own commits, and keeps them", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const own = await commitOnBatch(batch, 'src/api/alpha.txt');
+    const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
+    const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    const path = pathOf(batch);
+    expect(update).toMatchObject({ kind: 'merged', base: teammate });
+    expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
+  });
+
+  it('changes nothing when origin has nothing newer', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const before = state(pathOf(batch));
+    expect(await createBaseUpdates(h.ctx).atLaunch(batch.id, signal)).toEqual({
+      kind: 'up_to_date',
+      note: null,
+    });
+    expect(state(pathOf(batch))).toEqual(before);
+  });
+
+  it('starts the lane on the copy as it is when the fetch fails, with a notice on the batch that the next fetch clears', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const before = state(pathOf(batch));
+    renameSync(h.origin, `${h.origin}-unreachable`);
+    try {
+      const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+      expect(update.kind).toBe('not_merged');
+    } finally {
+      renameSync(`${h.origin}-unreachable`, h.origin);
+    }
+    expect(state(pathOf(batch))).toEqual(before);
+    expect(h.only(getBatch(h.store.db, batch.id).notices)).toMatchObject({
+      key: 'base-fetch',
+      tone: 'warning',
+      line: "Couldn't fetch main: this lane started on the copy as it is",
+    });
+    expect(h.cards()).toEqual([]);
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
+  it("leaves a fix batch's branch, which is the pull request's, as it is", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    // The harness holds this one batch, so the update needs no filter.
+    h.store.db.update(schema.batches).set({ ciFixOf: batch.id, ciFixHead: batch.baseSha }).run();
+    h.teammatePush('main', 'src/ui/teammate.txt');
+    const before = state(pathOf(batch));
+    expect((await createBaseUpdates(h.ctx).atLaunch(batch.id, signal)).kind).toBe('up_to_date');
     expect(state(pathOf(batch))).toEqual(before);
   });
 });
