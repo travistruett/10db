@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { createGit } from '../git';
+import { classifyPath } from '../guard';
 import { proposeAreas, type AreaNamer } from './propose-areas';
 
 const cleanups: (() => void)[] = [];
@@ -171,6 +172,19 @@ describe('proposeAreas without a model', () => {
     expect(pair?.globs).toContain('two/**');
   });
 
+  it.each([
+    ['a stray bracket', ['a]b', 'axb', 'a[b']],
+    ['a backslash', ['a\\b', 'axb']],
+    ['expanding braces', ['k{x,y}', 'kxx,yy']],
+  ])('puts each file in one area when folder names differ only at %s', async (_, dirs) => {
+    const tracked = dirs.flatMap((dir) => ['1.ts', '2.ts', '3.ts'].map((f) => `${dir}/${f}`));
+    const repo = repoWith([['package.json', 'other/x.ts', 'other/y.ts', 'other/z.ts', ...tracked]]);
+    const { areas } = await proposal(repo.path);
+    for (const file of [...tracked, 'package.json', 'other/x.ts'])
+      expect(classifyPath(file, areas, []).areas, file).toHaveLength(1);
+    expect(new Set(areas.map((a) => a.name)).size).toBe(areas.length);
+  });
+
   it('refuses a folder that is not a git repository', async () => {
     const folder = track(tempDir('plain'));
     const result = await proposeAreas(
@@ -277,6 +291,51 @@ describe('proposeAreas with a model', () => {
     const { areas, namedBy } = await proposal(repo.path, namer);
     expect(namedBy).toBe(AreaProposalSource.Structure);
     expect(namesOf(areas)).toEqual(['api', 'root', 'ui', 'web']);
+  });
+
+  it('stops waiting for a model that has not answered within its bound, and aborts the question', async () => {
+    const repo = repoWith(WORKSPACE);
+    let asked: AbortSignal | undefined;
+    const hung: AreaNamer = (_, signal) => {
+      asked = signal;
+      return new Promise<string>(() => undefined);
+    };
+    const result = await proposeAreas(
+      { git: createGit(), namer: hung, protectedRoots: [], namingMs: 20 },
+      repo.path,
+    );
+    expect(result.ok && result.proposal.namedBy).toBe(AreaProposalSource.Structure);
+    expect(asked?.aborted).toBe(true);
+  });
+
+  it('aborts the question when the caller gives up', async () => {
+    const repo = repoWith(WORKSPACE);
+    const caller = new AbortController();
+    let asked: AbortSignal | undefined;
+    const hung: AreaNamer = (_, signal) => {
+      asked = signal;
+      caller.abort();
+      return new Promise<string>(() => undefined);
+    };
+    await proposeAreas(
+      { git: createGit(), namer: hung, protectedRoots: [] },
+      repo.path,
+      caller.signal,
+    );
+    expect(asked?.aborted).toBe(true);
+  });
+
+  it('asks the model nothing when the caller has already given up', async () => {
+    const repo = repoWith(WORKSPACE);
+    const caller = new AbortController();
+    caller.abort();
+    let calls = 0;
+    const namer: AreaNamer = () => {
+      calls += 1;
+      return Promise.resolve('x');
+    };
+    await proposeAreas({ git: createGit(), namer, protectedRoots: [] }, repo.path, caller.signal);
+    expect(calls).toBe(0);
   });
 
   it('keeps a model area from taking a default hazard name', async () => {

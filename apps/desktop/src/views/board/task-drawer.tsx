@@ -43,6 +43,7 @@ import { canRetry } from '../factory/workstream-state';
 import { ReviewRoundsList } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
+import { CopyTaskId } from './copy-task-id';
 import { BatchPanel } from './batch-panel';
 import { ciLine } from './ci-line';
 import { FlowSelect } from './flow-select';
@@ -352,6 +353,7 @@ export function TaskDrawer({
             <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
           </Stack>
         )}
+        <CopyTaskId id={task.id} />
       </Stack>
       {/* Pinned to the drawer's bottom edge, so Save never scrolls away. */}
       <Group

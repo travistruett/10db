@@ -19,7 +19,9 @@ import { jobKey, JobQueue } from './index';
 let h: DeliveryHarness;
 beforeEach(() => {
   // A project whose default is Your folder: each task's own placement decides where it runs.
-  h = createDeliveryHarness({}, { trigger: false });
+  // The cuts run real git against a local origin; on a loaded CI runner the default 10 s fetch limit
+  // can refuse a cut, which deletes its batch, so the limit is generous here.
+  h = createDeliveryHarness({}, { trigger: false, networkTimeoutMs: 60_000 });
 });
 afterEach(() => {
   h.close();
@@ -90,6 +92,18 @@ describe('starting a mix of placements', () => {
     expect(kinds.filter((copied) => !copied)).toHaveLength(1);
     expect(kinds.filter(Boolean)).toHaveLength(2);
     await h.jobs.idle();
+    // A refused cut deletes its batch and raises a card; say which, so a failure names its cause.
+    const missing = answered.filter(
+      (batch) => !listBatches(h.store.db).some((row) => row.id === batch.id),
+    );
+    if (missing.length > 0)
+      throw new Error(
+        `batches ${missing.map((batch) => batch.id).join(', ')} were removed; cards: ${JSON.stringify(
+          h.cards().map((card) => ({ title: card.title, body: card.body })),
+        )}; batches left: ${JSON.stringify(
+          listBatches(h.store.db).map((row) => ({ id: row.id, state: row.state })),
+        )}`,
+      );
     const now = answered.map((batch) => getBatch(h.store.db, batch.id));
     expect(now.map((batch) => batch.state)).toEqual(['OPEN', 'OPEN', 'OPEN']);
     const tasksOf = (batch: BatchDto) =>
@@ -167,6 +181,21 @@ describe('starting a mix of placements', () => {
     expect(message).toContain('separate copy');
     expect(message).toContain('Your folder');
     expect(listBatches(h.store.db)).toEqual([]);
+  });
+
+  it('raises one start-refused card naming both tasks, folded on a repeat', () => {
+    const a = shared('Alpha');
+    const b = copy('Beta', { dependsOn: ids(a) });
+    const start = () => h.starter.startBatch(h.project.id, { title: 'Mixed', taskIds: ids(a, b) });
+    expect(start).toThrow(ConflictError);
+    expect(start).toThrow(ConflictError);
+    const card = h.only(h.cards());
+    expect((card.detail as { taskIds: string[] }).taskIds.sort()).toEqual([a.id, b.id].sort());
+    expect(card.body).toContain('Alpha');
+    expect(card.body).toContain('Beta');
+    expect(card.body).toContain('Your folder');
+    expect(card.body).toContain('separate copy');
+    expect(card.options.map((o) => o.label)).toEqual(['Retry start', 'Cancel task']);
   });
 
   it('refuses the same dependency the other way round', () => {

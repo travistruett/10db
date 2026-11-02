@@ -160,6 +160,7 @@ describe('the builder MCP endpoint', () => {
     expect(projects[0]?.['hazards']).toContainEqual(
       expect.objectContaining({ name: 'migrations', globs: expect.any(Array) as unknown }),
     );
+    expect(projects[0]?.['isolate']).toEqual(['migrations', 'deps']);
     expect(projects[0]?.['columns']).toContainEqual({ id: column.id, name: 'Later' });
   });
 
@@ -334,6 +335,35 @@ describe('the builder MCP endpoint', () => {
       expect(result.isError).toBe(true);
       expect(result.text).toContain('billing');
       expect((await tasksOf(project.id))[0]?.areas).toEqual(['src']);
+    });
+
+    it('changes where an unstarted task lands, and leaves it when landing is not sent', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'lands');
+      expect(task.landing).toEqual({ kind: 'base' });
+      await callJson('edit_task', { taskId: task.id, landing: { kind: 'hold' } });
+      expect((await tasksOf(project.id))[0]?.landing).toEqual({ kind: 'hold' });
+      await callJson('edit_task', { taskId: task.id, title: 'renamed' });
+      expect((await tasksOf(project.id))[0]?.landing).toEqual({ kind: 'hold' });
+    });
+
+    it('refuses a landing that is not one of the three kinds', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'keep');
+      const result = await call('edit_task', { taskId: task.id, landing: { kind: 'nowhere' } });
+      expect(result.isError).toBe(true);
+      expect((await tasksOf(project.id))[0]?.landing).toEqual({ kind: 'base' });
+    });
+
+    it('refuses a task that has started when its landing changes, saying why', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'running');
+      await callJson('start_task', { taskId: task.id });
+      const result = await call('edit_task', { taskId: task.id, landing: { kind: 'hold' } });
+      expect(result).toEqual({
+        isError: true,
+        text: 'running has already started, so where its work lands is fixed',
+      });
     });
 
     it('refuses a task that has started, saying why', async () => {

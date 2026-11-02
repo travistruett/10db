@@ -1,5 +1,6 @@
 import { BoardStatus, TaskStatus, WorkstreamState, type TaskDto } from '@10db/contracts';
 import { ActionIcon, Menu } from '@mantine/core';
+import { useClipboard } from '@mantine/hooks';
 import { IconDots } from '@tabler/icons-react';
 import type { DropTarget, MenuMove } from './drop-rules';
 import type { HoldOption } from './task-hold';
@@ -50,7 +51,7 @@ export interface TaskCardMenuProps {
   readonly onRemove?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
-  /** Present when the task's batch is open or not shipped; abandoning keeps the branch and cancels its unfinished tasks. */
+  /** Present when the task's batch is open or not shipped; abandoning deletes the branch when nothing is committed on it, keeps it otherwise, and cancels its unfinished tasks. */
   readonly onAbandon?: () => void;
   /** Why Abandon is held back: a run on the branch is live, and the daemon won't cut it short. */
   readonly abandonRefusal?: string | null;
@@ -83,6 +84,7 @@ export function TaskCardMenu({
   closeLine,
 }: TaskCardMenuProps) {
   const startable = canStart(task, latest, shippedAnywayClosed);
+  const clipboard = useClipboard({ timeout: 1500 });
   return (
     <Menu position="bottom-end" withinPortal>
       <Menu.Target>
@@ -152,6 +154,16 @@ export function TaskCardMenu({
             {abandonRefusal === null ? 'Abandon' : `Abandon (${abandonRefusal.replace(/\.$/, '')})`}
           </Menu.Item>
         ) : null}
+        <Menu.Divider />
+        {/* The menu stays open so the item can say it copied. */}
+        <Menu.Item
+          closeMenuOnClick={false}
+          onClick={() => {
+            clipboard.copy(task.id);
+          }}
+        >
+          {clipboard.copied ? 'Copied' : 'Copy ID'}
+        </Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );

@@ -3,11 +3,13 @@ import {
   landingTarget,
   type BatchDto,
   type LandingTarget,
+  type Notice,
   type ProjectDto,
   type TaskDto,
 } from '@10db/contracts';
 import { startCards, type Card } from './cards';
 import { networkCall, type DeliveryContext } from './context';
+import { landingNotices } from './notices';
 
 /**
  * The refusal for a batch that takes its base from a branch the task named, when origin has no
@@ -27,6 +29,32 @@ export async function missingLandingBranch(
     networkCall(ctx, signal),
   );
   return there ? null : startCards.branchMissing(batch.baseBranch);
+}
+
+/**
+ * A notice when the branch a batch lands in lacks commits the project's base has, so a task still
+ * filed against a retired integration branch is not started unwarned; null when it holds the base,
+ * when the base is the batch's own, or when origin can't be asked (the start's own fetch refuses that).
+ * Fetches the base into origin's remote-tracking ref, as the batch's own fetch does for its branch.
+ */
+export async function branchBehindBase(
+  ctx: DeliveryContext,
+  project: Pick<ProjectDto, 'repoPath' | 'baseBranch'>,
+  batch: Pick<BatchDto, 'baseBranch'>,
+  signal: AbortSignal,
+): Promise<Notice | null> {
+  if (batch.baseBranch === project.baseBranch) return null;
+  try {
+    await ctx.git.fetch(project.repoPath, project.baseBranch, networkCall(ctx, signal));
+    const base = `refs/remotes/origin/${project.baseBranch}`;
+    const branch = `refs/remotes/origin/${batch.baseBranch}`;
+    if (await ctx.git.isAncestor(project.repoPath, base, branch)) return null;
+    const missing = (await ctx.git.commitsSince(project.repoPath, branch, base)).length;
+    return landingNotices.behind(batch.baseBranch, project.baseBranch, Math.max(missing, 1));
+  } catch (error) {
+    ctx.logger.warn({ baseBranch: batch.baseBranch, err: error }, 'landing branch not compared');
+    return null;
+  }
 }
 
 /** The batch's landing as a task would state it: where it is built from and how it merges. */

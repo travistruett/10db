@@ -339,7 +339,8 @@ function originLine(origin: FollowUpOrigin, source: TaskDto): string {
 /**
  * Files a follow-up for `sourceId`: an open task in the same project, parked in the Icebox column
  * (the project's first column when the builder renamed it, the derived board when it has none),
- * landing where the source lands and touching the same areas. Its description names the source and
+ * landing where the project's tasks land now (`taskLandingFor`, not the source's landing, which may
+ * name a branch since retired) and touching the same areas. Its description names the source and
  * says whether a step found it or the source's implementer left it. It depends on nothing, so it
  * never holds the source up.
  */
@@ -354,9 +355,10 @@ export function insertFollowUpTask(
   const columns = listBoardColumns(ctx.tx, source.projectId);
   const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
   const origin = originLine(how, source);
+  const project = getProject(ctx.tx, source.projectId);
   return writeTask(ctx, source.projectId, {
-    landing: source.landing,
-    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     reason: null,
     title: Title.parse(fields.title),
     description: `${origin}\n\n${fields.description}`,
@@ -383,8 +385,8 @@ const TITLE_MAX = 200;
 
 /**
  * Files the findings of a rejection that used up the retry limit, for a task that shipped with them
- * open: a task in the project's Ready column (planned, no human column), landing where the source
- * landed and touching the same areas, with one acceptance criterion per finding. Its description
+ * open: a task in the project's Ready column (planned, no human column), landing where the
+ * project's tasks land now and touching the same areas, with one acceptance criterion per finding. Its description
  * names the source. It depends on nothing, so it never holds the source up.
  */
 export function insertRetryLimitFollowUp(
@@ -396,9 +398,10 @@ export function insertRetryLimitFollowUp(
   const findings = parseFindings(found.notes);
   const quoted = `"${source.title}"`;
   const title = `${LIMIT_TITLE_PREFIX}${quoted}`;
+  const project = getProject(ctx.tx, source.projectId);
   return writeTask(ctx, source.projectId, {
-    landing: source.landing,
-    workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
     reason: null,
     // Cut by characters, so the title stays one line within its limit however long the source's is.
     title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
@@ -792,7 +795,18 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
   return getTask(ctx.tx, id);
 }
 
-export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): TaskDto {
+/**
+ * `proposed` is the placement the daemon's rule gives the task as the patch leaves it. It is taken
+ * only when it names a separate copy, the patch doesn't set the placement itself, the builder has not
+ * chosen this task's placement, and the task could still be moved (see `placementRefusal`); otherwise it
+ * is ignored, so a task that has started, or that the builder placed, is never moved by an edit.
+ */
+export function patchTask(
+  ctx: WriteContext,
+  id: TaskId,
+  patch: TaskPatch,
+  proposed?: Placement,
+): TaskDto {
   const changes = TaskPatch.parse(patch);
   if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
     throw new ConflictError('A removed task can no longer be edited');
@@ -813,6 +827,10 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
   }
   if (fields.areas !== undefined) checkAreasCanChange(ctx.tx, getTask(ctx.tx, id), fields.areas);
   if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
+  const moved =
+    fields.workspaceMode === undefined && proposed !== undefined
+      ? movedByProposal(ctx.tx, getTask(ctx.tx, id), proposed)
+      : null;
   ctx.tx
     .update(schema.tasks)
     .set({
@@ -820,6 +838,7 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
       ...(landing === undefined ? {} : landingColumns(landing)),
       // The patch is the builder's placement control: the reason says so, replacing a proposed one.
       ...(fields.workspaceMode === undefined ? {} : { placementReason: BUILDER_CHOSE_PLACEMENT }),
+      ...(moved ?? {}),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))
@@ -849,15 +868,37 @@ function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string
  * pending-join test on top.
  */
 function checkPlacementCanChange(db: DbReader, task: TaskDto): void {
+  const refusal = placementRefusal(db, task);
+  if (refusal) throw refusal;
+}
+
+function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictError | null {
   if (getProject(db, task.projectId).delivery !== Delivery.PullRequest)
-    throw new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
+    return new InvalidError(NO_COPY_WITHOUT_PULL_REQUESTS);
   if (task.status !== TaskStatus.Open)
-    throw new ConflictError(`${task.title} is finished, so where it worked can't change`);
+    return new ConflictError(`${task.title} is finished, so where it worked can't change`);
   const run = latestRun(db, task.id);
   if (run && ACTIVE_STATES.includes(run.state))
-    throw new ConflictError(
+    return new ConflictError(
       `${task.title} has started, so where it works can't change until its run ends`,
     );
+  return null;
+}
+
+/**
+ * The columns an edit sets when the placement rule now sends the task to a separate copy (the task's
+ * areas or risk tags changed after it was made). Null when the task stays as it is: the rule names no
+ * copy, the builder chose its placement, it already has a reason, or Start could no longer start it.
+ */
+function movedByProposal(
+  db: DbReader,
+  task: TaskDto,
+  proposed: Placement,
+): { workspaceMode: WorkspaceMode; placementReason: string | null } | null {
+  if (proposed.workspaceMode !== WorkspaceMode.Worktree) return null;
+  if (task.placementReason !== null) return null;
+  if (placementRefusal(db, task) !== null) return null;
+  return { workspaceMode: proposed.workspaceMode, placementReason: proposed.reason };
 }
 
 /** Below this gap a midpoint loses precision, so the project is renumbered first. */

@@ -696,6 +696,10 @@ function startSession(
           if (failure) continue;
           started = true;
         }
+        // Claude Code can change mode mid-session, for example leaving auto mode after repeated classifier refusals.
+        if (msg.type === 'system' && msg.subtype === 'status' && msg.permissionMode !== undefined) {
+          log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
+        }
         for (const event of mapSdkMessage(msg, { pid })) {
           if (event.type === 'turn_complete') {
             totals.inputTokens += event.inputTokens;
@@ -889,6 +893,7 @@ async function complete(
   opts: ClaudeAdapterOptions,
   runQuery: QueryFn,
 ): Promise<string> {
+  if (ask.signal?.aborted === true) throw new CompletionError('The question was withdrawn.');
   const clock = opts.clock ?? systemClock;
   const input = createChannel<SDKUserMessage>();
   const abortController = new AbortController();
@@ -916,6 +921,14 @@ async function complete(
       reject(new CompletionError('The model did not answer in time.'));
     }, COMPLETION_MS);
   });
+  // A caller that gives up ends the question now, not when the model would have answered.
+  let withdrawn: () => void = () => undefined;
+  const withdrawal = new Promise<never>((_, reject) => {
+    withdrawn = () => {
+      reject(new CompletionError('The question was withdrawn.'));
+    };
+    ask.signal?.addEventListener('abort', withdrawn, { once: true });
+  });
   const answer = (async () => {
     const info = await q.accountInfo();
     const refusal = checkAccount(ask.account, seenFrom(info));
@@ -932,19 +945,22 @@ async function complete(
     throw new CompletionError('The model ended without an answer.');
   })();
   try {
-    return await Promise.race([answer, timeout]);
+    return await Promise.race([answer, timeout, withdrawal]);
   } catch (error) {
     throw error instanceof CompletionError
       ? error
       : new CompletionError(error instanceof Error ? error.message : 'The model failed.');
   } finally {
     timer.cancel();
+    ask.signal?.removeEventListener('abort', withdrawn);
     input.end();
     abortController.abort();
     void drain(q);
-    // Whichever of the answer and the timeout lost the race must not become an unhandled rejection.
+    // Whichever of the answer, the timeout and the withdrawal lost the race must not become an
+    // unhandled rejection.
     answer.catch(() => undefined);
     timeout.catch(() => undefined);
+    withdrawal.catch(() => undefined);
   }
 }
 

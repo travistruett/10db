@@ -9,6 +9,7 @@ import type {
   SDKUserMessage,
   SpawnedProcess,
 } from '@anthropic-ai/claude-agent-sdk';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
@@ -67,8 +68,11 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
 
 interface Script {
   readonly messages: readonly SDKMessage[];
-  /** After the scripted messages: end the stream, wait for input to end or an abort, or throw. */
-  readonly then?: 'end' | 'hang' | { readonly throws: string };
+  /**
+   * After the scripted messages: end the stream, wait for input to end or an abort, wait for an
+   * abort alone (a model that never answers), or throw.
+   */
+  readonly then?: 'end' | 'hang' | 'stall' | { readonly throws: string };
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
@@ -162,6 +166,10 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
     async function* stream(): AsyncGenerator<SDKMessage, void> {
       for (const message of script.messages) yield message;
       const then = script.then ?? 'end';
+      if (then === 'stall') {
+        await aborted;
+        throw new Error('Claude Code process aborted by user');
+      }
       if (then === 'hang') {
         await Promise.race([inputEnded, aborted]);
         if (signal?.aborted) throw new Error('Claude Code process aborted by user');
@@ -1641,6 +1649,40 @@ describe('createClaudeAdapter', () => {
     expect(billing.map((l) => l['permissionMode'])).toEqual(['default']);
   });
 
+  it('logs a permission mode change Claude Code reports partway through a session', async () => {
+    // Claude Code can leave auto mode mid-session, for example after repeated classifier refusals.
+    const logs = captureLogs();
+    const status = (permissionMode?: 'default' | 'auto'): SDKMessage => ({
+      type: 'system',
+      subtype: 'status',
+      status: null,
+      ...(permissionMode === undefined ? {} : { permissionMode }),
+      uuid: randomUUID(),
+      session_id: PROVIDER_SESSION,
+    });
+    const fake = fakeQuery({
+      messages: [
+        { ...initMessage(), permissionMode: 'auto' as const },
+        status(),
+        status('default'),
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      lanePermissionMode: 'auto',
+    });
+    const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+    const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
+    expect(billing.map((l) => l['permissionMode'])).toEqual(['auto']);
+    const changes = logs.lines().filter((l) => l['msg'] === 'claude session permission mode');
+    expect(changes.map((l) => l['permissionMode'])).toEqual(['default']);
+  });
+
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {
     const clock = new ManualClock();
     const { adapter } = adapterFor(
@@ -2087,6 +2129,30 @@ describe('complete', () => {
     clock.advance(120_000);
     await failure;
     expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('stops Claude Code when the caller gives up, without waiting for the answer', async () => {
+    const { adapter, record } = adapterFor_({ messages: [], then: 'stall' });
+    const caller = new AbortController();
+    const asked = adapter.complete({ ...ASK, signal: caller.signal });
+    const failure = expect(asked).rejects.toThrow(CompletionError);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(1);
+    });
+    expect(record.options?.abortController?.signal.aborted).toBe(false);
+    caller.abort();
+    await failure;
+    expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('never starts Claude Code for a caller that has already given up', async () => {
+    const { adapter, record } = adapterFor_({ messages: [answer('x')] });
+    const caller = new AbortController();
+    caller.abort();
+    await expect(adapter.complete({ ...ASK, signal: caller.signal })).rejects.toThrow(
+      CompletionError,
+    );
+    expect(record.inputs).toEqual([]);
   });
 });
 

@@ -8,6 +8,7 @@ import {
   mintId,
   NotFoundError,
   TaskStatus,
+  UNFINISHED_BATCH_STATES,
   WorkspaceMode,
   type BatchDto,
   type BatchId,
@@ -38,13 +39,13 @@ import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
 import { batchCheckout } from './checkout';
-import { ghCall, networkCall, raise, type DeliveryContext } from './context';
+import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
-import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
+import { branchBehindBase, joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -167,7 +168,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         placement: () => WorkspaceMode.Shared,
       };
     }
-    refuseCrossPlacementDependency(tasks);
+    refuseCrossPlacementDependency(tasks, (card, taskIds) => {
+      raise(
+        ctx.inbox,
+        project.id,
+        forTasks(card, taskIds, input.title ? { title: input.title } : {}),
+      );
+    });
     const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
     const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
     return {
@@ -181,7 +188,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     };
   }
 
-  /** The project's batch `batchId` when it is a separate copy's; none when it is not, or names no batch. */
+  /**
+   * The project's batch `batchId` when it is a separate copy's; none when it is the shared batch's
+   * or names no batch (the shared join answers for those). A batch of another project, or one that
+   * has finished, is refused here saying so, since the shared join can't tell what is wrong with it.
+   */
   function copyBatchOf(project: ProjectDto, batchId: BatchId): BatchDto | undefined {
     let batch: BatchDto;
     try {
@@ -190,7 +201,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       if (error instanceof NotFoundError) return undefined;
       throw error;
     }
-    return batch.projectId === project.id && batch.worktreePath !== null ? batch : undefined;
+    if (batch.projectId !== project.id)
+      throw new ConflictError(`Batch "${batch.title}" is not a batch of ${project.name}`);
+    // A finished copy may keep its worktree path (retiring keeps a worktree holding unseeded
+    // ignored files), so the state alone decides; a shared batch's path is always null.
+    if (!UNFINISHED_BATCH_STATES.includes(batch.state))
+      throw new ConflictError(
+        `Batch "${batch.title}" has finished; start these tasks again on their own`,
+      );
+    return batch.worktreePath !== null ? batch : undefined;
   }
 
   function prepareShared(
@@ -423,6 +442,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       } catch (error) {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));
         return;
+      }
+      // Not a refusal: the builder may mean to land in a branch that is behind. A notice on the
+      // batch's tasks names it.
+      const behind = await branchBehindBase(ctx, project, batch, signal);
+      if (behind && !stopped()) {
+        try {
+          showNotice(ctx.state, batchId, behind);
+        } catch (error) {
+          ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
+        }
       }
       const call = ghCall(ctx, signal);
       try {

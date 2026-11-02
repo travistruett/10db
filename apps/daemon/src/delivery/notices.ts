@@ -24,7 +24,19 @@ export const NOTICE_KEY = {
   gateRerun: 'gate-rerun',
   /** 10db merged the base into the open pull request's branch. */
   update: 'pull-request-update',
+  /** The branch the batch lands in lacks commits the project's base branch has. */
+  landingBehind: 'landing-behind',
 } as const;
+
+/** What a batch's tasks are told when the branch they land in has fallen behind the project's base. */
+export const landingNotices = {
+  behind: (branch: string, base: string, missing: number): Notice => ({
+    key: NOTICE_KEY.landingBehind,
+    tone: 'warning',
+    line: `${branch} lacks ${String(missing)} commit${missing === 1 ? '' : 's'} ${base} has`,
+    body: `This work lands in ${branch}, and is built from it, but origin/${branch} doesn't hold ${String(missing)} commit${missing === 1 ? '' : 's'} that origin/${base} has, so the batch lacks any fix made there. Work landed in ${branch} also won't reach ${base} unless ${branch} is merged into it.\n\nIf ${branch} is no longer in use, change where this task lands to the base and start it again. Otherwise merge ${base} into ${branch} on origin first.`,
+  }),
+};
 
 /** Why a base notice was written beyond the gate, and what more it found. */
 export interface BaseNoticeContext {
