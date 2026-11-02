@@ -200,15 +200,14 @@ const GROUP_LEADERS: ReadonlySet<string> = new Set([...BEFORE_COMMAND, 'time']);
  */
 function scan(command: string, from: number, substitution: boolean): Scan {
   const segments: ShellSegment[] = [];
-  // Open parentheses: whether each opens a subshell.
-  const parens: boolean[] = [];
   const pending: HereDocument[] = [];
   let certain = true;
   let wordsCertain = true;
   let bracesCertain = true;
   // The segment holds a `>(…)` or `<(…)`, so what it reads or writes reaches another command.
   let processSubstitution = false;
-  // The index of the first segment inside each open group or parenthesis, innermost last.
+  // The index of the first segment inside each open group or parenthesis, innermost last; the
+  // length of `parenStarts` is how many parentheses are open.
   const groupStarts: number[] = [];
   const parenStarts: number[] = [];
   // Segment index ranges of the groups and subshells closed since the last separator: the next
@@ -527,21 +526,18 @@ function scan(command: string, from: number, substitution: boolean): Scan {
         // subshell. `((` is arithmetic, where `<<` shifts instead of opening a here-document.
         if (next === '(') certain = false;
         flush('(');
-        parens.push(true);
         parenStarts.push(segments.length);
       } else {
         // A function's `()`, an array or a case pattern: not a subshell.
         certain = false;
         flush('(');
-        parens.push(false);
         parenStarts.push(segments.length);
       }
       continue;
     }
     if (ch === ')') {
-      if (parens.length > 0) {
+      if (parenStarts.length > 0) {
         flush(')');
-        parens.pop();
         closeRange(parenStarts.pop());
       } else if (substitution) {
         flush('');
@@ -581,7 +577,7 @@ function scan(command: string, from: number, substitution: boolean): Scan {
     }
   }
   flush('');
-  if (parens.length > 0 || quote !== null) certain = false;
+  if (parenStarts.length > 0 || quote !== null) certain = false;
   return { segments: withForwarding(), certain, end: command.length, closed: false };
 }
 

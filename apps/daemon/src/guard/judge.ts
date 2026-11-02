@@ -40,7 +40,7 @@ export interface GuardInput {
   readonly readOnly: boolean;
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
-  /** Paths no tool or command may touch: the data directory and the default account's sign-in. */
+  /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
   readonly protectedPaths: readonly ProtectedPath[];
   /**
    * The session's own config directory and Claude Code session id. Claude Code saves a large tool

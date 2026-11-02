@@ -202,19 +202,13 @@ function written(word: string, base: string): string {
 
 function reachRefusal(
   word: string,
-  base: string | null,
+  base: string,
   paths: readonly ProtectedPath[],
   reach: Reach,
 ): string | null {
-  const target = base === null && !isAbsolute(word) ? null : written(word, base ?? '/');
-  if (target === null) {
-    // The working directory is unknown after a `cd` the guard cannot follow: a word that names a
-    // protected path's last component is refused.
-    const segments = lower(word).split('/');
-    return paths.find((p) => segments.includes(lower(basename(p.path))))?.refusal ?? null;
-  }
-  // A `..` after a wildcard, or after a part that does not exist yet (a link the command makes
-  // first may stand there), climbs from a place the guard cannot name.
+  const target = written(word, base);
+  // A `..` after a wildcard, or after a part of the path that does not exist yet, climbs from a
+  // place the guard cannot name.
   if (paths.length > 0 && isOverLongPath(target)) return OVER_LONG_PATH_REFUSAL;
   if (paths.length > 0 && (climbsAfterGlob(word) || !realPathReadings(target).complete))
     return unresolved(word);

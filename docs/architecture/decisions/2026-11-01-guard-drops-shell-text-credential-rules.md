@@ -1,7 +1,7 @@
 # The guard no longer reads shell text for credentials
 
 - **Date:** 2026-11-01
-- **Amends:** decision 124 (the sandbox is always on); builds D12 of `../../superpowers/specs/2026-10-25-10db-lane-sandbox-design.md`
+- **Builds on:** decision 124 (the sandbox is always on), which this changes nothing in; builds D12 of `../../superpowers/specs/2026-10-25-10db-lane-sandbox-design.md`
 
 ## Decision
 
