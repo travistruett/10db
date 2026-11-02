@@ -1179,6 +1179,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     };
     let made = false;
     let before: string | null = null;
+    /** The head the base update wrote (its merge, then the generators' commit); null while none has. */
+    let wrote: string | null = null;
     let pushed = false;
     let keptAt: string | null = null;
     try {
@@ -1271,6 +1273,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
+        // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
+        // since the install and the generators run long enough for the builder to commit meanwhile.
+        if (update.kind === 'merged') wrote = update.head;
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
@@ -1341,22 +1346,35 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
       if (pushed) unpushedHead.delete(batchId);
-      else if (before !== null) await rewind(batchId, main, branch, before, keptAt);
+      else if (before !== null) await rewind(batchId, main, branch, before, wrote, keptAt);
     }
   }
 
-  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  /**
+   * Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. Only
+   * the head the base update wrote (`wrote`) goes: a tip past it holds a commit the builder made
+   * meanwhile, and a tip with no head written (a stop before the update answered) is not known to be
+   * 10db's, so either stays, and the next catch-up's card names the commits.
+   */
   async function rewind(
     batchId: BatchId,
     main: string,
     branch: string,
     to: string,
+    wrote: string | null,
     keptAt: string | null,
   ): Promise<void> {
     let tip: string | null = null;
     try {
       tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
+      if (tip !== wrote) {
+        deps.logger.warn(
+          { batchId, branch, tip, wrote },
+          'branch left as it is after a catch-up that was not pushed: it holds more than 10db wrote',
+        );
+        return;
+      }
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
       unpushedHead.delete(batchId);
     } catch (error) {

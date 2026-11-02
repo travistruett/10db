@@ -305,6 +305,62 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(card.body).toContain(stale.slice(0, 7));
   });
 
+  it.each([
+    ['the worktree it kept', true],
+    ['a worktree it made', false],
+  ])(
+    "keeps a builder's commit made in %s while the base update's install runs, when the check then fails",
+    async (_where, keepWorktree) => {
+      const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree });
+      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+      conflicts(batch);
+      const branch = batch.branch ?? '';
+      h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+      // The install after the merge reads the lockfile at HEAD: the builder commits in that window.
+      const read = h.git.blobAt.bind(h.git);
+      let committed = false;
+      vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+        if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+          committed = true;
+          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+        }
+        return read(repo, rev, file);
+      });
+
+      await catchUp(batch);
+
+      expect(committed).toBe(true);
+      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+      expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
+      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
+      // Nothing was pushed, and the failed check still has its one card.
+      expect(h.origin$('log', '-1', '--format=%s', onOrigin(branch))).not.toBe(
+        'Add src/builder.ts',
+      );
+      expect(h.cards().filter((c) => c.title.includes('gate failed'))).toHaveLength(1);
+    },
+  );
+
+  it("keeps a builder's commit made in the kept worktree while the check runs, when it then fails", async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const branch = batch.branch ?? '';
+    const kept = batch.worktreePath ?? '';
+    // The check fails after the builder commits in the worktree; it runs there.
+    h.state.write((c) =>
+      patchProject(c, h.project.id, {
+        gateCommand: `git -c user.name=Builder -c user.email=builder@example.com commit -q --allow-empty -m 'Fix by hand' && false`,
+      }),
+    );
+
+    await catchUp(batch);
+
+    const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+    expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Fix by hand');
+    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(tip);
+  });
+
   it('merges it once GitHub says it is clean, when it had refused the merge', async () => {
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set(
