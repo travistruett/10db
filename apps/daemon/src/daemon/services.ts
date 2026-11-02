@@ -17,6 +17,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  BUILDER_CHOSE_PLACEMENT,
   cancelTask,
   closeTask,
   reopenTask,
@@ -401,7 +402,14 @@ export function createServices(deps: {
                 riskTags: patch.riskTags ?? task.riskTags,
               });
         // A join still pending has not written yet, so the move would collide with it.
-        if (proposed?.workspaceMode === WorkspaceMode.Worktree && task.placementReason === null)
+        // The same holds for any move the rule makes: a task the builder placed never moves, and one with
+        // no reason moves only to a copy.
+        if (
+          proposed !== undefined &&
+          proposed.workspaceMode !== task.workspaceMode &&
+          task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
+          (task.placementReason !== null || proposed.workspaceMode === WorkspaceMode.Worktree)
+        )
           deps.starter.refuseIfJoining(id);
         return patchTask(ctx, id, patch, proposed);
       });
