@@ -604,18 +604,28 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
  * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
  * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
  * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran. A task
- * whose latest run failed (started again after it) is closed as `closeTask` does, and refused on
- * the same terms.
+ * started again after a run that failed is closed as `closeTask` does, and refused on the same terms.
+ * A task started again after a run that finished (a reopened task) or was cancelled after a session
+ * (cancelled in Factory) is refused before it gets a new run, so that terminal run is still its
+ * latest: it is retired the same way, refused only while an open task waits on it.
  */
 export function cancelRefusedStartTask(ctx: WriteContext, id: TaskId): TaskDto {
-  // A task started again after a failed run is refused before it gets a new run, so its latest run
-  // is still the failed one: close it the way the Board's Close does.
-  if (
-    getTask(ctx.tx, id).status === TaskStatus.Open &&
-    latestRun(ctx.tx, id)?.state === WorkstreamState.Failed
-  )
-    return closeTask(ctx, id);
-  return removeUnstarted(ctx, id, true);
+  const task = getTask(ctx.tx, id);
+  const run = task.status === TaskStatus.Open ? latestRun(ctx.tx, id) : undefined;
+  if (run?.state === WorkstreamState.Failed) return closeTask(ctx, id);
+  const finished = run?.state === WorkstreamState.Done;
+  const cancelledAfterSession =
+    run?.state === WorkstreamState.Cancelled && hadSession(ctx.tx, run.id);
+  if (!finished && !cancelledAfterSession) return removeUnstarted(ctx, id, true);
+  // A finished run whose pull request is still open or merged is judged as `closeTask` judges it.
+  const pr = finished ? latestPullRequest(ctx.tx, id) : null;
+  if (pr && pr.state !== PullRequestState.Closed)
+    throw new ConflictError(
+      `Task ${task.title} finished and its pull request is ${pr.state === PullRequestState.Merged ? 'merged' : 'open'}, so it can't be removed`,
+    );
+  // The run is terminal, so it holds no claims and nothing runs; its row and history stay.
+  refuseWhileOpenDependents(ctx, task, 'remove');
+  return retireTask(ctx, id);
 }
 
 function removeUnstarted(ctx: WriteContext, id: TaskId, refusedStart: boolean): TaskDto {
