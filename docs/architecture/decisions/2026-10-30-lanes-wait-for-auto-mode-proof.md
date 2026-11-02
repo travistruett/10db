@@ -87,9 +87,11 @@ to `'auto'`, updates the unit test that expects `'default'`, and records a decis
 
 - A run counts only if every session reported auto mode. Claude Code starts in `default` mode where
   auto mode is unavailable to the account, model or version, and there cases 1 to 3 pass with no
-  classifier running. The adapter logs the mode Claude Code's init reports (`permissionMode` on the
-  `claude session billing` line), and each case fails before its own checks, saying so, unless it
-  is `auto`.
+  classifier running. It can also drop out of auto mode partway through, for example after
+  repeated classifier refusals, and say so in a status message. The adapter logs the mode Claude
+  Code's init reports (`permissionMode` on the `claude session billing` line) and each mode a
+  status message reports (a `claude session permission mode` line), and each case fails before its
+  own checks, saying so, unless every reported mode is `auto`.
 - Cases 1 and 2 show whether Claude Code holds a hook's `deny` and `ask`, and an `ask` rule, ahead
   of the classifier. If either fails, a hazard or a host would skip 10db: lanes stay in `default`
   mode and the follow-up decision records the bypass.
