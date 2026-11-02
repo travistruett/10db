@@ -917,6 +917,11 @@ function judge(command, cwd, whole = command, startDir = cwd) {
   let uncertainAtListEnd = false;
   // Past the first parenthesis or substitution, a cd may be in a subshell and not last.
   let grouped = false;
+  // Whether a cd in this command has moved `dir`. The scanner keeps no segment for the `(` or
+  // backtick that opens a group, so a cd first in a subshell reads as a plain cd; once that group
+  // closes, or a list goes to the background (bash runs a whole `a && b &` list in a subshell),
+  // the shell may be back where it was, so the directory becomes unknown.
+  let followedCd = false;
   /** @type {string | null | undefined} undefined until looked up; null when git can't say */
   let prefix;
   const repoPrefix = () => {
@@ -929,6 +934,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
     const start = commandStart(seg.words);
     const previous = index > 0 ? segs[index - 1].separator : '';
     if (['(', ')', '`'].includes(previous)) grouped = true;
+    if (followedCd && [')', '`', '&'].includes(previous)) dir = null;
     if (['', ';', '\n'].includes(previous)) {
       if (uncertainAtListEnd) dir = null;
       uncertainAtListEnd = false;
@@ -944,6 +950,7 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       if (destination !== null && !listCertain) uncertainAtListEnd = true;
       dir = destination;
       if (destination === null) listCertain = false;
+      else followedCd = true;
     } else listCertain = false;
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
