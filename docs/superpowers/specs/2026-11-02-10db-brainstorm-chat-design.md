@@ -121,7 +121,7 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 - **Left, about 45%: the conversation.** Plain text blocks, not bubbles; the builder's in bright text; the list is virtualized, so a long conversation renders only what is on screen (the eng review's call). Tool use
   collapses to one dimmed line ("Read apps/desktop/src/views/board/ (12 files)", "propose_plan · 2 changes ·
   passed"). The input autosizes, takes dropped files and pasted images (§5.4), and holds the group's one filled
-  primary, **Propose** (§6). Jev's chips (§9) sit above the input. The header shows the conversation's title and
+  primary, **Propose** (§6). Jev's nudges (§9; D5 below) sit above the input. The header shows the conversation's title and
   its tokens so far. While a turn runs, **Stop** sits beside Propose.
 - **Right: Proposed.** One list with hairline dividers (DESIGN.md: lists, not cards), each kind labelled in a
   narrow left column:
@@ -152,6 +152,30 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 | Proposed      | its rows' skeleton lines      | Heard so far, or the Propose line    | a red `Alert` in the sidebar; the chat stays usable   |
 | Convert modal | the primary's `loading` state | not applicable                       | each refusal as a row, beside the primary             |
 | Nav list      | `Loader size="sm"`            | "No conversations yet · Shape Work…" | a red `Alert` "Couldn't load conversations"           |
+
+**Details from the design review (2026-11-02; the builder chose each):**
+
+- **Summary line (D1).** Under the Proposed header, sticky while the list scrolls, one dimmed `sm` line: "1 goal ·
+  3 loose · 4 pull requests · ~2 days · 2 to record · 1 open question". Each count jumps to its section; open
+  findings and rehearsal questions are counted. It stays visible when the sidebar is a drawer (D7).
+- **Row states (D2), one quiet treatment each, no fills, borders or stripes:** pinned = Tabler `pin` (16, dimmed)
+  after the title; new or changed this round = a dimmed "new" or "changed" at the row's end until the next round;
+  converted = the whole row in dim_0 with "Converted · on the Board"; superseded = only under Earlier; a validation
+  error = a red line under the row naming the field (red is failed, DESIGN.md); rehearsing = `Loader size="xs"`;
+  an open question = a yellow dot and its count (waiting on you).
+- **First run (D3).** With no conversations, Shape opens a new one with the input focused, placeholder "Talk it
+  through, drop a document, or paste a list…", and one dimmed line under it: "Nothing is proposed until you press
+  Propose. Nothing starts until you Convert." No illustration or tour.
+- **Jev's nudges (D5)** are `Button variant="subtle" size="xs"` with a Tabler `sparkles` icon (14) and the
+  suggestion, plus × to dismiss; at most two, newest first. DESIGN.md names this pattern.
+- **Keys and screen readers (D6).** ⌘↩ sends; ⌘⇧↩ is Propose / Propose Again; Esc stops a turn or cancels a row
+  edit. The conversation and the sidebar are labelled regions ("Conversation", "Proposed"). Sidebar rows are a list
+  moved through with ↑/↓, as the Inbox's are: Enter edits, Esc cancels, P pins or unpins, W opens Why?. A round's
+  summary ("Round 3: 4 changes") is announced through one `aria-live="polite"` region and never moves focus. The
+  Convert modal traps focus as form modals do. Axe runs on every state in Playwright.
+- **Layout (D7).** A draggable divider splits chat and sidebar: chat at least 420 px, sidebar at least 480 px,
+  45/55 by default, remembered per person. Below 1100 px of content width the sidebar becomes a toggleable drawer
+  over the chat, with the summary line always visible. Checked at 1440×900 and 1280×720, as the Board is.
 
 ## 5. The session
 
@@ -468,7 +492,7 @@ attachment on the goal.
   every consumer, with that bucket's median or midpoint as hours, and reads "size set by you". The success measure
   counts derived sizes only and reports overrides beside it.
 - **Calibration, shown.** Once a converted task finishes, its converted row in the Proposed sidebar (§4) and its
-  task drawer read "Sized M (~2 h) · took 5 h of lane time", the actual in yellow when it falls outside one bucket
+  task drawer read "Sized M (~2 h) · took 5 h of lane time", the actual in plain text with a Tabler `clock-exclamation` icon when it falls outside one bucket
   either way. Settings › Decisions gains a **Sizing** line: the share of finished converted tasks whose derived
   size is within one bucket of their lane time, with n, and the same per bucket; overrides are counted beside it,
   never in it. A reopened conversation is told which of its tasks mis-sized, so its re-plans account
@@ -530,7 +554,7 @@ dependencies and each task's lane time. Work already running or queued in the pr
 its remaining estimate: its derived hours less its lane time so far, or, for a task never sized (filed by hand or by
 adoption), the project's median lane time per finished task less its lane time so far, floored at zero
 **(spec's call)**. The preview shows lanes, the critical path
-in blue, area clashes in yellow ("Compact density and Shape view both claim `desktop`: they'll run one after the
+in blue, area clashes as a dimmed line with a Tabler `arrows-split` icon (no status color; the design review's D4) ("Compact density and Shape view both claim `desktop`: they'll run one after the
 other"), the total in lane hours, and an end estimate: the lane schedule plus, per task, the project's median
 non-lane time per finished task (queueing, review waits, CI), marked "estimate". A preview never writes.
 
@@ -608,7 +632,8 @@ refusal writes nothing and lists each error. Nothing starts.
 - **Remove Draft Goal**, in a goal's menu and drawer: allowed while every task of the goal is unstarted; removes
   the tasks (the task-removal service), the criteria and the goal in one transaction, and marks the shape's goal
   proposal `pending` again, so it can be edited and converted anew. Goals phase 2's Cancel covers started goals.
-- **Withdraw Decision**, in the decision's row in Knowledge: M3's withdrawn tombstone as M3's plan designs it
+- **Withdraw Decision…**, in the menu of the converted decision's row in the Proposed sidebar (the design review's
+  D8; there is no Knowledge view until M3, which adds the same action): M3's withdrawn tombstone as M3's plan designs it
   (`docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md`, task 1 and K1/K3): `withdrawn_at`, `withdrawn_by`
   and a required `withdrawn_reason`, and only the head of a supersede chain can be withdrawn (409 otherwise). A
   withdrawn decision leaves context packs and searches. M3 adopts the columns as built.
@@ -749,7 +774,9 @@ Convert's undos are built in slice 1; landings are in scope as slice 6. From the
 builder added: the rehearsal reviewer (§7), `find_records` (§5.5), calibration shown back (§8), round marks and Why?
 (§6), and `start_shape` (§5.6). In the same review the builder chose: Jev's Shape decisions as a per-project opt-in
 (§9), the robustness guards (§5.3, §6, §11), removing Adopt a Plan… from the UI (§4), and a live confinement test
-plus the Shape eval (§15).
+plus the Shape eval (§15). The eng review chose a `shape_proposals` table (§6), audited usage joins (§5.1) and regression
+rows (§15); the design review chose the summary line, row states, first run, nudges, keys and screen readers, the
+resizable split (§4), icon lines instead of yellow (§8, §10.2) and Withdraw Decision on the converted row (§11).
 
 **The spec's calls, to confirm:**
 
