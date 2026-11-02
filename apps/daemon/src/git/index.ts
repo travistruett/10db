@@ -9,6 +9,7 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  type ResolvedConflict,
   type SwitchBack,
 } from './git';
 export { GitNetworkError, GitNetworkFailure, type NetworkCall } from './network';
