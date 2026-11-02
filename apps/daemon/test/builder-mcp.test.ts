@@ -11,6 +11,7 @@ import {
   QuestionCategory,
   TaskDto,
   Urgency,
+  WorkstreamState,
   mintId,
 } from '@10db/contracts';
 import { insertInboxItem } from '@10db/db';
@@ -348,6 +349,81 @@ describe('the builder MCP endpoint', () => {
       });
       const after = (await tasksOf(project.id)).find((t) => t.id === waiting.id);
       expect(after?.workstreamId).toBeNull();
+    });
+  });
+
+  describe('run_next', () => {
+    const Result = z.object({
+      taskId: z.string(),
+      workstreamId: z.string(),
+      state: z.string(),
+      waitingOn: z.array(z.string()),
+    });
+    const queued = () =>
+      api().get(
+        '/workstreams',
+        z.array(z.object({ id: z.string(), runNextAt: z.string().nullable() })),
+      );
+
+    it('puts a queued task first in line, as the Board’s endpoint does', async () => {
+      const project = await seedProject();
+      const earlier = await seedTask(project.id, 'earlier');
+      const later = await seedTask(project.id, 'later');
+      await callJson('start_task', { taskId: earlier.id });
+      await callJson('start_task', { taskId: later.id });
+      const result = Result.parse(await callJson('run_next', { taskId: later.id }));
+      const stored = await tasksOf(project.id);
+      expect(result).toEqual({
+        taskId: later.id,
+        workstreamId: stored.find((t) => t.id === later.id)?.workstreamId,
+        state: WorkstreamState.Queued,
+        waitingOn: [],
+      });
+      const lines = await queued();
+      const earlierId = stored.find((t) => t.id === earlier.id)?.workstreamId;
+      expect(lines.find((w) => w.id === result.workstreamId)?.runNextAt).not.toBeNull();
+      expect(lines.find((w) => w.id === earlierId)?.runNextAt).toBeNull();
+    });
+
+    it('answers the dependencies it still waits on, as the endpoint does', async () => {
+      const project = await seedProject();
+      const first = await seedTask(project.id, 'first');
+      const waiting = await seedTask(project.id, 'waiting', [first.id]);
+      // The REST API starts a task whose dependencies are open; the tool refuses that, so use REST.
+      const started = await restRefusal(`/tasks/${waiting.id}/start`, {});
+      expect(started.status).toBeLessThan(300);
+      const result = Result.parse(await callJson('run_next', { taskId: waiting.id }));
+      expect(result.waitingOn).toEqual(['first']);
+    });
+
+    it.each([
+      { name: 'a task that has not started', start: false },
+      { name: 'a task already running', start: true },
+    ])('refuses $name in the Board’s words', async ({ start }) => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'idle');
+      if (start) {
+        await callJson('start_task', { taskId: task.id });
+        daemon.state.db.$client
+          .prepare("update workstreams set state = 'running' where task_id = ?")
+          .run(task.id);
+      }
+      const rest = await restRefusal(`/tasks/${task.id}/run-next`, {});
+      expect(rest.status).toBe(409);
+      expect(await call('run_next', { taskId: task.id })).toEqual({
+        isError: true,
+        text: restText(rest.body),
+      });
+    });
+
+    it('refuses an unknown task as the endpoint does', async () => {
+      await seedProject();
+      const taskId = mintId('Task');
+      const rest = await restRefusal(`/tasks/${taskId}/run-next`, {});
+      expect(await call('run_next', { taskId })).toEqual({
+        isError: true,
+        text: restText(rest.body),
+      });
     });
   });
 

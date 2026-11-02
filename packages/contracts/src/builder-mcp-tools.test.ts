@@ -84,7 +84,7 @@ describe('refusalText', () => {
 });
 
 describe('the builder tools', () => {
-  it('lists exactly the nine tools, none of them a lane tool', () => {
+  it('lists exactly the ten tools, none of them a lane tool', () => {
     expect(Object.values(BuilderToolName).sort()).toEqual([
       'create_task',
       'edit_task',
@@ -94,6 +94,7 @@ describe('the builder tools', () => {
       'list_tasks',
       'move_task',
       'remove_task',
+      'run_next',
       'start_task',
     ]);
     const lane = new Set<string>(Object.values(McpToolName));
