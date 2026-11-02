@@ -12,7 +12,10 @@ export interface NetworkCall {
 
 export const GitNetworkFailure = {
   Timeout: 'timeout',
+  /** The branch moved on the remote (non-fast-forward, fetch first, stale info): a divergence to reconcile. */
   Rejected: 'rejected',
+  /** The remote refused the ref for a repository rule or a hook (GH013, a protected branch): not a divergence. */
+  Declined: 'declined',
   /** The remote's own server failed (an HTTP 5xx, `fatal error in commit_refs_rules`): not a divergence. */
   ServerError: 'server_error',
   Aborted: 'aborted',
@@ -43,9 +46,11 @@ export class GitNetworkError extends Error {
   }
 }
 
-const REJECTED = /\[(remote )?rejected\]|failed to push some refs/i;
+/** A ref the remote refused with a reason of its own, on a `[remote rejected]` line. */
+const REMOTE_REJECTED = /\[remote rejected\]/i;
 /** A ref the remote refused because the branch moved: a real divergence, never retried. */
-const DIVERGED = /non-fast-forward|fetch first|stale info|\(already exists\)/i;
+const DIVERGED =
+  /non-fast-forward|fetch first|stale info|\(already exists\)|tip of your current branch is behind/i;
 /** An HTTP 5xx from the server, as curl and git word it. */
 const HTTP_5XX = /returned error: 5\d\d|\bHTTP\/?\s?(?:\d\.\d\s)?5\d\d\b/i;
 /** The reason GitHub gives in `[remote rejected] a -> a (reason)` when its own side failed. */
@@ -55,12 +60,14 @@ const SERVER_REASON =
 /**
  * What a failed fetch or push was, read from git's stderr. A server-side failure (an HTTP 5xx, or a
  * `remote rejected` whose reason is GitHub's own error) is told apart from a rejection for
- * divergence, since the first is worth retrying and the second needs the builder.
+ * divergence, since the first is worth retrying and the second needs the builder. Only a
+ * non-fast-forward, fetch-first or stale-info refusal is `rejected`; any other `remote rejected`
+ * (a hook, a protected branch, a repository rule) is `declined`.
  */
 export function failureKind(detail: string): GitNetworkFailure {
   if (DIVERGED.test(detail)) return GitNetworkFailure.Rejected;
   if (HTTP_5XX.test(detail) || SERVER_REASON.test(detail)) return GitNetworkFailure.ServerError;
-  return REJECTED.test(detail) ? GitNetworkFailure.Rejected : GitNetworkFailure.Failed;
+  return REMOTE_REJECTED.test(detail) ? GitNetworkFailure.Declined : GitNetworkFailure.Failed;
 }
 /** How much of git's output a run keeps: the end, where git says what went wrong. */
 const OUTPUT_TAIL = 2000;

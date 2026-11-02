@@ -788,6 +788,19 @@ export const shipCards = {
     },
   }),
   /**
+   * The remote refused the push for a repository rule or a hook (GH013, a protected branch, a
+   * pre-receive hook). Nothing is known of the branch having diverged, so the card quotes the
+   * remote's own words and asks for no reconcile.
+   */
+  pushDeclined: (batch: BatchDto, detail: string): ShipFailure => ({
+    failure: BatchFailure.Network,
+    card: {
+      title: `${notShipped(batch)}: origin refused the push`,
+      body: `origin said:\n${detail}\n\nA repository rule or hook on origin declined the push, whatever the branch holds. 10db pushed nothing and never force-pushes. Change the rule or hook (or its bypass list) for ${batch.branch ?? 'this branch'}, then retry.\n\n${RETRY}`,
+      detail: answers(batch),
+    },
+  }),
+  /**
    * GitHub's server failed the push (an HTTP 5xx, or a remote rejection with its own error as the
    * reason) and 10db pushed `retries` more times by itself. This says nothing of the branch having
    * diverged: it never learned of a divergence.
