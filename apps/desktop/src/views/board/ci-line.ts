@@ -18,7 +18,8 @@ export interface CiLink {
 export interface CiLine {
   readonly line: string;
   readonly color: MantineColor;
-  readonly link: CiLink;
+  /** Null when the pull request is not an https github.com address, which the app never links. */
+  readonly link: CiLink | null;
 }
 
 /** An https github.com address, the only kind the app opens; null for anything else. */
@@ -36,13 +37,18 @@ function githubUrl(url: string | null): string | null {
 const FIX_RUNNING: ReadonlySet<BatchState> = new Set([
   BatchState.Cutting,
   BatchState.Open,
-  BatchState.Failed,
   BatchState.Shipping,
 ]);
 
-function jobLink(jobs: readonly RequiredCheckJobDto[], prUrl: string): CiLink {
+/** The pull request's checks page, or null unless the pull request is an https github.com address. */
+function checksLink(prUrl: string): CiLink | null {
+  const url = githubUrl(prUrl);
+  return url === null ? null : { url: `${url}/checks`, label: 'CI checks' };
+}
+
+function jobLink(jobs: readonly RequiredCheckJobDto[], prUrl: string): CiLink | null {
   const url = jobs.map((j) => githubUrl(j.link)).find((u) => u !== null);
-  return url ? { url, label: 'CI job' } : { url: `${prUrl}/checks`, label: 'CI checks' };
+  return url ? { url, label: 'CI job' } : checksLink(prUrl);
 }
 
 /**
@@ -57,7 +63,7 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
     batch.ciFixOf === null ? batch : (batches.find((b) => b.id === batch.ciFixOf) ?? batch);
   const required = root.prRequired;
   if (required === null || required.state === RequiredChecksState.None) return null;
-  const checks: CiLink = { url: `${batch.prUrl}/checks`, label: 'CI checks' };
+  const checks = checksLink(batch.prUrl);
   if (batch.pr?.state === PullRequestState.Merged)
     return { line: 'Merged · CI passed', color: 'green', link: checks };
   if (batch.pr?.state !== PullRequestState.Open) return null;
@@ -68,7 +74,7 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
     return {
       line: `Pull request open · ${how} ${base}`,
       color: 'red',
-      link: { url: githubUrl(batch.prUrl) ?? batch.prUrl, label: 'Pull request' },
+      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull request' } : null,
     };
   }
   switch (required.state) {

@@ -490,6 +490,8 @@ export const TaskPatchFields = z.object({
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   riskTags: z.array(z.enum(RiskTag)),
   flowId: FlowId.nullable(),
+  /** Replaces the task's areas; only while the task has never started, and only with the project's own. */
+  areas: z.array(Name).min(1),
 });
 
 /**
@@ -620,6 +622,13 @@ export type InboxAnswer = z.infer<typeof InboxAnswer>;
 /** `POST /workstreams/:id/retry`: the builder's note, for the session a retry sends the work to. */
 export const RetryInput = z.object({ note: z.string().max(4000).optional() });
 export type RetryInput = z.infer<typeof RetryInput>;
+
+/**
+ * `POST /tasks/:id/start`: `fresh` starts a task whose latest run failed in an open batch over from
+ * the base branch; without it the run continues in that batch, as the failure card's Retry does.
+ */
+export const StartTaskInput = z.object({ fresh: z.boolean().optional() });
+export type StartTaskInput = z.infer<typeof StartTaskInput>;
 
 /** The two answers to a check card: the work is right, or it goes back with a note. */
 export const CheckChoice = {

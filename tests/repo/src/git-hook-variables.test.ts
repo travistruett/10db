@@ -40,6 +40,21 @@ const VITEST = resolve(repoRoot, 'node_modules/.bin/vitest');
 const BIN = resolve(repoRoot, 'node_modules/.bin');
 const SETUP = resolve(repoRoot, 'tests/git-isolation.setup.ts');
 
+// The daemon test files the nested run selects, and the fewest tests its `-t` filter may pick: 10
+// today. Lower this only when tests are removed on purpose, never to follow a rename.
+const SELECTED_FILES = ['apps/daemon/test/fixtures.test.ts', 'apps/daemon/src/git/git.test.ts'];
+const MIN_SELECTED_TESTS = 10;
+
+/** The part of vitest's JSON report this file reads. */
+const VitestReport = z.object({
+  testResults: z.array(
+    z.object({
+      name: z.string(),
+      assertionResults: z.array(z.object({ status: z.string() })),
+    }),
+  ),
+});
+
 /** The part of a vitest project config this file checks. */
 const ProjectTest = z.object({
   root: z.string().optional(),
@@ -178,16 +193,20 @@ describe('git hook variables', () => {
     // git.test.ts and the watcher tests build a repository per case (about 1 s each, 80 s and
     // 26 s alone, 305 s for this test under the full gate's load) and say nothing about the
     // variables. This selection takes about 11 s.
+    const report = join(mkdtempSync(join(tmpdir(), '10db-hook-vitest-')), 'report.json');
+    cleanup.push(dirname(report));
     const run = spawnSync(
       VITEST,
       [
         'run',
         '--project',
         'daemon',
-        'apps/daemon/test/fixtures.test.ts',
-        'apps/daemon/src/git/git.test.ts',
+        SELECTED_FILES[0] ?? '',
+        SELECTED_FILES[1] ?? '',
         '-t',
         'git hook variables',
+        '--reporter=json',
+        `--outputFile=${report}`,
       ],
       {
         cwd: repoRoot,
@@ -197,6 +216,22 @@ describe('git hook variables', () => {
     );
     expect(snapshotFiles(repo.dir)).toEqual(before);
     expect(run.status, `${run.stdout}${run.stderr}`).toBe(0);
+
+    // A `-t` filter that matches no title skips every test and still exits 0, so a reworded title
+    // would leave this guard passing while proving nothing. Count what actually passed.
+    const { testResults } = VitestReport.parse(JSON.parse(readFileSync(report, 'utf8')));
+    const passedBy = (file: string): number =>
+      testResults
+        .filter((result) => result.name.endsWith(`/${file}`))
+        .flatMap((result) => result.assertionResults)
+        .filter((test) => test.status === 'passed').length;
+    for (const file of SELECTED_FILES) {
+      expect(passedBy(file), `no 'git hook variables' test passed in ${file}`).toBeGreaterThan(0);
+    }
+    expect(
+      SELECTED_FILES.reduce((sum, file) => sum + passedBy(file), 0),
+      'fewer hook-variable tests ran than the 10 there are today',
+    ).toBeGreaterThanOrEqual(MIN_SELECTED_TESTS);
   }, 120_000);
 });
 

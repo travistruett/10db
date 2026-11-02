@@ -1,5 +1,6 @@
 import {
   isTerminal,
+  NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
@@ -35,6 +36,7 @@ import {
   useRetryWorkstream,
   useRunNext,
   useStartTask,
+  useStartTaskOver,
 } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
@@ -60,6 +62,7 @@ import { holdOption, isHeld, type HoldOption } from './task-hold';
 import {
   canCloseRun,
   canRetryRun,
+  canStartOver,
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
@@ -94,6 +97,11 @@ export interface TaskDrawerProps {
    * task lands, and lets the builder change it until the task has run.
    */
   readonly pullRequestBase?: string;
+  /**
+   * The project's area names. With them, a task that has never started can have its areas changed
+   * here; without them, or once it has started, they show as they are.
+   */
+  readonly areaNames?: readonly string[];
   readonly onClose: () => void;
 }
 
@@ -111,6 +119,7 @@ export function TaskDrawer({
   onStart,
   place,
   pullRequestBase,
+  areaNames,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -124,6 +133,13 @@ export function TaskDrawer({
   const [criteria, setCriteria] = useState(initialCriteria);
   const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
   const [risks, setRisks] = useState<RiskTag[]>([...task.riskTags]);
+  // Areas are the claims the lane takes when it starts, so they change only before then.
+  const areasEditable =
+    areaNames !== undefined && task.workstreamId === null && task.status === TaskStatus.Open;
+  const [areas, setAreas] = useState<string[]>([...task.areas]);
+  const areasChanged =
+    areasEditable &&
+    (areas.length !== task.areas.length || areas.some((a) => !task.areas.includes(a)));
   const [error, setError] = useState<string | null>(null);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
   const waitsOn = task.dependsOn.flatMap((id) => {
@@ -140,6 +156,7 @@ export function TaskDrawer({
     flowId !== task.flowId ||
     risks.length !== task.riskTags.length ||
     risks.some((r) => !task.riskTags.includes(r)) ||
+    areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
 
   // Every way out (close button, Escape, outside click, Cancel) comes through here.
@@ -161,6 +178,10 @@ export function TaskDrawer({
       setError(NEW_TASK_NO_CRITERIA);
       return;
     }
+    if (areasEditable && areas.length === 0) {
+      setError(NEW_TASK_NO_AREAS);
+      return;
+    }
     const changesLanding =
       pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing);
     const where = landingFromDraft(landing);
@@ -179,6 +200,7 @@ export function TaskDrawer({
           acceptanceCriteria: lines,
           flowId,
           riskTags: risks,
+          ...(areasChanged ? { areas } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
       },
@@ -254,15 +276,26 @@ export function TaskDrawer({
           <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
             {columnName}
           </Badge>
-          {task.areas.map((area) => (
-            <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-              {area}
-            </Badge>
-          ))}
+          {areasEditable
+            ? null
+            : task.areas.map((area) => (
+                <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
+                  {area}
+                </Badge>
+              ))}
           {waitsOn.length > 0 ? (
             <Text size="xs" c="dimmed">{`Waits on ${waitsOn.join(', ')}`}</Text>
           ) : null}
         </Group>
+        {areasEditable ? (
+          <MultiSelect
+            label="Areas"
+            description="The parts of the project this task works in. They are fixed once it starts."
+            data={areaNames}
+            value={areas}
+            onChange={setAreas}
+          />
+        ) : null}
         <Textarea
           label="Description"
           autosize
@@ -404,7 +437,7 @@ function CiStatusLine({
       <Text size="sm" c={ci.color}>
         {ci.line}
       </Text>
-      <ExternalLink url={ci.link.url} label={ci.link.label} />
+      {ci.link ? <ExternalLink url={ci.link.url} label={ci.link.label} /> : null}
     </Group>
   );
 }
@@ -456,10 +489,12 @@ function WorkstreamLine({
   const runNext = useRunNext();
   const hold = useHoldTask();
   const start = useStartTask();
+  const startOver = useStartTaskOver();
   const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
   // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
   const retryable = canRetryRun(workstream, batch);
+  const startableOver = canStartOver(task, workstream, batch);
   const closable = canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
   const queued = canRunNext(task, workstream.state);
@@ -467,8 +502,8 @@ function WorkstreamLine({
   if (isTerminal(workstream.state) && !failed) {
     return null;
   }
-  const busy = hold.isPending || start.isPending || remove.isPending;
-  const refusal = [hold, start, remove].find((m) => m.error)?.error?.message ?? null;
+  const busy = hold.isPending || start.isPending || startOver.isPending || remove.isPending;
+  const refusal = [hold, start, startOver, remove].find((m) => m.error)?.error?.message ?? null;
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
@@ -547,6 +582,22 @@ function WorkstreamLine({
               }}
             >
               Retry
+            </Button>
+          ) : null}
+          {startableOver ? (
+            <Button
+              size="xs"
+              variant="default"
+              title="Starts the task again from the base branch in a new batch; the failed attempt's batch is abandoned and its branch kept."
+              disabled={busy}
+              loading={startOver.isPending}
+              onClick={() => {
+                closeTask.reset();
+                retry.reset();
+                startOver.mutate(taskId);
+              }}
+            >
+              Start over
             </Button>
           ) : null}
           {closable ? (

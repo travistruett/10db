@@ -62,7 +62,12 @@ import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
-import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
+import {
+  createFailedRestarts,
+  workstreamChanges,
+  type BatchStarter,
+  type Shipper,
+} from '../delivery';
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
@@ -116,6 +121,7 @@ export function createServices(deps: {
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
+  const restarts = createFailedRestarts(deps);
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
 
@@ -211,13 +217,23 @@ export function createServices(deps: {
       return task;
     },
     holdTask: (taskId) => deps.state.write((ctx) => holdTask(ctx, taskId)),
-    startTask(taskId) {
+    startTask(taskId, input) {
       // A held task already has its run, and its batch and worktree if it has them: it only queues again.
       const held = latestWorkstreamOf(db, taskId);
       if (held?.state === WorkstreamState.Held) {
         const workstream = deps.state.write((ctx) => resumeTask(ctx, taskId));
         deps.scheduler.requestTick();
         return { kind: 'workstream', workstream };
+      }
+      // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
+      // the builder asked to start over: then the batch holding only that attempt ends first.
+      if (input?.fresh) restarts.supersede(taskId);
+      else {
+        const retried = restarts.continueRun(taskId);
+        if (retried) {
+          deps.scheduler.requestTick();
+          return { kind: 'workstream', workstream: retried };
+        }
       }
       const project = getProject(db, getTask(db, taskId).projectId);
       if (project.delivery === Delivery.PullRequest) {
@@ -351,7 +367,8 @@ export function createServices(deps: {
     async patchTask(id, patch) {
       await refuseMissingLandingBranch(getProject(db, getTask(db, id).projectId), patch.landing);
       // The store refuses a task that has started; a join still pending has not written yet.
-      if (patch.workspaceMode !== undefined) deps.starter.refuseIfJoining(id);
+      if (patch.workspaceMode !== undefined || patch.areas !== undefined)
+        deps.starter.refuseIfJoining(id);
       return deps.state.write((ctx) => patchTask(ctx, id, patch));
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),

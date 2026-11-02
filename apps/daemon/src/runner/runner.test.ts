@@ -3084,6 +3084,44 @@ describe('flows', () => {
         expect(new Set(ids)).toEqual(new Set(filed.map((t) => t.id)));
         expect(filed.find((t) => t.id === ids[1])?.description).toContain(QA_FINDINGS);
       });
+
+      it('skips QA, as an approval would, when only Markdown changed', async () => {
+        const docsPlan = {
+          do: 'mcp' as const,
+          tool: 'complete_step',
+          args: { opId: 'op-docs-0580', summary: '1. Write src/api/a.md.', verdict: null },
+        };
+        engine = await createTestEngine({
+          Alpha: [
+            [docsPlan, turn],
+            [write('src/api/a.md', '# A design'), commit('op-docs-0581', ['src/api/a.md']), turn],
+            [reject('op-docs-0582', '1. NOTE round 1'), turn],
+            ...[2, 3, 4].flatMap(round),
+          ],
+        });
+        const { task, workstream } = engine.addTask('Alpha', ['api'], [], {
+          flow: 'full',
+          criteria: 4,
+        });
+        await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+        expect(ws(workstream.id)).toMatchObject({ state: 'DONE', failureReason: null });
+        // The QA step leaves the plan and no QA session runs: plan, implement, and four reviews.
+        expect(ws(workstream.id).steps.map((s) => s.role)).toEqual(['plan', 'implement', 'review']);
+        expect(engine.adapter.prompts).toHaveLength(2 + 3 * 2 + 1);
+        const [filed, ...rest] = filedFor(task.id);
+        expect(rest).toEqual([]);
+        expect(filed?.description).toContain(FINAL);
+        expect(step(workstream.id, 2)?.shippedAtLimit).toEqual({
+          followUpTaskId: filed?.id,
+          followUpTitle: filed?.title,
+        });
+        const reasons = listEventsAfter(engine.store.db, 0, 1000)
+          .filter((e) => e.type === 'workstream.changed' && e.entityId === workstream.id)
+          .map((e) => e.data['reason']);
+        expect(reasons).toContain(
+          'review rejected the work at the retry limit; shipped with its findings filed as a follow-up task; QA skipped: only docs changed',
+        );
+      });
     });
   });
 

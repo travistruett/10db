@@ -18,6 +18,7 @@ import {
 import {
   activeClaims,
   findToolOp,
+  FollowUpOrigin,
   getBatch,
   getProject,
   getTask,
@@ -317,11 +318,16 @@ export function createToolHandlers(
       if (done !== undefined) return Promise.resolve(McpToolOutputs.file_follow_up.parse(done));
       return Promise.resolve(
         deps.state.write((ctx) => {
-          const task = insertFollowUpTask(ctx, getWorkstreamRow(ctx.tx, workstreamId).taskId, {
-            title: input.title,
-            description: input.description,
-            acceptanceCriteria: input.acceptanceCriteria,
-          });
+          const task = insertFollowUpTask(
+            ctx,
+            getWorkstreamRow(ctx.tx, workstreamId).taskId,
+            {
+              title: input.title,
+              description: input.description,
+              acceptanceCriteria: input.acceptanceCriteria,
+            },
+            FollowUpOrigin.Left,
+          );
           return record('file_follow_up', input.opId, { taskId: task.id, title: task.title }, ctx);
         }),
       );

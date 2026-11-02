@@ -27,6 +27,8 @@ interface Opts {
   readonly gateCommand?: string;
   readonly workstreams?: ReturnType<typeof workstreamDto>[];
   readonly place?: number;
+  /** The project's area names, which let an unstarted task's areas change. */
+  readonly areaNames?: readonly string[];
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -42,6 +44,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.gateCommand ? { gateCommand: opts.gateCommand } : {})}
       {...(opts.workstreams ? { workstreams: opts.workstreams } : {})}
       {...(opts.place ? { place: opts.place } : {})}
+      {...(opts.areaNames ? { areaNames: opts.areaNames } : {})}
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       onClose={() => {
         closes += 1;
@@ -121,6 +124,66 @@ describe('TaskDrawer', () => {
     });
     await waitFor(() => {
       expect(closed()).toBe(1);
+    });
+  });
+
+  describe('areas', () => {
+    function serveAreaSaves(): TaskPatch[] {
+      const patched: TaskPatch[] = [];
+      serve(
+        http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+          patched.push((await request.json()) as TaskPatch);
+          return HttpResponse.json(taskDto());
+        }),
+      );
+      return patched;
+    }
+
+    it('sets the areas of a task that has not started, from the project’s areas', async () => {
+      const patched = serveAreaSaves();
+      open({ task: { areas: [] }, areaNames: ['api', 'ui'] });
+      const d = await dialog();
+      fireEvent.click(within(d).getByLabelText('Areas'));
+      fireEvent.click(await screen.findByRole('option', { name: 'ui', hidden: true }));
+      fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]?.areas).toEqual(['ui']);
+    });
+
+    it('leaves areas out of a save that did not change them', async () => {
+      const patched = serveAreaSaves();
+      open({ task: { areas: ['api'] }, areaNames: ['api', 'ui'] });
+      await edit('Title', 'Other');
+      fireEvent.click(within(await dialog()).getByRole('button', { name: 'Save Changes' }));
+      await waitFor(() => {
+        expect(patched).toHaveLength(1);
+      });
+      expect(patched[0]).not.toHaveProperty('areas');
+    });
+
+    it('asks for an area before saving a change that leaves none', async () => {
+      const patched = serveAreaSaves();
+      open({ task: { areas: ['api'] }, areaNames: ['api', 'ui'] });
+      const d = await dialog();
+      fireEvent.click(within(d).getByLabelText('Areas'));
+      fireEvent.click(await screen.findByRole('option', { name: 'api', hidden: true }));
+      fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+      expect(await within(d).findByText('Choose at least one area')).toBeTruthy();
+      expect(patched).toEqual([]);
+    });
+
+    it('shows the areas of a task that has started as fixed', async () => {
+      serve();
+      open({
+        task: { areas: ['api'], workstreamId: mintId('Workstream') },
+        areaNames: ['api', 'ui'],
+        workstream: workstreamDto(),
+      });
+      const d = await dialog();
+      expect(within(d).getByText('api')).toBeTruthy();
+      expect(within(d).queryByLabelText('Areas')).toBeNull();
     });
   });
 
@@ -517,6 +580,46 @@ describe('TaskDrawer', () => {
       await waitFor(() => {
         expect(bodies).toEqual([{}, { note: 'Use the existing card.' }]);
       });
+    });
+
+    it('offers Start over beside Retry for a failed run in an open batch, and posts fresh', async () => {
+      const batch = batchDto();
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      const bodies: unknown[] = [];
+      serve(
+        http.post(daemonUrl('/tasks/:taskId/start'), async ({ request }) => {
+          // The body rides along without replacing the client's headers.
+          expect(request.headers.get('authorization')).toBe('Bearer test-token');
+          bodies.push(await request.json());
+          return HttpResponse.json({ ...ws, state: 'QUEUED' }, { status: 201 });
+        }),
+      );
+      open({ workstream: ws, batch, workstreams: [ws] });
+      const d = await dialog();
+      expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Start over' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{ fresh: true }]);
+      });
+    });
+
+    it('offers no Start over for a failed run outside a batch, or in one that shipped', async () => {
+      serve();
+      open({ workstream: workstreamDto({ state: 'FAILED', failureReason: 'boom' }) });
+      expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
+    });
+
+    it('offers no Start over to a parked task, which the daemon would refuse to start', async () => {
+      serve();
+      const batch = batchDto();
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      open({
+        task: { boardColumnId: mintId('BoardColumn') },
+        workstream: ws,
+        batch,
+        workstreams: [ws],
+      });
+      expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
     });
 
     it('a retry refusal shows beside Retry', async () => {

@@ -9,7 +9,9 @@
   role is review or QA, the task has neither the `security` nor the `auth` risk tag, and the latest gate evidence
   is not a failure (a project with no gate has none). A plan review's rejection still fails, as nothing is built.
 - The task then moves on as an approved one does. When a step follows the rejecting one (QA after review in the
-  `full` flow), it advances to that step through the same `advanceTo` as the `advance` move, and QA runs. When
+  `full` flow), it advances to that step through the same `advanceTo` as the `advance` move, and QA runs, unless
+  the commits touch only Markdown files: `withoutDocsOnlyQa` drops QA there as it does after an approval, and
+  the transition's reason says so. When
   none follows, it ends through the same `completeReadOnlySteps` as the `done` move: `DONE` with its claims and
   lease released, or, in a project with no gate, waiting on the builder's check card. Either way, in the same
   write 10db files one follow-up task with `insertRetryLimitFollowUp` and sets `shippedAtLimit`

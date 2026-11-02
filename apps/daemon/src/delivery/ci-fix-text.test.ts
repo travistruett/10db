@@ -157,18 +157,28 @@ describe('ciFixTitle', () => {
 });
 
 describe('ciFixLogName', () => {
-  it('is <job>-<sha>.log', () => {
-    expect(ciFixLogName('build', 'abc123')).toBe('build-abc123.log');
+  it('is <job>-<job id>-<sha>.log', () => {
+    expect(ciFixLogName('build', '77', 'abc123')).toBe('build-77-abc123.log');
   });
 
   it('keeps a job name that holds a slash, spaces or dots inside one file name', () => {
-    const name = ciFixLogName('../../etc/ passwd / x', 'abc123');
+    const name = ciFixLogName('../../etc/ passwd / x', '77', 'abc123');
     expect(name).not.toContain('/');
     expect(name.startsWith('.')).toBe(false);
-    expect(name.endsWith('-abc123.log')).toBe(true);
+    expect(name.endsWith('-77-abc123.log')).toBe(true);
   });
 
   it('tells two jobs that differ only in odd characters apart', () => {
-    expect(ciFixLogName('a b', 'abc')).not.toBe(ciFixLogName('a/b', 'abc'));
+    expect(ciFixLogName('a b', '1', 'abc')).not.toBe(ciFixLogName('a/b', '1', 'abc'));
+  });
+
+  it('tells two jobs with the same name on one head apart by their job ids', () => {
+    expect(ciFixLogName('test', '77', 'abc')).not.toBe(ciFixLogName('test', '78', 'abc'));
+  });
+
+  it('keeps a job id with odd characters inside one file name', () => {
+    const name = ciFixLogName('test', '../7/7', 'abc');
+    expect(name).not.toContain('/');
+    expect(name).not.toContain('..');
   });
 });

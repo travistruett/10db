@@ -480,7 +480,11 @@ export function duration(ms: number): string {
 /** What ran before the push, as a failed ship's card names it. */
 export type ShipCheckName = 'gate' | 'pre-check';
 
-/** The fold key of a batch's card for a pull request left open because only the pre-check checked it. */
+/**
+ * The fold key of the card an earlier build raised for a pull request left open because only the
+ * pre-check checked it. A `pull-request-merge` notice says it now; a ship that writes the notice closes
+ * such a card.
+ */
 export const preCheckOnlyKey = (batchId: BatchId): string => `pre-check-only:${batchId}`;
 
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
@@ -488,16 +492,16 @@ const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothin
 /** How many failing tests a gate card lists. */
 const MAX_LISTED_TESTS = 5;
 
-const RERAN =
+export const RERAN =
   "Every failing test was in a file the batch didn't change and had passed in its tasks' own gates, so 10db ran the gate again by itself";
 
 /** " in test, lint", naming the failing steps after a gate card's title; empty when the gate named none. */
-function inSteps(steps: readonly GateStepFailure[]): string {
+export function inSteps(steps: readonly GateStepFailure[]): string {
   return steps.length === 0 ? '' : ` in ${steps.map((s) => s.name).join(', ')}`;
 }
 
 /** Up to five failing tests across the steps, as list lines, then how many more there are. */
-function testLines(steps: readonly GateStepFailure[]): string {
+export function testLines(steps: readonly GateStepFailure[]): string {
   const tests = steps.flatMap((s) => s.tests);
   const shown = tests
     .slice(0, MAX_LISTED_TESTS)
@@ -521,10 +525,19 @@ function stepsText(steps: readonly GateStepFailure[]): string {
   return `${failed}${tests}${logs.length > 0 ? `\n\n${logs.join('\n')}` : ''}`;
 }
 
-/** The batch and the first failing step's log, which the desktop offers to open. */
+/**
+ * What a not-shipped card carries so the Inbox shows Retry and Abandon of its batch as buttons over the
+ * ship and abandon routes (`detail.actions`). Every ship failure is one the builder answers with one of
+ * the two, so none is a card to dismiss.
+ */
+function answers(batch: BatchDto): Record<string, Json> {
+  return { batchId: batch.id, actions: ['retry', 'abandon'] };
+}
+
+/** The batch's answers and the first failing step's log, which the desktop offers to open. */
 function stepsDetail(batch: BatchDto, steps: readonly GateStepFailure[]): Record<string, Json> {
   const logPath = steps.find((s) => s.logPath !== null)?.logPath;
-  return { batchId: batch.id, ...(logPath ? { logPath } : {}) };
+  return { ...answers(batch), ...(logPath ? { logPath } : {}) };
 }
 
 /** A shipping failure: the code the batch records and the card the builder reads. */
@@ -540,7 +553,7 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: the checkout has uncommitted changes`,
       body: `10db ships only a clean branch. Commit these with a fix task in the batch, or discard them${checkout === undefined ? '' : ` in ${checkout}`}, then retry:\n${listPaths(paths)}\n\n${RETRY}`,
-      detail: { batchId: batch.id },
+      detail: answers(batch),
     },
   }),
   /**
@@ -579,7 +592,7 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: conflict markers from the merge of ${batch.baseBranch} are still in the branch`,
       body: `10db merged origin/${batch.baseBranch} into the branch for a task's gate and left git's conflict markers for a session to resolve. They are still in:\n${listPaths(paths)}\n\nNo gate ran and nothing was pushed. Start a fix task in the batch to resolve them (it reopens the batch), or resolve them by hand in the batch's worktree and commit, then press Retry in a task's drawer on the Board to ship again.`,
-      detail: { batchId: batch.id },
+      detail: answers(batch),
     },
   }),
   /**
@@ -595,14 +608,8 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: the gate failed twice, in tests the batch didn't change`,
       body: `${note === null ? '' : `${note}\n\n`}This failure looks unrelated to the batch's work. ${RERAN}, and it failed again in tests the batch didn't change, so a flaky test, the base branch or this machine is the likelier cause. 10db started no fix session.\n\n${stepsText(steps)}\n\nPress Retry to run the gate and ship again, or Abandon to give up the batch; both are here and in a task's drawer on the Board. Nothing was merged.`,
-      detail: { ...stepsDetail(batch, steps), actions: ['retry', 'abandon'] },
+      detail: stepsDetail(batch, steps),
     },
-  }),
-  /** The second run 10db made by itself passed, and the batch went on to ship. */
-  gatePassedOnRerun: (batch: BatchDto, steps: readonly GateStepFailure[]): Card => ({
-    title: `Batch "${batch.title}": the gate passed when 10db ran it again`,
-    body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
-    detail: { batchId: batch.id },
   }),
   gateTimedOut: (
     batch: BatchDto,
@@ -615,6 +622,18 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: the ${check} timed out after ${duration(timeoutMs)}`,
       body: `${note === null ? '' : `${note}\n\n`}10db stopped the ${check} and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      detail: answers(batch),
+    },
+  }),
+  /**
+   * The base merge before the shipping gate left git's conflict markers in `paths`, and the batch's
+   * last task could not be sent back to resolve them (`why`): nothing was pushed and no gate ran.
+   */
+  baseConflict: (batch: BatchDto, paths: readonly string[], why: string): ShipFailure => ({
+    failure: BatchFailure.BaseConflict,
+    card: {
+      title: `${notShipped(batch)}: it conflicts with ${batch.baseBranch}`,
+      body: `10db merged origin/${batch.baseBranch} into the branch and git left conflict markers in:\n${listPaths(paths)}\n\nNo session could resolve them, because ${why}. No gate ran and nothing was pushed. Resolve the markers in the batch's worktree, commit, then retry.\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),
@@ -623,7 +642,7 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: git push was rejected`,
       body: `${detail}\n\norigin's ${batch.branch ?? 'branch'} has commits this checkout doesn't, and 10db never force-pushes. Reconcile the branch by hand, then retry.`,
-      detail: { batchId: batch.id },
+      detail: answers(batch),
     },
   }),
   pushTimedOut: (batch: BatchDto, timeoutMs: number): ShipFailure => ({
@@ -631,41 +650,23 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: git push ran past ${duration(timeoutMs)}`,
       body: `git push was still running after ${duration(timeoutMs)}, so 10db stopped it and every process it started. Check that git reaches origin from your login shell (its SSH agent or credential helper).\n\n${RETRY}`,
-      detail: { batchId: batch.id },
+      detail: answers(batch),
     },
   }),
   /** gh missing or signed out; anything else gh or the network did is `network`. */
   network: (batch: BatchDto, step: string, error: unknown): ShipFailure => {
     const gh = ghCard(notShipped(batch), error, 'retry');
     return gh
-      ? { failure: BatchFailure.GhUnavailable, card: { ...gh, detail: { batchId: batch.id } } }
+      ? { failure: BatchFailure.GhUnavailable, card: { ...gh, detail: answers(batch) } }
       : {
           failure: BatchFailure.Network,
           card: {
             title: `${notShipped(batch)}: ${step} failed`,
             body: `${detailOf(error)}\n\n${RETRY}`,
-            detail: { batchId: batch.id },
+            detail: answers(batch),
           },
         };
   },
-  /**
-   * GitHub has nothing to wait for on the pull request and the base has no required checks, so only
-   * the pre-check ever checked the work: 10db leaves the pull request open for the builder.
-   */
-  notMergedPreCheckOnly: (batch: BatchDto, prUrl: string): Card => ({
-    title: `not merged: ${batch.baseBranch} has no required checks and only the pre-check ran`,
-    body: `Batch "${batch.title}" was checked on the Mac by the project's pre-check, which stands in for the gate only where ${batch.baseBranch} has required checks on GitHub. It has none, so nothing but the pre-check would have checked this work, and 10db did not merge it.\n\nPull request: ${prUrl}\n\nReview and merge it yourself, add required checks to ${batch.baseBranch}, or clear the project's pre-check in Settings › General to run the full gate again.`,
-    foldKey: preCheckOnlyKey(batch.id),
-    detail: { batchId: batch.id, prUrl },
-  }),
-  abandoned: (batch: BatchDto, doneTitles: readonly string[]): Card => ({
-    title: `Batch "${batch.title}" abandoned`,
-    body:
-      doneTitles.length > 0
-        ? `These tasks stay done, but their code is unmerged, only on the local branch ${batch.branch ?? '(none)'}:\n${doneTitles.map((t) => `- ${t}`).join('\n')}`
-        : 'Nothing in it finished.',
-    detail: { batchId: batch.id },
-  }),
 };
 
 /**

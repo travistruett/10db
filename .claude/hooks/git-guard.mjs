@@ -561,6 +561,74 @@ function gitOutput(cwd, args) {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
 }
 
+// Options a branch deletion may carry and still count as one plain delete: the delete flags, force
+// and quiet. `-r` (remote-tracking branches) and everything else is not one.
+const BRANCH_DELETE_OPTIONS = [
+  '-D',
+  '-d',
+  '-f',
+  '-df',
+  '-fd',
+  '-q',
+  '--quiet',
+  '--delete',
+  '--force',
+];
+// A branch name made of characters git allows and no revision syntax: no `~`, `^`, `@{`, `:`, `..`
+// or glob. A name that doesn't fit is asked about, never resolved.
+const PLAIN_BRANCH_NAME = /^[A-Za-z0-9_][A-Za-z0-9_./+-]*$/;
+
+/**
+ * True when `git branch <delete flags> <names>` deletes only local branches whose pull request has
+ * merged and whose tip is that pull request's head commit, so the deletion loses no commit. The
+ * repository squash-merges, so a merged branch is never an ancestor of main and only `-D` deletes
+ * it. False whenever a branch can't be confirmed: not a plain local branch name, the checked-out
+ * branch, no merged pull request with exactly that head, or gh missing, offline or unparseable.
+ * @param {string[]} args the arguments after `branch`
+ * @param {string} cwd
+ */
+function deletesOnlyMergedBranches(args, cwd) {
+  const names = args.filter((x) => !x.startsWith('-'));
+  const options = args.filter((x) => x.startsWith('-'));
+  if (names.length === 0 || options.length === 0) return false;
+  if (!options.every((x) => BRANCH_DELETE_OPTIONS.includes(x))) return false;
+  if (!options.some((x) => x === '--delete' || /^-[a-zA-Z]*[dD]/.test(x))) return false;
+  const checkedOut = currentBranch(cwd);
+  return names.every((name) => {
+    if (!PLAIN_BRANCH_NAME.test(name) || name.includes('..') || name === checkedOut) return false;
+    const tip = attempt(() =>
+      gitOutput(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`]).trim(),
+    );
+    if (!tip) return false;
+    const pulls = attempt(() =>
+      JSON.parse(
+        execFileSync(
+          'gh',
+          [
+            'pr',
+            'list',
+            '--head',
+            name,
+            '--state',
+            'merged',
+            '--limit',
+            '100',
+            '--json',
+            'headRefName,headRefOid,state',
+          ],
+          { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000 },
+        ),
+      ),
+    );
+    return (
+      Array.isArray(pulls) &&
+      pulls.some(
+        (pull) => pull?.state === 'MERGED' && pull.headRefName === name && pull.headRefOid === tip,
+      )
+    );
+  });
+}
+
 /** Paths staged right now, relative to the repository root. @param {string} cwd */
 function stagedPaths(cwd) {
   return gitOutput(cwd, ['diff', '--cached', '--name-only', '-z']).split('\0').filter(Boolean);
@@ -977,7 +1045,14 @@ function judge(command, cwd, whole = command) {
         isFileDiscard(git.verb, a, cwd) &&
         !RETARGETS.test(whole) &&
         inAgentWorktree(cwd);
-      if (irreversible && !ownDiscard) {
+      // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
+      // call, for the same reason as above; the cwd is the repository the branch names live in.
+      const mergedBranchDelete =
+        loneGitCall &&
+        git.verb === 'branch' &&
+        !RETARGETS.test(whole) &&
+        deletesOnlyMergedBranches(a, cwd);
+      if (irreversible && !ownDiscard && !mergedBranchDelete) {
         verdicts.push({
           decision: 'ask',
           reason: pushesMain

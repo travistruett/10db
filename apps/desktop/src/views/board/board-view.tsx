@@ -325,7 +325,7 @@ function BoardColumns({
               return (
                 <Group gap="sm" wrap="nowrap">
                   <PullRequestLink url={url} />
-                  {ci && ci.link.url !== url ? (
+                  {ci?.link && ci.link.url !== url ? (
                     <ExternalLink url={ci.link.url} label={ci.link.label} />
                   ) : null}
                 </Group>
@@ -448,6 +448,7 @@ function BoardColumns({
           {...(openPlace !== undefined ? { place: openPlace } : {})}
           workspaceMode={project.workspaceMode}
           gateCommand={project.gateCommand}
+          areaNames={project.areas.map((area) => area.name)}
           {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
           onStart={() => {
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
