@@ -62,7 +62,12 @@ function oneLine(text: string): string {
     .replace(/\p{Cf}+/gu, '')
     .replace(/[\s\p{Cc}]+/gu, ' ')
     .trim();
-  return line.length <= MAX_REASON ? line : `${line.slice(0, MAX_REASON - 1).trimEnd()}…`;
+  if (line.length <= MAX_REASON) return line;
+  // Cut on a code point boundary: slicing UTF-16 code units could leave half an astral character.
+  const cut = line.slice(0, MAX_REASON - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  const whole = last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  return `${whole.trimEnd()}…`;
 }
 
 function modelJson(text: string): unknown {
