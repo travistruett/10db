@@ -46,8 +46,8 @@ favors legibility and calm over decoration.
 - **Factory is one list, not cards:** goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
-  until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running, the
-  Ungrouped row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
+  shipping, not started, the Ungrouped row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
   no badge and no color.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect

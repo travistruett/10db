@@ -266,7 +266,8 @@ decisions; phase 3 adds "Waiting on Mark" with the evidence sent.
 
 The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; the digest's loading and
 "None" rows are the spec's call.
-- **Order:** failed, waiting on you, waiting on someone, paused, running, then Ungrouped, then done goals under
+- **Order:** failed, waiting on you, waiting on someone, paused, running, shipping, not started, then
+  Ungrouped, then done goals under
   one collapsed "Done (n)" line; within a status, the most recently changed first.
 - **No goals yet:** one dimmed line under the header, "Goals are outcomes 10db pursues across many tasks. Adopt
   a plan to start one, or ask Claude Code to with the 10db-task skill.", with Adopt a Plan… as the header's
