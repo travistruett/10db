@@ -20,7 +20,7 @@ check:
 check-changed:
 	@node scripts/check-changed.mjs
 
-## precheck: format and lint of the changed files, typecheck of the changed packages and their dependents, and drift of the changed packages; no tests, Rust checks or e2e, never the gate. Over every package where it cannot place a file.
+## precheck: format and lint of the changed files, typecheck of the changed packages and their dependents, drift of the changed packages, knip, and the docs and agent-file rule tests for a docs change; no other tests, Rust checks or e2e, never the gate. Over every package where it cannot place a file.
 precheck:
 	@node scripts/check-changed.mjs --precheck
 

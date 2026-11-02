@@ -415,11 +415,6 @@ export function TaskDrawer({
 }
 
 /**
- * What stands beside the task's state that asks the builder nothing: another task's hazard it waits
- * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
- * and how to fix it, with its line breaks. Nothing when there is none.
- */
-/**
  * Where a pull request's required checks stand (CI-decides spec §5), as the card says it, with a link
  * to the job or the checks. Nothing for a pull request with no required checks.
  */
@@ -442,6 +437,11 @@ function CiStatusLine({
   );
 }
 
+/**
+ * What stands beside the task's state that asks the builder nothing: another task's hazard it waits
+ * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
+ * and how to fix it, with its line breaks. Nothing when there is none.
+ */
 function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
   if (notices.length === 0) return null;
   return (

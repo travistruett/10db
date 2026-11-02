@@ -25,6 +25,8 @@ interface Plan {
   readonly format?: readonly string[];
   readonly rust?: boolean;
   readonly precheck?: boolean;
+  readonly knip?: boolean;
+  readonly repoTests?: readonly string[];
 }
 
 /** What `scripts/check-changed.mjs --plan` says it would run for these changed files. */
@@ -200,6 +202,46 @@ describe('scripts/check-changed.mjs --precheck', () => {
     const plan = precheckPlanFor('apps/daemon/src/sandbox/command-env.ts');
     expect(plan.format).toEqual(['apps/daemon/src/sandbox/command-env.ts']);
   });
+
+  it('runs knip, which is whole-repo, for any change, but not for no change', () => {
+    expect(precheckPlanFor('apps/daemon/src/delivery/index.ts').knip).toBe(true);
+    expect(precheckPlanFor('docs/architecture/decisions/README.md').knip).toBe(true);
+    expect(precheckPlanFor().knip).toBe(false);
+  });
+
+  it('runs the docs rule tests when a decision file is added', () => {
+    const plan = precheckPlanFor('docs/architecture/decisions/2026-11-02-new-thing.md');
+    expect(plan.repoTests).toEqual(['tests/repo/src/architecture-docs.test.ts']);
+  });
+
+  it('runs the agent file rule tests for an AGENTS.md and an agent rule file', () => {
+    expect(precheckPlanFor('apps/daemon/AGENTS.md').repoTests).toEqual([
+      'tests/repo/src/agent-docs.test.ts',
+      'tests/repo/src/architecture-docs.test.ts',
+    ]);
+    expect(precheckPlanFor('.claude/rules/testing.md').repoTests).toEqual([
+      'tests/repo/src/agent-docs.test.ts',
+      'tests/repo/src/architecture-docs.test.ts',
+    ]);
+  });
+
+  it('runs no repo rule tests for a package source change: they are not about it', () => {
+    expect(precheckPlanFor('apps/daemon/src/runner/runner.ts').repoTests).toEqual([]);
+  });
+
+  it('keeps the changed packages check without knip or repo rule tests', () => {
+    const plan = planFor('docs/architecture/decisions/README.md');
+    expect(plan.knip).toBeUndefined();
+    expect(plan.repoTests).toBeUndefined();
+  });
+
+  it('runs knip and the docs rule tests over every package too', () => {
+    const plan = precheckPlanFor('pnpm-lock.yaml');
+    expect(plan.full).toBe(true);
+    expect(readRepoFile('scripts/check-changed.mjs')).toMatch(
+      /async function runPrecheckEverywhere[\s\S]*?knipStep\(\)[\s\S]*?ALL_REPO_DOC_TESTS/,
+    );
+  });
 });
 
 /**
@@ -244,7 +286,10 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     return { stdout: result.stdout, commands };
   }
 
-  const FOUR_STEPS = [
+  // The four per-package steps, plus knip and the docs rule tests, which `runPrecheckEverywhere` adds.
+  const EVERY_PACKAGE_STEPS = [
+    'pnpm exec knip',
+    'pnpm exec vitest run tests/repo/src/agent-docs.test.ts tests/repo/src/architecture-docs.test.ts',
     'pnpm run drift',
     'pnpm run format:check',
     'pnpm run lint',
@@ -256,7 +301,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     expect(run.stdout).toContain('pre-check over every package');
     expect(run.stdout).toContain('CHECK-CHANGED PASS');
     expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
-    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+    expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
     // Drift regenerates files in the tree, so it runs last.
     expect(run.commands.at(-1)).toBe('pnpm run drift');
   });
@@ -265,7 +310,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     const run = runWithStubs(['--precheck']);
     expect(run.stdout).toContain('no base branch to diff against');
     expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
-    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+    expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
   });
 
   it('does run the gate for the same unplaced file without --precheck', () => {

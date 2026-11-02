@@ -11,6 +11,7 @@ import {
   TaskMove,
   TaskPatch,
   TaskStatus,
+  WorkstreamState,
   type TaskDto,
 } from '@10db/contracts';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
@@ -26,6 +27,7 @@ export type BuilderServices = Pick<
   | 'startTask'
   | 'moveTask'
   | 'runNext'
+  | 'listWorkstreams'
   | 'listBoardColumns'
   | 'listInbox'
 > &
@@ -40,6 +42,14 @@ function taskSummary(task: TaskDto) {
 export function createBuilderTools(
   services: BuilderServices,
 ): Record<BuilderToolName, (args: unknown) => unknown> {
+  /** Whether the task is open, on the Board and not parked, and its latest run is set aside. */
+  const isHeld = (task: TaskDto): boolean =>
+    task.workstreamId !== null &&
+    task.status === TaskStatus.Open &&
+    task.boardColumnId === null &&
+    services
+      .listWorkstreams({ active: false })
+      .some((run) => run.id === task.workstreamId && run.state === WorkstreamState.Held);
   return {
     [BuilderToolName.ListProjects]: (args) => {
       BuilderToolInputs.list_projects.parse(args);
@@ -110,11 +120,29 @@ export function createBuilderTools(
       const { taskId } = BuilderToolInputs.start_task.parse(args);
       // The API starts any open task; an agent filing tasks must not jump one past its dependencies.
       const task = services.getTask(taskId);
-      if (task.boardStatus !== BoardStatus.Ready) {
+      // A held task already started once: the Board's Start queues its run again, so this does too.
+      const held = isHeld(task);
+      if (!held && task.boardStatus !== BoardStatus.Ready) {
         throw new DomainError(
           'conflict',
           `Task ${task.title} is ${task.boardStatus.replace('_', ' ')}, not ready, so it can't be started`,
         );
+      }
+      if (held) {
+        // A held task is Blocked whatever it waits on, so its dependencies are checked here.
+        const waitingOn = task.dependsOn
+          .map((id) => services.getTask(id))
+          .filter(
+            (dep) =>
+              dep.status !== TaskStatus.Done &&
+              (dep.status === TaskStatus.Cancelled || dep.boardStatus !== BoardStatus.Done),
+          );
+        if (waitingOn.length > 0) {
+          throw new DomainError(
+            'conflict',
+            `Task ${task.title} waits on ${waitingOn.map((dep) => dep.title).join(', ')}, so it can't be started`,
+          );
+        }
       }
       const started = services.startTask(taskId);
       return started.kind === 'workstream'
