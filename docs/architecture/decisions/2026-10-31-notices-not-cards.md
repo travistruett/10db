@@ -55,6 +55,20 @@
   startup. A ship that writes or clears `pull-request-merge` closes the batch's `auto-merge-refused:<id>` card, and
   one that sets a pull request to merge closes the project's `auto-merge-off:<projectId>` card.
 
+## Ship failures (follow-up, 2026-11-01)
+
+- **Every "Batch … not shipped" card offers Retry and Abandon** (`shipCards`: dirty checkout, gate failed or
+  timed out, push rejected or timed out, network, gh not installed or signed out). Each carries
+  `detail.actions: ['retry', 'abandon']`; the Inbox shows buttons over the batch's existing ship and abandon routes
+  (`batch-card-actions.tsx`), which the daemon acts on, and either closes the card. The card still closes itself when
+  the batch ships (`resolvesWhen`). None offers only a Dismiss.
+- **What asked nothing is a notice, not a card:** "the gate passed when 10db ran it again" is the batch notice
+  `gate-rerun` (info; cleared when the next gate of the batch starts), and "only the pre-check ran, so the pull
+  request waits" is the `pull-request-merge` notice (`mergeNotices.preCheckOnly`), which closes the
+  `pre-check-only:<id>` card an earlier build raised. The "Batch … abandoned" card is gone: the builder just asked
+  for it, an abandoned batch shows no notices, and the branch card (Delete Branch or Keep) already says what stays
+  unmerged.
+
 ## Why
 
 - A card interrupts: it raises the Inbox count, wants a look and then a dismiss, and these three asked for no
@@ -67,6 +81,23 @@
 - Turned down: a new Inbox kind that the desktop filters out (still a row to dismiss, and an Inbox with hidden rows);
   keeping the cards but giving them a Dismiss option (still an interruption); computing the wait from `ClaimWaits`
   at read time (lost on restart, unreachable from the db package that builds the DTO).
+
+## Start refusals (2026-11-01)
+
+A refused start (`startCards`, `worktreeCards`, the wrong-branch card of a join, `landing`'s missing branch) stays an
+Inbox card, and `forTasks` gives every one two answers the daemon acts on (`delivery/start-card.ts`,
+`createStartCardAnswers`, run before the inbox records the answer):
+
+- **Retry start** repeats the start from `detail.startRefused` (the batch title, and the batch it tried to join) and the
+  card's `taskIds`. A start the request itself refuses (a task running, an unfinished dependency) throws, so the card
+  stays open and says why; one the background cut refuses raises a fresh card, since the first closed with the answer.
+- **Cancel task** removes each named task as the Board's remove does (`cancelTask`); a task that has started since, or
+  that another open task waits on, throws and keeps the card open.
+
+The tasks of a CI fix batch get **Cancel task** alone: a start can't repeat a fix cut, and the pull request's CI-stop
+card, raised with it, has the Retry. No start refusal became a notice: a task that never started has neither a run nor a
+batch to hold one (`workstreams.notice`, `batches.notices`), and each refusal has a real next step the builder takes
+by answering, so none "asks nothing". The Board already shows a refused task's line from its card (`start-note.ts`).
 
 ## Open
 

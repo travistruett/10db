@@ -748,17 +748,20 @@ export function createRunner(opts: RunnerOptions): Runner {
    * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
    * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
    * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
-   * plan, as a step an existing skip rule drops never enters one, and the reason is logged.
+   * plan, as a step an existing skip rule drops never enters one, and the reason is logged. A review
+   * that rejects at the retry limit and ships anyway hands over to QA as an approval does, so it
+   * gets the same check (`shipping`).
    */
   async function withoutDocsOnlyQa(
     id: WorkstreamId,
     row: WorkstreamRow,
     step: WorkstreamStep,
+    shipping = step.result?.verdict === Verdict.Approve,
   ): Promise<WorkstreamRow> {
     const qaIndex = row.stepIndex + 1;
     if (
       step.role !== StepRole.Review ||
-      step.result?.verdict !== Verdict.Approve ||
+      !shipping ||
       row.steps[qaIndex]?.role !== StepRole.Qa ||
       row.baseHead === null
     )
@@ -1001,10 +1004,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             };
             // The move an approval would get: a step that follows (QA after review) still runs. One
             // that rejects there is past the limit too, so it ships the same way with its own follow-up.
-            const to = row.stepIndex + 1;
-            if (to < row.steps.length) return advanceTo(id, ctl, row, step, to, atLimit);
-            return completeReadOnlySteps(id, ctl, row, step, {
-              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task`,
+            // A change of Markdown files alone skips QA here as it does after an approval.
+            const shipped = await withoutDocsOnlyQa(id, row, step, true);
+            const skippedQa = shipped.steps.length < row.steps.length;
+            const to = shipped.stepIndex + 1;
+            if (to < shipped.steps.length) return advanceTo(id, ctl, shipped, step, to, atLimit);
+            return completeReadOnlySteps(id, ctl, shipped, step, {
+              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task${skippedQa ? '; QA skipped: only docs changed' : ''}`,
               atLimit,
             });
           }
@@ -2415,6 +2421,33 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * A lane's first launch brings its batch's copy up to the base as it is now, so the lane sees what
+   * merged while its task waited in the queue (a copy cut at an older base would send it to redo
+   * work that is already there). A copy with no work of its own is fast-forwarded and one with
+   * commits takes the base by 10db's base merge. A lane that already ran a session keeps its copy:
+   * its changes are in it. What kept the base out is a notice on the batch, never a stop to the lane.
+   * Stopped like a gate is.
+   */
+  async function baseFirst(id: WorkstreamId, ctl: Control): Promise<void> {
+    const row = getWorkstreamRow(db, id);
+    if (row.batchId === null || row.baseHead !== null) return;
+    if (row.nextAction.kind === 'verify' || row.state === S.Verifying) return;
+    const abort = new AbortController();
+    ctl.gateAbort = abort;
+    if (ctl.stopReason === 'cancelled' || ctl.stopReason === 'shutdown') abort.abort();
+    try {
+      await opts.baseUpdates.atLaunch(row.batchId, abort.signal);
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        'base not brought into the copy at launch',
+      );
+    } finally {
+      ctl.gateAbort = null;
+    }
+  }
+
+  /**
    * A run that holds the migrations hazard from its start (the task names it among its areas) takes
    * its base first, as request_claim does, so a migration it generates is numbered after the base's
    * latest. A branch that can't take its base gives the hazard back: the session runs without it, and
@@ -2446,6 +2479,7 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
+      await baseFirst(id, ctl);
       await migrationsBaseFirst(id, ctl);
       for (;;) {
         const row = getWorkstreamRow(db, id);

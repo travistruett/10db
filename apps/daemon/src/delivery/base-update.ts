@@ -8,7 +8,7 @@ import {
   patchWorkstream,
 } from '@10db/db';
 import { z } from 'zod';
-import type { BranchMerge } from '../git';
+import type { BranchMerge, ResolvedConflict } from '../git';
 import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import {
   hideNotices,
@@ -49,10 +49,12 @@ export type BaseUpdate =
       readonly base: string;
       readonly head: string;
       readonly note: string | null;
+      /** The conflicts the merge settled; only when asked for a pull request (`forPullRequest`). */
+      readonly resolved?: readonly ResolvedConflict[];
     }
   /**
-   * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard
-   * only, says what in the branch kept the base out.
+   * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard or
+   * for a pull request only, says what in the branch kept the base out.
    */
   | { readonly kind: 'not_merged'; readonly note: string; readonly held?: BaseHeld }
   /**
@@ -84,12 +86,24 @@ export interface BeforeGateOptions {
    */
   readonly forMigrations?: { readonly task: string };
   /**
+   * Brings the base into the branch of a batch whose pull request is open and conflicts with it
+   * (`ship.ts` catches it up). The merge runs the install and the generators as a gate's does. A
+   * branch that can't take the base is not told on its tasks: `held` says what kept it out, and
+   * the caller raises its one card. The merge lists the conflicts it settled in `resolved`.
+   */
+  readonly forPullRequest?: boolean;
+  /**
    * The caller can send a session to resolve conflicts, as a task's verify gate can: a conflict
    * that only needs both sides' work put together is merged into the branch with its markers
    * (`conflicted`), rather than shown as a notice with the gate running on the stale branch. The
    * shipping gate sends the batch's last task (`ship.ts` `sendToMerge`), so it asks too.
    */
   readonly inSession?: true;
+  /**
+   * A lane is launching on the copy, not a gate starting: a fetch that fails also leaves a notice on
+   * the batch, since no gate note will say that the lane started without the base's newer commits.
+   */
+  readonly atLaunch?: true;
 }
 
 export interface BaseUpdates {
@@ -112,6 +126,15 @@ export interface BaseUpdates {
    * before its turn; the gates behind it keep their order.
    */
   gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null>;
+  /**
+   * Brings the base into the batch's copy as a lane launches on it, so the lane sees what merged
+   * while its task waited in the queue (`decisions/2026-11-02-a-lane-starts-on-the-base-as-it-is-now.md`).
+   * It is `beforeGate` taking its turn among the batch's gates: a copy with no work of its own is
+   * fast-forwarded, one with commits gets the base merged in by the same merge, never reset. A fetch
+   * that fails leaves a notice on the batch and the copy as it is. A batch in the builder's own
+   * checkout, and a CI fix batch, whose branch is the pull request's, are left alone. Never throws.
+   */
+  atLaunch(batchId: BatchId, signal: AbortSignal): Promise<BaseUpdate>;
 }
 
 /** What a gate's evidence or card says about its base and packages; null when there is nothing. */
@@ -617,7 +640,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Merging> {
     const migrationsFor = options.forMigrations?.task;
     const context = migrationsFor === undefined ? {} : { migrationsFor };
-    const holding = (held: BaseHeld) => (migrationsFor === undefined ? {} : { held });
+    const forPullRequest = options.forPullRequest === true;
+    const holding = (held: BaseHeld) =>
+      migrationsFor === undefined && !forPullRequest ? {} : { held };
     const origin = `origin/${batch.baseBranch}`;
     // An earlier gate merged the base and left markers: the merge stands, and what is left is whether
     // a session has resolved them.
@@ -672,13 +697,15 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         // taking the base's directory still shows the migration the branch must renumber.
         const taken = await takenIn(path, merged.from, merged.conflicted ?? paths);
         // The batch's tasks show it; no card asks the builder anything about a conflict that stands.
-        tell(batch, () => {
-          showNotice(
-            ctx.state,
-            batch.id,
-            baseNotices.conflict(batch, path, paths, { ...context, taken, reasons }),
-          );
-        });
+        // A pull request's caller raises the one card instead.
+        if (!forPullRequest)
+          tell(batch, () => {
+            showNotice(
+              ctx.state,
+              batch.id,
+              baseNotices.conflict(batch, path, paths, { ...context, taken, reasons }),
+            );
+          });
         return alone({
           ...notMerged(
             batch,
@@ -690,7 +717,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       }
       case 'blocked': {
         const { changed, kept } = merged;
-        if (kept.length > 0)
+        if (kept.length > 0 && !forPullRequest)
           tell(batch, () => {
             showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
           });
@@ -746,10 +773,18 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         marked: [...marked],
         regenerate: (merged.regenerate ?? []).map((r) => ({ dir: r.dir, dropped: [...r.dropped] })),
       };
+      // The note names the merge commit, so it can only be kept once the merge is made. Without it
+      // the next gate finds the branch up to date with the base, and nothing would regenerate the
+      // directories or report a migration they dropped: so a note that can't be kept is a card.
+      let unkept: string | null = null;
       try {
         await ctx.git.keepNote(path, mergeRef(ctx.worktreeRoot, batch.id), JSON.stringify(note));
       } catch (error) {
         ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base merge note not kept');
+        const reason = `10db couldn't keep the note of what to regenerate (${why(error)}), so it won't regenerate them once the conflicts in ${named(marked)} are resolved`;
+        unkept = `10db couldn't keep a note of this merge (${why(error)}), so the next gate won't know that ${named(marked)} still hold conflict markers.`;
+        if (note.regenerate.length > 0)
+          unkept = `${unregenerated(batch, path, merged, { why: reason, logPath: null, restored: false })} ${unkept}`;
       }
       ctx.logger.info(
         { batchId: batch.id, base: merged.from, head: merged.head, files: marked },
@@ -758,7 +793,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       tell(batch, () => {
         showNotice(ctx.state, batch.id, baseNotices.resolving(batch, marked));
       });
-      return alone(conflicted(batch, merged.from, marked, unmoved));
+      return alone(conflicted(batch, merged.from, marked, joined(unmoved, unkept)));
     }
     ctx.logger.info(
       {
@@ -776,6 +811,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         base: merged.from,
         head: merged.head,
         note: joined(settledNote(batch, merged), unmoved),
+        ...(forPullRequest ? { resolved: merged.resolved ?? [] } : {}),
       },
       regenerate: (merged.regenerate ?? []).length > 0 ? merged : null,
     };
@@ -871,6 +907,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
     } catch (error) {
       if (stopped()) return { kind: 'aborted' };
+      if (options.atLaunch)
+        try {
+          showNotice(ctx.state, batch.id, baseNotices.fetchFailed(batch, error));
+        } catch (noticeError) {
+          ctx.logger.warn({ batchId, err: why(noticeError) }, 'fetch notice not written');
+        }
       merging = alone(
         notMerged(
           batch,
@@ -879,6 +921,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         ),
       );
     }
+    if (merging === null)
+      try {
+        hideNotices(ctx.state, batch.id, [NOTICE_KEY.baseFetch]);
+      } catch (error) {
+        ctx.logger.warn({ batchId, err: why(error) }, 'fetch notice not cleared');
+      }
     if (stopped()) return { kind: 'aborted' };
     merging ??=
       batch.worktreePath === null
@@ -930,7 +978,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   /** Each batch's latest gate, which the next one waits for. */
   const gates = new Map<BatchId, Promise<unknown>>();
 
-  return {
+  const baseUpdates: BaseUpdates = {
     gate<T>(batchId: BatchId, signal: AbortSignal, run: () => Promise<T>): Promise<T | null> {
       const ahead = gates.get(batchId) ?? Promise.resolve();
       const turn = new Promise<boolean>((resolve) => {
@@ -975,5 +1023,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         };
       }
     },
+    async atLaunch(batchId, signal) {
+      const batch = getBatch(db, batchId);
+      // The builder's own checkout is never merged into, and a CI fix batch's branch is the pull
+      // request's, which stays at the head CI failed on.
+      if (batch.worktreePath === null || batch.ciFixOf !== null)
+        return { kind: 'up_to_date', note: null };
+      const update = await baseUpdates.gate(batchId, signal, () =>
+        baseUpdates.beforeGate(batchId, signal, { atLaunch: true }),
+      );
+      return update ?? { kind: 'aborted' };
+    },
   };
+  return baseUpdates;
 }

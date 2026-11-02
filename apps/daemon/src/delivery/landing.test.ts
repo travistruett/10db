@@ -3,7 +3,7 @@ import { getBatch, listBatches, listWorkstreams } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
-import { autoMergeOffKey, autoMergeRefusedKey } from './cards';
+import { autoMergeOffKey, autoMergeRefusedKey, preCheckOnlyKey } from './cards';
 import { raise } from './context';
 
 let h: DeliveryHarness;
@@ -279,15 +279,33 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
   const notMergedCard = () =>
     h.cards().filter((c) => c.title.startsWith('not merged: main has no required checks'));
 
-  it('does not merge a pull request whose base has no required checks, and raises a card linking it', async () => {
+  it("does not merge a pull request whose base has no required checks, and tells the batch's tasks with a notice linking it, not a card", async () => {
     h = createDeliveryHarness({ precheckCommand: 'true' });
     h.gh.noRequiredChecks = true;
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.state).toBe('SHIPPED');
     expect(h.gh.merged).toEqual([]);
-    const card = h.only(h.cards());
-    expect(card.title).toBe('not merged: main has no required checks and only the pre-check ran');
-    expect(card.body).toContain(shipped.prUrl ?? 'no pull request');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(shipped.notices);
+    expect(notice.key).toBe('pull-request-merge');
+    expect(notice.tone).toBe('warning');
+    expect(notice.line).toBe(
+      'Pull request waits for you to merge it: main has no required checks and only the pre-check ran',
+    );
+    expect(notice.body).toContain(shipped.prUrl ?? 'no pull request');
+  });
+
+  it('closes the card an earlier build raised for it', async () => {
+    h = createDeliveryHarness({ precheckCommand: 'true' });
+    h.gh.noRequiredChecks = true;
+    const batch = await start('One', h.addTask('Alpha'));
+    raise(h.inbox, h.project.id, {
+      title: 'not merged: main has no required checks and only the pre-check ran',
+      body: 'x',
+      foldKey: preCheckOnlyKey(batch.id),
+    });
+    await ship(batch);
+    expect(h.cards()).toEqual([]);
   });
 
   it('merges at once when the required checks already passed on this head', async () => {

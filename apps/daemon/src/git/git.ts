@@ -409,6 +409,14 @@ export interface Git {
     to: string,
   ): Promise<'unchanged' | 'created' | 'moved'>;
   /**
+   * Takes back a merge: moves `branch` from `from`, where it must be, to `to`, an ancestor of it,
+   * which is where it was before the merge. Never more than that: any other tip, or a `to` the tip
+   * does not descend from, is refused with an InvalidError and nothing changes. A branch `repo` has
+   * checked out has its files follow through `read-tree -m -u`, which keeps uncommitted changes
+   * elsewhere and refuses one in the way; one checked out anywhere else is refused.
+   */
+  rewindBranch(repo: string, branch: string, from: string, to: string): Promise<void>;
+  /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
    */
@@ -2109,6 +2117,54 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function rewindBranch(
+    repo: string,
+    branch: string,
+    from: string,
+    to: string,
+  ): Promise<void> {
+    if (!OBJECT_ID.test(from) || !OBJECT_ID.test(to))
+      throw new InvalidError('A branch is rewound between two commit ids');
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const ref = `refs/heads/${branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db rewinds nothing there`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip !== from)
+        throw new InvalidError(`Branch ${branch} is at ${tip ?? 'nothing'}, not ${from}`);
+      if (tip === to) return;
+      if (!(await isAncestor(c, to, tip)))
+        throw new InvalidError(`Branch ${branch} is at ${tip}, which does not descend from ${to}`);
+      const here = (await currentBranch(c)) === branch;
+      if (here) {
+        await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+          () => undefined,
+        );
+        try {
+          // Files first, then the branch, as the merge itself did.
+          await git(c, ['read-tree', '-m', '-u', tip, to]);
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error;
+          throw new InvalidError(`10db could not put ${to} back in ${c.real}: ${error.message}`);
+        }
+      } else {
+        const holder = await branchInUseElsewhere(c, branch);
+        if (holder !== null)
+          throw new InvalidError(
+            `Branch ${branch} is checked out at ${holder}, so it can't be moved to ${to}`,
+          );
+      }
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: rewind to ${to}`, ref, to, tip]);
+      } catch (error) {
+        if (here) await git(c, ['read-tree', '-m', '-u', to, tip]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+    });
+  }
+
   async function listWorktrees(main: Pinned): Promise<WorktreeEntry[]> {
     return parseWorktreeList(await git(main, ['worktree', 'list', '--porcelain', '-z']));
   }
@@ -2436,6 +2492,7 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     addWorktree,
     fastForwardBranch,
+    rewindBranch,
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

@@ -251,6 +251,14 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(cardsAbout(batch.branch)).toEqual([]);
   });
 
+  it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {
+    const { batch } = await opened();
+    await commitIn(batch, 'src/api/one.txt');
+    h.shipper.abandon(batch.id);
+    await h.jobs.idle();
+    expect(h.cards().filter((c) => c.title.endsWith('abandoned'))).toEqual([]);
+  });
+
   it('answers a card whose branch is already gone without a new card', async () => {
     const { batch } = await opened();
     await commitIn(batch, 'src/api/one.txt');

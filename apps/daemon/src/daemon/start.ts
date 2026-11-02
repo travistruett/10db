@@ -61,6 +61,7 @@ import {
   createBatchCardAnswers,
   createBranchCardAnswers,
   createCiStopAnswers,
+  createStartCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -403,6 +404,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -429,6 +431,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
+      answerStartCard?.(item, answer);
       answerDeadlockCard(item, answer);
     },
   });
@@ -581,6 +584,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
+  answerStartCard = createStartCardAnswers({ state, starter });
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
   // Before a task gets the migrations hazard, from request_claim or at its start.
@@ -836,6 +840,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ctx: delivery,
     clock,
     ciFix: { dataDir: opts.dataDir },
+    // A pull request that conflicts gets its base merged in, and a merge GitHub refused is retried.
+    landing: shipper,
     // A pull request that merges or closes ends the fix session still working on it.
     endFixes: {
       cancel: (id) => createdRunner.cancel(id),

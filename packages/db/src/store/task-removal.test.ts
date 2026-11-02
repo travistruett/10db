@@ -26,6 +26,7 @@ import {
 } from './batches';
 import { insertBoardColumn } from './board-columns';
 import {
+  cancelRefusedStartTask,
   cancelTask,
   closeTask,
   dependenciesDone,
@@ -37,6 +38,7 @@ import {
   reopenTask,
   setTaskStatus,
 } from './tasks';
+import { insertSession } from './sessions';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, listWorkstreams, transitionWorkstream } from './workstreams';
 
@@ -205,6 +207,68 @@ describe('cancelTask', () => {
     );
     store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
     expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(/already run/);
+  });
+});
+
+describe('cancelRefusedStartTask', () => {
+  it('removes a task whose only run was cancelled before it had a session, as a refused cut leaves it', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    const { value } = store.write((ctx) => cancelRefusedStartTask(ctx, task.id));
+    expect(value.status).toBe(TaskStatus.Cancelled);
+  });
+
+  it('removes a task that never started, as cancelTask does', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
+      TaskStatus.Cancelled,
+    );
+  });
+
+  it.each(['RUNNING', 'FAILED', 'QUEUED'])(
+    'refuses a task whose run is %s with TaskStartedError',
+    (name) => {
+      const project = seedProject(store);
+      const task = seedTask(project.id);
+      const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+      for (const to of PATHS[name] ?? [])
+        store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+      expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
+        TaskStartedError,
+      );
+    },
+  );
+
+  it('refuses a task whose cancelled run had a session', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    store.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: ws.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'hash-refused',
+      }),
+    );
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
+      TaskStartedError,
+    );
+  });
+
+  it('refuses a task an open task waits on', () => {
+    const project = seedProject(store);
+    const base = seedTask(project.id, 'Base');
+    seedTask(project.id, 'Child', [base.id]);
+    expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, base.id))).toThrow(
+      TaskHasDependentsError,
+    );
   });
 });
 

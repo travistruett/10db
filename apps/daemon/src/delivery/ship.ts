@@ -40,9 +40,16 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { Clock } from '../clock';
-import { GitNetworkError, GitNetworkFailure } from '../git';
+import { comparablePath, GitNetworkError, GitNetworkFailure, samePath } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
-import { PrState, type PullRequest, type RequiredChecks } from '../github';
+import {
+  MergeBlocked,
+  PrMergeable,
+  PrState,
+  type PullRequest,
+  type PullRequestStatus,
+  type RequiredChecks,
+} from '../github';
 import { insertPlannedWorkstream } from '../team';
 import { raiseGateHostCards } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
@@ -52,9 +59,14 @@ import { settleBranch } from './branch-cleanup';
 import {
   autoMergeOffKey,
   autoMergeRefusedKey,
+  detailOf,
   nothingToWaitFor,
+  preCheckOnlyKey,
+  prCardKey,
+  prCards,
   shipCards,
   wrongBranchCard,
+  type CatchUpStop,
   type Card,
   type ShipCheckName,
   type ShipFailure,
@@ -65,6 +77,7 @@ import { resolveShipCards } from './stale-cards';
 import {
   ghCall,
   hideNotices,
+  networkCall,
   pushCall,
   raise,
   showNotice,
@@ -75,12 +88,34 @@ import {
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
-import { mergeNotices, NOTICE_KEY } from './notices';
+import { gateNotices, mergeNotices, NOTICE_KEY, updateNotices } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
+import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
+import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
+
+/**
+ * How long a pull request 10db failed to catch up waits before 10db tries it again at the same
+ * head: the base may have changed, or the builder fixed what kept it out. A new head tries at once.
+ */
+const CATCH_UP_RETRY_MS = 30 * 60_000;
+
+/** How long a merge GitHub refused waits before 10db asks again while the pull request stays clean. */
+const MERGE_RETRY_MS = 10 * 60_000;
+
+/** Batch states whose work can't run again, so a worktree of theirs stays until someone removes it. */
+const FINISHED_BATCH: readonly BatchState[] = [
+  BatchState.Shipped,
+  BatchState.Closed,
+  BatchState.Abandoned,
+];
+
+/** True when GitHub says the open pull request conflicts with its base. */
+const conflicting = (status: PullRequestStatus): boolean =>
+  status.mergeBlocked === MergeBlocked.Conflicts || status.mergeable === PrMergeable.Conflicting;
 
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
@@ -106,6 +141,20 @@ export interface Shipper {
   /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
   shipAnyway(batchId: BatchId): BatchDto;
   abandon(batchId: BatchId): BatchDto;
+  /**
+   * The open pull request of a shipped batch that merges by itself conflicts with its base: merges the
+   * base into its branch in a worktree made for it, checks the result as shipping does, pushes it onto
+   * the pull request and retires the worktree. A conflict 10db can't settle, or a check that fails,
+   * is one card that names the files. Queued in the ship queue; a call for a pull request already
+   * queued, or not one 10db lands, does nothing.
+   */
+  catchUp(batchId: BatchId): void;
+  /**
+   * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
+   * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
+   * that stopped (`catchUpCardWasOpen`). Does nothing when no merge is due.
+   */
+  retryMerge(batchId: BatchId, opts?: RetryMergeOptions): void;
 }
 
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
@@ -547,14 +596,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /**
    * Shows on the batch's tasks why its pull request waits for the builder, or clears that with null once
    * it is set to merge (or merged). The cards an earlier build raised for it close too: the batch's
-   * refusal card always, and the project's auto-merge-is-off card once a pull request was set to merge,
-   * which shows the setting is on.
+   * refusal card and its pre-check-only card always, and the project's auto-merge-is-off card once a
+   * pull request was set to merge, which shows the setting is on.
    */
   function tellMerge(batch: BatchDto, notice: Notice | null): void {
     if (notice === null) hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
     else showNotice(deps.state, batch.id, notice);
     withdraw(deps.state, deps.inbox, batch.projectId, [
       autoMergeRefusedKey(batch.id),
+      preCheckOnlyKey(batch.id),
       ...(notice === null ? [autoMergeOffKey(batch.projectId)] : []),
     ]);
   }
@@ -617,7 +667,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * GitHub said the pull request has nothing to wait for, and only the pre-check ran on the Mac, so
    * merging on that answer alone could land work nothing but the pre-check checked. It says the same
    * when the base has no required checks and when they already passed on this head, so read them:
-   * passing merges at once; none leaves the pull request open with a card; anything else (pending,
+   * passing merges at once; none leaves the pull request open with a notice; anything else (pending,
    * failing, a read that failed) merges nothing and raises nothing, and the pull request watch takes over.
    */
   async function mergeIfRequiredChecksPassed(
@@ -646,7 +696,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         await mergeNow(batch, repo, prUrl, signal);
         return;
       case 'none':
-        raise(deps.inbox, batch.projectId, shipCards.notMergedPreCheckOnly(batch, prUrl));
+        tellMerge(batch, mergeNotices.preCheckOnly(batch, prUrl));
         return;
       case 'pending':
       case 'failing':
@@ -766,6 +816,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (check !== null) {
         const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
         step = `the ${name}`;
+        // A notice from an earlier ship attempt's rerun says nothing of this one's gate.
+        hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun]);
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
         const gateOnce = async (): Promise<{
@@ -862,7 +914,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             );
             return;
           }
-          raise(deps.inbox, batch.projectId, shipCards.gatePassedOnRerun(batch, steps));
+          showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
         }
       }
       // 3. Push, never forced.
@@ -984,7 +1036,293 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
+  /**
+   * A shipped batch whose pull request 10db keeps landing: the one that opened it (not a CI fix), set
+   * to merge by itself. A pull request held for the builder is the builder's to update.
+   */
+  function landsItself(batch: BatchDto): boolean {
+    return (
+      batch.state === BatchState.Shipped &&
+      batch.ciFixOf === null &&
+      batch.autoMerge &&
+      batch.prUrl !== null &&
+      batch.branch !== null &&
+      batch.repo !== null
+    );
+  }
+
+  /** Pull requests being caught up or merged again, so a watch round that meets one again queues nothing twice. */
+  const catchingUp = new Set<BatchId>();
+  const retrying = new Set<BatchId>();
+  /** Each pull request's last catch-up: the head it conflicted at, and when it ran. */
+  const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
+  /**
+   * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
+   * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
+   * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
+   */
+  const mergeAgain = new Set<BatchId>();
+  const lastMergeRetry = new Map<BatchId, number>();
+
+  /**
+   * Brings the base into a shipped batch's conflicting pull request, in a worktree made for it from
+   * the branch: the merge, the install and the generators of a gate's base update, the pre-check or the
+   * gate on the result, then the push. A worktree made here goes again at the end, whatever happened.
+   */
+  async function catchUpSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
+    // A function, so a check after an await is not narrowed away by the one before it.
+    const stopped = (): boolean => signal.aborted;
+    const batch = getBatch(db, batchId);
+    const { branch, repo, prUrl } = batch;
+    if (stopped() || !landsItself(batch) || branch === null || repo === null || prUrl === null)
+      return;
+    const project = getProject(db, batch.projectId);
+    const main = project.repoPath;
+    let status: PullRequestStatus | null;
+    try {
+      status = await deps.gh.prStatus({ repo, ref: prUrl }, ghCall(deps, signal));
+    } catch (error) {
+      if (!stopped())
+        deps.logger.warn({ batchId, err: detailOf(error) }, 'pull request not read to catch it up');
+      return;
+    }
+    if (status?.state !== PrState.Open || !conflicting(status)) return;
+    const startedAt = deps.clock.now().getTime();
+    const last = lastCatchUp.get(batchId);
+    // Once per head until the retry time: a failure that raised its card is not tried every round.
+    if (last?.head === status.headSha && startedAt - last.at < CATCH_UP_RETRY_MS) return;
+    lastCatchUp.set(batchId, { head: status.headSha, at: startedAt });
+    /** Raises the one card; neither notice says the same thing as well. */
+    const stop = (why: CatchUpStop): void => {
+      raise(deps.inbox, batch.projectId, prCards.catchUpStopped(getBatch(db, batchId), why));
+      hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict, NOTICE_KEY.merge]);
+      mergeAgain.add(batchId);
+      deps.logger.warn({ batchId, prUrl, stop: why.kind }, 'pull request not caught up');
+    };
+    let made = false;
+    let before: string | null = null;
+    let pushed = false;
+    let keptAt: string | null = null;
+    try {
+      const holder = await deps.git.branchInUse(main, branch);
+      // The batch's own worktree, kept after it shipped for a file 10db didn't seed: merged there, and kept.
+      const kept =
+        holder !== null &&
+        batch.worktreePath !== null &&
+        samePath(comparablePath(holder), comparablePath(batch.worktreePath));
+      if (holder !== null && !kept) {
+        // The worktree of a batch whose work still runs, such as a CI fix's, goes when it ends: asked again next round.
+        if (heldByLiveBatch(batch, holder)) {
+          lastCatchUp.delete(batchId);
+          return;
+        }
+        stop({
+          kind: 'other',
+          why: `${branch} is checked out at ${holder}, so 10db can't merge ${batch.baseBranch} into it. Close that checkout, or update the pull request on GitHub.`,
+        });
+        return;
+      }
+      // The branch as GitHub has it: a fix, or Update branch, may have moved it past the local one.
+      const head = status.headSha;
+      const tip = await deps.git.branchTip(main, branch);
+      if (head === null) {
+        if (tip === null) {
+          stop({
+            kind: 'other',
+            why: `10db has no local branch ${branch} and GitHub did not say where the pull request's branch is.`,
+          });
+          return;
+        }
+      } else if (tip !== head) {
+        if (!(await deps.git.hasCommit(main, head)))
+          await deps.git.fetchCommit(main, head, networkCall(deps, signal));
+        if (tip === null || (await deps.git.isAncestor(main, tip, head))) {
+          // A checked-out branch can't be moved under its files: the kept worktree takes it as a merge.
+          if (kept && batch.worktreePath !== null)
+            await deps.git.mergeIntoBranch({
+              repo: batch.worktreePath,
+              branch,
+              from: head,
+              message: `Merge the pull request's branch ${branch} from GitHub`,
+            });
+          else await deps.git.fastForwardBranch(main, branch, head);
+        } else if (await deps.git.isAncestor(main, head, tip))
+          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+          await deps.git.rewindBranch(
+            kept && batch.worktreePath !== null ? batch.worktreePath : main,
+            branch,
+            tip,
+            head,
+          );
+        else {
+          stop({
+            kind: 'other',
+            why: `${branch} here and the pull request's branch on GitHub each have commits the other lacks, so 10db can't tell which is current.`,
+          });
+          return;
+        }
+      }
+      // Where the branch stands before 10db merges into it: where it goes back to unless the merge is pushed.
+      before = await deps.git.branchTip(main, branch);
+      if (kept) keptAt = batch.worktreePath;
+      let path = batch.worktreePath ?? '';
+      if (!kept) {
+        path = worktreePathFor(madeWorktreeRoot(deps.worktreeRoot), project, branch);
+        deps.state.write((w) => patchBatch(w, batchId, { worktreePath: path }));
+        made = true;
+      }
+      // Its own card says why when it refuses.
+      if ((await ensureWorktreeWhole(deps, getBatch(db, batchId), signal)) === 'refused') return;
+      if (stopped()) return;
+      const check = shipCheck(project);
+      let update: BaseUpdate | null = null;
+      const bringBaseIn = async (): Promise<boolean> => {
+        update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
+        return update.kind === 'merged';
+      };
+      const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
+        if (check === null) {
+          await bringBaseIn();
+          return null;
+        }
+        return runGate(
+          getBatch(db, batchId),
+          projectAtCheckout(project, path),
+          signal,
+          bringBaseIn,
+        );
+      });
+      const brought = update as BaseUpdate | null;
+      if (brought === null || brought.kind === 'aborted' || stopped()) return;
+      if (brought.kind === 'not_merged') {
+        if (brought.held?.reason === 'conflict')
+          stop({ kind: 'conflict', paths: brought.held.paths });
+        else stop({ kind: 'other', why: brought.note });
+        return;
+      }
+      if (brought.kind === 'up_to_date') {
+        // GitHub says conflict, the branch holds the base: its answer is stale, or the base moved again.
+        deps.logger.info(
+          { batchId, prUrl },
+          'pull request conflicts but its branch holds the base',
+        );
+        return;
+      }
+      if (check !== null) {
+        if (gate === null) return;
+        if (gate.timedOut || gate.exitCode !== 0) {
+          stop({
+            kind: 'gate',
+            name: check.kind === 'precheck' ? 'pre-check' : 'gate',
+            logPath: gate.logPath,
+          });
+          return;
+        }
+      }
+      await pushBranch(getBatch(db, batchId), project, branch, signal);
+      pushed = true;
+      const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
+      showNotice(deps.state, batchId, updateNotices.merged(getBatch(db, batchId), resolved));
+      hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
+      withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
+      mergeAgain.add(batchId);
+      deps.logger.info(
+        { batchId, prUrl, files: resolved.map((r) => r.path) },
+        'base merged into the pull request',
+      );
+    } catch (error) {
+      if (stopped()) return;
+      stop({
+        kind: 'other',
+        why: `10db hit an error while it merged ${batch.baseBranch} into the pull request: ${detailOf(error)}`,
+      });
+    } finally {
+      if (made) await retire(batchId);
+      // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
+      // GitHub's, and, once the builder updates the pull request there, apart from it.
+      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+    }
+  }
+
+  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  async function rewind(
+    batchId: BatchId,
+    main: string,
+    branch: string,
+    to: string,
+    keptAt: string | null,
+  ): Promise<void> {
+    try {
+      const tip = await deps.git.branchTip(main, branch);
+      if (tip === null || tip === to) return;
+      await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId, branch, err: detailOf(error) },
+        'branch not put back after a catch-up that was not pushed',
+      );
+    }
+  }
+
+  /** True when `holder` is the worktree of another batch of the project whose work may still run. */
+  function heldByLiveBatch(batch: BatchDto, holder: string): boolean {
+    const where = comparablePath(holder);
+    return listBatches(db, { projectId: batch.projectId }).some(
+      (other) =>
+        other.id !== batch.id &&
+        other.worktreePath !== null &&
+        !FINISHED_BATCH.includes(other.state) &&
+        samePath(comparablePath(other.worktreePath), where),
+    );
+  }
+
+  function catchUp(batchId: BatchId): void {
+    const batch = getBatch(db, batchId);
+    if (!landsItself(batch) || catchingUp.has(batchId)) return;
+    catchingUp.add(batchId);
+    deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
+      try {
+        await catchUpSteps(batchId, signal);
+      } finally {
+        catchingUp.delete(batchId);
+      }
+    });
+  }
+
+  function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
+    const batch = getBatch(db, batchId);
+    const again = mergeAgain.has(batchId) || opts.catchUpCardWasOpen === true;
+    if (!landsItself(batch) || catchingUp.has(batchId) || retrying.has(batchId)) return;
+    if (!again && !batch.notices.some((n) => n.key === NOTICE_KEY.merge)) return;
+    const startedAt = deps.clock.now().getTime();
+    const last = lastMergeRetry.get(batchId);
+    if (!again && last !== undefined && startedAt - last < MERGE_RETRY_MS) return;
+    lastMergeRetry.set(batchId, startedAt);
+    retrying.add(batchId);
+    const project = getProject(db, batch.projectId);
+    deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
+      try {
+        const now = getBatch(db, batchId);
+        const { repo, prUrl } = now;
+        if (signal.aborted || !landsItself(now) || repo === null || prUrl === null) return;
+        mergeAgain.delete(batchId);
+        await turnOnAutoMerge(
+          now,
+          repo,
+          prUrl,
+          signal,
+          shipCheck(project)?.kind === 'precheck',
+          again,
+        );
+      } finally {
+        retrying.delete(batchId);
+      }
+    });
+  }
+
   return {
+    catchUp,
+    retryMerge,
     checkBatch,
     checkOpenBatches() {
       for (const batch of listBatches(db, { states: [BatchState.Open] })) checkBatch(batch.id);
@@ -1032,10 +1370,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
-      const done = members(db, batchId)
-        .filter((m) => m.state === WorkstreamState.Done)
-        .map((m) => m.taskTitle);
-      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
         await afterEnd(batchId, abandoned.worktreePath);
       });

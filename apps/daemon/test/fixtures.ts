@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
@@ -111,9 +111,42 @@ export const NETWORK_ENV: Readonly<Record<string, string>> = {
   GIT_CONFIG_GLOBAL: '/dev/null',
 };
 
-/** A temp repo whose `origin` is a local bare repo holding `main`, so fetch and push are real. */
+/** The URL the template pair's `origin` has until a copy points it at its own bare repository. */
+const TEMPLATE_ORIGIN = 'ORIGIN-OF-THE-TEMPLATE';
+
+/**
+ * A temp repo whose `origin` is a local bare repo holding `main`, so fetch and push are real. Both
+ * are copies of the pair `buildRemoteTemplate` made: a copy is file writes, where building the pair
+ * takes a dozen git calls, and every delivery test makes one while other lanes load the machine.
+ */
 export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cleanup(): void } {
+  const { repo: repoTemplate, origin: originTemplate } = inject('remoteTemplate');
   const origin = tempDir('origin');
+  cpSync(originTemplate, origin.path, { recursive: true });
+  const repo = tempDir('repo');
+  cpSync(repoTemplate, repo.path, { recursive: true });
+  const config = join(repo.path, '.git', 'config');
+  const text = readFileSync(config, 'utf8');
+  if (!text.includes(TEMPLATE_ORIGIN)) throw new Error('the template repository lost its origin');
+  writeFileSync(config, text.replace(TEMPLATE_ORIGIN, origin.path));
+  return {
+    repo,
+    origin,
+    cleanup: () => {
+      repo.cleanup();
+      origin.cleanup();
+    },
+  };
+}
+
+/**
+ * Builds the pair `createTempRepoWithOrigin` copies: the template repository with its `origin` a
+ * bare repository holding `main`, and `refs/remotes/origin/main` as a push leaves it. The repository's
+ * URL is a placeholder a copy replaces. `repo-template.global.ts` builds it once per test run and
+ * removes it after.
+ */
+export function buildRemoteTemplate(): { repo: TempDir; origin: TempDir; cleanup(): void } {
+  const origin = tempDir('origin-template');
   const env = isolatedGitEnv();
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin.path], { env, stdio: 'pipe' });
   // A test that commits in the origin itself (as GitHub's branch update does) needs an identity:
@@ -126,12 +159,16 @@ export function createTempRepoWithOrigin(): { repo: TempDir; origin: TempDir; cl
   };
   for (const [key, value] of Object.entries(originConfig))
     execFileSync('git', ['--git-dir', origin.path, 'config', key, value], { env, stdio: 'pipe' });
-  const repo = createTempRepo();
+  const repo = buildRepoTemplate();
   execFileSync('git', ['-C', repo.path, 'remote', 'add', 'origin', origin.path], {
     env,
     stdio: 'pipe',
   });
   execFileSync('git', ['-C', repo.path, 'push', '-q', 'origin', 'main'], { env, stdio: 'pipe' });
+  execFileSync('git', ['-C', repo.path, 'remote', 'set-url', 'origin', TEMPLATE_ORIGIN], {
+    env,
+    stdio: 'pipe',
+  });
   return {
     repo,
     origin,
@@ -170,17 +207,15 @@ export function githubOrigin(repo: string, origin: string): { global: string; cl
 export function createTempClone(origin: string): TempDir {
   const dir = tempDir('clone');
   const env = isolatedGitEnv();
-  // `clone -c` writes the config into the new repository before anything is fetched or committed.
-  const config = Object.entries(TEST_REPO_CONFIG).flatMap(([key, value]) => [
-    '-c',
-    `${key}=${value}`,
-  ]);
+  // `clone -c` writes the config into the new repository before anything is fetched or committed,
+  // the identity too: a call for each key costs a spawn, and a teammate's push makes a clone.
+  const config = Object.entries({
+    ...TEST_REPO_CONFIG,
+    'user.name': 'teammate',
+    'user.email': 'teammate@10db.invalid',
+    'commit.gpgsign': 'false',
+  }).flatMap(([key, value]) => ['-c', `${key}=${value}`]);
   execFileSync('git', ['clone', '-q', ...config, origin, dir.path], { env, stdio: 'pipe' });
-  const git = (...args: string[]) =>
-    execFileSync('git', ['-C', dir.path, ...args], { env, stdio: 'pipe' });
-  git('config', 'user.name', 'teammate');
-  git('config', 'user.email', 'teammate@10db.invalid');
-  git('config', 'commit.gpgsign', 'false');
   return dir;
 }
 

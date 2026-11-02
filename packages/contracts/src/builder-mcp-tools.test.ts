@@ -84,7 +84,7 @@ describe('refusalText', () => {
 });
 
 describe('the builder tools', () => {
-  it('lists exactly the nine tools, none of them a lane tool', () => {
+  it('lists exactly the ten tools, none of them a lane tool', () => {
     expect(Object.values(BuilderToolName).sort()).toEqual([
       'create_task',
       'edit_task',
@@ -94,6 +94,7 @@ describe('the builder tools', () => {
       'list_tasks',
       'move_task',
       'remove_task',
+      'run_next',
       'start_task',
     ]);
     const lane = new Set<string>(Object.values(McpToolName));
@@ -191,6 +192,17 @@ describe('the drafting guidance', () => {
   it('edit_task points at the same guidance', () => {
     const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
     expect(edit?.description).toContain('seen or measured');
+  });
+
+  it('edit_task takes areas, and says they change only before the task starts', () => {
+    const taskId = mintId('Task');
+    expect(BuilderToolInputs.edit_task.parse({ taskId, areas: ['api'] })).toMatchObject({
+      areas: ['api'],
+    });
+    const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
+    expect(edit?.description).toContain('areas');
+    expect(edit?.description).toContain('before it starts');
+    expect(JSON.stringify(edit?.inputSchema)).toContain('"areas"');
   });
 
   it('list_tasks says it returns open tasks only', () => {

@@ -17,6 +17,7 @@ export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { prBody, prTitle, titlePrefix } from './pr-text';
 export { createShipper, type Shipper } from './ship';
@@ -25,6 +26,8 @@ export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
 export { createCiStopAnswers } from './ci-stop';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { createBranchCardAnswers } from './branch-card';
+export { StartChoice } from './cards';
+export { createStartCardAnswers } from './start-card';
 export { removeMergedBranches } from './branch-sweep';
 export {
   batchLaunchVerdict,

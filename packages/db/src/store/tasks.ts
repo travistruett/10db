@@ -318,22 +318,42 @@ export interface FollowUpFields {
   readonly acceptanceCriteria?: readonly string[];
 }
 
+/** How a follow-up task came about, which decides how its description names the source. */
+export const FollowUpOrigin = {
+  /** A step checking the source found it. */
+  Found: 'found',
+  /** The source's implementer left it out of the source. */
+  Left: 'left',
+} as const;
+export type FollowUpOrigin = (typeof FollowUpOrigin)[keyof typeof FollowUpOrigin];
+
+function originLine(origin: FollowUpOrigin, source: TaskDto): string {
+  switch (origin) {
+    case FollowUpOrigin.Found:
+      return `Found while checking the task "${source.title}" (${source.id}).`;
+    case FollowUpOrigin.Left:
+      return `Work left from the task "${source.title}" (${source.id}).`;
+  }
+}
+
 /**
- * Files a follow-up found while a step checked `sourceId`: an open task in the same project, parked
- * in the Icebox column (the project's first column when the builder renamed it, the derived board
- * when it has none), landing where the source lands and touching the same areas. Its description
- * names the source. It depends on nothing, so it never holds the source up.
+ * Files a follow-up for `sourceId`: an open task in the same project, parked in the Icebox column
+ * (the project's first column when the builder renamed it, the derived board when it has none),
+ * landing where the source lands and touching the same areas. Its description names the source and
+ * says whether a step found it or the source's implementer left it. It depends on nothing, so it
+ * never holds the source up.
  */
 export function insertFollowUpTask(
   ctx: WriteContext,
   sourceId: TaskId,
   fields: FollowUpFields,
+  how: FollowUpOrigin = FollowUpOrigin.Found,
 ): TaskDto {
   const source = getTask(ctx.tx, sourceId);
   const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
   const columns = listBoardColumns(ctx.tx, source.projectId);
   const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
-  const origin = `Found while checking the task "${source.title}" (${source.id}).`;
+  const origin = originLine(how, source);
   return writeTask(ctx, source.projectId, {
     landing: source.landing,
     workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
@@ -574,12 +594,27 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
  * workstreams), so there is nothing to release.
  */
 export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, false);
+}
+
+/**
+ * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
+ * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
+ * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran.
+ */
+export function cancelRefusedStartTask(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, true);
+}
+
+function removeUnstarted(ctx: WriteContext, id: TaskId, refusedStart: boolean): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   const run = latestRun(ctx.tx, id);
   // A held run never ran, so it goes with its task; any other run belongs to the workstream's own cancel.
   const held = run?.state === WorkstreamState.Held ? run : undefined;
-  if (task.status !== TaskStatus.Open || (run && !held))
+  const refusedRun =
+    refusedStart && run?.state === WorkstreamState.Cancelled && !hadSession(ctx.tx, run.id);
+  if (task.status !== TaskStatus.Open || (run && !held && !refusedRun))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -709,6 +744,17 @@ function latestRun(db: DbReader, taskId: TaskId) {
     .get();
 }
 
+function hadSession(db: DbReader, workstreamId: WorkstreamId): boolean {
+  return (
+    db
+      .select({ id: schema.sessions.id })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.workstreamId, workstreamId))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
 /** A cancelled dependency is never done, so an open dependent would wait for ever. */
 function refuseWhileOpenDependents(
   ctx: WriteContext,
@@ -765,6 +811,7 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
         `${getTask(ctx.tx, id).title} has already started, so where its work lands is fixed`,
       );
   }
+  if (fields.areas !== undefined) checkAreasCanChange(ctx.tx, getTask(ctx.tx, id), fields.areas);
   if (fields.workspaceMode !== undefined) checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
   ctx.tx
     .update(schema.tasks)
@@ -779,6 +826,20 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .run();
   ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
   return getTask(ctx.tx, id);
+}
+
+/**
+ * A task's areas change only while it has never started: its lane takes the areas as claims when it
+ * starts, and a finished task's are history. Every area must be one the project has.
+ */
+function checkAreasCanChange(db: DbReader, task: TaskDto, areas: readonly string[]): void {
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`${task.title} is finished, so its areas are fixed`);
+  if (latestRun(db, task.id))
+    throw new ConflictError(
+      `${task.title} has already started, so its areas are fixed: the lane took them when it started`,
+    );
+  refuseUnknownAreas(getProject(db, task.projectId), areas);
 }
 
 /**
