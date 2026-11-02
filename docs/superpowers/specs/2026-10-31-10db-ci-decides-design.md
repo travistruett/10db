@@ -145,7 +145,7 @@ decision model can later take over (§9); today it is these rules:
    stops, but from the cut itself (below). See "Stopping".
 3. **Read each failing job's log**: `gh run view --job <id> -R <repo> --log-failed`, the job id taken from the
    check's link (`…/actions/runs/R/job/J`). If gh says the run is still in progress, no fix this round; the next
-   round reads again. ANSI codes are stripped; the full log goes to `dataDir/logs/ci/<job>-<sha>.log` and the last
+   round reads again. ANSI codes are stripped; the full log goes to `dataDir/logs/ci/<job>-<job id>-<sha>.log` and the last
    300 lines, at most 64 KiB, are kept for the task.
 4. **Make the fix, in one write**: a task "Fix CI: <job> on <pull request title>", with the failing job's name, its
    link and the excerpt in its description, acceptance criterion "<job> passes on the pull request", and the root

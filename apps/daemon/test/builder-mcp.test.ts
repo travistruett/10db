@@ -1,4 +1,5 @@
 import {
+  BatchDto,
   BoardColumnDto,
   BUILDER_INSTRUCTIONS,
   BuilderToolName,
@@ -14,7 +15,13 @@ import {
   WorkstreamState,
   mintId,
 } from '@10db/contracts';
-import { insertInboxItem } from '@10db/db';
+import {
+  insertBatch,
+  insertInboxItem,
+  insertWorkstream,
+  transitionBatch,
+  transitionWorkstream,
+} from '@10db/db';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -22,7 +29,7 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, tempDir } from './fixtures';
+import { createTempRepo, tempDir, waitForAsync } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -414,6 +421,88 @@ describe('the builder MCP endpoint', () => {
       });
       const after = (await tasksOf(project.id)).find((t) => t.id === waiting.id);
       expect(after?.workstreamId).toBeNull();
+    });
+
+    describe('fresh', () => {
+      const batchesOf = (projectId: string) =>
+        api().get(`/projects/${projectId}/batches`, z.array(BatchDto));
+
+      /** A pull-request project whose only task failed in an OPEN batch of its own. */
+      async function failedInOpenBatch() {
+        const project = await api().post('/projects', ProjectDto, {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          areas: [{ name: 'src', globs: ['src/**'] }],
+          delivery: 'pull_request',
+          prTitlePrefix: 'feat(app)',
+        });
+        const task = await seedTask(project.id, 'Alpha');
+        const batchId = daemon.state.write((ctx) => {
+          const batch = insertBatch(ctx, {
+            projectId: project.id,
+            title: 'Alpha',
+            baseBranch: 'main',
+          });
+          transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/alpha' } });
+          const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+          for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+            transitionWorkstream(ctx, ws.id, { to, fence: null });
+          return batch.id;
+        });
+        return { project, task, batchId };
+      }
+
+      it('starts a failed task over in a new batch, abandoning the old one', async () => {
+        const { project, task, batchId } = await failedInOpenBatch();
+        const result = z
+          .object({ taskId: z.string(), batchId: z.string() })
+          .parse(await callJson('start_task', { taskId: task.id, fresh: true }));
+        expect(result.taskId).toBe(task.id);
+        expect(result.batchId).not.toBe(batchId);
+        const old = (await batchesOf(project.id)).find((b) => b.id === batchId);
+        expect(old?.state).toBe('ABANDONED');
+        // The repo has no origin, so the new batch's cut is refused; wait for it before the daemon stops.
+        await waitForAsync(async () =>
+          (await batchesOf(project.id)).every((b) => b.id !== result.batchId) ? true : undefined,
+        );
+      });
+
+      it('leaves a failed task alone without it, as before: it is not ready', async () => {
+        const { project, task, batchId } = await failedInOpenBatch();
+        const result = await call('start_task', { taskId: task.id });
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain('not ready');
+        expect((await batchesOf(project.id)).find((b) => b.id === batchId)?.state).toBe('OPEN');
+      });
+
+      it('refuses a failed local task whose dependency is unfinished, starting nothing', async () => {
+        const project = await seedProject();
+        const first = await seedTask(project.id, 'first');
+        const waiting = await seedTask(project.id, 'waiting', [first.id]);
+        const failedId = daemon.state.write((ctx) => {
+          const ws = insertWorkstream(ctx, waiting.id);
+          for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+            transitionWorkstream(ctx, ws.id, { to, fence: null });
+          return ws.id;
+        });
+        const result = await call('start_task', { taskId: waiting.id, fresh: true });
+        expect(result).toEqual({
+          isError: true,
+          text: "Task waiting waits on first, so it can't be started",
+        });
+        // No new workstream: the task still points at its failed run.
+        expect((await tasksOf(project.id)).find((t) => t.id === waiting.id)?.workstreamId).toBe(
+          failedId,
+        );
+      });
+
+      it('is a plain start for a Ready task that never ran', async () => {
+        const project = await seedProject();
+        const task = await seedTask(project.id, 'first run');
+        await callJson('start_task', { taskId: task.id, fresh: true });
+        expect((await tasksOf(project.id))[0]?.workstreamId).not.toBeNull();
+      });
     });
 
     describe('a held task', () => {
