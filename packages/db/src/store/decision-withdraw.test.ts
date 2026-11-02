@@ -80,6 +80,16 @@ describe('withdrawDecision', () => {
     expect(listRecentDecisions(store.db, project.id, 10).map((d) => d.id)).toEqual([kept]);
   });
 
+  it('takes a decision a later one replaced out of search and the recent list, until the later one is withdrawn', () => {
+    const first = decide('BullMQ');
+    const second = decide('pg-boss', first);
+    expect(searched()).toEqual(['pg-boss']);
+    expect(listRecentDecisions(store.db, project.id, 10).map((d) => d.id)).toEqual([second]);
+    withdraw(second);
+    expect(searched()).toEqual(['BullMQ']);
+    expect(listRecentDecisions(store.db, project.id, 10).map((d) => d.id)).toEqual([first]);
+  });
+
   it.each([
     ['an empty reason', ''],
     ['a reason of blanks', '   '],

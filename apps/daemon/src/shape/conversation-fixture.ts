@@ -8,7 +8,9 @@ import {
   type ShapeMessageId,
 } from '@10db/contracts';
 import {
+  BUILDER_HANDLE,
   createTestStore,
+  insertPerson,
   insertShape,
   insertShapeMessage,
   seedProject,
@@ -28,6 +30,8 @@ export interface ConversationFixture {
 export function seedConversation(): ConversationFixture {
   const { store, close } = createTestStore();
   const project = seedProject(store, { name: 'alpha' });
+  // Goals are owned by the builder, whom the daemon seeds at start.
+  store.write((ctx) => insertPerson(ctx, { handle: BUILDER_HANDLE, name: 'You', isBuilder: true }));
   const shape = store.write((ctx) =>
     insertShape(ctx, project.id, { title: 'Board polish', origin: ShapeOrigin.App }),
   ).value;
@@ -45,6 +49,12 @@ export function seedConversation(): ConversationFixture {
         }),
       ).value.id,
   };
+}
+
+/** The value, or a failure that says what was missing; a test's way past `undefined`. */
+export function must<T>(value: T | null | undefined, what: string): T {
+  if (value === null || value === undefined) throw new Error(`missing: ${what}`);
+  return value;
 }
 
 /** A draft of loose tasks, each citing `source`; the project's areas are `api` and `ui`. */

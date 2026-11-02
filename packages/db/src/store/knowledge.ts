@@ -228,6 +228,9 @@ export function searchDecisions(
     FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
     WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
       AND d.withdrawn_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM decisions s WHERE s.supersedes_id = d.id AND s.withdrawn_at IS NULL
+      )
     ORDER BY bm25(decisions_fts), d.id
     LIMIT ${limit}
   `);
@@ -251,6 +254,10 @@ export function listRecentDecisions(
       and(
         or(eq(schema.decisions.projectId, projectId), isNull(schema.decisions.projectId)),
         isNull(schema.decisions.withdrawnAt),
+        // A decision a later one replaced is history, not context.
+        sql`NOT EXISTS (
+          SELECT 1 FROM decisions s WHERE s.supersedes_id = ${schema.decisions.id} AND s.withdrawn_at IS NULL
+        )`,
       ),
     )
     .orderBy(desc(schema.decisions.id))
