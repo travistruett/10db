@@ -27,7 +27,6 @@ export type BuilderServices = Pick<
   | 'startTask'
   | 'moveTask'
   | 'runNext'
-  | 'listWorkstreams'
   | 'listBoardColumns'
   | 'listInbox'
 > &
@@ -42,22 +41,17 @@ function taskSummary(task: TaskDto) {
 export function createBuilderTools(
   services: BuilderServices,
 ): Record<BuilderToolName, (args: unknown) => unknown> {
+  /** The state of an open task's latest run, read as that one row; null when it has no run. */
+  const latestRunState = (task: TaskDto): WorkstreamState | null =>
+    task.workstreamId !== null && task.status === TaskStatus.Open
+      ? services.getWorkstream(task.workstreamId).state
+      : null;
   /** Whether the task is open, on the Board and not parked, and its latest run is set aside. */
   const isHeld = (task: TaskDto): boolean =>
-    task.workstreamId !== null &&
-    task.status === TaskStatus.Open &&
-    task.boardColumnId === null &&
-    services
-      .listWorkstreams({ active: false })
-      .some((run) => run.id === task.workstreamId && run.state === WorkstreamState.Held);
+    task.boardColumnId === null && latestRunState(task) === WorkstreamState.Held;
   /** Whether the task is open and on the Board, and its latest run failed. */
   const hasFailedRun = (task: TaskDto): boolean =>
-    task.workstreamId !== null &&
-    task.status === TaskStatus.Open &&
-    task.boardColumnId === null &&
-    services
-      .listWorkstreams({ active: false })
-      .some((run) => run.id === task.workstreamId && run.state === WorkstreamState.Failed);
+    task.boardColumnId === null && latestRunState(task) === WorkstreamState.Failed;
   return {
     [BuilderToolName.ListProjects]: (args) => {
       BuilderToolInputs.list_projects.parse(args);
@@ -135,6 +129,13 @@ export function createBuilderTools(
       // before anything is abandoned: local delivery starts the task with no checks of its own.
       const startingOver = fresh === true && hasFailedRun(task);
       if (!held && !startingOver && task.boardStatus !== BoardStatus.Ready) {
+        // A parked task is Blocked too, whatever its run: say so rather than call it not ready.
+        if (task.boardColumnId !== null && latestRunState(task) === WorkstreamState.Held) {
+          throw new DomainError(
+            'conflict',
+            `Task ${task.title} is parked and its run is held, so it can't be started until it is moved back to the Board`,
+          );
+        }
         throw new DomainError(
           'conflict',
           `Task ${task.title} is ${task.boardStatus.replace('_', ' ')}, not ready, so it can't be started`,

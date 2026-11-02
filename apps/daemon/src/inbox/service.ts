@@ -9,6 +9,7 @@ import {
   InboxKind,
   InboxState,
   InvalidError,
+  isParkChoice,
   PermissionChoice,
   ProposalId,
   ProposalKind,
@@ -22,6 +23,7 @@ import {
   type ProjectId,
   type SessionId,
   type WorkstreamId,
+  withParkOption,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -186,6 +188,11 @@ function assertKnownChoice(item: InboxItemDto, answer: InboxAnswer): void {
   }
 }
 
+/** Whether the answer to a lane's question is the choice that parks the task. */
+function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
+  return item.kind === InboxKind.Question && isParkChoice(answer.choice);
+}
+
 interface Waiter {
   resolve(answer: InboxAnswer): void;
 }
@@ -277,6 +284,12 @@ export function createInboxService(deps: {
    * that write has committed. A check card closes with its answer and never reaches `onParkedAnswer`.
    */
   onCheckAnswer?(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): () => void;
+  /**
+   * Runs once the builder answered a lane's question with "Park the task" and the card closed with the
+   * answer: the run stops and the task is parked. The asking session is not handed the answer, since
+   * it is stopped, not told. It must not throw; it logs what it could not do.
+   */
+  onParkAnswer?(item: InboxItemDto): void;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -317,7 +330,10 @@ export function createInboxService(deps: {
   }
 
   return {
-    ask(input) {
+    ask(raw) {
+      // Whatever the lane wrote, a question can be answered by parking the task.
+      const input =
+        raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
       const foldKey = foldKeyFor(input);
       const target: InboxTarget = { workstreamId: input.workstreamId, sessionId: input.sessionId };
       const item = deps.state.write((ctx) => {
@@ -377,13 +393,21 @@ export function createInboxService(deps: {
         }
         assertKnownChoice(item, answer);
         if (item.kind === InboxKind.Check) afterCommit = deps.onCheckAnswer?.(ctx, item, answer);
+        // Parking ends the run, so no session is handed the answer: the card closes with it. It is
+        // 10db's control over the run, not the builder's answer to the question, so it is no decision
+        // either: the question and answer live only on the parked run's notice.
+        const parks = parksTask(item, answer);
         const closesDirectly =
-          item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission;
+          parks || (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
         const updated = updateInboxItem(ctx, id, {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
           answer,
         });
-        if (item.kind === InboxKind.Question && DECISION_CATEGORIES.includes(item.category)) {
+        if (
+          !parks &&
+          item.kind === InboxKind.Question &&
+          DECISION_CATEGORIES.includes(item.category)
+        ) {
           const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: id });
           insertDecision(ctx, {
             projectId: item.projectId,
@@ -405,6 +429,11 @@ export function createInboxService(deps: {
         return updated;
       });
       afterCommit?.();
+      if (parksTask(answered, answer)) {
+        // The waiting sessions are stopped by the park, never handed the answer.
+        waiters.delete(id);
+        deps.onParkAnswer?.(answered);
+      }
       return answered.state === InboxState.Resolved ? answered : deliver(answered);
     },
 

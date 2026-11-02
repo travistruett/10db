@@ -120,6 +120,8 @@ export interface TaskRemovalServices {
 export interface TaskLookupServices {
   /** Throws NotFoundError for an unknown task. */
   getTask(taskId: TaskId): TaskDto;
+  /** One run by id, without listing the rest. Throws NotFoundError for an unknown run. */
+  getWorkstream(id: WorkstreamId): WorkstreamDto;
 }
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */

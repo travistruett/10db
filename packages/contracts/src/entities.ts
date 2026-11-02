@@ -657,6 +657,33 @@ export const CheckChoice = {
 } as const;
 export type CheckChoice = (typeof CheckChoice)[keyof typeof CheckChoice];
 
+/**
+ * The choice every lane question card offers beside the lane's own: answering it stops the run and
+ * parks the task in the project's Icebox column, with the question and the answer on its drawer. The
+ * daemon adds it to every question, whatever options the lane wrote.
+ */
+export const PARK_TASK_CHOICE = 'Park the task';
+
+/** The park option as a card shows it. */
+export const PARK_TASK_OPTION: InboxOption = {
+  label: PARK_TASK_CHOICE,
+  description:
+    'Stops this run and parks the task in the Icebox, with this question and your answer on its drawer. No review follows; start it again when you can answer.',
+};
+
+/** Whether `choice` is the park choice, however the card's text was cased or spaced. */
+export function isParkChoice(choice: string): boolean {
+  return choice.trim().replace(/\s+/g, ' ').toLowerCase() === PARK_TASK_CHOICE.toLowerCase();
+}
+
+/** The options with the park choice last, unless the lane already wrote it. */
+export function withParkOption(options: readonly InboxOption[]): InboxOption[] {
+  return options.some((o) => isParkChoice(o.label)) ? [...options] : [...options, PARK_TASK_OPTION];
+}
+
+/** The key of the notice a parked run keeps for its task's drawer: the question and the builder's answer. */
+export const PARKED_NOTICE_KEY = 'parked-answer';
+
 export const InboxTarget = z.object({
   workstreamId: WorkstreamId,
   sessionId: SessionId.nullable(),
