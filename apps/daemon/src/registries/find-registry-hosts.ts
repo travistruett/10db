@@ -139,11 +139,23 @@ export async function findRegistryHostsAt(
 ): Promise<FoundHost[]> {
   // Each folder is listed once, when the walk first reaches it, so the work stays within the walk's
   // depth and folder limits however big the tree is.
+  // A folder is listed only when its parent's listing names it (a `.cargo` is looked for in every
+  // folder the walk visits, and most hold none), so a walk makes about one git listing per folder.
   const listings = new Map<string, Promise<FolderAt>>();
   const folderAt = (folder: string): Promise<FolderAt> => {
     let listing = listings.get(folder);
     if (listing === undefined) {
-      listing = git.folderAt(repo, rev, folder);
+      if (folder === '') {
+        listing = git.folderAt(repo, rev, folder);
+      } else {
+        const slash = folder.lastIndexOf('/');
+        const name = folder.slice(slash + 1);
+        listing = folderAt(slash < 0 ? '' : folder.slice(0, slash)).then((parent) =>
+          parent.folders.includes(name)
+            ? git.folderAt(repo, rev, folder)
+            : { files: [], folders: [] },
+        );
+      }
       listings.set(folder, listing);
     }
     return listing;

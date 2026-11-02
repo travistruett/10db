@@ -115,6 +115,8 @@ prefix_rule(
     justification = "AGENTS.md Git: checkout -- discards uncommitted work.",
 )
 
+# The Claude guard lets a merged branch's deletion through; a prefix rule can't ask GitHub, so
+# Codex always prompts.
 prefix_rule(
     pattern = ["git", "branch", ["-D", "--delete"]],
     decision = "prompt",

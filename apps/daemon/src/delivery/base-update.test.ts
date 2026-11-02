@@ -833,7 +833,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           kind: 'conflicted',
           paths: ['README.md'],
         });
-        // A gate with no session to send, the shipping gate's, finds them too and does not merge.
+        // A caller that does not ask for a session finds them too and does not merge.
         expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
           kind: 'conflicted',
           paths: ['README.md'],

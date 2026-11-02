@@ -76,6 +76,22 @@ export const FollowUpInput = z.object({
 });
 export type FollowUpInput = z.infer<typeof FollowUpInput>;
 
+/** A section an implementer left out of its task: the rest comes from the task it is working on. */
+export const RemainingWorkInput = z.object({
+  title: Title.describe('The outcome, as what is true when this remaining section is done.'),
+  description: z
+    .string()
+    .min(1)
+    .describe(
+      'What is left to do, what this task already covers, and where the next session should start.',
+    ),
+  acceptanceCriteria: z
+    .array(z.string().min(1))
+    .default([])
+    .describe('What must be true for this remaining section to count as done.'),
+});
+export type RemainingWorkInput = z.infer<typeof RemainingWorkInput>;
+
 export const McpToolInputs = {
   get_context: z.object({}),
   find_knowledge: z.object({ query: z.string().min(1), limit: z.int().min(1).max(20).default(5) }),
@@ -109,7 +125,7 @@ export const McpToolInputs = {
     severity: z.enum(Severity),
     reason: z.string().min(1),
   }),
-  file_follow_up: FollowUpInput.extend({ opId: OpId }),
+  file_follow_up: RemainingWorkInput.extend({ opId: OpId }),
   request_claim: z.object({
     opId: OpId,
     kind: z.enum(ClaimKind),
