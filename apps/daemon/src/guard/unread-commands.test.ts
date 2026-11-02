@@ -100,6 +100,100 @@ const ROWS: readonly Row[] = [
   { name: 'a numeric substring', command: 'echo ${a:1:2}', reason: null },
   { name: 'let on literals', command: 'let x=1+2', reason: null },
   { name: 'a numeric test on literals', command: '[[ 3 -eq 3 ]]', reason: null },
+  // A name this command sets only to numbers is a number in arithmetic.
+  {
+    name: 'a timing loop: names set from date, $? and arithmetic',
+    command:
+      'for f in a b; do s=$(date +%s); node x.mjs "$f" > "$TMPDIR/pc.log" 2>&1; rc=$?; e=$(( $(date +%s) - s )); echo "$f rc=$rc e=$e"; done',
+    reason: null,
+  },
+  { name: 'a name set from a number', command: 'n=5; echo $((n + 1)) $((n*2))', reason: null },
+  {
+    name: 'a name set from another numeric name',
+    command: 's=$(date +%s); t=$s; echo $((t - s))',
+    reason: null,
+  },
+  {
+    name: 'a name set from arithmetic over a numeric name',
+    command: 's=$(date +%s); t=$(( s + 1 )); echo $(( t - s ))',
+    reason: null,
+  },
+  { name: 'date alone in arithmetic', command: 'echo $(( $(date +%s) - 3 ))', reason: null },
+  {
+    name: 'a name set from a command that is not date',
+    command: 's=$(echo 1); echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a name set from a variable',
+    command: 's=$x; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a name set to a number, then to a variable',
+    command: 's=$(date +%s); s=$x; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a name set to a variable after its use in a loop',
+    command: 's=1; for i in a b; do echo $((s)); s=$x; done',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also read into',
+    command: 's=$(date +%s); read s; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also a loop variable',
+    command: 's=1; for s in $x; do echo $((s)); done',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also declared with a value',
+    command: 's=1; declare s=$x; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also set by printf -v',
+    command: 's=1; printf -v s %s $x; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also set by a default expansion',
+    command: 's=1; echo ${s:=$x}; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also set inside arithmetic',
+    command: 's=1; echo $((s = $x)); echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a numeric name that is also an array',
+    command: 's=1; s[0]=$x; echo $((s))',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a numeric name that is appended to',
+    command: 's=1; s+=$x; echo $((s))',
+    reason: UnreadReason.CommandName,
+  },
+  {
+    name: 'a name set by a shell the scan does not follow',
+    command: "s=1; bash -c 's=$x'; echo $((s))",
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a name set by eval',
+    command: 's=1; eval "s=$x"; echo $((s))',
+    reason: UnreadReason.Script,
+  },
+  {
+    name: 'a name set by sourcing a file',
+    command: 's=1; . ./env.sh; echo $((s))',
+    reason: UnreadReason.Script,
+  },
   { name: 'a bare name in arithmetic', command: 'echo $((n))', reason: UnreadReason.Script },
   { name: 'a bare name in old arithmetic', command: 'echo $[n]', reason: UnreadReason.Script },
   { name: 'let on a name', command: 'let n', reason: UnreadReason.Script },
