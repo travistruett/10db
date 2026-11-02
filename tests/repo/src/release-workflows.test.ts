@@ -149,9 +149,14 @@ describe('release-dry-run workflow', () => {
     });
   });
 
-  it('never cancels a build in progress, because the app waits for the build of the commit it saw', () => {
+  it('keeps one build waiting per branch and never cancels a running one', () => {
+    // A concurrency group allows one running and one pending run: a newer push replaces the
+    // pending run, and with cancel-in-progress false the running build finishes.
     expect(text).not.toContain('cancel-in-progress: true');
-    expect(JSON.stringify(workflow)).not.toMatch(/cancel-in-progress/);
+    expect(workflow.concurrency).toEqual({
+      group: 'release-dry-run-${{ github.ref }}',
+      'cancel-in-progress': false,
+    });
   });
 
   it('can reach no secret, no environment and no release', () => {

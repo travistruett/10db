@@ -216,6 +216,49 @@ describe('Adopt a Plan…', () => {
     expect(screen.getByText(NO_GOALS)).toBeTruthy();
   });
 
+  it('Pick Again… shows a daemon failure inside the open refusal modal', async () => {
+    panel(PLAN, '/Users/me/plans/fixed.md');
+    // The second pick finds no answer queued, so the daemon fails with a 500.
+    serve({ errors: REFUSAL });
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: "This plan can't be adopted yet" });
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Pick Again…' }));
+
+    expect(await within(modal).findByText("Couldn't adopt that plan")).toBeTruthy();
+    expect(within(modal).getAllByRole('listitem')).toHaveLength(REFUSAL.length);
+  });
+
+  it('shows a field error for a typed path that is not absolute', async () => {
+    const daemon = serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+
+    fireEvent.change(within(modal).getByLabelText('Plan path'), {
+      target: { value: 'plans/importer.md' },
+    });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+
+    expect(await within(modal).findByText(/starting with \//)).toBeTruthy();
+    expect(daemon.posted).toEqual([]);
+  });
+
+  it('shows a daemon failure on a typed Adopt inside the open modal', async () => {
+    const daemon = serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+
+    fireEvent.change(within(modal).getByLabelText('Plan path'), { target: { value: PLAN } });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+
+    expect(await within(modal).findByText("Couldn't adopt that plan")).toBeTruthy();
+    expect(daemon.posted).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Adopt a plan' })).toBeTruthy();
+  });
+
   it('says so when the daemon fails for a reason other than the brief', async () => {
     panel(PLAN);
     serve();
