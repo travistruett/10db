@@ -350,15 +350,24 @@ describe('starting a fix when a required check fails', () => {
     expect(fixBatches(root)).toHaveLength(1);
   });
 
-  it('starts none when no log can be read', async () => {
+  it('stops with no_log when no log can be read, and does not read a log again', async () => {
     const { root } = await shippedRoot();
     fails(root.prUrl ?? '', job('build'));
     h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
+    const w = watcher();
 
-    await begin(watcher());
+    await begin(w);
 
     expect(fixBatches(root)).toEqual([]);
     expect(fixTasks()).toEqual([]);
+    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
+    expect(logReads()).toBe(1);
+
+    await round(w);
+    await round(w);
+
+    expect(logReads()).toBe(1);
+    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_log');
   });
 
   it('writes nothing when the watch is given no fix path', async () => {

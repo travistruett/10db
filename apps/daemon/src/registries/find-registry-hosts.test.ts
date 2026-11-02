@@ -530,6 +530,16 @@ const MAX_TIME_GROWTH = 24;
  */
 const ATTEMPTS = 9;
 /**
+ * Pairs stop at the first one under MAX_TIME_GROWTH, so a linear reader runs 1 warm-up and 2 timed runs
+ * in the usual case; only a loaded or super-linear run goes on to ATTEMPTS pairs. No new pair starts
+ * after this long, so a slow format (1.3 s a run under the 2026-10-30 gate's load, more with file I/O)
+ * ends with a growth to report rather than at the test timeout. A pair in flight can still add a few
+ * seconds, and TIMEOUT_MS covers that.
+ */
+const BUDGET_MS = 12_000;
+/** The vitest timeout of a test that times growth: well above the budget plus a pair in flight, and above the 30 s default. */
+const TIMEOUT_MS = 60_000;
+/**
  * The small text's time is never taken as less than this: below it a time is timer noise, and a linear
  * reader's few milliseconds on the large text must not look like growth. A quadratic one takes seconds
  * on the large text, far above MAX_TIME_GROWTH times this.
@@ -539,50 +549,98 @@ const FLOOR_MS = 2;
 /**
  * How many times longer `run` takes on the crafted text at its full size than at 1/GROWTH of it, both
  * measured here, so a loaded machine slows both and the ratio holds. `prepare` builds a run's input
- * outside the timing.
+ * outside the timing. `now` is the clock, replaced only by the tests of this measure.
  */
 async function timeGrowth<T>(
   crafted: (typeof CRAFTED)[number],
   prepare: (text: string) => T,
   run: (input: T) => unknown,
+  budgetMs = BUDGET_MS,
+  now: () => number = () => performance.now(),
 ): Promise<number> {
   async function timed(input: T): Promise<number> {
-    const started = performance.now();
+    const started = now();
     await run(input);
-    return performance.now() - started;
+    return now() - started;
   }
   const small = prepare(crafted.text(crafted.size / GROWTH));
   const large = prepare(crafted.text(crafted.size));
   await timed(small); // warms the code before anything counts
   let best = Infinity;
-  for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
+  const deadline = now() + budgetMs;
+  for (let attempt = 0; attempt < ATTEMPTS && now() < deadline; attempt++) {
     const smallMs = Math.max(await timed(small), FLOOR_MS);
     best = Math.min(best, (await timed(large)) / smallMs);
+    if (best < MAX_TIME_GROWTH) break; // linear growth is shown: more pairs only cost time
   }
   return best;
 }
 
-describe('the package files on crafted text', () => {
-  it.each(CRAFTED)('every format reads $name in time linear in its size', async (crafted) => {
+describe('the time-growth measure', () => {
+  const sample = { name: 'a sample', size: 800, text: (n: number) => 'x'.repeat(n) };
+
+  it('stops at the first pair of runs that shows linear growth', async () => {
+    let runs = 0;
     const growth = await timeGrowth(
-      crafted,
+      sample,
       (text) => text,
-      (text) => {
-        for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
-        namesNpmRegistry(text);
+      () => {
+        runs++;
       },
     );
     expect(growth).toBeLessThan(MAX_TIME_GROWTH);
+    expect(runs).toBe(3); // one warm-up run, then one small and one large
   });
 
-  it.each(CRAFTED)('findRegistryHosts reads $name in every package file', async (crafted) => {
+  it('starts no new pair once its budget is spent, and reports the growth it saw', async () => {
+    // A clock of its own, moved only by the runs, so timer lag under load cannot change the result.
+    let clock = 0;
+    let runs = 0;
     const growth = await timeGrowth(
-      crafted,
-      (text) => project(Object.fromEntries(FORMATS.map((format) => [format.path, text]))),
-      async (root) => {
-        expect(await hostsOf(root)).toEqual(DEFAULT_HOSTS);
+      sample,
+      (text) => text,
+      (text) => {
+        runs++;
+        // Quadratic: the large text takes GROWTH ** 2 times as long as the small one (2.5 and 160 ms).
+        clock += (text.length / 10) ** 2 / 40;
       },
+      100, // spent by the first pair, so no second pair starts
+      () => clock,
     );
-    expect(growth).toBeLessThan(MAX_TIME_GROWTH);
+    expect(growth).toBe(GROWTH ** 2);
+    expect(runs).toBe(3); // one warm-up run, then one small and one large
   });
+});
+
+describe('the package files on crafted text', () => {
+  it.each(CRAFTED)(
+    'every format reads $name in time linear in its size',
+    async (crafted) => {
+      const growth = await timeGrowth(
+        crafted,
+        (text) => text,
+        (text) => {
+          for (const format of FORMATS) format.hosts(text, { npmRegistryNamed: false });
+          namesNpmRegistry(text);
+        },
+      );
+      expect(growth).toBeLessThan(MAX_TIME_GROWTH);
+    },
+    TIMEOUT_MS,
+  );
+
+  it.each(CRAFTED)(
+    'findRegistryHosts reads $name in every package file',
+    async (crafted) => {
+      const growth = await timeGrowth(
+        crafted,
+        (text) => project(Object.fromEntries(FORMATS.map((format) => [format.path, text]))),
+        async (root) => {
+          expect(await hostsOf(root)).toEqual(DEFAULT_HOSTS);
+        },
+      );
+      expect(growth).toBeLessThan(MAX_TIME_GROWTH);
+    },
+    TIMEOUT_MS,
+  );
 });

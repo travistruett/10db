@@ -1,14 +1,16 @@
 # Spike 15: What gh prints for required checks, a failed job's log and auto-merge
 
-- **Status:** PARTIAL. Passing checks, no required checks, a completed failed job's log and signed out are
-  VERIFIED against travistruett/10db. Pending, failing, cancelled, no checks at all, a run in progress and
-  `gh pr merge --auto` with auto-merge already on were not observed. Those rows come from the message strings
-  in the installed gh binary and from gh's source, and are marked as such.
-- **Date:** 2026-10-31
+- **Status:** PARTIAL. VERIFIED against travistruett/10db: passing, pending and failing checks, no required
+  checks, a completed failed job's log, a log asked for while the job runs, `gh pr merge --auto` with
+  auto-merge already on, and signed out. Not yet observed: a cancelled required check and a head with no
+  checks at all. No pull request was in either state on 2026-11-02, and the builder chose not to make a
+  throwaway one. Those two rows come from gh's source and the message strings in its binary, and are marked
+  that way.
+- **Date:** 2026-10-31. Pending, failing, in progress and re-arm were captured 2026-11-02T04:56Z.
 - **Versions:** gh 2.83.2 (2025-12-10)
-- **Command:** a throwaway script that ran each command below and recorded the exit code, stdout and stderr.
-  The builder ran it with a signed-in gh, because the lane's gh was signed out and its sandbox blocks
-  GitHub.
+- **Command:** each command below, with its exit code, stdout and stderr recorded verbatim. The builder (or
+  the orchestrator) ran them with a signed-in gh. The lane's gh is signed out, its sandbox blocks GitHub,
+  and its hook forbids `gh pr merge`.
 
 The checks come from the CI-decides design, `docs/superpowers/specs/2026-10-31-10db-ci-decides-design.md` §4
 and §6 (build task T3). The parsers are `parseRequiredChecks` and `parseJobLog` in
@@ -17,15 +19,15 @@ and §6 (build task T3). The parsers are `parseRequiredChecks` and `parseJobLog`
 
 ## `gh pr checks <url> -R <repo> --required --json name,state,bucket,link,workflow,description`
 
-| Case                                    | Exit | stdout                     | stderr                                                                           | Source   | Read as                |
-| --------------------------------------- | ---- | -------------------------- | -------------------------------------------------------------------------------- | -------- | ---------------------- |
-| every required check passed (#193)      | 0    | JSON list, one per check   | empty                                                                            | observed | `passing`              |
-| checks, none required (#194, into next) | 1    | empty                      | `no required checks reported on the 'fix/next-live-test-logger' branch`          | observed | `none`                 |
-| signed out                              | 4    | empty                      | `To get started with GitHub CLI, please run:  gh auth login` and a GH_TOKEN line | observed | unknown (`signed_out`) |
-| one pending                             | 8    | JSON list                  | empty                                                                            | gh docs  | `pending`              |
-| one failed                              | 1    | JSON list                  | empty                                                                            | gh docs  | `failing`              |
-| one cancelled                           | 1    | JSON list, bucket `cancel` | empty                                                                            | gh docs  | `pending`              |
-| the head has no checks at all           | 1    | empty                      | `no checks reported on the '<branch>' branch`                                    | binary   | `none`                 |
+| Case                                    | Exit | stdout                      | stderr                                                                           | Source   | Read as                |
+| --------------------------------------- | ---- | --------------------------- | -------------------------------------------------------------------------------- | -------- | ---------------------- |
+| every required check passed (#193)      | 0    | JSON list, one per check    | empty                                                                            | observed | `passing`              |
+| checks, none required (#194, into next) | 1    | empty                       | `no required checks reported on the 'fix/next-live-test-logger' branch`          | observed | `none`                 |
+| signed out                              | 4    | empty                       | `To get started with GitHub CLI, please run:  gh auth login` and a GH_TOKEN line | observed | unknown (`signed_out`) |
+| two required checks running (#245)      | 0    | JSON list, bucket `pending` | empty                                                                            | observed | `pending`              |
+| one required check failed (#242)        | 0    | JSON list, bucket `fail`    | empty                                                                            | observed | `failing`              |
+| one cancelled                           | 1    | JSON list, bucket `cancel`  | empty                                                                            | gh docs  | `pending`              |
+| the head has no checks at all           | 1    | empty                       | `no checks reported on the '<branch>' branch`                                    | binary   | `none`                 |
 
 Observed:
 
@@ -36,34 +38,46 @@ Observed:
 - **No required checks** is an error, not an empty list: exit 1, nothing on stdout, and the message on stderr
   with a newline. A network error also exits 1, so the parser reads `none` only when exit 1, an empty stdout
   and the whole of stderr (trimmed) is gh's message. Anything else with exit 1 and no list is unknown.
+- **Pending and failing exit 0 with `--json`.** gh's help gives 8 for pending and 1 for failed. But with
+  `--json`, gh 2.83.2 exited 0 for both #245 (`desktop` and `gate` with bucket `pending`, state
+  `IN_PROGRESS`) and #242 (`gate` with bucket `fail`, state `FAILURE`). The parser takes 0, 1 and 8 and reads
+  the state from the buckets, never from the exit code, so nothing in it changed. A pending entry is
+  `{"bucket":"pending","description":"","link":"https://github.com/travistruett/10db/actions/runs/41390916319/job/125101889888","name":"gate","state":"IN_PROGRESS","workflow":"ci"}`.
+  A failing one is
+  `{"bucket":"fail","description":"","link":"https://github.com/travistruett/10db/actions/runs/41389319225/job/125096990697","name":"gate","state":"FAILURE","workflow":"ci"}`.
+  The full lists are `SPIKE_PENDING` and `SPIKE_FAILING` in `ci-checks.test.ts`.
 
-Not observed:
+Not observed yet (no pull request was in either state, and none was made to try it):
+
+- **One cancelled.** The `cancel` bucket is in gh's source. It is read as `pending` (spec §4).
 
 - **No checks at all.** gh 2.83.2's binary has both `no checks reported on the '%s' branch` and
   `no required checks reported on the '%s' branch`. In gh's source the first comes when the head commit has no
   checks at all, before the filter to `--required`. A base with no CI, or a pull request pushed before GitHub
   lists its runs, gets that message with `--required` too. Both messages are therefore read as `none`.
-- **Exit codes 1 (failed) and 8 (pending)** with the list on stdout are from gh's help.
 
 ## `gh run view --job <id> -R <repo> --log-failed`
 
-| Case                           | Exit | stdout                                     | stderr                                                                      | Source   | Read as   |
-| ------------------------------ | ---- | ------------------------------------------ | --------------------------------------------------------------------------- | -------- | --------- |
-| a completed failed job         | 0    | the log, `<job>\t<step>\t<timestamp> text` | empty                                                                       | observed | `ready`   |
-| a job whose run is in progress | 1    | empty                                      | `job <id> is still in progress; logs will be available when it is complete` | binary   | `not_yet` |
-| signed out                     | 4    | empty                                      | as above                                                                    | observed | unknown   |
+| Case                   | Exit | stdout                                     | stderr                                                                      | Source   | Read as   |
+| ---------------------- | ---- | ------------------------------------------ | --------------------------------------------------------------------------- | -------- | --------- |
+| a completed failed job | 0    | the log, `<job>\t<step>\t<timestamp> text` | empty                                                                       | observed | `ready`   |
+| a job still running    | 1    | empty                                      | `job <id> is still in progress; logs will be available when it is complete` | observed | `not_yet` |
+| signed out             | 4    | empty                                      | as above                                                                    | observed | unknown   |
 
 Observed for job 124622919963 (a failed `desktop` job): **every line's step was `UNKNOWN STEP`**, and gh printed
 the whole job's log, from `Current runner version` on, not only the failed step's lines. The first line's
 timestamp follows a byte order mark (U+FEFF). For T7: the excerpt (the last 300 lines) still ends at the
 failure, but nothing can be cut by step name, and a BOM has to be stripped along with the ANSI codes.
 
-Not observed: the in-progress message, whose text is from the binary (`job %d is still in progress; …` and
-`run %d is still in progress; …`). The parser matches the whole of stderr against either one.
+Observed for job 125101889888 (`gate` on #245, status `in_progress` at capture): exit 1, nothing on stdout,
+and on stderr exactly `job 125101889888 is still in progress; logs will be available when it is complete`
+with a newline. That is the text `RUN_IN_PROGRESS` in `gh.ts` is anchored to, so the regex stays as it is.
+It also matches the `run %d …` form in the binary, which was not seen. The fixture is `SPIKE_LOG_IN_PROGRESS`.
 
 ## `gh pr merge <url> --auto --squash` with auto-merge already on
 
-Not run: it changes the pull request, and no pull request with auto-merge on was free to try it on. The
-binary has `Auto-merge enabled…` and `Auto-merge disabled for pull request…`, but no message for "already
-enabled". The spec's rule stands until this is observed: when the fix ship's re-arm gets an error back, it
-treats the pull request as armed and does not raise the refused card (spec §6).
+Observed on #240, which had auto-merge on, by running the command twice. **Both runs exited 0, with nothing
+on stdout or stderr.** Re-arming an armed pull request is a plain success, not an error. `prAutoMerge` resolves
+and the fix ship carries on (fixture `SPIKE_REARM_ARMED`). The spec's fallback still holds for any error
+GitHub does return: the fix ship treats the pull request as armed and does not raise the refused card (spec
+§6). But an already-armed pull request does not go down that path.
