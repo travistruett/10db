@@ -26,7 +26,25 @@ export const NOTICE_KEY = {
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
   landingBehind: 'landing-behind',
+  /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
+  seedSkipped: 'seed-skipped',
 } as const;
+
+/**
+ * What a copy's tasks are told when its cut skipped the seed because Your folder had an unfinished
+ * shared batch, and the install did not make every directory the seed would have cloned.
+ */
+export const seedNotices = {
+  skipped: (dirs: readonly string[]): Notice => {
+    const named = dirs.join(', ');
+    return {
+      key: NOTICE_KEY.seedSkipped,
+      tone: 'warning',
+      line: `This copy has no ${named}: Your folder had a batch open when it was made`,
+      body: `A new copy usually gets a clone of Your folder's ignored ${dirs.length === 1 ? 'directory' : 'directories'} ${named}. A task in Your folder was unfinished when this copy was made, and a lane there can write those directories, so 10db cloned nothing into the copy. 10db can only rebuild node_modules, and only in a pnpm project, so ${named} ${dirs.length === 1 ? 'is' : 'are'} missing from the copy, and its gate may fail on that.\n\nTo get them, abandon this batch and start the task again once Your folder's batch has shipped or been abandoned, or make them in the copy yourself.`,
+    };
+  },
+};
 
 /** What a batch's tasks are told when the branch they land in has fallen behind the project's base. */
 export const landingNotices = {

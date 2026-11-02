@@ -270,6 +270,47 @@ describe('seeding a new copy', () => {
     expect(batch.state).toBe('OPEN');
     expect(cloned(batch)).toBe(false);
     expect(installsIn(batch)).toHaveLength(1);
+    // The install made what the clone would have, so there is nothing to tell.
+    expect(batch.notices).toEqual([]);
+  });
+
+  it('tells the batch when 10db cannot install what the clone would have brought', async () => {
+    // npm's lockfile: 10db installs only pnpm projects, so the copy gets no node_modules.
+    h.commit('.gitignore', 'node_modules/\n');
+    h.commit('package-lock.json', '{}\n');
+    h.git$('push', '-q', 'origin', 'main');
+    mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    await startedOne(shared('Alpha'));
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toEqual([]);
+    const notice = h.only(batch.notices);
+    expect(notice).toMatchObject({ key: 'seed-skipped', tone: 'warning' });
+    expect(notice.line).toContain('node_modules');
+    expect(notice.body).toContain('Your folder');
+  });
+
+  it('names a seed directory the install does not make, in a pnpm project', async () => {
+    h.close();
+    h = createDeliveryHarness({ worktreeSeed: ['node_modules', '.venv'] }, { trigger: false });
+    h.commit('.gitignore', 'node_modules/\n.venv/\n');
+    h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    h.git$('push', '-q', 'origin', 'main');
+    mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    mkdirSync(join(h.repo, '.venv', 'bin'), { recursive: true });
+    writeFileSync(join(h.repo, '.venv', 'bin', 'python'), '#!/bin/sh\n');
+    await startedOne(shared('Alpha'));
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
+    expect(existsSync(join(batch.worktreePath ?? '', '.venv'))).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+    const notice = h.only(batch.notices);
+    expect(notice.key).toBe('seed-skipped');
+    expect(notice.line).toContain('.venv');
+    expect(notice.line).not.toContain('node_modules');
   });
 
   it('skips the clone and installs when a shared batch is still CUTTING', async () => {
