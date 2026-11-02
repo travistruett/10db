@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { readManifest, readRepoFile, repoRoot } from './workspace';
-import { readWorkflow, workflowJobNames } from './workflows';
+import { workflowJobNames } from './workflows';
 
 interface Rule {
   type: string;
@@ -58,7 +58,6 @@ describe('rulesets', () => {
     expect(main?.bypass_actors).toEqual([]);
     expect(main?.rules.map((r) => r.type).sort()).toEqual([
       'deletion',
-      'merge_queue',
       'non_fast_forward',
       'pull_request',
       'required_linear_history',
@@ -74,43 +73,24 @@ describe('rulesets', () => {
     });
   });
 
-  it('merges main through a queue of squash merges that tests each pull request with those ahead', () => {
-    // decisions/2026-11-02-merge-queue.md. ALLGREEN: an entry merges only when every entry in its
-    // group is green, so a red one never lands with its neighbours.
-    const queue = rule(byName('main-protection'), 'merge_queue')?.parameters;
-    expect(queue).toEqual({
-      merge_method: 'SQUASH',
-      grouping_strategy: 'ALLGREEN',
-      max_entries_to_build: 5,
-      max_entries_to_merge: 5,
-      min_entries_to_merge: 1,
-      min_entries_to_merge_wait_minutes: 1,
-      check_response_timeout_minutes: 30,
-    });
+  it('has no merge queue rule: GitHub offers a merge queue only to organization-owned repositories', () => {
+    // GitHub refused the ruleset with HTTP 422 while it had one (the repository is user-owned).
+    expect(rule(byName('main-protection'), 'merge_queue')).toBeUndefined();
   });
 
-  it('gives queue entries as long to report as the longest CI job may run', () => {
-    // A required check that has not reported when the timeout ends removes the entry from the
-    // queue, so the timeout must not be shorter than any job's own timeout-minutes.
-    const timeout = rule(byName('main-protection'), 'merge_queue')?.parameters?.[
-      'check_response_timeout_minutes'
-    ];
-    const longest = Math.max(
-      ...Object.values(readWorkflow('.github/workflows/ci.yml').jobs).map(
-        (job) => job['timeout-minutes'] ?? 0,
-      ),
-    );
-    expect(timeout).toBeGreaterThanOrEqual(longest);
-  });
-
-  it('records why main uses a merge queue, and says the ruleset is applied by hand', () => {
-    const record = readRepoFile('docs/architecture/decisions/2026-11-02-merge-queue.md');
-    expect(record).toMatch(/integration branch/i);
-    expect(record).toContain('#414');
-    expect(record).toContain('#422');
-    expect(record).toContain('make github-settings');
-    expect(readRepoFile('CONTRIBUTING.md')).toMatch(/merge queue/i);
-    expect(readRepoFile('AGENTS.md')).toMatch(/merge queue/i);
+  it('records why the merge queue rule was dropped, and what would bring it back', () => {
+    const path = 'docs/architecture/decisions/2026-11-02-main-has-no-merge-queue.md';
+    const record = readRepoFile(path);
+    expect(record).toMatch(/Supersedes:.*2026-11-02-merge-queue\.md/);
+    expect(record).toMatch(/user-owned/i);
+    expect(record).toMatch(/organization/i);
+    expect(record).toContain('422');
+    expect(record).toContain('merge_group');
+    expect(record).toMatch(/bring(s)? .*back/i);
+    for (const doc of ['CONTRIBUTING.md', 'AGENTS.md']) {
+      expect(readRepoFile(doc), doc).toContain(path.replace('docs/architecture/', ''));
+      expect(readRepoFile(doc), doc).not.toMatch(/merges through a GitHub merge queue/i);
+    }
   });
 
   it('requires exactly the CI jobs that ci.yml defines', () => {
