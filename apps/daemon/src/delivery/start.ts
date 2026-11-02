@@ -197,7 +197,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     }
     if (batch.projectId !== project.id)
       throw new ConflictError(`Batch "${batch.title}" is not a batch of ${project.name}`);
-    if (!UNFINISHED_BATCH_STATES.includes(batch.state) && batch.worktreePath === null)
+    // A finished copy may keep its worktree path (retiring keeps a worktree holding unseeded
+    // ignored files), so the state alone decides; a shared batch's path is always null.
+    if (!UNFINISHED_BATCH_STATES.includes(batch.state))
       throw new ConflictError(
         `Batch "${batch.title}" has finished; start these tasks again on their own`,
       );
