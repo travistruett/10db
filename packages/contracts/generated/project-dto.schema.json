@@ -46,6 +46,9 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "catchAll": {
+            "type": "boolean"
           }
         },
         "required": [

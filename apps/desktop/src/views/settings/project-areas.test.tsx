@@ -77,6 +77,107 @@ describe('the areas and hazards editor', () => {
     });
   });
 
+  describe('the catch-all', () => {
+    const withRest = projectDto({
+      areas: [
+        { name: 'api', globs: ['src/api/**'] },
+        { name: 'root', globs: ['*', '.*'], catchAll: true },
+      ],
+      hazards: [],
+    });
+    const box = (n: number): HTMLInputElement => {
+      const el = screen.getByRole('checkbox', { name: `Area ${String(n)} is the catch-all` });
+      if (!(el instanceof HTMLInputElement)) throw new Error('not an input');
+      return el;
+    };
+    function serveProject(served: unknown[], shown: typeof withRest): void {
+      server.use(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([shown])),
+        http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+          served.push(await request.json());
+          return HttpResponse.json(shown);
+        }),
+        ...baseHandlers(),
+      );
+    }
+
+    it('shows which area is the catch-all and what that means', async () => {
+      serveProject([], withRest);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      expect([1, 2].map((n) => box(n).checked)).toEqual([false, true]);
+      expect(screen.getAllByText(/holds every file no other area holds/).length).toBeGreaterThan(0);
+    });
+
+    it('shows none when the project has none', async () => {
+      serveProject([], project);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      expect([1, 2].map((n) => box(n).checked)).toEqual([false, false]);
+    });
+
+    it('moves it to another area and saves it in the patch, never with two', async () => {
+      const patched: unknown[] = [];
+      serveProject(patched, withRest);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      fireEvent.click(box(1));
+      expect([1, 2].map((n) => box(n).checked)).toEqual([true, false]);
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      await waitFor(() => {
+        expect(patched).toEqual([
+          {
+            areas: [
+              { name: 'api', globs: ['src/api/**'], catchAll: true },
+              { name: 'root', globs: ['*', '.*'] },
+            ],
+            hazards: [],
+          },
+        ]);
+      });
+    });
+
+    it('can be cleared, which sends no area as the catch-all', async () => {
+      const patched: unknown[] = [];
+      serveProject(patched, withRest);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      fireEvent.click(box(2));
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      await waitFor(() => {
+        expect(patched).toEqual([
+          {
+            areas: [
+              { name: 'api', globs: ['src/api/**'] },
+              { name: 'root', globs: ['*', '.*'] },
+            ],
+            hazards: [],
+          },
+        ]);
+      });
+    });
+
+    it('keeps the catch-all through an edit that does not touch it', async () => {
+      const patched: unknown[] = [];
+      serveProject(patched, withRest);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      type('Area 1 name', 'server');
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      await waitFor(() => {
+        expect(patched).toEqual([
+          {
+            areas: [
+              { name: 'server', globs: ['src/api/**'] },
+              { name: 'root', globs: ['*', '.*'], catchAll: true },
+            ],
+            hazards: [],
+          },
+        ]);
+      });
+    });
+  });
+
   it('shows which hazards are held per copy, keeps the choice on save, and lets the builder change it', async () => {
     const patched: unknown[] = [];
     const stored = projectDto({
