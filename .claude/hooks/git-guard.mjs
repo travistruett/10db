@@ -451,8 +451,9 @@ const WRAPPERS = new Map([
     {
       valueOptions: [
         ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'],
-        ...['--max-args', '--replace', '--max-lines', '--max-procs', '--delimiter'],
-        ...['--max-chars', '--eof', '--arg-file'],
+        // --replace, --eof and --max-lines take an optional value, given only with =, so
+        // the word after them is the command.
+        ...['--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file'],
       ],
       operands: 0,
     },
