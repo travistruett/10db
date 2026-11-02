@@ -185,9 +185,10 @@ export interface ApiServices {
   inspectFolder(path: string): Promise<FolderInspectResult>;
   /**
    * Areas for the repository at `path`, each with its globs and a reason, for a new project or for
-   * Settings. Reads git's object store only and runs nothing the repository names.
+   * Settings. Reads git's object store only and runs nothing the repository names. Aborting
+   * `signal` (the caller went away) stops the model question and ends the process it started.
    */
-  proposeAreas(path: string): Promise<AreaProposalResult>;
+  proposeAreas(path: string, signal?: AbortSignal): Promise<AreaProposalResult>;
   /** The hosts the project's tasks and checks may reach: its project-wide network rules, one per host. */
   listNetworkHosts(projectId: ProjectId): NetworkHostDto[];
   /**

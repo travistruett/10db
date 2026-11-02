@@ -207,7 +207,8 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/folders/propose-areas',
       validator('json', (value): AreaProposalInput => AreaProposalInput.parse(value)),
-      async (c) => c.json(await deps.services.proposeAreas(c.req.valid('json').path)),
+      async (c) =>
+        c.json(await deps.services.proposeAreas(c.req.valid('json').path, c.req.raw.signal)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(

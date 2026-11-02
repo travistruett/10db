@@ -54,6 +54,22 @@ describe('createAreaNamer', () => {
     scratch.cleanup();
   });
 
+  it("passes the caller's signal to the question so giving up stops the model", async () => {
+    const adapter = new FakeAdapter(FakeScriptBook.parse({}));
+    adapter.answer = () => Promise.resolve('x');
+    const scratch = tempDir('namer');
+    const namer = createAreaNamer({
+      adapter,
+      launcher: launcher(),
+      db: store.db,
+      scratchRoot: scratch.path,
+    });
+    const caller = new AbortController();
+    await namer('Name these.', caller.signal);
+    expect(adapter.completions[0]?.signal).toBe(caller.signal);
+    scratch.cleanup();
+  });
+
   it('removes its folder when the model fails', async () => {
     const adapter = new FakeAdapter(FakeScriptBook.parse({}));
     const scratch = tempDir('namer');
