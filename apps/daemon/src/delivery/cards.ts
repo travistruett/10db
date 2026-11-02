@@ -159,6 +159,16 @@ export const startCards = {
     title: 'Not started: tasks depend on unfinished work',
     body: `${blocked.map((b) => `- ${b.task.title} needs ${b.deps.map((d) => d.title).join(', ')}`).join('\n')}\n\nStart them together, or finish those tasks first.`,
   }),
+  /** `where` and `depWhere` are the placements in words ("Your folder", "a separate copy"). */
+  crossPlacementDependency: (
+    task: TaskDto,
+    where: string,
+    dep: TaskDto,
+    depWhere: string,
+  ): Card => ({
+    title: 'Not started: a task depends on a task that runs somewhere else',
+    body: `${task.title} runs in ${where} but needs ${dep.title}, which runs in ${depWhere}. Tasks that depend on each other must run in the same place: change where one of them runs, then start them again.`,
+  }),
   unmergedDependencies: (found: readonly UnmergedDependency[]): Card => ({
     title: 'Not started: tasks depend on code that is not on the base branch',
     body: `${found.map((f) => `- ${f.task.title} needs ${f.dep.title}: ${f.reason}`).join('\n')}\n\nMerge that work into the base branch, then start again.`,
