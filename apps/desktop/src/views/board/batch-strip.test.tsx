@@ -73,9 +73,7 @@ describe('BatchStrip', () => {
     strip([member('RUNNING'), member('QUEUED')]);
     const button = await screen.findByRole('button', { name: 'Abandon' });
     expect(button.hasAttribute('disabled')).toBe(true);
-    expect(
-      screen.getByText('Write the greeting is running: cancel it in Factory first.'),
-    ).toBeTruthy();
+    expect(screen.getByText('Write the greeting is running: cancel it first.')).toBeTruthy();
   });
 
   it('shows the daemon refusal', async () => {
