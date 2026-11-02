@@ -415,6 +415,35 @@ describe('seeding a new copy', () => {
         expect(batch.notices).toEqual([]);
       });
 
+      it('ignores an empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
+        );
+        allowing('onlyBuiltDependencies: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+        expect(notice.line).not.toContain('left-pad');
+      });
+
+      it('ignores a non-empty onlyBuiltDependencies list when neverBuiltDependencies is not empty', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
+        );
+        allowing('onlyBuiltDependencies:\n  - left-pad\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+      });
+
       it('says nothing when the empty list is in package.json', async () => {
         h.commit(
           'package.json',

@@ -62,6 +62,8 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   let all = false;
   // Whether the project limits builds with a list, even an empty one or one this can't read.
   let limited = false;
+  // Whether a neverBuiltDependencies list has entries (valid or not): pnpm 9 reads it first.
+  let neverListed = false;
   const manifest = readData(join(root, 'package.json'));
   const sources: Record<string, unknown>[] = [];
   const workspace = readData(join(root, 'pnpm-workspace.yaml'));
@@ -86,10 +88,14 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
     // pnpm 10.1 added ignoredBuiltDependencies; pnpm 9 and earlier don't read it.
     if (!legacy) namesIn(source['ignoredBuiltDependencies'], denied);
     namesIn(source['neverBuiltDependencies'], denied);
+    const never = source['neverBuiltDependencies'];
+    if (Array.isArray(never) && never.length > 0) neverListed = true;
   }
   // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list (or a file of
-  // them, which isn't read here) limits them: an empty list builds nothing.
-  if (legacy && !limited) all = true;
+  // them, which isn't read here) limits them: an empty list builds nothing. A non-empty
+  // neverBuiltDependencies list is checked first, though: pnpm then builds everything it doesn't
+  // name and ignores onlyBuiltDependencies and onlyBuiltDependenciesFile.
+  if (legacy && (!limited || neverListed)) all = true;
   return { all, allowed: valid(allowed), denied: valid(denied) };
 }
 

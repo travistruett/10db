@@ -6,8 +6,8 @@
 # main has moved on; it prints that commit and how many commits behind the head it is. Only when
 # none of them has a finished build does it wait for a run of the head already under way, or start
 # one and wait for it; if that run ends cancelled (a newer push replaced it in the concurrency
-# group before any job began), it looks again, up to 3 cancelled runs; a run cancelled after a job began
-# was cancelled by hand and stops the install. release-dry-run runs on every push to main as well as by hand (and keeps at
+# group: none of its jobs began and a newer run of the ref exists), it looks again, up to 3
+# cancelled runs; any other cancelled run was stopped by hand, and fails. release-dry-run runs on every push to main as well as by hand (and keeps at
 # most one build waiting per branch), so main's build is usually ready already; starting one is
 # the fallback (another ref, or builds that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
 # 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
@@ -212,16 +212,30 @@ while :; do
     sleep "$poll_seconds"
   done
   if [ "$conclusion" = cancelled ]; then
-    cancelled_runs=$((cancelled_runs + 1))
     # cancel-in-progress is false, so the concurrency group only cancels a run still pending, which has
-    # no job that began. A run with a job that began was cancelled by hand, and a newer run in the queue
-    # does not change that: the builder stopped this install. If gh cannot say, it counts as a replacement.
+    # no job that began, and only for a newer run of the workflow on the ref (run ids grow with
+    # creation). A run with a job that began was cancelled by hand, even with a newer run queued, and a
+    # run with no newer one was too: the builder stopped this install. If gh cannot say whether a job
+    # began, the newer run decides.
     started_jobs="$(gh run view "$run_id" --json jobs \
       --jq '[.jobs[] | select(.startedAt != null and (.startedAt | startswith("0001") | not))] | length' 2> "$gh_err" || true)"
     [[ "$started_jobs" =~ ^[0-9]+$ ]] || started_jobs=0
-    if [ "$started_jobs" -eq 0 ] && [ "$cancelled_runs" -lt "$max_cancelled_runs" ]; then
-      echo "Run $run_id was cancelled, most likely replaced by a newer run of $ref; looking again."
-      continue
+    if [ "$started_jobs" -eq 0 ]; then
+      if ! ref_runs="$(gh run list --workflow "$workflow" --branch "$ref" --limit 20 --json databaseId \
+        --jq '.[].databaseId' 2> "$gh_err")"; then
+        fail "gh could not list the runs of $workflow on $ref: $(cat "$gh_err")"
+      fi
+      replaced=0
+      for id in $ref_runs; do
+        if [[ "$id" =~ ^[0-9]+$ ]] && [ "$id" -gt "$run_id" ]; then replaced=1; fi
+      done
+      if [ "$replaced" -eq 1 ]; then
+        cancelled_runs=$((cancelled_runs + 1))
+        if [ "$cancelled_runs" -lt "$max_cancelled_runs" ]; then
+          echo "Run $run_id was cancelled, most likely replaced by a newer run of $ref; looking again."
+          continue
+        fi
+      fi
     fi
   fi
   [ "$conclusion" = success ] || fail "run $run_id ended in $conclusion; read it with gh run view $run_id --log-failed"

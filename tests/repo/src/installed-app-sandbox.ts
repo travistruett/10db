@@ -56,6 +56,10 @@ const STUBS: Record<string, readonly string[]> = {
     // The jobs of a run that started: STUB_STARTED_RUNS lists the run ids with a job that began; others have none.
     "  'run view '*'--json jobs'*)",
     '    case " ${STUB_STARTED_RUNS:-} " in *" $3 "*) echo 1 ;; *) echo 0 ;; esac ;;',
+    // Runs of the workflow on the ref, for telling a replaced run from one cancelled by hand: once a run
+    // has been reported cancelled, STUB_NEWER_RUNS (ids of runs created after it) show beside the cancelled ones.
+    "  'run list '*'--branch '*)",
+    '    if [ -f "$STUB_STATE/cancelled" ]; then for id in ${STUB_CANCELLED_RUNS:-} ${STUB_NEWER_RUNS:-}; do echo "$id"; done; fi ;;',
     "  'run view '*)",
     `    ${count('view')}`,
     '    if [ "$n" -le "${STUB_VIEW_FAILS:-0}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi',
