@@ -989,10 +989,13 @@ export const branchCards = {
     foldKey: branchCardKey.offer(batch.id),
     ...branchOffer(batch),
   }),
-  /** 10db deleted an abandoned task's branch because it held no commits beyond its base. */
-  abandonedBranchDeleted: (batch: BatchDto): Card => ({
+  /**
+   * 10db deleted an abandoned task's branch because it held no commits beyond its base;
+   * `withWorktree` when the batch's separate copy was removed with it.
+   */
+  abandonedBranchDeleted: (batch: BatchDto, withWorktree: boolean): Card => ({
     title: `Batch "${batch.title}" abandoned: ${batch.branch ?? 'its branch'} deleted`,
-    body: `The branch ${batch.branch ?? '(none)'} held no commits beyond ${batch.baseBranch}, so 10db deleted it along with the batch's worktree. Nothing was lost.`,
+    body: `The branch ${batch.branch ?? '(none)'} held no commits beyond ${batch.baseBranch}, so 10db deleted it${withWorktree ? " along with the batch's worktree" : ''}. Nothing was lost.`,
     foldKey: branchCardKey.deleted(batch.id),
     detail: { batchId: batch.id },
   }),

@@ -66,7 +66,13 @@ export async function settleBranch(ctx: DeliveryContext, batchId: BatchId): Prom
   );
   if (batch.state !== BatchState.Abandoned) return;
   if (removal.kind === 'removed') {
-    raise(ctx.inbox, batch.projectId, branchCards.abandonedBranchDeleted(batch));
+    // retireWorktree settles the branch before it clears `worktree_path`, so a set path here means
+    // the batch's worktree was just removed; a shared batch never had one.
+    raise(
+      ctx.inbox,
+      batch.projectId,
+      branchCards.abandonedBranchDeleted(batch, batch.worktreePath !== null),
+    );
     return;
   }
   if (removal.kind !== 'kept' && removal.kind !== 'checked_out') return;
