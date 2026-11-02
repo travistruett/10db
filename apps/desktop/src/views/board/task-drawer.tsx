@@ -68,6 +68,7 @@ import {
   canCloseRun,
   canRetryRun,
   canStartOver,
+  failureLine,
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
@@ -684,6 +685,8 @@ function WorkstreamLine({
           {refusal}
         </Text>
       ) : null}
+      {/* A run shipped anyway offers no Retry, so it is not told what Retry would do. */}
+      {retryable ? <Text size="sm">{failureLine(workstream)}</Text> : null}
       {failed && workstream.failureReason !== null ? (
         <Text size="xs" c="dimmed">
           {workstream.failureReason}

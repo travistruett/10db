@@ -30,6 +30,7 @@ import {
   TaskStatus,
   Urgency,
   WorkspaceMode,
+  WorkstreamFailure,
   WorkstreamState,
 } from './states';
 import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
@@ -657,6 +658,8 @@ export const WorkstreamDto = z.object({
   contextPct: z.number().nullable(),
   pausedUntil: Timestamp.nullable(),
   failureReason: z.string().nullable(),
+  /** What kind of failure `failureReason` describes; null when it has not failed or failed before kinds were kept. */
+  failureKind: z.enum(WorkstreamFailure).nullable().default(null),
   lastActivityAt: Timestamp.nullable(),
   /** When the builder put it first in line; null for a workstream that waits in the order it started. */
   runNextAt: Timestamp.nullable(),

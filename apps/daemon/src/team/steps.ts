@@ -182,6 +182,7 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
           attempt: 0,
           recoveryAttempts: 0,
           failureReason: null,
+          failureKind: null,
           steps: clearSendBacks(
             sendBackSteps(row.steps, row.stepIndex, reworkAt, reworked, {
               now: ctx.now,
@@ -220,6 +221,7 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
         attempt: 0,
         recoveryAttempts: 0,
         failureReason: null,
+        failureKind: null,
         steps,
         // A new note is the fix; otherwise work the builder sent back that ran out of attempts keeps
         // its note, and a gate failure its output, for the restarted step.

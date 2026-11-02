@@ -4,6 +4,7 @@ import type {
   AccountSettings,
   AreaDef,
   BatchFailure,
+  WorkstreamFailure,
   BatchId,
   BatchState,
   CiStopped,
@@ -454,6 +455,8 @@ export const workstreams = sqliteTable(
     contextPct: real('context_pct'),
     pausedUntil: text('paused_until'),
     failureReason: text('failure_reason'),
+    /** The kind of failure `failureReason` describes; null on a row that failed before kinds were kept. */
+    failureKind: text('failure_kind').$type<WorkstreamFailure>(),
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),

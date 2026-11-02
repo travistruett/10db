@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATES,
   EventType,
+  WorkstreamFailure,
   WorkstreamState as S,
   type InboxItemId,
   type NextAction,
@@ -196,6 +197,7 @@ export async function recoverOnStartup(opts: {
           patch: {
             recoveryAttempts: attempts,
             failureReason: `Recovery failed ${String(attempts)} times`,
+            failureKind: WorkstreamFailure.SessionFailed,
             ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
           },
         });

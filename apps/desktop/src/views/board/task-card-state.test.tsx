@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { theme } from '../../theme';
 import { cardSummary, TaskCard } from './task-card';
+import { failureLine } from './task-state';
 
 function card(props: Partial<Parameters<typeof TaskCard>[0]>) {
   render(
@@ -227,6 +228,47 @@ describe('TaskCard state', () => {
     it('says nothing for a task that did not ship at the limit', () => {
       card({ workstream: workstreamDto({ state: 'DONE', steps: [stepDto(), stepDto()] }) });
       expect(screen.queryByText(/retry limit/)).toBeNull();
+    });
+  });
+
+  describe('a failed task', () => {
+    const REASON =
+      'The review step ended without calling complete_step: its last turn ended normally.';
+    it.each([
+      'no_result',
+      'gate_failed',
+      'session_failed',
+      'retry_limit',
+      'rejected_at_limit',
+      null,
+    ] as const)(
+      'says a %s failure in plain words, with the raw reason as its tooltip',
+      async (kind) => {
+        const workstream = workstreamDto({
+          state: 'FAILED',
+          failureKind: kind,
+          failureReason: REASON,
+          steps: [stepDto({ status: 'done' }), stepDto({ role: 'review', status: 'failed' })],
+          stepIndex: 1,
+        });
+        card({ workstream });
+        const line = screen.getByText(failureLine(workstream));
+        expect(line.textContent).toMatch(/Retry /);
+        expect(screen.queryByText(REASON)).toBeNull();
+        fireEvent.mouseEnter(line);
+        expect(await screen.findByText(REASON)).toBeTruthy();
+      },
+    );
+
+    it('speaks the plain line and the raw reason to a screen reader', () => {
+      const workstream = workstreamDto({
+        state: 'FAILED',
+        failureKind: 'gate_failed',
+        failureReason: 'The gate failed 4 times (last exit 2)',
+      });
+      const summary = cardSummary(taskDto(), workstream, new Map());
+      expect(summary).toContain(`${failureLine(workstream)} `);
+      expect(summary).toContain('Reason: The gate failed 4 times (last exit 2).');
     });
   });
 

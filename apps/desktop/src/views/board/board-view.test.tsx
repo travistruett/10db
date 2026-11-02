@@ -744,7 +744,7 @@ describe('BoardView', () => {
     ['RUNNING', 'Building', 'in_progress', false],
     // An open task in Ready whose latest run finished was reopened after its pull request closed.
     ['DONE', 'Done', 'ready', true],
-    ['FAILED', 'Failed', 'blocked', false],
+    ['FAILED', 'The run failed. Retry runs it again.', 'blocked', false],
     ['CANCELLED', 'Cancelled', 'ready', true],
   ] as const)(
     'offers Start only when the latest workstream %s leaves the open task Backlog or Ready',

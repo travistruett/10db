@@ -13,6 +13,7 @@ import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/da
 import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
+import { failureLine } from './task-state';
 
 const peers = new Map();
 
@@ -622,6 +623,32 @@ describe('TaskDrawer', () => {
   });
 
   describe('workstream state', () => {
+    it.each([
+      'no_result',
+      'gate_failed',
+      'session_failed',
+      'retry_limit',
+      'rejected_at_limit',
+      null,
+    ] as const)(
+      'a %s failure shows Failed, the plain line, the raw reason and Retry',
+      async (kind) => {
+        serve();
+        const workstream = workstreamDto({
+          state: 'FAILED',
+          failureKind: kind,
+          failureReason: 'The gate failed twice',
+          steps: [stepDto({ status: 'failed' })],
+        });
+        open({ workstream });
+        const d = await dialog();
+        expect(within(d).getByText('Failed')).toBeTruthy();
+        expect(within(d).getByText(failureLine(workstream))).toBeTruthy();
+        expect(within(d).getByText('The gate failed twice')).toBeTruthy();
+        expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
+      },
+    );
+
     it('a failed task shows Failed, its reason and Retry', async () => {
       serve();
       open({
@@ -629,6 +656,7 @@ describe('TaskDrawer', () => {
       });
       const d = await dialog();
       expect(within(d).getByText('Failed')).toBeTruthy();
+      expect(within(d).getByText('The run failed. Retry runs it again.')).toBeTruthy();
       expect(within(d).getByText('The gate failed twice')).toBeTruthy();
       const retry = within(d).getByRole('button', { name: 'Retry' });
       expect((retry as HTMLButtonElement).disabled).toBe(false);

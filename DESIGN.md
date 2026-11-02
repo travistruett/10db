@@ -27,10 +27,17 @@ favors legibility and calm over decoration.
   sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns;
   columns scroll horizontally on narrow windows.
 - **Card state:** a card says its task's state once, in one plain line with a dot, such as
-  "Checking: make gate" or "Failed: the gate failed". The card's border and the dot take the status color
+  "Checking: make gate". The card's border and the dot take the status color
   (blue running, yellow waiting on you, orange paused, red failed); queued keeps the plain border. No
   fill, no left stripe, no pulsing. A card waiting on the builder is the most prominent: a full 2 px
   yellow border and "Waiting on you: answer in Inbox".
+- **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
+  `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's session rows:
+  "The review session stopped without reporting a result. Retry runs the review step again." The line is
+  worded from the failure kind the daemon records, and its Retry half from the rule the daemon's retry
+  follows, so after a review's rejection at the retry limit it names the earlier step that runs again. A run
+  with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
+  on the card and in Factory, and is shown under the line in the drawer.
 - **Goal strip:** a goal with open tasks is one slim line above the Board's columns, in the same scroll
   area as the batch strips: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
   drawer. A goal is never a card in a column: cards are tasks, and the columns stay about tasks. Each of a

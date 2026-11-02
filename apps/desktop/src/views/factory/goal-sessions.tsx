@@ -8,9 +8,11 @@ import {
   Table,
   Text,
   Title,
+  Tooltip,
   VisuallyHidden,
 } from '@mantine/core';
 import { useRetryWorkstream } from '../../daemon/queries';
+import { failureLine } from '../board/task-state';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
@@ -72,10 +74,19 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
               <Table.Tr key={ws.id}>
                 <Table.Td>
                   <Text size="sm">{ws.taskTitle}</Text>
-                  {ws.failureReason ? (
-                    <Text size="xs" c="red">
-                      {ws.failureReason}
-                    </Text>
+                  {canRetry(ws.state) ? (
+                    <Tooltip
+                      label={ws.failureReason}
+                      disabled={!ws.failureReason}
+                      withArrow
+                      multiline
+                      maw={360}
+                      openDelay={300}
+                    >
+                      <Text size="xs" c="red">
+                        {failureLine(ws)}
+                      </Text>
+                    </Tooltip>
                   ) : null}
                 </Table.Td>
                 <Table.Td>

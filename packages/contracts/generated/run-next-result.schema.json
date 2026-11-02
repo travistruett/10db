@@ -568,6 +568,24 @@
             "null"
           ]
         },
+        "failureKind": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "no_result",
+                "gate_failed",
+                "session_failed",
+                "retry_limit",
+                "rejected_at_limit"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "lastActivityAt": {
           "anyOf": [
             {

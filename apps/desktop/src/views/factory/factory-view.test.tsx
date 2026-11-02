@@ -20,6 +20,7 @@ import {
   goalSummaryDto,
   ungroupedDto,
 } from '../../test/goal-fixtures';
+import { failureLine } from '../board/task-state';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
@@ -119,7 +120,7 @@ describe('FactoryView goal list', () => {
     const region = await screen.findByRole('region', { name: 'Ungrouped' });
     expect(await within(region).findByText('Loose run')).toBeTruthy();
     expect(within(region).getByText('Loose break')).toBeTruthy();
-    expect(within(region).getByText('The gate failed 4 times (last exit 2)')).toBeTruthy();
+    expect(within(region).getByText('The run failed. Retry runs it again.')).toBeTruthy();
     expect(within(region).queryByRole('heading', { name: 'Pull requests' })).toBeNull();
   });
 
@@ -454,10 +455,38 @@ describe('FactoryView sessions', () => {
     return row;
   }
 
+  it.each([
+    'no_result',
+    'gate_failed',
+    'session_failed',
+    'retry_limit',
+    'rejected_at_limit',
+    null,
+  ] as const)(
+    'says a %s failure in the plain line the Board says, with the raw reason as its tooltip',
+    async (kind) => {
+      const failed = workstreamDto({
+        taskTitle: 'Broken',
+        state: 'FAILED',
+        failureKind: kind,
+        failureReason: 'The gate failed 4 times (last exit 2)',
+        steps: [stepDto({ status: 'done' }), stepDto({ role: 'review', status: 'failed' })],
+        stepIndex: 1,
+      });
+      open(failed);
+      const row = await sessionRow('Broken');
+      const line = within(row).getByText(failureLine(failed));
+      expect(screen.queryByText('The gate failed 4 times (last exit 2)')).toBeNull();
+      fireEvent.mouseEnter(line);
+      expect(await screen.findByText('The gate failed 4 times (last exit 2)')).toBeTruthy();
+    },
+  );
+
   it('offers Retry only on a failed session, and shows why it failed', async () => {
     const failed = workstreamDto({
       taskTitle: 'Broken',
       state: 'FAILED',
+      failureKind: 'gate_failed',
       failureReason: 'The gate failed 4 times (last exit 2)',
     });
     const retried: string[] = [];
@@ -469,7 +498,11 @@ describe('FactoryView sessions', () => {
     ]);
 
     const row = await sessionRow('Broken');
-    expect(within(row).getByText('The gate failed 4 times (last exit 2)')).toBeTruthy();
+    expect(
+      within(row).getByText(
+        'The checks kept failing and the run ran out of fix attempts. Retry runs it again.',
+      ),
+    ).toBeTruthy();
     expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
     fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
     await waitFor(() => {

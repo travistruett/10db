@@ -6,7 +6,7 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
+import { Badge, Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
 import { PlacementBadge } from './placement-badge';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
@@ -87,7 +87,8 @@ export function cardSummary(
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
-    state ? `${state.line}.` : null,
+    state ? (state.line.endsWith('.') ? state.line : `${state.line}.`) : null,
+    state?.detail ? `Reason: ${state.detail.replace(/\.$/, '')}.` : null,
     sentBack ? `${sentBack}.` : null,
     atLimit ? `${atLimit}.` : null,
   ]
@@ -188,14 +189,25 @@ export function TaskCard({
                 background: `var(--mantine-color-${state.color}-filled)`,
               }}
             />
-            {/* A refusal's reason is shown whole: it is the one thing the builder came to read. */}
-            <Text
-              size="sm"
-              fw={waiting ? 600 : 400}
-              {...(startNote?.kind === 'refused' ? {} : { lineClamp: 2 })}
+            {/* A refusal's reason and a failure's line are shown whole: each is the one thing the builder came to read. */}
+            <Tooltip
+              label={state.detail}
+              disabled={!state.detail}
+              withArrow
+              multiline
+              maw={360}
+              openDelay={300}
             >
-              {state.line}
-            </Text>
+              <Text
+                size="sm"
+                fw={waiting ? 600 : 400}
+                {...(startNote?.kind === 'refused' || state.detail !== undefined
+                  ? {}
+                  : { lineClamp: 2 })}
+              >
+                {state.line}
+              </Text>
+            </Tooltip>
           </Group>
         ) : null}
         {sentBack ? (
