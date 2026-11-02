@@ -1,5 +1,5 @@
-import { existsSync, watch as fsWatch } from 'node:fs';
-import { join, sep } from 'node:path';
+import { existsSync, lstatSync, readdirSync, watch as fsWatch, type Dirent } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import {
   ACTIVE_STATES,
   ClaimKind,
@@ -49,6 +49,8 @@ import {
 
 const WATCH_BATCH_MS = 500;
 const BULK_LISTED = 20;
+/** The most files a sensitive directory may hold and still be read as the base's own; more cards it. */
+const MAX_DIR_FILES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
 /**
  * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
@@ -98,6 +100,14 @@ export interface Watcher {
 }
 
 const STRAY_TITLE = 'Write outside every claim';
+
+function isRealDirectory(path: string): boolean {
+  try {
+    return lstatSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 export function createWatcher(deps: {
   readonly state: StateStore;
@@ -348,20 +358,72 @@ export function createWatcher(deps: {
   }
 
   /**
-   * Whether a sensitive path is a file HEAD holds that the checkout still matches: git doesn't report it as
-   * changed, yet it is tracked. Only a commit puts such a file there, and the commits that land without a
-   * lane's write are 10db's own (a base merge or fast-forward into the copy), so nobody's write is left to
-   * card. A sensitive path is flagged whether or not git reports it, because it can be ignored or untracked
-   * (`.env`, `.git/config`); those are in no commit, so they stay flagged, as does any edit or deletion of a
-   * tracked one. A path git can't be asked about stays flagged too.
+   * The commits 10db merges into a batch's copy from: the base branch as last fetched (base-update merges
+   * `refs/remotes/origin/<base>`, and fast-forwards to it when the branch has nothing of its own), and the
+   * base the batch records once merged. None for the main checkout, which 10db never merges into.
    */
-  async function committedAndClean(
+  function incomingBases(batchId: BatchId | null): string[] {
+    if (batchId === null) return [];
+    const batch = getBatch(db, batchId);
+    const bases = [`refs/remotes/origin/${batch.baseBranch}`];
+    if (batch.baseSha !== null) bases.push(batch.baseSha);
+    return bases;
+  }
+
+  /** Whether HEAD holds `rel` as a regular file with the very blob one of `bases` holds there. */
+  async function sameAsBase(root: string, rel: string, bases: readonly string[]): Promise<boolean> {
+    const head = await deps.git.blobAt(root, 'HEAD', rel).catch(() => null);
+    if (head === null) return false;
+    for (const base of bases)
+      if ((await deps.git.blobAt(root, base, rel).catch(() => null)) === head) return true;
+    return false;
+  }
+
+  /**
+   * The files under directory `rel`, relative to the checkout, leaving out Claude Code's bookkeeping; null
+   * when it holds anything but files and directories (a link, say) or more than `MAX_DIR_FILES` files.
+   */
+  function filesUnder(root: string, rel: string): string[] | null {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(join(root, rel), { recursive: true, withFileTypes: true });
+    } catch {
+      return null;
+    }
+    const files: string[] = [];
+    for (const entry of entries) {
+      if (entry.isDirectory()) continue;
+      const file = relative(root, join(entry.parentPath, entry.name)).split(sep).join('/');
+      if (isInsideClaudeCodeBookkeeping(file)) continue;
+      if (!entry.isFile() || files.length >= MAX_DIR_FILES) return null;
+      files.push(file);
+    }
+    return files;
+  }
+
+  /**
+   * Whether a sensitive path holds only what 10db's own base merge or fast-forward brought into the copy, so
+   * no lane's write is left to card. A file qualifies when git doesn't report it as changed and HEAD's blob
+   * for it is the incoming base's own: a file a lane committed (through the commit tool, before its batch
+   * ran) has a blob no base holds, so it still cards, as does any edit, deletion or untracked or ignored
+   * file (`.env`, `.git/config`). A directory qualifies when it holds at least one file, every file in it
+   * qualifies, and git reports nothing under it. A path git can't be asked about stays flagged.
+   */
+  async function onlyFromBase(
     root: string,
     rel: string,
     changed: ReadonlySet<string>,
+    bases: readonly string[],
   ): Promise<boolean> {
-    if (changed.has(rel)) return false;
-    return (await deps.git.blobAt(root, 'HEAD', rel).catch(() => null)) !== null;
+    if (bases.length === 0) return false;
+    if (!isRealDirectory(join(root, rel)))
+      return !changed.has(rel) && (await sameAsBase(root, rel, bases));
+    const files = filesUnder(root, rel);
+    if (files === null || files.length === 0) return false;
+    const reported = await deps.git.changedPaths(root, [rel]).catch(() => null);
+    if (reported === null || reported.length > 0) return false;
+    for (const file of files) if (!(await sameAsBase(root, file, bases))) return false;
+    return true;
   }
 
   async function processBatch(root: string, allPaths: readonly string[]): Promise<void> {
@@ -393,11 +455,13 @@ export function createWatcher(deps: {
     // claim over the whole repository covers a `.mcp.json` in it too. Claude Code's staging directory, as a
     // real directory, is its bookkeeping, and a sensitive directory holding only that is the `.claude/` a
     // session start made for it. Each one dropped as bookkeeping is logged.
+    // A sensitive path holding only what 10db's own base merge brought into the copy is no lane's write.
     const hidden: string[] = [];
+    const bases = incomingBases(batchId);
     for (const rel of paths) {
       if (changed.has(rel) && !isSensitivePath(rel)) continue;
       if (!isSensitivePath(rel) && !isInsideClaudeCodeBookkeeping(rel)) continue;
-      if (isSensitivePath(rel) && (await committedAndClean(entry.root, rel, changed))) continue;
+      if (isSensitivePath(rel) && (await onlyFromBase(entry.root, rel, changed, bases))) continue;
       if (!existsAsEntry(join(entry.root, rel))) continue;
       const bookkeeping = bookkeepingAt(entry.root, rel);
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
