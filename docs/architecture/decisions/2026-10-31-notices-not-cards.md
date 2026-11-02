@@ -87,10 +87,9 @@ by answering, so none "asks nothing". The Board already shows a refused task's l
 
 ## Open
 
-- The "Claim deadlock" card stays: two tasks wait on each other, which only the builder or the tasks' agents can
-  break, and it has no answer options yet. The start-refusal and ship-failure flag cards also stay as flags that say
-  what to fix and close themselves (`resolvesWhen`); giving every one of them an answer is not done here. The builder
-  agreed on 2026-10-31 that this change's "every card that remains offers a choice" covers only the cards it changed
-  (the wait, the conflict with the base, the unmerged pull request), and that a follow-up task gives the deadlock card
-  and the other flag cards real answers (proposal "Give every remaining Inbox flag card an answer, starting with
-  Claim deadlock").
+- The "Claim deadlock" card now offers answers the daemon acts on (each task yields its claim, or either is
+  cancelled; see `2026-10-29-per-copy-hazards-and-waiting-claims.md`). The start-refusal and ship-failure flag cards
+  still stay as flags that say what to fix and close themselves (`resolvesWhen`); giving every one of them an answer
+  is not done here. The builder agreed on 2026-10-31 that this change's "every card that remains offers a choice"
+  covers only the cards it changed (the wait, the conflict with the base, the unmerged pull request), and that
+  follow-up tasks give the other flag cards real answers.

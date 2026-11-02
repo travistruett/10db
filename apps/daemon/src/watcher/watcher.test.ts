@@ -360,6 +360,59 @@ describe('watcher', () => {
     ).toEqual(['.claude/settings.local.json', '.env']);
   });
 
+  describe('a sensitive file a commit brought in', () => {
+    /** Commits `rel` as a lane's commit-tool call does: the file arrives tracked, and the worktree equals HEAD. */
+    const commitFile = (rel: string) => {
+      touch(rel);
+      execFileSync('git', ['add', rel], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', `Add ${rel}`], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+    };
+
+    it.each(['apps/daemon/.env.example', '.mcp.json', '.claude/settings.json'])(
+      'still flags %s that a lane commits before its batch runs, since no base brought it',
+      async (rel) => {
+        running();
+        watcher.sync();
+        commitFile(rel);
+        emit(rel);
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([rel]);
+      },
+    );
+
+    it('still flags that file once a lane edits it', async () => {
+      running();
+      commitFile('apps/daemon/.env.example');
+      watcher.sync();
+      writeFileSync(join(repo.path, 'apps/daemon/.env.example'), 'KEY=lane');
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual(['apps/daemon/.env.example']);
+    });
+
+    it('still flags a lane that deletes it', async () => {
+      running();
+      commitFile('apps/daemon/.env.example');
+      watcher.sync();
+      rmSync(join(repo.path, 'apps/daemon/.env.example'));
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags()).toHaveLength(1);
+    });
+
+    it('still flags a new .env.example the lane wrote that no commit holds', async () => {
+      running();
+      watcher.sync();
+      touch('apps/daemon/.env.example');
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual(['apps/daemon/.env.example']);
+    });
+  });
+
   describe("Claude Code's write staging directory", () => {
     const staging = '.claude/.cc-writes';
     const staged = `${staging}/settings.local.json.tmp`;
@@ -1105,5 +1158,125 @@ describe('worktree checkouts', () => {
     writeFileSync(join(a.path, 'src/api.ts'), 'x');
     expect(await watcher.stepEnd(a.workstream.id)).toEqual(['src/api.ts']);
     expect(flags().map((f) => f.body)).toEqual([`${a.path}: src/api.ts`]);
+  });
+
+  describe("10db's own base merge into the copy", () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', args, { cwd, env: isolatedGitEnv(), stdio: 'pipe' }).toString().trim();
+    const MERGED = ['apps/daemon/.env.example', '.mcp.json', 'src/api/new.ts'];
+    const bodies = () =>
+      flags()
+        .map((f) => f.body)
+        .sort();
+
+    /**
+     * Commits `files` on a copy of main and points `refs/remotes/origin/main` at it, as a fetch of
+     * origin's newer commits does.
+     */
+    function upstream(files: readonly string[]): void {
+      const dir = tempDir('upstream');
+      dirs.push(dir);
+      const at = join(dir.path, 'up');
+      git(repo.path, 'worktree', 'add', '-q', '--detach', at, 'main');
+      for (const rel of files) {
+        mkdirSync(dirname(join(at, rel)), { recursive: true });
+        writeFileSync(join(at, rel), `base ${rel}`);
+      }
+      git(at, 'add', '--', ...files);
+      git(at, 'commit', '-q', '-m', 'upstream work');
+      git(repo.path, 'update-ref', 'refs/remotes/origin/main', git(at, 'rev-parse', 'HEAD'));
+    }
+    /** Merges origin/main into the copy's branch, as base-update does, and reports each path it wrote. */
+    function mergeBase(path: string, written: readonly string[]): void {
+      git(path, 'merge', '-q', '--no-edit', 'refs/remotes/origin/main');
+      for (const rel of written) fake.open.get(path)?.onChange(rel);
+    }
+    /** Commits `rel` in the copy as the lane's commit-tool call does. */
+    function laneCommit(path: string, rel: string, text = 'lane'): void {
+      mkdirSync(dirname(join(path, rel)), { recursive: true });
+      writeFileSync(join(path, rel), text);
+      git(path, 'add', '--', rel);
+      git(path, 'commit', '-q', '-m', `lane ${rel}`);
+      fake.open.get(path)?.onChange(rel);
+    }
+
+    it('raises no card for any merged file, .env.example included, after a merge commit', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      laneCommit(lane.path, 'src/ui/mine.ts');
+      upstream(MERGED);
+      mergeBase(lane.path, MERGED);
+      await watcher.flush();
+      expect(bodies()).toEqual([]);
+    });
+
+    it('raises no card for any merged file after a fast-forward to the base', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      upstream(MERGED);
+      mergeBase(lane.path, MERGED);
+      await watcher.flush();
+      expect(bodies()).toEqual([]);
+    });
+
+    it('raises no card for a new directory under .claude/ that the merge brought in', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      upstream(['.claude/skills/new-skill/SKILL.md', '.claude/skills/new-skill/refs/a.md']);
+      mergeBase(lane.path, [
+        '.claude/skills/new-skill',
+        '.claude/skills/new-skill/refs',
+        '.claude/skills/new-skill/SKILL.md',
+        '.claude/skills/new-skill/refs/a.md',
+      ]);
+      await watcher.flush();
+      expect(bodies()).toEqual([]);
+    });
+
+    it('still flags a merged .claude/ directory once a lane adds an untracked file to it', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      upstream(['.claude/skills/new-skill/SKILL.md']);
+      mergeBase(lane.path, []);
+      writeAt(lane.path, '.claude/skills/new-skill/extra.md');
+      fake.open.get(lane.path)?.onChange('.claude/skills/new-skill');
+      await watcher.flush();
+      expect(bodies()).toEqual([
+        `${lane.path}: .claude/skills/new-skill`,
+        `${lane.path}: .claude/skills/new-skill/extra.md`,
+      ]);
+    });
+
+    it('still flags a new .claude/ directory a lane made and committed', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      laneCommit(lane.path, '.claude/skills/mine/SKILL.md');
+      fake.open.get(lane.path)?.onChange('.claude/skills/mine');
+      await watcher.flush();
+      expect(bodies()).toEqual([
+        `${lane.path}: .claude/skills/mine`,
+        `${lane.path}: .claude/skills/mine/SKILL.md`,
+      ]);
+    });
+
+    it('still flags a .mcp.json the lane commits before its batch runs', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      laneCommit(lane.path, '.mcp.json');
+      await watcher.flush();
+      expect(bodies()).toEqual([`${lane.path}: .mcp.json`]);
+    });
+
+    it('still flags a lane commit that changes a .mcp.json the merge brought in', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      upstream(['.mcp.json']);
+      mergeBase(lane.path, ['.mcp.json']);
+      await watcher.flush();
+      expect(bodies()).toEqual([]);
+      laneCommit(lane.path, '.mcp.json', '{"lane":true}');
+      await watcher.flush();
+      expect(bodies()).toEqual([`${lane.path}: .mcp.json`]);
+    });
   });
 });
