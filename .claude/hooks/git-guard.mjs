@@ -446,6 +446,26 @@ const WRAPPERS = new Map([
 ]);
 
 /**
+ * True when an option word leaves its value to the next word. getopt takes a short option's value
+ * attached (`-CDIR`) or in the next word, so in a group of short options (`-iC DIR`) the value
+ * comes next only when the option that takes one is last. A long option takes its value in the next
+ * word unless it carries `=`, and getopt_long accepts any unambiguous prefix of a name, so a prefix
+ * of a listed long option counts (`--ch DIR`).
+ * @param {string} word starts with `-`
+ * @param {string[]} valueOptions
+ */
+function takesNextWord(word, valueOptions) {
+  if (word.startsWith('--')) {
+    if (word.includes('=')) return false;
+    return valueOptions.some((name) => name.startsWith('--') && name.startsWith(word));
+  }
+  for (let k = 1; k < word.length; k += 1) {
+    if (valueOptions.includes(`-${word[k]}`)) return k === word.length - 1;
+  }
+  return false;
+}
+
+/**
  * Index of the word after a wrapper's options and positional operands.
  * @param {string[]} words
  * @param {number} from index just past the wrapper word
@@ -458,7 +478,7 @@ function skipWrapperArguments(words, from, wrapper) {
       i += 1;
       break;
     }
-    i += wrapper.valueOptions.includes(words[i]) ? 2 : 1;
+    i += takesNextWord(words[i], wrapper.valueOptions) ? 2 : 1;
   }
   return Math.min(i + wrapper.operands, words.length);
 }
@@ -512,7 +532,8 @@ function gitSubcommand(words) {
     (w) =>
       // getopt takes a short option's value attached (`-CDIR`) or in the next word, and a
       // cluster can carry it (`-iCDIR`), so any C, D or R in a short option word counts.
-      /^(--chdir|--chroot)(=|$)/.test(w) ||
+      // A long option may be shortened to any prefix (`--ch`, `--chd=DIR`).
+      /^--(c|ch|chd|chdi|chdir|chr|chro|chroo|chroot)(=|$)/.test(w) ||
       /^-[A-Za-z]*[CDR]/.test(w) ||
       /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
   );
@@ -597,7 +618,7 @@ function envSplitString(words) {
     if (word === '--split-string' || /^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
     if (word.startsWith('--split-string=')) return word.slice('--split-string='.length);
     if (/^-[A-Za-z]*S./.test(word)) return word.slice(word.indexOf('S') + 1);
-    if (word === '-u' || word === '-C') j += 1;
+    if (takesNextWord(word, ['-u', '-C', '--unset', '--chdir'])) j += 1;
     else if (!word.startsWith('-') && !ENV_ASSIGNMENT.test(word)) break;
   }
   return null;
