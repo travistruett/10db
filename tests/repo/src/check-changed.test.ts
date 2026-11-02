@@ -286,7 +286,10 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     return { stdout: result.stdout, commands };
   }
 
-  const FOUR_STEPS = [
+  // The four per-package steps, plus knip and the docs rule tests, which `runPrecheckEverywhere` adds.
+  const EVERY_PACKAGE_STEPS = [
+    'pnpm exec knip',
+    'pnpm exec vitest run tests/repo/src/agent-docs.test.ts tests/repo/src/architecture-docs.test.ts',
     'pnpm run drift',
     'pnpm run format:check',
     'pnpm run lint',
@@ -298,7 +301,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     expect(run.stdout).toContain('pre-check over every package');
     expect(run.stdout).toContain('CHECK-CHANGED PASS');
     expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
-    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+    expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
     // Drift regenerates files in the tree, so it runs last.
     expect(run.commands.at(-1)).toBe('pnpm run drift');
   });
@@ -307,7 +310,7 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     const run = runWithStubs(['--precheck']);
     expect(run.stdout).toContain('no base branch to diff against');
     expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
-    expect([...run.commands].sort()).toEqual(FOUR_STEPS);
+    expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
   });
 
   it('does run the gate for the same unplaced file without --precheck', () => {
