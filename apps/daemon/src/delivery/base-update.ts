@@ -781,7 +781,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         await ctx.git.keepNote(path, mergeRef(ctx.worktreeRoot, batch.id), JSON.stringify(note));
       } catch (error) {
         ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base merge note not kept');
-        const reason = `10db couldn't keep the note of what to regenerate (${why(error)}), so it won't regenerate them once the conflicts in ${named(marked)} are resolved`;
+        // The migrations the base's directory dropped from the branch are only in the note, so
+        // name them here: otherwise the builder would diff against the merge's first parent.
+        const dropped = note.regenerate.flatMap((r) => r.dropped).filter((f) => f.endsWith('.sql'));
+        const lost =
+          dropped.length > 0
+            ? `, and the merge removed ${named(dropped)} from the branch, which nothing will check was made again`
+            : '';
+        const reason = `10db couldn't keep the note of what to regenerate (${why(error)}), so it won't regenerate them once the conflicts in ${named(marked)} are resolved${lost}`;
         unkept = `10db couldn't keep a note of this merge (${why(error)}), so the next gate won't know that ${named(marked)} still hold conflict markers.`;
         if (note.regenerate.length > 0)
           unkept = `${unregenerated(batch, path, merged, { why: reason, logPath: null, restored: false })} ${unkept}`;
