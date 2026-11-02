@@ -141,8 +141,24 @@ describe('starting a fix when a required check fails', () => {
 
     await begin(watcher());
 
-    const file = join(h.dataDir, 'logs', 'ci', `build-${head}.log`);
+    const file = join(h.dataDir, 'logs', 'ci', `build-77-${head}.log`);
     expect(readFileSync(file, 'utf8')).toBe(log);
+  });
+
+  it('keeps two failing jobs with the same name in two files', async () => {
+    const { root, head } = await shippedRoot();
+    fails(root.prUrl ?? '', job('test', '77'), job('test', '78'));
+    h.gh.setJobLog('77', { kind: 'ready', log: 'first workflow broke\n' });
+    h.gh.setJobLog('78', { kind: 'ready', log: 'second workflow broke\n' });
+
+    await begin(watcher());
+
+    const dir = join(h.dataDir, 'logs', 'ci');
+    expect(readFileSync(join(dir, `test-77-${head}.log`), 'utf8')).toBe('first workflow broke\n');
+    expect(readFileSync(join(dir, `test-78-${head}.log`), 'utf8')).toBe('second workflow broke\n');
+    const task = h.only(fixTasks());
+    expect(task.description).toContain(join(dir, `test-77-${head}.log`));
+    expect(task.description).toContain(join(dir, `test-78-${head}.log`));
   });
 
   it('names every failing job in one task, one criterion each', async () => {
