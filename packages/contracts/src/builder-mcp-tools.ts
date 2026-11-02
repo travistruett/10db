@@ -130,7 +130,7 @@ export const BUILDER_INSTRUCTIONS = [
   'Drafting a task (create_task, edit_task):',
   '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
-  "- Areas come from list_projects, for the project the task belongs to. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the riskTags migration or dependency; a task that touches neither names no hazard.",
+  "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the riskTags migration or dependency; a task that touches neither names no hazard.",
   '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
   '- Add dependsOn (ids of open tasks from list_tasks) and riskTags only when needed. Omit flowId to use the project default. Omit landing too: a new task lands where the project says by default.',
   '- Create the task without asking for confirmation, then report its title and id. The builder reads the board, and can edit or remove it.',
@@ -143,7 +143,7 @@ const DRAFTING =
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
-    'Lists 10db projects with their ids, areas (the names a task may use), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
+    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
   [BuilderToolName.ListFlows]:
     'Lists the flows, the step sequences a task can run through, with their ids. Omit flowId on create_task for the default.',
   [BuilderToolName.ListTasks]:

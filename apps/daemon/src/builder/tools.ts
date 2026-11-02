@@ -58,7 +58,11 @@ export function createBuilderTools(
       return services.listProjects().map((project) => ({
         id: project.id,
         name: project.name,
-        areas: project.areas.map((area) => ({ name: area.name, globs: area.globs })),
+        areas: project.areas.map((area) => ({
+          name: area.name,
+          globs: area.globs,
+          ...(area.catchAll === true ? { catchAll: true } : {}),
+        })),
         hazards: project.hazards.map((hazard) => ({ name: hazard.name, globs: hazard.globs })),
         isolate: project.isolate,
         columns: services
