@@ -159,8 +159,14 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
   expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
 
-  // One task per batch: no strip above the columns, and the batch history is Factory's, not the Board's.
-  await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+  // One task per batch: no batch strip, so the only strip above the columns is the seeded goal's
+  // (it has an open task), and the batch history is Factory's, not the Board's.
+  const above = page.getByTestId('board-above-columns');
+  await expect(above.getByTestId('goal-strip')).toHaveCount(1);
+  await expect(above.getByRole('button', { name: GOAL_TITLE })).toBeVisible();
+  for (const { title } of OPEN_BATCHES) {
+    await expect(above.getByText(title)).toHaveCount(0);
+  }
   await expect(page.getByRole('button', { name: /^Batches \(\d+\)$/ })).toHaveCount(0);
   for (const { title } of OPEN_BATCHES) {
     await expect(page.getByRole('listitem', { name: title })).toBeAttached();
@@ -224,7 +230,7 @@ test.describe('the Board with several open batches', () => {
       await expectColumnsUsable(page);
       await expect(columnHeader(page)).toBeInViewport();
       if (size.roomy) {
-        // Nothing above the Board: it fills the window and the page does not scroll.
+        // Only the one goal strip above the columns: the Board fills the window and the page does not scroll.
         expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight - window.innerHeight,
