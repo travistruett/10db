@@ -630,8 +630,13 @@ function envSplitString(words) {
   if (envAt < 0) return null;
   for (let j = envAt + 1; j < words.length; j += 1) {
     const word = words[j];
-    if (word === '--split-string' || /^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
-    if (word.startsWith('--split-string=')) return word.slice('--split-string='.length);
+    // getopt_long takes any unambiguous prefix of a long option; `--s` is already unique to
+    // --split-string among env's options.
+    const long = /^--(s[a-z-]*)(=|$)/.exec(word);
+    if (long && '--split-string'.startsWith(`--${long[1]}`)) {
+      return long[2] === '=' ? word.slice(long[0].length) : (words[j + 1] ?? null);
+    }
+    if (/^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
     if (/^-[A-Za-z]*S./.test(word)) return word.slice(word.indexOf('S') + 1);
     if (takesNextWord(word, ['-u', '-C', '--unset', '--chdir'])) j += 1;
     else if (!word.startsWith('-') && !ENV_ASSIGNMENT.test(word)) break;

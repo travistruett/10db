@@ -1191,6 +1191,15 @@ describe('worktree checkouts', () => {
           });
         });
       };
+      /**
+       * Commits `rel` with an op trailer as the commit tool would, but records it for no lane: a commit another
+       * lane made elsewhere that a fast-forward or rebase-pull brought into this checkout, trailer and all.
+       */
+      const pulledCommit = (root: string, rel: string) => {
+        git(root, 'add', rel);
+        opCount += 1;
+        git(root, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
+      };
       /** Commits `rel` as the builder would, with no op trailer. */
       const builderCommit = (root: string, rel: string) => {
         git(root, 'add', rel);
@@ -1239,6 +1248,21 @@ describe('worktree checkouts', () => {
           expect(bulk()).toHaveLength(1);
           writeAt(repo.path, 'docs/builder.md');
           builderCommit(repo.path, 'docs/builder.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it("resolves once the lane covers its writes, although a pull brought in another lane's commit with an op trailer", async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          // A commit another lane made elsewhere with the commit tool, fast-forwarded in: its trailer stays,
+          // but no lane here recorded it.
+          writeAt(repo.path, 'docs/pulled.md');
+          pulledCommit(repo.path, 'docs/pulled.md');
           grantUi(lane);
           await watcher.flush();
           expect(flags()).toEqual([]);

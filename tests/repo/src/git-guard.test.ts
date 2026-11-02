@@ -736,6 +736,22 @@ describe('git guard judging a push in the directory the command runs in', () => 
     expect(run(command, worktree)).toBe('allow');
   });
 
+  // env takes any unambiguous prefix of --split-string (`--s` is the only long option starting
+  // with s), with the string in the next word or after `=`, and runs it as a command line.
+  it.each<[string, string]>([
+    ['env -S', "env -S 'git push'"],
+    ['env --split-string', "env --split-string 'git push'"],
+    ['env --split-string=', "env --split-string='git push'"],
+    ['env --split', "env --split 'git push'"],
+    ['env --spl=', "env --spl='git push'"],
+    ['env --s', "env --s 'git push'"],
+    ['env -i --sp', "env -i --sp 'git push'"],
+    ['env --unset VAR --split', "env --unset VAR --split 'git push'"],
+  ])('judges the command a split-string option runs: %s', (_name, command) => {
+    expect(run(command, checkout.dir)).toBe('ask');
+    expect(run(command, worktree)).toBe('allow');
+  });
+
   it('judges a cd to the main checkout from a session directory in the worktree', () => {
     expect(run('cd MAIN && git push', worktree)).toBe('ask');
     expect(run('cd .. && git push', onMainSub)).toBe('ask');
