@@ -6,7 +6,10 @@
 
 `make install-app [REF=main]` (`scripts/release/install-app.sh`) installs 10db from the `unsigned-dmg` artifact of
 `release-dry-run.yml`. It uses the newest successful run for the ref's head commit, else a run of that commit
-still queued or in progress, else a run it starts with `gh workflow run`; it waits with a deadline. REF is a
+still queued or in progress, else a run it starts with `gh workflow run`; it waits with a deadline.
+`release-dry-run.yml` runs on every push to `main` as well as by hand (`workflow_dispatch`), so main's build
+usually exists already when the install looks, and the dispatch is the fallback for a ref other than main or a
+build that failed. REF is a
 branch or tag; a commit SHA is refused, because GitHub dispatches a workflow only on a branch or tag. Make takes
 REF from its command line only, never from the environment.
 
