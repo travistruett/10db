@@ -11,7 +11,14 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { WorkspaceMode, type BatchDto, type TaskDto } from '@10db/contracts';
-import { getBatch, insertWorkstream, listBatches, listWorkstreams } from '@10db/db';
+import {
+  getBatch,
+  getTask,
+  insertWorkstream,
+  listBatches,
+  listWorkstreams,
+  patchTask,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -348,6 +355,24 @@ describe('seeding a new copy', () => {
     h.shipper.abandon(sharedBatch.id);
     await h.jobs.idle();
     expect(getBatch(h.store.db, sharedBatch.id).state).toBe('ABANDONED');
+    const batch = await startedOne(copy('Copied'));
+    expect(batch.state).toBe('OPEN');
+    expect(cloned(batch)).toBe(false);
+    expect(installsIn(batch)).toHaveLength(1);
+  });
+
+  it('does not clone after a shared lane ran, even once its task has moved to a copy', async () => {
+    withInstalledProject();
+    const alpha = shared('Alpha');
+    const sharedBatch = await startedOne(alpha);
+    const lane = h.only(listWorkstreams(h.store.db, { batchId: sharedBatch.id }));
+    h.settle(lane.id, 'FAILED');
+    writeFileSync(join(h.repo, 'node_modules/pkg/index.js'), 'module.exports = "lane";\n');
+    // Its run has ended and the task is still open, so the builder may send it to a copy.
+    h.state.write((c) => patchTask(c, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    expect(getTask(h.store.db, alpha.id).workspaceMode).toBe(WorkspaceMode.Worktree);
+    h.shipper.abandon(sharedBatch.id);
+    await h.jobs.idle();
     const batch = await startedOne(copy('Copied'));
     expect(batch.state).toBe('OPEN');
     expect(cloned(batch)).toBe(false);

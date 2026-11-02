@@ -418,6 +418,12 @@ export const workstreams = sqliteTable(
     batchId: text('batch_id')
       .$type<BatchId>()
       .references(() => batches.id),
+    /**
+     * Where the run works: its task's placement when the run was made, which can't change while the
+     * run is active. Kept after the task's placement changes, so a shared lane stays one for good
+     * (`sharedLaneRan`). Null on a row made before migration 0022; readers fall back to the task's.
+     */
+    workspaceMode: text('workspace_mode').$type<WorkspaceMode>(),
     state: text('state').$type<WorkstreamState>().notNull(),
     nextAction: text('next_action', { mode: 'json' }).$type<NextAction>().notNull(),
     attempt: integer('attempt').notNull(),

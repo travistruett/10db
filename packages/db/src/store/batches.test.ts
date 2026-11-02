@@ -28,6 +28,7 @@ import {
   insertSession,
   insertTask,
   insertWorkstream,
+  patchTask,
   latestDoneWorkstream,
   listBatches,
   listCheckoutReturns,
@@ -343,6 +344,20 @@ describe('worktree batches', () => {
       expect(sharedLaneRan(store.db, project.id)).toBe(true);
       // Another project's shared lane is not this project's.
       expect(sharedLaneRan(store.db, prProject().id)).toBe(false);
+    });
+
+    it('goes by where the run worked, not where its task would run now', () => {
+      const project = prProject();
+      const wasShared = taskIn(project.id, 'shared');
+      run(workstreamOf(wasShared.id).id, 'STARTING', 'RUNNING', 'FAILED');
+      store.write((ctx) => patchTask(ctx, wasShared.id, { workspaceMode: 'worktree' }));
+      expect(sharedLaneRan(store.db, project.id)).toBe(true);
+
+      const other = prProject();
+      const wasCopy = taskIn(other.id, 'worktree');
+      run(workstreamOf(wasCopy.id).id, 'STARTING', 'RUNNING', 'FAILED');
+      store.write((ctx) => patchTask(ctx, wasCopy.id, { workspaceMode: 'shared' }));
+      expect(sharedLaneRan(store.db, other.id)).toBe(false);
     });
 
     it('is true for a cancelled shared workstream that had a session', () => {
