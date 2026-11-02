@@ -1330,6 +1330,30 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-kept');
   });
 
+  it('names the files a later gate is blocked by, not the ones a launch named, when the notice is showing', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    h.teammatePush('main', 'src/x.ts', 'export const x = 2;\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    const launched = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(launched.key).toBe('base-uncommitted');
+    expect(launched.line).toContain('README.md');
+    // README.md is committed (as the base has it); src/x.ts is now the uncommitted change in the way.
+    await commitOnBatch(batch, 'README.md', '# theirs\n');
+    mkdirSync(join(path, 'src'), { recursive: true });
+    writeFileSync(join(path, 'src', 'x.ts'), 'export const x = 1; // mid-edit\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice.key).toBe('base-uncommitted');
+    expect(notice.line).toContain('src/x.ts');
+    expect(notice.line).not.toContain('README.md');
+    expect(notice.body).not.toContain('README.md');
+  });
+
   it('shows no launch notice for uncommitted changes a gate meets', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened();

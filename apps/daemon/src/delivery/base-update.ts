@@ -769,8 +769,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
           });
         // A gate's note says it ran without the base; a lane launching has no gate note, so the
-        // batch's tasks are told it started on the stale copy.
-        if (changed.length > 0 && options.atLaunch)
+        // batch's tasks are told it started on the stale copy. A gate meeting a notice that is already
+        // showing brings it up to date, so it names the files in the way now, not the ones a launch saw.
+        const showing = batch.notices.some((n) => n.key === NOTICE_KEY.baseUncommitted);
+        if (changed.length > 0 && (options.atLaunch || showing))
           tell(batch, () => {
             showNotice(ctx.state, batch.id, baseNotices.uncommitted(batch, changed));
           });
