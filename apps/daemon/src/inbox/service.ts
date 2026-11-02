@@ -72,6 +72,8 @@ interface AskInput {
   readonly urgency: Urgency;
   readonly detail: Record<string, Json> | null;
   readonly signal: AbortSignal;
+  /** The card folds only with the same lane's identical asks, never with another lane's. */
+  readonly foldPerLane?: boolean;
 }
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
@@ -185,13 +187,17 @@ function optionsForTargets(
   );
 }
 
-/** Identical open questions fold into one card. */
+/** Identical open questions fold into one card; with `foldPerLane`, only one lane's. */
 function foldKeyFor(
-  input: Pick<AskInput, 'projectId' | 'kind' | 'title' | 'body' | 'options'>,
+  input: Pick<
+    AskInput,
+    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane'
+  >,
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
     input.projectId,
+    ...(input.foldPerLane === true ? [input.workstreamId] : []),
     input.kind,
     norm(input.title),
     norm(input.body),

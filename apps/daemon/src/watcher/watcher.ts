@@ -50,6 +50,7 @@ import {
   isDeletionStamp,
   relativeIn,
   ruleAllowances,
+  stampMatchesExpected,
   unstampedReason,
   writeStamp,
 } from './allowed-writes';
@@ -478,13 +479,13 @@ export function createWatcher(deps: {
         continue;
       }
       const keys = lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
-      const unused = cards.find(
+      const unusedCards = cards.filter(
         ({ rel, a }) =>
           rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
       );
       // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
       // is read; any other write is carded as it is.
-      if (keys.length === 0 && unused === undefined) continue;
+      if (keys.length === 0 && unusedCards.length === 0) continue;
       const stamp = writeStamp(root, path);
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
@@ -495,6 +496,18 @@ export function createWatcher(deps: {
         for (const k of keys) excusedWrites.delete(k);
         persistExcusedWrites();
       }
+      // A card that records the file its lane's allowed call makes excuses only that exact file: the watcher
+      // can't tell which lane wrote it, but another lane's write to the same path is not what the builder
+      // approved, and it leaves the card unused for the write that is. A card that asks for that exact write
+      // with none recorded (a NotebookEdit, a file the broker couldn't read) excuses no settled write. A file
+      // with no stamp goes on to the fail-closed handling below, which checks the write once it settles.
+      const unused = unusedCards.find(
+        ({ a }) =>
+          a.expected === undefined ||
+          (stamp === null
+            ? a.expected !== null
+            : a.expected !== null && stampMatchesExpected(stamp, a.expected)),
+      );
       const lane = unused?.a.workstreamId;
       const use = unused?.a.useKey;
       if (lane == null || use == null) continue;

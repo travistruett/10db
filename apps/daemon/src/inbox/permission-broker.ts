@@ -4,13 +4,14 @@ import {
   Urgency,
   type InboxAnswer,
   type InboxItemDto,
+  type InboxItemId,
   type HazardDef,
   type InboxOption,
   type ProjectId,
   type SessionId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { listPermissionRules } from '@10db/db';
+import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
@@ -23,7 +24,15 @@ import {
   unreadableHazard,
 } from '../guard';
 import type { Logger } from '../log';
-import { foundHostFile, matchPermissionRule, storableRule } from '../permissions';
+import {
+  ALLOWED_WRITES_KEY,
+  allowedWriteHash,
+  allowedWritesIn,
+  EXACT_WRITE_KEY,
+  foundHostFile,
+  matchPermissionRule,
+  storableRule,
+} from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
@@ -41,8 +50,15 @@ interface BrokerContext {
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
   readonly signal: AbortSignal;
-  /** An `allow_once` answered after the workstream was parked: the first identical call is allowed. */
-  readonly allowOnce?: { readonly toolName: string; readonly summary: string } | null;
+  /**
+   * An `allow_once` answered after the workstream was parked: the first identical call is allowed, and an
+   * edit's write is recorded on the card it answered (`cardId`).
+   */
+  readonly allowOnce?: {
+    readonly toolName: string;
+    readonly summary: string;
+    readonly cardId?: InboxItemId;
+  } | null;
   /**
    * Present for a sandboxed lane: its commands run without a card unless they are hazards, its
    * unlisted hosts are refused and asked about, and its file tools are judged by real path.
@@ -179,14 +195,21 @@ function summarize(req: ToolRequest): string {
  * The file an edit call writes, for its card's detail: the watcher reads it to tell that the builder allowed
  * the write and raises no stray-write card for it. A sandboxed lane's is the real path the judge resolved.
  */
-function editedPath(req: ToolRequest, ask: Ask | null): { path?: string } {
-  if (!EDIT_FAMILY.has(req.toolName)) return {};
+function editedPath(req: ToolRequest, ask: Ask | null): string | null {
+  if (!EDIT_FAMILY.has(req.toolName)) return null;
   const [real, ...more] = ask?.realPaths ?? [];
-  const path =
-    real !== undefined && more.length === 0
-      ? real
-      : (stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path'));
-  return path === null ? {} : { path };
+  return real !== undefined && more.length === 0
+    ? real
+    : (stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path'));
+}
+
+/**
+ * An edit card's detail: its file, and the mark that it excuses only the exact write its allowed call makes
+ * (`recordAllowedWrite`), so the watcher never takes another lane's write to the same file for it.
+ */
+function editDetail(req: ToolRequest, ask: Ask | null): Record<string, string | boolean> {
+  const path = editedPath(req, ask);
+  return path === null ? {} : { path, [EXACT_WRITE_KEY]: true };
 }
 
 /** Decides every canUseTool call: stored rules first, then a card for the builder. Never an LLM. */
@@ -239,6 +262,35 @@ export function createPermissionBroker(
     return { behavior: 'allow', updatedInput: { ...req.input, answers } };
   }
 
+  /**
+   * Records on the card `cardId` the file the allowed edit call `req` leaves, for this lane: the file as it is
+   * now with the call applied as Claude Code applies it, hashed. Claude Code writes it next, so the watcher
+   * excuses that exact write and no other lane's to the same file; a write that lands in between makes the
+   * call's own write differ, and it is carded. A call whose result can't be told (a NotebookEdit, a file that
+   * can't be read) records nothing, and its write is carded.
+   */
+  function recordAllowedWrite(cardId: InboxItemId, req: ToolRequest, ask: Ask | null): void {
+    const path = editedPath(req, ask);
+    if (path === null) return;
+    const hash = allowedWriteHash(req.toolName, req.input, path);
+    if (hash === undefined) return;
+    try {
+      deps.state.write((w) => {
+        const item = getInboxItem(w.tx, cardId);
+        const detail = item.detail ?? {};
+        updateInboxItem(w, cardId, {
+          detail: {
+            ...detail,
+            [ALLOWED_WRITES_KEY]: { ...allowedWritesIn(detail), [ctx.workstreamId]: hash },
+          },
+        });
+      });
+    } catch (error) {
+      // Without the record the write is carded, never excused: the builder sees it again.
+      deps.logger.warn({ err: error, cardId }, 'could not record the write an allowed edit makes');
+    }
+  }
+
   async function askPermission(req: ToolRequest, ask: Ask | null = null): Promise<ToolDecision> {
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
@@ -253,7 +305,9 @@ export function createPermissionBroker(
     }
     const summary = ask?.summary ?? summarize(req);
     if (!req.escalated && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
+      const { cardId } = allowOnce;
       allowOnce = null;
+      if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
       return { behavior: 'allow' };
     }
     const storable =
@@ -270,12 +324,19 @@ export function createPermissionBroker(
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
-      detail: { toolName: req.toolName, summary, ...editedPath(req, ask) },
+      detail: { toolName: req.toolName, summary, ...editDetail(req, ask) },
       signal: ctx.signal,
+      // An edit's result depends on the file it lands on. Folded with another lane's, both lanes would read the
+      // file on the one answer, before either writes, and the second write would match neither record.
+      // A Write's content doesn't depend on the file, so Writes still fold.
+      foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
     });
     const result = await wait(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
-    if (ALLOWING.includes(result.choice)) return { behavior: 'allow' };
+    if (ALLOWING.includes(result.choice)) {
+      recordAllowedWrite(item.id, req, ask);
+      return { behavior: 'allow' };
+    }
     return {
       behavior: 'deny',
       message: denialMessage(req.toolName, summary, result.note),
