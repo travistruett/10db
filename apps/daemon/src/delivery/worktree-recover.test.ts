@@ -213,6 +213,59 @@ async function expectCutAgain(batch: BatchDto, path: string, branch: string): Pr
 }
 
 describe('recoverBatches with worktrees', () => {
+  it('says the branch is unused on every copy of one start whose cuts a restart repeats', async () => {
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const noJobs: DeliveryJobs = {
+      run: () => undefined,
+      idle: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    };
+    const landing = { landing: { kind: 'branch', branch: 'feature/x' } } as const;
+    const started = createBatchStarter({ ...h.ctx, jobs: noJobs }).startBatch(h.project.id, {
+      title: 'Together',
+      taskIds: [h.addTask('Alpha', landing).id, h.addTask('Beta', landing).id],
+    });
+    expect(started).toHaveLength(2);
+
+    const report = await recover();
+    await h.jobs.idle();
+
+    expect(report.recut.sort()).toEqual(started.map((b) => b.id).sort());
+    for (const { id } of started) {
+      const batch = getBatch(h.store.db, id);
+      expect(batch.state).toBe('OPEN');
+      expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
+    }
+    // The record of the start goes once its cuts are done.
+    for (const { id } of started)
+      expect(getAppSetting(h.store.db, `start_siblings.${id}`)).toBeUndefined();
+  });
+
+  it('still counts a batch of another start as use of the branch when a restart repeats a cut', async () => {
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const noJobs: DeliveryJobs = {
+      run: () => undefined,
+      idle: () => Promise.resolve(),
+      stop: () => Promise.resolve(),
+    };
+    const landing = { landing: { kind: 'branch', branch: 'feature/x' } } as const;
+    const starter = createBatchStarter({ ...h.ctx, jobs: noJobs });
+    const first = starter.startBatch(h.project.id, {
+      title: 'First',
+      taskIds: [h.addTask('Alpha', landing).id],
+    });
+    const second = starter.startBatch(h.project.id, {
+      title: 'Second',
+      taskIds: [h.addTask('Beta', landing).id],
+    });
+
+    await recover();
+    await h.jobs.idle();
+
+    for (const { id } of [...first, ...second])
+      expect(getBatch(h.store.db, id).notices.map((n) => n.key)).toEqual([]);
+  });
+
   it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
     // A branch with a commit origin's base lacks can't be removed to cut again, so this cut is not repeated.
     const { batch, branch } = cuttingRow();
