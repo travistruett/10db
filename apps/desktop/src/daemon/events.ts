@@ -23,6 +23,7 @@ const CANDIDATES: QueryKey = ['candidates'];
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects, CANDIDATES],
   task: [['tasks'], goalKeys.all, CANDIDATES],
+  // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
