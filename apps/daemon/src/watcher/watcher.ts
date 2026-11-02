@@ -347,6 +347,23 @@ export function createWatcher(deps: {
     });
   }
 
+  /**
+   * Whether a sensitive path is a file HEAD holds that the checkout still matches: git doesn't report it as
+   * changed, yet it is tracked. Only a commit puts such a file there, and the commits that land without a
+   * lane's write are 10db's own (a base merge or fast-forward into the copy), so nobody's write is left to
+   * card. A sensitive path is flagged whether or not git reports it, because it can be ignored or untracked
+   * (`.env`, `.git/config`); those are in no commit, so they stay flagged, as does any edit or deletion of a
+   * tracked one. A path git can't be asked about stays flagged too.
+   */
+  async function committedAndClean(
+    root: string,
+    rel: string,
+    changed: ReadonlySet<string>,
+  ): Promise<boolean> {
+    if (changed.has(rel)) return false;
+    return (await deps.git.blobAt(root, 'HEAD', rel).catch(() => null)) !== null;
+  }
+
   async function processBatch(root: string, allPaths: readonly string[]): Promise<void> {
     const entry = watched.get(root);
     if (!entry) return;
@@ -380,6 +397,7 @@ export function createWatcher(deps: {
     for (const rel of paths) {
       if (changed.has(rel) && !isSensitivePath(rel)) continue;
       if (!isSensitivePath(rel) && !isInsideClaudeCodeBookkeeping(rel)) continue;
+      if (isSensitivePath(rel) && (await committedAndClean(entry.root, rel, changed))) continue;
       if (!existsAsEntry(join(entry.root, rel))) continue;
       const bookkeeping = bookkeepingAt(entry.root, rel);
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);

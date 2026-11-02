@@ -360,6 +360,60 @@ describe('watcher', () => {
     ).toEqual(['.claude/settings.local.json', '.env']);
   });
 
+  describe('a sensitive file a commit brought in', () => {
+    /** Commits `rel` as the base merge does: the file arrives tracked, and the worktree equals HEAD. */
+    const commitFile = (rel: string) => {
+      touch(rel);
+      execFileSync('git', ['add', rel], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', `Add ${rel}`], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+    };
+
+    it.each(['apps/daemon/.env.example', '.mcp.json', '.claude/settings.json'])(
+      'raises no card for %s when the worktree matches HEAD, as after 10db merges the base',
+      async (rel) => {
+        running();
+        watcher.sync();
+        commitFile(rel);
+        emit(rel);
+        emit('src/api/other.ts');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      },
+    );
+
+    it('still flags that file once a lane edits it', async () => {
+      running();
+      commitFile('apps/daemon/.env.example');
+      watcher.sync();
+      writeFileSync(join(repo.path, 'apps/daemon/.env.example'), 'KEY=lane');
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual(['apps/daemon/.env.example']);
+    });
+
+    it('still flags a lane that deletes it', async () => {
+      running();
+      commitFile('apps/daemon/.env.example');
+      watcher.sync();
+      rmSync(join(repo.path, 'apps/daemon/.env.example'));
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags()).toHaveLength(1);
+    });
+
+    it('still flags a new .env.example the lane wrote that no commit holds', async () => {
+      running();
+      watcher.sync();
+      touch('apps/daemon/.env.example');
+      emit('apps/daemon/.env.example');
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual(['apps/daemon/.env.example']);
+    });
+  });
+
   describe("Claude Code's write staging directory", () => {
     const staging = '.claude/.cc-writes';
     const staged = `${staging}/settings.local.json.tmp`;
