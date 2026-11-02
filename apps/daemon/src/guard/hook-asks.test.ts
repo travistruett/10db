@@ -297,6 +297,16 @@ describe('a hazard program with a word 10db cannot read asks while a hazard is u
   });
 });
 
+describe('arithmetic over a name the command can rebind', () => {
+  it('asks when a nameref can write the name arithmetic reads', () => {
+    expect(bash("declare -n r=s; s=1; r='a[$(id)]'; echo $((s+1))")).toBe('ask');
+  });
+
+  it('allows a timing check over a name set only to numbers', () => {
+    expect(bash('s=$(date +%s); make check; echo $(( $(date +%s) - s ))')).toBe('allow');
+  });
+});
+
 describe('a word the shell fills in, only as an argument to a fixed program, is read', () => {
   it.each([
     // The three read-only checks lanes ran on 2026-11-01.
