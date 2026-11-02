@@ -163,6 +163,16 @@ export interface Gh {
     },
     call: GhCall,
   ): Promise<string>;
+  /**
+   * Whether the open pull request waits in its base's merge queue. A push to its branch takes it out
+   * of the queue, so 10db pushes nothing to one that does. Throws a GhError, never answers `false`,
+   * for any failure of the call itself or an answer without the field, so an unread queue is never
+   * taken for an empty one. (gh's `pr view --json` has no merge queue field, so this is a GraphQL read.)
+   */
+  prInMergeQueue(
+    input: { readonly repo: string; readonly url: string },
+    call: GhCall,
+  ): Promise<boolean>;
   /** Whether the repository lets a pull request merge by itself once its required checks pass. */
   repoAllowsAutoMerge(repo: string, call: GhCall): Promise<boolean>;
   /**
@@ -309,6 +319,15 @@ export function createSystemGhExec(tools: GhTools): GhExec {
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
 /** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
 const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
+
+/** The merge queue read: `isInMergeQueue` is the pull request's own field in GitHub's GraphQL schema. */
+const MergeQueueView = z.object({
+  data: z.object({
+    repository: z.object({ pullRequest: z.object({ isInMergeQueue: z.boolean() }) }),
+  }),
+});
+const MERGE_QUEUE_QUERY =
+  'query($owner: String!, $name: String!, $number: Int!) { repository(owner: $owner, name: $name) { pullRequest(number: $number) { isInMergeQueue } } }';
 
 /**
  * A pull request URL in `repo` (`owner/name`), on any GitHub host: https and
@@ -694,6 +713,30 @@ export function createGh(exec: GhExec): Gh {
         if (url.success) return url.data;
       }
       throw new GhError(GhFailure.Failed, `gh pr create printed no pull request URL for ${repo}`);
+    },
+    async prInMergeQueue({ repo, url }, call) {
+      const args = ['api', 'graphql'];
+      const [owner, name] = repo.split('/');
+      const number = prUrlIn(repo).safeParse(url).success
+        ? /\/pull\/(\d+)$/.exec(new URL(url).pathname)?.[1]
+        : undefined;
+      if (owner === undefined || name === undefined || number === undefined)
+        throw new GhError(
+          GhFailure.Failed,
+          `gh api graphql was given ${JSON.stringify(url.slice(0, 200))}, which is no pull request of ${repo}`,
+        );
+      args.push(
+        '-f',
+        `query=${MERGE_QUEUE_QUERY}`,
+        '-f',
+        `owner=${owner}`,
+        '-f',
+        `name=${name}`,
+        '-F',
+        `number=${number}`,
+      );
+      return parseOutput(MergeQueueView, args, await ok(args, call)).data.repository.pullRequest
+        .isInMergeQueue;
     },
     async repoAllowsAutoMerge(repo, call) {
       const args = ['api', `repos/${repo}`];

@@ -734,6 +734,32 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(now.notices).toEqual([]);
   });
 
+  // A push takes a pull request out of its base's merge queue. The watch read it a round ago, and
+  // the queue may have taken it since, so the job reads the queue itself before it pushes anything.
+  it('pushes nothing to a pull request that is in the merge queue, nor when the queue cannot be read', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const before = onOrigin(batch.branch);
+    const url = conflicts(batch);
+    h.gh.setInMergeQueue(url, true);
+    const now = await catchUp(batch);
+    expect(onOrigin(batch.branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+    expect(h.gh.calls.some((c) => c.method === 'prInMergeQueue')).toBe(true);
+
+    h.gh.setInMergeQueue(url, false);
+    h.gh.failQueueRead.set(url, new GhError('failed', 'HTTP 502'));
+    await catchUp(batch);
+    expect(onOrigin(batch.branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+
+    // Out of the queue and readable, the same pull request is caught up.
+    h.gh.failQueueRead.delete(url);
+    await catchUp(batch);
+    expect(onOrigin(batch.branch)).not.toBe(before);
+  });
+
   it('is left to the builder when the batch did not ask to be merged by itself', async () => {
     h.close();
     h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
@@ -846,6 +872,20 @@ describe('a shipped pull request whose head never got its required checks', () =
     expect(h.cards()).toEqual([]);
     expect(now.notices).toEqual([]);
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+  });
+
+  it('pushes nothing to a pull request in the merge queue, which reads BLOCKED with no checks', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    const url = waitsForChecks(batch);
+    h.gh.setInMergeQueue(url, true);
+
+    const now = await restartCi(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    expect(now.notices).toEqual([]);
+    expect(h.cards()).toEqual([]);
   });
 
   it('pushes nothing to a pull request held for the builder', async () => {

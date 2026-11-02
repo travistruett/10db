@@ -243,10 +243,15 @@ export const RequiredChecksState = {
 } as const;
 export type RequiredChecksState = ValueOf<typeof RequiredChecksState>;
 
-/** Why GitHub will not merge a pull request as it is; 10db resolves neither. */
+/**
+ * Why GitHub will not merge a pull request as it is. 10db resolves neither `conflicts` nor `behind`.
+ * `queued` is no fault: the pull request waits in its base's merge queue, where a push to its branch
+ * would take it out, so 10db pushes nothing to it.
+ */
 export const PullRequestMergeBlocked = {
   Conflicts: 'conflicts',
   Behind: 'behind',
+  Queued: 'queued',
 } as const;
 export type PullRequestMergeBlocked = ValueOf<typeof PullRequestMergeBlocked>;
 

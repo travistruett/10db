@@ -267,7 +267,7 @@ export const batches = sqliteTable(
     prUnknownReason: text('pr_unknown_reason'),
     /** The pull request's required checks as the watch last read them; kept on the root batch. */
     prRequired: text('pr_required', { mode: 'json' }).$type<StoredRequiredChecks>(),
-    /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`). */
+    /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`), or `queued`: it waits in the merge queue. */
     prMergeBlocked: text('pr_merge_blocked').$type<PullRequestMergeBlocked>(),
     /** A CI fix batch's root batch and the pull request head it fixes; null on any other batch. */
     ciFixOf: text('ci_fix_of')
