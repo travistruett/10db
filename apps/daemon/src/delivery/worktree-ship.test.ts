@@ -21,6 +21,7 @@ import { createInboxService } from '../inbox';
 import { retryWorkstream } from '../team';
 import {
   batchCardFields,
+  createBaseUpdates,
   createBatchCardAnswers,
   ensureWorktreeWhole,
   retireWorktree,
@@ -883,4 +884,35 @@ describe('a finished worktree with git-ignored files', () => {
       expect(h.cards()).toEqual([]);
     },
   );
+});
+
+describe('shipping a batch whose branch still holds the markers of the base merge', () => {
+  /** A task's gate merged the base with its markers; the member then failed at its retry limit. */
+  async function markedBatch() {
+    const { batch, ws } = await opened();
+    await commitIn(batch, 'README.md');
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const update = await createBaseUpdates(h.ctx).beforeGate(
+      batch.id,
+      new AbortController().signal,
+      { inSession: true },
+    );
+    expect(update.kind).toBe('conflicted');
+    h.settle(ws.id, 'DONE');
+    return batch;
+  }
+
+  it('runs no gate, pushes nothing, and raises one card naming the marked files', async () => {
+    const batch = await markedBatch();
+    h.shipper.ship(batch.id);
+    await h.jobs.idle();
+
+    expect(existsSync(gateOut)).toBe(false);
+    expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
+    expect(onOrigin(batch.branch)).toBeNull();
+    const card = h.only(h.cards());
+    expect(card.title).toContain('conflict markers');
+    expect(card.body).toContain('README.md');
+    expect(card.body).not.toContain('gate failed');
+  });
 });
