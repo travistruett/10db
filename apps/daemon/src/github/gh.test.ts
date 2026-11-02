@@ -261,6 +261,57 @@ describe('createGh', () => {
     ]);
   });
 
+  // gh 2.83.2's `gh pr view --json` has no merge queue field, so the read is a GraphQL query with the
+  // owner, name and number each as its own argument. On a queue-protected base gh only warns that
+  // "the merge strategy is set by the merge queue" for --squash (its binary carries the message), and
+  // exits 0: the two merge calls above stay as they are.
+  describe('prInMergeQueue', () => {
+    const PR = { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' };
+    const answer = (isInMergeQueue: unknown) => ({
+      exitCode: 0,
+      stdout: JSON.stringify({ data: { repository: { pullRequest: { isInMergeQueue } } } }),
+    });
+
+    it('reads whether the pull request is in the merge queue, naming everything as its own argument', async () => {
+      const yes = scripted({ 'api graphql': answer(true) });
+      await expect(createGh(yes.exec).prInMergeQueue(PR, CALL)).resolves.toBe(true);
+      const args = yes.seen[0] ?? [];
+      expect(args.slice(0, 2)).toEqual(['api', 'graphql']);
+      expect(args).toEqual(expect.arrayContaining(['-f', 'owner=acme', '-f', 'name=widgets']));
+      expect(args).toEqual(expect.arrayContaining(['-F', 'number=8']));
+      expect(args.find((a) => a.startsWith('query='))).toContain('isInMergeQueue');
+      const no = scripted({ 'api graphql': answer(false) });
+      await expect(createGh(no.exec).prInMergeQueue(PR, CALL)).resolves.toBe(false);
+    });
+
+    it.each([
+      { name: 'a pull request GraphQL does not have', stdout: '{"data":{"repository":null}}' },
+      { name: 'an answer without the field', stdout: '{"data":{"repository":{"pullRequest":{}}}}' },
+      { name: 'output that is not JSON', stdout: 'oops' },
+    ])('throws, never answers no, for $name', async ({ stdout }) => {
+      const { exec } = scripted({ 'api graphql': { exitCode: 0, stdout } });
+      await expect(createGh(exec).prInMergeQueue(PR, CALL)).rejects.toMatchObject({
+        name: 'GhError',
+        kind: 'failed',
+      });
+    });
+
+    it('throws for a failed call and for a url that is not the repository pull request', async () => {
+      const { exec } = scripted({ 'api graphql': { exitCode: 1, stderr: 'HTTP 502' } });
+      await expect(createGh(exec).prInMergeQueue(PR, CALL)).rejects.toMatchObject({
+        name: 'GhError',
+      });
+      const other = scripted({ 'api graphql': answer(true) });
+      await expect(
+        createGh(other.exec).prInMergeQueue(
+          { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/issues/8' },
+          CALL,
+        ),
+      ).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+      expect(other.seen).toEqual([]);
+    });
+  });
+
   it('refuses a merge GitHub turns down as a typed error', async () => {
     const { exec } = scripted({
       'pr merge': { exitCode: 1, stderr: 'X Pull request is not mergeable' },

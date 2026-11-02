@@ -89,8 +89,20 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
   const root =
     batch.ciFixOf === null ? batch : (batches.find((b) => b.id === batch.ciFixOf) ?? batch);
   const required = root.prRequired;
-  if (required === null || required.state === RequiredChecksState.None) return null;
   const checks = checksLink(batch.prUrl);
+  // In the merge queue the pull request waits its turn, whatever its checks say: the queue's own
+  // group run is what is left, and 10db pushes nothing meanwhile. Open only: a merged pull request
+  // has left the queue, and the watch clears the mark on the next read.
+  if (
+    batch.pr?.state === PullRequestState.Open &&
+    root.prMergeBlocked === PullRequestMergeBlocked.Queued
+  )
+    return {
+      line: 'Pull request open · queued to merge',
+      color: 'blue',
+      link: githubUrl(batch.prUrl) ? { url: batch.prUrl, label: 'Pull request' } : null,
+    };
+  if (required === null || required.state === RequiredChecksState.None) return null;
   if (batch.pr?.state === PullRequestState.Merged)
     return { line: 'Merged · CI passed', color: 'green', link: checks };
   if (batch.pr?.state !== PullRequestState.Open) return null;
@@ -98,6 +110,7 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
   if (root.prMergeBlocked !== null) {
     const how =
       root.prMergeBlocked === PullRequestMergeBlocked.Conflicts ? 'conflicts with' : 'behind';
+    // `queued` returned above, so what is left here is a conflict or a base that moved on.
     return {
       line: `Pull request open · ${how} ${base}`,
       color: 'red',

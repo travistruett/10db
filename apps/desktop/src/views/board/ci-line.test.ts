@@ -223,6 +223,39 @@ describe('ciLine', () => {
     expect(ciLine(batch, [batch])?.line).toBe('Pull request open · behind next');
   });
 
+  // A pull request in the merge queue is waiting its turn: its own checks passed, and the queue's
+  // group runs elsewhere, so neither "CI passed" nor "CI running" says it.
+  it.each([
+    ['passing', required('passing')],
+    ['pending', required('pending', { pending: [job('build', null)] })],
+    ['none', required('none')],
+    ['unread', null],
+  ])(
+    'says queued to merge for a pull request in the merge queue (checks %s)',
+    (_name, prRequired) => {
+      const batch = shipped({ prMergeBlocked: 'queued', prRequired });
+      expect(ciLine(batch, [batch])).toEqual({
+        line: 'Pull request open · queued to merge',
+        color: 'blue',
+        link: { url: PR, label: 'Pull request' },
+      });
+    },
+  );
+
+  it('says queued to merge on a fix batch of the queued root, and nothing once merged or closed', () => {
+    const root = shipped({ prMergeBlocked: 'queued', prRequired: required('passing') });
+    const fix = shipped({ ciFixOf: root.id });
+    expect(ciLine(fix, [root, fix])?.line).toBe('Pull request open · queued to merge');
+    const merged = shipped({
+      pr: read('merged'),
+      prMergeBlocked: 'queued',
+      prRequired: required('passing'),
+    });
+    expect(ciLine(merged, [merged])?.line).toBe('Merged · CI passed');
+    const closed = shipped({ pr: read('closed'), prMergeBlocked: 'queued' });
+    expect(ciLine(closed, [closed])).toBeNull();
+  });
+
   it('says Merged · CI passed once the pull request merged', () => {
     const batch = shipped({ pr: read('merged'), prRequired: required('pending') });
     expect(ciLine(batch, [batch])).toEqual({

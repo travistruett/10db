@@ -540,7 +540,8 @@
                   "type": "string",
                   "enum": [
                     "conflicts",
-                    "behind"
+                    "behind",
+                    "queued"
                   ]
                 },
                 {
@@ -991,7 +992,8 @@
                 "type": "string",
                 "enum": [
                   "conflicts",
-                  "behind"
+                  "behind",
+                  "queued"
                 ]
               },
               {

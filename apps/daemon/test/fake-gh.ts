@@ -23,6 +23,7 @@ export type GhMethod =
   | 'prView'
   | 'prStatus'
   | 'prRequiredChecks'
+  | 'prInMergeQueue'
   | 'jobLog'
   | 'rerunFailed'
   | 'prCreate'
@@ -57,6 +58,8 @@ export class FakeGh implements Gh {
    * a pull request gh can't read while it reads the others.
    */
   readonly failRead = new Map<string, GhError>();
+  /** Merge queue reads of these pull request urls fail with their error until removed. */
+  readonly failQueueRead = new Map<string, GhError>();
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
   /** The Actions runs `rerunFailed` was asked to rerun, in order. */
   readonly reruns: string[] = [];
@@ -69,6 +72,7 @@ export class FakeGh implements Gh {
       headSha: string | null;
       mergeBlocked: MergeBlocked | null;
       blockedOnChecks: boolean;
+      inMergeQueue: boolean;
       mergeable: PrMergeable;
       body: string;
       create: PrCreateCall | null;
@@ -146,6 +150,15 @@ export class FakeGh implements Gh {
     readonly url: string;
   }): Promise<RequiredChecks> {
     return this.call('prRequiredChecks', input, () => this.required.get(input.url) ?? NO_REQUIRED);
+  }
+
+  prInMergeQueue(input: { readonly repo: string; readonly url: string }): Promise<boolean> {
+    return this.call(
+      'prInMergeQueue',
+      input,
+      () => this.byRef.get(input.url)?.inMergeQueue ?? false,
+      this.failQueueRead.get(input.url),
+    );
   }
 
   jobLog(input: { readonly repo: string; readonly jobId: string }): Promise<JobLog> {
@@ -236,6 +249,13 @@ export class FakeGh implements Gh {
     found.blockedOnChecks = blocked;
   }
 
+  /** Whether the PR waits in its base's merge queue from now on; a new PR does not. */
+  setInMergeQueue(url: string, inQueue: boolean): void {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    found.inMergeQueue = inQueue;
+  }
+
   /** The required checks `prRequiredChecks` reports for the PR from now on; a new PR has none. */
   setRequiredChecks(url: string, checks: RequiredChecks): void {
     this.required.set(url, checks);
@@ -275,6 +295,7 @@ export class FakeGh implements Gh {
       headSha: null,
       mergeBlocked: null,
       blockedOnChecks: false,
+      inMergeQueue: false,
       mergeable: PrMergeable.Mergeable,
       body,
       create,
