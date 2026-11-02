@@ -1,6 +1,7 @@
 import {
   BatchState,
   FIX_ATTEMPT_LIMIT,
+  PARKED_NOTICE_KEY,
   PullRequestChecks,
   PullRequestState,
   rejectionsSentBack,
@@ -188,13 +189,17 @@ function batchStands(batch: BatchDto): boolean {
 /**
  * The notices a task's card and drawer show besides its state: what its run waits for, such as another
  * task's hazard, then what its batch stands in, such as a conflict with its base. These ask the builder
- * nothing, so none is an Inbox card. None for a cancelled or failed run, which have their own say.
+ * nothing, so none is an Inbox card. None for a cancelled or failed run, which have their own say, but
+ * a run the builder parked keeps the question they answered and what they said.
  */
 export function taskNotices(
   workstream: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
 ): Notice[] {
-  if (!workstream || workstream.state === S.Cancelled || workstream.state === S.Failed) return [];
+  if (!workstream) return [];
+  if (workstream.state === S.Cancelled)
+    return workstream.notice?.key === PARKED_NOTICE_KEY ? [workstream.notice] : [];
+  if (workstream.state === S.Failed) return [];
   return [
     ...(workstream.notice ? [workstream.notice] : []),
     ...(batch && batchStands(batch) ? batch.notices : []),
