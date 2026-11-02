@@ -1186,15 +1186,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
               message: `Merge the pull request's branch ${branch} from GitHub`,
             });
           else await deps.git.fastForwardBranch(main, branch, head);
-        } else if (await deps.git.isAncestor(main, head, tip))
-          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+        } else if (await deps.git.isAncestor(main, head, tip)) {
+          // Only a merge of an earlier catch-up that was not pushed, nor put back, goes: this one starts
+          // from the head. A commit of the builder's own is never dropped.
+          const own = await deps.git.ownCommitsSince(main, head, tip);
+          if (own.length > 0) {
+            const shown = own.slice(0, 5).map((sha) => sha.slice(0, 7));
+            stop({
+              kind: 'other',
+              why: `${branch} here has ${own.length === 1 ? 'a commit' : `${String(own.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${own.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${own.length === 1 ? 'it' : 'them'} to the pull request, or drop ${own.length === 1 ? 'it' : 'them'} from the local branch.`,
+            });
+            return;
+          }
           await deps.git.rewindBranch(
             kept && batch.worktreePath !== null ? batch.worktreePath : main,
             branch,
             tip,
             head,
           );
-        else {
+        } else {
           stop({
             kind: 'other',
             why: `${branch} here and the pull request's branch on GitHub each have commits the other lacks, so 10db can't tell which is current.`,

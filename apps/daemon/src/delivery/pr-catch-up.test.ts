@@ -184,7 +184,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
     const head = onOrigin(branch);
-    // An earlier catch-up's merge, left on the local branch and never pushed.
+    // An earlier catch-up's merge of main, left on the local branch and never pushed.
     const stale = h.git$(
       '-c',
       'user.name=10db',
@@ -194,6 +194,8 @@ describe('a shipped pull request that conflicts with its base', () => {
       `${head}^{tree}`,
       '-p',
       head,
+      '-p',
+      'main',
       '-m',
       'Merge main',
     );
@@ -227,6 +229,35 @@ describe('a shipped pull request that conflicts with its base', () => {
 
     expect(h.cards().filter((c) => c.body.includes("can't tell which is current"))).toEqual([]);
     expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
+  });
+
+  it("keeps a builder's local commit one ahead of the pull request head and raises a card naming it", async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const branch = batch.branch ?? '';
+    const head = onOrigin(branch);
+    // A hand commit on the local branch, never pushed: not a merge of 10db's.
+    const byHand = h.git$(
+      '-c',
+      'user.name=Builder',
+      '-c',
+      'user.email=builder@example.com',
+      'commit-tree',
+      `${head}^{tree}`,
+      '-p',
+      head,
+      '-m',
+      'Fix by hand',
+    );
+    h.git$('update-ref', `refs/heads/${branch}`, byHand, head);
+
+    await catchUp(batch);
+
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
+    expect(onOrigin(branch)).toBe(head);
+    const card = h.only(h.cards());
+    expect(card.body).toContain(byHand.slice(0, 7));
   });
 
   it('merges it once GitHub says it is clean, when it had refused the merge', async () => {
