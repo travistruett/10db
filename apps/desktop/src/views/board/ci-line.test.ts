@@ -108,6 +108,35 @@ describe('ciLine', () => {
     expect(withFixTaskTitles([root, fix], [])[1]?.title).toBe('Fix CI: build on Add greetings');
   });
 
+  it("names the CI fix task, the batch's oldest workstream, when a person added another (spec §5)", () => {
+    const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+    const fix = batchDto({
+      state: 'OPEN',
+      title: 'Fix CI: build on Add greetings',
+      ciFixOf: root.id,
+      ciFixHead: 'abc',
+    });
+    const created = workstreamDto({
+      batchId: fix.id,
+      taskTitle: 'Make the build pass again',
+      createdAt: '2026-11-01T10:00:00.000Z',
+    });
+    const added = workstreamDto({
+      batchId: fix.id,
+      taskTitle: 'Also tidy the lint config',
+      createdAt: '2026-11-01T11:00:00.000Z',
+    });
+    const expected = 'Pull request open · CI failed: build · fixing in "Make the build pass again"';
+    // Whichever order the list comes in, the line names the task made first.
+    for (const workstreams of [
+      [created, added],
+      [added, created],
+    ]) {
+      const batches = withFixTaskTitles([root, fix], workstreams);
+      expect(ciLine(root, batches)?.line).toBe(expected);
+    }
+  });
+
   it('does not say fixing for a fix batch whose ship failed', () => {
     const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
     const fix = batchDto({ state: 'FAILED', ciFixOf: root.id, ciFixHead: 'abc' });
