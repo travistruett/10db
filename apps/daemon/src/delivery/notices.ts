@@ -15,6 +15,8 @@ export const NOTICE_KEY = {
   baseConflict: 'base-conflict',
   /** Files git doesn't track keep the base out. */
   baseKept: 'base-kept',
+  /** A lane launched without the base's newer commits because origin could not be fetched. */
+  baseFetch: 'base-fetch',
   /** The pull request waits for the builder to merge it. */
   merge: 'pull-request-merge',
   /** 10db merged the base into the open pull request's branch. */
@@ -117,6 +119,16 @@ export const baseNotices = {
     tone: 'warning',
     line: `Pull request conflicts with ${batch.baseBranch}`,
     body: `${batch.baseBranch} on origin changed files in ways that conflict with the batch's own changes, and the batch shipped anyway: the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} can't merge until the conflict is resolved.\n\nResolve it on GitHub (Update branch, then Resolve conflicts). 10db never resolves a conflict in a pull request.`,
+  }),
+  /**
+   * A lane launched on the batch's copy as it is, because the base could not be fetched: anything
+   * that merged into the base since the copy was cut is not in it. The next fetch that works clears it.
+   */
+  fetchFailed: (batch: BatchDto, error: unknown): Notice => ({
+    key: NOTICE_KEY.baseFetch,
+    tone: 'warning',
+    line: `Couldn't fetch ${batch.baseBranch}: this lane started on the copy as it is`,
+    body: `10db brings ${batch.baseBranch} into a batch's copy when a lane launches, so the lane sees what merged while it waited. It couldn't fetch ${batch.baseBranch} from origin (${detailOf(error)}), so this lane started on the copy as it is, without any commits that merged into ${batch.baseBranch} since the copy was cut.\n\nThe next launch or gate fetches again, and this notice goes once a fetch works.`,
   }),
   /** `worktree` is the batch's worktree, which holds `paths`. */
   kept: (

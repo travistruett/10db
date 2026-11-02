@@ -102,6 +102,44 @@ describe('mergeIntoBranch', () => {
     expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('');
   });
 
+  describe('rewindBranch', () => {
+    it('takes a merge back: the branch, the files and the index return, a file of the builder stays', async () => {
+      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+      onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
+      const merged = await merge();
+      const head = merged.kind === 'merged' ? merged.head : '';
+      write('notes.txt', 'mine\n');
+
+      await git.rewindBranch(repo.path, 'work', head, own);
+
+      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
+      expect(existsSync(join(repo.path, 'src/theirs.txt'))).toBe(false);
+      expect(read('src/own.txt')).toBe('own\n');
+      expect(rawGit('status', '--porcelain', '--untracked-files=all')).toBe('?? notes.txt');
+    });
+
+    it('moves a branch that is not checked out by its ref alone', async () => {
+      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+      const next = commitFiles({ 'src/more.txt': 'more\n' }, 'more');
+      rawGit('switch', '-q', 'main');
+      await git.rewindBranch(repo.path, 'work', next, own);
+      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(own);
+    });
+
+    it('refuses a branch that moved, or a target the tip does not descend from, and changes nothing', async () => {
+      const own = commitFiles({ 'src/own.txt': 'own\n' }, 'own');
+      const next = commitFiles({ 'src/more.txt': 'more\n' }, 'more');
+      const other = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
+      await expect(git.rewindBranch(repo.path, 'work', own, own)).rejects.toBeInstanceOf(
+        InvalidError,
+      );
+      await expect(git.rewindBranch(repo.path, 'work', next, other)).rejects.toBeInstanceOf(
+        InvalidError,
+      );
+      expect(rawGit('rev-parse', 'refs/heads/work')).toBe(next);
+    });
+  });
+
   it('fast-forwards a branch with nothing of its own', async () => {
     const base = onMain({ 'src/theirs.txt': 'theirs\n' }, 'theirs');
     expect(await merge()).toEqual({

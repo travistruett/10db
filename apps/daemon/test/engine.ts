@@ -260,6 +260,7 @@ export async function createTestEngine(
     baseUpdates: {
       beforeGate: () => Promise.resolve({ kind: 'up_to_date', note: null }),
       gate: (_batchId, _signal, run) => run(),
+      atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
     },
     // No decision is asked of a model unless a test scripts one.
     judge: offJudge,

@@ -1006,6 +1006,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       deps.logger.warn({ batchId, prUrl, stop: why.kind }, 'pull request not caught up');
     };
     let made = false;
+    let before: string | null = null;
+    let pushed = false;
+    let keptAt: string | null = null;
     try {
       const holder = await deps.git.branchInUse(main, branch);
       // The batch's own worktree, kept after it shipped for a file 10db didn't seed: merged there, and kept.
@@ -1028,7 +1031,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // The branch as GitHub has it: a fix, or Update branch, may have moved it past the local one.
       const head = status.headSha;
       const tip = await deps.git.branchTip(main, branch);
-      let unpushed = false;
       if (head === null) {
         if (tip === null) {
           stop({
@@ -1051,8 +1053,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
             });
           else await deps.git.fastForwardBranch(main, branch, head);
         } else if (await deps.git.isAncestor(main, head, tip))
-          // An earlier catch-up merged and its check failed, so nothing was pushed.
-          unpushed = true;
+          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+          await deps.git.rewindBranch(
+            kept && batch.worktreePath !== null ? batch.worktreePath : main,
+            branch,
+            tip,
+            head,
+          );
         else {
           stop({
             kind: 'other',
@@ -1061,6 +1068,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
       }
+      // Where the branch stands before 10db merges into it: where it goes back to unless the merge is pushed.
+      before = await deps.git.branchTip(main, branch);
+      if (kept) keptAt = batch.worktreePath;
       let path = batch.worktreePath ?? '';
       if (!kept) {
         path = worktreePathFor(madeWorktreeRoot(deps.worktreeRoot), project, branch);
@@ -1074,7 +1084,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
-        return update.kind === 'merged' || (update.kind === 'up_to_date' && unpushed);
+        return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
         if (check === null) {
@@ -1096,7 +1106,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         else stop({ kind: 'other', why: brought.note });
         return;
       }
-      if (brought.kind === 'up_to_date' && !unpushed) {
+      if (brought.kind === 'up_to_date') {
         // GitHub says conflict, the branch holds the base: its answer is stale, or the base moved again.
         deps.logger.info(
           { batchId, prUrl },
@@ -1116,6 +1126,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         }
       }
       await pushBranch(getBatch(db, batchId), project, branch, signal);
+      pushed = true;
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
       showNotice(deps.state, batchId, updateNotices.merged(getBatch(db, batchId), resolved));
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
@@ -1133,6 +1144,29 @@ export function createShipper(deps: ShipperDeps): Shipper {
       });
     } finally {
       if (made) await retire(batchId);
+      // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
+      // GitHub's, and, once the builder updates the pull request there, apart from it.
+      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+    }
+  }
+
+  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  async function rewind(
+    batchId: BatchId,
+    main: string,
+    branch: string,
+    to: string,
+    keptAt: string | null,
+  ): Promise<void> {
+    try {
+      const tip = await deps.git.branchTip(main, branch);
+      if (tip === null || tip === to) return;
+      await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
+    } catch (error) {
+      deps.logger.warn(
+        { batchId, branch, err: detailOf(error) },
+        'branch not put back after a catch-up that was not pushed',
+      );
     }
   }
 
