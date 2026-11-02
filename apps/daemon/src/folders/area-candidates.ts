@@ -1,5 +1,5 @@
-import { posix } from 'node:path';
-import { literalGlob } from './literal-glob';
+import { matchesGlob, posix } from 'node:path';
+import { isLooseGlob, literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
 export const AreaCandidateKind = {
@@ -372,6 +372,7 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
   const held = new Map<Draft, Holding>(
     all.map((d) => [d, { files: 0, patterns: new Map(d.trees.map((t) => [t, new Set(['**'])])) }]),
   );
+  const owner = new Map<string, Draft>();
   for (const file of files) {
     // Every folder has a holder; a file none took would still be the rest's, by its folder.
     const at = heldAt(holdings, file) ?? {
@@ -381,16 +382,28 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
     };
     const holding = held.get(at.holder);
     if (holding === undefined) continue;
+    owner.set(file, at.holder);
     holding.files += 1;
     const { folder, pattern } = globOf(file, at);
     holding.patterns.set(folder, (holding.patterns.get(folder) ?? new Set<string>()).add(pattern));
   }
 
   // A draft that ends up holding no file is no area: it would have no glob, and an area needs one.
+<<<<<<< 0b5ea352d55fd1a3e6d12abcc603826fc9914664
   // The rest is the exception: it becomes the project's catch-all, which a file added later falls
   // in, so it stays when everything else is a package and gets the top of the repository's globs.
   return all.flatMap((draft): AreaCandidate[] => {
+||||||| acfae3a
+  return all.flatMap((draft): AreaCandidate[] => {
+=======
+  const candidates: AreaCandidate[] = [];
+  const indexOf = new Map<Draft, number>();
+  /** For each candidate, the globs that name a folder with `?` for characters a glob cannot escape. */
+  const looseGlobs = new Map<number, string[]>();
+  for (const draft of all) {
+>>>>>>> 9bd77b0716d36652ed36a9444d7e0fc568f9fd20
     const holding = held.get(draft);
+<<<<<<< 0b5ea352d55fd1a3e6d12abcc603826fc9914664
     const emptyRest = draft === leftovers && holding?.files === 0 && files.length > 0;
     if (holding === undefined || (holding.files === 0 && !emptyRest)) return [];
     const globs = emptyRest
@@ -409,6 +422,88 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
       },
     ];
   });
+||||||| acfae3a
+    if (holding === undefined || holding.files === 0) return [];
+    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
+      [...patterns].map((pattern) => prefixed(folder, pattern)),
+    );
+    return [
+      {
+        kind: draft.kind,
+        label: draft.label,
+        globs,
+        files: holding.files,
+        trees: [...draft.trees],
+        directs: [...draft.directs],
+      },
+    ];
+  });
+=======
+    if (holding === undefined || holding.files === 0) continue;
+    const loose: string[] = [];
+    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
+      [...patterns].map((pattern) => {
+        const glob = prefixed(folder, pattern);
+        if (isLooseGlob(folder)) loose.push(glob);
+        return glob;
+      }),
+    );
+    indexOf.set(draft, candidates.length);
+    if (loose.length > 0) looseGlobs.set(candidates.length, loose);
+    candidates.push({
+      kind: draft.kind,
+      label: draft.label,
+      globs,
+      files: holding.files,
+      trees: [...draft.trees],
+      directs: [...draft.directs],
+    });
+  }
+  return looseGlobs.size === 0
+    ? candidates
+    : mergeOverlapping(
+        candidates,
+        looseGlobs,
+        (file) => {
+          const holder = owner.get(file);
+          return holder === undefined ? undefined : indexOf.get(holder);
+        },
+        files,
+      );
+}
+
+/** Stands in for a dot while a glob is matched, as the guard does, so `?` and `*` read a dot name like any other. */
+const DOT = '';
+
+const reaches = (file: string, glob: string) =>
+  matchesGlob(file.replaceAll('.', DOT), glob.replaceAll('.', DOT));
+
+/**
+ * A glob that names a folder with `?` where it cannot escape a character matches the sibling folders
+ * that differ from it only there (`a?b/**` takes `axb/` too). The guard allows a write when any matching
+ * area is claimed, so a file two areas match could be written by lanes holding different ones. Candidates
+ * whose loose globs reach another candidate's files are made one, so each file has one area.
+ */
+function mergeOverlapping(
+  candidates: readonly AreaCandidate[],
+  looseGlobs: ReadonlyMap<number, readonly string[]>,
+  candidateOf: (file: string) => number | undefined,
+  files: readonly string[],
+): AreaCandidate[] {
+  const group = new Map<number, number>();
+  const find = (i: number): number => {
+    const parent = group.get(i) ?? i;
+    return parent === i ? i : find(parent);
+  };
+  for (const [i, globs] of looseGlobs) {
+    for (const file of files) {
+      const j = candidateOf(file);
+      if (j === undefined || find(j) === find(i)) continue;
+      if (globs.some((glob) => reaches(file, glob))) group.set(find(j), find(i));
+    }
+  }
+  return mergeGroups(candidates, find);
+>>>>>>> 9bd77b0716d36652ed36a9444d7e0fc568f9fd20
 }
 
 /**
@@ -462,6 +557,14 @@ export function mergeCoupledCandidates(
     group.set(find(b), find(a));
   }
 
+  return mergeGroups(candidates, find);
+}
+
+/** The candidates, with those that share a `find` result made into one, in the order of their first member. */
+function mergeGroups(
+  candidates: readonly AreaCandidate[],
+  find: (index: number) => number,
+): AreaCandidate[] {
   const merged = new Map<number, AreaCandidate[]>();
   candidates.forEach((c, i) => {
     const key = find(i);
@@ -473,7 +576,9 @@ export function mergeCoupledCandidates(
     if (others.length === 0) return [first];
     return [
       {
-        kind: first.kind,
+        kind: members.some((m) => m.kind === AreaCandidateKind.Rest)
+          ? AreaCandidateKind.Rest
+          : first.kind,
         label: members.map((m) => m.label).join(' + '),
         globs: [...new Set(members.flatMap((m) => m.globs))],
         files: members.reduce((sum, m) => sum + m.files, 0),

@@ -47,9 +47,12 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
   ].join('\n');
 }
 
-/** `text` with whitespace, line breaks included, collapsed to single spaces and cut to one short line. */
+/**
+ * `text` with whitespace, line breaks and every other control character (an escape sequence, a NUL)
+ * collapsed to single spaces and cut to one short line.
+ */
 function oneLine(text: string): string {
-  const line = text.replace(/\s+/gu, ' ').trim();
+  const line = text.replace(/[\s\p{Cc}]+/gu, ' ').trim();
   return line.length <= MAX_REASON ? line : `${line.slice(0, MAX_REASON - 1).trimEnd()}…`;
 }
 
@@ -130,16 +133,21 @@ function nameOptions(label: string): string[] {
 }
 
 function nameFor(candidate: AreaCandidate, taken: ReadonlySet<string>): string {
-  if (candidate.kind === AreaCandidateKind.Rest) return taken.has('root') ? 'root-files' : 'root';
+  if (candidate.kind === AreaCandidateKind.Rest) {
+    for (let n = 1; ; n += 1) {
+      const name = n === 1 ? 'root' : n === 2 ? 'root-files' : `root-files-${String(n - 1)}`;
+      if (!taken.has(name) && !RESERVED.has(name)) return name;
+    }
+  }
   for (const option of nameOptions(candidate.label)) {
     const name = /^[a-z]/u.test(option) ? option : `area-${option}`;
     if (!taken.has(name) && !RESERVED.has(name)) return name;
   }
   const base = nameOptions(candidate.label).at(-1) ?? 'area';
   const stem = RESERVED.has(base) ? `${base}-area` : /^[a-z]/u.test(base) ? base : `area-${base}`;
-  for (let n = 2; ; n += 1) {
-    const name = taken.has(stem) ? `${stem}-${String(n)}` : stem;
-    if (!taken.has(name)) return name;
+  for (let n = 1; ; n += 1) {
+    const name = n === 1 ? stem : `${stem}-${String(n)}`;
+    if (!taken.has(name) && !RESERVED.has(name)) return name;
   }
 }
 
