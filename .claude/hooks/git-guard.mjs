@@ -430,7 +430,7 @@ const WRAPPERS = new Map([
   ['exec', { valueOptions: ['-a'], operands: 0 }],
   ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
   // -P altpath is BSD/macOS env's.
-  ['env', { valueOptions: ['-u', '-C', '-P', '--unset', '--chdir'], operands: 0 }],
+  ['env', { valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'], operands: 0 }],
   [
     'stdbuf',
     { valueOptions: [...['-i', '-o', '-e'], ...['--input', '--output', '--error']], operands: 0 },
@@ -457,6 +457,7 @@ const WRAPPERS = new Map([
         // --replace, --eof and --max-lines take an optional value, given only with =, so
         // the word after them is the command.
         ...['--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file'],
+        '--process-slot-var',
       ],
       operands: 0,
     },

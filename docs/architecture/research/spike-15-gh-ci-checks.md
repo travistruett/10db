@@ -26,7 +26,7 @@ and §6 (build task T3). The parsers are `parseRequiredChecks` and `parseJobLog`
 | signed out                              | 4    | empty                       | `To get started with GitHub CLI, please run:  gh auth login` and a GH_TOKEN line | observed | unknown (`signed_out`) |
 | two required checks running (#245)      | 0    | JSON list, bucket `pending` | empty                                                                            | observed | `pending`              |
 | one required check failed (#242)        | 0    | JSON list, bucket `fail`    | empty                                                                            | observed | `failing`              |
-| one required check cancelled (#333)     | 0    | JSON list, bucket `cancel`  | empty                                                                            | observed | `pending`              |
+| one required check cancelled (#333)     | 0    | JSON list, bucket `cancel`  | empty                                                                            | observed | `cancelled`            |
 | the head has no checks at all           | 1    | empty                       | `no checks reported on the '<branch>' branch`                                    | binary   | `none`                 |
 
 Observed:
@@ -50,7 +50,7 @@ Observed:
   125201910780, completed and cancelled before any step ran) while the other four passed. gh exited 0, not
   the 1 its docs give, and printed nothing on stderr. The cancelled entry is
   `{"bucket":"cancel","description":"","link":"https://github.com/travistruett/10db/actions/runs/41422731196/job/125201910780","name":"desktop","state":"CANCELLED","workflow":"ci"}`.
-  The parser reads bucket `cancel` as `pending` (spec §4) and already takes exit 0, so nothing in it changed.
+  The parser reads bucket `cancel` as its own state, `cancelled`, and already takes exit 0.
   The full list is `SPIKE_CANCELLED` in `ci-checks.test.ts`.
 
 Not observed yet (no pull request was in that state, and none was made to try it):

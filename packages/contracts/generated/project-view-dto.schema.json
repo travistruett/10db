@@ -388,6 +388,7 @@
                       "type": "string",
                       "enum": [
                         "pending",
+                        "cancelled",
                         "passing",
                         "failing",
                         "none"
@@ -436,6 +437,49 @@
                       }
                     },
                     "pending": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "link": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "jobId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "runId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "description": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "name",
+                          "link",
+                          "jobId",
+                          "runId",
+                          "description"
+                        ]
+                      }
+                    },
+                    "cancelled": {
+                      "default": [],
                       "type": "array",
                       "items": {
                         "type": "object",
@@ -795,6 +839,7 @@
                     "type": "string",
                     "enum": [
                       "pending",
+                      "cancelled",
                       "passing",
                       "failing",
                       "none"
@@ -843,6 +888,49 @@
                     }
                   },
                   "pending": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "link": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "jobId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "runId": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "description": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "link",
+                        "jobId",
+                        "runId",
+                        "description"
+                      ]
+                    }
+                  },
+                  "cancelled": {
+                    "default": [],
                     "type": "array",
                     "items": {
                       "type": "object",
