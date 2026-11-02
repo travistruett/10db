@@ -1,6 +1,7 @@
 import {
   mintId,
   PARK_TASK_CHOICE,
+  PARK_TASK_OPTION,
   PARKED_NOTICE_KEY,
   WorkstreamState,
   type WorkstreamId,
@@ -8,6 +9,7 @@ import {
 import {
   clearWorkstreamNotices,
   createTestStore,
+  getInboxItem,
   getTask,
   getWorkstream,
   listBoardColumns,
@@ -114,6 +116,36 @@ describe('a question card', () => {
       signal: new AbortController().signal,
     });
     expect(item.options.map((o) => o.label)).toEqual(['Go on', 'park the task']);
+  });
+});
+
+describe('a folded question card', () => {
+  const parkOf = (options: readonly { label: string; description: string }[]) =>
+    options.find((o) => o.label === PARK_TASK_CHOICE)?.description ?? '';
+
+  it('says which tasks Park the task will park, once a second lane folds into it', () => {
+    const a = seedWorkstream(base, { title: 'Alpha task' });
+    const b = seedWorkstream(base, { project: a.project, title: 'Beta task' });
+    const first = askOn(a).item;
+    expect(parkOf(first.options)).not.toContain('Alpha task');
+    const folded = askOn(b).item;
+    expect(folded.id).toBe(first.id);
+    expect(folded.targets).toHaveLength(2);
+    expect(parkOf(folded.options)).toContain('Alpha task');
+    expect(parkOf(folded.options)).toContain('Beta task');
+    // The lane's own options are not touched.
+    expect(folded.options.map((o) => o.label)).toEqual(['Defer', 'Retry', PARK_TASK_CHOICE]);
+  });
+
+  it('goes back to the plain wording when only one lane is left on it', () => {
+    const a = seedWorkstream(base, { title: 'Alpha task' });
+    const b = seedWorkstream(base, { project: a.project, title: 'Beta task' });
+    const { item } = askOn(a);
+    askOn(b);
+    inbox.cancelForWorkstream(b.workstream.id);
+    const left = getInboxItem(state.db, item.id);
+    expect(left.targets).toHaveLength(1);
+    expect(parkOf(left.options)).toBe(PARK_TASK_OPTION.description);
   });
 });
 
