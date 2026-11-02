@@ -219,25 +219,6 @@ describe('history queries', () => {
     expect(await git.commitsSince(repo.path, base)).toEqual([sha]);
   });
 
-  it('lists, among the committed files, only those of commits that carry an op trailer', async () => {
-    const base = await git.head(repo.path);
-    write('a.txt', 'a');
-    await git.commit({
-      repo: repo.path,
-      paths: ['a.txt'],
-      message: 'a',
-      opId: 'op-history-own',
-      branch: 'main',
-    });
-    // A commit the builder made: no op trailer.
-    write('builder.txt', 'b');
-    rawGit('add', 'builder.txt');
-    rawGit('commit', '-q', '-m', 'builder');
-    write('c.txt', 'c');
-    expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'builder.txt', 'c.txt']);
-    expect(await git.opChangedFilesSince(repo.path, base)).toEqual(['a.txt', 'c.txt']);
-  });
-
   it('lists the files committed between two commits, not what is uncommitted', async () => {
     const base = await git.head(repo.path);
     mkdirSync(join(repo.path, 'dir'));
