@@ -167,7 +167,7 @@ export async function startCiFix(input: {
   });
   if (made === null) return false;
 
-  ctx.jobs.run(jobKey(made.project, JobQueue.Cut), (jobSignal) =>
+  ctx.jobs.run(jobKey(made.batch, JobQueue.Cut), (jobSignal) =>
     cutWorktree(ctx, made.batch.id, made.plans, jobSignal),
   );
   ctx.logger.info(

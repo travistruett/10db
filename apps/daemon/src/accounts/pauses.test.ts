@@ -74,7 +74,11 @@ describe('account pauses', () => {
     const at = { projectId: work.projectId, card: card(accountId, 'usage_limit') };
     p.pause(accountId, { reason: AccountPauseReason.UsageLimit, until: reset }, at);
     p.pause(accountId, { reason: AccountPauseReason.UsageLimit, until: reset }, at);
-    expect(p.pausedFor(accountId)).toEqual({ reason: 'usage_limit', until: reset });
+    expect(p.pausedFor(accountId)).toEqual({
+      reason: 'usage_limit',
+      until: reset,
+      since: clock.now(),
+    });
     expect(stopped).toEqual([accountId, accountId]);
     expect(listInbox(state.db, { states: ['OPEN'] })).toHaveLength(1);
     clock.advance(10 * 60_000);
@@ -108,7 +112,7 @@ describe('account pauses', () => {
     expect(p.pausedFor(key.id)?.until).toEqual(inMinutes(20));
     p.pause(key.id, { reason: AccountPauseReason.Refused, until: null }, at);
     p.pause(key.id, { reason: AccountPauseReason.UsageLimit, until: inMinutes(60) }, at);
-    expect(p.pausedFor(key.id)).toEqual({ reason: 'refused', until: null });
+    expect(p.pausedFor(key.id)).toEqual({ reason: 'refused', until: null, since: clock.now() });
     clock.advance(120 * 60_000);
     expect(p.pausedFor(key.id)?.reason).toBe('refused');
     expect(stopped).toEqual([key.id, key.id, key.id]);
@@ -122,9 +126,12 @@ describe('account pauses', () => {
       { reason: AccountPauseReason.Refused, until: null },
       { projectId, card: card(key.id, 'r') },
     );
+    const since = clock.now();
+    clock.advance(30 * 60_000);
     const restarted = pauses();
     restarted.restore();
-    expect(restarted.pausedFor(key.id)).toEqual({ reason: 'refused', until: null });
+    // It remembers when it began, not when the daemon restarted.
+    expect(restarted.pausedFor(key.id)).toEqual({ reason: 'refused', until: null, since });
 
     const short = seedAccount(store, { kind: 'anthropic_api_key', label: 'Short' });
     const work = pausedWork(seedProject(store, { accountId: short.id }));
