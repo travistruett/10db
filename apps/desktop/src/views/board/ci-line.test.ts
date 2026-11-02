@@ -1,7 +1,7 @@
 import type { BatchDto, RequiredChecksDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, workstreamDto } from '../../test/fixtures';
-import { ciLine, withFixTaskTitles } from './ci-line';
+import { ciLine, ciResult, withFixTaskTitles } from './ci-line';
 
 const PR = 'https://github.com/acme/widgets/pull/9';
 const job = (name: string, link: string | null) => ({
@@ -292,5 +292,33 @@ describe('ciLine', () => {
     const open = batchDto({ state: 'OPEN', prRequired: required('passing') });
     expect(ciLine(open, [open])).toBeNull();
     expect(ciLine(undefined, [])).toBeNull();
+  });
+});
+
+describe('ciResult', () => {
+  it('says passed for passing checks on an open pull request and for a merged one', () => {
+    const open = shipped({ prRequired: required('passing') });
+    expect(ciResult(open, [open])).toBe('passed');
+    const merged = shipped({ prRequired: required('passing'), pr: read('merged') });
+    expect(ciResult(merged, [merged])).toBe('passed');
+  });
+
+  it('says failed for failing checks', () => {
+    const batch = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+    expect(ciResult(batch, [batch])).toBe('failed');
+  });
+
+  it.each([
+    ['running', shipped({ prRequired: required('pending') })],
+    ['cancelled', shipped({ prRequired: required('cancelled') })],
+    ['conflicted', shipped({ prRequired: required('failing'), prMergeBlocked: 'conflicts' })],
+    ['not required', shipped({ prRequired: null })],
+    ['not shipped', batchDto({ state: 'OPEN', prRequired: required('passing') })],
+  ])('says nothing while the checks are %s', (_name, batch) => {
+    expect(ciResult(batch, [batch])).toBeNull();
+  });
+
+  it('says nothing with no batch', () => {
+    expect(ciResult(undefined, [])).toBeNull();
   });
 });

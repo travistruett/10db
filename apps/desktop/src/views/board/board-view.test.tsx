@@ -211,7 +211,9 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    expect(await screen.findAllByText('Building · step 1 of 2')).toHaveLength(1);
+    expect(await screen.findByRole('button', { name: 'Alpha' })).toBeTruthy();
+    // A running card says so by its border and its column, with no line (readable board spec §5).
+    expect(screen.queryByText('Building · step 1 of 2')).toBeNull();
     expect(screen.queryByTestId('board-above-columns')).toBeNull();
     expect(screen.queryByText(batch.branch ?? '')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Abandon' })).toBeNull();
@@ -239,8 +241,9 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    expect(await screen.findByText('Checking: make check-changed')).toBeTruthy();
-    expect(screen.queryByText('Checking: make gate')).toBeNull();
+    // Blue shows no line; the screen-reader summary still names the check.
+    expect(await screen.findByText(/Checking: make check-changed\./)).toBeTruthy();
+    expect(screen.queryByText(/Checking: make gate/)).toBeNull();
   });
 
   it('shows one line above the columns when several tasks share a branch', async () => {
@@ -402,12 +405,10 @@ describe('BoardView', () => {
 
     const cards = await screen.findAllByTestId('task-card');
     expect(cards).toHaveLength(2);
-    const readyCard = cards.find((c) => within(c).queryByText('Add a migration') !== null);
-    const runningCard = cards.find((c) => within(c).queryByText('Running one') !== null);
-    expect(within(readyCard ?? document.body).getByTestId('placement-badge').textContent).toBe(
-      'Separate copy',
-    );
-    expect(within(runningCard ?? document.body).queryByTestId('placement-badge')).toBeNull();
+    // The badge left the card face; the summary says where an open task will run.
+    expect(screen.queryByTestId('placement-badge')).toBeNull();
+    // Only the open task's summary says where it runs; the running task's placement is past changing.
+    expect(screen.getAllByText(/Runs in Separate copy\./)).toHaveLength(1);
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add a migration' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
@@ -466,56 +467,51 @@ describe('BoardView', () => {
 
   it.each([
     {
-      name: 'shows the pull request of the batch that shipped it',
+      name: 'whose batch shipped',
       batchState: 'SHIPPED' as const,
       prUrl: 'https://github.com/acme/widgets/pull/1',
-      link: 'https://github.com/acme/widgets/pull/1',
     },
-    {
-      name: 'shows no pull request while its batch has not shipped',
-      batchState: 'OPEN' as const,
-      prUrl: null,
-      link: null,
-    },
-  ])('a finished task $name', async ({ batchState, prUrl, link }) => {
-    const batch = batchDto({ title: 'Alpha first', state: batchState, prUrl });
-    const project = projectViewDto({
-      id: batch.projectId,
-      delivery: 'pull_request',
-      prTitlePrefix: 'feat(app)',
-      currentBatch: batch,
-    });
-    const ws = workstreamDto({
-      projectId: project.id,
-      batchId: batch.id,
-      taskTitle: 'Alpha',
-      state: 'DONE',
-    });
-    const done = taskDto({
-      projectId: project.id,
-      title: 'Alpha',
-      boardStatus: 'done',
-      status: 'done',
-      boardOrder: 1,
-      workstreamId: ws.id,
-    });
-    serve(
-      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
-      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
-      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
-      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
-    );
-    renderApp('/board');
+    { name: 'whose batch has not shipped', batchState: 'OPEN' as const, prUrl: null },
+  ])(
+    'a finished task $name shows no pull request link on its card',
+    async ({ batchState, prUrl }) => {
+      const batch = batchDto({ title: 'Alpha first', state: batchState, prUrl });
+      const project = projectViewDto({
+        id: batch.projectId,
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+        currentBatch: batch,
+      });
+      const ws = workstreamDto({
+        projectId: project.id,
+        batchId: batch.id,
+        taskTitle: 'Alpha',
+        state: 'DONE',
+      });
+      const done = taskDto({
+        projectId: project.id,
+        title: 'Alpha',
+        boardStatus: 'done',
+        status: 'done',
+        boardOrder: 1,
+        workstreamId: ws.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([done])),
+        http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+        http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      );
+      renderApp('/board');
 
-    const card = within(await screen.findByRole('list', { name: 'Done tasks' })).getByRole(
-      'listitem',
-      { name: 'Alpha' },
-    );
-    const hrefs = within(card)
-      .queryAllByRole('link', { name: 'Pull request' })
-      .map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(link === null ? [] : [link]);
-  });
+      const card = within(await screen.findByRole('list', { name: 'Done tasks' })).getByRole(
+        'listitem',
+        { name: 'Alpha' },
+      );
+      // The pull request link left the card face for the drawer (readable board spec §5).
+      expect(within(card).queryAllByRole('link')).toEqual([]);
+    },
+  );
 
   describe('where a task lands', () => {
     /** One project with a ready task of each landing; `delivery` is the project's. */
@@ -537,16 +533,11 @@ describe('BoardView', () => {
       );
     }
 
-    it('says on each card where its work will land', async () => {
+    it('leaves the landing line off the card face but speaks it to a screen reader', async () => {
       serveLandings('pull_request');
       renderApp('/board');
-      const lines = await screen.findAllByTestId('landing-line');
-      expect(lines.map((l) => l.textContent)).toEqual([
-        'Merges into main when checks pass',
-        'Merges into feature/x when checks pass',
-        'Held for your review: pull request against main',
-      ]);
-      // A screen reader hears it with the rest of the card.
+      await screen.findByRole('button', { name: 'Alpha' });
+      expect(screen.queryByTestId('landing-line')).toBeNull();
       expect(
         screen.getByText(/Runs in Your folder\. Merges into feature\/x when checks pass\./),
       ).toBeTruthy();
@@ -720,7 +711,11 @@ describe('BoardView', () => {
       const card = await readyCard();
 
       await clickStart(card);
-      expect(await within(card).findByText('Starting…')).toBeTruthy();
+      // On its way is blue, so the card has a blue edge and no line (readable board spec §5); the menu says it.
+      await waitFor(() => {
+        expect(card.querySelector('[data-state-color="blue"]')).not.toBeNull();
+      });
+      expect(within(card).queryByText('Starting…')).toBeNull();
 
       fireEvent.click(within(card).getByRole('button', { name: 'Actions for Alpha' }));
       const again = await screen.findByRole('menuitem', { name: /Starting/, hidden: true });
@@ -741,11 +736,12 @@ describe('BoardView', () => {
   });
 
   it.each([
-    ['RUNNING', 'Building', 'in_progress', false],
+    // Only a failed card has a status line; the others say it by their border.
+    ['RUNNING', null, 'in_progress', false],
     // An open task in Ready whose latest run finished was reopened after its pull request closed.
-    ['DONE', 'Done', 'ready', true],
+    ['DONE', null, 'ready', true],
     ['FAILED', 'The run failed. Retry runs it again.', 'blocked', false],
-    ['CANCELLED', 'Cancelled', 'ready', true],
+    ['CANCELLED', null, 'ready', true],
   ] as const)(
     'offers Start only when the latest workstream %s leaves the open task Backlog or Ready',
     async (state, label, boardStatus, startable) => {
@@ -765,8 +761,7 @@ describe('BoardView', () => {
       renderApp('/board');
 
       const card = await screen.findByRole('listitem', { name: 'Busy' });
-      if (label !== 'Done' && label !== 'Cancelled')
-        expect(await within(card).findByText(label)).toBeTruthy();
+      if (label !== null) expect(await within(card).findByText(label)).toBeTruthy();
       fireEvent.click(within(card).getByRole('button', { name: 'Actions for Busy' }));
       await screen.findByRole('menu', { hidden: true });
       // jsdom has no layout, so Mantine leaves an open menu display:none; query it as hidden.
@@ -927,17 +922,18 @@ describe('BoardView', () => {
       'Done tasks',
     ]);
     const inProgress = screen.getByRole('list', { name: 'In progress tasks' });
-    expect(
-      await within(within(inProgress).getByRole('listitem', { name: 'Base' })).findByText(
-        'Building',
-      ),
-    ).toBeTruthy();
+    // A running card has a blue edge and no line.
+    const base = within(inProgress).getByRole('listitem', { name: 'Base' });
+    expect(base.querySelector('[data-state-color="blue"]')).not.toBeNull();
+    expect(within(base).queryByText('Building')).toBeNull();
     const nextCard = within(screen.getByRole('list', { name: 'Backlog tasks' })).getByRole(
       'listitem',
       { name: 'Next' },
     );
-    expect(within(nextCard).getByText('api')).toBeTruthy();
-    expect(within(nextCard).getByText('Waits on Base')).toBeTruthy();
+    // Areas left the face; a dependency shows as an indicator, with its title in the summary.
+    expect(within(nextCard).queryByText('api')).toBeNull();
+    expect(within(nextCard).getByTestId('indicator-waits-on')).toBeTruthy();
+    expect(within(nextCard).getByText(/Waits on Base\./)).toBeTruthy();
     expect(
       within(screen.getByRole('list', { name: 'Icebox tasks' })).getByRole('listitem', {
         name: 'Idea',
@@ -1084,9 +1080,9 @@ describe('BoardView', () => {
       http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
     );
     renderApp('/board');
-    // The workstream arrives on its own query; wait until the card shows it.
+    // The workstream arrives on its own query; wait until the card's summary has it (a queued card has no line).
     const card = await screen.findByRole('listitem', { name: 'Next' });
-    expect(await within(card).findByText('Queued · next in line')).toBeTruthy();
+    expect(await within(card).findByText(/Queued · next in line\./)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Actions for Base' }));
     const park = await screen.findByRole('menuitem', { name: /^Move to Icebox/, hidden: true });
     expect(park.hasAttribute('data-disabled')).toBe(true);
@@ -1135,9 +1131,10 @@ describe('BoardView', () => {
       );
       renderApp('/board');
       const big = await screen.findByRole('listitem', { name: /^Big one/ });
-      expect(await within(big).findByText('Queued · next in line')).toBeTruthy();
+      // A queued card shows no line; its place is in the screen-reader summary.
+      expect(await within(big).findByText(/Queued · next in line\./)).toBeTruthy();
       const urgent = screen.getByRole('listitem', { name: /^Urgent fix/ });
-      expect(within(urgent).getByText('Queued · 2nd in line')).toBeTruthy();
+      expect(within(urgent).getByText(/Queued · 2nd in line\./)).toBeTruthy();
     });
 
     it('puts the task first from its card menu, and the line follows', async () => {
@@ -1171,7 +1168,7 @@ describe('BoardView', () => {
       });
       expect(await screen.findByText('Urgent fix is next in line for a free lane.')).toBeTruthy();
       const card = screen.getByRole('listitem', { name: /^Urgent fix/ });
-      expect(await within(card).findByText('Queued · next in line')).toBeTruthy();
+      expect(await within(card).findByText(/Queued · next in line\./)).toBeTruthy();
     });
 
     it('says the task will run once its dependencies are done', async () => {
@@ -1648,21 +1645,11 @@ describe('BoardView', () => {
       renderApp('/board');
     }
 
-    it('keeps the link out of the card button', async () => {
-      shippedCard();
-      const card = await screen.findByRole('button', { name: 'Alpha' });
-      const done = screen.getByRole('list', { name: 'Done tasks' });
-      const link = within(done).getByRole('link', { name: 'Pull request' });
-      expect(card.contains(link)).toBe(false);
-      expect(link.getAttribute('href')).toBe(url);
-    });
-
-    it('opens no details when the link is clicked', async () => {
+    it('has no link on the card face; the drawer holds the pull request', async () => {
       shippedCard();
       await screen.findByRole('button', { name: 'Alpha' });
       const done = screen.getByRole('list', { name: 'Done tasks' });
-      fireEvent.click(within(done).getByRole('link', { name: 'Pull request' }));
-      expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+      expect(within(done).queryByRole('link')).toBeNull();
     });
   });
 
@@ -1849,10 +1836,9 @@ describe('BoardView', () => {
         shipped('in_review', read('open', checks));
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
-        expect(within(card).getByText(line)).toBeTruthy();
-        expect(within(card).getByRole('link', { name: 'Pull request' }).getAttribute('href')).toBe(
-          url,
-        );
+        // Where a card has no line of its own, the summary speaks it; the link left for the drawer.
+        expect(within(card).getAllByText(line, { exact: false }).length).toBeGreaterThan(0);
+        expect(within(card).queryByRole('link')).toBeNull();
         expect(
           within(screen.getByRole('list', { name: 'Done tasks' })).queryByText('Alpha'),
         ).toBeNull();
@@ -1863,40 +1849,37 @@ describe('BoardView', () => {
       const jobUrl = 'https://github.com/acme/widgets/actions/runs/5/job/6';
       const job = { name: 'build', link: jobUrl, jobId: '6', runId: '5', description: null };
 
-      it('says CI running and links the running job', async () => {
+      it('speaks CI running, with no link and no indicator on the card', async () => {
         serveShipped('in_review', read('open', 'pending'), 'DONE', [], {
           prRequired: { state: 'pending', failing: [], pending: [job], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
-        expect(within(card).getByText('Pull request open · CI running')).toBeTruthy();
-        expect(within(card).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
-          jobUrl,
-        );
+        expect(within(card).getByText(/Pull request open · CI running\./)).toBeTruthy();
+        expect(within(card).queryByRole('link')).toBeNull();
+        expect(within(card).queryByTestId('indicator-ci')).toBeNull();
       });
 
-      it('says CI failed with the job’s name and links that job', async () => {
+      it('says CI failed with the job’s name and an indicator, and links nothing', async () => {
         serveShipped('in_review', read('open', 'failing'), 'DONE', [], {
           prRequired: { state: 'failing', failing: [job], pending: [], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
-        expect(within(card).getByText('Pull request open · CI failed: build')).toBeTruthy();
-        expect(within(card).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
-          jobUrl,
-        );
+        expect(within(card).getAllByText(/Pull request open · CI failed: build/).length).toBe(2);
+        expect(within(card).getByTestId('indicator-ci').textContent).toBe('CI failed');
+        expect(within(card).queryByRole('link')).toBeNull();
       });
 
-      it('says Merged · CI passed on a Done card', async () => {
+      it('shows a CI passed indicator on a Done card whose pull request merged', async () => {
         serveShipped('done', read('merged', 'passing'), 'DONE', [], {
           prRequired: { state: 'pending', failing: [], pending: [job], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'Done tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
-        expect(within(card).getByText('Merged · CI passed')).toBeTruthy();
-        expect(within(card).getByRole('link', { name: 'CI checks' }).getAttribute('href')).toBe(
-          `${url}/checks`,
-        );
+        expect(within(card).getByText(/Merged · CI passed\./)).toBeTruthy();
+        expect(within(card).getByTestId('indicator-ci').textContent).toBe('CI passed');
+        expect(within(card).queryByRole('link')).toBeNull();
       });
 
       it('says conflicts with the base instead of CI running', async () => {
@@ -1907,8 +1890,11 @@ describe('BoardView', () => {
         });
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
-        expect(within(card).getByText('Pull request open · conflicts with main')).toBeTruthy();
+        expect(
+          within(card).getAllByText(/Pull request open · conflicts with main/).length,
+        ).toBeGreaterThan(0);
         expect(within(card).queryByText(/CI running/)).toBeNull();
+        expect(within(card).queryByTestId('indicator-ci')).toBeNull();
       });
     });
 
@@ -2183,7 +2169,7 @@ describe('BoardView', () => {
     expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
   });
 
-  it('the card shows areas as labels and the criteria count', async () => {
+  it('the card face leaves out the areas and the criteria count, which a screen reader still hears', async () => {
     boardWith(
       [
         taskDto({
@@ -2197,12 +2183,10 @@ describe('BoardView', () => {
       [],
     );
     const two = await screen.findByRole('button', { name: 'Two' });
-    expect(within(two).getByText('2 criteria')).toBeTruthy();
-    expect(within(two).getByText('api')).toBeTruthy();
-    expect(within(two).getByText('ui')).toBeTruthy();
-    expect(
-      within(screen.getByRole('button', { name: 'One' })).getByText('1 criterion'),
-    ).toBeTruthy();
+    expect(within(two).queryByText('2 criteria')).toBeNull();
+    expect(within(two).queryByText('api')).toBeNull();
+    expect(screen.getByText(/Areas: api, ui\. 2 criteria\./)).toBeTruthy();
+    expect(screen.getByText(/1 criterion\./)).toBeTruthy();
   });
 });
 
@@ -2288,7 +2272,8 @@ describe('BoardView holding a started task', () => {
     renderApp('/board');
 
     const blocked = await screen.findByRole('list', { name: 'Blocked tasks' });
-    expect(within(blocked).getByText('Held: not in the queue')).toBeTruthy();
+    // Held is gray, so the card has no line; the summary says it.
+    expect(within(blocked).getByText(/Held: not in the queue\./)).toBeTruthy();
     fireEvent.click(within(blocked).getByRole('button', { name: 'Actions for Alpha' }));
     expect(await screen.findByRole('menuitem', { name: 'Remove', hidden: true })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: /^Hold/, hidden: true })).toBeNull();

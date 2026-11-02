@@ -78,6 +78,27 @@ function jobLink(jobs: readonly RequiredCheckJobDto[], prUrl: string): CiLink | 
 }
 
 /**
+ * Whether the required checks of a shipped pull request passed or failed, for the card's indicator;
+ * null while they run, when a conflict or the merge queue is what the pull request waits on, or when
+ * the pull request has no required checks. It reads the same data as `ciLine`.
+ */
+export function ciResult(
+  batch: BatchDto | undefined,
+  batches: readonly BatchDto[],
+): 'passed' | 'failed' | null {
+  const line = ciLine(batch, batches);
+  if (line === null || batch === undefined) return null;
+  if (line.color === 'green') return 'passed';
+  if (line.color !== 'red') return null;
+  const root =
+    batch.ciFixOf === null ? batch : (batches.find((b) => b.id === batch.ciFixOf) ?? batch);
+  // Red is also a conflict or a base that moved on, which is no CI result.
+  return root.prMergeBlocked === null && root.prRequired?.state === RequiredChecksState.Failing
+    ? 'failed'
+    : null;
+}
+
+/**
  * What the pull request's required checks say of a batch's tasks, or null when today's line stands:
  * no required checks, a pull request that is closed or unreadable, or a batch that has not shipped.
  * A CI fix batch shares its root's pull request, and the required checks are stored on the root

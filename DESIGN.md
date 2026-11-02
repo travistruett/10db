@@ -26,11 +26,22 @@ favors legibility and calm over decoration.
   up. A card that can't move (In progress, Blocked, Done) says why in a tooltip. The card's actions menu
   sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns;
   columns scroll horizontally on narrow windows.
-- **Card state:** a card says its task's state once, in one plain line with a dot, such as
-  "Checking: make gate". The card's border and the dot take the status color
-  (blue running, yellow waiting on you, orange paused, red failed); queued keeps the plain border. No
-  fill, no left stripe, no pulsing. A card waiting on the builder is the most prominent: a full 2 px
-  yellow border and "Waiting on you: answer in Inbox".
+  A card's face, top to bottom: the goal's title (small, dimmed, when the task is in a goal); the headline,
+  or the title when the headline is empty (weight 500, at most three lines); the why (dimmed, `xs`, at most
+  two lines, only when there is one); a status line (see Card state); and a row of indicators, only when
+  the task has one. Areas, the criteria count, the landing line, the placement badge, the pull request and
+  CI links, "Review sent back" and the shipped-at-limit line are not on the face: the task drawer holds
+  them, and the card's screen-reader summary still speaks them. The indicator row is one component that
+  takes a list of small labelled badges, so a new kind is another entry in the list: a shared branch (the
+  batch has more than one task), CI passed or failed on a shipped pull request, waits on (the titles of the
+  unfinished dependencies are its tooltip) and Cancelled.
+- **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
+  paused, red failed, green done); queued keeps the plain border. No fill, no left stripe, no pulsing. A
+  card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state
+  as a line with a dot, such as "Waiting on you: answer in Inbox", only when the color is yellow, red or
+  orange, because only then does the builder have something to do or read. A failed task's line is the
+  plain-words one below. Blue, green and gray cards show no line: the border and the column say it, and
+  the screen-reader summary still does.
 - **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
   `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's session rows:
   "The review session stopped without reporting a result. Retry runs the review step again." The line is

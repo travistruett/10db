@@ -37,7 +37,7 @@ import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
-import { BatchStrip, sharedBatches } from './batch-strip';
+import { BatchStrip, batchTaskCount, sharedBatches } from './batch-strip';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -49,8 +49,7 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
-import { ciLine, withFixTaskTitles } from './ci-line';
-import { ExternalLink, PullRequestLink } from './pull-request-link';
+import { withFixTaskTitles } from './ci-line';
 import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
 import { canRunNext } from './run-next';
@@ -128,19 +127,6 @@ function parkedDependencyOf(
     if (peer?.status === TaskStatus.Open && peer.boardColumnId !== null) return peer.title;
   }
   return null;
-}
-
-/** A finished task's pull request: the one its batch opened, once that batch has shipped. */
-function shippedPullRequest(
-  task: TaskDto,
-  workstream: WorkstreamDto | undefined,
-  batchById: ReadonlyMap<BatchId, BatchDto>,
-): string | undefined {
-  if (!workstream?.batchId) return undefined;
-  // A failed run the builder shipped anyway has a pull request too.
-  if (task.status !== TaskStatus.Done && workstream.state !== WorkstreamState.Failed)
-    return undefined;
-  return batchById.get(workstream.batchId)?.prUrl ?? undefined;
 }
 
 const isDone = (column: LayoutColumn) =>
@@ -323,32 +309,15 @@ function BoardColumns({
                 batch={batch}
                 batches={allBatches}
                 gateCommand={stepCheck}
-                pullRequest={shippedPullRequest(task, ws, batchById)}
-                landing={landingOf(task, batch)}
+                batchTaskCount={batch ? batchTaskCount(batch, workstreams) : 1}
                 startNote={noteOf(task)}
                 place={ws ? places.get(ws.id) : undefined}
-                placementShown={placementOpen(task, ws?.state)}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
               />
             );
           }}
-          renderLink={(task) => {
-            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            const url = shippedPullRequest(task, ws, batchById);
-            if (url) {
-              const ci = ciLine(batchOf(ws), allBatches);
-              return (
-                <Group gap="sm" wrap="nowrap">
-                  <PullRequestLink url={url} />
-                  {ci?.link && ci.link.url !== url ? (
-                    <ExternalLink url={ci.link.url} label={ci.link.label} />
-                  ) : null}
-                </Group>
-              );
-            }
-            return noteOf(task)?.inbox ? <InboxLink /> : null;
-          }}
+          renderLink={(task) => (noteOf(task)?.inbox ? <InboxLink /> : null)}
           summary={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
             const batch = batchOf(ws);
@@ -363,6 +332,7 @@ function BoardColumns({
               ws ? places.get(ws.id) : undefined,
               allBatches,
               placementOpen(task, ws?.state) ? placementLabel(task.workspaceMode) : null,
+              batch ? batchTaskCount(batch, workstreams) : 1,
             );
           }}
           renderMenu={(task) => {
