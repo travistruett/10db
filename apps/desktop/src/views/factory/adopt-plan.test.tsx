@@ -245,6 +245,29 @@ describe('Adopt a Plan…', () => {
     expect(daemon.posted).toEqual([]);
   });
 
+  it('reopens the typed-path form empty and without a field error after Cancel', async () => {
+    serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+    fireEvent.change(within(modal).getByLabelText('Plan path'), {
+      target: { value: 'plans/x.md' },
+    });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+    expect(await within(modal).findByText(/starting with \//)).toBeTruthy();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Adopt a Plan…' }));
+
+    const reopened = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+    const field = within(reopened).getByLabelText<HTMLInputElement>('Plan path');
+    expect(field.value).toBe('');
+    expect(within(reopened).queryByText(/starting with \//)).toBeNull();
+  });
+
   it('shows a daemon failure on a typed Adopt inside the open modal', async () => {
     const daemon = serve();
     renderApp('/factory');
