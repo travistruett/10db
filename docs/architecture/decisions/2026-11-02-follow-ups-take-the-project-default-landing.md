@@ -18,12 +18,14 @@
   unless the branch is merged into it, and what to do. It runs in both cuts (`start.ts`, `worktree-cut.ts`). A
   comparison that can't be made (the base can't be fetched) writes nothing; the cut's own fetch of the landing
   branch still refuses when origin can't be asked.
-- **Starting a task whose landing branch no other open work uses shows a notice too.** A retired branch can be level
+- **Starting a task whose landing branch no other work under way uses shows a notice too.** A retired branch can be level
   with the base (`next` just after a final merge), so "behind" alone misses it. When the batch's base branch is not
-  the project's base, nor the branch the project lands new tasks in, and no other open task (status open, not one the
-  batch starts) lands there, and no unfinished batch other than this one has it as its base, the cut writes the batch
-  notice `landing-unused` (warning): "Nothing else open lands in <branch>". A done or removed task and a shipped
-  batch count as no use. It is written beside `landing-behind`, not instead of it (`landingWarnings` in
+  the project's base, nor the branch the project lands new tasks in, and no other open task with an active workstream
+  (not one the batch starts) lands there, and no unfinished batch other than this one has it as its base, the cut
+  writes the batch notice `landing-unused` (warning): "Nothing else under way lands in <branch>". A task merely filed
+  against the branch counts as no use, wherever it sits on the Board, Icebox included: otherwise two follow-ups
+  still filed against a retired branch would each hide the other's warning. A done or removed task and a shipped
+  batch count as no use too. It is written beside `landing-behind`, not instead of it (`landingWarnings` in
   `landing.ts`), in both cuts, and the check reads only the database, so it never blocks a start.
 
 ## Why

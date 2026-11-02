@@ -28,7 +28,7 @@ export const NOTICE_KEY = {
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
   landingBehind: 'landing-behind',
-  /** The branch the batch lands in is used by no other open task or batch, and isn't the project's base. */
+  /** The branch the batch lands in is used by no other task under way or unfinished batch, and isn't the project's base. */
   landingUnused: 'landing-unused',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
@@ -79,18 +79,22 @@ export const seedNotices = {
    * The install made `node_modules` but ran no install script, and the seed that would have carried
    * the built output was skipped, so these packages the project allows to build are unbuilt.
    */
-  scriptsSkipped: (names: readonly string[]): Notice => {
+  scriptsSkipped: (names: readonly string[], legacyPnpmMajor?: number): Notice => {
     const shown = names.slice(0, SCRIPTS_SKIPPED_SHOWN);
     const rest = names.length - shown.length;
     const named = rest > 0 ? `${shown.join(', ')} and ${String(rest)} more` : shown.join(', ');
     const one = names.length === 1;
     // pnpm rebuild with no names rebuilds every package, so a long list needn't be typed out.
     const rebuild = rest > 0 ? 'pnpm rebuild' : `pnpm rebuild ${named}`;
+    const allows =
+      legacyPnpmMajor === undefined
+        ? `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds),`
+        : `The copy was installed with pnpm ${String(legacyPnpmMajor)}, which builds every dependency that has an install script unless the project limits it, ${named} included,`;
     return {
       key: NOTICE_KEY.scriptsSkipped,
       tone: 'warning',
       line: `${named} ${one ? 'is' : 'are'} not built in this copy: its install ran without install scripts`,
-      body: `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds), and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
+      body: `${allows} and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
     };
   },
 };
@@ -103,12 +107,12 @@ export const landingNotices = {
     line: `${branch} lacks ${String(missing)} commit${missing === 1 ? '' : 's'} ${base} has`,
     body: `This work lands in ${branch}, and is built from it, but origin/${branch} doesn't hold ${String(missing)} commit${missing === 1 ? '' : 's'} that origin/${base} has, so the batch lacks any fix made there. Work landed in ${branch} also won't reach ${base} unless ${branch} is merged into it.\n\nIf ${branch} is no longer in use, change where this task lands to the base and start it again. Otherwise merge ${base} into ${branch} on origin first.`,
   }),
-  /** The branch is not the project's default, and no other open task or batch lands in it. */
+  /** The branch is not the project's default, and no other task under way or unfinished batch lands in it. */
   unused: (branch: string, base: string): Notice => ({
     key: NOTICE_KEY.landingUnused,
     tone: 'warning',
-    line: `Nothing else open lands in ${branch}`,
-    body: `This work lands in ${branch}, which isn't ${base}, the project's base branch, and no other open task or batch lands in it. A branch kept for a run of work is often retired once its last piece merges, and work landed in a retired branch never reaches ${base}.\n\nIf ${branch} is still in use, carry on. If it is retired, change where this task lands to the base and start it again.`,
+    line: `Nothing else under way lands in ${branch}`,
+    body: `This work lands in ${branch}, which isn't ${base}, the project's base branch, and no other task under way or unfinished batch lands in it. Tasks only filed against it, not started, don't count. A branch kept for a run of work is often retired once its last piece merges, and work landed in a retired branch never reaches ${base}.\n\nIf ${branch} is still in use, carry on. If it is retired, change where this task lands to the base and start it again.`,
   }),
 };
 

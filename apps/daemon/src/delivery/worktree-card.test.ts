@@ -231,6 +231,23 @@ describe('a worktree no batch uses any more', () => {
     expect(notice.title).toBe(`10db removed nothing at ${path}`);
     expect(notice.body).toContain('git no longer lists');
   });
+
+  it('says nothing was removed, and why, when 10db no longer has the worktree locked', async () => {
+    const { batch, path } = await orphaned();
+    raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
+    const card = h.only(h.cards());
+    h.git$('worktree', 'unlock', path);
+
+    inbox.answer(card.id, { choice: WorktreeChoice.Remove });
+    await h.jobs.idle();
+
+    expect(existsSync(path)).toBe(true);
+    expect(await listed(path)).toBe(true);
+    const notice = h.only(h.cards());
+    expect(notice.id).not.toBe(card.id);
+    expect(notice.title).toBe(`10db removed nothing at ${path}`);
+    expect(notice.body).toContain('10db no longer has it locked');
+  });
 });
 
 describe('a directory 10db left in place', () => {

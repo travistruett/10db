@@ -903,6 +903,8 @@ export const goalViews = sqliteTable(
     openedAt: text('opened_at').notNull(),
     /** Where the current visit's Δ window starts: the mark before the visit began; null for a first visit. */
     visitSince: text('visit_since'),
+    /** When the current visit began, which bounds its length; null for a row from before the column. */
+    visitStartedAt: text('visit_started_at'),
   },
   (t) => [primaryKey({ columns: [t.goalId, t.personId] })],
 );
