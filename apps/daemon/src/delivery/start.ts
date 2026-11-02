@@ -18,7 +18,6 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
-  countLanes,
   deleteCuttingBatch,
   findUnfinishedBatch,
   getBatch,
@@ -37,7 +36,7 @@ import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
-import { batchCheckout } from './checkout';
+import { batchCheckout, lanesInProjectCheckout } from './checkout';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
@@ -392,7 +391,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const stopped = (): boolean => signal.aborted;
     if (stopped()) return;
     try {
-      const lanes = countLanes(db).byProject.get(project.id) ?? 0;
+      // Only lanes in the project's own checkout: the cut moves its branch under their files. A
+      // lane in a separate copy edits other files.
+      const lanes = lanesInProjectCheckout(db, project);
       if (lanes > 0) {
         refuse(startCards.lanesRunning(project, lanes));
         return;

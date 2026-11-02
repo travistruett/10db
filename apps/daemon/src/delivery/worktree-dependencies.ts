@@ -89,6 +89,11 @@ export interface WorktreeDependencies {
     /** The worktree, after its seed. */
     readonly path: string;
     readonly signal: AbortSignal;
+    /**
+     * False when the cut skipped the seed (a shared batch was unfinished): a missing `node_modules`
+     * is then expected, and the install makes it. Default true.
+     */
+    readonly seeded?: boolean;
   }): Promise<DependencyRefresh>;
 }
 
@@ -121,9 +126,10 @@ export interface WorktreeDependenciesDeps {
  */
 export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): WorktreeDependencies {
   return {
-    async refresh({ batch, project, path, signal }) {
-      if (!existsSync(join(path, PNPM_LOCKFILE)) || !existsSync(join(path, 'node_modules')))
-        return { kind: 'skipped' };
+    async refresh({ batch, project, path, signal, seeded = true }) {
+      // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
+      if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
+      if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
       const logPath = join(
         deps.dataDir,
         'logs',

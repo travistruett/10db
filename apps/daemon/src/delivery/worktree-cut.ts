@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import {
   deleteCuttingBatch,
+  findUnfinishedBatch,
   getBatch,
   getProject,
   getTask,
@@ -194,23 +195,41 @@ export async function cutWorktree(
     // Never a fix batch's: its branch is the pull request's and outlives a refused cut.
     made.branch = fix === null;
     made.base = baseSha;
-    try {
-      const seeded = await seedWorktree({
-        from: main,
-        to: path,
-        dirs: seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed),
-        signal,
-      });
+    // A shared batch that is unfinished (cutting or open) has lanes that may write the main
+    // checkout's ignored directories, `node_modules` included, and a clone would carry that into this
+    // copy's gate. Then nothing is cloned and the install builds `node_modules` from the copy's own
+    // lockfile (task placement spec §7, option b).
+    const seed = findUnfinishedBatch(db, project.id) === undefined;
+    if (seed) {
+      try {
+        const seeded = await seedWorktree({
+          from: main,
+          to: path,
+          dirs: seedDirs(await ctx.git.ignoredDirectories(main), project.worktreeSeed),
+          signal,
+        });
+        ctx.logger.info(
+          { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
+          'worktree seeded',
+        );
+      } catch (error) {
+        if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
+        return;
+      }
+    } else {
       ctx.logger.info(
-        { batchId, path, files: seeded.files, links: seeded.links, skipped: seeded.skipped },
-        'worktree seeded',
+        { batchId, path },
+        'worktree not seeded: a shared batch is unfinished, so the install builds node_modules',
       );
-    } catch (error) {
-      if (!stopped()) await refuse(worktreeCards.seedFailed(batch, error));
-      return;
     }
     if (stopped()) return;
-    const installed = await ctx.dependencies.refresh({ batch, project, path, signal });
+    const installed = await ctx.dependencies.refresh({
+      batch,
+      project,
+      path,
+      signal,
+      seeded: seed,
+    });
     await recordInstall(ctx, batchId, path, installed);
     switch (installed.kind) {
       case 'aborted':

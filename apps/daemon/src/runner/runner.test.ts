@@ -4265,6 +4265,26 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(specs.map((spec) => spec.cwd)).toEqual([path]);
     });
 
+    it("a shared task's session still runs in the project's checkout while a copy is live", async () => {
+      const probe = sandboxProbe();
+      const book: FakeScriptBook = { Beta: [[turn]] };
+      engine = await createTestEngine(
+        book,
+        { delivery: 'pull_request', prTitlePrefix: 'feat(app)' },
+        { laneSandbox: probe.laneSandbox },
+      );
+      const specs = recordSpecs();
+      const made = worktreeBatch();
+      cleanups.push(made.cleanup);
+      // A task with no batch works in Your folder, whatever copies the project holds.
+      const { workstream } = engine.addTask('Beta', ['api']);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(specs.map((spec) => realpathSync(spec.cwd))).toEqual([realpathSync(engine.repoPath)]);
+      expect(probe.inputs[0]?.project.repoPath).toBe(engine.repoPath);
+      expect(probe.inputs[0]?.checkouts).toEqual([engine.repoPath, made.path]);
+    });
+
     it('the lane sandbox gets the worktree as the checkout and every checkout in checkouts', async () => {
       const { probe, specs, path } = await run(() => [[turn]]);
       expect(probe.inputs[0]?.project.repoPath).toBe(path);
