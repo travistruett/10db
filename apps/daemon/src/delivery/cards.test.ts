@@ -128,6 +128,22 @@ describe('the cards of a batch that failed to ship', () => {
   });
 });
 
+describe('the wrong-branch card of a ship', () => {
+  it('offers Retry and Abandon of its batch, which the Inbox shows as buttons', () => {
+    const card = wrongBranchCard(batch, 'main', '/repo', 'not_shipped');
+    expect(card.detail).toEqual({ batchId: batch.id, actions: ['retry', 'abandon'] });
+  });
+
+  it.each(['waits', 'failed', 'not_joined'] as const)(
+    'the %s card names only its batch, as before',
+    (outcome) => {
+      expect(wrongBranchCard(batch, 'main', '/repo', outcome).detail).toEqual({
+        batchId: batch.id,
+      });
+    },
+  );
+});
+
 describe('the cards that say why a checkout stays on its branch', () => {
   const shipped = { ...batch, state: 'SHIPPED' as const, worktreePath: null };
   it.each([

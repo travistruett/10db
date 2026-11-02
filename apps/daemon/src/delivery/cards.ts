@@ -593,7 +593,8 @@ export function wrongBranchCard(
       return {
         title: `Batch "${batch.title}" not shipped: ${where}`,
         body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
-        detail,
+        // Retry ship and Abandon, as every other ship failure offers.
+        detail: answers(batch),
       };
     case 'not_joined':
       return {
