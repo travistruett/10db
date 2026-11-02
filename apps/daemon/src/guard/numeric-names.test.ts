@@ -65,6 +65,8 @@ describe('numericNames', () => {
       ['command eval', 's=1; command eval "s=x"; echo $((s))'],
       ['exec eval', 's=1; exec eval "s=x"; echo $((s))'],
       ['getopts', 's=1; getopts ab o; echo $((s))'],
+      // bash `jobs -x cmd` runs cmd in the current shell, so a builtin it runs can set names
+      ['jobs -x getopts', 'OPTARG=1; jobs -x getopts a: o -a x; echo $((OPTARG))'],
       ['hash', 's=1; hash -p x y; echo $((s))'],
     ];
     it.each(rows)('%s', (_, command) => {

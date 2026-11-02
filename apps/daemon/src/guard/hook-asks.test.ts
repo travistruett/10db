@@ -302,6 +302,10 @@ describe('arithmetic over a name the command can rebind', () => {
     expect(bash("declare -n r=s; s=1; r='a[$(id)]'; echo $((s+1))")).toBe('ask');
   });
 
+  it('asks when `jobs -x` runs a builtin that can write the name arithmetic reads', () => {
+    expect(bash("OPTARG=1; jobs -x getopts a: o -a 'a[$(id)]'; echo $((OPTARG+1))")).toBe('ask');
+  });
+
   it('allows a timing check over a name set only to numbers', () => {
     expect(bash('s=$(date +%s); make check; echo $(( $(date +%s) - s ))')).toBe('allow');
   });
