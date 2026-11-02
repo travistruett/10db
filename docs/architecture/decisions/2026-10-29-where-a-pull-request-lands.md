@@ -61,6 +61,6 @@ Turned down:
 - **Letting a started task change its landing.** Its batch already holds its branch and, soon, its pull request;
   changing one task's policy would change its siblings'.
 
-Left open: the builder MCP's `create_task` and `edit_task` and the `10db-task` skill, which live on branches that
-have not merged into this base, take `landing` through `TaskInput` and `TaskPatch` once they do; their loose
-input shapes need the one field added then.
+The builder MCP's `create_task` and `edit_task` take `landing` too, through `TaskInput` and `TaskPatch`, so they
+give the refusals the API gives (a branch origin lacks, a task that has started) and a `create_task` without
+`landing` gets the project default.
