@@ -14,6 +14,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
+import { createInboxService } from '../inbox';
 import { GH_CHECK_CHOICE, prCardKey } from './cards';
 import { raiseIn } from './context';
 import { createGhCardAnswers, createPrWatch, subscribePrWatch, type PrWatch } from './index';
@@ -821,7 +822,7 @@ describe('gh unavailable', () => {
       const card = await ghCard();
       let pokes = 0;
       createGhCardAnswers({
-        poke: () => {
+        recheck: () => {
           pokes += 1;
         },
       })(card, { choice: GH_CHECK_CHOICE });
@@ -832,13 +833,66 @@ describe('gh unavailable', () => {
       const card = await ghCard();
       let pokes = 0;
       const answer = createGhCardAnswers({
-        poke: () => {
+        recheck: () => {
           pokes += 1;
         },
       });
       answer(card, { choice: 'Later' });
       answer({ ...card, detail: {} }, { choice: GH_CHECK_CHOICE });
       expect(pokes).toBe(0);
+    });
+
+    /** The inbox the daemon runs: an answer to the gh card reaches the watch before the card closes. */
+    function answeringInbox(w: PrWatch) {
+      return createInboxService({
+        state: h.state,
+        onParkedAnswer: () => undefined,
+        onFlagAnswer: createGhCardAnswers(w),
+      });
+    }
+
+    it('raises a fresh card saying how gh fails now when gh still fails', async () => {
+      setup();
+      shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      const first = h.only(h.cards());
+
+      h.gh.failNext.set('prStatus', new GhError('timeout', TIMEOUT));
+      answeringInbox(w).answer(first.id, { choice: GH_CHECK_CHOICE });
+      await w.idle();
+
+      const fresh = h.only(h.cards());
+      expect(fresh.id).not.toBe(first.id);
+      expect(fresh.body).toContain(TIMEOUT);
+      expect(fresh.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
+
+      // Only the round the answer asked for raises again: a later failing round keeps the one card.
+      await round(w);
+      expect(h.only(h.cards()).id).toBe(fresh.id);
+    });
+
+    it('leaves no card once gh answers', async () => {
+      setup();
+      const a = shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      const card = h.only(h.cards());
+
+      h.gh.auth = 'ok';
+      answeringInbox(w).answer(card.id, { choice: GH_CHECK_CHOICE });
+      await w.idle();
+
+      expect(pr(a.id)).toMatchObject({ state: 'open', unknownReason: null });
+      expect(h.cards()).toEqual([]);
+      // gh failing in a later round raises a card again, as any first failure does.
+      h.gh.auth = 'signed_out';
+      await round(w);
+      expect(h.cards()).toHaveLength(1);
     });
   });
 

@@ -108,7 +108,8 @@ themselves once it is made (`resolvesWhen`, or the existing closing of settled c
 
 - **"Pull request status unknown: gh …"** (`prCards.ghUnavailable`) offers **Check again**
   (`delivery/gh-card.ts`, `createGhCardAnswers`): the pull request watch reads every followed pull request now
-  (`poke`) instead of at its next interval. If gh still fails, the round raises a fresh card saying how.
+  (`recheck`) instead of at its next interval. If gh still fails, that round raises a fresh card saying how,
+  though every pull request it reads was unknown already; a later round raises none while that card is open.
 - **Sign in, Fix the credentials, Set the secret** offer **Check again**: `AccountPreparer.retry` probes at once,
   whatever the last probe's time. A ready account closes the cards that asked for the fix and asks for a tick; a
   secret that is still missing throws a `ConflictError`, which keeps the card open and says what is missing.
