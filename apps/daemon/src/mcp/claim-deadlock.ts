@@ -11,6 +11,7 @@ import { activeClaims, getWorkstreamRow, releaseClaim, type Json } from '@10db/d
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
+import type { ClaimWaits } from './claim-wait';
 
 /** Where a deadlock card keeps what each of its answers does. */
 const DEADLOCK_DETAIL = 'deadlock';
@@ -77,13 +78,17 @@ export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
 
 /**
  * Acts on the builder's answer to a claim deadlock card, before the card records it. A yield releases
- * the claims the card named for that task; a cancel ends the task unless it already ended. Any other
- * card, and any other answer, is left alone.
+ * the claims the card named for that task and ends its wait with a refusal naming them, so its agent
+ * learns it lost them before it edits there again; the other task's wait, which waits on the card,
+ * then takes the claim. A cancel ends the task unless it already ended. Any other card, and any other
+ * answer, is left alone.
  */
 export function createClaimDeadlockAnswers(deps: {
   readonly state: StateStore;
   /** Ends the workstream's session (if any) and marks it cancelled, as a cancel from the Board does. */
   cancel(id: WorkstreamId): Promise<void>;
+  /** The MCP handler's claim waits, which end the yielding task's wait and tell its agent. */
+  readonly waits: ClaimWaits;
   readonly log: Logger;
 }): (item: InboxItemDto, answer: InboxAnswer) => void {
   return (item, answer) => {
@@ -94,6 +99,15 @@ export function createClaimDeadlockAnswers(deps: {
     if (!choice) return;
     const id = choice.workstreamId as WorkstreamId;
     if (choice.action === 'yield') {
+      // The task is told through its wait, so a claim is released only from a task that waits: one
+      // that does not is in no deadlock, and losing a claim untold would let two tasks edit one area.
+      if (!deps.waits.yielded(id, { claims: choice.claims, inboxId: item.id })) {
+        deps.log.warn(
+          { workstreamId: id, inboxId: item.id },
+          'a claim deadlock answer named a task that no longer waits; nothing was released',
+        );
+        return;
+      }
       deps.state.write((ctx) => {
         for (const claim of activeClaims(ctx.tx, id))
           if (choice.claims.some((c) => c.kind === claim.kind && c.name === claim.name))

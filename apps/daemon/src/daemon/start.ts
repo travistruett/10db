@@ -411,6 +411,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       if (!runner) throw new RunnerNotStartedError();
       return runner.cancel(id);
     },
+    waits: claimWaits,
     log: logger,
   });
   const inbox = createInboxService({
