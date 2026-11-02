@@ -6,8 +6,9 @@ import { createServices } from './services';
 
 let h: DeliveryHarness;
 beforeEach(() => {
-  // The test moves batches by hand; the ship trigger would race it.
-  h = createDeliveryHarness({}, { trigger: false });
+  // The ship trigger is on: the old batch keeps the superseded attempt until the new cut ends
+  // (`members`), and the trigger is what checks it again then.
+  h = createDeliveryHarness({}, { networkTimeoutMs: 60_000 });
 });
 afterEach(() => {
   h.close();
@@ -52,7 +53,7 @@ describe('a fresh start of one task of a shared batch through the task service',
     expect(started.kind).toBe('batch');
     if (started.kind !== 'batch') throw new Error('a batch was expected');
     expect(started.batch.id).not.toBe(batch.id);
-    // The old batch no longer waits on the superseded attempt: the start moved it out of OPEN.
+    // The old batch no longer waits on the superseded attempt: the cut that ended moved it out of OPEN.
     expect(getBatch(h.store.db, batch.id).state).not.toBe('OPEN');
   });
 });
