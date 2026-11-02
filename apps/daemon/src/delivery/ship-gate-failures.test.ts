@@ -101,7 +101,8 @@ describe('a shipping gate that fails', () => {
     expect(gateRuns()).toBe(1);
     const card = h.only(h.cards());
     expect(card.body).toContain('Start a fix task');
-    expect(card.detail?.['actions']).toBeUndefined();
+    // The card still points at a fix task, and offers the answers the daemon acts on as well.
+    expect(card.detail?.['actions']).toEqual(['retry', 'abandon']);
   });
 
   it("doesn't run it again when the task's own gate didn't pass", async () => {
@@ -194,15 +195,17 @@ describe('a shipping gate that fails while the Mac is overloaded', () => {
 });
 
 describe('a shipping gate that fails only in tests the batch could not have caused', () => {
-  it('runs once more by itself and ships when that passes, saying so on a card', async () => {
+  it("runs once more by itself and ships when that passes, saying so as a notice on the batch's tasks, not a card", async () => {
     h = createDeliveryHarness({ gateCommand: fakeGate(1, ['src/ui/other.test.ts > flakes']) });
     const batch = await openBatch();
     const ended = await finish(batch, 0);
     expect(ended.state).toBe('SHIPPED');
     expect(gateRuns()).toBe(2);
-    const card = h.only(h.cards());
-    expect(card.title).toBe('Batch "Greetings": the gate passed when 10db ran it again');
-    expect(card.body).toContain('- src/ui/other.test.ts > flakes');
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(ended.notices.filter((n) => n.key === 'gate-rerun'));
+    expect(notice.tone).toBe('info');
+    expect(notice.line).toBe('The gate passed when 10db ran it again');
+    expect(notice.body).toContain('- src/ui/other.test.ts > flakes');
     expect(h.logs.lines().map((l) => l['msg'])).toContain(
       'ship gate failed only in tests the batch did not change; running it again',
     );
