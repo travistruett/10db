@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Installs 10db as GitHub built it from a branch or tag, so this Mac never compiles the app.
 #   install-app.sh [ref]    ref is a branch or tag, default main (`make install-app REF=<ref>`)
-# It takes the unsigned-dmg artifact of the newest successful release-dry-run run for the ref's
-# head commit, or waits for a run of that commit already under way, or starts one and waits for
-# it. release-dry-run runs on every push to main as well as by hand, so main's build is usually
-# ready already; starting one is the fallback (another ref, or a build that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
+# It takes the unsigned-dmg artifact of the newest successful release-dry-run run for the newest
+# commit of the ref (among its last 100) that has one, without waiting for the head's build when
+# main has moved on; it prints that commit and how many commits behind the head it is. Only when
+# none of them has a finished build does it wait for a run of the head already under way, or start
+# one and wait for it. release-dry-run runs on every push to main as well as by hand (and keeps at
+# most one build waiting per branch), so main's build is usually ready already; starting one is
+# the fallback (another ref, or builds that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
 # 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
 # quarantine and registers it with Launch Services. Only then does it delete older zips and all
 # but the newest 5 database backups. It refuses while 10db runs and never quits it.
@@ -105,20 +108,47 @@ if ! sha="$(gh api "repos/{owner}/{repo}/commits/$ref" --jq .sha 2> "$gh_err")";
 fi
 [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || fail "GitHub answered '$sha' for the head of $ref, not a commit SHA"
 
-run_id="$(gh run list --workflow "$workflow" --commit "$sha" --status success --limit 1 \
-  --json databaseId --jq '.[0].databaseId // empty')"
-if [ -n "$run_id" ]; then
-  live="$(gh api "repos/{owner}/{repo}/actions/runs/$run_id/artifacts" \
-    --jq "[.artifacts[] | select(.name == \"$artifact\" and (.expired | not))] | length")"
-  if [ "$live" -eq 0 ]; then
-    echo "The build of ${sha:0:12} in run $run_id has expired (GitHub keeps it for 7 days)."
-    run_id=""
-  else
-    echo "Using the build of $ref at ${sha:0:12} from run $run_id."
-  fi
+# Main moves faster than a build takes, so the head's build is often still queued or running while
+# an older commit's has finished. The newest commit of the ref with a finished successful build and
+# a live artifact is installed; the head's build is waited for only when none of them has one.
+commits_scanned=100
+if ! commits="$(gh api "repos/{owner}/{repo}/commits?sha=$ref&per_page=$commits_scanned" --jq '.[].sha' 2> "$gh_err")"; then
+  fail "gh could not list the commits of $ref: $(cat "$gh_err")"
+fi
+if ! finished="$(gh run list --workflow "$workflow" --status success --limit "$commits_scanned" \
+  --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2> "$gh_err")"; then
+  fail "gh could not list the finished builds: $(cat "$gh_err")"
 fi
 
-if [ -z "$run_id" ]; then
+run_id=""
+built=""
+behind=0 # the commits the installed one trails the head of the ref by
+position=0
+while IFS= read -r commit; do
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || continue
+  for id in $(awk -v commit="$commit" '$2 == commit { print $1 }' <<< "$finished"); do
+    [[ "$id" =~ ^[0-9]+$ ]] || continue
+    live="$(gh api "repos/{owner}/{repo}/actions/runs/$id/artifacts" \
+      --jq "[.artifacts[] | select(.name == \"$artifact\" and (.expired | not))] | length")"
+    if [ "$live" -gt 0 ]; then
+      run_id="$id"
+      built="$commit"
+      behind="$position"
+      break
+    fi
+    echo "The build of ${commit:0:12} in run $id has expired (GitHub keeps it for 7 days)."
+  done
+  [ -z "$run_id" ] || break
+  position=$((position + 1))
+done <<< "$commits"
+
+if [ -n "$run_id" ]; then
+  if [ "$behind" -eq 0 ]; then
+    echo "Using the build of $ref at ${built:0:12} from run $run_id."
+  else
+    echo "The build of the head of $ref (${sha:0:12}) has not finished; using the newest finished one, ${built:0:12} from run $run_id."
+  fi
+else
   run_id="$(gh run list --workflow "$workflow" --commit "$sha" --limit 20 --json databaseId,status \
     --jq '[.[] | select(.status != "completed")][0].databaseId // empty')"
   [ -z "$run_id" ] || echo "A build of ${sha:0:12} is already under way in run $run_id; waiting for it."
@@ -152,22 +182,34 @@ if [ -z "$run_id" ]; then
 fi
 [[ "$run_id" =~ ^[0-9]+$ ]] || fail "GitHub answered '$run_id' for a run id"
 
-# A long wait meets the odd failed request (a 502, a dropped connection); only three in a row stop it.
-view_failures=0
-while :; do
-  if view="$(gh run view "$run_id" --json status,conclusion,headSha --jq '.status, .conclusion, .headSha' 2> "$gh_err")"; then
-    view_failures=0
-    { read -r status; read -r conclusion; read -r head; } <<< "$view"
-    [ "$status" != completed ] || break
-  else
-    view_failures=$((view_failures + 1))
-    [ "$view_failures" -lt 3 ] || fail "gh could not report on run $run_id three times running: $(cat "$gh_err")"
-  fi
-  past_deadline && fail "run $run_id did not finish in $deadline_seconds seconds; follow it with gh run watch $run_id, then run this again"
-  sleep "$poll_seconds"
-done
-[ "$conclusion" = success ] || fail "run $run_id ended in $conclusion; read it with gh run view $run_id --log-failed"
-[[ "$head" =~ ^[0-9a-f]{40}$ ]] || fail "run $run_id reports '$head' as its commit"
+if [ -n "$built" ]; then
+  # A finished, successful build chosen above.
+  head="$built"
+else
+  # A long wait meets the odd failed request (a 502, a dropped connection); only three in a row stop it.
+  view_failures=0
+  while :; do
+    if view="$(gh run view "$run_id" --json status,conclusion,headSha --jq '.status, .conclusion, .headSha' 2> "$gh_err")"; then
+      view_failures=0
+      { read -r status; read -r conclusion; read -r head; } <<< "$view"
+      [ "$status" != completed ] || break
+    else
+      view_failures=$((view_failures + 1))
+      [ "$view_failures" -lt 3 ] || fail "gh could not report on run $run_id three times running: $(cat "$gh_err")"
+    fi
+    past_deadline && fail "run $run_id did not finish in $deadline_seconds seconds; follow it with gh run watch $run_id, then run this again"
+    sleep "$poll_seconds"
+  done
+  [ "$conclusion" = success ] || fail "run $run_id ended in $conclusion; read it with gh run view $run_id --log-failed"
+  [[ "$head" =~ ^[0-9a-f]{40}$ ]] || fail "run $run_id reports '$head' as its commit"
+  # The build was of the head, or of a commit pushed after it (a dispatch builds the ref as it is then).
+  behind=0
+  position=0
+  while IFS= read -r commit; do
+    [ "$commit" != "$head" ] || { behind="$position"; break; }
+    position=$((position + 1))
+  done <<< "$commits"
+fi
 
 gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
 
@@ -256,6 +298,11 @@ prune_backups() {
 }
 
 echo "Installed 10db from $ref at commit $head (GitHub run $run_id) as $app_path."
+if [ "$behind" -eq 0 ]; then
+  echo "  That is the head of $ref."
+else
+  echo "  That is $behind commit$([ "$behind" -eq 1 ] || echo s) behind the head of $ref (${sha:0:12}); its build had not finished. Run this again later for a newer one."
+fi
 if [ -n "$backup" ]; then echo "  Database backup:  $backup"; fi
 if [ -n "$previous_zip" ]; then
   keep_only_zip "$previous_zip"
