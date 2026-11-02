@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { envWithoutGitVariables } from './fixtures';
+import { createThrowawayRepo, envWithoutGitVariables } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
 interface Plan {
@@ -295,6 +295,103 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     'pnpm run lint',
     'pnpm run typecheck',
   ];
+
+  it('skips a changed file it cannot stat, naming it, and a deleted one silently', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'scripts'));
+    copyFileSync(
+      join(repoRoot, 'scripts/check-changed.mjs'),
+      join(dir, 'scripts/check-changed.mjs'),
+    );
+    mkdirSync(join(dir, 'apps/x/src'), { recursive: true });
+    mkdirSync(join(dir, 'apps/x/locked'));
+    writeFileSync(join(dir, 'apps/x/package.json'), '{"name":"x"}');
+    writeFileSync(join(dir, 'apps/x/src/a.ts'), 'export {};\n');
+    writeFileSync(join(dir, 'apps/x/locked/b.ts'), 'export {};\n');
+    // A directory without search permission makes lstat of what is inside fail with EACCES, as the
+    // sandbox's read deny list does for apps/daemon/.env.example.
+    chmodSync(join(dir, 'apps/x/locked'), 0o000);
+    const bin = join(dir, 'bin');
+    mkdirSync(bin);
+    const log = join(dir, 'commands.log');
+    const stub = join(bin, 'pnpm');
+    writeFileSync(stub, `#!/bin/sh\nprintf '%s\\n' "pnpm $*" >> '${log}'\n`);
+    chmodSync(stub, 0o755);
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [
+          'scripts/check-changed.mjs',
+          '--precheck',
+          '--',
+          'apps/x/src/a.ts',
+          'apps/x/src/gone.ts',
+          'apps/x/locked/b.ts',
+        ],
+        { cwd: dir, encoding: 'utf8', env: { PATH: bin } },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout).toContain(
+        'check-changed: skipping what it cannot read: apps/x/locked/b.ts\n',
+      );
+      expect(result.stdout).not.toContain('gone.ts');
+      const commands = readFileSync(log, 'utf8').split('\n').filter(Boolean);
+      expect(commands).toContain('pnpm exec prettier --check --ignore-unknown apps/x/src/a.ts');
+      expect(commands).toContain(
+        'pnpm exec eslint --max-warnings=0 --no-warn-ignored apps/x/src/a.ts',
+      );
+    } finally {
+      chmodSync(join(dir, 'apps/x/locked'), 0o755);
+    }
+  });
+
+  it('counts a file it cannot stat as changed only when a commit or the index changes it', () => {
+    const repo = createThrowawayRepo('check-changed-git');
+    const locked = ['apps/x/locked', 'apps/y/locked', 'apps/z/locked'];
+    try {
+      const write = (path: string, content: string) => {
+        mkdirSync(join(repo.dir, path, '..'), { recursive: true });
+        writeFileSync(join(repo.dir, path), content);
+      };
+      write('scripts/check-changed.mjs', readRepoFile('scripts/check-changed.mjs'));
+      for (const name of ['x', 'y', 'z']) {
+        write(`apps/${name}/package.json`, JSON.stringify({ name }));
+        write(`apps/${name}/locked/a.ts`, 'export {};\n');
+      }
+      write('docs/a.md', 'a\n');
+      repo.git('add', '.');
+      repo.commit('base');
+      repo.git('branch', 'main');
+      // apps/y's file changes in a commit, apps/z's only in the index, apps/x's not at all.
+      write('docs/a.md', 'b\n');
+      write('apps/y/locked/a.ts', 'export const y = 1;\n');
+      repo.git('add', 'docs/a.md', 'apps/y/locked/a.ts');
+      repo.commit('change');
+      write('apps/z/locked/a.ts', 'export const z = 1;\n');
+      repo.git('add', 'apps/z/locked/a.ts');
+      // Without search permission lstat of what is inside fails with EACCES, as the sandbox's read
+      // deny list makes it fail with EPERM for apps/daemon/.env.example. git cannot compare such a
+      // file with the index, so a diff against the worktree reports it as changed.
+      for (const dir of locked) chmodSync(join(repo.dir, dir), 0o000);
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/check-changed.mjs', '--plan', '--precheck'],
+        { cwd: repo.dir, encoding: 'utf8', env: repo.env },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const plan = JSON.parse(result.stdout) as Plan & { files: string[] };
+      expect(plan.files).toEqual(['apps/y/locked/a.ts', 'apps/z/locked/a.ts', 'docs/a.md']);
+      expect(plan.changed).toEqual(['apps/y', 'apps/z']);
+      expect(plan.affected).toEqual(['apps/y', 'apps/z']);
+      expect(result.stderr).toContain(
+        'check-changed: skipping what it cannot read: apps/x/locked/a.ts\n',
+      );
+    } finally {
+      for (const dir of locked) chmodSync(join(repo.dir, dir), 0o755);
+      repo.remove();
+    }
+  });
 
   it('runs the four steps over every package, not the gate, for a file it cannot place', () => {
     const run = runWithStubs(['--precheck', '--', 'pnpm-lock.yaml']);
