@@ -98,7 +98,12 @@ import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
-import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
+import {
+  ClaimWaits,
+  createClaimDeadlockAnswers,
+  createMcpHandler,
+  withdrawStaleClaimWaits,
+} from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -399,6 +404,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
+  // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
+  const answerDeadlockCard = createClaimDeadlockAnswers({
+    state,
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    waits: claimWaits,
+    log: logger,
+  });
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
@@ -414,6 +429,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
+      answerDeadlockCard(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.

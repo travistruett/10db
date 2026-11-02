@@ -169,11 +169,11 @@ export const McpToolOutputs = {
       /**
        * True while the wait goes on: the call answers before the session's tool timeout and the agent
        * calls again with the same opId. False (or absent, in a result recorded before this field) for
-       * a refusal: waiting would deadlock, or the migrations hazard is held back until the branch
-       * holds its base.
+       * a refusal: the builder made this task give up claims to end a claim deadlock, or the
+       * migrations hazard is held back until the branch holds its base.
        */
       waiting: z.boolean().default(false),
-      /** What to do next; null on a deadlock refusal, whose card says it. */
+      /** What to do next; null only in a result recorded by an older build. */
       instruction: z.string().nullable().default(null),
     }),
   ]),
