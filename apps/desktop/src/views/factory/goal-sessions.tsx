@@ -55,6 +55,7 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
         </Text>
       ) : null}
       {workstreams.length > 0 ? (
+<<<<<<< 0880e9b3126edc6fa11b2c0e7d65235a95d158d5
         <Table verticalSpacing="xs" aria-label="Sessions">
           <Table.Thead>
             <Table.Tr>
@@ -120,10 +121,127 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
                     ) : null}
                   </Group>
                 </Table.Td>
+||||||| 4186559
+        <Table verticalSpacing="xs" aria-label="Sessions">
+          <Table.Thead>
+            <Table.Tr>
+              <Table.Th>Task</Table.Th>
+              <Table.Th>State</Table.Th>
+              <Table.Th>Step</Table.Th>
+              <Table.Th>Context</Table.Th>
+              <Table.Th>Sessions</Table.Th>
+              <Table.Th>Last activity</Table.Th>
+              <Table.Th>
+                <VisuallyHidden>Actions</VisuallyHidden>
+              </Table.Th>
+            </Table.Tr>
+          </Table.Thead>
+          <Table.Tbody>
+            {workstreams.map((ws) => (
+              <Table.Tr key={ws.id}>
+                <Table.Td>
+                  <Text size="sm">{ws.taskTitle}</Text>
+                  {ws.failureReason ? (
+                    <Text size="xs" c="red">
+                      {ws.failureReason}
+                    </Text>
+                  ) : null}
+                </Table.Td>
+                <Table.Td>
+                  <StateBadge state={ws.state} />
+                </Table.Td>
+                <Table.Td>
+                  <StepCell workstream={ws} />
+                </Table.Td>
+                <Table.Td>
+                  <ContextGauge pct={ws.contextPct} />
+                </Table.Td>
+                <Table.Td>
+                  <Text size="sm">{ws.sessionCount}</Text>
+                </Table.Td>
+                <Table.Td>
+                  <RelativeTime at={ws.lastActivityAt} />
+                </Table.Td>
+                <Table.Td>
+                  <Group gap="xs" justify="flex-end" wrap="nowrap">
+                    {canRetry(ws.state) ? (
+                      <Button
+                        size="xs"
+                        variant="light"
+                        loading={retry.isPending && retry.variables.id === ws.id}
+                        onClick={() => {
+                          retry.mutate({ id: ws.id });
+                        }}
+                      >
+                        Retry
+                      </Button>
+                    ) : null}
+                  </Group>
+                </Table.Td>
+=======
+        <Table.ScrollContainer minWidth={640}>
+          <Table verticalSpacing="xs" aria-label="Sessions">
+            <Table.Thead>
+              <Table.Tr>
+                <Table.Th>Task</Table.Th>
+                <Table.Th>State</Table.Th>
+                <Table.Th>Step</Table.Th>
+                <Table.Th>Context</Table.Th>
+                <Table.Th>Sessions</Table.Th>
+                <Table.Th>Last activity</Table.Th>
+                <Table.Th>
+                  <VisuallyHidden>Actions</VisuallyHidden>
+                </Table.Th>
+>>>>>>> c06b12c9a5dd98bd707981d7e2bc3df65365bf2e
               </Table.Tr>
-            ))}
-          </Table.Tbody>
-        </Table>
+            </Table.Thead>
+            <Table.Tbody>
+              {workstreams.map((ws) => (
+                <Table.Tr key={ws.id}>
+                  <Table.Td style={{ minWidth: '12rem', overflowWrap: 'anywhere' }}>
+                    <Text size="sm">{ws.taskTitle}</Text>
+                    {ws.failureReason ? (
+                      <Text size="xs" c="red">
+                        {ws.failureReason}
+                      </Text>
+                    ) : null}
+                  </Table.Td>
+                  <Table.Td style={{ whiteSpace: 'nowrap' }}>
+                    <StateBadge state={ws.state} />
+                  </Table.Td>
+                  <Table.Td>
+                    <StepCell workstream={ws} />
+                  </Table.Td>
+                  <Table.Td>
+                    <ContextGauge pct={ws.contextPct} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Text size="sm">{ws.sessionCount}</Text>
+                  </Table.Td>
+                  <Table.Td>
+                    <RelativeTime at={ws.lastActivityAt} />
+                  </Table.Td>
+                  <Table.Td>
+                    <Group gap="xs" justify="flex-end" wrap="nowrap">
+                      {canRetry(ws.state) ? (
+                        <Button
+                          size="xs"
+                          variant="light"
+                          loading={retry.isPending && retry.variables.id === ws.id}
+                          onClick={() => {
+                            retry.mutate({ id: ws.id });
+                          }}
+                        >
+                          Retry
+                        </Button>
+                      ) : null}
+                    </Group>
+                  </Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
       ) : null}
     </Stack>
   );
