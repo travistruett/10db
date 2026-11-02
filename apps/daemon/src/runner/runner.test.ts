@@ -61,7 +61,13 @@ import { createGit, type Git } from '../git';
 import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateResult } from '../verify';
-import type { BaseUpdate, BaseUpdates, MigrationsBase, MigrationsBaseTake } from '../delivery';
+import type {
+  BaseUpdate,
+  BaseUpdates,
+  BeforeGateOptions,
+  MigrationsBase,
+  MigrationsBaseTake,
+} from '../delivery';
 import { allowedToolsFor, listNetworkHosts, setLaneAutoMode } from '../permissions';
 import {
   createLaneSandbox,
@@ -4362,6 +4368,62 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           nextAction: { kind: 'verify' },
         });
         expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+      });
+
+      it('sends the work back to a session that resolves the conflict markers the base merge left, running no gate and raising no card, then gates the merged branch', async () => {
+        const order: string[] = [];
+        const options: (BeforeGateOptions | undefined)[] = [];
+        const answers: BaseUpdate[] = [
+          {
+            kind: 'conflicted',
+            base: 'abc',
+            paths: ['README.md'],
+            note: 'markers are left in README.md',
+          },
+          { kind: 'merged', base: 'abc', head: 'def', note: null },
+        ];
+        const baseUpdates: BaseUpdates = {
+          beforeGate: (batchId, _signal, given) => {
+            order.push(`base ${batchId}`);
+            options.push(given);
+            return Promise.resolve(answers.shift() ?? { kind: 'up_to_date', note: null });
+          },
+          gate: (batchId, _signal, go) => {
+            order.push(`batch gate ${batchId}`);
+            return go();
+          },
+        };
+        const restore = watchGates(order);
+        try {
+          const { workstream } = await run(
+            () => [
+              [write('src/api/a.txt'), commit('op-wt-base-4', ['src/api/a.txt']), turn],
+              [write('README.md'), commit('op-wt-base-5', ['README.md']), turn],
+            ],
+            { baseUpdates },
+          );
+          expect(ws(workstream.id)).toMatchObject({
+            state: 'QUEUED',
+            nextAction: { kind: 'merge', base: 'origin/main', paths: ['README.md'] },
+            attempt: 1,
+          });
+          expect(order).not.toContain('gate spawned');
+          expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+          expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+
+          engine.launch(workstream.id);
+          await engine.runner.idle();
+          expect(engine.adapter.prompts[1]?.prompt).toContain(
+            '10db merged origin/main into your branch',
+          );
+          expect(engine.adapter.prompts[1]?.prompt).toContain('- README.md');
+          expect(ws(workstream.id).state).toBe('DONE');
+          expect(order.filter((entry) => entry === 'gate spawned')).toHaveLength(1);
+          // A task's gate has a session to send, which the shipping gate has not.
+          expect(options).toEqual([{ inSession: true }, { inSession: true }]);
+        } finally {
+          restore();
+        }
       });
     });
   });

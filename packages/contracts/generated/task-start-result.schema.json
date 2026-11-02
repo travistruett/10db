@@ -173,6 +173,32 @@
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "merge"
+                },
+                "base": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "paths": {
+                  "minItems": 1,
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
+              },
+              "required": [
+                "kind",
+                "base",
+                "paths"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "verify"
                 }
               },
