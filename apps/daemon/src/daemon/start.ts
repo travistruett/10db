@@ -62,6 +62,7 @@ import {
   createBranchCardAnswers,
   createCiStopAnswers,
   createStartCardAnswers,
+  createWorktreeCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -406,6 +407,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -433,6 +435,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
       answerStartCard?.(item, answer);
+      answerWorktreeCard?.(item, answer);
       answerDeadlockCard(item, answer);
     },
   });
@@ -600,6 +603,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
+  });
+  answerWorktreeCard = createWorktreeCardAnswers(delivery, {
+    starter,
+    abandon: (id) => shipper.abandon(id),
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id, note) => {

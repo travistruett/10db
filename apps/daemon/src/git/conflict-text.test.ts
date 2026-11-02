@@ -15,6 +15,35 @@ describe('resolveAddedLines', () => {
     });
   });
 
+  it('writes a list line both sides added once, and keeps each side’s different lines', () => {
+    const text = `import {\n${conflict(
+      ['  GoalId,', '  OursOnly,'],
+      [],
+      ['  GoalId,', '  TheirsOnly,'],
+    )}\n} from 'x';\n`;
+    expect(resolveAddedLines(text)).toEqual({
+      kind: 'resolved',
+      text: "import {\n  GoalId,\n  OursOnly,\n  TheirsOnly,\n} from 'x';\n",
+    });
+  });
+
+  it('writes the shared line once when it is the only line either side added', () => {
+    const text = conflict(['  GoalId,'], [], ['  GoalId,']);
+    expect(resolveAddedLines(text)).toEqual({ kind: 'resolved', text: '  GoalId,' });
+  });
+
+  it('keeps repeated lines of added blocks, whose shared lines belong to their own block', () => {
+    const text = conflict(
+      ['function a() {', '  return 1;', '}'],
+      [],
+      ['function b() {', '  return 1;', '}'],
+    );
+    expect(resolveAddedLines(text)).toEqual({
+      kind: 'resolved',
+      text: 'function a() {\n  return 1;\n}\nfunction b() {\n  return 1;\n}',
+    });
+  });
+
   it('resolves every hunk of a file, and keeps a file with no final newline', () => {
     const text = [conflict(['a'], [], ['b']), 'middle', conflict(['c'], [], ['d'])].join('\n');
     expect(resolveAddedLines(text)).toEqual({ kind: 'resolved', text: 'a\nb\nmiddle\nc\nd' });

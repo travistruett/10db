@@ -19,10 +19,28 @@ export function hasConflictMarkers(text: string): boolean {
   return lines.some((line) => OURS.test(line)) && lines.some((line) => THEIRS.test(line));
 }
 
+const indentOf = (line: string): string => /^\s*/.exec(line)?.[0] ?? '';
+
+/**
+ * `theirs` without the lines `ours` also added, when both sides added a flat list: every line
+ * non-blank and at one indentation (import names, enum members, array entries), where a line
+ * written twice is a duplicate (`TS2300` for an import). Added blocks (a function on each side)
+ * are left whole, since their shared lines (`}`, `return x;`) belong to their own block.
+ */
+function withoutShared(ours: readonly string[], theirs: readonly string[]): string[] {
+  const lines = [...ours, ...theirs];
+  const flat =
+    lines.every((line) => line.trim() !== '') &&
+    lines.every((line) => indentOf(line) === indentOf(lines[0] ?? ''));
+  if (!flat) return [...theirs];
+  const added = new Set(ours);
+  return theirs.filter((line) => !added.has(line));
+}
+
 /**
  * Reads a file git merged with `merge.conflictStyle=diff3` and resolves it when every conflict is
  * two sides adding lines at the same place, where the common ancestor has none there: both sides'
- * lines stay, ours first. A conflict where either side changed or deleted a line the ancestor had
+ * lines stay, ours first, and a line of a flat list that both sides added stays once. A conflict where either side changed or deleted a line the ancestor had
  * is a choice between two versions, and stays unresolved, as does a file whose markers don't show
  * the ancestor or aren't well formed (a file that holds markers of its own).
  */
@@ -64,7 +82,7 @@ export function resolveAddedLines(text: string): TextResolution {
       case 'theirs':
         if (THEIRS.test(line)) {
           if (base > 0) return unresolved(BOTH_CHANGED);
-          out.push(...ours, ...theirs);
+          out.push(...ours, ...withoutShared(ours, theirs));
           hunks += 1;
           side = 'text';
         } else if (OURS.test(line) || BASE.test(line) || MIDDLE.test(line))
