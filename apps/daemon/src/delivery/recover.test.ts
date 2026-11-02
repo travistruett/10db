@@ -1,6 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BatchDto } from '@10db/contracts';
+import type { BatchDto, TaskDto } from '@10db/contracts';
 import {
   getAppSetting,
   getBatch,
@@ -35,6 +35,7 @@ const recover = () =>
     inbox: h.inbox,
     processes: systemProcesses,
     shipper: h.shipper,
+    starter: h.starter,
     logger: silentLogger,
   });
 
@@ -87,15 +88,14 @@ describe('recoverBatches', () => {
     expect(batchBranches.split('\n').sort()).toEqual([leftover, next.branch].sort());
   });
 
-  it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
-    h = createDeliveryHarness({}, { trigger: false });
+  /** The daemon stopped before the cut ran: the CUTTING row and its task's QUEUED workstream. */
+  function interruptedCut(): { cutting: BatchDto; task: TaskDto } {
     const noJobs: DeliveryJobs = {
       run: () => undefined,
       idle: () => Promise.resolve(),
       stop: () => Promise.resolve(),
     };
     const task = h.addTask('Alpha');
-    // The daemon stopped before the cut ran: the CUTTING row and its task's QUEUED workstream.
     const cutting = h.only(
       createBatchStarter({ ...h.ctx, jobs: noJobs }).startBatch(h.project.id, {
         title: 'Greetings',
@@ -105,6 +105,59 @@ describe('recoverBatches', () => {
     expect(listWorkstreams(h.store.db, { batchId: cutting.id })).toMatchObject([
       { taskId: task.id, state: 'QUEUED' },
     ]);
+    return { cutting, task };
+  }
+
+  it('cuts a batch the restart interrupted again, with no card, and its task keeps its workstream', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const { cutting, task } = interruptedCut();
+    const [queued] = listWorkstreams(h.store.db, { batchId: cutting.id });
+    const report = await recover();
+    await h.jobs.idle();
+    expect(report).toMatchObject({ recut: [cutting.id], deleted: [] });
+    expect(h.cards()).toEqual([]);
+    expect(getBatch(h.store.db, cutting.id)).toMatchObject({ state: 'OPEN', title: 'Greetings' });
+    // The same workstream, still its task's: its place in line is kept.
+    expect(listWorkstreams(h.store.db, {})).toMatchObject([
+      { id: queued?.id, taskId: task.id, batchId: cutting.id },
+    ]);
+  });
+
+  it('cuts it again after a branch the interrupted cut left, with nothing committed on it', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const { cutting } = interruptedCut();
+    // The cut made the branch and died before it switched to it.
+    h.git$('branch', batchBranchName(cutting.title, cutting.id), 'main');
+    await recover();
+    await h.jobs.idle();
+    expect(h.cards()).toEqual([]);
+    expect(getBatch(h.store.db, cutting.id)).toMatchObject({
+      state: 'OPEN',
+      branch: batchBranchName(cutting.title, cutting.id),
+    });
+  });
+
+  it('still raises its card when the cut again is refused for a real reason', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const { cutting, task } = interruptedCut();
+    writeFileSync(join(h.repo, 'untracked.txt'), 'in the way\n');
+    h.git$('add', 'untracked.txt');
+    await recover();
+    await h.jobs.idle();
+    expect(listBatches(h.store.db)).toEqual([]);
+    expect(h.only(h.cards()).title).toContain('Batch not started');
+    expect(h.only(h.cards()).title).not.toContain('10db stopped');
+    expect(listWorkstreams(h.store.db, {})).toMatchObject([
+      { taskId: task.id, state: 'CANCELLED', batchId: null },
+    ]);
+    expect(getAppSetting(h.store.db, cuttingTasksKey(cutting.id))).toBeUndefined();
+  });
+
+  it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const { cutting, task } = interruptedCut();
+    // The checkout is on the branch the cut made, so where it came from is lost: not cut again.
+    h.git$('switch', '-q', '-c', batchBranchName(cutting.title, cutting.id));
     await recover();
     const card = h.only(h.cards());
     expect(card.title).toBe(

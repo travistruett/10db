@@ -1,4 +1,4 @@
-import { BatchFailure, BatchState, type BatchDto, type BatchId } from '@10db/contracts';
+import { BatchFailure, BatchState, CiStopped, type BatchDto, type BatchId } from '@10db/contracts';
 import {
   deleteAppSetting,
   deleteCuttingBatch,
@@ -8,6 +8,7 @@ import {
   listBatches,
   listCheckoutReturns,
   listLiveWorktrees,
+  listWorkstreams,
   patchBatch,
   transitionBatch,
 } from '@10db/db';
@@ -15,13 +16,16 @@ import type { StateStore } from '../events';
 import { existsAsEntry, WorktreeNotOursError, worktreePinKey, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { batchBranchName } from './branch-name';
 import { listStrayBranches, settleAbandonedBranches } from './branch-sweep';
 import { batchCheckout } from './checkout';
+import { stopCiFixing } from './ci-stop';
 import { forTasks, startCards, worktreeCards, wrongBranchCard, type Card } from './cards';
 import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import type { Shipper } from './ship';
+import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { sweepWorktrees } from './worktree-sweep';
@@ -36,6 +40,8 @@ export interface GateTerminator {
 }
 
 export interface BatchRecoveryReport {
+  /** CUTTING batches the restart interrupted, queued to be cut again as they are. */
+  readonly recut: BatchId[];
   readonly deleted: BatchId[];
   readonly failed: BatchId[];
   readonly resumed: BatchId[];
@@ -52,8 +58,10 @@ const message = (error: unknown): string =>
 
 /**
  * Batch delivery spec §5 and §6 and worktree mode spec §7 at startup, after workstream recovery and
- * before the scheduler: a CUTTING row's worktree is removed and the row deleted (a branch the crash
- * left stays, and the next cut uses a new name); an orphaned shipping gate is killed; an unfinished
+ * before the scheduler: a CUTTING row's worktree is removed and the row cut again as it is, its
+ * tasks keeping their workstreams; when something the cut left needs a person (a directory with
+ * files at the worktree path, a branch holding commits, a shared checkout already switched) the row
+ * is deleted instead, with a card; an orphaned shipping gate is killed; an unfinished
  * batch whose checkout is missing or off its branch fails; a SHIPPING batch re-runs from step 0; a
  * finished shared batch's checkout is switched back as its end would have done; a finished batch's
  * worktree goes; the sweep removes worktrees no batch names; an OPEN batch whose work all settled
@@ -65,12 +73,15 @@ export async function recoverBatches(deps: {
   readonly inbox: InboxService;
   readonly processes: GateTerminator;
   readonly shipper: Shipper;
+  /** Cuts again a CUTTING batch the restart interrupted. */
+  readonly starter: Pick<BatchStarter, 'recut'>;
   readonly logger: Logger;
   /** The delivery context worktree cleanup runs in, and this daemon's worktree root. */
   readonly worktrees?: { readonly ctx: DeliveryContext; readonly root: string };
 }): Promise<BatchRecoveryReport> {
   const db = deps.state.db;
   const report: BatchRecoveryReport = {
+    recut: [],
     deleted: [],
     failed: [],
     resumed: [],
@@ -97,24 +108,67 @@ export async function recoverBatches(deps: {
     return null;
   }
 
+  /**
+   * Whether a CUTTING row can be cut again as it is: its workstreams are still on it, and what the
+   * interrupted cut left in git is gone or can be removed without losing anything. A cut made
+   * mid-way on a branch the checkout is on, or on a branch that holds commits, is left to a person.
+   * A fix batch's branch is the pull request's, so nothing of it is touched.
+   */
+  async function cuttableAgain(batch: BatchDto): Promise<boolean> {
+    if (listWorkstreams(db, { batchId: batch.id }).length === 0) return false;
+    if (batch.ciFixOf !== null) return true;
+    const repo = getProject(db, batch.projectId).repoPath;
+    const branch = batchBranchName(batch.title, batch.id);
+    try {
+      // A shared cut that switched the checkout lost where it came from, which the cut again needs.
+      if (batch.worktreePath === null && (await deps.git.currentBranch(repo)) === branch)
+        return false;
+      const tip = await deps.git.branchTip(repo, branch);
+      if (tip === null) return true;
+      if ((await deps.git.branchInUse(repo, branch)) !== null) return false;
+      // Only a branch with nothing of its own on it goes: the cut made it and never opened the batch.
+      if (!(await deps.git.isAncestor(repo, tip, `refs/remotes/origin/${batch.baseBranch}`)))
+        return false;
+      return await deps.git.deleteBranchIfAt(repo, branch, tip);
+    } catch (error) {
+      deps.logger.warn({ batchId: batch.id, err: message(error) }, 'cut left in git not cleared');
+      return false;
+    }
+  }
+
   // 1. CUTTING rows: what git lists at the worktree path goes; an unlisted directory only when empty.
+  // A row the restart interrupted is then cut again, as it is, so its tasks keep their place in line.
+  // One that can't be (something is left that only a person can settle, or an earlier daemon's row
+  // with no workstreams) is deleted with a card saying its tasks did not start.
   for (const batch of listBatches(db, { states: [BatchState.Cutting] })) {
     const left = deps.worktrees ? await removeCutWorktree(deps.worktrees.root, batch) : null;
+    if (left === null && (await cuttableAgain(batch))) {
+      deps.starter.recut(batch.id);
+      report.recut.push(batch.id);
+      continue;
+    }
     // Read before the delete, which detaches the batch's workstreams.
     const taskIds = cuttingTasks(db, batch.id);
+    const reason = 'the daemon restarted while cutting the branch';
+    const card =
+      left === null ? startCards.cutInterrupted(batch) : worktreeCards.leftBehind(batch, left);
     deps.state.write((w) => {
-      deleteCuttingBatch(w, batch.id, 'the daemon restarted while cutting the branch');
+      deleteCuttingBatch(w, batch.id, reason);
       deleteAppSetting(w, worktreePinKey(batch.id));
       forgetCuttingTasks(w, batch.id);
+      // The row was the guard against making the same fix again, so the root stops fixing; the
+      // pull request's CI-stop card has the Retry.
+      if (batch.ciFixOf !== null) stopCiFixing(w, batch.ciFixOf, CiStopped.NoCut, card.title);
     });
     // The API answered 202 for its tasks; say they didn't start (a later start of them closes the
-    // card), or what was left at the path, which only moving it settles.
+    // card), or what was left at the path, which only moving it settles. A fix batch's start can't
+    // be repeated: a plain start would make a second fix for the pull request.
     raise(
       deps.inbox,
       batch.projectId,
       left === null
-        ? forTasks(startCards.cutInterrupted(batch), taskIds, { title: batch.title })
-        : worktreeCards.leftBehind(batch, left),
+        ? forTasks(card, taskIds, batch.ciFixOf === null ? { title: batch.title } : null)
+        : card,
     );
     report.deleted.push(batch.id);
   }
