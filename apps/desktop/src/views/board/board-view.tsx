@@ -49,7 +49,7 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
-import { ciLine } from './ci-line';
+import { ciLine, withFixTaskTitles } from './ci-line';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
@@ -208,7 +208,8 @@ function BoardColumns({
   const batchOf = (ws: WorkstreamDto | undefined) =>
     ws?.batchId ? batchById.get(ws.batchId) : undefined;
   // A CI fix batch finds the root that holds the pull request's required checks among all of them.
-  const allBatches = [...batchById.values()];
+  // The CI line names a fix by its task's title (CI-decides spec §5), so a fix batch carries that.
+  const allBatches = withFixTaskTitles([...batchById.values()], workstreams);
   // Local delivery has no pull request to place.
   const pullRequests = project.delivery === Delivery.PullRequest;
   const landingOf = (task: TaskDto, batch: BatchDto | undefined): string | undefined =>

@@ -225,6 +225,38 @@ describe('scripts/check-changed.mjs --precheck', () => {
     ]);
   });
 
+  describe('agent-docs.test.ts beyond the agent files', () => {
+    const agentDocs = 'tests/repo/src/agent-docs.test.ts';
+
+    it.each([
+      ['a CLAUDE.md anywhere', 'apps/daemon/src/CLAUDE.md'],
+      ['a root CLAUDE.md', 'CLAUDE.md'],
+      ['a package manifest', 'packages/db/package.json'],
+      ['an app manifest', 'apps/daemon/package.json'],
+      ['a grab-bag module in an app', 'apps/desktop/src/utils.ts'],
+      ['a grab-bag module in a package', 'packages/contracts/src/lib/common.tsx'],
+    ])('runs it for %s', (_name, file) => {
+      expect(precheckPlanFor(file).repoTests).toContain(agentDocs);
+    });
+
+    it('runs it over every package for a file in a new app or package directory', () => {
+      // A directory with no manifest is not a workspace package, so the plan cannot place its files
+      // and falls back to every step, the agent docs test included.
+      for (const file of ['packages/brand-new/src/index.ts', 'apps/brand-new/README.txt']) {
+        expect(precheckPlanFor(file)).toMatchObject({ full: true, precheck: true });
+      }
+    });
+
+    it.each([
+      ['a normal source file', 'apps/daemon/src/runner/runner.ts'],
+      ['a utils-like name that is not a grab-bag', 'apps/daemon/src/format-utils.ts'],
+      ['a grab-bag name outside apps and packages', 'scripts/utils.ts'],
+      ['a harness directory with a dot name', 'apps/.claude/.cc-writes/x.json'],
+    ])('does not run it for %s', (_name, file) => {
+      expect(precheckPlanFor(file).repoTests ?? []).not.toContain(agentDocs);
+    });
+  });
+
   it('runs no repo rule tests for a package source change: they are not about it', () => {
     expect(precheckPlanFor('apps/daemon/src/runner/runner.ts').repoTests).toEqual([]);
   });
