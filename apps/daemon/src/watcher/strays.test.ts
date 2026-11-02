@@ -65,6 +65,10 @@ describe('isSensitivePath', () => {
     ['.claude/.cc-writesx', true],
     ['.claude/x/.cc-writes', true],
     ['.codex/.cc-writes', true],
+    ['.claude/hooks/.claude/.cc-writes', true],
+    ['.claude/hooks/.claude/.cc-writes/settings.local.json.tmp', false],
+    ['.claude/hooks/.claude/settings.json', true],
+    ['.claude/hooks/.claude/.cc-writesx', true],
   ])('%s → %s', (rel, expected) => {
     expect(isSensitivePath(rel)).toBe(expected);
   });
