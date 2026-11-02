@@ -5,12 +5,14 @@ import type { BatchDto, WorkstreamDto } from '@10db/contracts';
 import {
   getAppSetting,
   getBatch,
+  getTask,
   getWorkstream,
   listInbox,
   listWorkstreams,
   patchProject,
   setBatchNotice,
   setAppSetting,
+  setTaskStatus,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -93,15 +95,15 @@ async function opened(title = 'Alpha'): Promise<{ batch: BatchDto; ws: Workstrea
 }
 
 /** Commits a file in the batch's worktree as the commit tool does for an agent; returns the SHA. */
-async function commitIn(batch: BatchDto, path: string): Promise<string> {
+async function commitIn(batch: BatchDto, path: string, content = `${path}\n`): Promise<string> {
   const file = join(pathOf(batch), path);
   mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${path}\n`);
+  writeFileSync(file, content);
   const { sha } = await h.git.commit({
     repo: pathOf(batch),
     paths: [path],
     message: `Add ${path}`,
-    opId: `op-${path}`,
+    opId: `op-${path}-${String(content.length)}`,
     branch: batch.branch ?? '',
   });
   return sha;
@@ -270,8 +272,9 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
   it("ships the branch as it is when it conflicts with main, with no card; the tasks say the pull request conflicts once the worktree's own notice goes", async () => {
     const { batch, ws } = await opened();
-    const head = await commitIn(batch, 'README.md');
-    h.teammatePush('main', 'README.md', '# theirs\n');
+    // Both sides add the file: no session can see the choice in markers, so it stays the builder's.
+    const head = await commitIn(batch, 'src/api/both.txt');
+    h.teammatePush('main', 'src/api/both.txt', 'theirs\n');
 
     const shipped = await ship(batch, ws);
 
@@ -317,16 +320,118 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
   it('names what kept main out in the card of a shipping gate that failed', async () => {
     const { batch, ws } = await opened();
-    await commitIn(batch, 'README.md');
-    h.teammatePush('main', 'README.md', '# theirs\n');
+    await commitIn(batch, 'src/api/both.txt');
+    h.teammatePush('main', 'src/api/both.txt', 'theirs\n');
     gate('false');
 
     const failed = await ship(batch, ws);
 
     expect(failed.state).toBe('FAILED');
     const card = h.cards().find((c) => c.title.includes('the gate failed'));
-    expect(card?.body).toMatch(/^origin\/main conflicts with this branch in README\.md/);
+    expect(card?.body).toMatch(/^origin\/main conflicts with this branch in src\/api\/both\.txt/);
     expect(onOrigin(batch.branch)).toBeNull();
+  });
+
+  describe('a conflict whose markers a session can resolve, met at the shipping gate', () => {
+    /** Both sides changed the one line of README.md. */
+    async function overlapping() {
+      const { batch, ws } = await opened();
+      const own = await commitIn(batch, 'README.md', '# ours\n');
+      const teammate = h.teammatePush('main', 'README.md', '# theirs\n');
+      return { batch, ws, own, teammate };
+    }
+
+    /** The workstream the shipper queued for the batch's last task, beside the one that was Done. */
+    function queuedBeside(batch: BatchDto, ws: WorkstreamDto): WorkstreamDto {
+      const all = listWorkstreams(h.store.db, { batchId: batch.id });
+      expect(all).toHaveLength(2);
+      const next = all.find((w) => w.id !== ws.id);
+      if (!next) throw new Error('no second workstream');
+      return next;
+    }
+
+    it('reopens the batch with its last task queued to merge, runs no gate on the branch, pushes nothing and raises no card', async () => {
+      const { batch, ws, own, teammate } = await overlapping();
+
+      const reopened = await ship(batch, ws);
+
+      expect(reopened).toMatchObject({ state: 'OPEN', failure: null });
+      expect(existsSync(gateOut)).toBe(false);
+      expect(onOrigin(batch.branch)).toBeNull();
+      expect(h.cards()).toEqual([]);
+      expect(gitIn(pathOf(batch), 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
+      expect(readFileSync(join(pathOf(batch), 'README.md'), 'utf8')).toContain('<<<<<<< ');
+      const next = queuedBeside(batch, ws);
+      expect(next).toMatchObject({
+        taskId: ws.taskId,
+        batchId: batch.id,
+        state: 'QUEUED',
+        nextAction: { kind: 'merge', base: 'origin/main', paths: ['README.md'] },
+      });
+      expect(next.steps.map((s) => [s.role, s.status])).toEqual([['implement', 'running']]);
+      expect(getWorkstream(h.store.db, ws.id).state).toBe('DONE');
+      expect(getTask(h.store.db, ws.taskId).status).toBe('open');
+      expect(h.only(reopened.notices)).toMatchObject({ key: 'base-conflict', tone: 'info' });
+    });
+
+    it('does the same for markers an earlier gate left, without merging again, and never runs a gate on them', async () => {
+      const { batch, ws } = await overlapping();
+      await createBaseUpdates(h.ctx).beforeGate(batch.id, new AbortController().signal, {
+        inSession: true,
+      });
+      const merged = gitIn(pathOf(batch), 'rev-parse', 'HEAD');
+
+      const reopened = await ship(batch, ws);
+
+      expect(reopened.state).toBe('OPEN');
+      expect(gitIn(pathOf(batch), 'rev-parse', 'HEAD')).toBe(merged);
+      expect(existsSync(gateOut)).toBe(false);
+      expect(h.cards()).toEqual([]);
+      expect(queuedBeside(batch, ws).nextAction).toMatchObject({
+        kind: 'merge',
+        paths: ['README.md'],
+      });
+    });
+
+    it("ships the resolved branch once the session's task is done, with the gate run on the merge", async () => {
+      const { batch, ws } = await overlapping();
+      await ship(batch, ws);
+      const next = queuedBeside(batch, ws);
+      await commitIn(batch, 'README.md', '# ours and theirs\n');
+      // The worktree goes once the batch ships.
+      const worktree = realpathSync(pathOf(batch));
+
+      h.settle(next.id, 'DONE');
+      h.shipper.checkBatch(batch.id);
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+      expect(readFileSync(gateOut, 'utf8').trim()).toBe(worktree);
+      const tip = onOrigin(batch.branch) ?? '';
+      expect(h.origin$('show', `${tip}:README.md`)).toBe('# ours and theirs');
+      expect(h.cards()).toEqual([]);
+    });
+
+    it('raises one card naming the files and why when the last task cannot take the merge', async () => {
+      const { batch, ws } = await overlapping();
+      h.settle(ws.id, 'DONE');
+      h.state.write((c) => {
+        setTaskStatus(c, ws.taskId, 'cancelled');
+      });
+      h.shipper.checkBatch(batch.id);
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batch.id)).toMatchObject({
+        state: 'FAILED',
+        failure: 'base_conflict',
+      });
+      expect(existsSync(gateOut)).toBe(false);
+      expect(listWorkstreams(h.store.db, { batchId: batch.id })).toHaveLength(1);
+      const card = h.only(h.cards());
+      expect(card.title).toContain('conflicts with main');
+      expect(card.body).toContain('README.md');
+      expect(card.body).toContain('was closed');
+    });
   });
 
   it('merges nothing for a project with no gate: the builder checked the work as it is', async () => {
@@ -883,35 +988,4 @@ describe('a finished worktree with git-ignored files', () => {
       expect(h.cards()).toEqual([]);
     },
   );
-});
-
-describe('shipping a batch whose branch still holds the markers of the base merge', () => {
-  /** A task's gate merged the base with its markers; the member then failed at its retry limit. */
-  async function markedBatch() {
-    const { batch, ws } = await opened();
-    await commitIn(batch, 'README.md');
-    h.teammatePush('main', 'README.md', '# theirs\n');
-    const update = await createBaseUpdates(h.ctx).beforeGate(
-      batch.id,
-      new AbortController().signal,
-      { inSession: true },
-    );
-    expect(update.kind).toBe('conflicted');
-    h.settle(ws.id, 'DONE');
-    return batch;
-  }
-
-  it('runs no gate, pushes nothing, and raises one card naming the marked files', async () => {
-    const batch = await markedBatch();
-    h.shipper.ship(batch.id);
-    await h.jobs.idle();
-
-    expect(existsSync(gateOut)).toBe(false);
-    expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
-    expect(onOrigin(batch.branch)).toBeNull();
-    const card = h.only(h.cards());
-    expect(card.title).toContain('conflict markers');
-    expect(card.body).toContain('README.md');
-    expect(card.body).not.toContain('gate failed');
-  });
 });
