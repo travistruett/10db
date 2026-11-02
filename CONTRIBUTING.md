@@ -144,6 +144,12 @@ files. Fix what it reports rather than skipping it; CI runs the same checks and 
 - Branch from `main` and open a pull request. Nobody pushes to `main`.
 - Pull requests are squash-merged. The title becomes the commit on `main`, so it must be a valid
   Conventional Commit.
+- `main` merges through a GitHub merge queue (`decisions/2026-11-02-merge-queue.md`). "Merge when
+  ready" adds the pull request to the queue, which builds it on top of the entries ahead of it, runs
+  the required checks on that combination (CI runs on `merge_group` too) and squash-merges it only if
+  they pass. Two pull requests that are each green alone can no longer break `main` together. The
+  queue rule is in `.github/rulesets/main-protection.json`; the maintainer applies it with
+  `make github-settings`, by hand, with admin rights.
 - Keep the squash dialog's commit subject as it is. GitHub fills it in from the title, which CI
   has checked, and lets whoever merges edit it; no rule can stop an edit there.
 - Every required check must pass: `gate`, `desktop`, `policy`, `dependency-review` and

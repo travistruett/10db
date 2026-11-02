@@ -11,6 +11,12 @@ on:
     # main, so policy must lint the current one. Every job runs on every event. A job skipped on
     # edited would count as passing and replace an earlier red result for the same commit.
     types: [opened, synchronize, reopened, edited]
+  # main merges through a merge queue (decisions/2026-11-02-merge-queue.md): GitHub builds a
+  # gh-readonly-queue/main/... branch of each pull request on top of those ahead of it and waits for
+  # the required checks on it. Every required job runs here; dependency-review is skipped by its `if`,
+  # which counts as passing. The title lint is pull_request only: a queue entry has no title to lint.
+  merge_group:
+    types: [checks_requested]
 
 permissions: {}
 
@@ -105,14 +111,16 @@ jobs:
         run: printf '%s\n' "$PR_TITLE" | pnpm exec commitlint
       - name: Secrets, hygiene and workflow lint over the pushed commits
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}
         run: bash scripts/policy.sh "$BASE_SHA" "$HEAD_SHA"
       - run: pnpm -s format:check
       - run: pnpm -s lint
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
 
   dependency-review:
+    # The action diffs a pull request's dependencies; a merge queue entry has none. A required check
+    # skipped by its `if` counts as passing, and the pull request already ran it.
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
