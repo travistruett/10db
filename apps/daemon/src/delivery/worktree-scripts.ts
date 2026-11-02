@@ -56,7 +56,7 @@ const valid = (names: Set<string>): string[] =>
  * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Read as
  * data from the copy's own files, which hold the base's content at the cut; nothing in them runs.
  */
-export function buildPolicy(root: string): BuildPolicy {
+export function buildPolicy(root: string, legacy = false): BuildPolicy {
   const allowed = new Set<string>();
   const denied = new Set<string>();
   let all = false;
@@ -66,19 +66,41 @@ export function buildPolicy(root: string): BuildPolicy {
   if (isRecord(workspace)) {
     sources.push(workspace);
     const allow = workspace['allowBuilds'];
-    if (isRecord(allow))
+    // pnpm 9 and earlier don't read allowBuilds.
+    if (!legacy && isRecord(allow))
       for (const [name, value] of Object.entries(allow))
         if (value === true) allowed.add(nameOf(name));
         else if (value === false) denied.add(nameOf(name));
   }
   if (isRecord(manifest) && isRecord(manifest['pnpm'])) sources.push(manifest['pnpm']);
   for (const source of sources) {
-    if (source['dangerouslyAllowAllBuilds'] === true) all = true;
+    if (!legacy && source['dangerouslyAllowAllBuilds'] === true) all = true;
     namesIn(source['onlyBuiltDependencies'], allowed);
     namesIn(source['ignoredBuiltDependencies'], denied);
     namesIn(source['neverBuiltDependencies'], denied);
   }
+  // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list limits them.
+  if (legacy && allowed.size === 0) all = true;
   return { all, allowed: valid(allowed), denied: valid(denied) };
+}
+
+/** The most `.modules.yaml` is read from: it lists every hoisted dependency, so it can be large. */
+const MAX_MODULES_BYTES = 8 * 1024 * 1024;
+
+/**
+ * The major version of the pnpm that made `<root>/node_modules`, which pnpm records in
+ * `.modules.yaml` as `packageManager: pnpm@9.15.0`; undefined when the file or the line is missing.
+ */
+export function installedPnpmMajor(root: string): number | undefined {
+  const path = join(root, 'node_modules', '.modules.yaml');
+  try {
+    const info = lstatSync(path);
+    if (!info.isFile() || info.size > MAX_MODULES_BYTES) return undefined;
+    const found = /^packageManager:\s*['"]?pnpm@(\d+)\./m.exec(readFileSync(path, 'utf8'));
+    return found?.[1] === undefined ? undefined : Number(found[1]);
+  } catch {
+    return undefined;
+  }
 }
 
 /** The package a pnpm virtual store entry holds: `@scope/name` from `@scope+name@1.2.3_peer`. */
@@ -103,31 +125,47 @@ function needsBuild(dir: string): boolean {
   }
 }
 
+export interface UnbuiltPackages {
+  /** The packages, by name. */
+  readonly names: string[];
+  /** Set when pnpm 9 or earlier made the install and built everything by default: its major version. */
+  readonly legacyPnpmMajor: number | undefined;
+}
+
 /**
  * The packages the project allows to build (`allowBuilds`) that a `--ignore-scripts` install left
  * unbuilt in the pnpm virtual store at `<root>/node_modules/.pnpm`, by name. A package the project
  * allows but that has no install script is not named: there is nothing it lacks. When the project
  * allows every build, every package in the store with something to build is named, less the ones
- * it never builds.
+ * it never builds. Under pnpm 9 and earlier (the version that made the copy's `node_modules`) a
+ * project with no onlyBuiltDependencies list allows every build, so the same holds there.
  */
-export function unbuiltAllowedPackages(root: string): string[] {
-  const policy = buildPolicy(root);
-  if (!policy.all && policy.allowed.length === 0) return [];
+export function unbuiltAllowedPackages(root: string): UnbuiltPackages {
+  const major = installedPnpmMajor(root);
+  const legacy = major !== undefined && major < 10;
+  const policy = buildPolicy(root, legacy);
+  const unbuilt = (names: string[]): UnbuiltPackages => ({
+    names,
+    legacyPnpmMajor: legacy && policy.all ? major : undefined,
+  });
+  if (!policy.all && policy.allowed.length === 0) return unbuilt([]);
   const store = join(root, 'node_modules', '.pnpm');
   let entries: string[];
   try {
     entries = readdirSync(store);
   } catch {
-    return [];
+    return unbuilt([]);
   }
   const candidates = policy.all
     ? valid(new Set(entries.flatMap((entry) => storeEntryName(entry) ?? [])))
     : policy.allowed;
   const allowed = candidates.filter((name) => !policy.denied.includes(name));
-  return allowed.filter((name) => {
-    const prefix = `${name.replace('/', '+')}@`;
-    return entries.some(
-      (entry) => entry.startsWith(prefix) && needsBuild(join(store, entry, 'node_modules', name)),
-    );
-  });
+  return unbuilt(
+    allowed.filter((name) => {
+      const prefix = `${name.replace('/', '+')}@`;
+      return entries.some(
+        (entry) => entry.startsWith(prefix) && needsBuild(join(store, entry, 'node_modules', name)),
+      );
+    }),
+  );
 }

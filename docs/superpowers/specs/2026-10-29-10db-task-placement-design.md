@@ -202,6 +202,14 @@ project's allow list as data, and a warning notice (`install-scripts-skipped`) o
 allowed package that has an install script (or a `binding.gyp`), saying to run `pnpm rebuild <name>` in the
 copy or to start the task again once Your folder's batch has ended.
 
+Under pnpm 9 and earlier every dependency's install script runs unless `neverBuiltDependencies` names it or an
+`onlyBuiltDependencies` list exists, so a project with no list has everything built in Your folder. The install
+runs whichever pnpm the builder's PATH holds, so the cut reads the version pnpm recorded in the copy's
+`node_modules/.modules.yaml` (`packageManager: pnpm@9.x`). Below 10 it ignores `allowBuilds` (pnpm 9 doesn't read
+it) and, with no `onlyBuiltDependencies` list, names every package in the store that has an install script or a
+`binding.gyp`, less the `neverBuiltDependencies` ones. Under pnpm 10 with no list nothing builds by default, so
+nothing is named; a `.modules.yaml` with no version also names nothing.
+
 Nothing else is new. A copy's lane profile is today's. The shared cut and the switch back keep their git rules
 (decision 129 and `decisions/2026-10-29-shared-checkout-switch-back.md`).
 

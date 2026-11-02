@@ -53,6 +53,7 @@ import {
   type GoalAdoptError,
 } from '@10db/contracts';
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
 import { validator } from 'hono/validator';
@@ -118,6 +119,14 @@ const StateList = z
   // InboxState is an `as const` object, not a schema, so wrap it in z.enum to parse.
   .transform((s) => (s ? s.split(',').map((x) => z.enum(InboxState).parse(x)) : null));
 
+/**
+ * The largest request body the API reads: 8 MiB. The daemon's only thread buffers and parses a body
+ * whole, so an unbounded one stalls every lane. A brief is held to 1 MiB of text (`goals/adopt.ts`),
+ * and JSON escaping writes at most six bytes for a byte (`\u0001`), so 8 MiB takes any brief the
+ * adopt route would accept.
+ */
+export const MAX_BODY_BYTES = 8 * 1024 * 1024;
+
 export function createApp(deps: ApiDeps) {
   const app = new Hono()
     .use(
@@ -136,6 +145,9 @@ export function createApp(deps: ApiDeps) {
       if (!sameToken(presented, deps.token)) return c.json({ error: 'unauthorized' }, 401);
       return next();
     })
+    // After the token check, before any route reads the body. A declared length over the limit is
+    // refused unread; a body with none is read only up to the limit.
+    .use('*', bodyLimit({ maxSize: MAX_BODY_BYTES }))
     .use(STREAM_PATH, async (c, next) => {
       // Browsers don't apply CORS to WebSockets; a page on another origin must not read the stream.
       // Non-browser clients send no Origin and are covered by the token alone.
