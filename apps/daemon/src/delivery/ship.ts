@@ -946,23 +946,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
-<<<<<<< 532f791776f34801663101f8ff57ff9f6b390691
-      const project = getProject(db, batch.projectId);
-      deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
-||||||| 2c6e84e
-      const done = members(db, batchId)
-        .filter((m) => m.state === WorkstreamState.Done)
-        .map((m) => m.taskTitle);
-      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
-      const project = getProject(db, batch.projectId);
-      deps.jobs.run(jobKey(project, JobQueue.Ship), async () => {
-=======
-      const done = members(db, batchId)
-        .filter((m) => m.state === WorkstreamState.Done)
-        .map((m) => m.taskTitle);
-      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
->>>>>>> 1f2c6196d139d6c328a5e0fad579d5d262214c23
         await afterEnd(batchId, abandoned.worktreePath);
       });
       return abandoned;
