@@ -294,6 +294,11 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   Team is the steps of the goal's started workstreams. The window comes from `goal_views` (goal, person, opened
   at): the route computes Δ rows from the previous mark, then advances it, so a refresh in the same visit keeps
   them. The same response carries the Ungrouped group (`goalId: null`).
+  **Built:** the daemon computes it (`packages/db/src/store/goal-digest.ts`). `GET /projects/:projectId/goals`
+  answers `GoalListDto` (each goal's digest and count of new items, plus Ungrouped) and leaves every mark
+  alone; only `GET /goals/:goalId/digest` advances its goal's mark. In phase 1 every open card on a goal's
+  tasks counts as waiting on you, tokens are input plus output (cached tokens aside), and a task whose
+  work is done but whose batch has no merged pull request keeps the goal at Shipping.
 
 - **The goal's detail** is the expanded goal in Factory: the digest, then **Sessions** (the goal's workstreams as
   today's table, with Retry and Cancel), then **Pull requests** (its batches). It is one self-contained
