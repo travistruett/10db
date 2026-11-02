@@ -331,6 +331,45 @@ describe('seeding a new copy', () => {
       const batch = await startedOne(copy('Copied'));
       expect(h.only(batch.notices).line).toContain('puppeteer');
     });
+
+    it('names every package with an install script when all builds are allowed', async () => {
+      allowing('dangerouslyAllowAllBuilds: true\nignoredBuiltDependencies:\n  - sharp\n');
+      h.pnpm.makes({
+        ...installed('prisma', '6.0.0', { postinstall: 'node build.js' }),
+        ...installed('@scope/native', '1.2.0', { install: 'node-gyp rebuild' }),
+        ...installed('sharp', '0.30.0', { install: 'node install.js' }),
+        ...installed('left-pad', '1.0.0', { test: 'x' }),
+      });
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      const notice = h.only(batch.notices);
+      expect(notice.key).toBe('install-scripts-skipped');
+      expect(notice.line).toContain('prisma');
+      expect(notice.line).toContain('@scope/native');
+      expect(notice.line).not.toContain('sharp');
+      expect(notice.line).not.toContain('left-pad');
+    });
+
+    it('reads dangerouslyAllowAllBuilds from package.json too, and caps a long list', async () => {
+      h.commit(
+        'package.json',
+        JSON.stringify({ name: 'app', pnpm: { dangerouslyAllowAllBuilds: true } }),
+      );
+      allowing('packages: []\n');
+      const many: Record<string, string> = {};
+      for (let i = 0; i < 15; i++)
+        Object.assign(
+          many,
+          installed(`pkg${String(i).padStart(2, '0')}`, '1.0.0', { postinstall: 'x' }),
+        );
+      h.pnpm.makes(many);
+      await startedOne(shared('Alpha'));
+      const batch = await startedOne(copy('Copied'));
+      const notice = h.only(batch.notices);
+      expect(notice.line).toContain('pkg00');
+      expect(notice.line).not.toContain('pkg14');
+      expect(notice.line).toContain('5 more');
+    });
   });
 
   it('tells the batch when 10db cannot install what the clone would have brought', async () => {

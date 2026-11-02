@@ -60,6 +60,9 @@ export const supersededNotices = {
  * What a copy's tasks are told when its cut skipped the seed because Your folder had an unfinished
  * shared batch, and the install did not make every directory the seed would have cloned.
  */
+/** How many unbuilt packages the install-scripts notice names before it counts the rest. */
+const SCRIPTS_SKIPPED_SHOWN = 10;
+
 export const seedNotices = {
   skipped: (dirs: readonly string[]): Notice => {
     const named = dirs.join(', ');
@@ -75,13 +78,17 @@ export const seedNotices = {
    * the built output was skipped, so these packages the project allows to build are unbuilt.
    */
   scriptsSkipped: (names: readonly string[]): Notice => {
-    const named = names.join(', ');
+    const shown = names.slice(0, SCRIPTS_SKIPPED_SHOWN);
+    const rest = names.length - shown.length;
+    const named = rest > 0 ? `${shown.join(', ')} and ${String(rest)} more` : shown.join(', ');
     const one = names.length === 1;
+    // pnpm rebuild with no names rebuilds every package, so a long list needn't be typed out.
+    const rebuild = rest > 0 ? 'pnpm rebuild' : `pnpm rebuild ${named}`;
     return {
       key: NOTICE_KEY.scriptsSkipped,
       tone: 'warning',
       line: `${named} ${one ? 'is' : 'are'} not built in this copy: its install ran without install scripts`,
-      body: `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds), and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run pnpm rebuild ${named} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
+      body: `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds), and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
     };
   },
 };

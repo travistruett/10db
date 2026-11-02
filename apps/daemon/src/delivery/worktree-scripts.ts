@@ -31,30 +31,62 @@ function nameOf(entry: string): string {
   return at === -1 ? entry : entry.slice(0, at);
 }
 
+/** Which packages the project lets run their install scripts. */
+export interface BuildPolicy {
+  /** `dangerouslyAllowAllBuilds`: every package may build, except those in `denied`. */
+  readonly all: boolean;
+  /** The packages allowed by name. */
+  readonly allowed: readonly string[];
+  /** The packages never built: `allowBuilds` set to false, `ignoredBuiltDependencies`, `neverBuiltDependencies`. */
+  readonly denied: readonly string[];
+}
+
+/** The string entries of `list`, by package name, when it is an array. */
+function namesIn(list: unknown, into: Set<string>): void {
+  if (Array.isArray(list))
+    for (const name of list) if (typeof name === 'string') into.add(nameOf(name));
+}
+
+const valid = (names: Set<string>): string[] =>
+  [...names].filter((name) => PACKAGE_NAME.test(name)).sort();
+
 /**
- * The packages the project lets run their install scripts: `allowBuilds` entries set to true
- * (pnpm-workspace.yaml) and the older `onlyBuiltDependencies` lists (pnpm-workspace.yaml and
- * package.json's `pnpm` field). Read as data from the copy's own files, which hold the base's
- * content at the cut; nothing in them runs.
+ * Which packages the project lets run their install scripts: `allowBuilds` entries set to true
+ * (pnpm-workspace.yaml), the older `onlyBuiltDependencies` lists, and `dangerouslyAllowAllBuilds`
+ * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Read as
+ * data from the copy's own files, which hold the base's content at the cut; nothing in them runs.
  */
-export function allowedBuilds(root: string): string[] {
-  const names = new Set<string>();
-  const workspace = readData(join(root, 'pnpm-workspace.yaml'));
+export function buildPolicy(root: string): BuildPolicy {
+  const allowed = new Set<string>();
+  const denied = new Set<string>();
+  let all = false;
   const manifest = readData(join(root, 'package.json'));
-  const lists: unknown[] = [];
+  const sources: Record<string, unknown>[] = [];
+  const workspace = readData(join(root, 'pnpm-workspace.yaml'));
   if (isRecord(workspace)) {
+    sources.push(workspace);
     const allow = workspace['allowBuilds'];
     if (isRecord(allow))
       for (const [name, value] of Object.entries(allow))
-        if (value === true) names.add(nameOf(name));
-    lists.push(workspace['onlyBuiltDependencies']);
+        if (value === true) allowed.add(nameOf(name));
+        else if (value === false) denied.add(nameOf(name));
   }
-  if (isRecord(manifest) && isRecord(manifest['pnpm']))
-    lists.push(manifest['pnpm']['onlyBuiltDependencies']);
-  for (const list of lists)
-    if (Array.isArray(list))
-      for (const name of list) if (typeof name === 'string') names.add(nameOf(name));
-  return [...names].filter((name) => PACKAGE_NAME.test(name)).sort();
+  if (isRecord(manifest) && isRecord(manifest['pnpm'])) sources.push(manifest['pnpm']);
+  for (const source of sources) {
+    if (source['dangerouslyAllowAllBuilds'] === true) all = true;
+    namesIn(source['onlyBuiltDependencies'], allowed);
+    namesIn(source['ignoredBuiltDependencies'], denied);
+    namesIn(source['neverBuiltDependencies'], denied);
+  }
+  return { all, allowed: valid(allowed), denied: valid(denied) };
+}
+
+/** The package a pnpm virtual store entry holds: `@scope/name` from `@scope+name@1.2.3_peer`. */
+function storeEntryName(entry: string): string | undefined {
+  const at = entry.indexOf('@', 1);
+  if (at === -1) return undefined;
+  const name = entry.slice(0, at).replace('+', '/');
+  return PACKAGE_NAME.test(name) ? name : undefined;
 }
 
 /** Whether the package installed at `dir` has something pnpm would build: an install script or a binding.gyp. */
@@ -74,11 +106,13 @@ function needsBuild(dir: string): boolean {
 /**
  * The packages the project allows to build (`allowBuilds`) that a `--ignore-scripts` install left
  * unbuilt in the pnpm virtual store at `<root>/node_modules/.pnpm`, by name. A package the project
- * allows but that has no install script is not named: there is nothing it lacks.
+ * allows but that has no install script is not named: there is nothing it lacks. When the project
+ * allows every build, every package in the store with something to build is named, less the ones
+ * it never builds.
  */
 export function unbuiltAllowedPackages(root: string): string[] {
-  const allowed = allowedBuilds(root);
-  if (allowed.length === 0) return [];
+  const policy = buildPolicy(root);
+  if (!policy.all && policy.allowed.length === 0) return [];
   const store = join(root, 'node_modules', '.pnpm');
   let entries: string[];
   try {
@@ -86,6 +120,10 @@ export function unbuiltAllowedPackages(root: string): string[] {
   } catch {
     return [];
   }
+  const candidates = policy.all
+    ? valid(new Set(entries.flatMap((entry) => storeEntryName(entry) ?? [])))
+    : policy.allowed;
+  const allowed = candidates.filter((name) => !policy.denied.includes(name));
   return allowed.filter((name) => {
     const prefix = `${name.replace('/', '+')}@`;
     return entries.some(
