@@ -140,6 +140,46 @@ function isOwnToolResult(realPath: string, ctx: FileAccessContext): boolean {
   return false;
 }
 
+/**
+ * Claude Code's name for a working dir's project: every character but an ASCII letter or digit made
+ * `-`. A name it would shorten and hash (over 200 characters) is not derived; such a session's task
+ * output is asked about.
+ */
+const CLAUDE_SLUG_MAX = 200;
+function claudeProjectSlug(dir: string): string | null {
+  const slug = dir.replace(/[^a-zA-Z0-9]/g, '-');
+  return slug.length > CLAUDE_SLUG_MAX ? null : slug;
+}
+
+/**
+ * The session's own Claude Code task output directories, by exact derivation:
+ * `<own temp dir>/claude-<this process's uid>/<slug of the checkout>/<providerSessionId>/tasks`, for
+ * each spelling of the temp dir and the checkout. Only those: a lane can make a lookalike under its
+ * own temp dir (another uid, another slug), but a lookalike holds only what the lane wrote itself.
+ */
+function ownTaskDirs(ctx: FileAccessContext): string[] {
+  const uid = process.getuid?.();
+  if (ctx.providerSessionId === null || uid === undefined) return [];
+  const slugs = spellings(ctx.checkout)
+    .map(claudeProjectSlug)
+    .filter((slug): slug is string => slug !== null);
+  return spellings(ctx.sandboxTemp.own).flatMap((own) =>
+    slugs.map((slug) =>
+      foldPathCase(join(own, `claude-${String(uid)}`, slug, ctx.providerSessionId ?? '', 'tasks')),
+    ),
+  );
+}
+
+/** True only for a file directly in this session's own task output directory. It need not exist yet. */
+function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
+  const folded = foldPathCase(realPath);
+  return ownTaskDirs(ctx).some((dir) => {
+    if (!folded.startsWith(`${dir}/`)) return false;
+    const file = folded.slice(dir.length + 1);
+    return file !== '' && !file.includes('/');
+  });
+}
+
 const READ_STRICTNESS: Record<ReadAccess, number> = {
   inside: 0,
   allowed: 1,
@@ -158,6 +198,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (roots.some((root) => isEqualOrUnder(real, root))) return 'protected';
   if (tree && roots.some((root) => isEqualOrUnder(root, real))) return 'contains-protected';
   if (spellings(ctx.checkout).some((root) => isEqualOrUnder(real, root))) return 'inside';
+  if (isOwnTaskOutput(real, ctx)) return 'allowed';
   if (ctx.readList.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) return 'allowed';
   return 'ask';
 }
