@@ -429,7 +429,7 @@ const WRAPPERS = new Map([
   ),
   ['exec', { valueOptions: ['-a'], operands: 0 }],
   ['nice', { valueOptions: ['-n'], operands: 0 }],
-  ['env', { valueOptions: ['-u', '-C', '--unset', '--chdir'], operands: 0 }],
+  ['env', { valueOptions: ['-u', '-C', '-a', '--unset', '--chdir', '--argv0'], operands: 0 }],
   ['stdbuf', { valueOptions: ['-i', '-o', '-e'], operands: 0 }],
   ['timeout', { valueOptions: ['-s', '-k'], operands: 1 }],
   [
@@ -442,7 +442,13 @@ const WRAPPERS = new Map([
       operands: 0,
     },
   ],
-  ['xargs', { valueOptions: ['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'], operands: 0 }],
+  [
+    'xargs',
+    {
+      valueOptions: [...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'], '--process-slot-var'],
+      operands: 0,
+    },
+  ],
 ]);
 
 /**
