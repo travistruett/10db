@@ -268,10 +268,28 @@ function teamOf(tasks: readonly TaskRow[], facts: Facts): DigestTeamMember[] {
   return team;
 }
 
+/** The open tasks a task waits on, in Board order. */
+function openDependenciesOf(db: DbReader, taskId: TaskId): { taskId: TaskId; title: string }[] {
+  return db
+    .select({
+      taskId: schema.tasks.id,
+      title: schema.tasks.title,
+      status: schema.tasks.status,
+    })
+    .from(schema.taskDeps)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
+    .where(eq(schema.taskDeps.taskId, taskId))
+    .orderBy(schema.tasks.boardOrder, schema.tasks.id)
+    .all()
+    .filter((d) => d.status !== TaskStatus.Done && !mergedDespiteFailure(db, d.taskId))
+    .map(({ taskId: id, title }) => ({ taskId: id, title }));
+}
+
 /**
  * The first task that can start now, else the first that cannot yet and what it waits on. With no
- * unstarted task left, the queued task first in line for a lane (a queued task has started, so it
- * waits on nothing).
+ * unstarted task left, the queued task the scheduler would start: the first in line whose
+ * dependencies are done (it skips a queued task that waits, even one the builder ran next), else
+ * the first in line with the open dependencies it waits on.
  */
 function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNext | null {
   const unstarted = tasks.filter((t) => {
@@ -290,25 +308,19 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
         queued.push({ task, ws: run.workstream });
       }
     }
-    const firstInLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws))[0];
-    return firstInLine
-      ? { taskId: firstInLine.task.id, title: firstInLine.task.title, waitsOn: [] }
+    const inLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws));
+    const startable = inLine.find((q) => dependenciesDone(db, q.task.id));
+    if (startable) return { taskId: startable.task.id, title: startable.task.title, waitsOn: [] };
+    const first = inLine[0];
+    return first
+      ? {
+          taskId: first.task.id,
+          title: first.task.title,
+          waitsOn: openDependenciesOf(db, first.task.id),
+        }
       : null;
   }
-  const waitsOn = db
-    .select({
-      taskId: schema.tasks.id,
-      title: schema.tasks.title,
-      status: schema.tasks.status,
-    })
-    .from(schema.taskDeps)
-    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskDeps.dependsOnId))
-    .where(eq(schema.taskDeps.taskId, blocked.id))
-    .orderBy(schema.tasks.boardOrder, schema.tasks.id)
-    .all()
-    .filter((d) => d.status !== TaskStatus.Done && !mergedDespiteFailure(db, d.taskId))
-    .map(({ taskId, title }) => ({ taskId, title }));
-  return { taskId: blocked.id, title: blocked.title, waitsOn };
+  return { taskId: blocked.id, title: blocked.title, waitsOn: openDependenciesOf(db, blocked.id) };
 }
 
 function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
