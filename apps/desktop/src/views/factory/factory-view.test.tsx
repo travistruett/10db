@@ -87,10 +87,10 @@ describe('FactoryView goal list', () => {
         'Goals are outcomes 10db pursues across many tasks. Adopt a plan to start one, or ask Claude Code to with the 10db-task skill.',
       ),
     ).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Ungrouped/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Not in a goal/ })).toBeNull();
   });
 
-  it('still lists running and failed tasks with no goal under Ungrouped', async () => {
+  it('still lists running and failed tasks with no goal under Not in a goal', async () => {
     const running = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
     const failed = workstreamDto({
       taskTitle: 'Loose break',
@@ -111,20 +111,20 @@ describe('FactoryView goal list', () => {
     serve(goals({ ...goalListDto(), ungrouped }), workstreams(running, failed));
     renderApp('/factory');
 
-    const row = await screen.findByRole('button', { name: /^Ungrouped/ });
+    const row = await screen.findByRole('button', { name: /^Not in a goal/ });
     expect(row.textContent).toContain('1 running · 1 failed');
     expect(screen.getByText(/Goals are outcomes 10db pursues/)).toBeTruthy();
     expect(row.getAttribute('aria-expanded')).toBe('false');
 
     fireEvent.click(row);
-    const region = await screen.findByRole('region', { name: 'Ungrouped' });
+    const region = await screen.findByRole('region', { name: 'Not in a goal' });
     expect(await within(region).findByText('Loose run')).toBeTruthy();
     expect(within(region).getByText('Loose break')).toBeTruthy();
     expect(within(region).getByText('The run failed. Retry runs it again.')).toBeTruthy();
     expect(within(region).queryByRole('heading', { name: 'Pull requests' })).toBeNull();
   });
 
-  it('orders goals failed, waiting on you, running, not started, Ungrouped, then Done, all collapsed', async () => {
+  it('orders goals failed, waiting on you, running, not started, Not in a goal, then Done, all collapsed', async () => {
     const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
     serve(
       goals({
@@ -152,9 +152,9 @@ describe('FactoryView goal list', () => {
     renderApp('/factory');
 
     await screen.findByRole('button', { name: /^Broken/ });
-    expect(rowTitles(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Ungrouped', 'Done'])).toEqual(
-      ['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Ungrouped', 'Done'],
-    );
+    expect(
+      rowTitles(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']),
+    ).toEqual(['Broken', 'Asking', 'Busy', 'Landing', 'Idle', 'Not in a goal', 'Done']);
     expect(screen.queryAllByRole('button', { expanded: true })).toEqual([]);
     expect(screen.queryAllByRole('region')).toEqual([]);
     // Done goals sit behind one collapsed line and show once it opens.
@@ -507,6 +507,93 @@ describe('FactoryView sessions', () => {
     fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
       expect(retried).toEqual([failed.id]);
+    });
+  });
+
+  it('names a task by its headline, and by its title when it has none', async () => {
+    const withHeadline = workstreamDto({
+      taskTitle: 'Replace src/greeting/hello.txt with a greeting that names the visitor',
+      taskHeadline: 'Greet the visitor by name',
+    });
+    const without = workstreamDto({ taskTitle: 'Plain title only', taskHeadline: '' });
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [withHeadline.taskId, without.taskId] },
+      { status: 'running' },
+    );
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(withHeadline, without),
+      digests([], summary.digest),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    expect(await within(region).findByText('Greet the visitor by name')).toBeTruthy();
+    expect(within(region).getByText('Plain title only')).toBeTruthy();
+    expect(within(region).queryByText(/Replace src\/greeting/)).toBeNull();
+  });
+
+  it('links a goal task’s row to the Board with its drawer open and its goal as the filter', async () => {
+    const ws = workstreamDto({ taskTitle: 'Alpha', state: 'RUNNING' });
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [ws.taskId] },
+      { status: 'running' },
+    );
+    serve(goals(goalListDto(summary)), workstreams(ws), digests([], summary.digest));
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    const link = await within(region).findByRole('link', { name: 'Alpha' });
+    const href = new URL(link.getAttribute('href') ?? '', 'http://x');
+    expect(href.pathname).toBe('/board');
+    expect(href.searchParams.get('task')).toBe(ws.taskId);
+    expect(href.searchParams.get('goal')).toBe(summary.goal.id);
+  });
+
+  it('links a row of a task not in a goal to the Board with no goal', async () => {
+    const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
+    const ungrouped = ungroupedDto({
+      workstreams: [
+        {
+          workstreamId: loose.id,
+          taskId: loose.taskId,
+          taskTitle: loose.taskTitle,
+          state: loose.state,
+        },
+      ],
+    });
+    serve(goals({ ...goalListDto(), ungrouped }), workstreams(loose));
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Not in a goal/ }));
+    const region = await screen.findByRole('region', { name: 'Not in a goal' });
+    const link = await within(region).findByRole('link', { name: 'Loose run' });
+    const href = new URL(link.getAttribute('href') ?? '', 'http://x');
+    expect(href.searchParams.get('task')).toBe(loose.taskId);
+    expect(href.searchParams.has('goal')).toBe(false);
+  });
+
+  it('goes to the Board when the row is clicked, and Retry stays in Factory', async () => {
+    const failed = workstreamDto({ taskTitle: 'Broken', state: 'FAILED' });
+    const retried: string[] = [];
+    open(failed, [
+      http.post(daemonUrl('/workstreams/:id/retry'), ({ params }) => {
+        retried.push(String(params['id']));
+        return HttpResponse.json({ ...failed, state: 'QUEUED' });
+      }),
+    ]);
+    const row = await sessionRow('Broken');
+    fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => {
+      expect(retried).toEqual([failed.id]);
+    });
+    expect(screen.getByRole('region', { name: 'Real areas' })).toBeTruthy();
+
+    fireEvent.click(within(row).getByText('Broken'));
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'Real areas' })).toBeNull();
     });
   });
 

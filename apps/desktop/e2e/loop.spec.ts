@@ -165,10 +165,10 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(
     page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
   ).toBeVisible();
-  // Finished work with no goal is not Factory's: it shows the guide and nothing under Ungrouped.
+  // Finished work with no goal is not Factory's: it shows the guide and nothing under Not in a goal.
   await open(page, 'Factory');
   await expect(page.getByText(/^Goals are outcomes 10db pursues/)).toBeVisible();
-  await expect(page.getByRole('button', { name: /^Ungrouped/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Not in a goal/ })).toHaveCount(0);
   await expectAccessible(page, 'factory, no goals, dark');
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.

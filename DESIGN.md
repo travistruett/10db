@@ -65,8 +65,10 @@ favors legibility and calm over decoration.
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
-  shipping, not started, the Ungrouped row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
-  no badge and no color.
+  shipping, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  no badge and no color. A session row names its task by headline (the title when it has none) and goes to the
+  Board with that task's drawer open and the Board filtered to the task's goal; a task not in a goal opens the
+  Board unfiltered. The row keeps its Retry button.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).

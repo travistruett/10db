@@ -20,6 +20,7 @@ import {
   taskDto,
   workstreamDto,
 } from '../../test/fixtures';
+import { goalListDto, goalSummaryDto } from '../../test/goal-fixtures';
 
 /** The base daemon (health, head, empty lists, a silent event stream), then this test's overrides. */
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -64,6 +65,56 @@ describe('BoardView', () => {
       renderApp(path);
       await screen.findByRole('button', { name: 'Alpha' });
       expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+    });
+
+    describe('with a goal=', () => {
+      function serveGoal() {
+        const project = projectViewDto({ gateCommand: null });
+        const summary = goalSummaryDto({ projectId: project.id, title: 'Real areas' });
+        const inGoal = taskDto({ projectId: project.id, title: 'Alpha', goalId: summary.goal.id });
+        const loose = taskDto({ projectId: project.id, title: 'Beta' });
+        serve(
+          http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+          http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+            HttpResponse.json([inGoal, loose]),
+          ),
+          http.get(daemonUrl('/projects/:projectId/goals'), () =>
+            HttpResponse.json(goalListDto(summary)),
+          ),
+          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+        );
+        return { summary, inGoal, loose };
+      }
+
+      it('opens the task’s drawer with only that goal’s tasks shown, and the filter can be cleared', async () => {
+        const { summary, inGoal } = serveGoal();
+        renderApp(`/board?task=${inGoal.id}&goal=${summary.goal.id}`);
+        await screen.findByRole('dialog', { name: 'Task' });
+        const filter = await screen.findByDisplayValue(/^(Real areas|All goals)$/);
+        expect((filter as HTMLInputElement).value).toBe('Real areas');
+        expect(screen.queryByText('Beta')).toBeNull();
+        expect(screen.getAllByText('Alpha').length).toBeGreaterThan(0);
+
+        fireEvent.click(filter);
+        fireEvent.click(await screen.findByRole('option', { name: 'All goals', hidden: true }));
+        expect(await screen.findByText('Beta')).toBeTruthy();
+      });
+
+      it('leaves the board unfiltered when the link names no goal', async () => {
+        const { inGoal } = serveGoal();
+        renderApp(`/board?task=${inGoal.id}`);
+        await screen.findByRole('dialog', { name: 'Task' });
+        expect(await screen.findByText('Beta')).toBeTruthy();
+        const filter = await screen.findByDisplayValue(/^(Real areas|All goals)$/);
+        expect((filter as HTMLInputElement).value).toBe('All goals');
+      });
+
+      it('ignores a goal that is not valid', async () => {
+        const { inGoal } = serveGoal();
+        renderApp(`/board?task=${inGoal.id}&goal=nope`);
+        await screen.findByRole('dialog', { name: 'Task' });
+        expect(await screen.findByText('Beta')).toBeTruthy();
+      });
     });
 
     describe('with two projects', () => {

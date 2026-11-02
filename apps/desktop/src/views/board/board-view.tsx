@@ -470,7 +470,7 @@ export function BoardView() {
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
-  const { task } = useSearch({ from: '/board' });
+  const { task, goal: linkedGoalId } = useSearch({ from: '/board' });
   const linked = useLinkedTask(task, projects.data ?? [], project?.id ?? null, select);
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
@@ -481,7 +481,14 @@ export function BoardView() {
   const goals = useGoals(project?.id ?? null);
   // The goal whose drawer is open and the goal the filter shows, by ID so they follow the refetched list.
   const [openGoalId, setOpenGoalId] = useState<GoalId | null>(null);
-  const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(null);
+  // A link's `goal` starts the filter (a Factory row opens the task among its goal's tasks); the
+  // Select clears or changes it as usual, and a new link replaces it.
+  const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(linkedGoalId ?? null);
+  const [filterLinkedFor, setFilterLinkedFor] = useState(linkedGoalId);
+  if (filterLinkedFor !== linkedGoalId) {
+    setFilterLinkedFor(linkedGoalId);
+    setFilterGoalId(linkedGoalId ?? null);
+  }
   // The goal whose ready tasks the batch sheet is proposing.
   const [sheetGoalId, setSheetGoalId] = useState<GoalId | null>(null);
 

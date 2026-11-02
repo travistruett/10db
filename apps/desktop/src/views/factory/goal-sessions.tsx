@@ -1,4 +1,4 @@
-import type { WorkstreamDto } from '@10db/contracts';
+import type { GoalId, TaskId, WorkstreamDto } from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -11,6 +11,7 @@ import {
   Tooltip,
   VisuallyHidden,
 } from '@mantine/core';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { useRetryWorkstream } from '../../daemon/queries';
 import { failureLine } from '../board/task-state';
 import { ContextGauge } from './context-gauge';
@@ -19,7 +20,14 @@ import { StateBadge } from './state-badge';
 import { StepCell } from './step-cell';
 import { canRetry } from './workstream-state';
 
+/** The Board link of a task: its drawer, and its goal as the filter when it has one. */
+function boardSearch(ws: WorkstreamDto, goalId: GoalId | null): { task: TaskId; goal?: GoalId } {
+  return goalId === null ? { task: ws.taskId } : { task: ws.taskId, goal: goalId };
+}
+
 export interface GoalSessionsProps {
+  /** The goal these sessions belong to; null for tasks not in a goal, which open the Board unfiltered. */
+  readonly goalId: GoalId | null;
   /** The goal's workstreams, one per task (its latest run). */
   readonly workstreams: readonly WorkstreamDto[];
   readonly loading: boolean;
@@ -30,8 +38,13 @@ export interface GoalSessionsProps {
  * A goal's sessions: its workstreams, each with Retry when it failed. A run is cancelled from its
  * task's card menu or drawer on the Board, not from every row here.
  */
-export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps) {
+export function GoalSessions({ goalId, workstreams, loading, error }: GoalSessionsProps) {
   const retry = useRetryWorkstream();
+  const navigate = useNavigate();
+
+  function openOnBoard(ws: WorkstreamDto): void {
+    void navigate({ to: '/board', search: boardSearch(ws, goalId) });
+  }
 
   return (
     <Stack gap="xs">
@@ -72,9 +85,23 @@ export function GoalSessions({ workstreams, loading, error }: GoalSessionsProps)
             </Table.Thead>
             <Table.Tbody>
               {workstreams.map((ws) => (
-                <Table.Tr key={ws.id}>
+                <Table.Tr
+                  key={ws.id}
+                  style={{ cursor: 'pointer' }}
+                  onClick={(event) => {
+                    // The task's link and Retry act on their own; the rest of the row opens the task.
+                    if (event.target instanceof Element && event.target.closest('a, button')) {
+                      return;
+                    }
+                    openOnBoard(ws);
+                  }}
+                >
                   <Table.Td style={{ minWidth: '12rem', overflowWrap: 'anywhere' }}>
-                    <Text size="sm">{ws.taskTitle}</Text>
+                    <Text size="sm" component="span">
+                      <Link to="/board" search={boardSearch(ws, goalId)}>
+                        {ws.taskHeadline || ws.taskTitle}
+                      </Link>
+                    </Text>
                     {canRetry(ws.state) ? (
                       <Tooltip
                         label={ws.failureReason}

@@ -9,7 +9,7 @@ import { GOAL_STATUS_LOOK } from '../board/goal-status';
 import { groupGoals, ungroupedLine, verdictLine } from './goal-status';
 import { shortAgo } from './short-ago';
 
-/** The row key of the Ungrouped group, beside the goals' ids. */
+/** The row key of the Not in a goal group, beside the goals' ids. */
 const UNGROUPED = 'ungrouped';
 
 /** "· 3 new since 3h ago": plain text, with no badge, when the goal has items in its window. */
@@ -22,7 +22,7 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
 }
 
 /**
- * The project's goals as one list: open goals in status order, Ungrouped, then the done ones
+ * The project's goals as one list: open goals in status order, Not in a goal, then the done ones
  * behind one collapsed line. Every row starts collapsed and one is open at a time.
  */
 export function GoalList({ list }: { readonly list: GoalListDto }) {
@@ -78,7 +78,7 @@ export function GoalList({ list }: { readonly list: GoalListDto }) {
       {goals.map(goalRow)}
       {ungrouped ? (
         <GoalRow
-          title="Ungrouped"
+          title="Not in a goal"
           line={ungroupedLine(ungrouped)}
           color={GOAL_STATUS_LOOK[ungrouped.status].color}
           expanded={openKey === UNGROUPED}
