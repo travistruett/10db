@@ -1112,6 +1112,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     let before: string | null = null;
     let pushed = false;
     let keptAt: string | null = null;
+    let wrote: string | null = null;
     try {
       const holder = await deps.git.branchInUse(main, branch);
       // The batch's own worktree, kept after it shipped for a file 10db didn't seed: merged there, and kept.
@@ -1188,8 +1189,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const check = shipCheck(project);
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
-        update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
-        return update.kind === 'merged';
+        try {
+          update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
+          return update.kind === 'merged';
+        } finally {
+          // The last head 10db wrote, merge and generator commits included: a rewind starts only from it.
+          wrote = await deps.git.branchTip(main, branch).catch(() => null);
+        }
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
         if (check === null) {
@@ -1252,21 +1258,33 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (made) await retire(batchId);
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
-      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt, wrote);
     }
   }
 
-  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  /**
+   * Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. Only
+   * from the head 10db last wrote (`wrote`): a branch that moved on since, such as a commit the builder
+   * made in the kept worktree while the check ran, is left as it is.
+   */
   async function rewind(
     batchId: BatchId,
     main: string,
     branch: string,
     to: string,
     keptAt: string | null,
+    wrote: string | null,
   ): Promise<void> {
     try {
       const tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
+      if (tip !== wrote) {
+        deps.logger.warn(
+          { batchId, branch, tip, wrote },
+          'branch not put back after a catch-up that was not pushed: it holds commits that are not 10db’s',
+        );
+        return;
+      }
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
     } catch (error) {
       deps.logger.warn(

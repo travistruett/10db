@@ -144,6 +144,31 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('-C', kept, 'show', 'HEAD:src/index.ts')).toBe(BOTH.mine.trimEnd());
   });
 
+  it('leaves a commit the builder adds in the kept worktree while the check runs on the branch', async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const kept = batch.worktreePath ?? '';
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    // The builder, with the worktree open, commits a file while the check runs, which then fails.
+    const gate = [
+      'printf "by hand\\n" > by-hand.txt',
+      'git add by-hand.txt',
+      'git -c user.name=Builder -c user.email=builder@example.com commit -q -m "By hand"',
+      'false',
+    ].join(' && ');
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: gate }));
+
+    await catchUp(batch);
+
+    const branch = batch.branch ?? '';
+    expect(h.git$('log', '-1', '--format=%s', `refs/heads/${branch}`)).toBe('By hand');
+    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(
+      h.git$('rev-parse', `refs/heads/${branch}`),
+    );
+    expect(existsSync(join(kept, 'by-hand.txt'))).toBe(true);
+    expect(h.git$('-C', kept, 'status', '--porcelain')).toBe('');
+  });
+
   it('catches up again after a failed check and the builder updating the branch on GitHub', async () => {
     const batch = await shipped();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
