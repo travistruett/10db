@@ -130,13 +130,16 @@ export function findRegistryHosts(root: string): Promise<FoundHost[]> {
  * The hosts the package files committed at `rev` name, read as `findRegistryHosts` reads a folder but
  * from the object store through the daemon's git, so nothing in the checkout is read, followed or run:
  * a lane's uncommitted edits are not seen, and a link or a file over the size cap counts as absent.
- * A `rev` git can't resolve is an error, not an empty answer.
+ * A `rev` git can't resolve is an error, not an empty answer. The `rev` is resolved to a commit once,
+ * first, and every listing and file is read from that commit, so a branch that moves during the walk
+ * cannot make the reading span two commits.
  */
 export async function findRegistryHostsAt(
-  git: Pick<Git, 'folderAt' | 'fileAt'>,
+  git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>,
   repo: string,
   rev: string,
 ): Promise<FoundHost[]> {
+  const commit = await git.commitAt(repo, rev);
   // Each folder is listed once, when the walk first reaches it, so the work stays within the walk's
   // depth and folder limits however big the tree is.
   // A folder is listed only when its parent's listing names it (a `.cargo` is looked for in every
@@ -146,13 +149,13 @@ export async function findRegistryHostsAt(
     let listing = listings.get(folder);
     if (listing === undefined) {
       if (folder === '') {
-        listing = git.folderAt(repo, rev, folder);
+        listing = git.folderAt(repo, commit, folder);
       } else {
         const slash = folder.lastIndexOf('/');
         const name = folder.slice(slash + 1);
         listing = folderAt(slash < 0 ? '' : folder.slice(0, slash)).then((parent) =>
           parent.folders.includes(name)
-            ? git.folderAt(repo, rev, folder)
+            ? git.folderAt(repo, commit, folder)
             : { files: [], folders: [] },
         );
       }
@@ -160,8 +163,6 @@ export async function findRegistryHostsAt(
     }
     return listing;
   };
-  // The root is listed first so a `rev` git can't resolve fails the reading, not each file.
-  await folderAt('');
   return readHosts({
     async read(file) {
       const slash = file.lastIndexOf('/');
@@ -169,7 +170,7 @@ export async function findRegistryHostsAt(
       const name = file.slice(slash + 1);
       const entry = (await folderAt(folder)).files.find((f) => f.name === name);
       if (entry === undefined || entry.bytes > MAX_FILE_BYTES) return null;
-      const found = await git.fileAt(repo, rev, file, MAX_FILE_BYTES);
+      const found = await git.fileAt(repo, commit, file, MAX_FILE_BYTES);
       return found.kind === 'file' ? found.text : null;
     },
     subfolders: async (folder) => [...(await folderAt(folder)).folders],

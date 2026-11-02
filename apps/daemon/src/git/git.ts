@@ -474,6 +474,12 @@ export interface Git {
    */
   diffSince(repo: string, base: string, head: string, maxBytes: number): Promise<DiffSince>;
   /**
+   * The commit `rev` names now, as a full object id. A caller that reads many folders and files of one
+   * `rev` resolves it once and reads each from the id, so the reads cannot span a branch that moves.
+   * A `rev` that names no commit is a `GitError`.
+   */
+  commitAt(repo: string, rev: string): Promise<string>;
+  /**
    * The text of `path` in commit `rev`, read from the object store, never from the worktree, so no
    * link is followed: a path that is a link, or lies under one, is `not_regular` or `missing`. A
    * blob over `maxBytes` is not read.
@@ -2558,6 +2564,14 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async branchTip(repo, branch) {
       return revParse(await pinned(repo), `refs/heads/${branch}`);
+    },
+    async commitAt(repo, rev) {
+      // A rev that starts with a dash would be read as an option by rev-parse.
+      const sha = rev.startsWith('-')
+        ? null
+        : await revParse(await pinned(repo), `${rev}^{commit}`);
+      if (sha === null) throw new GitError(['rev-parse', rev], `${rev} names no commit`, null);
+      return sha;
     },
     async fileAt(repo, rev, path, maxBytes) {
       const c = await pinned(repo);
