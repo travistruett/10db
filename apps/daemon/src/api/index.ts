@@ -1,2 +1,7 @@
 export { createApp, type AppType } from './app';
-export type { ApiServices, TaskLookupServices, TaskRemovalServices } from './services';
+export type {
+  ApiServices,
+  GoalAdoptResult,
+  TaskLookupServices,
+  TaskRemovalServices,
+} from './services';
