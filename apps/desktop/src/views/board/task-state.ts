@@ -8,6 +8,7 @@ import {
   type BatchDto,
   type ShippedAtLimit,
   type Notice,
+  type TaskDto,
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
@@ -98,6 +99,23 @@ export function pullRequestClosed(batch: BatchDto | undefined): boolean {
  */
 export function canRetryRun(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
   return canRetry(workstream.state) && batch?.state !== BatchState.Shipped;
+}
+
+/**
+ * Whether a failed run can be started over instead of retried: its batch is still open or failed, so
+ * Retry continues in it, and starting over cuts the task a new batch from the base branch. A parked
+ * task is never started, as Start says too.
+ */
+export function canStartOver(
+  task: Pick<TaskDto, 'boardColumnId'>,
+  workstream: WorkstreamDto,
+  batch: BatchDto | undefined,
+): boolean {
+  return (
+    task.boardColumnId === null &&
+    canRetry(workstream.state) &&
+    (batch?.state === BatchState.Open || batch?.state === BatchState.Failed)
+  );
 }
 
 /**
