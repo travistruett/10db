@@ -1,13 +1,19 @@
 import { Alert, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
-import { AdoptPlanButton, RefusalModal, TypedPathModal } from './adopt-plan';
+import { AdoptPlanButton, AdoptProblem, RefusalModal, TypedPathModal } from './adopt-plan';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
 import { useAdoptPlan } from './use-adopt-plan';
 
 /** Factory: the project's goals, each opening to its digest, sessions and pull requests (goals spec §8). */
 export function FactoryView() {
+  const { project } = useSelectedProject();
+  // Keyed by project so a refusal, an open form or a failure never carries into another one.
+  return <Factory key={project?.id ?? 'none'} />;
+}
+
+function Factory() {
   const { project } = useSelectedProject();
   const goals = useGoals(project?.id ?? null);
   const adoption = useAdoptPlan(project?.id ?? null);
@@ -26,11 +32,8 @@ export function FactoryView() {
         </Stack>
         <AdoptPlanButton adoption={adoption} />
       </Group>
-      {adoption.problem ? (
-        <Alert color="red" title="Couldn't adopt that plan">
-          {adoption.problem}
-        </Alert>
-      ) : null}
+      {/* An open modal shows the problem itself, so it is not shown twice. */}
+      {adoption.refusal === null && !adoption.typing ? <AdoptProblem adoption={adoption} /> : null}
       {goals.isError ? (
         <Alert color="red" title="Couldn't load the goals">
           {goals.error.message}
