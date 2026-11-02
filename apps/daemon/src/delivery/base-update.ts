@@ -747,10 +747,18 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         marked: [...marked],
         regenerate: (merged.regenerate ?? []).map((r) => ({ dir: r.dir, dropped: [...r.dropped] })),
       };
+      // The note names the merge commit, so it can only be kept once the merge is made. Without it
+      // the next gate finds the branch up to date with the base, and nothing would regenerate the
+      // directories or report a migration they dropped: so a note that can't be kept is a card.
+      let unkept: string | null = null;
       try {
         await ctx.git.keepNote(path, mergeRef(ctx.worktreeRoot, batch.id), JSON.stringify(note));
       } catch (error) {
         ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'base merge note not kept');
+        const reason = `10db couldn't keep the note of what to regenerate (${why(error)}), so it won't regenerate them once the conflicts in ${named(marked)} are resolved`;
+        unkept = `10db couldn't keep a note of this merge (${why(error)}), so the next gate won't know that ${named(marked)} still hold conflict markers.`;
+        if (note.regenerate.length > 0)
+          unkept = `${unregenerated(batch, path, merged, { why: reason, logPath: null, restored: false })} ${unkept}`;
       }
       ctx.logger.info(
         { batchId: batch.id, base: merged.from, head: merged.head, files: marked },
@@ -759,7 +767,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       tell(batch, () => {
         showNotice(ctx.state, batch.id, baseNotices.resolving(batch, marked));
       });
-      return alone(conflicted(batch, merged.from, marked, unmoved));
+      return alone(conflicted(batch, merged.from, marked, joined(unmoved, unkept)));
     }
     ctx.logger.info(
       {
