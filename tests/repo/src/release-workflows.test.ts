@@ -142,8 +142,16 @@ describe('release-dry-run workflow', () => {
   const text = readRepoFile(releaseWorkflowPaths.dryRun);
   const workflow = readWorkflow(releaseWorkflowPaths.dryRun);
 
-  it('runs only when dispatched by hand', () => {
-    expect(Object.keys(workflow.on)).toEqual(['workflow_dispatch']);
+  it('runs on every push to main, so the self-update finds the build ready, and when dispatched by hand', () => {
+    expect(workflow.on).toEqual({
+      push: { branches: ['main'] },
+      workflow_dispatch: null,
+    });
+  });
+
+  it('never cancels a build in progress, because the app waits for the build of the commit it saw', () => {
+    expect(text).not.toContain('cancel-in-progress: true');
+    expect(JSON.stringify(workflow)).not.toMatch(/cancel-in-progress/);
   });
 
   it('can reach no secret, no environment and no release', () => {

@@ -8,6 +8,7 @@ import {
   mintId,
   NotFoundError,
   TaskStatus,
+  UNFINISHED_BATCH_STATES,
   WorkspaceMode,
   type BatchDto,
   type BatchId,
@@ -186,7 +187,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     };
   }
 
-  /** The project's batch `batchId` when it is a separate copy's; none when it is not, or names no batch. */
+  /**
+   * The project's batch `batchId` when it is a separate copy's; none when it is the shared batch's
+   * or names no batch (the shared join answers for those). A batch of another project, or one that
+   * has finished, is refused here saying so, since the shared join can't tell what is wrong with it.
+   */
   function copyBatchOf(project: ProjectDto, batchId: BatchId): BatchDto | undefined {
     let batch: BatchDto;
     try {
@@ -195,7 +200,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       if (error instanceof NotFoundError) return undefined;
       throw error;
     }
-    return batch.projectId === project.id && batch.worktreePath !== null ? batch : undefined;
+    if (batch.projectId !== project.id)
+      throw new ConflictError(`Batch "${batch.title}" is not a batch of ${project.name}`);
+    // A finished copy may keep its worktree path (retiring keeps a worktree holding unseeded
+    // ignored files), so the state alone decides; a shared batch's path is always null.
+    if (!UNFINISHED_BATCH_STATES.includes(batch.state))
+      throw new ConflictError(
+        `Batch "${batch.title}" has finished; start these tasks again on their own`,
+      );
+    return batch.worktreePath !== null ? batch : undefined;
   }
 
   function prepareShared(
