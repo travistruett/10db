@@ -213,6 +213,10 @@ other subscription account needs the builder's confirmation.
   may name (§3), so it isn't a field of the account; it is null for keyed kinds.
 - `PUT /accounts/:id/secret`. This route is write-only: responses carry `secretSet: boolean`, never the secret.
 - `GET /accounts/:id/signin`, `GET /accounts/:id/identity` and `GET /accounts/:id/usage`.
+- `GET /accounts/pauses` lists the accounts paused now (`reason`, `since`, `until`); `POST /accounts/:id/resume`
+  lifts a refused or monthly-cap pause, as saving the account unchanged does, and answers the pauses still in
+  force. A usage-limit pause ends by itself, so resuming it is a 409. Settings › Accounts and the account
+  drawer show each pause and offer Resume, so a card answered Later is never the only way back.
 - `PATCH /projects/:id` accepts `accountId` (a move, with work in flight too), `fallbackAccountId` and
   `usageHandoffAt`.
 
