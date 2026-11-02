@@ -207,8 +207,10 @@ task under a rule is open (§14).
 **Built:** Factory is the project's goals as described below (`apps/desktop/src/views/factory/`): the status-ordered
 list, the Ungrouped and Done (n) rows, each goal's digest, its Sessions and Pull requests, and the header's
 **Adopt a Plan…** with its refusal sheet (§11). The workstream table's columns (task, state, step, context,
-sessions, last activity, Retry, Cancel) live on in Sessions; a queued or held run names no step and the digest
-never counts one as running.
+sessions, last activity, Retry) live on in Sessions; a queued or held run names no step and the digest
+never counts one as running. **Cancel Run** for a running task is in its card menu and its drawer, after a
+confirm (`views/board/cancel-run-modal.tsx`); Sessions rows have no Cancel, and the project-wide workstream table,
+the Show finished switch and the batch history are gone from Factory.
 
 **Designed.** Factory becomes the project's goals, with the project switcher above it as today.
 

@@ -2108,7 +2108,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Abandon (Busy is running: cancel it in Factory first)',
+      name: 'Abandon (Busy is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2239,7 +2239,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Busy is running: cancel it in Factory first)',
+      name: 'Hold (Busy is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2253,7 +2253,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Again' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Again has already run: cancel it in Factory first)',
+      name: 'Hold (Again has already run: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2282,6 +2282,95 @@ describe('BoardView holding a started task', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove', hidden: true }));
     await waitFor(() => {
       expect(calls).toEqual([`remove ${task.id}`]);
+    });
+  });
+
+  /** Serves the cancel route, recording the workstreams it is asked to cancel. */
+  function serveCancel(ws: { readonly id: string }, refusal?: string) {
+    const cancelled: string[] = [];
+    server.use(
+      http.post(daemonUrl('/workstreams/:id/cancel'), ({ params }) => {
+        cancelled.push(String(params['id']));
+        return refusal
+          ? HttpResponse.json({ error: 'conflict', message: refusal }, { status: 409 })
+          : HttpResponse.json({ ...ws, state: 'CANCELLED' });
+      }),
+    );
+    return cancelled;
+  }
+
+  it('cancels a running task from its card menu, only after a confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    expect(within(dialog).getByText(/Task: Busy/)).toBeTruthy();
+    expect(cancelled).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    await waitFor(() => {
+      expect(cancelled).toEqual([ws.id]);
+    });
+  });
+
+  it('keeps a task running when the confirm is declined', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep running' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Cancel this workstream?' })).toBeNull();
+    });
+    expect(cancelled).toEqual([]);
+  });
+
+  it('shows the daemon’s refusal inside the confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    serveCancel(ws, 'already finished');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    expect(await within(dialog).findByText('already finished')).toBeTruthy();
+  });
+
+  it('offers Cancel on a queued task beside Hold, and none on a held one', async () => {
+    serveRun('QUEUED');
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    expect(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Hold', hidden: true })).toBeTruthy();
+  });
+
+  it('offers no Cancel on a held task', async () => {
+    serveRun('HELD');
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    await screen.findByRole('menuitem', { name: 'Remove', hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Cancel Run', hidden: true })).toBeNull();
+  });
+
+  it('cancels a running task from its drawer, only after a confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Busy' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Cancel Run' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    expect(cancelled).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    await waitFor(() => {
+      expect(cancelled).toEqual([ws.id]);
     });
   });
 
@@ -2323,7 +2412,7 @@ describe('BoardView holding a started task', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
     const hold = within(drawer).getByRole('button', { name: 'Hold' });
     expect(hold.hasAttribute('disabled')).toBe(true);
-    expect(within(drawer).getByText('Busy is running: cancel it in Factory first.')).toBeTruthy();
+    expect(within(drawer).getByText('Busy is running: cancel it first.')).toBeTruthy();
   });
 
   it('starts and removes a held task from the drawer', async () => {
