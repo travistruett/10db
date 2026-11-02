@@ -18,6 +18,7 @@ import {
   type ProjectDto,
   type TaskDto,
   type WorkstreamDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   acquireClaims,
@@ -1086,6 +1087,102 @@ describe('worktree checkouts', () => {
       );
       await watcher.flush();
       expect(flags().map((f) => f.body)).toEqual([`${lane.path}: .env.local`]);
+    });
+
+    describe('the bulk card for a lane that wrote past the threshold before its grant', () => {
+      const grant = (
+        lane: { workstream: { id: WorkstreamId }; batch: { id: BatchId } },
+        name: string,
+      ) =>
+        state.write((ctx) =>
+          acquireClaims(ctx, {
+            projectId: project.id,
+            workstreamId: lane.workstream.id,
+            requests: [{ kind: ClaimKind.Area, name }],
+            leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+            areaScope: lane.batch.id,
+          }),
+        );
+      beforeEach(() => {
+        state.write((ctx) =>
+          patchProject(ctx, project.id, {
+            areas: [
+              { name: 'repo', globs: ['**'] },
+              { name: 'ui', globs: ['src/ui/**'] },
+            ],
+          }),
+        );
+        project = getProject(base.db, project.id);
+      });
+      const bulk = () => flags().filter((f) => f.title.endsWith('writes outside every claim'));
+      const writeMany = (root: string, dir: string, count: number) => {
+        for (let i = 0; i < count; i += 1)
+          writeAt(root, `${dir}/file-${String(i).padStart(3, '0')}.ts`);
+      };
+
+      it('resolves once the lane takes a claim covering every path', async () => {
+        const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
+        watcher.sync();
+        writeMany(lane.path, 'docs/gen', STRAY_BULK_THRESHOLD + 10);
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+        grant(lane, 'repo');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
+      it('stays open when a path the card lists is not covered', async () => {
+        const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+        watcher.sync();
+        writeMany(lane.path, 'docs/gen', STRAY_BULK_THRESHOLD + 10);
+        await watcher.flush();
+        grant(lane, 'ui');
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+      });
+
+      it('stays open when a path the card does not list is not covered', async () => {
+        const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+        watcher.sync();
+        writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+        writeAt(lane.path, 'zzz/last.ts');
+        await watcher.flush();
+        expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+        grant(lane, 'ui');
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+      });
+
+      it('stays open when a path it lists is sensitive', async () => {
+        const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
+        inbox.flag({
+          projectId: project.id,
+          workstreamId: lane.workstream.id,
+          title: `${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`,
+          body: `${lane.path}: .mcp.json\n…and 1 more`,
+          detail: {
+            count: STRAY_BULK_THRESHOLD + 1,
+            paths: ['.mcp.json'],
+            candidates: [lane.workstream.id],
+          },
+          foldKey: `stray-write:${lane.batch.id}:bulk`,
+        });
+        watcher.sync();
+        grant(lane, 'repo');
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+      });
+
+      it("stays open when the claim is another lane's", async () => {
+        const lane = inWorktree('Alpha', 'repo', WorkstreamState.Running, false);
+        const other = inWorktree('Beta', 'repo', WorkstreamState.Running, false);
+        watcher.sync();
+        writeMany(lane.path, 'docs/gen', STRAY_BULK_THRESHOLD + 10);
+        await watcher.flush();
+        grant(other, 'repo');
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+      });
     });
 
     it("keeps a card that a claim taken in another copy doesn't cover", async () => {

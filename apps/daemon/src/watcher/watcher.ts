@@ -100,6 +100,9 @@ export interface Watcher {
 }
 
 const STRAY_TITLE = 'Write outside every claim';
+/** The title of a single stray card, or of a bulk one: "<n> writes outside every claim". */
+const isStrayTitle = (title: string): boolean =>
+  title === STRAY_TITLE || /^\d+ writes outside every claim$/.test(title);
 
 function isRealDirectory(path: string): boolean {
   try {
@@ -309,25 +312,57 @@ export function createWatcher(deps: {
    * holding nothing, and takes one through request_claim), so the writes the watcher saw before the grant
    * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
    * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
-   * Sensitive paths stay carded.
+   * Sensitive paths stay carded. A bulk card resolves only when every path it lists is covered and not
+   * sensitive and, when it lists fewer than it counts, the checkout's current changes hold nothing the claims
+   * leave uncovered, since the paths it leaves out can't be read from the card.
    */
-  function resolveCovered(lane: WorkstreamId): void {
+  async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
     const ws = getWorkstream(db, lane);
     const open = listInbox(db, { states: [InboxState.Open], projectId: ws.projectId }).filter(
-      (item) => item.kind === InboxKind.Flag && item.title === STRAY_TITLE && names(item, lane),
+      (item) => item.kind === InboxKind.Flag && isStrayTitle(item.title) && names(item, lane),
     );
     if (open.length === 0) return;
     const project = getProject(db, ws.projectId);
-    const site = siteOf(project, worktreeBatchOf(ws), checkoutOf(db, ws));
+    const root = checkoutOf(db, ws);
+    const site = siteOf(project, worktreeBatchOf(ws), root);
     // Every claim the lane holds counts in its own checkout, the one its per-copy claims are scoped to.
     const claims = activeClaims(db, lane).map((c) => ({ kind: c.kind, name: c.name }));
+    const covered = (paths: readonly string[]): boolean =>
+      paths.every((p) => !isSensitivePath(p)) && findStrays(paths, project, claims).length === 0;
+    let unlistedCovered: boolean | null = null;
+    /** Whether nothing the checkout now has changed lies outside the claims, bar the sensitive paths with cards of their own. */
+    const noStraysNow = async (): Promise<boolean> => {
+      if (unlistedCovered !== null) return unlistedCovered;
+      try {
+        const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
+        unlistedCovered =
+          findStrays(
+            changed.filter((p) => !isSensitivePath(p)),
+            project,
+            claims,
+          ).length === 0;
+      } catch {
+        unlistedCovered = false;
+      }
+      return unlistedCovered;
+    };
     for (const item of open) {
-      const path = item.detail?.['path'];
-      if (typeof path !== 'string' || isSensitivePath(path)) continue;
-      if (item.body !== labelled(site, path)) continue;
-      if (findStrays([path], project, claims).length > 0) continue;
-      deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering it.');
+      if (item.title === STRAY_TITLE) {
+        const path = item.detail?.['path'];
+        if (typeof path !== 'string' || !covered([path])) continue;
+        if (item.body !== labelled(site, path)) continue;
+        deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering it.');
+        continue;
+      }
+      const listed = item.detail?.['paths'];
+      const count = item.detail?.['count'];
+      if (!Array.isArray(listed) || listed.length === 0 || typeof count !== 'number') continue;
+      if (!listed.every((p): p is string => typeof p === 'string') || !covered(listed)) continue;
+      const lines = listed.map((p) => labelled(site, p));
+      if (!item.body.startsWith(lines.join('\n'))) continue;
+      if (count > listed.length && !(await noStraysNow())) continue;
+      deps.inbox.resolve(item.id, 'The lane it names now holds a claim covering every write.');
     }
   }
 
@@ -506,9 +541,7 @@ export function createWatcher(deps: {
       const lane = WorkstreamId.safeParse(event.data['workstreamId']);
       if (!lane.success) return;
       chain = chain
-        .then(() => {
-          resolveCovered(lane.data);
-        })
+        .then(() => resolveCovered(lane.data))
         .catch((error: unknown) => {
           deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
         });
