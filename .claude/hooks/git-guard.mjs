@@ -13,11 +13,13 @@ import { join, posix } from 'node:path';
  *   raw: string,
  *   words: string[],
  *   separator: string,
+ *   closesExpansion: boolean,
  *   substitutions: string[],
  *   heredocs: string[],
  * }} Segment
  * `raw` keeps the segment text for quote-aware checks, `separator` is the operator that ended it,
- * `substitutions` holds the commands of `$(...)` and backticks that run inside double quotes or an
+ * `closesExpansion` is true when that operator is the `)` of a `$(...)`, `<(...)`, `>(...)` or
+ * `$((...))` rather than of a subshell, `substitutions` holds the commands of `$(...)` and backticks that run inside double quotes or an
  * unquoted heredoc, and `heredocs` holds the bodies of heredocs fed to the segment.
  */
 
@@ -131,8 +133,14 @@ class Scanner {
     /** True while inside `$'...'`, where a backslash escapes any character. */
     this.ansiQuote = false;
     this.parenDepth = 0;
+    /** For each open `(`: whether it opens an expansion rather than a subshell. @type {boolean[]} */
+    this.openParens = [];
+    /** Whether the last `)` read closed an expansion. */
+    this.closedExpansion = false;
     /** Open parentheses of the `$((...))` or `((...))` being read; heredocs can't start there. */
     this.arithParens = 0;
+    /** Whether the arithmetic being read opened with `$((`, an expansion, not a bare `((`. */
+    this.arithExpansion = false;
     /**
      * @type {{
      *   delimiter: string,
@@ -159,14 +167,18 @@ class Scanner {
     this.word = '';
   }
 
-  /** @param {string} separator */
-  endSegment(separator) {
+  /**
+   * @param {string} separator
+   * @param {boolean} [closesExpansion] the separator is a `)` that closes a `$(`, `<(`, `>(` or `$((`
+   */
+  endSegment(separator, closesExpansion = false) {
     this.endWord();
     if (this.raw.trim() !== '') {
       this.out.push({
         raw: this.raw.trim(),
         words: this.words,
         separator,
+        closesExpansion,
         substitutions: this.substitutions,
         heredocs: [],
       });
@@ -243,7 +255,7 @@ class Scanner {
     if (ch === '&' && (/[<>]$/.test(this.raw) || this.source[this.pos + 1] === '>')) return false;
     if (ch === '(') this.openParen();
     if (ch === ')' && this.closeParen()) return true;
-    this.endSegment(ch);
+    this.endSegment(ch, ch === ')' && this.closedExpansion);
     this.pos += 1;
     if (ch === '\n') this.skipHeredocBodies();
     return true;
@@ -253,9 +265,17 @@ class Scanner {
     if (this.arithParens > 0) this.arithParens += 1;
     else if (this.source.startsWith('((', this.pos)) {
       // `$((` anywhere, or `((` where a command would start, opens an arithmetic expression.
-      if (this.word.endsWith('$') || this.raw === '') this.arithParens = 1;
+      if (this.word.endsWith('$') || this.raw === '') {
+        this.arithParens = 1;
+        this.arithExpansion = this.word.endsWith('$');
+      }
     }
     this.parenDepth += 1;
+    // `$(`, `<(`, `>(` and the parentheses of `$((...))` open an expansion; any other `(` opens a
+    // subshell or group. The scanner is looking at the raw text before the `(`, so adjacency holds.
+    // A bare `((` stays a group: bash reads it as nested subshells when its close isn't `))`.
+    const inArithExpansion = this.arithParens > 0 && this.arithExpansion;
+    this.openParens.push(inArithExpansion || /(^|[^\\])[$<>]$/.test(this.raw));
   }
 
   /** @returns {boolean} true when this `)` closes the substitution being read */
@@ -266,6 +286,8 @@ class Scanner {
       return true;
     }
     this.parenDepth = Math.max(0, this.parenDepth - 1);
+    // A `)` with nothing open (a `case` pattern's) is not known to close an expansion.
+    this.closedExpansion = this.openParens.pop() === true;
     return false;
   }
 
@@ -407,18 +429,41 @@ const WRAPPERS = new Map([
   ),
   ['exec', { valueOptions: ['-a'], operands: 0 }],
   ['nice', { valueOptions: ['-n'], operands: 0 }],
-  ['env', { valueOptions: ['-u', '-C'], operands: 0 }],
+  ['env', { valueOptions: ['-u', '-C', '--unset', '--chdir'], operands: 0 }],
   ['stdbuf', { valueOptions: ['-i', '-o', '-e'], operands: 0 }],
   ['timeout', { valueOptions: ['-s', '-k'], operands: 1 }],
   [
     'sudo',
     {
-      valueOptions: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'],
+      valueOptions: [
+        ...['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'],
+        ...['--chdir', '--chroot'],
+      ],
       operands: 0,
     },
   ],
   ['xargs', { valueOptions: ['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'], operands: 0 }],
 ]);
+
+/**
+ * True when an option word leaves its value to the next word. getopt takes a short option's value
+ * attached (`-CDIR`) or in the next word, so in a group of short options (`-iC DIR`) the value
+ * comes next only when the option that takes one is last. A long option takes its value in the next
+ * word unless it carries `=`, and getopt_long accepts any unambiguous prefix of a name, so a prefix
+ * of a listed long option counts (`--ch DIR`).
+ * @param {string} word starts with `-`
+ * @param {string[]} valueOptions
+ */
+function takesNextWord(word, valueOptions) {
+  if (word.startsWith('--')) {
+    if (word.includes('=')) return false;
+    return valueOptions.some((name) => name.startsWith('--') && name.startsWith(word));
+  }
+  for (let k = 1; k < word.length; k += 1) {
+    if (valueOptions.includes(`-${word[k]}`)) return k === word.length - 1;
+  }
+  return false;
+}
 
 /**
  * Index of the word after a wrapper's options and positional operands.
@@ -433,7 +478,7 @@ function skipWrapperArguments(words, from, wrapper) {
       i += 1;
       break;
     }
-    i += wrapper.valueOptions.includes(words[i]) ? 2 : 1;
+    i += takesNextWord(words[i], wrapper.valueOptions) ? 2 : 1;
   }
   return Math.min(i + wrapper.operands, words.length);
 }
@@ -483,12 +528,15 @@ const GIT_OPTIONS_WITH_VALUE = [
 function gitSubcommand(words) {
   let i = commandStart(words);
   if (programAt(words, i) !== 'git') return null;
-  let retargeted = words
-    .slice(0, i)
-    .some(
-      (w) =>
-        /^(-C|-D|-R|--chdir|--chroot)(=|$)/.test(w) || /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
-    );
+  let retargeted = words.slice(0, i).some(
+    (w) =>
+      // getopt takes a short option's value attached (`-CDIR`) or in the next word, and a
+      // cluster can carry it (`-iCDIR`), so any C, D or R in a short option word counts.
+      // A long option may be shortened to any prefix (`--ch`, `--chd=DIR`).
+      /^--(c|ch|chd|chdi|chdir|chr|chro|chroo|chroot)(=|$)/.test(w) ||
+      /^-[A-Za-z]*[CDR]/.test(w) ||
+      /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
+  );
   i += 1;
   /** @type {string[]} */
   const config = [];
@@ -567,10 +615,15 @@ function envSplitString(words) {
   if (envAt < 0) return null;
   for (let j = envAt + 1; j < words.length; j += 1) {
     const word = words[j];
-    if (word === '--split-string' || /^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
-    if (word.startsWith('--split-string=')) return word.slice('--split-string='.length);
+    // getopt_long takes any unambiguous prefix of a long option; `--s` is already unique to
+    // --split-string among env's options.
+    const long = /^--(s[a-z-]*)(=|$)/.exec(word);
+    if (long && '--split-string'.startsWith(`--${long[1]}`)) {
+      return long[2] === '=' ? word.slice(long[0].length) : (words[j + 1] ?? null);
+    }
+    if (/^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
     if (/^-[A-Za-z]*S./.test(word)) return word.slice(word.indexOf('S') + 1);
-    if (word === '-u' || word === '-C') j += 1;
+    if (takesNextWord(word, ['-u', '-C', '--unset', '--chdir'])) j += 1;
     else if (!word.startsWith('-') && !ENV_ASSIGNMENT.test(word)) break;
   }
   return null;
@@ -642,6 +695,17 @@ const BRANCH_DELETE_OPTIONS = [
 // A branch name made of characters git allows and no revision syntax: no `~`, `^`, `@{`, `:`, `..`
 // or glob. A name that doesn't fit is asked about, never resolved.
 const PLAIN_BRANCH_NAME = /^[A-Za-z0-9_][A-Za-z0-9_./+-]*$/;
+// One `gh pr list` may wait this long, and all the lookups for one command together wait at most
+// GH_BUDGET_MS. Claude Code cancels a hook that outlasts its timeout (60 s by default) and then
+// runs the command unjudged, so the total stays well below that. TENDB_GIT_GUARD_GH_BUDGET_MS
+// overrides the total, for tests.
+const GH_LOOKUP_TIMEOUT_MS = 15000;
+const GH_BUDGET_MS = 20000;
+
+function ghBudgetMs() {
+  const override = Number(process.env.TENDB_GIT_GUARD_GH_BUDGET_MS);
+  return Number.isFinite(override) && override > 0 ? override : GH_BUDGET_MS;
+}
 
 /**
  * True when `git branch <delete flags> <names>` deletes only local branches whose pull request has
@@ -659,12 +723,16 @@ function deletesOnlyMergedBranches(args, cwd) {
   if (!options.every((x) => BRANCH_DELETE_OPTIONS.includes(x))) return false;
   if (!options.some((x) => x === '--delete' || /^-[a-zA-Z]*[dD]/.test(x))) return false;
   const checkedOut = currentBranch(cwd);
+  const deadline = Date.now() + ghBudgetMs();
   return names.every((name) => {
     if (!PLAIN_BRANCH_NAME.test(name) || name.includes('..') || name === checkedOut) return false;
     const tip = attempt(() =>
       gitOutput(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`]).trim(),
     );
     if (!tip) return false;
+    // The branches share one budget; a lookup that starts with none left is an unconfirmed branch.
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
     const pulls = attempt(() =>
       JSON.parse(
         execFileSync(
@@ -681,7 +749,12 @@ function deletesOnlyMergedBranches(args, cwd) {
             '--json',
             'headRefName,headRefOid,state',
           ],
-          { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000 },
+          {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: Math.min(GH_LOOKUP_TIMEOUT_MS, left),
+          },
         ),
       ),
     );
@@ -934,7 +1007,9 @@ function judge(command, cwd, whole = command, startDir = cwd) {
     const start = commandStart(seg.words);
     const previous = index > 0 ? segs[index - 1].separator : '';
     if (['(', ')', '`'].includes(previous)) grouped = true;
-    if (followedCd && [')', '`', '&'].includes(previous)) dir = null;
+    // A substitution's `)` leaves the shell where it was; a cd inside it already made `dir` null.
+    const closedExpansion = index > 0 && segs[index - 1].closesExpansion;
+    if (followedCd && [')', '`', '&'].includes(previous) && !closedExpansion) dir = null;
     if (['', ';', '\n'].includes(previous)) {
       if (uncertainAtListEnd) dir = null;
       uncertainAtListEnd = false;
@@ -1162,12 +1237,17 @@ function judge(command, cwd, whole = command, startDir = cwd) {
         inAgentWorktree(cwd);
       // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
       // call, for the same reason as above; the cwd is the repository the branch names live in.
-      const mergedBranchDelete =
-        loneGitCall &&
-        git.verb === 'branch' &&
-        !RETARGETS.test(whole) &&
-        deletesOnlyMergedBranches(a, cwd);
-      if (irreversible && !ownDiscard && !mergedBranchDelete) {
+      // GitHub is asked only for a call that would ask otherwise (`&&` stops before the lookup).
+      if (
+        irreversible &&
+        !ownDiscard &&
+        !(
+          loneGitCall &&
+          git.verb === 'branch' &&
+          !RETARGETS.test(whole) &&
+          deletesOnlyMergedBranches(a, cwd)
+        )
+      ) {
         verdicts.push({
           decision: 'ask',
           reason: pushesMain

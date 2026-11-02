@@ -20,7 +20,7 @@
 //
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
-//   node scripts/check-changed.mjs --precheck       run the pre-check (no tests, Rust or e2e)
+//   node scripts/check-changed.mjs --precheck       run the pre-check (knip and the docs rule tests; no other tests, Rust or e2e)
 //   node scripts/check-changed.mjs --plan [--precheck] [-- file…]
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
@@ -62,7 +62,22 @@ const AGENT_DOCS_TEST = 'tests/repo/src/agent-docs.test.ts';
 /** @type {[RegExp, string][]} */
 const REPO_DOC_TESTS = [
   [/^docs\/|\.md$/, ARCHITECTURE_DOCS_TEST],
-  [/(^|\/)AGENTS\.md$|^\.claude\/|^\.codex\//, AGENT_DOCS_TEST],
+  [
+    new RegExp(
+      [
+        // The agent instruction files and tooling config the test reads.
+        String.raw`(^|/)AGENTS\.md$|^\.claude/|^\.codex/`,
+        // 'has no CLAUDE.md anywhere'.
+        String.raw`(^|/)CLAUDE\.md$`,
+        // 'never lets a package depend on an app', and a manifest makes a directory an app or
+        // package that needs an AGENTS.md. A directory with no manifest is unplaced: a full run.
+        String.raw`^(apps|packages)/[^/]+/package\.json$`,
+        // 'has no grab-bag modules'.
+        String.raw`^(apps|packages)/(.*/)?(utils|helpers|misc|common)\.tsx?$`,
+      ].join('|'),
+    ),
+    AGENT_DOCS_TEST,
+  ],
 ];
 /** Every repo rule test the pre-check runs, for the runs that cannot narrow. */
 const ALL_REPO_DOC_TESTS = [AGENT_DOCS_TEST, ARCHITECTURE_DOCS_TEST];
@@ -122,7 +137,7 @@ function withDependents(packages, start) {
  * What to run for these changed files (repo-relative, still present or deleted).
  * @param {string[]} files
  * @param {Pkg[]} packages
- * @param {boolean} [precheck] plan the pre-check: no tests, so no repo rule tests and no Rust
+ * @param {boolean} [precheck] plan the pre-check: knip and, for a docs or agent file, the architecture-docs and agent-docs rule tests; no other tests and no Rust
  */
 function planFor(files, packages, precheck = false) {
   /** @type {Set<string>} */

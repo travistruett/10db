@@ -17,9 +17,10 @@ Status: under construction. The design is in
 | Install or update 10db from main     | quit 10db (⌘Q), then `make install-app`, then open 10db                              |
 | Something's wrong with the new build | quit 10db, then `make rollback-app` (it prints the matching database backup command) |
 
-- GitHub builds it, so nothing compiles on your Mac. `make install-app` reuses the build of main's newest
-  commit, or starts one and waits: the first install of a new commit waits about 15 minutes.
-  If a build of that commit is already running, it waits for it. `make install-app REF=<branch or tag>`
+- GitHub builds it, so nothing compiles on your Mac. `make install-app` installs the newest commit of main
+  that has a finished build, even when main's head is still building, and prints which commit that was and
+  how many commits behind the head it is. Only when none of the last 100 commits has a finished build does it
+  wait for the head's build (about 15 minutes) or start one. `make install-app REF=<branch or tag>`
   installs another ref. It needs `gh` signed in, and it refuses while 10db runs; it never quits 10db for you.
 - The build is unsigned, so install it only this way. Gatekeeper refuses a copy opened from a download, and the
   Keychain may ask for access again after an update.

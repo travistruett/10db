@@ -131,6 +131,15 @@ describe('the builder tools', () => {
     expect(parsed.dependsOn).toEqual([]);
   });
 
+  it('start_task takes an optional fresh flag that must be a boolean', () => {
+    expect(BuilderToolInputs.start_task.parse({ taskId })).toEqual({ taskId });
+    expect(BuilderToolInputs.start_task.parse({ taskId, fresh: true })).toEqual({
+      taskId,
+      fresh: true,
+    });
+    expect(BuilderToolInputs.start_task.safeParse({ taskId, fresh: 'yes' }).success).toBe(false);
+  });
+
   it('refuses an edit that changes nothing with the form-level message', () => {
     const parsed = BuilderToolInputs.edit_task.safeParse({ taskId });
     expect(parsed.success).toBe(false);
@@ -195,6 +204,14 @@ describe('the drafting guidance', () => {
       expect(text).toContain('separate copy');
     }
     expect(BUILDER_INSTRUCTIONS).not.toContain('Hazards are not areas');
+  });
+
+  it('says a file no other area holds belongs to the catch-all area', () => {
+    const list = builderToolList().find((t) => t.name === BuilderToolName.ListProjects);
+    for (const text of [BUILDER_INSTRUCTIONS, list?.description ?? '']) {
+      expect(text).toContain('catchAll');
+      expect(text).toContain('no other area');
+    }
   });
 
   it('edit_task points at the same guidance', () => {

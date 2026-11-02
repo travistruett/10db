@@ -1,7 +1,7 @@
 import type { BatchDto, RequiredChecksDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { batchDto } from '../../test/fixtures';
-import { ciLine } from './ci-line';
+import { batchDto, workstreamDto } from '../../test/fixtures';
+import { ciLine, withFixTaskTitles } from './ci-line';
 
 const PR = 'https://github.com/acme/widgets/pull/9';
 const job = (name: string, link: string | null) => ({
@@ -84,6 +84,57 @@ describe('ciLine', () => {
     expect(ciLine(root, [root, fix])?.line).toBe(
       'Pull request open · CI failed: build · fixing in "Fix CI: build on Add greetings"',
     );
+  });
+
+  it('names the fix task, not the fix batch, once the task is renamed (spec §5)', () => {
+    const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+    const fix = batchDto({
+      state: 'OPEN',
+      title: 'Fix CI: build on Add greetings',
+      ciFixOf: root.id,
+      ciFixHead: 'abc',
+    });
+    const other = batchDto({ state: 'OPEN', title: 'Another batch' });
+    const workstreams = [
+      workstreamDto({ batchId: fix.id, taskTitle: 'Make the build pass again' }),
+      workstreamDto({ batchId: other.id, taskTitle: 'Some other task' }),
+    ];
+    const batches = withFixTaskTitles([root, fix, other], workstreams);
+    expect(ciLine(root, batches)?.line).toBe(
+      'Pull request open · CI failed: build · fixing in "Make the build pass again"',
+    );
+    // Only a CI fix batch is retitled; the batch's own title stands when it has no workstream.
+    expect(batches.find((b) => b.id === other.id)?.title).toBe('Another batch');
+    expect(withFixTaskTitles([root, fix], [])[1]?.title).toBe('Fix CI: build on Add greetings');
+  });
+
+  it("names the CI fix task, the batch's oldest workstream, when a person added another (spec §5)", () => {
+    const root = shipped({ prRequired: required('failing', { failing: [job('build', null)] }) });
+    const fix = batchDto({
+      state: 'OPEN',
+      title: 'Fix CI: build on Add greetings',
+      ciFixOf: root.id,
+      ciFixHead: 'abc',
+    });
+    const created = workstreamDto({
+      batchId: fix.id,
+      taskTitle: 'Make the build pass again',
+      createdAt: '2026-11-01T10:00:00.000Z',
+    });
+    const added = workstreamDto({
+      batchId: fix.id,
+      taskTitle: 'Also tidy the lint config',
+      createdAt: '2026-11-01T11:00:00.000Z',
+    });
+    const expected = 'Pull request open · CI failed: build · fixing in "Make the build pass again"';
+    // Whichever order the list comes in, the line names the task made first.
+    for (const workstreams of [
+      [created, added],
+      [added, created],
+    ]) {
+      const batches = withFixTaskTitles([root, fix], workstreams);
+      expect(ciLine(root, batches)?.line).toBe(expected);
+    }
   });
 
   it('does not say fixing for a fix batch whose ship failed', () => {

@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
+import { expectAccessible } from './expect-accessible';
 import { DESKTOP_DIR, E2E_DATA, E2E_DIR, E2E_TOKEN } from './paths';
 
 // Runs after loop.spec.ts (files run in name order with one worker); it adds its own project, on its
@@ -24,9 +25,23 @@ const OPEN_BATCHES = [
 ] as const;
 const FINISHED_BATCH = 'Fix the typo';
 
-/** A disposable repository for the worktree-mode project; git config comes from nowhere but this repo. */
-function createRepository(): void {
-  mkdirSync(WORKTREE_REPO, { recursive: true });
+/** One goal whose task has not started, so the project holds a goal beside the running goal-less tasks. */
+const GOAL_TITLE = 'Greet properly';
+const GOAL_BRIEF = `---
+title: ${GOAL_TITLE}
+objective: Every greeting reads well.
+tasks:
+  - key: polish-greeting
+    title: Polish the greeting
+    areas: [docs]
+---
+`;
+
+const GOALS_REPO = join(E2E_DIR, 'goals-repo');
+
+/** A disposable repository for a project; git config comes from nowhere but this repo. */
+function createRepository(repo: string = WORKTREE_REPO): void {
+  mkdirSync(repo, { recursive: true });
   const globalConfig = join(E2E_DIR, 'worktree-gitconfig');
   writeFileSync(globalConfig, '');
   const env = {
@@ -35,7 +50,7 @@ function createRepository(): void {
     GIT_CONFIG_GLOBAL: globalConfig,
   };
   const git = (...args: string[]): void => {
-    execFileSync('git', args, { cwd: WORKTREE_REPO, env, stdio: 'ignore' });
+    execFileSync('git', args, { cwd: repo, env, stdio: 'ignore' });
   };
   git('init', '-b', 'main');
   git('config', 'maintenance.auto', 'false');
@@ -43,7 +58,7 @@ function createRepository(): void {
   git('config', 'user.email', 'e2e@10db.invalid');
   git('config', 'user.name', '10db e2e');
   git('config', 'commit.gpgsign', 'false');
-  writeFileSync(join(WORKTREE_REPO, 'README.md'), '# worktree e2e\n');
+  writeFileSync(join(repo, 'README.md'), '# worktree e2e\n');
   git('add', 'README.md');
   git('commit', '-m', 'Initial commit');
 }
@@ -70,6 +85,11 @@ async function seedProject(request: Page['request']): Promise<string> {
   });
   expect(project.ok()).toBe(true);
   const projectId = Created.parse(await project.json()).id;
+  const adopted = await request.post(`${daemonUrl}/projects/${projectId}/goals/adopt`, {
+    headers: auth,
+    data: { text: GOAL_BRIEF },
+  });
+  expect(adopted.status()).toBe(201);
   const open = [];
   for (const batch of OPEN_BATCHES) {
     const task = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
@@ -139,8 +159,14 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
   expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
 
-  // One task per batch: no strip above the columns, and the batch history is Factory's, not the Board's.
-  await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+  // One task per batch: no batch strip, so the only strip above the columns is the seeded goal's
+  // (it has an open task), and the batch history is Factory's, not the Board's.
+  const above = page.getByTestId('board-above-columns');
+  await expect(above.getByTestId('goal-strip')).toHaveCount(1);
+  await expect(above.getByRole('button', { name: GOAL_TITLE })).toBeVisible();
+  for (const { title } of OPEN_BATCHES) {
+    await expect(above.getByText(title)).toHaveCount(0);
+  }
   await expect(page.getByRole('button', { name: /^Batches \(\d+\)$/ })).toHaveCount(0);
   for (const { title } of OPEN_BATCHES) {
     await expect(page.getByRole('listitem', { name: title })).toBeAttached();
@@ -204,7 +230,7 @@ test.describe('the Board with several open batches', () => {
       await expectColumnsUsable(page);
       await expect(columnHeader(page)).toBeInViewport();
       if (size.roomy) {
-        // Nothing above the Board: it fills the window and the page does not scroll.
+        // Only the one goal strip above the columns: the Board fills the window and the page does not scroll.
         expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight - window.innerHeight,
@@ -242,6 +268,163 @@ test.describe('the Board with several open batches', () => {
       await expectColumnsBottomReachable(page);
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-board-${String(size.width)}.png`) });
+      }
+    });
+
+    test(`lists the goal and the running tasks in Factory at ${label}, accessibly in dark and light`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await claudeIsInstalled(page);
+      await page.addInitScript((id: string) => {
+        window.localStorage.setItem('tendb.project', JSON.stringify(id));
+      }, projectId);
+      await page.goto('/factory');
+      await expect(page.getByRole('heading', { name: 'Factory', level: 2 })).toBeVisible();
+
+      // Every row starts collapsed. The queued task is not running: only two of the three count.
+      const goal = page.getByRole('button', { name: new RegExp(`^${GOAL_TITLE}`) });
+      const ungrouped = page.getByRole('button', { name: /^Ungrouped/ });
+      await expect(goal).toHaveAttribute('aria-expanded', 'false');
+      await expect(ungrouped).toHaveAttribute('aria-expanded', 'false');
+      await expect(goal).toContainText('Not started');
+      await expect(ungrouped).toContainText('2 running');
+      await expect(ungrouped).not.toContainText('3 running');
+
+      for (const scheme of ['dark', 'light'] as const) {
+        if (scheme === 'light') {
+          await page.getByRole('button', { name: 'Switch to light mode' }).click();
+          await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
+        }
+        await expectAccessible(page, `factory, collapsed, ${scheme}`);
+
+        await goal.click();
+        const goalRegion = page.getByRole('region', { name: GOAL_TITLE });
+        await expect(goalRegion.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+        await expect(goalRegion.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+        // The window's rows have loaded once the Δ row labels are there.
+        await expect(goalRegion.getByText(/^Deviations/)).toBeVisible();
+        await expectAccessible(page, `factory, goal open, ${scheme}`);
+
+        // One at a time: opening Ungrouped closes the goal, and the queued task is not among its sessions.
+        await ungrouped.click();
+        await expect(goal).toHaveAttribute('aria-expanded', 'false');
+        const sessions = page.getByRole('region', { name: 'Ungrouped' }).getByRole('table');
+        await expect(
+          sessions.getByRole('row', { name: new RegExp(OPEN_BATCHES[0].title) }),
+        ).toBeVisible();
+        await expect(sessions.getByText(OPEN_BATCHES[2].title)).toHaveCount(0);
+        await expect(sessions.getByText('Queued')).toHaveCount(0);
+        await expectAccessible(page, `factory, ungrouped open, ${scheme}`);
+
+        // Escape closes the open row.
+        await page.keyboard.press('Escape');
+        await expect(ungrouped).toHaveAttribute('aria-expanded', 'false');
+      }
+      if (SHOTS) {
+        await page.screenshot({ path: join(SHOTS, `e2e-factory-${String(size.width)}.png`) });
+      }
+    });
+  }
+});
+
+const GOAL_TITLES = ['Greet the visitor', 'Say farewell', 'Tidy the rooms'] as const;
+
+/** A brief with two tasks, so its goal has open tasks and earns a strip. */
+function briefOf(title: string, n: number): string {
+  return [
+    '---',
+    `title: ${title}`,
+    'objective: Every visitor is looked after.',
+    'tasks:',
+    `  - key: first-${String(n)}`,
+    `    title: ${title}, part one`,
+    '    areas: [docs]',
+    `  - key: second-${String(n)}`,
+    `    title: ${title}, part two`,
+    '    areas: [docs]',
+    '---',
+    '',
+  ].join('\n');
+}
+
+/** A project with three goals, each with open tasks, adopted from briefs through the daemon's own route. */
+async function seedGoals(request: Page['request']): Promise<string> {
+  createRepository(GOALS_REPO);
+  const project = await request.post(`${daemonUrl}/projects`, {
+    headers: auth,
+    data: {
+      name: 'goals',
+      repoPath: GOALS_REPO,
+      gateCommand: 'true',
+      areas: [{ name: 'docs', globs: ['**'] }],
+      handoffPct: 40,
+      nudgePct: 50,
+    },
+  });
+  expect(project.ok()).toBe(true);
+  const projectId = Created.parse(await project.json()).id;
+  for (const [n, title] of GOAL_TITLES.entries()) {
+    const adopted = await request.post(`${daemonUrl}/projects/${projectId}/goals/adopt`, {
+      headers: auth,
+      data: { text: briefOf(title, n) },
+    });
+    expect(adopted.status()).toBe(201);
+  }
+  return projectId;
+}
+
+test.describe('the Board with three goals', () => {
+  let projectId = '';
+
+  test.beforeAll(async ({ playwright }) => {
+    const request = await playwright.request.newContext();
+    projectId = await seedGoals(request);
+    await request.dispose();
+  });
+
+  for (const size of SIZES) {
+    const label = `${String(size.width)}x${String(size.height)}`;
+
+    test(`shows the goal strips and keeps the columns' minimum height at ${label}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await claudeIsInstalled(page);
+      await page.addInitScript((id: string) => {
+        window.localStorage.setItem('tendb.project', JSON.stringify(id));
+      }, projectId);
+      await page.goto('/board');
+      await expect(page.getByTestId('board-columns')).toBeVisible();
+
+      // One slim strip per goal, above the columns, and no goal among the cards.
+      const above = page.getByTestId('board-above-columns');
+      await expect(above.getByTestId('goal-strip')).toHaveCount(GOAL_TITLES.length);
+      for (const title of GOAL_TITLES) {
+        await expect(above.getByRole('button', { name: title })).toBeVisible();
+        // The goal's title shows in the columns only as the dimmed label on its two tasks' cards.
+        const inColumns = page.getByTestId('board-columns').getByText(title, { exact: true });
+        await expect(inColumns.and(page.getByTestId('task-card-goal'))).toHaveCount(2);
+        await expect(
+          inColumns.and(page.locator(':not([data-testid="task-card-goal"])')),
+        ).toHaveCount(0);
+      }
+
+      // The strips leave the columns their minimum height; where the window is short the page scrolls.
+      await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
+      expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(
+        COLUMNS_MIN_HEIGHT,
+      );
+      await expectColumnsBottomReachable(page);
+      if (size.roomy) expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
+
+      // A strip opens its goal's drawer.
+      await above.getByRole('button', { name: GOAL_TITLES[0] }).click();
+      const drawer = page.getByRole('dialog', { name: 'Goal' });
+      await expect(drawer).toBeVisible();
+      await expect(drawer.getByText('Every visitor is looked after.')).toBeVisible();
+      if (SHOTS) {
+        await page.screenshot({ path: join(SHOTS, `e2e-board-goals-${String(size.width)}.png`) });
       }
     });
   }

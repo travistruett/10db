@@ -28,14 +28,43 @@ export const NOTICE_KEY = {
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
   landingBehind: 'landing-behind',
+  /** The branch the batch lands in is used by no other task under way or unfinished batch, and isn't the project's base. */
+  landingUnused: 'landing-unused',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
+  /** A copy's install skipped the install scripts of packages the project allows to build. */
+  scriptsSkipped: 'install-scripts-skipped',
+  /** The pull request's head has no run of the checks GitHub requires, and 10db could not start them. */
+  checksNeverStarted: 'checks-never-started',
+  /** A task started over from a failed attempt whose commits are still on the batch's branch. */
+  supersededAttempt: 'superseded-attempt',
 } as const;
+
+/**
+ * What a batch's tasks are told when tasks in it failed, started over in a run of their own, and
+ * left their failed attempts' commits on the batch's branch: those commits are unverified, so the
+ * batch doesn't ship by itself, and Ship anyway would put them in its pull request.
+ */
+export const supersededNotices = {
+  committed: (batch: BatchDto, titles: readonly string[]): Notice => {
+    const named = titles.map((t) => `"${t}"`).join(', ');
+    const one = titles.length === 1;
+    return {
+      key: NOTICE_KEY.supersededAttempt,
+      tone: 'warning',
+      line: `${named} started over; ${one ? 'its' : 'their'} failed attempt${one ? '' : 's'}' commits are still on this branch`,
+      body: `${named} failed in this batch and ${one ? 'was' : 'were'} started over in a new run, which does the work again from ${batch.baseBranch}. Nothing will run the failed attempt${one ? '' : 's'} again, but the commits ${one ? 'it' : 'they'} made are still on ${batch.branch ?? "the batch's branch"}, and no gate or review passed them. So this batch doesn't ship by itself.\n\nShip anyway puts those commits in the pull request with the other tasks' work, and the new run may then conflict with them or repeat them. To keep them out, revert them on the branch first, then Ship anyway, or abandon the batch.`,
+    };
+  },
+};
 
 /**
  * What a copy's tasks are told when its cut skipped the seed because Your folder had an unfinished
  * shared batch, and the install did not make every directory the seed would have cloned.
  */
+/** How many unbuilt packages the install-scripts notice names before it counts the rest. */
+const SCRIPTS_SKIPPED_SHOWN = 10;
+
 export const seedNotices = {
   skipped: (dirs: readonly string[]): Notice => {
     const named = dirs.join(', ');
@@ -44,6 +73,28 @@ export const seedNotices = {
       tone: 'warning',
       line: `This copy has no ${named}: Your folder had a batch open when it was made`,
       body: `A new copy usually gets a clone of Your folder's ignored ${dirs.length === 1 ? 'directory' : 'directories'} ${named}. A task in Your folder was unfinished when this copy was made, and a lane there can write those directories, so 10db cloned nothing into the copy. 10db can only rebuild node_modules, and only in a pnpm project, so ${named} ${dirs.length === 1 ? 'is' : 'are'} missing from the copy, and its gate may fail on that.\n\nTo get them, abandon this batch and start the task again once Your folder's batch has shipped or been abandoned, or make them in the copy yourself.`,
+    };
+  },
+  /**
+   * The install made `node_modules` but ran no install script, and the seed that would have carried
+   * the built output was skipped, so these packages the project allows to build are unbuilt.
+   */
+  scriptsSkipped: (names: readonly string[], legacyPnpmMajor?: number): Notice => {
+    const shown = names.slice(0, SCRIPTS_SKIPPED_SHOWN);
+    const rest = names.length - shown.length;
+    const named = rest > 0 ? `${shown.join(', ')} and ${String(rest)} more` : shown.join(', ');
+    const one = names.length === 1;
+    // pnpm rebuild with no names rebuilds every package, so a long list needn't be typed out.
+    const rebuild = rest > 0 ? 'pnpm rebuild' : `pnpm rebuild ${named}`;
+    const allows =
+      legacyPnpmMajor === undefined
+        ? `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds),`
+        : `The copy was installed with pnpm ${String(legacyPnpmMajor)}, which builds every dependency that has an install script unless the project limits it, ${named} included,`;
+    return {
+      key: NOTICE_KEY.scriptsSkipped,
+      tone: 'warning',
+      line: `${named} ${one ? 'is' : 'are'} not built in this copy: its install ran without install scripts`,
+      body: `${allows} and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
     };
   },
 };
@@ -55,6 +106,13 @@ export const landingNotices = {
     tone: 'warning',
     line: `${branch} lacks ${String(missing)} commit${missing === 1 ? '' : 's'} ${base} has`,
     body: `This work lands in ${branch}, and is built from it, but origin/${branch} doesn't hold ${String(missing)} commit${missing === 1 ? '' : 's'} that origin/${base} has, so the batch lacks any fix made there. Work landed in ${branch} also won't reach ${base} unless ${branch} is merged into it.\n\nIf ${branch} is no longer in use, change where this task lands to the base and start it again. Otherwise merge ${base} into ${branch} on origin first.`,
+  }),
+  /** The branch is not the project's default, and no other task under way or unfinished batch lands in it. */
+  unused: (branch: string, base: string): Notice => ({
+    key: NOTICE_KEY.landingUnused,
+    tone: 'warning',
+    line: `Nothing else under way lands in ${branch}`,
+    body: `This work lands in ${branch}, which isn't ${base}, the project's base branch, and no other task under way or unfinished batch lands in it. Tasks only filed against it, not started, don't count. A branch kept for a run of work is often retired once its last piece merges, and work landed in a retired branch never reaches ${base}.\n\nIf ${branch} is still in use, carry on. If it is retired, change where this task lands to the base and start it again.`,
   }),
 };
 
@@ -201,6 +259,23 @@ export const gateNotices = {
   }),
 };
 
+/** What delivery shows on a shipped batch's tasks about its pull request's required checks. */
+export const ciNotices = {
+  /** The head has no check at all while GitHub waits for a required one, and starting CI again did not help or is not 10db's to do. */
+  neverStarted: (batch: BatchDto): Notice => {
+    const prUrl = batch.prUrl;
+    const number = prUrl === null ? null : /\/pull\/(\d+)$/.exec(prUrl)?.[1];
+    const named =
+      number === undefined || number === null ? 'the pull request' : `pull request #${number}`;
+    return {
+      key: NOTICE_KEY.checksNeverStarted,
+      tone: 'warning',
+      line: `Checks never started on ${named}`,
+      body: `GitHub waits for the required checks of ${batch.baseBranch}, but the head of ${named}${prUrl === null ? '' : ` (${prUrl})`} has no run of them, minutes after it was pushed. GitHub skips a pull request's workflows when it cannot build the merge commit at push time, so the pull request waits for checks that will never come.\n\n${batch.autoMerge ? '10db tried to start them again by merging the base into the pull request, and they still did not start. ' : 'This pull request is held for you, so 10db pushes nothing to it. '}Push a commit to the branch, or merge ${batch.baseBranch} into it on GitHub (Update branch), to start the checks. This notice goes once any check appears on the head.`,
+    };
+  },
+};
+
 /** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
 export const updateNotices = {
   /** The pull request conflicts, and a CI fix still running holds its branch, so the merge waits for it. */
@@ -210,6 +285,23 @@ export const updateNotices = {
     line: `Pull request conflicts with ${batch.baseBranch}; 10db merges it after the CI fix ends`,
     body: `${batch.baseBranch} on origin changed files in ways that conflict with the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`}. A CI fix of it is still running in a checkout that holds the branch, so 10db can't merge ${batch.baseBranch} into it yet.\n\n10db tries again once that fix ends, and raises a card if it can't settle the conflict.`,
   }),
+  /** 10db merged the base into the pull request because its head got none of the checks GitHub requires. */
+  restarted: (
+    batch: BatchDto,
+    resolved: readonly { readonly path: string; readonly how: 'kept_both' | 'regenerated' }[],
+  ): Notice => {
+    const base = batch.baseBranch;
+    const settled =
+      resolved.length === 0
+        ? ''
+        : `\n\nThe merge settled these conflicts itself:\n${listPaths(resolved.map((r) => r.path))}`;
+    return {
+      key: NOTICE_KEY.update,
+      tone: 'info',
+      line: `10db merged ${base} into the pull request to start its checks`,
+      body: `The head of the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} had no run of the checks ${base} requires, minutes after it was pushed, so it would have waited for them for ever. 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it, so GitHub starts its workflows on the new head.${settled}\n\nIf the checks still do not start, 10db says so on this task.`,
+    };
+  },
   /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
   merged: (
     batch: BatchDto,

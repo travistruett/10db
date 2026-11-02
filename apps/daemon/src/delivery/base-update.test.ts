@@ -579,6 +579,76 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.cards()).toEqual([]);
     });
 
+    describe('when the builder commits in the worktree while it runs', () => {
+      const regenerated = {
+        [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+        [`${DB}/0002_mine.sql`]: MINE,
+      };
+
+      /** The branch's commits from its tip down, by subject. */
+      const subjects = (path: string, n: number): string[] =>
+        gitIn(path, 'log', `-${String(n)}`, '--format=%s').split('\n');
+
+      it("answers with its merge, not the builder's commit made during the install, and commits nothing on top of it", async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const run = { ran: 0 };
+        // The install reads the lockfile at HEAD after the merge: the builder commits in that window.
+        const read = h.git.blobAt.bind(h.git);
+        let committed = false;
+        vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+          if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+            committed = true;
+            await commitOnBatch(batch, 'src/builder.ts');
+          }
+          return read(repo, rev, file);
+        });
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating(regenerated, run),
+        }).beforeGate(batch.id, signal);
+        expect(committed).toBe(true);
+        expect(update.kind).toBe('merged');
+        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(subjects(path, 2)).toEqual([
+          'Add src/builder.ts',
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        ]);
+        expect(run.ran).toBe(0);
+        expect(state(path).status).toBe('');
+        const card = h.only(h.cards());
+        expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+        expect(card.body).toContain('a commit 10db did not make');
+      });
+
+      it("answers with its merge, not the builder's commit made while the generators ran, and commits nothing on top of it", async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const generator = generating(regenerated);
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: {
+            regenerate: async (input) => {
+              await commitOnBatch(batch, 'src/builder.ts');
+              return generator.regenerate(input);
+            },
+          },
+        }).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('merged');
+        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(subjects(path, 2)).toEqual([
+          'Add src/builder.ts',
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        ]);
+        // What the run wrote is removed: the builder regenerates on top of their own commit.
+        expect(state(path).status).toBe('');
+        const card = h.only(h.cards());
+        expect(card.body).toContain('a commit 10db did not make');
+      });
+    });
+
     it('raises one card, naming the directory and why, when the generator fails; the merge stands and what the run wrote is removed', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();
@@ -809,7 +879,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       it('merges the base with its markers in the files, committed with the base as second parent, and runs no gate on the branch', async () => {
         const { batch, ws, own, teammate, path } = await overlapping();
         const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, inSession);
-        expect(update).toMatchObject({ kind: 'conflicted', paths: ['README.md'] });
+        // The markers are this gate's own merge's, which no session has seen.
+        expect(update).toMatchObject({ kind: 'conflicted', paths: ['README.md'], fresh: true });
         expect(gitIn(path, 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
         expect(readFileSync(join(path, 'README.md'), 'utf8')).toContain('<<<<<<< ');
         expect(state(path).status).toBe('');
@@ -829,10 +900,10 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         await updates.beforeGate(batch.id, signal, inSession);
         const head = gitIn(path, 'rev-parse', 'HEAD');
         h.teammatePush('main', 'src/more.txt');
-        expect(await updates.beforeGate(batch.id, signal, inSession)).toMatchObject({
-          kind: 'conflicted',
-          paths: ['README.md'],
-        });
+        const again = await updates.beforeGate(batch.id, signal, inSession);
+        expect(again).toMatchObject({ kind: 'conflicted', paths: ['README.md'] });
+        // Found, not made by this gate: a session was already sent these.
+        expect(again).not.toHaveProperty('fresh');
         // A caller that does not ask for a session finds them too and does not merge.
         expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
           kind: 'conflicted',
@@ -1222,6 +1293,65 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     writeFileSync(join(path, 'README.md'), original);
     await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
+  it("hides the uncommitted notice once the sibling's commit makes the next gate's merge conflict", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-uncommitted');
+    // The sibling commits its edit: nothing is uncommitted, and the base now conflicts with it.
+    await commitOnBatch(batch, 'README.md', '# ours\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-conflict');
+  });
+
+  it("hides the uncommitted notice once the sibling's commit leaves only untracked files in the way", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.commit('.gitignore', 'build/\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-uncommitted');
+    // The sibling's work is committed (the base's README change is taken back out of the way).
+    await commitOnBatch(batch, 'README.md', '# theirs\n');
+    mkdirSync(join(path, 'build'));
+    writeFileSync(join(path, 'build', 'out.js'), 'built\n');
+    h.teammatePush('main', 'build', 'a file now\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('base-kept');
+  });
+
+  it('names the files a later gate is blocked by, not the ones a launch named, when the notice is showing', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    h.teammatePush('main', 'src/x.ts', 'export const x = 2;\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    const launched = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(launched.key).toBe('base-uncommitted');
+    expect(launched.line).toContain('README.md');
+    // README.md is committed (as the base has it); src/x.ts is now the uncommitted change in the way.
+    await commitOnBatch(batch, 'README.md', '# theirs\n');
+    mkdirSync(join(path, 'src'), { recursive: true });
+    writeFileSync(join(path, 'src', 'x.ts'), 'export const x = 1; // mid-edit\n');
+    const gate = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(gate.kind).toBe('not_merged');
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice.key).toBe('base-uncommitted');
+    expect(notice.line).toContain('src/x.ts');
+    expect(notice.line).not.toContain('README.md');
+    expect(notice.body).not.toContain('README.md');
   });
 
   it('shows no launch notice for uncommitted changes a gate meets', async () => {

@@ -208,7 +208,11 @@ export function createAccountPauses(opts: {
           ...(card.options ? { options: card.options } : {}),
         });
         // A card still open from an earlier pause folds this one in; it shows the pause in force.
-        if (armed && item.body !== card.body) opts.inbox.reword(item.id, card.body);
+        if (armed && item.body !== card.body)
+          opts.inbox.reword(item.id, card.body, {
+            options: card.options ?? [],
+            detail: card.detail,
+          });
       }
       // Only a usage limit stops running sessions; a capped or refused account lets them finish.
       switch (pause.reason) {

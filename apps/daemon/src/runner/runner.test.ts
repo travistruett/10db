@@ -7,6 +7,8 @@ import {
   ConflictError,
   InboxAnswerRefused,
   mintId,
+  PARK_TASK_CHOICE,
+  PARKED_NOTICE_KEY,
   ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
@@ -505,6 +507,93 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]).toMatchObject({ resume: first?.providerSessionId });
     expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
     expect(second?.exitReason).toBe('step_done');
+  });
+
+  describe('Park the task, answered on a lane question', () => {
+    const askHuman = {
+      do: 'mcp' as const,
+      tool: 'ask_human',
+      args: {
+        opId: 'op-park-ask-01',
+        category: 'engineering',
+        question: 'Can you capture the live GitHub checks?',
+        options: [
+          { label: 'Defer', description: 'make no change and end this step' },
+          { label: 'Retry', description: '' },
+        ],
+      },
+    };
+    // The implement step would go on to write and commit, and a review step follows it.
+    const parkedBook = (ask: FakeScriptBook[string][number][number]): FakeScriptBook => ({
+      Alpha: [
+        [ask, write('src/api/a.txt'), commit('op-park-live-1', ['src/api/a.txt']), turn],
+        [turn],
+      ],
+    });
+
+    const expectParked = async (
+      id: WorkstreamId,
+      taskId: Parameters<typeof getTask>[1],
+      card: { id: string },
+    ) => {
+      await waitFor(() => ws(id).state === 'CANCELLED');
+      await engine.runner.idle();
+      const run = ws(id);
+      // Stopped where it was: the step never moved on to review and nothing was committed.
+      expect(run).toMatchObject({ state: 'CANCELLED', stepIndex: 0, currentSessionId: null });
+      expect(transitions(id).filter((t) => t.endsWith('->QUEUED'))).toEqual([]);
+      expect(transitions(id).filter((t) => t.endsWith('->VERIFYING'))).toEqual([]);
+      expect(engine.adapter.prompts).toHaveLength(1);
+      expect(listSessions(engine.store.db, id)).toHaveLength(1);
+      expect(engine.runner.isRunning(id)).toBe(false);
+      expect(run.notice?.key).toBe(PARKED_NOTICE_KEY);
+      expect(listInbox(engine.store.db, {}).find((c) => c.id === card.id)?.state).toBe('RESOLVED');
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+      const icebox = listBoardColumns(engine.store.db, engine.project.id).find(
+        (c) => c.name === 'Icebox',
+      );
+      expect(icebox).toBeDefined();
+      expect(getTask(engine.store.db, taskId).boardColumnId).toBe(icebox?.id);
+      expect(
+        engine.adapter.observations.some((o) => JSON.stringify(o).includes(PARK_TASK_CHOICE)),
+      ).toBe(false);
+    };
+
+    it.each([
+      { name: 'ask_human', ask: askHuman },
+      { name: 'AskUserQuestion', ask: askShip },
+    ])(
+      'cancels the run of a live session waiting on $name, with no review round and no new session',
+      async ({ ask }) => {
+        engine = await createTestEngine(parkedBook(ask));
+        const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+        engine.launch(workstream.id);
+        const card = await waitFor(openCard);
+        expect(ws(workstream.id)).toMatchObject({ state: 'WAITING_HUMAN' });
+        expect(ws(workstream.id).currentSessionId).not.toBeNull();
+        expect(card.options.map((o) => o.label)).toContain(PARK_TASK_CHOICE);
+
+        engine.inbox.answer(card.id, { choice: PARK_TASK_CHOICE });
+        await expectParked(workstream.id, task.id, card);
+      },
+    );
+
+    it('cancels a run already parked in WAITING_HUMAN with no session, and never requeues it', async () => {
+      engine = await createTestEngine(parkedBook(askHuman));
+      const { task, workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      engine.launch(workstream.id);
+      const card = await waitFor(openCard);
+      engine.clock.advance(10 * 60_000);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        currentSessionId: null,
+        nextAction: { kind: 'answer', inboxId: card.id },
+      });
+
+      engine.inbox.answer(card.id, { choice: PARK_TASK_CHOICE });
+      await expectParked(workstream.id, task.id, card);
+    });
   });
 
   it('pins the branch at the first session, so a later session never commits where HEAD moved', async () => {
@@ -4549,6 +4638,33 @@ describe('the base merge leaving conflict markers in a task that used its fix at
     expect(engine.adapter.prompts).toHaveLength(2);
     expect(ws(workstream.id).failureReason).toContain('README.md');
     expect(ws(workstream.id).failureReason).toContain('retry limit');
+    expect(ws(workstream.id).failureReason).toContain('still in README.md');
+  });
+
+  it('does not say the markers are still there when a new base merge made them after the merge session', async () => {
+    const workstream = await usedUp([conflicted, { ...conflicted, fresh: true }], [[turn], [turn]]);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    const reason = ws(workstream.id).failureReason ?? '';
+    expect(reason).toContain('README.md');
+    expect(reason).toContain('retry limit');
+    expect(reason).not.toContain('still');
+    expect(reason).toMatch(/new|again/);
+  });
+
+  it('counts only the sessions the step used when it ends the merge session with uncommitted changes', async () => {
+    const workstream = await usedUp([conflicted], [[turn], [write('src/api/a.txt'), turn]]);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    const limit = DEFAULT_RUNNER_LIMITS.maxFixAttempts;
+    const reason = ws(workstream.id).failureReason ?? '';
+    expect(reason).toContain('uncommitted changes');
+    // The attempt is now limit + 2, but only limit + 1 sessions (fix attempts and the merge) ran.
+    expect(reason).not.toContain(`${String(limit + 2)} times`);
+    expect(reason).toContain(`after ${String(limit + 1)} fix attempts and merge sessions`);
   });
 });
 

@@ -21,18 +21,27 @@ const local = projectViewDto({ maxLanes: 2, gateCommand: 'make gate', delivery: 
 const one = taskDto({ projectId: local.id, title: 'One', boardStatus: 'ready', boardOrder: 1 });
 const two = taskDto({ projectId: local.id, title: 'Two', boardStatus: 'ready', boardOrder: 2 });
 
-const proposalOf = (project: ProjectViewDto, size: number, both = false) =>
-  PickerProposalDto.parse({
+/** `copies` names the tasks whose placement is a separate copy. */
+const proposalOf = (
+  project: ProjectViewDto,
+  size: number,
+  both = false,
+  copies: readonly TaskDto[] = [],
+) => {
+  const placed = (task: TaskDto): TaskDto =>
+    copies.includes(task) ? { ...task, workspaceMode: 'worktree' } : task;
+  return PickerProposalDto.parse({
     projectId: project.id,
     size,
     candidates: [
-      candidate(one),
+      candidate(placed(one)),
       candidate(
-        two,
+        placed(two),
         both ? {} : { proposed: false, conflict: 'Area src is shared with One, picked before it' },
       ),
     ],
   });
+};
 
 interface Sent {
   readonly path: string;
@@ -42,7 +51,12 @@ interface Sent {
 /** A daemon with `project` and its two ready tasks; `overrides` come first, so they win. */
 function serve(
   project: ProjectViewDto,
-  opts: { readonly sizes?: number[]; readonly both?: boolean; readonly tasks?: TaskDto[] } = {},
+  opts: {
+    readonly sizes?: number[];
+    readonly both?: boolean;
+    readonly tasks?: TaskDto[];
+    readonly copies?: readonly TaskDto[];
+  } = {},
   ...overrides: RequestHandler[]
 ): Sent[] {
   const sent: Sent[] = [];
@@ -57,7 +71,7 @@ function serve(
     http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
       const size = Number(new URL(request.url).searchParams.get('size'));
       opts.sizes?.push(size);
-      return HttpResponse.json(proposalOf(project, size, opts.both ?? false));
+      return HttpResponse.json(proposalOf(project, size, opts.both ?? false, opts.copies));
     }),
     http.post(daemonUrl('/tasks/:taskId/start'), async ({ request, params }) => {
       sent.push({ path: new URL(request.url).pathname, body: await request.text() });
@@ -174,11 +188,106 @@ describe('BatchSheet', () => {
     expect(within(sheet).getByText('10db/greeting-and-readme-…')).toBeTruthy();
   });
 
-  it('in Separate copies mode, leaves the checkout out of it', async () => {
-    serve(projectViewDto({ ...pr(null), workspaceMode: 'worktree' }), { both: true });
+  it('with only separate copies ticked, leaves the checkout out of it', async () => {
+    serve(pr(null), { both: true, copies: [one, two] });
     const sheet = await openSheet();
-    await within(sheet).findByRole('button', { name: 'Start 2 tasks in worktrees' });
+    await within(sheet).findByRole('button', { name: 'Start 2 tasks in separate copies' });
     expect(within(sheet).queryByText(/switches your checkout/)).toBeNull();
+    expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
+    expect(
+      within(sheet).getByText(/Each task gets its own copy, branch and pull request/),
+    ).toBeTruthy();
+  });
+
+  it('with a mix ticked, names both parts and still asks for the shared batch title', async () => {
+    serve(pr(null), { both: true, copies: [two] });
+    const sheet = await openSheet();
+    await within(sheet).findByRole('button', {
+      name: 'Start a batch of 1 task and start 1 task in a separate copy',
+    });
+    // The title defaults to the first task that goes in Your folder.
+    expect(within(sheet).getByLabelText('Batch title')).toHaveProperty('value', 'One');
+    expect(within(sheet).getByText(/Starting switches your checkout/)).toBeTruthy();
+    expect(within(sheet).getByText(/Two gets its own copy/)).toBeTruthy();
+  });
+
+  it('with a mix ticked, a busy shared batch holds only the Your folder tasks back', async () => {
+    serve(pr('SHIPPING'), { both: true, copies: [two] });
+    const sheet = await openSheet();
+    await within(sheet).findByRole('button', {
+      name: 'Add 1 task to Fix the login and start 1 task in a separate copy',
+    });
+    expect(
+      within(sheet).getByText(
+        'Fix the login is shipping; start once it has shipped, or untick the Your folder tasks to start the separate copies now',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole('checkbox', { name: 'One' }));
+    expect(
+      await within(sheet).findByRole('button', { name: 'Start 1 task in a separate copy' }),
+    ).toHaveProperty('disabled', false);
+  });
+
+  it.each([
+    { name: 'a pull-request project', project: pr(null), shown: true },
+    { name: 'a local project', project: local, shown: false },
+  ])('shows the placement control only in $name', async ({ project, shown }) => {
+    serve(project, { both: true });
+    const sheet = await openSheet();
+    await within(sheet).findByRole('checkbox', { name: 'One' });
+    expect(within(sheet).queryByRole('radiogroup', { name: 'Where One runs' }) !== null).toBe(
+      shown,
+    );
+  });
+
+  it("changes a task's placement from the sheet and starts it where it was moved", async () => {
+    const patched: unknown[] = [];
+    let copy = false;
+    const sent = serve(
+      pr(null),
+      { both: true },
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request, params }) => {
+        patched.push({ taskId: params['taskId'], body: await request.json() });
+        copy = true;
+        return HttpResponse.json({ ...one, workspaceMode: 'worktree' });
+      }),
+      http.get(daemonUrl('/projects/:projectId/candidates'), () =>
+        HttpResponse.json(proposalOf(pr(null), 2, true, copy ? [one] : [])),
+      ),
+    );
+    const sheet = await openSheet();
+    const group = await within(sheet).findByRole('radiogroup', { name: 'Where One runs' });
+    fireEvent.click(within(group).getByRole('radio', { name: 'Separate copy' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ taskId: one.id, body: { workspaceMode: 'worktree' } }]);
+    });
+    fireEvent.click(
+      await within(sheet).findByRole('button', {
+        name: 'Start a batch of 1 task and start 1 task in a separate copy',
+      }),
+    );
+    await waitFor(() => {
+      expect(sent).toHaveLength(1);
+    });
+  });
+
+  it("shows the daemon's refusal when a placement can't change", async () => {
+    serve(
+      pr(null),
+      { both: true },
+      http.patch(daemonUrl('/tasks/:taskId'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'One has started, so it keeps where it runs' },
+          { status: 409 },
+        ),
+      ),
+    );
+    const sheet = await openSheet();
+    const group = await within(sheet).findByRole('radiogroup', { name: 'Where One runs' });
+    fireEvent.click(within(group).getByRole('radio', { name: 'Separate copy' }));
+    expect(
+      await within(sheet).findByText('One has started, so it keeps where it runs'),
+    ).toBeTruthy();
   });
 
   it('says nothing is run for verification when the project has no gate command', async () => {
@@ -207,25 +316,36 @@ describe('BatchSheet', () => {
     );
   });
 
-  it('starts tasks in worktrees with one request', async () => {
-    const sent = serve(
-      projectViewDto({
-        ...pr(null),
-        workspaceMode: 'worktree',
-        currentBatch: batchDto({ projectId: local.id, title: 'Fix the login', state: 'SHIPPING' }),
-      }),
-      { both: true },
-    );
+  it('starts separate copies with one request, even while the shared batch ships', async () => {
+    const sent = serve(pr('SHIPPING'), { both: true, copies: [one, two] });
     const sheet = await openSheet();
     expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
     fireEvent.click(
-      await within(sheet).findByRole('button', { name: 'Start 2 tasks in worktrees' }),
+      await within(sheet).findByRole('button', { name: 'Start 2 tasks in separate copies' }),
     );
     await waitFor(() => {
       expect(sent).toEqual([
         {
           path: `/projects/${local.id}/batches`,
           body: { title: 'One', taskIds: [one.id, two.id] },
+        },
+      ]);
+    });
+  });
+
+  it("sends a mix with the shared batch's title, named after the first Your folder task", async () => {
+    const sent = serve(pr(null), { both: true, copies: [one] });
+    const sheet = await openSheet();
+    fireEvent.click(
+      await within(sheet).findByRole('button', {
+        name: 'Start a batch of 1 task and start 1 task in a separate copy',
+      }),
+    );
+    await waitFor(() => {
+      expect(sent).toEqual([
+        {
+          path: `/projects/${local.id}/batches`,
+          body: { title: 'Two', taskIds: [one.id, two.id] },
         },
       ]);
     });

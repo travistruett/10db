@@ -9,6 +9,7 @@ import {
   TaskStatus,
   WorkstreamState,
   Delivery,
+  queueOrder,
   type DigestCost,
   type DigestDecision,
   type DigestDeviation,
@@ -96,10 +97,20 @@ function gatherFacts(db: DbReader, tasks: TaskRow[]): Facts {
   return { tasks, workstreams: rows.map((r) => r.workstream), latest, taskOfWorkstream };
 }
 
-/** A run still going: any state that is not terminal, except one the builder set aside. */
+/** A run that has started and is not over: not terminal, not waiting in the queue, not set aside. */
 function isRunning(run: Run | undefined): boolean {
   const state = run?.workstream.state;
-  return state !== undefined && state !== WorkstreamState.Held && ACTIVE_STATES.includes(state);
+  return (
+    state !== undefined &&
+    state !== WorkstreamState.Held &&
+    state !== WorkstreamState.Queued &&
+    ACTIVE_STATES.includes(state)
+  );
+}
+
+/** A run that has started and waits in the queue for a lane. */
+function isQueued(run: Run | undefined): boolean {
+  return run?.workstream.state === WorkstreamState.Queued;
 }
 
 /** A run that failed and did not ship anyway (a failed run whose work shipped is judged by its pull request). */
@@ -257,7 +268,11 @@ function teamOf(tasks: readonly TaskRow[], facts: Facts): DigestTeamMember[] {
   return team;
 }
 
-/** The first task that can start now, else the first that cannot yet and what it waits on. */
+/**
+ * The first task that can start now, else the first that cannot yet and what it waits on. With no
+ * unstarted task left, the queued task first in line for a lane (a queued task has started, so it
+ * waits on nothing).
+ */
 function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNext | null {
   const unstarted = tasks.filter((t) => {
     if (t.status !== TaskStatus.Open) return false;
@@ -267,7 +282,19 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
   const ready = unstarted.find((t) => dependenciesDone(db, t.id));
   if (ready) return { taskId: ready.id, title: ready.title, waitsOn: [] };
   const blocked = unstarted[0];
-  if (!blocked) return null;
+  if (!blocked) {
+    const queued: { task: TaskRow; ws: WorkstreamRow }[] = [];
+    for (const task of tasks) {
+      const run = facts.latest.get(task.id);
+      if (task.status === TaskStatus.Open && run && isQueued(run)) {
+        queued.push({ task, ws: run.workstream });
+      }
+    }
+    const firstInLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws))[0];
+    return firstInLine
+      ? { taskId: firstInLine.task.id, title: firstInLine.task.title, waitsOn: [] }
+      : null;
+  }
   const waitsOn = db
     .select({
       taskId: schema.tasks.id,
@@ -295,7 +322,7 @@ function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
 
 /**
  * A goal's status, progress and rows. Status, first match wins: failed, waiting on you, running,
- * shipping (every task done, a pull request unmerged), not started, done. `since` is the builder's
+ * queued (nothing runs, an open task waits for a lane), shipping (every task done, a pull request unmerged), not started, done. `since` is the builder's
  * previous view of the goal; Δ rows hold what is newer, and null counts everything.
  */
 export function goalDigest(db: DbReader, goalId: GoalId, since: string | null): GoalDigestDto {
@@ -320,6 +347,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   if (open.some((t) => isFailed(facts.latest.get(t.id)))) status = GoalStatus.Failed;
   else if (waitingOn.length > 0) status = GoalStatus.WaitingOnYou;
   else if (open.some((t) => isRunning(facts.latest.get(t.id)))) status = GoalStatus.Running;
+  else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
     const shipped =
       project.delivery !== Delivery.PullRequest ||

@@ -3,6 +3,7 @@ import {
   TaskMove,
   type BatchDto,
   type BoardColumnDto,
+  type ProjectId,
   type TaskDto,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -285,6 +286,152 @@ describe('BoardView', () => {
     });
   });
 
+  /** A batch with two queued tasks in it, as the daemon would answer for the board. */
+  function twoTaskBatch(projectId: ProjectId, title: string, overrides: Partial<BatchDto> = {}) {
+    const batch = batchDto({ projectId, title, branch: `10db/${title}-0a1b2c3d`, ...overrides });
+    const workstreams = ['A', 'B'].map((letter) =>
+      workstreamDto({
+        projectId,
+        batchId: batch.id,
+        taskTitle: `${title} ${letter}`,
+        state: 'QUEUED',
+      }),
+    );
+    const tasks = workstreams.map((ws) =>
+      taskDto({
+        id: ws.taskId,
+        projectId,
+        title: ws.taskTitle,
+        boardStatus: 'in_progress',
+        workstreamId: ws.id,
+      }),
+    );
+    return { batch, workstreams, tasks };
+  }
+
+  it.each([
+    { name: 'a project whose default is Your folder', workspaceMode: 'shared' as const },
+    { name: 'a project whose default is a separate copy', workspaceMode: 'worktree' as const },
+  ])('shows the shared batch and a separate copy together: $name', async ({ workspaceMode }) => {
+    const projectId = mintId('Project');
+    const shared = twoTaskBatch(projectId, 'folder');
+    const copy = twoTaskBatch(projectId, 'copy', { worktreePath: '/wt/copy' });
+    const project = projectViewDto({
+      id: projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      workspaceMode,
+      currentBatch: shared.batch,
+      openBatches: [copy.batch, shared.batch],
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([...shared.tasks, ...copy.tasks]),
+      ),
+      http.get(daemonUrl('/projects/:projectId/batches'), () =>
+        HttpResponse.json([shared.batch, copy.batch]),
+      ),
+      http.get(daemonUrl('/workstreams'), () =>
+        HttpResponse.json([...shared.workstreams, ...copy.workstreams]),
+      ),
+    );
+    renderApp('/board');
+
+    const above = await screen.findByTestId('board-above-columns');
+    expect(within(above).getByText('10db/folder-0a1b2c3d')).toBeTruthy();
+    expect(within(above).getByText('10db/copy-0a1b2c3d')).toBeTruthy();
+    expect(within(above).getAllByText('2 tasks')).toHaveLength(2);
+  });
+
+  it("shows a separate copy's batch when no shared batch is open", async () => {
+    const projectId = mintId('Project');
+    const copy = twoTaskBatch(projectId, 'copy', { worktreePath: '/wt/copy' });
+    const project = projectViewDto({
+      id: projectId,
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      workspaceMode: 'shared',
+      currentBatch: null,
+      openBatches: [copy.batch],
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(copy.tasks)),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([copy.batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json(copy.workstreams)),
+    );
+    renderApp('/board');
+
+    const above = await screen.findByTestId('board-above-columns');
+    expect(within(above).getByText('10db/copy-0a1b2c3d')).toBeTruthy();
+    expect(within(above).getByText('2 tasks')).toBeTruthy();
+  });
+
+  it('says where a task will run on its card until it starts, and in its drawer', async () => {
+    const project = projectViewDto({
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+    });
+    const ready = taskDto({
+      projectId: project.id,
+      title: 'Add a migration',
+      workspaceMode: 'worktree',
+      placementReason: 'touches migrations',
+      boardStatus: 'ready',
+    });
+    const ws = workstreamDto({
+      projectId: project.id,
+      taskTitle: 'Running one',
+      state: 'RUNNING',
+    });
+    const running = taskDto({
+      id: ws.taskId,
+      projectId: project.id,
+      title: 'Running one',
+      boardStatus: 'in_progress',
+      workstreamId: ws.id,
+      boardOrder: 2,
+    });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([ready, running])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([ws])),
+    );
+    renderApp('/board');
+
+    const cards = await screen.findAllByTestId('task-card');
+    expect(cards).toHaveLength(2);
+    const readyCard = cards.find((c) => within(c).queryByText('Add a migration') !== null);
+    const runningCard = cards.find((c) => within(c).queryByText('Running one') !== null);
+    expect(within(readyCard ?? document.body).getByTestId('placement-badge').textContent).toBe(
+      'Separate copy',
+    );
+    expect(within(runningCard ?? document.body).queryByTestId('placement-badge')).toBeNull();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add a migration' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Separate copy');
+    expect(
+      within(drawer).getByRole('radiogroup', { name: 'Where Add a migration runs' }),
+    ).toBeTruthy();
+  });
+
+  it('shows no placement control in the drawer of a local project', async () => {
+    const project = projectViewDto({ delivery: 'local' });
+    const ready = taskDto({ projectId: project.id, title: 'Plain task', boardStatus: 'ready' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([ready])),
+    );
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Plain task' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).queryByRole('radiogroup')).toBeNull();
+    expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Your folder');
+  });
+
   it('shows no strip for open batches of one task each in worktree mode, and no batch history', async () => {
     const first = batchDto({ title: 'First', worktreePath: '/wt/first' });
     const batches = [first, 'Second', 'Third'].map((b) =>
@@ -401,7 +548,7 @@ describe('BoardView', () => {
       ]);
       // A screen reader hears it with the rest of the card.
       expect(
-        screen.getByText(/criterion\. Merges into feature\/x when checks pass\./),
+        screen.getByText(/Runs in Your folder\. Merges into feature\/x when checks pass\./),
       ).toBeTruthy();
     });
 
@@ -1514,9 +1661,12 @@ describe('BoardView', () => {
         .map((id) => document.getElementById(id)?.textContent ?? '')
         .join(' | ');
     await screen.findByRole('button', { name: 'Wired' });
-    expect(describedBy('Wired')).toBe('Areas: api, ui. 2 criteria. Waits on Base.');
+    expect(describedBy('Wired')).toBe(
+      'Areas: api, ui. 2 criteria. Runs in Your folder. Waits on Base.',
+    );
     expect(describedBy('Running')).toBe(
-      'Areas: src. 1 criterion. | In progress cards follow their workstream; they can’t be dragged',
+      // This fixture's task has no run yet, so its placement is still open.
+      'Areas: src. 1 criterion. Runs in Your folder. | In progress cards follow their workstream; they can’t be dragged',
     );
   });
 
@@ -1958,7 +2108,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Abandon (Busy is running: cancel it in Factory first)',
+      name: 'Abandon (Busy is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2089,7 +2239,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Busy is running: cancel it in Factory first)',
+      name: 'Hold (Busy is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2103,7 +2253,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Again' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Again has already run: cancel it in Factory first)',
+      name: 'Hold (Again has already run: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2132,6 +2282,95 @@ describe('BoardView holding a started task', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove', hidden: true }));
     await waitFor(() => {
       expect(calls).toEqual([`remove ${task.id}`]);
+    });
+  });
+
+  /** Serves the cancel route, recording the workstreams it is asked to cancel. */
+  function serveCancel(ws: { readonly id: string }, refusal?: string) {
+    const cancelled: string[] = [];
+    server.use(
+      http.post(daemonUrl('/workstreams/:id/cancel'), ({ params }) => {
+        cancelled.push(String(params['id']));
+        return refusal
+          ? HttpResponse.json({ error: 'conflict', message: refusal }, { status: 409 })
+          : HttpResponse.json({ ...ws, state: 'CANCELLED' });
+      }),
+    );
+    return cancelled;
+  }
+
+  it('cancels a running task from its card menu, only after a confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    expect(within(dialog).getByText(/Task: Busy/)).toBeTruthy();
+    expect(cancelled).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    await waitFor(() => {
+      expect(cancelled).toEqual([ws.id]);
+    });
+  });
+
+  it('keeps a task running when the confirm is declined', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep running' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Cancel this workstream?' })).toBeNull();
+    });
+    expect(cancelled).toEqual([]);
+  });
+
+  it('shows the daemon’s refusal inside the confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    serveCancel(ws, 'already finished');
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    expect(await within(dialog).findByText('already finished')).toBeTruthy();
+  });
+
+  it('offers Cancel on a queued task beside Hold, and none on a held one', async () => {
+    serveRun('QUEUED');
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    expect(await screen.findByRole('menuitem', { name: 'Cancel Run', hidden: true })).toBeTruthy();
+    expect(screen.getByRole('menuitem', { name: 'Hold', hidden: true })).toBeTruthy();
+  });
+
+  it('offers no Cancel on a held task', async () => {
+    serveRun('HELD');
+    renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'Actions for Alpha' }));
+    await screen.findByRole('menuitem', { name: 'Remove', hidden: true });
+    expect(screen.queryByRole('menuitem', { name: 'Cancel Run', hidden: true })).toBeNull();
+  });
+
+  it('cancels a running task from its drawer, only after a confirm', async () => {
+    const { ws } = serveRun('RUNNING', 'Busy');
+    const cancelled = serveCancel(ws);
+    renderApp('/board');
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Busy' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Cancel Run' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
+    expect(cancelled).toEqual([]);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
+    await waitFor(() => {
+      expect(cancelled).toEqual([ws.id]);
     });
   });
 
@@ -2173,7 +2412,7 @@ describe('BoardView holding a started task', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
     const hold = within(drawer).getByRole('button', { name: 'Hold' });
     expect(hold.hasAttribute('disabled')).toBe(true);
-    expect(within(drawer).getByText('Busy is running: cancel it in Factory first.')).toBeTruthy();
+    expect(within(drawer).getByText('Busy is running: cancel it first.')).toBeTruthy();
   });
 
   it('starts and removes a held task from the drawer', async () => {

@@ -230,7 +230,7 @@ function ghCard(prefix: string, error: unknown, then: string): Card | null {
 export const startCards = {
   lanesRunning: (project: ProjectDto, lanes: number): Card => ({
     title: `${NOT_STARTED}: work is still running in ${project.name}`,
-    body: `10db switches branches only when no lane runs in the project, and ${String(lanes)} lane(s) run now. Let them finish, or cancel them in the Factory view, then start again.`,
+    body: `10db switches branches only when no lane runs in Your folder (${project.repoPath}); lanes in separate copies don't block it. ${String(lanes)} lane(s) run in Your folder now. Let them finish, or cancel them in the Factory view, then start again.`,
   }),
   dirtyCheckout: (project: ProjectDto, paths: readonly string[]): Card => ({
     title: `${NOT_STARTED}: the checkout has uncommitted changes`,
@@ -426,6 +426,13 @@ export const worktreeCards = {
     refresh: true,
     ...worktreeOffer(offer),
   }),
+  /** A Remove worktree answer on an orphan's card found the path no longer an orphan, so 10db left it. */
+  orphanNotRemoved: (path: string, why: string): Card => ({
+    title: `10db removed nothing at ${path}`,
+    body: `You answered Remove worktree, but 10db checked again and ${why}, so it is no longer a worktree no batch uses. Nothing was removed.`,
+    foldKey: keptWorktreeKey.removeFailed(path),
+    refresh: true,
+  }),
   inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
     body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then answer Retry (Abandon batch gives the batch up).`,
@@ -593,7 +600,8 @@ export function wrongBranchCard(
       return {
         title: `Batch "${batch.title}" not shipped: ${where}`,
         body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
-        detail,
+        // Retry ship and Abandon, as every other ship failure offers.
+        detail: answers(batch),
       };
     case 'not_joined':
       return {
@@ -910,7 +918,7 @@ export const checkoutCards = {
       batch,
       place,
       `work is running in ${project.name}`,
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no work runs in the project, and ${String(lanes)} workstream(s) run now. Once they finish, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no lane runs in Your folder (${project.repoPath}); lanes in separate copies don't block it. ${String(lanes)} lane(s) run in Your folder now. Once they finish, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
   failed: (batch: BatchDto, project: Checkout, place: CheckoutPlace, error: unknown): Card =>
     leftCard(
@@ -937,6 +945,12 @@ export const prCardKey = {
 function prDetail(batch: BatchDto, link: string): Record<string, Json> {
   return { batchId: batch.id, prUrl: batch.prUrl, link };
 }
+
+/** The `detail` key marking the gh card, whose Check again reads the followed pull requests now. */
+export const GH_CHECK_DETAIL = 'ghCheck';
+
+/** The answer of the gh card: the watch reads every followed pull request again at once. */
+export const GH_CHECK_CHOICE = 'Check again';
 
 /** The `detail` key of a stop card that offers Retry; it holds the root batch's id. */
 export const CI_RERUN_DETAIL = 'ciRerun';
@@ -1096,13 +1110,19 @@ export const prCards = {
    */
   ghUnavailable: (batch: BatchDto, error: unknown): Card => ({
     ...prCards.ghUnavailableText(error),
-    detail: { batchId: batch.id, prUrl: batch.prUrl },
+    detail: { batchId: batch.id, prUrl: batch.prUrl, [GH_CHECK_DETAIL]: true },
+    options: [
+      {
+        label: GH_CHECK_CHOICE,
+        description: 'Read every followed pull request now, once gh works',
+      },
+    ],
   }),
   /** The gh card without its detail: what an open one is rewritten with when gh fails another way. */
   ghUnavailableText: (error: unknown): Card => {
     const kind = error instanceof GhError ? error.kind : null;
     const until =
-      'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking.';
+      'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking; once gh works, answer Check again to read them now.';
     const foldKey = prCardKey.ghUnavailable;
     if (kind === 'signed_out')
       return {

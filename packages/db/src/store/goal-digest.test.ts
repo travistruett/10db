@@ -26,8 +26,14 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { eq } from 'drizzle-orm';
-import { goalDigest, listGoalSummaries, openGoalDigest, ungroupedDigest } from './goal-digest';
-import { insertGoal, lastGoalView } from './goals';
+import {
+  goalDigest,
+  listGoalSummaries,
+  newItemCount,
+  openGoalDigest,
+  ungroupedDigest,
+} from './goal-digest';
+import { insertGoal, lastGoalView, VISIT_MAX_MS } from './goals';
 import { insertInboxItem } from './inbox';
 import { insertDecision, insertDeviation, insertSource } from './knowledge';
 import { insertSession, updateSessionUsage } from './sessions';
@@ -36,7 +42,7 @@ import { insertTask, setTaskStatus } from './tasks';
 import { BUILDER_HANDLE, insertPerson } from './team';
 import { createTestStore, seedProject } from './test-support';
 import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
-import { insertWorkstream } from './workstreams';
+import { insertWorkstream, runNext } from './workstreams';
 
 let store: Store;
 let close: () => void;
@@ -194,6 +200,32 @@ describe('a goal’s status', () => {
   it('is running while a task’s workstream is active', () => {
     const { goal, a } = adopt();
     run(a, WorkstreamState.Running);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
+  });
+
+  it('is queued, not running or not started, while a started task waits in the queue', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Queued);
+    expect(digest.workingNow).toEqual([]);
+  });
+
+  it('is queued when some tasks are done and the rest wait in the queue', () => {
+    const { goal, a, b, c } = adopt();
+    run(a, WorkstreamState.Done);
+    store.write((ctx) => {
+      setTaskStatus(ctx, a, TaskStatus.Done);
+    });
+    run(b, WorkstreamState.Queued);
+    run(c, WorkstreamState.Queued);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Queued);
+  });
+
+  it('is running, not queued, while one task runs and another waits in the queue', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Running);
+    run(b, WorkstreamState.Queued);
     expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
   });
 
@@ -441,6 +473,31 @@ describe('the rows', () => {
     expect(goalDigest(store.db, goal.id, null).next).toBeNull();
   });
 
+  it('offers the queued task first in line next when every open task is queued', () => {
+    const { goal, a, b, c } = adopt();
+    // Started in the order b, a, c, so b leads the queue even though a comes first on the Board.
+    setClock(9);
+    run(b, WorkstreamState.Queued);
+    setClock(10);
+    run(a, WorkstreamState.Queued);
+    setClock(11);
+    run(c, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Queued);
+    expect(digest.next).toEqual({ taskId: b, title: 'Drawer', waitsOn: [] });
+  });
+
+  it('puts a task the builder ran next ahead of the others in an all-queued goal’s next', () => {
+    const { goal, a, b, c } = adopt();
+    for (const [i, id] of [a, b, c].entries()) {
+      setClock(9 + i);
+      run(id, WorkstreamState.Queued);
+    }
+    setClock(13);
+    store.write((ctx) => runNext(ctx, c));
+    expect(goalDigest(store.db, goal.id, null).next?.taskId).toBe(c);
+  });
+
   it('sums tokens over the goal’s sessions, and dollars only where a session has them', () => {
     const { goal, a, b } = adopt();
     const wsA = run(a, WorkstreamState.Running);
@@ -556,6 +613,86 @@ describe('the window', () => {
     expect(second.deviations.earlier).toHaveLength(1);
     expect(lastGoalView(store.db, goal.id, builder.id)).toBe(at(12));
   });
+
+  it('a refresh in the same visit answers the same Δ rows', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(9);
+    deviation(ws, 'Split A in two');
+    setClock(10);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    setClock(11);
+    deviation(ws, 'Split B in two');
+
+    setClock(12);
+    const first = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(12)).getTime() + 5_000);
+    const refresh = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(12)).getTime() + 4 * 60_000);
+    const remount = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+
+    expect(first.deviations.recent).toHaveLength(1);
+    expect(refresh.since).toBe(first.since);
+    expect(refresh.deviations).toEqual(first.deviations);
+    expect(remount.since).toBe(first.since);
+    expect(remount.deviations).toEqual(first.deviations);
+    expect(newItemCount(refresh)).toBe(newItemCount(first));
+    // Opening still closes the list's window.
+    expect(listGoalSummaries(store.db, project.id).goals[0]?.newItems).toBe(0);
+  });
+
+  it('a first visit refreshed keeps every item recent', () => {
+    const { goal, a } = adopt();
+    deviation(run(a, WorkstreamState.Running), 'Split A in two');
+    setClock(9);
+    const first = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(9)).getTime() + 5_000);
+    const refresh = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(first.since).toBeNull();
+    expect(refresh.since).toBeNull();
+    expect(refresh.deviations.recent).toHaveLength(1);
+  });
+
+  it('a visit ends after a quiet spell, and the next opening starts a new window', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(10);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    setClock(11);
+    deviation(ws, 'Split B in two');
+    setClock(12);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    clock = new Date(new Date(at(12)).getTime() + 31 * 60_000);
+    const later = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(later.since).toBe(at(12));
+    expect(later.deviations.recent).toEqual([]);
+  });
+
+  it('a visit that keeps being reopened still ends once it has run past its bounded length', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(8);
+    deviation(ws, 'Split A in two');
+    const start = new Date(at(9)).getTime();
+    const openAt = (minutes: number) => {
+      clock = new Date(start + minutes * 60_000);
+      return store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    };
+    const first = openAt(0);
+    expect(first.since).toBeNull();
+    // Opened every 20 minutes (under the gap): the visit goes on while it is short.
+    for (let minutes = 20; minutes <= VISIT_MAX_MS / 60_000; minutes += 20) {
+      expect(openAt(minutes).since).toBeNull();
+    }
+    // The next opening, still under the gap from the last, is past the bound: a new window
+    // that starts at the previous opening, so what was read in the visit is no longer recent.
+    const lastOpening = new Date(start + (VISIT_MAX_MS / 60_000) * 60_000).toISOString();
+    const next = openAt(VISIT_MAX_MS / 60_000 + 20);
+    expect(next.since).toBe(lastOpening);
+    expect(next.deviations.recent).toEqual([]);
+    // And that window is itself a visit that refreshes keep.
+    expect(openAt(VISIT_MAX_MS / 60_000 + 25).since).toBe(lastOpening);
+  });
 });
 
 describe('the goal list', () => {
@@ -646,6 +783,14 @@ describe('the Ungrouped group', () => {
       running: 1,
       failed: 1,
     });
+  });
+
+  it('leaves out a task that only waits in the queue', () => {
+    run(insertGoalFreeTask('Queued'), WorkstreamState.Queued);
+    expect(ungroupedDigest(store.db, project.id)).toBeNull();
+    const running = insertGoalFreeTask('Running');
+    run(running, WorkstreamState.Running);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({ running: 1, failed: 0 });
   });
 
   it('comes with a goal’s digest', () => {

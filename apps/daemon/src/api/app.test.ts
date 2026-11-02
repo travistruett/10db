@@ -15,7 +15,7 @@ import {
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createApp } from './app';
+import { createApp, MAX_BODY_BYTES } from './app';
 import type { ApiServices } from './services';
 
 const TOKEN = 'ui-token-for-tests';
@@ -1289,5 +1289,94 @@ describe('judge routes', () => {
     });
     expect((await app(services).request(`/judge/calls?limit=${limit}`, auth)).status).toBe(200);
     expect(seen).toEqual([asked]);
+  });
+
+  describe('body size limit', () => {
+    const adoptPath = `/projects/${mintId('Project')}/goals/adopt`;
+    const oversize = 'x'.repeat(MAX_BODY_BYTES + 1);
+
+    it('answers 413 for a body over the limit without parsing it or reaching the service', async () => {
+      // Not JSON: a parse would answer 400, so a 413 shows the body was never parsed.
+      const services = stubServices({ adoptGoal: track('adoptGoal') });
+      const res = await app(services).request(adoptPath, {
+        method: 'POST',
+        ...json,
+        body: oversize,
+      });
+      expect(res.status).toBe(413);
+      expect(await res.json()).toMatchObject({ error: 'invalid' });
+      expect(reached).toEqual([]);
+    });
+
+    it('answers 413 for a streamed body over the limit that declares no length', async () => {
+      const services = stubServices({ adoptGoal: track('adoptGoal') });
+      const chunk = new TextEncoder().encode('x'.repeat(1024 * 1024));
+      let sent = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent > MAX_BODY_BYTES) controller.close();
+          else controller.enqueue(chunk);
+          sent += chunk.length;
+        },
+      });
+      const res = await app(services).request(adoptPath, {
+        method: 'POST',
+        ...json,
+        body,
+        duplex: 'half',
+      });
+      expect(res.status).toBe(413);
+      expect(reached).toEqual([]);
+    });
+
+    it('answers 413 for a declared Content-Length over the limit without reading the body', async () => {
+      const services = stubServices({ adoptGoal: track('adoptGoal') });
+      let pulls = 0;
+      // highWaterMark 0: the stream pulls only when something reads it.
+      const body = new ReadableStream<Uint8Array>(
+        {
+          pull(controller) {
+            pulls += 1;
+            controller.enqueue(new TextEncoder().encode('x'));
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      const res = await app(services).request(adoptPath, {
+        method: 'POST',
+        headers: { ...json.headers, 'content-length': String(MAX_BODY_BYTES + 1) },
+        body,
+        duplex: 'half',
+      });
+      expect(res.status).toBe(413);
+      expect(pulls).toBe(0);
+      expect(reached).toEqual([]);
+    });
+
+    it('answers 401 before 413 for a request without the token', async () => {
+      const res = await app().request(adoptPath, { method: 'POST', body: oversize });
+      expect(res.status).toBe(401);
+    });
+
+    it.each([
+      ['plain text', 'a'.repeat(1024 * 1024)],
+      ['text that escapes to two bytes a character', '\n'.repeat(1024 * 1024)],
+      ['text that escapes to six bytes a character', '\u0001'.repeat(1024 * 1024)],
+    ])('still accepts a 1 MiB brief of %s sent as JSON text', async (_name, text) => {
+      const seen: number[] = [];
+      const services = stubServices({
+        adoptGoal: (_projectId, input) => {
+          seen.push(input.text?.length ?? 0);
+          return Promise.resolve({ kind: 'refused', errors: [{ path: 'brief', message: 'no' }] });
+        },
+      });
+      const res = await app(services).request(adoptPath, {
+        method: 'POST',
+        ...json,
+        body: JSON.stringify({ text }),
+      });
+      expect(res.status).toBe(400);
+      expect(seen).toEqual([text.length]);
+    });
   });
 });

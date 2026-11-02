@@ -67,7 +67,7 @@ The bridge reads no other 10db variable.
 | `create_task`   | Makes a task from a title, description, criteria, areas, dependencies, risk tags, flow and landing, and returns its id.          |
 | `edit_task`     | Changes a task's title, description, criteria, risk tags, flow, areas or landing (areas and landing only before it has started). |
 | `remove_task`   | Removes a task that has not started.                                                                                             |
-| `start_task`    | Starts a **Ready** task, or resumes a held one; any other is refused (see below).                                                |
+| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).         |
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                 |
 | `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                 |
 | `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                        |
@@ -90,6 +90,13 @@ first; a task parked or held back is not queued.
 way the Board's Start does: its run keeps its batch and worktree and goes back in the queue, and the tool answers
 `{ taskId, workstreamId }` for that run. It still refuses a task that waits on unfinished dependencies (a Backlog task,
 or a held one whose dependencies aren't done) and a task with a run in progress or one that is parked.
+
+`start_task` takes an optional `fresh: true`, the `fresh` of `POST /tasks/:taskId/start`. A task whose latest run
+failed is not Ready, so `start_task` refuses it unless `fresh` is set. With it, the task starts over from the base
+branch in a new batch (the drawer's Start over): the failed attempt's batch is abandoned when it holds only that task's
+work, and its branch is kept. The daemon runs its start checks (dependencies, landing, parked) before it abandons
+anything, and a refusal leaves the old batch as it was. On a task that never ran, `fresh` changes nothing. The tool
+cannot continue a failed run in its batch; that stays the failure card's Retry.
 
 Not available here, on purpose: answering a card, shipping or abandoning a batch, changing a project. They stay
 in the app.

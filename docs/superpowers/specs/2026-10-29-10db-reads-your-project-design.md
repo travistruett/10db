@@ -49,7 +49,8 @@ Said here because the page itself must say it in one line.
 
 - **An area** is a part of the project. Two tasks in your folder run at the same time only when their areas
   don't overlap, and a task may write only inside its areas, asking for more mid-run with `request_claim`
-  (`apps/daemon/src/guard/judge.ts:105-119`). A path in no area is denied for every task. In a separate copy
+  (`apps/daemon/src/guard/judge.ts:105-119`). A path in no area is denied for every task; in a project with a catch-all area (§5), only `.git` paths
+  are in no area. In a separate copy
   (worktree mode) areas don't hold tasks up (worktree design W9). **Built.**
 - **A hazard** is something only one task may change at a time across the project, such as a lockfile, the
   migrations or the agents' instructions. Hazards are project-wide in both modes. **Built.** Whether file-only
@@ -184,10 +185,15 @@ Accept All saves everything. Any row can be edited in place first.
 **Built:** a path in no area is denied for writes (`judge.ts:115-118`), and setup's `repo` area over `**` hides
 that.
 
-**Designed (call D4):** with proposed parts, the files in no part form **the rest**: computed by the classifier
-as "matches no stored area", never stored as a glob. It is claimable like an area under the reserved name `rest`.
-A path in the rest belongs to no other area, so holding `rest` never lets a task write inside another part, and
-the watcher's stray detection keeps working. `rest` can't be renamed, removed or given paths in Settings.
+**Built (D4, as a flagged area):** the rest is an ordinary area marked `catchAll: true` (`AreaDef`), not the
+computed, reserved `rest` this section first designed. `classifyPath` puts a path in the catch-all only when no
+other area matches it, whatever the catch-all's own globs say; a path with a `.git` part is in no area, the
+catch-all's included. So in a project with a catch-all, only `.git` paths are in no area. The proposal marks the
+area that holds the rest of the repository (its top and small folders); the builder can pick another, rename
+it or remove it in Settings, and a project has at most one. A lane holding the catch-all never writes inside
+another area, and the watcher's stray detection keeps working. This replaces the reserved `rest` design: there
+is no `rest` name, and nothing is computed as "matches no stored area". A project with none classifies as before.
+The decision is in `docs/architecture/decisions/2026-10-29-propose-areas-from-the-repository.md`.
 
 ## 6. Every task's parts
 
@@ -278,7 +284,8 @@ Network hosts takes the same shape (host, source, Remove as a default button); i
 - **D2** The model's output is untrusted and may only label and explain the scan's candidates, checked in code.
   **(call)**
 - **D3** Thresholds are starting values in one module, tuned after 100 tasks. **(call)**
-- **D4** The rest is computed, claimable as `rest`, never stored as a glob. **(call)**
+- **D4** The rest is a flagged catch-all area, not a computed `rest`. **Built**, replacing the reserved `rest`
+  design (§5).
 - **D5** Structure scan after every 10 finished tasks; model run only on Look Again or drift. **(call)**
 - **D6** A task with no parts waits in "choosing parts" rather than launching with every part. **(call)**
 - **D7** Suggestions apply when their parts are free. **(call)**
@@ -288,9 +295,10 @@ Network hosts takes the same shape (host, source, Remove as a default button); i
 Each is a 10db task; dependencies in brackets. Tasks with a model path test it with the fake adapter (the boundary
 in `apps/daemon/AGENTS.md`) and add a `TENDB_LIVE_CLAUDE=1` live test that never runs in `make gate`.
 
-1. **Contracts and db:** `AreaDef` and `HazardDef` fields of §3, `TaskPatch.areas` refused while active, the
-   reserved `rest` name, a regenerated baseline. (none)
-2. **The rest, computed:** classifier, guard and watcher treat files in no stored area as `rest` (§5). (1)
+1. **Contracts and db:** `AreaDef` and `HazardDef` fields of §3, `TaskPatch.areas` refused while active,
+   a regenerated baseline (no reserved `rest` name: the catch-all is a flag, §5). (none)
+2. **The rest, as a catch-all area:** built; `classifyPath` puts a path no other area matches in the
+   catch-all (§5). (1)
 3. **Scan:** extend the queued proposal task's reader to §4.1, with the limits. (the queued proposal task)
 4. **Proposal from scan and history:** candidates, the history unit, merge, fit score, the rest (§4.2). (1, 3)
 5. **"Read <project>" task and `propose_parts`:** the read-only flow, the system task at save and on Look Again,

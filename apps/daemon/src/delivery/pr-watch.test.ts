@@ -14,9 +14,10 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
-import { prCardKey } from './cards';
+import { createInboxService } from '../inbox';
+import { GH_CHECK_CHOICE, prCardKey } from './cards';
 import { raiseIn } from './context';
-import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
+import { createGhCardAnswers, createPrWatch, subscribePrWatch, type PrWatch } from './index';
 import { baseNotices } from './notices';
 
 const INTERVAL = 120_000;
@@ -378,6 +379,7 @@ describe('the pull request watch', () => {
         intervalMs: INTERVAL,
         landing: {
           catchUp: (id) => asked.push(`catch-up ${id}`),
+          restartCi: (id) => asked.push(`restart-ci ${id}`),
           retryMerge: (id, opts) =>
             asked.push(opts?.catchUpCardWasOpen ? `retry ${id} after card` : `retry ${id}`),
         },
@@ -588,6 +590,223 @@ describe('the pull request watch', () => {
   });
 });
 
+describe('a pull request whose head never got its required checks', () => {
+  const GRACE_ROUNDS = 5; // 10 minutes of 2-minute rounds: how long runs get to appear
+  const HEAD_A = 'a'.repeat(40);
+  const HEAD_B = 'b'.repeat(40);
+
+  /** A watch whose landing is a spy: what it was asked, in order. */
+  function spy(): { asked: string[]; watch: PrWatch } {
+    const asked: string[] = [];
+    const watch = createPrWatch({
+      ctx: h.ctx,
+      clock,
+      intervalMs: INTERVAL,
+      landing: {
+        catchUp: (id) => asked.push(`catch-up ${id}`),
+        restartCi: (id) => asked.push(`restart-ci ${id}`),
+        retryMerge: (id) => asked.push(`retry ${id}`),
+      },
+    });
+    watches.push(watch);
+    return { asked, watch };
+  }
+
+  /** A shipped pull request that GitHub holds for a required check that has not reported. */
+  function stuck(autoMerge = true): { id: BatchId; prUrl: string } {
+    setup();
+    const made = shipped(h.project.id, 'Alpha', undefined, autoMerge);
+    h.gh.setBlockedOnChecks(made.prUrl, true);
+    h.gh.setHead(made.prUrl, HEAD_A);
+    // Landing asks to merge a clean pull request again; that is not what these cases are about.
+    return made;
+  }
+
+  const stuckNotice = (id: BatchId) =>
+    getBatch(h.store.db, id).notices.find((n) => n.key === 'checks-never-started');
+
+  const rounds = async (w: PrWatch, n: number) => {
+    for (let i = 0; i < n; i++) await round(w);
+  };
+
+  it('asks for CI to be started again once the head has had minutes to get its runs, and not before', async () => {
+    const { id } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS - 1);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
+    expect(stuckNotice(id)).toBeUndefined();
+
+    await round(watch);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
+    // 10db pushed or tried to: no notice yet, the new head gets its own minutes.
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('asks once per head, then says on the task that the checks never started, naming the pull request', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS);
+    await rounds(watch, GRACE_ROUNDS - 1);
+    expect(stuckNotice(id)).toBeUndefined();
+    await round(watch);
+
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
+    const notice = stuckNotice(id);
+    expect(notice).toMatchObject({ tone: 'warning' });
+    expect(notice?.line).toBe(`Checks never started on pull request #1`);
+    expect(notice?.body).toContain(prUrl);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('gives the head 10db pushed its own minutes before it says the checks never started', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS);
+    expect(asked).toContain(`restart-ci ${id}`);
+
+    // 10db's merge landed: a new head, still without runs.
+    h.gh.setHead(prUrl, HEAD_B);
+    await rounds(watch, GRACE_ROUNDS);
+    expect(stuckNotice(id)).toBeUndefined();
+    await round(watch);
+    expect(stuckNotice(id)).toBeDefined();
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toHaveLength(1);
+  });
+
+  it('keeps the ask across the unknown read GitHub gives the head 10db pushed', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS);
+    expect(asked).toContain(`restart-ci ${id}`);
+
+    // GitHub has not worked out the new head yet: not blocked, mergeability unknown.
+    h.gh.setHead(prUrl, HEAD_B);
+    h.gh.setBlockedOnChecks(prUrl, false);
+    h.gh.setMergeable(prUrl, 'UNKNOWN');
+    await round(watch);
+    h.gh.setBlockedOnChecks(prUrl, true);
+    h.gh.setMergeable(prUrl, 'MERGEABLE');
+    await rounds(watch, GRACE_ROUNDS);
+    expect(stuckNotice(id)).toBeUndefined();
+    await round(watch);
+
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
+    expect(stuckNotice(id)).toBeDefined();
+  });
+
+  it('keeps the notice through an unknown read, and drops it when a check appears', async () => {
+    const { id, prUrl } = stuck();
+    const { watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 2);
+    expect(stuckNotice(id)).toBeDefined();
+
+    // The base moved: GitHub works the merge state out again.
+    h.gh.setBlockedOnChecks(prUrl, false);
+    h.gh.setMergeable(prUrl, 'UNKNOWN');
+    await round(watch);
+    expect(stuckNotice(id)).toBeDefined();
+
+    h.gh.setChecks(prUrl, [run('build', null)]);
+    await round(watch);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('drops the notice once the checks start, and starts counting again for a later head', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 2);
+    expect(stuckNotice(id)).toBeDefined();
+
+    h.gh.setChecks(prUrl, [run('build', null)]);
+    await round(watch);
+    expect(stuckNotice(id)).toBeUndefined();
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['running', [run('build', null)]],
+    ['passed', [run('build', 'SUCCESS')]],
+    ['failed', [run('build', 'FAILURE')]],
+  ])('never asks anything of a pull request whose checks are %s', async (_name, rollup) => {
+    const { id, prUrl } = stuck();
+    h.gh.setChecks(prUrl, rollup);
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 3);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('leaves a pull request alone when GitHub is not blocked on checks, such as a base with no CI', async () => {
+    const { id, prUrl } = stuck();
+    h.gh.setBlockedOnChecks(prUrl, false);
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 3);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('leaves a pull request that conflicts to the catch-up for conflicts', async () => {
+    const { id, prUrl } = stuck();
+    h.gh.setMergeable(prUrl, 'CONFLICTING');
+    h.gh.setMergeBlocked(prUrl, 'conflicts');
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS * 2);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('does not count a read gh could not answer, nor a pull request that is not open', async () => {
+    const { id, prUrl } = stuck();
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS - 1);
+    h.gh.setState(prUrl, 'MERGED');
+    await rounds(watch, GRACE_ROUNDS);
+    expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([]);
+    expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('says the checks never started, without pushing, for a pull request held for the builder', async () => {
+    const { id } = stuck(false);
+    const { asked, watch } = spy();
+    watch.start();
+    await watch.idle();
+    await rounds(watch, GRACE_ROUNDS - 1);
+    expect(stuckNotice(id)).toBeUndefined();
+    await round(watch);
+    expect(asked).toEqual([]);
+    expect(stuckNotice(id)).toBeDefined();
+  });
+
+  it('says the checks never started when nothing can start them again', async () => {
+    const { id } = stuck();
+    const w = watcher();
+    w.start();
+    await w.idle();
+    await rounds(w, GRACE_ROUNDS);
+    expect(stuckNotice(id)).toBeDefined();
+  });
+});
+
 describe('gh unavailable', () => {
   it('shows signed out as unknown with one card across projects, one call per round, and withdraws it on sign-in', async () => {
     setup();
@@ -611,7 +830,7 @@ describe('gh unavailable', () => {
     expect(card.body).toContain('gh auth login');
     expect(card.body).toContain('unknown');
     // No link: the desktop's Open on GitHub would open one pull request, which says nothing about gh.
-    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl });
+    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl, ghCheck: true });
 
     await round(w);
     expect(polls()).toBe(2);
@@ -798,6 +1017,101 @@ describe('gh unavailable', () => {
     await round(w);
     expect(pr(b.id)).toMatchObject({ state: 'open' });
     expect(h.cards()).toEqual([]);
+  });
+
+  describe('the gh card’s Check again', () => {
+    async function ghCard() {
+      setup();
+      shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      return h.only(h.cards());
+    }
+
+    it('offers an answer the daemon acts on, not a dismiss', async () => {
+      const card = await ghCard();
+      expect(card.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
+      expect(card.body).toContain(GH_CHECK_CHOICE);
+    });
+
+    it('reads every followed pull request again at once', async () => {
+      const card = await ghCard();
+      let pokes = 0;
+      createGhCardAnswers({
+        recheck: () => {
+          pokes += 1;
+        },
+      })(card, { choice: GH_CHECK_CHOICE });
+      expect(pokes).toBe(1);
+    });
+
+    it('does nothing for another answer or another card', async () => {
+      const card = await ghCard();
+      let pokes = 0;
+      const answer = createGhCardAnswers({
+        recheck: () => {
+          pokes += 1;
+        },
+      });
+      answer(card, { choice: 'Later' });
+      answer({ ...card, detail: {} }, { choice: GH_CHECK_CHOICE });
+      expect(pokes).toBe(0);
+    });
+
+    /** The inbox the daemon runs: an answer to the gh card reaches the watch before the card closes. */
+    function answeringInbox(w: PrWatch) {
+      return createInboxService({
+        state: h.state,
+        onParkedAnswer: () => undefined,
+        onFlagAnswer: createGhCardAnswers(w),
+      });
+    }
+
+    it('raises a fresh card saying how gh fails now when gh still fails', async () => {
+      setup();
+      shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      const first = h.only(h.cards());
+
+      h.gh.failNext.set('prStatus', new GhError('timeout', TIMEOUT));
+      answeringInbox(w).answer(first.id, { choice: GH_CHECK_CHOICE });
+      await w.idle();
+
+      const fresh = h.only(h.cards());
+      expect(fresh.id).not.toBe(first.id);
+      expect(fresh.body).toContain(TIMEOUT);
+      expect(fresh.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
+
+      // Only the round the answer asked for raises again: a later failing round keeps the one card.
+      await round(w);
+      expect(h.only(h.cards()).id).toBe(fresh.id);
+    });
+
+    it('leaves no card once gh answers', async () => {
+      setup();
+      const a = shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      const card = h.only(h.cards());
+
+      h.gh.auth = 'ok';
+      answeringInbox(w).answer(card.id, { choice: GH_CHECK_CHOICE });
+      await w.idle();
+
+      expect(pr(a.id)).toMatchObject({ state: 'open', unknownReason: null });
+      expect(h.cards()).toEqual([]);
+      // gh failing in a later round raises a card again, as any first failure does.
+      h.gh.auth = 'signed_out';
+      await round(w);
+      expect(h.cards()).toHaveLength(1);
+    });
   });
 
   it('starts the next round after the read that ended the last, so one that always times out holds up no other', async () => {

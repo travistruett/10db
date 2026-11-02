@@ -56,7 +56,7 @@ import { createLauncher, secretFingerprint, type Keychain } from '../src/environ
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
 import type { Judge } from '../src/judge';
-import { createInboxService, type InboxService } from '../src/inbox';
+import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
 import { createMcpHandler } from '../src/mcp';
@@ -165,11 +165,21 @@ export async function createTestEngine(
   const startGate = createStartGate();
   let runner: Runner | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  // As start.ts wires it: "Park the task" stops the run as a cancel from the Board does.
+  const parkAnswers = createParkAnswers({
+    state,
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    log: silentLogger,
+  });
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
+    onParkAnswer: parkAnswers,
     onCheckAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer);
@@ -229,6 +239,12 @@ export async function createTestEngine(
     },
     stay: (projectId) => {
       moves.stay(projectId);
+    },
+    // The engine has no preparer: it never probes an account.
+    recheck: () => undefined,
+    raiseCap: (id, toUsd, answering) => {
+      state.write((ctx) => patchAccount(ctx, id, { monthlyCapUsd: toUsd }));
+      accounts.saved(id, answering);
     },
   });
   const guarded = protectedPaths({ dataDir: data.path, home: homedir(), loginConfigDir: null });

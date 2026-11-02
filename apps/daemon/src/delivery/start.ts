@@ -44,7 +44,13 @@ import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
-import { branchBehindBase, joinsLanding, missingLandingBranch, sharedLanding } from './landing';
+import {
+  joinsLanding,
+  landingWarnings,
+  missingLandingBranch,
+  sharedLanding,
+  type SameStart,
+} from './landing';
 import { cutWorktree, type CutTasks, type Plans } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -182,12 +188,14 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     });
     const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
     const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
+    // Everything this request makes, so no batch of it counts another's tasks as use of its branch.
+    const sameStart: SameStart = { tasks: new Set(tasks.map((t) => t.id)), batches: new Set() };
     return {
       steps: [
         ...(inFolder.length > 0
-          ? [prepareShared(project, input.title, undefined, inFolder, ending)]
+          ? [prepareShared(project, input.title, undefined, inFolder, ending, sameStart)]
           : []),
-        ...prepareWorktrees(project, inCopies),
+        ...prepareWorktrees(project, inCopies, sameStart),
       ],
       placement: (task) => task.workspaceMode,
     };
@@ -223,6 +231,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     batchId: BatchId | undefined,
     tasks: readonly TaskDto[],
     ending: BatchId | undefined,
+    sameStart?: SameStart,
   ): StartStep {
     const unfinished = findUnfinishedBatch(db, project.id) ?? null;
     // A dry run before starting over treats the batch it will abandon as already gone.
@@ -268,11 +277,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           ...(target ?? { baseBranch: project.baseBranch, autoMerge: true }),
         });
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, inserted.id);
+        sameStart?.batches.add(inserted.id);
         return inserted;
       },
       launch: (batch) => {
         ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
-          cut(batch.id, tasks, plans, inBatch, signal),
+          cut(batch.id, tasks, plans, inBatch, signal, sameStart),
         );
       },
     };
@@ -283,7 +293,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
    * run apart: each inserted CUTTING with its worktree path and its workstreams QUEUED, once every
    * group passed the request's checks.
    */
-  function prepareWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): StartStep[] {
+  function prepareWorktrees(
+    project: ProjectDto,
+    tasks: readonly TaskDto[],
+    sameStart: SameStart,
+  ): StartStep[] {
     if (tasks.length === 0) return [];
     const groups = groupByDependency(tasks);
     // Tasks that share a worktree share a pull request, so they must land alike; checked for every
@@ -316,11 +330,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
             worktreePath: worktreePathFor(root, project, batchBranchName(group.title, id)),
           });
           for (const [taskId, plan] of groupPlans) insertPlannedWorkstream(w, taskId, plan, id);
+          sameStart.batches.add(id);
           return inserted;
         },
         launch: (batch) => {
           ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
-            cutWorktree(ctx, batch.id, groupPlans, signal),
+            cutWorktree(ctx, batch.id, groupPlans, signal, sameStart),
           );
         },
       };
@@ -390,12 +405,25 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */
-  async function cut(
+  function cut(
     batchId: BatchId,
     tasks: readonly TaskDto[],
     plans: CutTasks,
     inBatch: ReadonlySet<TaskId>,
     signal: AbortSignal,
+    sameStart?: SameStart,
+  ): Promise<void> {
+    // One operation: the checkout's git dirs are read once for the cut, not once per git call.
+    return ctx.git.operation(() => cutSteps(batchId, tasks, plans, inBatch, signal, sameStart));
+  }
+
+  async function cutSteps(
+    batchId: BatchId,
+    tasks: readonly TaskDto[],
+    plans: CutTasks,
+    inBatch: ReadonlySet<TaskId>,
+    signal: AbortSignal,
+    sameStart?: SameStart,
   ): Promise<void> {
     const batch = getBatch(db, batchId);
     const project = getProject(db, batch.projectId);
@@ -450,12 +478,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));
         return;
       }
-      // Not a refusal: the builder may mean to land in a branch that is behind. A notice on the
-      // batch's tasks names it.
-      const behind = await branchBehindBase(ctx, project, batch, signal);
-      if (behind && !stopped()) {
+      // Not a refusal: the builder may mean to land in a branch that is behind, or that nothing
+      // else uses. A notice on the batch's tasks names it.
+      for (const notice of await landingWarnings(ctx, project, batch, inBatch, signal, sameStart)) {
+        if (stopped()) break;
         try {
-          showNotice(ctx.state, batchId, behind);
+          showNotice(ctx.state, batchId, notice);
         } catch (error) {
           ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
         }

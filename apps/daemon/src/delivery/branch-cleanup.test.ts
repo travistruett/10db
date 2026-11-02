@@ -254,7 +254,29 @@ describe('an abandoned task whose branch holds commits', () => {
     const card = h.only(cardsAbout(batch.branch));
     expect(card.title).toBe(`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`);
     expect(card.body).toContain('no commits');
+    // 10db removed the worktree (the check above), so the card says it went with the branch.
+    expect(card.body).toContain("deleted it along with the batch's worktree");
     expect(card.options).toEqual([]);
+  });
+
+  it('does not say the worktree was deleted when 10db left it behind, and still deletes the branch', async () => {
+    const { batch } = await opened();
+    const wt = batch.worktreePath ?? '';
+    // Git forgets the worktree and a person's file sits at its path: not 10db's, not empty.
+    h.git$('worktree', 'remove', '--force', '--force', wt);
+    mkdirSync(wt, { recursive: true });
+    writeFileSync(join(wt, 'notes.txt'), 'mine\n');
+    h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
+    // The builder's Remove worktree answer, which skips the checks that would keep the directory.
+    await retireWorktree(h.ctx, batch.id, true);
+    expect(exists(batch.branch)).toBe(false);
+    expect(existsSync(join(wt, 'notes.txt'))).toBe(true);
+    const cards = h.cards();
+    const deleted = h.only(cards.filter((c) => c.title.endsWith('deleted')));
+    expect(deleted.body).toContain('no commits');
+    expect(deleted.body).not.toMatch(/worktree/i);
+    // The card that says the worktree stays is still there.
+    expect(cards.some((c) => c.title === `10db left ${wt} in place`)).toBe(true);
   });
 
   it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {

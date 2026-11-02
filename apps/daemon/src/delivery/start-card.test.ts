@@ -1,9 +1,10 @@
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, TaskStatus } from '@10db/contracts';
+import { ConflictError, type TaskId, TaskStatus } from '@10db/contracts';
 import {
   getBatch,
   getTask,
+  insertSession,
   insertWorkstream,
   listBatches,
   listInbox,
@@ -81,20 +82,66 @@ describe('the answers of a refused start', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('cancels a task that ran before and failed, when its restart is refused', async () => {
-    const task = h.addTask('Alpha', { areas: ['api'] });
-    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
-    h.settle(earlier.id, 'FAILED');
-    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
-    h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] });
-    await h.jobs.idle();
+  /**
+   * Refuses a restart of a task that ran before (its run settled to `state` by `settle`) for an
+   * unfinished dependency, which is refused before any new run is inserted. Answers Cancel task
+   * and checks the task retires with its earlier run kept as the latest.
+   */
+  function cancelRefusedRestart(settle: (taskId: TaskId) => { id: string }) {
+    const base = h.addTask('Base', { areas: ['api'] });
+    const task = h.addTask('Alpha', { areas: ['ui'], dependsOn: [base.id] });
+    const earlier = settle(task.id);
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] }),
+    ).toThrow(ConflictError);
+    expect(getTask(h.store.db, task.id).workstreamId).toBe(earlier.id);
     const card = h.only(h.cards());
+    // No new run went in: the earlier run is still the task's latest.
+    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toEqual([earlier.id]);
     expect(card.options.map((o) => o.label)).toContain(StartChoice.Cancel);
     inbox.answer(card.id, { choice: StartChoice.Cancel });
     expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
     expect(h.cards()).toEqual([]);
-    // The failed run stays as history.
-    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toContain(earlier.id);
+    // The earlier run stays as history.
+    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toEqual([earlier.id]);
+  }
+
+  it('cancels a task that ran before and failed, when its restart is refused', () => {
+    cancelRefusedRestart((taskId) => {
+      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      h.settle(earlier.id, 'FAILED');
+      return earlier;
+    });
+  });
+
+  it('cancels a task whose latest run was cancelled in Factory, when its restart is refused', () => {
+    cancelRefusedRestart((taskId) => {
+      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      h.state.write((w) =>
+        insertSession(w, {
+          workstreamId: earlier.id,
+          provider: 'claude',
+          model: 'sonnet',
+          effort: 'medium',
+          mode: 'managed',
+          mcpTokenHash: 'hash-factory-cancel',
+        }),
+      );
+      h.settle(earlier.id, 'CANCELLED');
+      return earlier;
+    });
+  });
+
+  it('cancels a reopened task, whose latest run finished, when its restart is refused', () => {
+    cancelRefusedRestart((taskId) => {
+      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      h.settle(earlier.id, 'DONE');
+      // reopenTask leaves the task open with its finished run as the latest.
+      h.state.write((w) => {
+        setTaskStatus(w, taskId, 'open');
+      });
+      return earlier;
+    });
   });
 
   it('titles a repeated start after its first task, and keeps the title within 200 characters', () => {

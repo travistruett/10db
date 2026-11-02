@@ -70,12 +70,33 @@ describe('StepCell', () => {
       ws: workstreamDto({ steps: [], stepIndex: 0, model: 'opus', effort: 'high' }),
       texts: ['opus@high'],
     },
-  ])('shows $name', ({ ws, texts, noRetry, badge }) => {
+    {
+      name: 'a queued run as waiting, not as the step it will take',
+      ws: workstreamDto({
+        state: 'QUEUED',
+        steps: [step('implement', 'Implementer', 'sonnet', 'high')],
+        stepIndex: 0,
+      }),
+      texts: ['Waiting for a free lane'],
+      absent: [/1\/1/, /Implementer/],
+    },
+    {
+      name: 'a held run as set aside, not as the step it will take',
+      ws: workstreamDto({
+        state: 'HELD',
+        steps: [step('implement', 'Implementer', 'sonnet', 'high')],
+        stepIndex: 0,
+      }),
+      texts: ['Held: not in the queue'],
+      absent: [/1\/1/, /Implementer/],
+    },
+  ])('shows $name', ({ ws, texts, noRetry, badge, absent }) => {
     show(ws);
     for (const text of texts) expect(screen.getByText(text)).toBeTruthy();
     // The light badge takes the theme's AA-checked text color; plain orange text misses AA in light mode.
     if (badge) expect(screen.getByText(badge).closest('.mantine-Badge-root')).not.toBeNull();
     if (noRetry) expect(screen.queryByText(/retry/)).toBeNull();
+    for (const pattern of absent ?? []) expect(screen.queryByText(pattern)).toBeNull();
   });
 
   it("carries the router's reason as the tooltip of the step label", () => {

@@ -4,11 +4,19 @@ import {
   AccountKind,
   AccountCardChoice,
   AccountProblem,
+  ConflictError,
   InboxState,
   type AccountId,
+  type InboxItemId,
   type ProjectId,
 } from '@10db/contracts';
-import { defaultAccountId, listInbox, patchAccount, type AccountRow } from '@10db/db';
+import {
+  defaultAccountId,
+  getAccountRow,
+  listInbox,
+  patchAccount,
+  type AccountRow,
+} from '@10db/db';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
@@ -18,6 +26,7 @@ import { checkAccount, type SessionAdapter, type SeenAccount } from '../sessions
 import {
   confirmCard,
   credentialsCard,
+  fixFor,
   recordedCard,
   secretCard,
   signInCard,
@@ -33,6 +42,18 @@ export const PREPARE_RETRY_MS = 60_000;
 export interface AccountPreparer {
   /** Works toward making an unready account ready: at most one probe a minute, and one card per problem. */
   prepare(account: AccountRow, projectId: ProjectId): void;
+  /**
+   * The builder answered Check again (or Record again, with `forgetIdentity`) on a card that waits for a fix:
+   * probes now, whatever the last probe's time. An account that is ready closes the cards that asked and asks for
+   * a tick; a secret still missing throws, so the card stays open and says what is missing. `answering` is
+   * the card being answered, which the inbox closes itself.
+   */
+  retry(
+    account: AccountRow,
+    projectId: ProjectId,
+    answering: InboxItemId,
+    opts?: { readonly forgetIdentity?: boolean },
+  ): void;
   /** Settles once every probe started so far has finished (tests). */
   idle(): Promise<void>;
 }
@@ -131,6 +152,20 @@ export function createAccountPreparer(opts: {
     );
   }
 
+  /** Starts the identity probe unless one is already running for the account. */
+  function probe(account: AccountRow, projectId: ProjectId): void {
+    if (running.has(account.id)) return;
+    const job = confirmIdentity(account, projectId)
+      .catch((error: unknown) => {
+        opts.logger.error(
+          { accountId: account.id, err: String(error) },
+          'preparing the account failed',
+        );
+      })
+      .finally(() => running.delete(account.id));
+    running.set(account.id, job);
+  }
+
   return {
     prepare(account, projectId) {
       const problem = unready(account);
@@ -149,15 +184,29 @@ export function createAccountPreparer(opts: {
         raise(projectId, secretCard(account));
         return;
       }
-      const job = confirmIdentity(account, projectId)
-        .catch((error: unknown) => {
-          opts.logger.error(
-            { accountId: account.id, err: String(error) },
-            'preparing the account failed',
-          );
-        })
-        .finally(() => running.delete(account.id));
-      running.set(account.id, job);
+      probe(account, projectId);
+    },
+    retry(account, projectId, answering, { forgetIdentity = false } = {}) {
+      let current = account;
+      if (forgetIdentity) {
+        opts.state.write((ctx) => patchAccount(ctx, account.id, { expectedIdentity: null }));
+        current = getAccountRow(opts.state.db, account.id);
+      }
+      const problem = unready(current);
+      if (!problem) {
+        // Fixed since the card was raised: the cards that asked for it are stale, and work can run.
+        closeSettledCards(opts.state, current.id, answering);
+        opts.onReady();
+        return;
+      }
+      if (
+        problem.problem !== AccountProblem.Unconfirmed ||
+        current.kind !== AccountKind.ClaudeSubscription
+      )
+        throw new ConflictError(`${problem.message}. ${fixFor(current, problem.problem)}`);
+      // The builder asked, so the minute between probes does not apply.
+      lastTried.set(current.id, opts.clock.now().getTime());
+      probe(current, projectId);
     },
     idle: async () => {
       await Promise.all([...running.values()]);

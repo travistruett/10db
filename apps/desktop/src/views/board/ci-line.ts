@@ -4,7 +4,9 @@ import {
   PullRequestState,
   RequiredChecksState,
   type BatchDto,
+  type BatchId,
   type RequiredCheckJobDto,
+  type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 
@@ -40,6 +42,30 @@ const FIX_RUNNING: ReadonlySet<BatchState> = new Set([
   BatchState.Shipping,
 ]);
 
+/**
+ * The batches with each CI fix batch titled by its fix task, as the line names it (CI-decides spec
+ * §5). A fix batch starts with its task's title, but the task can be renamed; the workstream's
+ * `taskTitle` is the task's current one. A person can add a task to a fix batch that failed to ship,
+ * so the batch can have several workstreams; the CI fix task is the one the watch made, which is the
+ * batch's oldest workstream (the first listed when two share a `createdAt`). A fix batch with no
+ * workstream keeps its own title. Give `ciLine` the result, so its "fixing in" names the task.
+ */
+export function withFixTaskTitles(
+  batches: readonly BatchDto[],
+  workstreams: readonly WorkstreamDto[],
+): BatchDto[] {
+  const oldest = new Map<BatchId, WorkstreamDto>();
+  for (const ws of workstreams) {
+    if (ws.batchId === null) continue;
+    const seen = oldest.get(ws.batchId);
+    if (seen === undefined || ws.createdAt < seen.createdAt) oldest.set(ws.batchId, ws);
+  }
+  return batches.map((b) => {
+    const title = b.ciFixOf === null ? undefined : oldest.get(b.id)?.taskTitle;
+    return title === undefined ? b : { ...b, title };
+  });
+}
+
 /** The pull request's checks page, or null unless the pull request is an https github.com address. */
 function checksLink(prUrl: string): CiLink | null {
   const url = githubUrl(prUrl);
@@ -55,7 +81,8 @@ function jobLink(jobs: readonly RequiredCheckJobDto[], prUrl: string): CiLink | 
  * What the pull request's required checks say of a batch's tasks, or null when today's line stands:
  * no required checks, a pull request that is closed or unreadable, or a batch that has not shipped.
  * A CI fix batch shares its root's pull request, and the required checks are stored on the root
- * only, so `batches` is searched for the root and for the fixes made for it.
+ * only, so `batches` is searched for the root and for the fixes made for it. "Fixing in" names the
+ * fix batch's title, which is the fix task's when `batches` went through `withFixTaskTitles`.
  */
 export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]): CiLine | null {
   if (batch?.state !== BatchState.Shipped || !batch.prUrl) return null;

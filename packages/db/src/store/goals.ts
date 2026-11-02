@@ -17,7 +17,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import type { z } from 'zod';
-import { and, asc, eq, or } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -128,19 +128,35 @@ function builderId(db: DbReader): PersonId {
   return builder.id;
 }
 
+/**
+ * An exact handle (unique) wins. Otherwise the name must belong to exactly one person: a name
+ * is not unique, and guessing between two people would hand the acceptance to the wrong one.
+ */
 function personNamed(db: DbReader, name: string, where: string): PersonId {
-  const person = db
+  const byHandle = db
     .select({ id: schema.people.id })
     .from(schema.people)
-    .where(or(eq(schema.people.handle, name), eq(schema.people.name, name)))
+    .where(eq(schema.people.handle, name))
     .get();
+  if (byHandle) return byHandle.id;
+  const byName = db
+    .select({ id: schema.people.id })
+    .from(schema.people)
+    .where(eq(schema.people.name, name))
+    .limit(2)
+    .all();
+  const [person, other] = byName;
   if (!person) throw new InvalidError(`${where}: nobody is called ${name}`);
+  if (other)
+    throw new InvalidError(
+      `${where}: more than one person is called ${name}; name them by handle instead`,
+    );
   return person.id;
 }
 
 /**
  * The brief's tasks, each after the tasks it depends on and otherwise in brief order. Refuses a
- * repeated key, a dependency on a key no task has, and a cycle.
+ * repeated key, a dependency on a key no task has, a dependency listed twice, and a cycle.
  */
 function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
   const byKey = new Map<string, GoalBriefTask>();
@@ -148,10 +164,15 @@ function inDependencyOrder(tasks: readonly GoalBriefTask[]): GoalBriefTask[] {
     if (byKey.has(task.key)) throw new InvalidError(`Two tasks have the key ${task.key}`);
     byKey.set(task.key, task);
   }
-  for (const task of tasks)
-    for (const key of task.depends_on)
+  for (const task of tasks) {
+    const seen = new Set<string>();
+    for (const key of task.depends_on) {
       if (!byKey.has(key))
         throw new InvalidError(`Task ${task.key} depends on ${key}, and no task has that key`);
+      if (seen.has(key)) throw new InvalidError(`Task ${task.key} depends on ${key} twice`);
+      seen.add(key);
+    }
+  }
 
   const ordered: GoalBriefTask[] = [];
   const done = new Set<string>();
@@ -259,8 +280,25 @@ export function lastGoalView(db: DbReader, goalId: GoalId, personId: PersonId): 
 }
 
 /**
- * Marks the goal opened by the person now and answers the previous mark (null on the first
- * visit), so the digest computes its Δ rows from the window that just closed (§8).
+ * A visit lasts while the goal is opened again within this long of its last opening. A refetch or
+ * a remount during it answers the window the visit began with; after a quiet spell the next
+ * opening starts a new visit.
+ */
+export const VISIT_GAP_MS = 30 * 60_000;
+
+/**
+ * A visit also ends this long after it began, however often the goal is opened in between (every
+ * row click opens it), so 'since you left' never reaches back past hours of viewing.
+ */
+export const VISIT_MAX_MS = 2 * 60 * 60_000;
+
+/**
+ * Marks the goal opened by the person now and answers where the Δ window starts: the mark before
+ * this visit began (null on the first visit). An opening within `VISIT_GAP_MS` of the last one
+ * continues its visit, so a refresh keeps the rows the builder was reading (§8), unless the visit
+ * began more than `VISIT_MAX_MS` ago; otherwise the last mark closes and the window starts there.
+ * `openedAt` always moves to now, which keeps the goal list's count of new items at zero after an
+ * opening.
  */
 export function markGoalViewed(
   ctx: WriteContext,
@@ -269,14 +307,25 @@ export function markGoalViewed(
 ): string | null {
   getGoal(ctx.tx, goalId);
   getPerson(ctx.tx, personId);
-  const previous = lastGoalView(ctx.tx, goalId, personId);
+  const row = ctx.tx
+    .select()
+    .from(schema.goalViews)
+    .where(and(eq(schema.goalViews.goalId, goalId), eq(schema.goalViews.personId, personId)))
+    .get();
+  const now = Date.parse(ctx.now);
+  const continuing =
+    row !== undefined &&
+    now - Date.parse(row.openedAt) <= VISIT_GAP_MS &&
+    now - Date.parse(row.visitStartedAt ?? row.openedAt) <= VISIT_MAX_MS;
+  const since = row === undefined ? null : continuing ? row.visitSince : row.openedAt;
+  const visitStartedAt = continuing ? (row.visitStartedAt ?? row.openedAt) : ctx.now;
   ctx.tx
     .insert(schema.goalViews)
-    .values({ goalId, personId, openedAt: ctx.now })
+    .values({ goalId, personId, openedAt: ctx.now, visitSince: since, visitStartedAt })
     .onConflictDoUpdate({
       target: [schema.goalViews.goalId, schema.goalViews.personId],
-      set: { openedAt: ctx.now },
+      set: { openedAt: ctx.now, visitSince: since, visitStartedAt },
     })
     .run();
-  return previous;
+  return since;
 }

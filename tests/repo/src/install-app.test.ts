@@ -5,6 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { HEAD_SHA, installedAppSandbox, type InstalledAppSandbox } from './installed-app-sandbox';
 import { repoRoot } from './workspace';
 
+/** Commits before the head, newest first. */
+const OLDER = [
+  '1111111111111111111111111111111111111111',
+  '2222222222222222222222222222222222222222',
+  '3333333333333333333333333333333333333333',
+] as const;
 const STAMP = '20261029T101500Z';
 const ZIP = `10db-${STAMP}.zip`;
 
@@ -194,9 +200,13 @@ describe('install-app.sh refusals', () => {
   });
 
   it('gives up when gh keeps failing to report on the run', () => {
-    const result = install([], { STUB_VIEW_FAILS: '9' });
+    const result = install([], {
+      STUB_SUCCESS_RUN: '',
+      STUB_ACTIVE_RUN: '77',
+      STUB_VIEW_FAILS: '9',
+    });
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('run 42');
+    expect(result.stderr).toContain('run 77');
     expectUntouched();
   });
 
@@ -298,15 +308,80 @@ describe('install-app.sh puts the previous app back', () => {
 });
 
 describe('install-app.sh', () => {
-  it('reuses the newest successful build of the head commit', () => {
-    expect(install().status).toBe(0);
-    expect(gh()).toContain(
-      `gh run list --workflow release-dry-run.yml --commit ${HEAD_SHA} --status success --limit 1 --json databaseId --jq .[0].databaseId // empty`,
-    );
+  it('reuses the build of the head commit when it has finished, and says it is not behind', () => {
+    const result = install();
+    expect(result.status).toBe(0);
     expect(gh().some((call) => call.startsWith('gh run download 42 --name unsigned-dmg '))).toBe(
       true,
     );
     expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+    expect(result.stdout).toContain(`at commit ${HEAD_SHA}`);
+    expect(result.stdout).toContain('the head of main');
+    expect(result.stdout).not.toContain('behind');
+  });
+
+  describe('when the head commit has no finished build', () => {
+    // Main moved on: the head's build is queued or running, the one before it is not, and the
+    // older ones finished. The install takes the newest finished one instead of waiting.
+    const [one, two] = [OLDER[0], OLDER[1]]; // one and two commits behind the head
+    const moved = {
+      STUB_COMMITS: [HEAD_SHA, ...OLDER].join(' '),
+      STUB_SUCCESS_RUN: '',
+      STUB_ACTIVE_RUN: '77',
+    };
+
+    it('installs the newest commit with a finished build without waiting for the head', () => {
+      const result = install([], { ...moved, STUB_RUNS: `50@${two} 40@${OLDER[2]}` });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 50 '))).toBe(true);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+      expect(gh().filter((call) => call.startsWith('gh run view'))).toEqual([]);
+      expect(box.marker(app())).toBe('new build');
+    });
+
+    it('prints the commit it installed and how many commits behind the head that is', () => {
+      const result = install([], { ...moved, STUB_RUNS: `50@${two}` });
+      expect(result.stdout).toContain(`at commit ${two}`);
+      expect(result.stdout).toContain('2 commits behind the head of main');
+      expect(result.stdout).toContain(HEAD_SHA.slice(0, 12));
+    });
+
+    it('says one commit, not one commits', () => {
+      const result = install([], { ...moved, STUB_RUNS: `50@${one}` });
+      expect(result.stdout).toContain('1 commit behind the head of main');
+      expect(result.stdout).not.toContain('1 commits');
+    });
+
+    it('takes the newest commit even when an older commit has the newer run', () => {
+      const result = install([], { ...moved, STUB_RUNS: `60@${OLDER[2]} 50@${two}` });
+      expect(result.stdout).toContain(`at commit ${two}`);
+      expect(gh().some((call) => call.startsWith('gh run download 50 '))).toBe(true);
+    });
+
+    it('skips a commit whose artifact has expired', () => {
+      const result = install([], {
+        ...moved,
+        STUB_RUNS: `50@${two} 40@${OLDER[2]}`,
+        STUB_EXPIRED_RUNS: '50',
+      });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 40 '))).toBe(true);
+      expect(result.stdout).toContain('3 commits behind');
+    });
+
+    it('ignores a finished build of a commit that is not among the ref newest commits', () => {
+      const result = install([], { ...moved, STUB_RUNS: `50@${'f'.repeat(40)}` });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 77 '))).toBe(true);
+    });
+
+    it('waits for the head build when none of the newest commits has a usable build', () => {
+      const result = install([], moved);
+      expect(result.status).toBe(0);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+      expect(gh().some((call) => call.startsWith('gh run download 77 '))).toBe(true);
+      expect(result.stdout).toContain('the head of main');
+    });
   });
 
   it('waits for a build of the commit that is already queued or running instead of starting one', () => {
@@ -329,9 +404,69 @@ describe('install-app.sh', () => {
   });
 
   it('rides out a few failed reports on the run', () => {
-    const result = install([], { STUB_VIEW_FAILS: '2' });
+    const result = install([], {
+      STUB_SUCCESS_RUN: '',
+      STUB_ACTIVE_RUN: '77',
+      STUB_VIEW_FAILS: '2',
+    });
     expect(result.status).toBe(0);
     expect(box.marker(app())).toBe('new build');
+  });
+
+  describe('when the run it waits on ends cancelled', () => {
+    // release-dry-run's concurrency group cancels a run still waiting when a newer push arrives.
+    const waiting = {
+      STUB_SUCCESS_RUN: '',
+      STUB_ACTIVE_RUN: '77',
+      STUB_CANCELLED_RUNS: '77',
+    };
+
+    it('moves on to the newer run that replaced it', () => {
+      const result = install([], { ...waiting, STUB_ACTIVE_RUN_AFTER_CANCEL: '78' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Run 77 was cancelled');
+      expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+      expect(box.marker(app())).toBe('new build');
+    });
+
+    it('takes a build that finished meanwhile instead of waiting again', () => {
+      const result = install([], {
+        ...waiting,
+        STUB_COMMITS: [HEAD_SHA, ...OLDER].join(' '),
+        STUB_RUNS_AFTER_CANCEL: `50@${HEAD_SHA}`,
+      });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 50 '))).toBe(true);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+    });
+
+    it('starts a build when nothing replaced it', () => {
+      const result = install([], waiting);
+      expect(result.status).toBe(0);
+      expect(gh()).toContain('gh workflow run release-dry-run.yml --ref main');
+      expect(gh().some((call) => call.startsWith('gh run download 101 '))).toBe(true);
+    });
+
+    it('moves on from a dispatched run that was replaced too', () => {
+      const result = install([], {
+        STUB_SUCCESS_RUN: '',
+        STUB_CANCELLED_RUNS: '101',
+        STUB_ACTIVE_RUN_AFTER_CANCEL: '78',
+      });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
+    });
+
+    it('gives up after three cancelled runs in a row, naming the last', () => {
+      const result = install([], {
+        STUB_SUCCESS_RUN: '',
+        STUB_CANCELLED_RUNS: '101 102 103 104',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('ended in cancelled');
+      expectUntouched();
+    });
   });
 
   it('keeps the old app as one zip outside Applications, tested before the app is removed', () => {

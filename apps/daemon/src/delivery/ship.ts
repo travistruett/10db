@@ -9,6 +9,7 @@ import {
   isTerminal,
   LANE_STATES,
   latestPerTask,
+  McpToolName,
   shipReadiness,
   ShipReadiness,
   StepRole,
@@ -23,10 +24,13 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  clearBatchNotice,
   clearLease,
   getBatch,
   getProject,
   getTask,
+  getWorkstream,
+  hasToolOp,
   listBatches,
   listEvidence,
   listPermissionRules,
@@ -34,6 +38,7 @@ import {
   patchBatch,
   patchWorkstream,
   releaseClaims,
+  setBatchNotice,
   setTaskStatus,
   transitionBatch,
   transitionWorkstream,
@@ -88,7 +93,7 @@ import {
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
-import { gateNotices, mergeNotices, NOTICE_KEY, updateNotices } from './notices';
+import { gateNotices, mergeNotices, NOTICE_KEY, supersededNotices, updateNotices } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
@@ -117,6 +122,19 @@ const RUNNING_BATCH: readonly BatchState[] = [
 const conflicting = (status: PullRequestStatus): boolean =>
   status.mergeBlocked === MergeBlocked.Conflicts || status.mergeable === PrMergeable.Conflicting;
 
+/**
+ * True when the open pull request's head has no check at all while GitHub waits for a required one:
+ * the workflows never started. A head with any check, running or finished, is never this.
+ */
+const checksNeverStarted = (status: PullRequestStatus): boolean =>
+  status.state === PrState.Open &&
+  status.checks === 'none' &&
+  status.blockedOnChecks &&
+  !conflicting(status);
+
+/** Why 10db merges the base into a shipped pull request: it conflicts, or its head never got its checks. */
+type CatchUpCause = 'conflict' | 'checks';
+
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
   /** The daemon's one set of base updates, shared with the runner, so a batch's gates run in turn. */
@@ -135,6 +153,11 @@ export interface ShipperDeps extends DeliveryContext {
 export interface Shipper {
   checkBatch(batchId: BatchId): void;
   checkOpenBatches(): void;
+  /**
+   * Checks the open batches that still hold an attempt its task started over from: one waits for the
+   * replacement's cut (`members`), so each time a cut ends they are looked at again.
+   */
+  checkSupersededBatches(): void;
   resume(batchId: BatchId): void;
   /** A task drawer on the Board: Ship anyway from OPEN, or Retry from FAILED, which reopens unfinished work. */
   ship(batchId: BatchId): BatchDto;
@@ -150,6 +173,14 @@ export interface Shipper {
    */
   catchUp(batchId: BatchId): void;
   /**
+   * The open pull request of a batch that merges by itself has had minutes to get its required
+   * checks and its head has none: merges the base into it the same way and pushes it, so GitHub
+   * starts its workflows on a new head. Pushes nothing when the head has any check by the time the
+   * job runs, when the branch already holds the base, or when the merge or its check fails; none of
+   * those raises a card, since the watch's notice says the checks never started.
+   */
+  restartCi(batchId: BatchId): void;
+  /**
    * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
    * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
    * that stopped (`catchUpCardWasOpen`). Does nothing when no merge is due.
@@ -159,9 +190,46 @@ export interface Shipper {
 
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
 
-/** A batch's members: each task's latest workstream in it. */
+/**
+ * A failed member its task started over from: the task's current workstream is another, so nothing
+ * can retry this one.
+ */
+function superseded(db: DbReader, member: WorkstreamDto): boolean {
+  if (member.state !== WorkstreamState.Failed) return false;
+  const current = getTask(db, member.taskId).workstreamId;
+  return current !== null && current !== member.id;
+}
+
+/** Whether the attempt committed through the commit tool, so its commits may be on the batch's branch. */
+function committed(db: DbReader, member: WorkstreamDto): boolean {
+  return hasToolOp(db, member.id, McpToolName.Commit);
+}
+
+/**
+ * Whether the run that replaced a superseded member has not got going yet, so the attempt may still
+ * be the task's only one: the replacement's batch is still being cut (the cut may be refused), or
+ * its cut was refused and detached it from any batch, leaving it cancelled before it ran. In both
+ * cases the builder could still want the old batch to keep the attempt.
+ */
+function replacementUnsettled(db: DbReader, member: WorkstreamDto): boolean {
+  const current = getTask(db, member.taskId).workstreamId;
+  if (current === null) return false;
+  const next = getWorkstream(db, current);
+  if (next.batchId === null) return next.state === WorkstreamState.Cancelled;
+  return getBatch(db, next.batchId).state === BatchState.Cutting;
+}
+
+/**
+ * A batch's members: each task's latest workstream in it, except a superseded one that committed
+ * nothing. It holds nothing the batch should wait for, so the batch ships the work of the rest. One
+ * that committed stays a member: its commits are on the branch and passed no gate or review, so the
+ * batch ships them only through Ship anyway, and its tasks' notice says so (`supersededNotices`).
+ * One whose replacement is not yet cut stays too, until the cut has ended (`replacementUnsettled`).
+ */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
-  return latestPerTask(listWorkstreams(db, { batchId }));
+  return latestPerTask(listWorkstreams(db, { batchId })).filter(
+    (m) => !superseded(db, m) || committed(db, m) || replacementUnsettled(db, m),
+  );
 }
 
 /**
@@ -193,7 +261,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   function resume(batchId: BatchId): void {
     deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
-      shipSteps(batchId, signal),
+      // One operation: the checkout's git dirs are read once for the ship, not once per git call.
+      deps.git.operation(() => shipSteps(batchId, signal)),
     );
   }
 
@@ -974,8 +1043,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
-      if (shipReadiness(members(w.tx, batchId).map((m) => m.state)) !== ShipReadiness.Ready)
-        return false;
+      const current = members(w.tx, batchId);
+      const left = current
+        .filter((m) => superseded(w.tx, m) && committed(w.tx, m))
+        .map((m) => m.taskTitle);
+      if (left.length > 0) setBatchNotice(w, batchId, supersededNotices.committed(batch, left));
+      else clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
+      if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Ready) return false;
       transitionBatch(w, batchId, {
         to: BatchState.Shipping,
         reason: 'every workstream is done or cancelled',
@@ -1061,6 +1135,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /** Each pull request's last catch-up: the head it conflicted at, and when it ran. */
   const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
   /**
+   * Each pull request's merge a catch-up wrote, did not push, and could not put back: the one tip
+   * ahead of GitHub's head a later catch-up may rewind. In memory: after a restart that tip gets the card.
+   */
+  const unpushedHead = new Map<BatchId, string>();
+  /**
    * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
    * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
    * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
@@ -1078,7 +1157,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * the branch: the merge, the install and the generators of a gate's base update, the pre-check or the
    * gate on the result, then the push. A worktree made here goes again at the end, whatever happened.
    */
-  async function catchUpSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
+  async function catchUpSteps(
+    batchId: BatchId,
+    signal: AbortSignal,
+    cause: CatchUpCause,
+  ): Promise<void> {
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;
     const batch = getBatch(db, batchId);
@@ -1095,14 +1178,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
         deps.logger.warn({ batchId, err: detailOf(error) }, 'pull request not read to catch it up');
       return;
     }
-    if (status?.state !== PrState.Open || !conflicting(status)) return;
-    const startedAt = deps.clock.now().getTime();
-    const last = lastCatchUp.get(batchId);
-    // Once per head until the retry time: a failure that raised its card is not tried every round.
-    if (last?.head === status.headSha && startedAt - last.at < CATCH_UP_RETRY_MS) return;
-    lastCatchUp.set(batchId, { head: status.headSha, at: startedAt });
+    if (status?.state !== PrState.Open) return;
+    // The watch saw this a round ago: a check that has appeared since, running or finished, is
+    // never pushed over.
+    if (cause === 'checks' ? !checksNeverStarted(status) : !conflicting(status)) return;
+    if (cause === 'conflict') {
+      const startedAt = deps.clock.now().getTime();
+      const last = lastCatchUp.get(batchId);
+      // Once per head until the retry time: a failure that raised its card is not tried every round.
+      if (last?.head === status.headSha && startedAt - last.at < CATCH_UP_RETRY_MS) return;
+      lastCatchUp.set(batchId, { head: status.headSha, at: startedAt });
+    }
     /** Raises the one card; neither notice says the same thing as well. */
     const stop = (why: CatchUpStop): void => {
+      if (cause === 'checks') {
+        // Not a conflict: the watch's notice says the checks never started, and the card would not fit.
+        deps.logger.warn({ batchId, prUrl, stop: why.kind }, 'checks not started again');
+        return;
+      }
       raise(deps.inbox, batch.projectId, prCards.catchUpStopped(getBatch(db, batchId), why));
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict, NOTICE_KEY.merge]);
       mergeAgain.add(batchId);
@@ -1110,6 +1203,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     };
     let made = false;
     let before: string | null = null;
+    /** The head the base update wrote (its merge, then the generators' commit); null while none has. */
+    let wrote: string | null = null;
     let pushed = false;
     let keptAt: string | null = null;
     try {
@@ -1123,6 +1218,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // A CI fix of this pull request that still runs lets go of the branch when it ends: asked
         // again next round. Until then the pull request says it conflicts, as no card does yet.
         if (heldByRunningFix(batch, holder)) {
+          if (cause === 'checks') return;
           lastCatchUp.delete(batchId);
           showNotice(deps.state, batchId, updateNotices.waiting(getBatch(db, batchId)));
           return;
@@ -1157,15 +1253,40 @@ export function createShipper(deps: ShipperDeps): Shipper {
               message: `Merge the pull request's branch ${branch} from GitHub`,
             });
           else await deps.git.fastForwardBranch(main, branch, head);
-        } else if (await deps.git.isAncestor(main, head, tip))
-          // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
+        } else if (await deps.git.isAncestor(main, head, tip)) {
+          // Only the merge an earlier catch-up of this run wrote, and neither pushed nor put back, goes:
+          // this one starts from the head. Anything else, a merge the builder made included, stays.
+          const recorded = unpushedHead.get(batchId);
+          if (recorded !== tip) {
+            // When the tip descends from the merge 10db left unpushed, that merge is 10db's, not a
+            // commit to push: only the commits after it are named.
+            const ownMerge =
+              recorded !== undefined && (await deps.git.isAncestor(main, recorded, tip))
+                ? recorded
+                : null;
+            const extra = (await deps.git.commitsSince(main, ownMerge ?? head, tip)).reverse();
+            const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
+            const one = extra.length === 1;
+            const them = one ? 'it' : 'them';
+            // Pushing commits that sit on 10db's merge would push the merge too: they move onto the head first.
+            const action =
+              ownMerge === null
+                ? ` Push ${them} to the pull request, or drop ${them} from the local branch.`
+                : ` ${one ? 'It sits' : 'They sit'} on 10db's own unpushed merge ${ownMerge.slice(0, 7)}, which was not gated: pushing ${them} as ${one ? 'it is' : 'they are'} would push that merge too. Move ${them} onto the pull request's head with \`git rebase --onto ${head.slice(0, 7)} ${ownMerge.slice(0, 7)} ${branch}\` and push, or drop ${them} from the local branch.`;
+            stop({
+              kind: 'other',
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks that 10db did not write (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone.${action}`,
+            });
+            return;
+          }
+          unpushedHead.delete(batchId);
           await deps.git.rewindBranch(
             kept && batch.worktreePath !== null ? batch.worktreePath : main,
             branch,
             tip,
             head,
           );
-        else {
+        } else {
           stop({
             kind: 'other',
             why: `${branch} here and the pull request's branch on GitHub each have commits the other lacks, so 10db can't tell which is current.`,
@@ -1189,6 +1310,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
+        // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
+        // since the install and the generators run long enough for the builder to commit meanwhile.
+        if (update.kind === 'merged') wrote = update.head;
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
@@ -1234,7 +1358,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(getBatch(db, batchId), project, branch, signal);
       pushed = true;
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
-      showNotice(deps.state, batchId, updateNotices.merged(getBatch(db, batchId), resolved));
+      showNotice(
+        deps.state,
+        batchId,
+        cause === 'checks'
+          ? updateNotices.restarted(getBatch(db, batchId), resolved)
+          : updateNotices.merged(getBatch(db, batchId), resolved),
+      );
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
       withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
       mergeAgain.add(batchId);
@@ -1252,23 +1382,41 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (made) await retire(batchId);
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
-      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt);
+      if (pushed) unpushedHead.delete(batchId);
+      else if (before !== null) await rewind(batchId, main, branch, before, wrote, keptAt);
     }
   }
 
-  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  /**
+   * Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. Only
+   * the head the base update wrote (`wrote`) goes: a tip past it holds a commit the builder made
+   * meanwhile, and a tip with no head written (a stop before the update answered) is not known to be
+   * 10db's, so either stays, and the next catch-up's card names the commits.
+   */
   async function rewind(
     batchId: BatchId,
     main: string,
     branch: string,
     to: string,
+    wrote: string | null,
     keptAt: string | null,
   ): Promise<void> {
+    let tip: string | null = null;
     try {
-      const tip = await deps.git.branchTip(main, branch);
+      tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
+      if (tip !== wrote) {
+        deps.logger.warn(
+          { batchId, branch, tip, wrote },
+          'branch left as it is after a catch-up that was not pushed: it holds more than 10db wrote',
+        );
+        return;
+      }
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
+      unpushedHead.delete(batchId);
     } catch (error) {
+      // The merge stays on the branch: the next catch-up of this run may take it back from GitHub's head.
+      if (tip !== null && tip !== to) unpushedHead.set(batchId, tip);
       deps.logger.warn(
         { batchId, branch, err: detailOf(error) },
         'branch not put back after a catch-up that was not pushed',
@@ -1292,18 +1440,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
   }
 
-  function catchUp(batchId: BatchId): void {
+  function queueCatchUp(batchId: BatchId, cause: CatchUpCause): void {
     const batch = getBatch(db, batchId);
     if (!landsItself(batch) || catchingUp.has(batchId)) return;
     catchingUp.add(batchId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
-        await catchUpSteps(batchId, signal);
+        await deps.git.operation(() => catchUpSteps(batchId, signal, cause));
       } finally {
         catchingUp.delete(batchId);
       }
     });
   }
+
+  const catchUp = (batchId: BatchId): void => {
+    queueCatchUp(batchId, 'conflict');
+  };
+  const restartCi = (batchId: BatchId): void => {
+    queueCatchUp(batchId, 'checks');
+  };
 
   function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
     const batch = getBatch(db, batchId);
@@ -1339,10 +1494,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   return {
     catchUp,
+    restartCi,
     retryMerge,
     checkBatch,
     checkOpenBatches() {
       for (const batch of listBatches(db, { states: [BatchState.Open] })) checkBatch(batch.id);
+    },
+    checkSupersededBatches() {
+      for (const batch of listBatches(db, { states: [BatchState.Open] })) {
+        if (listWorkstreams(db, { batchId: batch.id }).some((m) => superseded(db, m)))
+          checkBatch(batch.id);
+      }
     },
     resume,
     ship,

@@ -1683,6 +1683,32 @@ describe('createClaudeAdapter', () => {
     expect(changes.map((l) => l['permissionMode'])).toEqual(['default']);
   });
 
+  it('logs a later init whose permission mode differs from the first, and only then', async () => {
+    // A second init (after a compaction or restart) is otherwise skipped without a trace.
+    const logs = captureLogs();
+    const fake = fakeQuery({
+      messages: [
+        { ...initMessage(), permissionMode: 'auto' as const },
+        { ...initMessage(), permissionMode: 'auto' as const },
+        { ...initMessage(), permissionMode: 'default' as const },
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      lanePermissionMode: 'auto',
+    });
+    const events = await collect(adapter.start(spec({ sandbox: laneSandbox })).events);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+    const billing = logs.lines().filter((l) => l['msg'] === 'claude session billing');
+    expect(billing.map((l) => l['permissionMode'])).toEqual(['auto']);
+    const changes = logs.lines().filter((l) => l['msg'] === 'claude session permission mode');
+    expect(changes.map((l) => l['permissionMode'])).toEqual(['default']);
+  });
+
   it("tells a sandboxed session's builder to check the account, not a settings file it never loads", async () => {
     const clock = new ManualClock();
     const { adapter } = adapterFor(

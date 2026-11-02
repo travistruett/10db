@@ -98,7 +98,8 @@ export const BuilderToolInputs = {
     })
     .refine(changesSomething, { message: CHANGE_NOTHING }),
   [BuilderToolName.RemoveTask]: z.object({ taskId: TaskId }),
-  [BuilderToolName.StartTask]: z.object({ taskId: TaskId }),
+  // `fresh` is StartTaskInput's: start a task whose latest run failed over from the base branch.
+  [BuilderToolName.StartTask]: z.object({ taskId: TaskId, fresh: z.boolean().optional() }),
   [BuilderToolName.MoveTask]: z
     .object({
       taskId: TaskId,
@@ -129,7 +130,7 @@ export const BUILDER_INSTRUCTIONS = [
   'Drafting a task (create_task, edit_task):',
   '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
-  "- Areas come from list_projects, for the project the task belongs to. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the riskTags migration or dependency; a task that touches neither names no hazard.",
+  "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the riskTags migration or dependency; a task that touches neither names no hazard.",
   '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
   '- Add dependsOn (ids of open tasks from list_tasks) and riskTags only when needed. Omit flowId to use the project default. Omit landing too: a new task lands where the project says by default.',
   '- Create the task without asking for confirmation, then report its title and id. The builder reads the board, and can edit or remove it.',
@@ -142,7 +143,7 @@ const DRAFTING =
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
-    'Lists 10db projects with their ids, areas (the names a task may use), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
+    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
   [BuilderToolName.ListFlows]:
     'Lists the flows, the step sequences a task can run through, with their ids. Omit flowId on create_task for the default.',
   [BuilderToolName.ListTasks]:
@@ -152,7 +153,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:
-    "Starts a task that is Ready (nothing it depends on is unfinished), or starts a held task again (the Board's Start). Refuses any other task, one that waits on unfinished dependencies, and one with a run in progress.",
+    "Starts a task that is Ready (nothing it depends on is unfinished), or starts a held task again (the Board's Start). Refuses any other task, one that waits on unfinished dependencies, and one with a run in progress. A task whose latest run failed is not Ready: pass fresh: true to start it over from the base branch (the drawer's Start over), in a new batch; the failed attempt's batch is abandoned when it holds only that task's work, and its branch is kept. Omit fresh for any other start.",
   [BuilderToolName.MoveTask]:
     'Moves a task to a board column: to is a column id from list_projects, or null to return it to Planned. This is how to park a task. after and before are optional neighbour task ids for the position.',
   [BuilderToolName.RunNext]:

@@ -49,6 +49,8 @@ export interface TaskCardMenuProps {
   readonly onHold?: () => void;
   /** Present for a held task: removing it deletes its worktree and branch. */
   readonly onRemove?: () => void;
+  /** Present when the task's run can still stop; the board asks the builder to confirm. */
+  readonly onCancelRun?: () => void;
   /** Present when the task's workstream failed and the daemon will retry it. */
   readonly onRetry?: () => void;
   /** Present when the task's batch is open or not shipped; abandoning deletes the branch when nothing is committed on it, keeps it otherwise, and cancels its unfinished tasks. */
@@ -76,6 +78,7 @@ export function TaskCardMenu({
   hold = null,
   onHold,
   onRemove,
+  onCancelRun,
   onRetry,
   onAbandon,
   abandonRefusal = null,
@@ -140,7 +143,14 @@ export function TaskCardMenu({
             Remove
           </Menu.Item>
         ) : null}
-        {onRetry || onAbandon || onCloseTask || onReopenTask ? <Menu.Divider /> : null}
+        {onCancelRun || onRetry || onAbandon || onCloseTask || onReopenTask ? (
+          <Menu.Divider />
+        ) : null}
+        {onCancelRun ? (
+          <Menu.Item color="red" onClick={onCancelRun}>
+            Cancel Run
+          </Menu.Item>
+        ) : null}
         {onRetry ? <Menu.Item onClick={onRetry}>Retry</Menu.Item> : null}
         {onReopenTask ? <Menu.Item onClick={onReopenTask}>Reopen</Menu.Item> : null}
         {onCloseTask ? (
