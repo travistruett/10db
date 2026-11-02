@@ -26,7 +26,7 @@ import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
-import { landingWarnings, missingLandingBranch } from './landing';
+import { landingWarnings, missingLandingBranch, type SameStart } from './landing';
 import { seedNotices } from './notices';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
@@ -54,6 +54,7 @@ export async function cutWorktree(
   batchId: BatchId,
   plans: CutTasks,
   signal: AbortSignal,
+  sameStart?: SameStart,
 ): Promise<void> {
   const db = ctx.state.db;
   const batch = getBatch(db, batchId);
@@ -124,7 +125,14 @@ export async function cutWorktree(
     }
     // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base
     // or that nothing else uses.
-    for (const notice of await landingWarnings(ctx, project, batch, plans.keys(), signal)) {
+    for (const notice of await landingWarnings(
+      ctx,
+      project,
+      batch,
+      plans.keys(),
+      signal,
+      sameStart,
+    )) {
       if (stopped()) break;
       try {
         showNotice(ctx.state, batchId, notice);
