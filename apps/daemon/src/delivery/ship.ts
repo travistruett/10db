@@ -9,6 +9,7 @@ import {
   isTerminal,
   LANE_STATES,
   latestPerTask,
+  McpToolName,
   shipReadiness,
   ShipReadiness,
   StepRole,
@@ -23,10 +24,12 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  clearBatchNotice,
   clearLease,
   getBatch,
   getProject,
   getTask,
+  hasToolOp,
   listBatches,
   listEvidence,
   listPermissionRules,
@@ -34,6 +37,7 @@ import {
   patchBatch,
   patchWorkstream,
   releaseClaims,
+  setBatchNotice,
   setTaskStatus,
   transitionBatch,
   transitionWorkstream,
@@ -88,7 +92,7 @@ import {
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
-import { gateNotices, mergeNotices, NOTICE_KEY, updateNotices } from './notices';
+import { gateNotices, mergeNotices, NOTICE_KEY, supersededNotices, updateNotices } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
@@ -160,16 +164,30 @@ export interface Shipper {
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
 
 /**
- * A batch's members: each task's latest workstream in it, except a failed one its task started over
- * from: the task's current workstream is another, so nothing can retry this one and it holds nothing
- * the batch should wait for. The batch ships the work of the rest.
+ * A failed member its task started over from: the task's current workstream is another, so nothing
+ * can retry this one.
+ */
+function superseded(db: DbReader, member: WorkstreamDto): boolean {
+  if (member.state !== WorkstreamState.Failed) return false;
+  const current = getTask(db, member.taskId).workstreamId;
+  return current !== null && current !== member.id;
+}
+
+/** Whether the attempt committed through the commit tool, so its commits may be on the batch's branch. */
+function committed(db: DbReader, member: WorkstreamDto): boolean {
+  return hasToolOp(db, member.id, McpToolName.Commit);
+}
+
+/**
+ * A batch's members: each task's latest workstream in it, except a superseded one that committed
+ * nothing. It holds nothing the batch should wait for, so the batch ships the work of the rest. One
+ * that committed stays a member: its commits are on the branch and passed no gate or review, so the
+ * batch ships them only through Ship anyway, and its tasks' notice says so (`supersededNotices`).
  */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
-  return latestPerTask(listWorkstreams(db, { batchId })).filter((m) => {
-    if (m.state !== WorkstreamState.Failed) return true;
-    const current = getTask(db, m.taskId).workstreamId;
-    return current === null || current === m.id;
-  });
+  return latestPerTask(listWorkstreams(db, { batchId })).filter(
+    (m) => !superseded(db, m) || committed(db, m),
+  );
 }
 
 /**
@@ -982,8 +1000,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
-      if (shipReadiness(members(w.tx, batchId).map((m) => m.state)) !== ShipReadiness.Ready)
-        return false;
+      const current = members(w.tx, batchId);
+      const left = current.filter((m) => superseded(w.tx, m)).map((m) => m.taskTitle);
+      if (left.length > 0) setBatchNotice(w, batchId, supersededNotices.committed(batch, left));
+      else clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
+      if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Ready) return false;
       transitionBatch(w, batchId, {
         to: BatchState.Shipping,
         reason: 'every workstream is done or cancelled',
