@@ -66,6 +66,14 @@ const REFUSAL: GoalAdoptIssue[] = [
   { path: 'Task 1, areas', message: 'the project has no area "web"' },
 ];
 
+/** The dimmed line Factory shows while the project has no goals. */
+const NO_GOALS = /^Goals are outcomes 10db pursues across many tasks/;
+
+/** A goal's row: a button whose accessible name starts with the goal's title. */
+function rowOf(title: string): Promise<HTMLElement> {
+  return screen.findByRole('button', { name: new RegExp(`^${title}`) });
+}
+
 /** Mantine leaves `data-variant` off a button of its default, filled variant. */
 function isFilled(button: HTMLElement): boolean {
   return (button.getAttribute('data-variant') ?? 'filled') === 'filled';
@@ -73,7 +81,7 @@ function isFilled(button: HTMLElement): boolean {
 
 async function adopt(): Promise<void> {
   // The goal list appears once the project is selected and its goals have loaded.
-  await screen.findByRole('heading', { name: 'Goals' });
+  await screen.findByRole('group', { name: 'Goals' });
   fireEvent.click(await screen.findByRole('button', { name: 'Adopt a Plan…' }));
 }
 
@@ -83,7 +91,7 @@ describe('Adopt a Plan…', () => {
     serve();
     renderApp('/factory');
     const button = await screen.findByRole('button', { name: 'Adopt a Plan…' });
-    await screen.findByText('No workstreams are running.');
+    await screen.findByText(NO_GOALS);
     // The shell's navigation links are buttons too, but they are not Mantine Buttons.
     const buttons = screen
       .getAllByRole('button')
@@ -117,16 +125,13 @@ describe('Adopt a Plan…', () => {
       ),
     );
     renderApp('/factory');
-    await screen.findByText('No goals yet.');
+    await screen.findByText(NO_GOALS);
 
     await adopt();
 
-    const row = (await screen.findByText('Ship the importer')).closest('tr');
-    if (!row) throw new Error('the goal is not in a table row');
-    expect(within(row).getByText('Running')).toBeTruthy();
-    expect(within(row).getByText('1 of 3 tasks done')).toBeTruthy();
-    expect(within(row).getByText('2 new')).toBeTruthy();
-    expect(screen.queryByText('No goals yet.')).toBeNull();
+    const row = await rowOf('Ship the importer');
+    expect(row.textContent).toContain('Running · 1 of 3 tasks done · 2 new');
+    expect(screen.queryByText(NO_GOALS)).toBeNull();
     expect(screen.queryByText("This plan can't be adopted yet")).toBeNull();
   });
 
@@ -169,7 +174,7 @@ describe('Adopt a Plan…', () => {
 
     fireEvent.click(within(modal).getByRole('button', { name: 'Pick Again…' }));
 
-    expect(await screen.findByText('Ship the importer')).toBeTruthy();
+    expect(await rowOf('Ship the importer')).toBeTruthy();
     expect(native.asked).toHaveLength(2);
     expect(daemon.posted).toEqual([
       { path: PLAN, dryRun: false },
@@ -208,7 +213,7 @@ describe('Adopt a Plan…', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(daemon.posted).toHaveLength(1);
-    expect(screen.getByText('No goals yet.')).toBeTruthy();
+    expect(screen.getByText(NO_GOALS)).toBeTruthy();
   });
 
   it('says so when the daemon fails for a reason other than the brief', async () => {
@@ -229,8 +234,6 @@ describe('the goal list', () => {
     );
     panel();
     renderApp('/factory');
-    const row = (await screen.findByText('Older goal')).closest('tr');
-    if (!row) throw new Error('the goal is not in a table row');
-    expect(within(row).getByText('Waiting on you')).toBeTruthy();
+    expect((await rowOf('Older goal')).textContent).toContain('Waiting on you');
   });
 });
