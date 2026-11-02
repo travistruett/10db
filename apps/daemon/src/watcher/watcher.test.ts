@@ -1893,6 +1893,43 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it('does not let an excuse recorded while the file was missing excuse a later deletion of it', async () => {
+      const lane = running();
+      watcher.sync();
+      touch(SENSITIVE_FILE);
+      execFileSync('git', ['add', SENSITIVE_FILE], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', 'Add .mcp.json'], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      // The lane removed the file inside the batch window, so the card is used with the file missing.
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      // Later the file is back, and a deletion no card allowed removes it again.
+      touch(SENSITIVE_FILE);
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it("does not let a finished lane's excused write excuse another lane's write in the checkout", async () => {
+      const done = running('Alpha', ['ui']);
+      watcher.sync();
+      editCard(done, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      state.write((ctx) =>
+        transitionWorkstream(ctx, done.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      const next = running('Beta', ['api']);
+      watcher.sync();
+      // The file is unchanged since the excused write, so its stamp still matches.
+      expect(await watcher.stepEnd(next.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
     describe('after the daemon restarts', () => {
       const restart = (): void => {
         watcher.stop();

@@ -123,11 +123,15 @@ export function relativeIn(root: string, path: string): string | null {
   return null;
 }
 
-/** What identifies the current write to a file: its modification time to the nanosecond, or `gone`. */
-export function writeStamp(root: string, rel: string): string {
+/**
+ * What identifies the current write to a file: its modification time to the nanosecond, or null when the
+ * file is missing. A missing file has no write to tell apart from the next deletion of it, so no stamp is
+ * ever recorded or matched for one.
+ */
+export function writeStamp(root: string, rel: string): string | null {
   try {
     return String(statSync(resolve(root, rel), { bigint: true }).mtimeNs);
   } catch {
-    return 'gone';
+    return null;
   }
 }
