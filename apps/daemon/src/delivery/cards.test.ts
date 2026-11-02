@@ -82,6 +82,7 @@ describe('batch cards', () => {
 describe('the cards of a batch that failed to ship', () => {
   const failures: Record<string, ShipFailure> = {
     'dirty checkout': shipCards.dirtyCheckout(batch, ['a.ts']),
+    'base markers': shipCards.baseMarkers(batch, ['a.ts']),
     'gate failed': shipCards.gateFailed(batch, gate),
     'gate failed twice, unrelated': shipCards.gateFailedUnrelated(batch, null, []),
     'gate timed out': shipCards.gateTimedOut(batch, 60_000, '/data/logs/gate/b.log'),

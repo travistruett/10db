@@ -592,7 +592,7 @@ export const shipCards = {
     card: {
       title: `${notShipped(batch)}: conflict markers from the merge of ${batch.baseBranch} are still in the branch`,
       body: `10db merged origin/${batch.baseBranch} into the branch for a task's gate and left git's conflict markers for a session to resolve. They are still in:\n${listPaths(paths)}\n\nNo gate ran and nothing was pushed. Start a fix task in the batch to resolve them (it reopens the batch), or resolve them by hand in the batch's worktree and commit, then press Retry in a task's drawer on the Board to ship again.`,
-      detail: { batchId: batch.id },
+      detail: answers(batch),
     },
   }),
   /**
