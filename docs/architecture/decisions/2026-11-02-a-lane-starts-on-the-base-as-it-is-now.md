@@ -29,3 +29,12 @@ keeps its copy, because its own changes are in it and a merge under a resumed co
 - A batch in the builder's own checkout is never merged into, and a CI fix batch is left on the pull request's head
   (`ciFixHead`), so neither calls the base.
 - Nothing stops the lane: whatever `atLaunch` answers, or throws, the session starts (a stop still wins).
+
+## Why
+
+- The lane cannot merge the base itself (its git directory is read-only), so the launch is the last moment anything can
+  bring in what merged since the task started. Doing it there reuses the merge a gate already does, not a second path.
+- A lane that has run a session keeps its copy: its own changes are in it, and a merge under a resumed conversation
+  would surprise it. Only a lane with no `baseHead` yet is brought up to date.
+- Never stopping the lane means a failed fetch or a conflict costs the lane a stale copy, which is what it had before,
+  and the notices tell the builder, instead of leaving the task blocked on a base problem.
