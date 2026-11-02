@@ -126,7 +126,9 @@ describe('proposeAreas without a model', () => {
     gitIn(repo.path, 'add', ...paths);
     gitIn(repo.path, 'commit', '-q', '-m', 'packages');
     const { areas } = await proposal(repo.path);
-    expect(namesOf(areas)).toEqual(['a', 'b']);
+    // The top holds no file, but it is the catch-all a file added there falls in.
+    expect(namesOf(areas)).toEqual(['a', 'b', 'root']);
+    expect(areas.find((a) => a.name === 'root')?.catchAll).toBe(true);
   });
 
   it('names no area like a default hazard', async () => {

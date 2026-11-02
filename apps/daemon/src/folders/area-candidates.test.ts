@@ -193,13 +193,22 @@ describe('deriveAreaCandidates', () => {
     expect(deriveAreaCandidates([])).toEqual([]);
   });
 
-  it('leaves out the top of a repository that holds no file of its own', () => {
+  // The rest is the project's catch-all, which a file added later falls in, so it stays even when it
+  // holds no file yet (it used to be left out, and a new top-level file then had no area).
+  it('keeps the top of a repository that holds no file of its own, with the globs of its top', () => {
     const tracked = [
       ...files('packages/a', ['package.json', 'x.ts']),
       ...files('packages/b', ['package.json', 'y.ts']),
     ];
     const candidates = deriveAreaCandidates(tracked);
-    expect(candidates.map((c) => c.label).sort()).toEqual(['packages/a', 'packages/b']);
+    expect(candidates.map((c) => c.label).sort()).toEqual(['.', 'packages/a', 'packages/b']);
+    const rest = candidates.find((c) => c.kind === AreaCandidateKind.Rest);
+    expect(rest).toMatchObject({ files: 0, globs: ['*', '.*'] });
+    expectEachFileInOneCandidate(tracked);
+  });
+
+  it('has no candidate at all for a repository with no file', () => {
+    expect(deriveAreaCandidates([])).toEqual([]);
   });
 
   it('gives every candidate a file and a glob when a route group holds no file of its own', () => {
@@ -212,7 +221,9 @@ describe('deriveAreaCandidates', () => {
     const candidates = deriveAreaCandidates(tracked);
     expect(candidates.length).toBeGreaterThan(0);
     for (const candidate of candidates) {
-      expect(candidate.files, candidate.label).toBeGreaterThan(0);
+      // The rest may hold no file: it is the catch-all, and has globs of the top regardless.
+      if (candidate.kind !== AreaCandidateKind.Rest)
+        expect(candidate.files, candidate.label).toBeGreaterThan(0);
       expect(candidate.globs.length, candidate.label).toBeGreaterThan(0);
     }
     for (const file of tracked)

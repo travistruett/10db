@@ -7,6 +7,7 @@ import {
   draftsFromAreas,
   mergeDrafts,
   removeDraft,
+  setCatchAll,
   setGlobs,
   setName,
   WHOLE_REPOSITORY,
@@ -136,6 +137,69 @@ describe('draftProblems', () => {
     expect(draftProblems(setGlobs(drafts, key, globs)).rows.get(key)).toMatchObject({
       globs: message,
     });
+  });
+});
+
+describe('the catch-all area', () => {
+  const withRest = proposed.map((a) => (a.name === 'root' ? { ...a, catchAll: true } : a));
+  const catchAllNames = (drafts: ReturnType<typeof draftsFromAreas>) =>
+    areasOf(drafts)
+      .filter((a) => a.catchAll === true)
+      .map((a) => a.name);
+
+  it('is read from the proposal and sent back as the builder left it', () => {
+    const drafts = draftsFromAreas(withRest);
+    expect(drafts.map((d) => d.catchAll)).toEqual([false, false, true]);
+    expect(areasOf(drafts)).toEqual([
+      { name: 'daemon', globs: ['apps/daemon/**', 'apps/daemon/.*'] },
+      { name: 'desktop', globs: ['apps/desktop/**'] },
+      { name: 'root', globs: ['*', '.*'], catchAll: true },
+    ]);
+  });
+
+  it('is absent from every area of a proposal that names none', () => {
+    expect(catchAllNames(draftsFromAreas(proposed))).toEqual([]);
+    for (const area of areasOf(draftsFromAreas(proposed)))
+      expect(area).not.toHaveProperty('catchAll');
+  });
+
+  it('moves to another area when the builder picks it, so there is never more than one', () => {
+    const drafts = draftsFromAreas(withRest);
+    const moved = setCatchAll(drafts, keyOf(drafts, 'daemon'), true);
+    expect(catchAllNames(moved)).toEqual(['daemon']);
+    expect(draftProblems(moved).whole).toBeNull();
+  });
+
+  it('can be cleared, leaving the project with none', () => {
+    const drafts = draftsFromAreas(withRest);
+    expect(catchAllNames(setCatchAll(drafts, keyOf(drafts, 'root'), false))).toEqual([]);
+  });
+
+  it('clearing an area that is not the catch-all changes nothing', () => {
+    const drafts = draftsFromAreas(withRest);
+    expect(catchAllNames(setCatchAll(drafts, keyOf(drafts, 'daemon'), false))).toEqual(['root']);
+  });
+
+  it('stays with the area it was merged into, and goes to the area that takes it in', () => {
+    const drafts = draftsFromAreas(withRest);
+    const intoRest = mergeDrafts(drafts, keyOf(drafts, 'daemon'), keyOf(drafts, 'root'));
+    expect(catchAllNames(intoRest)).toEqual(['root']);
+    const restInto = mergeDrafts(drafts, keyOf(drafts, 'root'), keyOf(drafts, 'daemon'));
+    expect(catchAllNames(restInto)).toEqual(['daemon']);
+  });
+
+  it('is gone with the area when that is removed', () => {
+    const drafts = draftsFromAreas(withRest);
+    expect(catchAllNames(removeDraft(drafts, keyOf(drafts, 'root')))).toEqual([]);
+  });
+
+  it('is not given to an area the builder adds', () => {
+    expect(addDraft(draftsFromAreas(withRest)).at(-1)?.catchAll).toBe(false);
+  });
+
+  it('is refused when two drafts say it, as the daemon would', () => {
+    const drafts = draftsFromAreas(withRest).map((d) => ({ ...d, catchAll: true }));
+    expect(draftProblems(drafts).whole).toBe('Only one area can be the catch-all');
   });
 });
 

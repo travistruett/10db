@@ -59,6 +59,22 @@ hazards changes with it.
   commit is proposed the same one area. Its globs are `WHOLE_REPOSITORY_GLOBS` in `@10db/contracts`: `**`,
   `**/.*` and `**/.*/**`, every file with at most one dot name in its path.
 
+- **One area is the catch-all, so a file added later has an area.** Proposed globs cover only the files that
+  exist when the proposal is made, and glob matching has no negation, so a new package, app, top-level folder
+  or first dotfile fell in no area and the guard refused it (found in review of PR #138). An area may carry
+  `catchAll: true` (`AreaDef`, stored with the area, no migration). `classifyPath` puts a path in the
+  catch-all only when no other area matches it, whatever the catch-all's own globs say, as CODEOWNERS falls
+  back to its widest rule; a path with a `.git` part is in no area, the catch-all's included. A lane holding
+  only the catch-all therefore cannot edit a file another area holds, and a lane holding another area cannot
+  edit a file that falls through. A project has at most one (`atMostOneCatchAll`, checked on create, on patch
+  and on a proposal) and a project with none classifies exactly as before, so the single `repo` area over
+  `**` and every project made before this change are unchanged. The proposal marks the area that holds the
+  rest candidate (the top of the repository and its small folders); that candidate is kept even when it holds
+  no file yet, with the globs `*` and `.*`, so a repository of packages only still has a catch-all. If a
+  model merges the rest into another area, that area is the catch-all. The form and Settings show a
+  "Catch-all" checkbox on each area; choosing one clears the others, and clearing it leaves the project with
+  none.
+
 ## Why
 
 A project with one area covering every file makes every task in Your folder mode overlap every other, so

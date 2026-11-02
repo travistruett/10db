@@ -683,6 +683,69 @@ describe('the areas in the new project', () => {
     });
   });
 
+  describe('the catch-all', () => {
+    const WITH_CATCH_ALL: AreaProposalResult = {
+      ok: true,
+      proposal: {
+        namedBy: 'model',
+        areas: PROPOSAL.proposal.areas.map((a) =>
+          a.name === 'root' ? { ...a, catchAll: true } : a,
+        ),
+      },
+    };
+    const catchAll = (n: number): HTMLInputElement => {
+      const el = screen.getByRole('checkbox', { name: `Area ${String(n)} is the catch-all` });
+      if (!(el instanceof HTMLInputElement)) throw new Error('not an input');
+      return el;
+    };
+
+    it('shows which area the proposal made the catch-all and says what it means', async () => {
+      serve({ proposal: WITH_CATCH_ALL });
+      await openInspected();
+      expect([1, 2, 3].map((n) => catchAll(n).checked)).toEqual([false, false, true]);
+      expect(screen.getAllByText(/holds every file no other area holds/).length).toBeGreaterThan(0);
+    });
+
+    it('creates the project with the catch-all the proposal made', async () => {
+      const served = serve({ proposal: WITH_CATCH_ALL });
+      await openInspected();
+      expect(await createAndRead(served)).toMatchObject({
+        areas: [
+          { name: 'api' },
+          { name: 'web' },
+          { name: 'root', globs: ['*', '.*'], catchAll: true },
+        ],
+      });
+    });
+
+    it('moves to the area the builder picks, and there is never more than one', async () => {
+      const served = serve({ proposal: WITH_CATCH_ALL });
+      await openInspected();
+      fireEvent.click(catchAll(1));
+      expect([1, 2, 3].map((n) => catchAll(n).checked)).toEqual([true, false, false]);
+      const posted = await createAndRead(served);
+      const areas = (posted as { areas: { name: string; catchAll?: boolean }[] }).areas;
+      expect(areas.filter((a) => a.catchAll === true).map((a) => a.name)).toEqual(['api']);
+    });
+
+    it('can be cleared, and then no area is sent as the catch-all', async () => {
+      const served = serve({ proposal: WITH_CATCH_ALL });
+      await openInspected();
+      fireEvent.click(catchAll(3));
+      expect(catchAll(3).checked).toBe(false);
+      const areas = ((await createAndRead(served)) as { areas: object[] }).areas;
+      for (const area of areas) expect(area).not.toHaveProperty('catchAll');
+    });
+
+    it('is not offered on the area a repository with no proposal gets, which holds everything', async () => {
+      const served = serve({ proposal: 'fail' });
+      await openInspected();
+      expect(catchAll(1).checked).toBe(false);
+      const areas = ((await createAndRead(served)) as { areas: object[] }).areas;
+      expect(areas).toEqual([{ name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] }]);
+    });
+  });
+
   it('merges an area into another, which keeps its name and takes both sets of globs', async () => {
     const served = serve();
     await openInspected();

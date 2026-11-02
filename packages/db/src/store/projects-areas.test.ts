@@ -50,6 +50,33 @@ describe('patching areas and hazards', () => {
     expect(getProject(store.db, project.id)).toMatchObject({ areas, hazards });
   });
 
+  it('keeps the catch-all flag of an area, moves it, and drops it when it is cleared', () => {
+    const project = seedProject(store);
+    const set = (areas: { name: string; globs: string[]; catchAll?: boolean }[]) => {
+      store.write((ctx) => patchProject(ctx, project.id, { areas }));
+      return getProject(store.db, project.id).areas;
+    };
+    expect(
+      set([
+        { name: 'api', globs: ['api/**'] },
+        { name: 'root', globs: ['*'], catchAll: true },
+      ]),
+    ).toEqual([
+      { name: 'api', globs: ['api/**'] },
+      { name: 'root', globs: ['*'], catchAll: true },
+    ]);
+    expect(
+      set([
+        { name: 'api', globs: ['api/**'], catchAll: true },
+        { name: 'root', globs: ['*'] },
+      ]),
+    ).toEqual([
+      { name: 'api', globs: ['api/**'], catchAll: true },
+      { name: 'root', globs: ['*'] },
+    ]);
+    expect(set([{ name: 'api', globs: ['api/**'] }])).toEqual([{ name: 'api', globs: ['api/**'] }]);
+  });
+
   it.each([
     ['an absolute path', '/etc/**'],
     ['a parent folder', '../outside/**'],
