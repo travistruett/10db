@@ -112,6 +112,8 @@ function build(): void {
     stay: (projectId) => {
       moves.stay(projectId);
     },
+    recheck: () => undefined,
+    raiseCap: () => undefined,
   });
 }
 

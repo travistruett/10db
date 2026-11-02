@@ -213,7 +213,22 @@ export function movedCard(
     title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report)}`,
     body: `A session on ${account.label} reported that it ${standing(report)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db asks whether to move back once ${account.label}'s limit resets.`,
     foldKey: accountFoldKey(account.id, MOVED_CARD),
-    detail: detail(account, null, null, null, usageDetail(report)),
+    detail: detail(account, null, null, null, {
+      moves: [{ choice: AccountCardChoice.MoveBack, accountId: account.id }],
+      moveBack: true,
+      ...usageDetail(report),
+    }),
+    // The move is done; the builder can undo it, or keep the project where it is and stop the reminder.
+    options: [
+      {
+        label: AccountCardChoice.MoveBack,
+        description: `Run ${project.name} on ${accountDisplayName(account)} again`,
+      },
+      {
+        label: AccountCardChoice.Stay,
+        description: `Keep ${project.name} on ${accountDisplayName(fallback)}, and don't ask to move it back`,
+      },
+    ],
   };
 }
 
@@ -248,14 +263,43 @@ export function moveBackCard(
   };
 }
 
-/** The card's body is rewritten as running sessions end, so it shows the final overshoot. */
+/** The `detail` key of a cap card; it holds the raise its option offers (`CapRaise`). */
+export const CAP_RAISE_DETAIL = 'capRaise';
+
+/** The raise a cap card offers: the account, the answer's label and the cap it sets. */
+export interface CapRaise {
+  readonly accountId: AccountId;
+  readonly choice: string;
+  readonly toUsd: number;
+}
+
+/** A whole-dollar cap, a $10 step clear of what is spent (or of the old cap, if that is higher). */
+export function raisedCap(cap: CapStatus): number {
+  return Math.ceil((Math.max(cap.capUsd, cap.spentUsd) + 10) / 10) * 10;
+}
+
+/**
+ * The card's body, option and detail are rewritten as running sessions end, so they show the final
+ * overshoot. Raise cap sets the cap it names and lifts the pause; waiting for the month's end needs no answer.
+ */
 export function capCard(account: AccountRow, cap: CapStatus): AccountCard {
   const over = cap.spentUsd - cap.capUsd;
+  const toUsd = raisedCap(cap);
+  const choice = `Raise cap to ${money(toUsd).replace('.00', '')}`;
   return {
     title: `${account.label} reached its monthly cap`,
-    body: `${money(cap.spentUsd)} of its ${money(cap.capUsd)} cap is spent in ${cap.window.month}${over > 0 ? `, ${money(over)} over` : ''}. New sessions on ${account.label} wait until ${cap.window.end.toISOString()} or until the cap is raised. Sessions already running finish, and this card shows what they add.`,
+    body: `${money(cap.spentUsd)} of its ${money(cap.capUsd)} cap is spent in ${cap.window.month}${over > 0 ? `, ${money(over)} over` : ''}. New sessions on ${account.label} wait until ${cap.window.end.toISOString()} or until the cap is raised: answer ${choice} to raise it now. Sessions already running finish, and this card shows what they add.`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.MonthlyCap),
-    detail: detail(account, AccountPauseReason.MonthlyCap, null, null),
+    detail: {
+      ...detail(account, AccountPauseReason.MonthlyCap, null, null),
+      [CAP_RAISE_DETAIL]: { accountId: account.id, choice, toUsd },
+    },
+    options: [
+      {
+        label: choice,
+        description: `Set ${account.label}'s monthly cap to ${money(toUsd)} and let its work run`,
+      },
+    ],
   };
 }
 
@@ -311,11 +355,18 @@ export function signInCard(account: AccountRow, why: string | null = null): Acco
       : `${why}, so ${account.label} may be signed out`;
   return {
     title: `Sign in the account ${account.label}`,
-    body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommand(account.configDir)}`,
+    body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommand(account.configDir)}, then answer Check again to try now.`,
     foldKey: accountFoldKey(account.id, AccountProblem.SignedOut),
     detail: detail(account, null, AccountProblem.SignedOut, null),
+    options: [checkAgain(account)],
   };
 }
+
+/** Probe the account now instead of at the next minute; what the cards that wait for a fix answer. */
+const checkAgain = (account: AccountRow): InboxOption => ({
+  label: AccountCardChoice.CheckAgain,
+  description: `I fixed it: look at ${account.label} again now`,
+});
 
 /**
  * The default account's identity is recorded from its first probe without a Confirm (it is the builder's current
@@ -324,9 +375,15 @@ export function signInCard(account: AccountRow, why: string | null = null): Acco
 export function recordedCard(account: AccountRow, email: string): AccountCard {
   return {
     title: `${account.label} runs as ${email}`,
-    body: `10db recorded ${email}, the login in ${account.configDir ?? "Claude Code's default directory"}, as ${account.label}'s identity, and runs its sessions only while they report it. If that is the wrong login, sign in as the right one with: ${signInCommand(account.configDir)}. The next session is then refused, and its card offers Confirm.`,
+    body: `10db recorded ${email}, the login in ${account.configDir ?? "Claude Code's default directory"}, as ${account.label}'s identity, and runs its sessions only while they report it. If that is the wrong login, sign in as the right one with: ${signInCommand(account.configDir)}, then answer Record again: 10db forgets ${email} and records the login the directory holds now.`,
     foldKey: accountFoldKey(account.id, 'recorded'),
     detail: detail(account, null, null, email),
+    options: [
+      {
+        label: AccountCardChoice.RecordAgain,
+        description: `Forget ${email} and record the login ${account.label} runs as now`,
+      },
+    ],
   };
 }
 
@@ -336,6 +393,7 @@ export function secretCard(account: AccountRow): AccountCard {
     body: `${account.label} has no secret yet, so its work waits. ${fixFor(account, AccountProblem.SecretMissing)}`,
     foldKey: accountFoldKey(account.id, AccountProblem.SecretMissing),
     detail: detail(account, null, AccountProblem.SecretMissing, null),
+    options: [checkAgain(account)],
   };
 }
 
@@ -346,5 +404,6 @@ export function credentialsCard(account: AccountRow, refusal: AccountRefusal): A
     body: `${refusal.message}. ${account.label}'s work waits; 10db tries again in a minute. ${fixFor(account, AccountProblem.WrongCredentials)}`,
     foldKey: accountFoldKey(account.id, AccountProblem.WrongCredentials),
     detail: detail(account, null, AccountProblem.WrongCredentials, null),
+    options: [checkAgain(account)],
   };
 }

@@ -938,6 +938,12 @@ function prDetail(batch: BatchDto, link: string): Record<string, Json> {
   return { batchId: batch.id, prUrl: batch.prUrl, link };
 }
 
+/** The `detail` key marking the gh card, whose Check again reads the followed pull requests now. */
+export const GH_CHECK_DETAIL = 'ghCheck';
+
+/** The answer of the gh card: the watch reads every followed pull request again at once. */
+export const GH_CHECK_CHOICE = 'Check again';
+
 /** The `detail` key of a stop card that offers Retry; it holds the root batch's id. */
 export const CI_RERUN_DETAIL = 'ciRerun';
 
@@ -1096,13 +1102,19 @@ export const prCards = {
    */
   ghUnavailable: (batch: BatchDto, error: unknown): Card => ({
     ...prCards.ghUnavailableText(error),
-    detail: { batchId: batch.id, prUrl: batch.prUrl },
+    detail: { batchId: batch.id, prUrl: batch.prUrl, [GH_CHECK_DETAIL]: true },
+    options: [
+      {
+        label: GH_CHECK_CHOICE,
+        description: 'Read every followed pull request now, once gh works',
+      },
+    ],
   }),
   /** The gh card without its detail: what an open one is rewritten with when gh fails another way. */
   ghUnavailableText: (error: unknown): Card => {
     const kind = error instanceof GhError ? error.kind : null;
     const until =
-      'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking.';
+      'Until then the status of shipped pull requests stays unknown here. Nothing else is affected, and 10db keeps checking; once gh works, answer Check again to read them now.';
     const foldKey = prCardKey.ghUnavailable;
     if (kind === 'signed_out')
       return {

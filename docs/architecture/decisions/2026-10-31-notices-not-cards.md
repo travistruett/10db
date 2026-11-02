@@ -99,6 +99,32 @@ card, raised with it, has the Retry. No start refusal became a notice: a task th
 batch to hold one (`workstreams.notice`, `batches.notices`), and each refusal has a real next step the builder takes
 by answering, so none "asks nothing". The Board already shows a refused task's line from its card (`start-note.ts`).
 
+## The gh card and the account cards (2026-11-02)
+
+Each of these stays an Inbox card with an answer the daemon acts on; none became a notice, because none belongs to a
+task (a notice lives on a run or a batch: `workstreams.notice`, `batches.notices`) and each has a next step the
+builder takes by answering. None offers only a Dismiss, and the cards below that wait for a fix still close
+themselves once it is made (`resolvesWhen`, or the existing closing of settled cards).
+
+- **"Pull request status unknown: gh …"** (`prCards.ghUnavailable`) offers **Check again**
+  (`delivery/gh-card.ts`, `createGhCardAnswers`): the pull request watch reads every followed pull request now
+  (`poke`) instead of at its next interval. If gh still fails, the round raises a fresh card saying how.
+- **Sign in, Fix the credentials, Set the secret** offer **Check again**: `AccountPreparer.retry` probes at once,
+  whatever the last probe's time. A ready account closes the cards that asked for the fix and asks for a tick; a
+  secret that is still missing throws a `ConflictError`, which keeps the card open and says what is missing.
+- **"<account> runs as <email>"** (the default account's login, recorded on its first probe) offers **Record again**:
+  after the builder signed in as the right login, 10db forgets the recorded identity and records the one the directory
+  holds now (`retry` with `forgetIdentity`).
+- **"<project> moved to <fallback>"** (10db moved the project on its own) offers **Move back** (the project returns to
+  the account it left, as the move-back card's answer does) and **Stay** (keeps the project where it is and forgets the
+  move back).
+- **"<account> reached its monthly cap"** offers **Raise cap to $N**: N is a whole-dollar figure a $10 step above
+  the spend (or the old cap, if higher). The answer sets the cap, never lowering one raised since, and lifts the pause
+  (`accounts.saved`). The option and its figure are rewritten with the body as running sessions add spend.
+- `verify/` and `sandbox/` raise no card of their own: they return text (a blocked host's note, a sandbox failure)
+  that the gate and the runner put in cards raised elsewhere. The gate's blocked-host card already offers to allow the
+  host; the runner's cards for a repo MCP server that can't run are not part of this change.
+
 ## Open
 
 - The "Claim deadlock" card now offers answers the daemon acts on (each task yields its claim, or either is

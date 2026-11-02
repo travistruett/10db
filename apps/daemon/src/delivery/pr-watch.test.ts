@@ -14,9 +14,9 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
-import { prCardKey } from './cards';
+import { GH_CHECK_CHOICE, prCardKey } from './cards';
 import { raiseIn } from './context';
-import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
+import { createGhCardAnswers, createPrWatch, subscribePrWatch, type PrWatch } from './index';
 import { baseNotices } from './notices';
 
 const INTERVAL = 120_000;
@@ -611,7 +611,7 @@ describe('gh unavailable', () => {
     expect(card.body).toContain('gh auth login');
     expect(card.body).toContain('unknown');
     // No link: the desktop's Open on GitHub would open one pull request, which says nothing about gh.
-    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl });
+    expect(card.detail).toEqual({ batchId: a.id, prUrl: a.prUrl, ghCheck: true });
 
     await round(w);
     expect(polls()).toBe(2);
@@ -798,6 +798,48 @@ describe('gh unavailable', () => {
     await round(w);
     expect(pr(b.id)).toMatchObject({ state: 'open' });
     expect(h.cards()).toEqual([]);
+  });
+
+  describe('the gh card’s Check again', () => {
+    async function ghCard() {
+      setup();
+      shipped(h.project.id, 'Alpha');
+      h.gh.auth = 'signed_out';
+      const w = watcher();
+      w.start();
+      await w.idle();
+      return h.only(h.cards());
+    }
+
+    it('offers an answer the daemon acts on, not a dismiss', async () => {
+      const card = await ghCard();
+      expect(card.options.map((o) => o.label)).toEqual([GH_CHECK_CHOICE]);
+      expect(card.body).toContain(GH_CHECK_CHOICE);
+    });
+
+    it('reads every followed pull request again at once', async () => {
+      const card = await ghCard();
+      let pokes = 0;
+      createGhCardAnswers({
+        poke: () => {
+          pokes += 1;
+        },
+      })(card, { choice: GH_CHECK_CHOICE });
+      expect(pokes).toBe(1);
+    });
+
+    it('does nothing for another answer or another card', async () => {
+      const card = await ghCard();
+      let pokes = 0;
+      const answer = createGhCardAnswers({
+        poke: () => {
+          pokes += 1;
+        },
+      });
+      answer(card, { choice: 'Later' });
+      answer({ ...card, detail: {} }, { choice: GH_CHECK_CHOICE });
+      expect(pokes).toBe(0);
+    });
   });
 
   it('starts the next round after the read that ended the last, so one that always times out holds up no other', async () => {
