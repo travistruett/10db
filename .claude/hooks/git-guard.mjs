@@ -407,13 +407,16 @@ const WRAPPERS = new Map([
   ),
   ['exec', { valueOptions: ['-a'], operands: 0 }],
   ['nice', { valueOptions: ['-n'], operands: 0 }],
-  ['env', { valueOptions: ['-u', '-C'], operands: 0 }],
+  ['env', { valueOptions: ['-u', '-C', '--unset', '--chdir'], operands: 0 }],
   ['stdbuf', { valueOptions: ['-i', '-o', '-e'], operands: 0 }],
   ['timeout', { valueOptions: ['-s', '-k'], operands: 1 }],
   [
     'sudo',
     {
-      valueOptions: ['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'],
+      valueOptions: [
+        ...['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'],
+        ...['--chdir', '--chroot'],
+      ],
       operands: 0,
     },
   ],
@@ -483,12 +486,14 @@ const GIT_OPTIONS_WITH_VALUE = [
 function gitSubcommand(words) {
   let i = commandStart(words);
   if (programAt(words, i) !== 'git') return null;
-  let retargeted = words
-    .slice(0, i)
-    .some(
-      (w) =>
-        /^(-C|-D|-R|--chdir|--chroot)(=|$)/.test(w) || /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
-    );
+  let retargeted = words.slice(0, i).some(
+    (w) =>
+      // getopt takes a short option's value attached (`-CDIR`) or in the next word, and a
+      // cluster can carry it (`-iCDIR`), so any C, D or R in a short option word counts.
+      /^(--chdir|--chroot)(=|$)/.test(w) ||
+      /^-[A-Za-z]*[CDR]/.test(w) ||
+      /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
+  );
   i += 1;
   /** @type {string[]} */
   const config = [];
