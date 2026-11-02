@@ -1,7 +1,22 @@
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { envWithoutGitVariables } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
+
+/** What the script exports. It runs nothing when imported, only when node runs it. */
+interface CheckChanged {
+  readonly readableFiles: (
+    files: readonly string[],
+    stat?: (path: string) => unknown,
+  ) => { readable: string[]; unreadable: string[] };
+}
+
+async function importScript(): Promise<CheckChanged> {
+  const url = pathToFileURL(join(repoRoot, 'scripts/check-changed.mjs')).href;
+  return (await import(url)) as CheckChanged;
+}
 
 interface Plan {
   readonly full: boolean;
@@ -173,5 +188,33 @@ describe('scripts/check-changed.mjs --precheck', () => {
 
   it('plans nothing for no changed file', () => {
     expect(precheckPlanFor()).toMatchObject({ full: false, changed: [], affected: [] });
+  });
+});
+
+describe('scripts/check-changed.mjs readableFiles', () => {
+  it('leaves out a file the sandbox refuses to stat, and names it', async () => {
+    // In the lane and gate sandbox apps/daemon/.env.example passes existsSync but lstat is refused,
+    // so git calls it changed. Handed to Prettier, it stops the whole format step on EPERM.
+    const { readableFiles } = await importScript();
+    const refused = Object.assign(new Error('EPERM: operation not permitted, lstat'), {
+      code: 'EPERM',
+    });
+    const stat = (path: string): void => {
+      if (path.endsWith('apps/daemon/.env.example')) throw refused;
+    };
+    expect(
+      readableFiles(['apps/daemon/.env.example', 'apps/daemon/src/daemon/services.ts'], stat),
+    ).toEqual({
+      readable: ['apps/daemon/src/daemon/services.ts'],
+      unreadable: ['apps/daemon/.env.example'],
+    });
+  });
+
+  it('drops a deleted file without calling it unreadable', async () => {
+    const { readableFiles } = await importScript();
+    expect(readableFiles(['package.json', 'apps/daemon/src/no-such-file.ts'])).toEqual({
+      readable: ['package.json'],
+      unreadable: [],
+    });
   });
 });

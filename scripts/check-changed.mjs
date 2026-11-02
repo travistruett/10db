@@ -22,7 +22,7 @@
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, globSync, readFileSync } from 'node:fs';
+import { globSync, lstatSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -183,6 +183,32 @@ function baseRef() {
   return null;
 }
 
+/**
+ * The changed files a step can read. A deleted file drops out. So does one the sandbox hides:
+ * inside the lane and gate sandbox apps/daemon/.env.example passes existsSync but lstat on it is
+ * refused, so git calls it changed, and Prettier stops the whole format step on EPERM before it
+ * reads .prettierignore. Nothing in the sandbox can format or lint such a file.
+ * @param {readonly string[]} files repo-relative
+ * @param {(path: string) => unknown} [stat] throws when the path can't be read; lstat by default
+ * @returns {{ readable: string[], unreadable: string[] }} unreadable: there, but refused
+ */
+export function readableFiles(files, stat = lstatSync) {
+  /** @type {string[]} */
+  const readable = [];
+  /** @type {string[]} */
+  const unreadable = [];
+  for (const file of files) {
+    try {
+      stat(join(root, file));
+      readable.push(file);
+    } catch (error) {
+      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') unreadable.push(file);
+    }
+  }
+  return { readable, unreadable };
+}
+
 /** @param {string} base */
 function changedFiles(base) {
   const lines = [
@@ -321,12 +347,14 @@ async function main() {
   console.log(
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );
-  const present = files.filter((f) => existsSync(join(root, f)));
+  const { readable: present, unreadable } = readableFiles(files);
+  if (unreadable.length > 0)
+    console.log(`check-changed: skipping what it cannot read: ${unreadable.join(', ')}`);
   const lintable = (/** @type {string} */ f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f);
   // The pre-check lints the changed files only; the changed-packages check lints whole packages.
   const lintTargets = precheck
     ? present.filter(lintable)
-    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && existsSync(join(root, f)))];
+    : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && present.includes(f))];
   /** @type {Step[]} */
   const together = [];
   if (present.length > 0)
