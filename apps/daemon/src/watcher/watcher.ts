@@ -66,6 +66,10 @@ const WATCH_BATCH_MS = 500;
 const BULK_LISTED = 20;
 /** The app setting that holds the writes a permission card excused, so a restart keeps them. */
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
+
+/** The key of an excused write: the checkout, the lane whose card excused it, and the path. */
+const excusedKey = (root: string, lane: WorkstreamId, path: string): string =>
+  `${root}\0${lane}\0${path}`;
 /** The most excused writes kept; the oldest go first. */
 const MAX_EXCUSED_WRITES = 500;
 /** The most files a sensitive directory may hold and still be read as the base's own; more cards it. */
@@ -338,8 +342,10 @@ export function createWatcher(deps: {
       ),
     ),
   );
-  // The write each excused path last showed, by checkout and path: a write seen again unchanged, in a later
-  // batch, is the one its card already excused, and a different one is not.
+  // The write each excused path last showed, by checkout, lane and path: a write seen again unchanged, in a
+  // later batch, is the one its card already excused for that lane, and a different one is not. The lane is
+  // in the key so one lane's excuse never covers another lane's write in a shared checkout, and a lane's
+  // entries go when it leaves the watched states (see dropFinishedLanes).
   // Kept in the database too, so a restarted daemon still excuses the write a card allowed before it: the
   // cards answered before it started count as used, which alone would card that write again at the step end.
   const excusedWrites = loadExcusedWrites();
@@ -349,12 +355,38 @@ export function createWatcher(deps: {
     const map = new Map<string, string>();
     if (Array.isArray(stored)) {
       for (const entry of stored) {
-        if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string') {
+        // An entry written before keys named a lane has two parts, and one stamped `gone` stood for a
+        // missing file; neither excuses anything now.
+        if (
+          Array.isArray(entry) &&
+          typeof entry[0] === 'string' &&
+          typeof entry[1] === 'string' &&
+          entry[0].split('\0').length === 3 &&
+          entry[1] !== 'gone'
+        ) {
           map.set(entry[0], entry[1]);
         }
       }
     }
     return map;
+  }
+
+  /** Drops the excused writes of every lane that is not in a watched state, and stores what is left. */
+  function dropFinishedLanes(): void {
+    if (excusedWrites.size === 0) return;
+    const live = new Set<string>(
+      listWorkstreams(db, { states: WATCHED_STATES }).map((ws) => ws.id),
+    );
+    let dropped = false;
+    for (const key of [...excusedWrites.keys()]) {
+      if (live.has(key.split('\0')[1] ?? '')) continue;
+      excusedWrites.delete(key);
+      dropped = true;
+    }
+    if (!dropped) return;
+    deps.state.write((ctx) => {
+      setAppSetting(ctx, EXCUSED_WRITES_SETTING, [...excusedWrites.entries()]);
+    });
   }
 
   /** Records that the write to `key` showing `stamp` was excused, keeping the latest few entries. */
@@ -405,16 +437,22 @@ export function createWatcher(deps: {
         continue;
       }
       const once = cards.filter(({ rel, a }) => rel === path && !a.standing);
-      const key = `${root}\0${path}`;
       const stamp = writeStamp(root, path);
-      if (excusedWrites.get(key) === stamp) {
+      // A write is excused again only by the lane whose card excused it, and only while it shows the same
+      // stamp; a missing file shows none.
+      if (
+        stamp !== null &&
+        lanes.some((lane) => excusedWrites.get(excusedKey(root, lane, path)) === stamp)
+      ) {
         allowed.add(path);
         continue;
       }
       const unused = once.find(({ a }) => a.useKey !== null && !usedCards.has(a.useKey));
       if (unused?.a.useKey == null) continue;
       usedCards.add(unused.a.useKey);
-      excuse(key, stamp);
+      if (stamp !== null && unused.a.workstreamId !== null) {
+        excuse(excusedKey(root, unused.a.workstreamId, path), stamp);
+      }
       allowed.add(path);
     }
     return allowed;
@@ -712,6 +750,7 @@ export function createWatcher(deps: {
   return {
     sync() {
       if (stopped) return;
+      dropFinishedLanes();
       const wanted = new Map<string, { projectId: ProjectId; batchId: BatchId | null }>();
       for (const ws of listWorkstreams(db, { states: WATCHED_STATES })) {
         const root = checkoutOf(db, ws);
