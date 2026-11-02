@@ -45,6 +45,7 @@ const recover = (git: Git = h.git) =>
     inbox: h.inbox,
     processes: systemProcesses,
     shipper: h.shipper,
+    starter: h.starter,
     logger: silentLogger,
     worktrees: { ctx: { ...h.ctx, git }, root: h.worktreeRoot },
   });
@@ -196,16 +197,35 @@ function expectCutDeleted(batch: BatchDto, cardTitle: string): void {
   expect(getAppSetting(h.store.db, `checkout_pin.${batch.id}`)).toBeUndefined();
 }
 
+/**
+ * A CUTTING row's recovery when nothing needs a person: the same row and workstream cut again, with
+ * no card, so the task keeps its place in line.
+ */
+async function expectCutAgain(batch: BatchDto, path: string, branch: string): Promise<void> {
+  const [queued] = listWorkstreams(h.store.db, { batchId: batch.id });
+  const report = await recover();
+  await h.jobs.idle();
+  expect(report).toMatchObject({ recut: [batch.id], deleted: [] });
+  expect(h.cards()).toEqual([]);
+  expect(getBatch(h.store.db, batch.id)).toMatchObject({ state: 'OPEN', branch });
+  expect(listed()).toContain(comparable(path));
+  expect(h.only(listWorkstreams(h.store.db, {})).id).toBe(queued?.id);
+}
+
 describe('recoverBatches with worktrees', () => {
   it('closes the cut-interrupted card by itself once its task starts after the restart', async () => {
-    const { batch } = cuttingRow();
+    // A branch with a commit origin's base lacks can't be removed to cut again, so this cut is not repeated.
+    const { batch, branch } = cuttingRow();
+    h.commit('src/api/mine.txt');
+    h.git$('branch', branch, 'HEAD');
     const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
     await recover();
-    const card = h.only(h.cards());
+    const card = h.only(h.cards().filter((c) => c.title === CUT_INTERRUPTED));
     expect(card.title).toBe(CUT_INTERRUPTED);
     h.starter.startTask(ws.taskId);
     await h.jobs.idle();
-    expect(h.cards()).toEqual([]);
+    // The branch with the commit stays, and is listed in a card of its own.
+    expect(h.cards().map((c) => c.title)).toEqual(['1 local branch under 10db/ without a task']);
     expect(h.only(listInbox(h.store.db, { states: ['RESOLVED'] }))).toMatchObject({
       id: card.id,
       detail: { resolution: { by: '10db', reason: 'Alpha started' } },
@@ -216,23 +236,16 @@ describe('recoverBatches with worktrees', () => {
     {
       name: 'after the CUTTING insert',
       check: async () => {
-        const { batch, path } = cuttingRow();
-        const report = await recover();
-        expect(report.deleted).toEqual([batch.id]);
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(existsSync(path)).toBe(false);
+        const { batch, path, branch } = cuttingRow();
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
       name: 'after update-ref',
       check: async () => {
-        const { batch, branch } = cuttingRow();
+        const { batch, path, branch } = cuttingRow();
         h.git$('update-ref', `refs/heads/${branch}`, 'HEAD');
-        await recover();
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(branchExists(branch)).toBe(true);
-        const stray = h.only(h.cards().filter((c) => c.title.includes('without a task')));
-        expect(stray.body).toContain(branch);
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
@@ -242,10 +255,7 @@ describe('recoverBatches with worktrees', () => {
         h.git$('update-ref', `refs/heads/${branch}`, 'HEAD');
         addedWorktree(batch, path, branch);
         expect(listed()).toContain(comparable(path));
-        await recover();
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(existsSync(path)).toBe(false);
-        expect(branchExists(branch)).toBe(true);
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
@@ -256,9 +266,7 @@ describe('recoverBatches with worktrees', () => {
         addedWorktree(batch, path, branch);
         gitIn(path, 'read-tree', '-m', '-u', 'HEAD');
         expect(existsSync(join(path, 'README.md'))).toBe(true);
-        await recover();
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(existsSync(path)).toBe(false);
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
@@ -270,19 +278,15 @@ describe('recoverBatches with worktrees', () => {
         gitIn(path, 'read-tree', '-m', '-u', 'HEAD');
         mkdirSync(join(path, 'node_modules', 'left-pad'), { recursive: true });
         writeFileSync(join(path, 'node_modules', 'left-pad', 'index.js'), 'module.exports = 1;\n');
-        await recover();
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(existsSync(path)).toBe(false);
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
       name: 'an unlisted empty directory at the path',
       check: async () => {
-        const { batch, path } = cuttingRow();
+        const { batch, path, branch } = cuttingRow();
         mkdirSync(path, { recursive: true });
-        await recover();
-        expectCutDeleted(batch, CUT_INTERRUPTED);
-        expect(existsSync(path)).toBe(false);
+        await expectCutAgain(batch, path, branch);
       },
     },
     {
