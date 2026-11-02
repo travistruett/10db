@@ -178,25 +178,44 @@ function hashFile(path: string): string {
  * It reads the whole file, so it is called only for a path a card or an excused write names.
  */
 export function writeStamp(root: string, rel: string): string | null {
+  const result = readStamp(root, rel);
+  return 'stamp' in result ? result.stamp : null;
+}
+
+/** Why a path has no stamp: it is not a regular file, it can't be read, or it kept changing while read. */
+export type UnstampedReason = 'not-a-file' | 'unreadable' | 'changing';
+
+/**
+ * Why `writeStamp` gives null for `rel`, read again now. A path that stamps this time counts as 'changing':
+ * it was moving a moment ago.
+ */
+export function unstampedReason(root: string, rel: string): UnstampedReason {
+  const result = readStamp(root, rel);
+  return 'stamp' in result ? 'changing' : result.reason;
+}
+
+function readStamp(root: string, rel: string): { stamp: string } | { reason: UnstampedReason } {
   const path = resolve(root, rel);
   try {
     lstatSync(path);
   } catch (error) {
     const code = (error as NodeJS.ErrnoException).code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? deletionStamp(root, path) : null;
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
+    const stamp = deletionStamp(root, path);
+    return stamp === null ? { reason: 'unreadable' } : { stamp };
   }
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
     try {
       const before = statSync(path, { bigint: true });
-      if (!before.isFile()) return null;
+      if (!before.isFile()) return { reason: 'not-a-file' };
       const hash = hashFile(path);
       // The file changed while it was read: the content may not be the one the time and size name.
       const after = statSync(path, { bigint: true });
       if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
-      return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
+      return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash}` };
     } catch {
-      return null;
+      return { reason: 'unreadable' };
     }
   }
-  return null;
+  return { reason: 'changing' };
 }
