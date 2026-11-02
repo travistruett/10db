@@ -106,11 +106,11 @@ const CATCH_UP_RETRY_MS = 30 * 60_000;
 /** How long a merge GitHub refused waits before 10db asks again while the pull request stays clean. */
 const MERGE_RETRY_MS = 10 * 60_000;
 
-/** Batch states whose work can't run again, so a worktree of theirs stays until someone removes it. */
-const FINISHED_BATCH: readonly BatchState[] = [
-  BatchState.Shipped,
-  BatchState.Closed,
-  BatchState.Abandoned,
+/** Batch states whose work runs, and ends by itself: its worktree goes when it does. */
+const RUNNING_BATCH: readonly BatchState[] = [
+  BatchState.Cutting,
+  BatchState.Open,
+  BatchState.Shipping,
 ];
 
 /** True when GitHub says the open pull request conflicts with its base. */
@@ -1111,9 +1111,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
         batch.worktreePath !== null &&
         samePath(comparablePath(holder), comparablePath(batch.worktreePath));
       if (holder !== null && !kept) {
-        // The worktree of a batch whose work still runs, such as a CI fix's, goes when it ends: asked again next round.
-        if (heldByLiveBatch(batch, holder)) {
+        // A CI fix of this pull request that still runs lets go of the branch when it ends: asked
+        // again next round. Until then the pull request says it conflicts, as no card does yet.
+        if (heldByRunningFix(batch, holder)) {
           lastCatchUp.delete(batchId);
+          showNotice(deps.state, batchId, updateNotices.waiting(getBatch(db, batchId)));
           return;
         }
         stop({
@@ -1265,14 +1267,18 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
-  /** True when `holder` is the worktree of another batch of the project whose work may still run. */
-  function heldByLiveBatch(batch: BatchDto, holder: string): boolean {
+  /**
+   * True when `holder` is the worktree of a CI fix of this batch's pull request that is still running.
+   * Any other holder, such as a fix that failed and kept its worktree, lets go of the branch only when
+   * the builder removes it, so waiting for it would hide that the pull request conflicts.
+   */
+  function heldByRunningFix(batch: BatchDto, holder: string): boolean {
     const where = comparablePath(holder);
     return listBatches(db, { projectId: batch.projectId }).some(
       (other) =>
-        other.id !== batch.id &&
+        other.ciFixOf === batch.id &&
         other.worktreePath !== null &&
-        !FINISHED_BATCH.includes(other.state) &&
+        RUNNING_BATCH.includes(other.state) &&
         samePath(comparablePath(other.worktreePath), where),
     );
   }

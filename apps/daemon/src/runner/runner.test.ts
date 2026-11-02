@@ -37,6 +37,7 @@ import {
   listTasks,
   listInbox,
   listSessions,
+  listWorkstreams,
   patchAccount,
   patchProject,
   patchWorkstream,
@@ -4467,6 +4468,67 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         }
       });
     });
+  });
+});
+
+describe('the base merge leaving conflict markers in a task that used its fix attempts', () => {
+  const conflicted: BaseUpdate = {
+    kind: 'conflicted',
+    base: 'abc',
+    paths: ['README.md'],
+    note: 'markers',
+  };
+
+  /**
+   * A batch task whose step has used its fix attempts when its lane launches, and whose gate meets
+   * `answers` in turn, then an up-to-date branch.
+   */
+  async function usedUp(answers: BaseUpdate[], script: FakeScriptBook['Alpha']) {
+    const baseUpdates: BaseUpdates = {
+      beforeGate: () => Promise.resolve(answers.shift() ?? { kind: 'up_to_date', note: null }),
+      gate: (_batchId, _signal, go) => go(),
+      atLaunch: (batchId) => {
+        engine.state.write((ctx) => {
+          for (const w of listWorkstreams(ctx.tx, { batchId }))
+            patchWorkstream(ctx, w.id, null, { attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts });
+        });
+        return Promise.resolve({ kind: 'up_to_date', note: null });
+      },
+    };
+    engine = await createTestEngine({ Alpha: script }, {}, { baseUpdates });
+    const batch = engine.state.write((ctx) =>
+      insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, batch.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    return workstream;
+  }
+
+  it('still gets a session that resolves the markers, rather than failing before any merge session ran', async () => {
+    const workstream = await usedUp(
+      [conflicted, { kind: 'merged', base: 'abc', head: 'def', note: null }],
+      [[turn], [turn]],
+    );
+    expect(ws(workstream.id).failureReason).toBeNull();
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'merge', base: 'origin/main', paths: ['README.md'] },
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts[1]?.prompt).toContain('10db merged origin/main into your branch');
+    expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('fails once that session left the markers again', async () => {
+    const workstream = await usedUp([conflicted, conflicted, conflicted], [[turn], [turn], [turn]]);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(ws(workstream.id).failureReason).toContain('README.md');
+    expect(ws(workstream.id).failureReason).toContain('retry limit');
   });
 });
 
