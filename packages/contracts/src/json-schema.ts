@@ -66,6 +66,7 @@ import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
 import { RunNextResult } from './run-next';
+import { PlanDraft, ShapeDto, ShapeMessageDto, ShapeToolInputs, ShapeToolName } from './shape';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -88,6 +89,13 @@ import {
   McpServerStatusDto,
   SystemCheckDto,
 } from './system';
+
+const shapeMcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
+  Object.values(ShapeToolName).map((tool): [string, z.ZodType] => [
+    `shape-mcp-${tool.replaceAll('_', '-')}-input`,
+    ShapeToolInputs[tool],
+  ]),
+);
 
 const mcpSchemas: Record<string, z.ZodType> = Object.fromEntries(
   Object.values(McpToolName).flatMap((tool): [string, z.ZodType][] => [
@@ -178,8 +186,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'goal-digest-dto': GoalDigestDto,
   'goal-dto': GoalDto,
   'goal-list-dto': GoalListDto,
+  'plan-draft': PlanDraft,
+  'shape-dto': ShapeDto,
+  'shape-message-dto': ShapeMessageDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
+  ...shapeMcpSchemas,
 };
 
 /** Renders each registered schema as JSON Schema text, keyed by file name. */

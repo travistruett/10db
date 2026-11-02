@@ -8,6 +8,7 @@ import {
   type Provider,
   type SessionId,
   type SessionMode,
+  type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { and, asc, count, desc, eq, isNull, sql } from 'drizzle-orm';
@@ -17,8 +18,22 @@ import type { DbReader, WriteContext } from './store';
 
 export type SessionRow = typeof schema.sessions.$inferSelect;
 
-export interface NewSession {
-  readonly workstreamId: WorkstreamId;
+/** A lane's session: the session runs its workstream. */
+export type LaneSessionRow = SessionRow & { readonly workstreamId: WorkstreamId };
+
+/** Whether the session runs a lane's workstream, rather than a Shape conversation. */
+export function isLaneSession(row: SessionRow): row is LaneSessionRow {
+  return row.workstreamId !== null;
+}
+
+/** A session runs a workstream or a Shape conversation, exactly one (Shape spec §5.1). */
+type SessionOwner =
+  | { readonly workstreamId: WorkstreamId; readonly shapeId?: undefined }
+  | { readonly shapeId: ShapeId; readonly workstreamId?: undefined };
+
+export type NewSession = SessionOwner & NewSessionFields;
+
+interface NewSessionFields {
   readonly provider: Provider;
   readonly model: string;
   readonly effort: Effort;
@@ -32,32 +47,52 @@ export interface NewSession {
   readonly accountId?: AccountId;
 }
 
-function projectOwner(ctx: WriteContext, workstreamId: WorkstreamId) {
+/** The account of the project the session works for: through its workstream, or its conversation. */
+function projectOwner(ctx: WriteContext, input: SessionOwner) {
+  const columns = { accountId: schema.projects.accountId, kind: schema.accounts.kind };
+  if (input.workstreamId !== undefined) {
+    const owner = ctx.tx
+      .select(columns)
+      .from(schema.workstreams)
+      .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+      .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
+      .where(eq(schema.workstreams.id, input.workstreamId))
+      .get();
+    if (!owner) throw new NotFoundError('workstream', input.workstreamId);
+    return owner;
+  }
   const owner = ctx.tx
-    .select({ accountId: schema.projects.accountId, kind: schema.accounts.kind })
-    .from(schema.workstreams)
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .select(columns)
+    .from(schema.shapes)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.shapes.projectId))
     .innerJoin(schema.accounts, eq(schema.accounts.id, schema.projects.accountId))
-    .where(eq(schema.workstreams.id, workstreamId))
+    .where(eq(schema.shapes.id, input.shapeId))
     .get();
-  if (!owner) throw new NotFoundError('workstream', workstreamId);
+  if (!owner) throw new NotFoundError('shape', input.shapeId);
   return owner;
 }
 
 export function insertSession(ctx: WriteContext, input: NewSession): SessionRow {
+  const { workstreamId, shapeId, ...fields } = input;
   const prior = ctx.tx
     .select({ n: count() })
     .from(schema.sessions)
-    .where(eq(schema.sessions.workstreamId, input.workstreamId))
+    .where(
+      workstreamId !== undefined
+        ? eq(schema.sessions.workstreamId, workstreamId)
+        : eq(schema.sessions.shapeId, shapeId),
+    )
     .get();
   // A project can move while a session waits for its start, so the runner names the account it launched on.
   const owner =
     input.accountId === undefined
-      ? projectOwner(ctx, input.workstreamId)
+      ? projectOwner(ctx, input)
       : { accountId: input.accountId, kind: getAccountRow(ctx.tx, input.accountId).kind };
   const row: SessionRow = {
     id: mintId('Session'),
-    ...input,
+    ...fields,
+    workstreamId: workstreamId ?? null,
+    shapeId: shapeId ?? null,
     accountId: owner.accountId,
     briefed: input.briefed ?? false,
     briefingBaselinePct: input.briefingBaselinePct ?? null,

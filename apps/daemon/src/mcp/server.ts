@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { DomainError, McpToolInputs, McpToolName } from '@10db/contracts';
-import { getLiveSessionByTokenHash } from '@10db/db';
+import { getLiveSessionByTokenHash, isLaneSession } from '@10db/db';
 import { z } from 'zod';
 import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
@@ -34,7 +34,9 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
   return async (req) => {
     const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
-    if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
+    // A Shape session has no lane, so it never gets a lane's tools; its own tool set comes with Shape.
+    if (!session || !isLaneSession(session))
+      return Response.json({ error: 'unauthorized' }, { status: 401 });
 
     const handlers = createToolHandlers(deps, session.id, session.workstreamId, claimWaits);
     const server = new McpServer({ name: '10db', version: '0.1.0' });

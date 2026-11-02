@@ -535,3 +535,91 @@ describe('migrating to per-task placement', () => {
     expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });
+
+describe('migrating to Shape sessions (Shape spec §5.1, §13)', () => {
+  const AT = '2026-11-02T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before a session could belong to a Shape conversation.
+    migrateDatabase(db, migrationsThrough('0026_workstream_failure_kind'));
+    const run = (sql: string, ...args: string[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES ('tsk_a', 'prj_a', 't', '', '[]', '[]', 'open', 1, 'shared', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts,
+         model, effort, fence, created_at, updated_at)
+       VALUES ('wst_a', 'tsk_a', 'prj_a', 'RUNNING', '"none"', 1, 0, 'sonnet', 'medium', 1, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO sessions (id, workstream_id, account_id, sequence, provider, model, effort, mode,
+         mcp_token_hash, started_at, input_tokens, output_tokens, cached_tokens, created_at, updated_at)
+       VALUES ('ses_a', 'wst_a', 'acc_x', 1, 'claude', 'sonnet', 'medium', 'managed', 'hash-a', ?, 120, 12, 3, ?, ?)`,
+      AT,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO handoffs (id, workstream_id, session_id, content, git_head, git_changed_files, git_commits, created_at)
+       VALUES ('hof_a', 'wst_a', 'ses_a', '{}', 'abc', '[]', '[]', ?)`,
+      AT,
+    );
+    run(`INSERT INTO sources (id, kind, ref, created_at) VALUES ('src_a', 'builder', '{}', ?)`, AT);
+    run(
+      `INSERT INTO decisions (id, project_id, question, choice, rationale, decided_by, scope, source_id,
+         created_at, updated_at)
+       VALUES ('dec_a', 'prj_a', 'Which queue library?', 'BullMQ', 'Redis', 'me', 'project', 'src_a', ?, ?)`,
+      AT,
+      AT,
+    );
+    migrateDatabase(db);
+  });
+
+  it('keeps a lane session and its handoff, with no shape', () => {
+    expect(
+      db.$client.prepare('SELECT id, workstream_id, shape_id, input_tokens FROM sessions').all(),
+    ).toEqual([{ id: 'ses_a', workstream_id: 'wst_a', shape_id: null, input_tokens: 120 }]);
+    expect(db.$client.prepare('SELECT id, session_id FROM handoffs').all()).toEqual([
+      { id: 'hof_a', session_id: 'ses_a' },
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('still enforces that a session has exactly one of a workstream and a shape', () => {
+    expect(() =>
+      db.$client.prepare("UPDATE sessions SET workstream_id = NULL WHERE id = 'ses_a'").run(),
+    ).toThrow(/CHECK constraint failed/);
+  });
+
+  it('keeps decisions searchable and not withdrawn', () => {
+    expect(
+      db.$client
+        .prepare(
+          `SELECT d.id, d.withdrawn_at FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
+           WHERE decisions_fts MATCH 'queue'`,
+        )
+        .all(),
+    ).toEqual([{ id: 'dec_a', withdrawn_at: null }]);
+  });
+});

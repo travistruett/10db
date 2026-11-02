@@ -49,7 +49,7 @@ export async function adoptGoal(
       },
     };
   }
-  const goal = deps.state.write((ctx) =>
+  const { goal } = deps.state.write((ctx) =>
     insertGoal(ctx, projectId, { brief: parsed.brief, description: parsed.notes }),
   );
   return { kind: 'adopted', goal };

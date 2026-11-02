@@ -37,6 +37,11 @@ const ID_SCHEMAS = {
   Goal: idSchema('gol', 'GoalId'),
   GoalCriterion: idSchema('gcr', 'GoalCriterionId'),
   JudgeCall: idSchema('jdg', 'JudgeCallId'),
+  Shape: idSchema('shp', 'ShapeId'),
+  ShapeMessage: idSchema('shm', 'ShapeMessageId'),
+  ShapeProposal: idSchema('spp', 'ShapeProposalId'),
+  ShapeLink: idSchema('slk', 'ShapeLinkId'),
+  ShapeFinding: idSchema('shf', 'ShapeFindingId'),
 } as const;
 
 const ID_PREFIX = {
@@ -65,6 +70,11 @@ const ID_PREFIX = {
   Goal: 'gol',
   GoalCriterion: 'gcr',
   JudgeCall: 'jdg',
+  Shape: 'shp',
+  ShapeMessage: 'shm',
+  ShapeProposal: 'spp',
+  ShapeLink: 'slk',
+  ShapeFinding: 'shf',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -127,5 +137,15 @@ export const GoalCriterionId = ID_SCHEMAS.GoalCriterion;
 export type GoalCriterionId = IdOf<'GoalCriterion'>;
 export const JudgeCallId = ID_SCHEMAS.JudgeCall;
 export type JudgeCallId = IdOf<'JudgeCall'>;
+export const ShapeId = ID_SCHEMAS.Shape;
+export type ShapeId = IdOf<'Shape'>;
+export const ShapeMessageId = ID_SCHEMAS.ShapeMessage;
+export type ShapeMessageId = IdOf<'ShapeMessage'>;
+export const ShapeProposalId = ID_SCHEMAS.ShapeProposal;
+export type ShapeProposalId = IdOf<'ShapeProposal'>;
+export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
+export type ShapeLinkId = IdOf<'ShapeLink'>;
+export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;
+export type ShapeFindingId = IdOf<'ShapeFinding'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

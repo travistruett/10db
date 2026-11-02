@@ -27,6 +27,7 @@ export * from './review-rounds';
 export { PROTOCOL_VERSION } from './protocol';
 export * from './run-next';
 export * from './send-back';
+export * from './shape';
 export * from './states';
 export * from './steps';
 export * from './system';
