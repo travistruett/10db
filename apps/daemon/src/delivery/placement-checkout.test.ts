@@ -357,6 +357,90 @@ describe('seeding a new copy', () => {
       expect(notice.line).not.toContain('left-pad');
     });
 
+    describe('under pnpm 9 and earlier, which builds every package unless told not to', () => {
+      /** What pnpm writes about itself in the node_modules it makes. */
+      const madeBy = (version: string): Record<string, string> => ({
+        'node_modules/.modules.yaml': `layoutVersion: 5\npackageManager: pnpm@${version}\nprefix: /x\n`,
+      });
+      const natives = {
+        ...installed('prisma', '6.0.0', { postinstall: 'node build.js' }),
+        ...installed('sharp', '0.30.0', { install: 'node install.js' }),
+        ...installed('left-pad', '1.0.0', { test: 'x' }),
+      };
+
+      it('names every package with an install script when the project has no list', async () => {
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.state).toBe('OPEN');
+        const notice = h.only(batch.notices);
+        expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).toContain('sharp');
+        expect(notice.line).not.toContain('left-pad');
+        expect(notice.body).toContain('pnpm rebuild');
+        expect(notice.body).toContain('pnpm 9');
+      });
+
+      it('leaves out the packages neverBuiltDependencies names', async () => {
+        h.commit(
+          'package.json',
+          JSON.stringify({ name: 'app', pnpm: { neverBuiltDependencies: ['sharp'] } }),
+        );
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('8.6.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+      });
+
+      it('names only the onlyBuiltDependencies list when the project has one', async () => {
+        allowing('onlyBuiltDependencies:\n  - prisma\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+      });
+
+      it('ignores allowBuilds, which pnpm 9 does not read', async () => {
+        allowing('allowBuilds:\n  prisma: true\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).toContain('sharp');
+      });
+
+      it('says nothing under pnpm 10 with no list: nothing builds there by default', async () => {
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('10.4.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the install left no version to read', async () => {
+        allowing('packages: []\n');
+        h.pnpm.makes(natives);
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+
+      it('says nothing when the clone carried the built output', async () => {
+        allowing('packages: []\n');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.notices).toEqual([]);
+      });
+    });
+
     it('reads dangerouslyAllowAllBuilds from package.json too, and caps a long list', async () => {
       h.commit(
         'package.json',
