@@ -55,15 +55,30 @@ opId; nothing is recorded for the opId. The wait itself goes on in the daemon (`
 claim of a workstream, which every call for that claim joins, whatever its opId, so a retry starts no second wait
 and no second card, and two calls sharing a wait record one result.
 
-The one case that returns `granted: false, waiting: false` is a deadlock: the holder is itself waiting, directly
-or through other waiters, for a claim this task holds. Waiting would never end, so the call returns at once with
-a "Claim deadlock" card naming both tasks, and the agent decides (finish and release, or `ask_human`). It is
+A deadlock is when the holder is itself waiting, directly or through other waiters, for a claim this task holds.
+Waiting on the holder alone would never end, so the wait raises a "Claim deadlock" card naming both tasks and waits
+on the builder's answer instead; a slice that ends meanwhile answers `waiting: true` with the card, as a plain wait
+does. The card offers, for each of the two tasks, "<task> yields <claim>" (the daemon releases the claims the other
+side waits for) and "Cancel <task>" (the runner cancels it, which frees everything it holds). Either way the wait
+that raised the card takes the claim inside the call already pending, with no second card. A yield also ends the
+yielding task's own wait with `granted: false, waiting: false` and an instruction naming the claims it gave up, so its
+agent learns before it edits there again; if no call of that task is waiting when this happens, its next
+`request_claim` answers that refusal first (`ClaimWaits.yielded`). A yield is applied only to a task that has a wait
+in progress: one that has none is in no deadlock, and releasing its claim untold would let two tasks edit one area.
+While its card is up, the raising wait checks again on every look: a deadlock that ended by itself withdraws the card
+and becomes a plain wait, and a card closed while the deadlock stands is raised again. Only that one wait checks so
+often (the other side checks when its holder changes), so one deadlock raises one card. The answers are stored in the
+card's detail, so a card answered after the tasks changed releases only what it named. The deadlock is
 checked when the wait starts and again whenever the holder changes. The waits it reads are the daemon's live
 waits, held in memory, not the cards: dismissing a wait card does not hide its wait, and a wait ends with the
 daemon that ran it. Startup withdraws the wait cards a stopped daemon left (`withdrawStaleClaimWaits`), and a new
 wait rewrites any card left under its fold key. The deadlock card has a fold key per workstream and claim, so an
 agent asking again while the deadlock holds rewrites the one card rather than raising a second; a later ask for
 that claim that is granted, or that starts a plain wait, withdraws it, since the deadlock it describes is gone.
+The card belongs to the wait that raised it: when that wait ends without the claim (its session stopped, or the
+task was cancelled) the card is withdrawn, startup withdraws any deadlock card a stopped daemon left, and an answer
+to a card no live wait waits on is refused (`InboxAnswerRefused`) and the card withdrawn, so a stale answer never
+cancels a task or reports a release that did not happen.
 
 **Lanes.** A waiting task stays `RUNNING` and keeps its lane, but the holder gives its lane up at every step
 boundary (a passed or failed gate, a crash retry, an answer after parking) while keeping its claims until `DONE`.

@@ -67,8 +67,8 @@ function unreadCheckFacts(row: WorkstreamRow) {
 
 /**
  * Runs once at startup, before the scheduler, so no runner races it. Every non-terminal workstream
- * loses its dead session, gate process and lease; lane work is then re-queued (or failed once it
- * has used its attempts), waiting work is parked on its card, and answered cards are redelivered.
+ * loses its dead session, gate process and lease; lane work is then re-queued at the front of the
+ * line (or failed once it has used its attempts), waiting work is parked on its card, and answered cards are redelivered.
  */
 export async function recoverOnStartup(opts: {
   readonly state: StateStore;
@@ -82,6 +82,8 @@ export async function recoverOnStartup(opts: {
 }): Promise<RecoveryReport> {
   const db = opts.state.db;
   const report: RecoveryReport = { requeued: [], failed: [], parked: [], redelivered: [] };
+  // One stamp for every workstream this run re-queues, so they keep their start order among themselves.
+  const recoveredAt = opts.state.now();
 
   for (const ws of listWorkstreams(db, { states: ACTIVE_STATES })) {
     const row = getWorkstreamRow(db, ws.id);
@@ -202,7 +204,8 @@ export async function recoverOnStartup(opts: {
         transitionWorkstream(ctx, ws.id, {
           to: S.Queued,
           fence: null,
-          patch: { nextAction, recoveryAttempts: attempts },
+          // Back at the front of the line, ahead of work that never started; see `queueOrder`.
+          patch: { nextAction, recoveryAttempts: attempts, runNextAt: recoveredAt },
           reason: 'recovered after restart',
         });
       }
