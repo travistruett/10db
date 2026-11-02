@@ -9,7 +9,7 @@
 
 - **`shape_proposals.created_round`** (migration 0029, generated) beside the existing round. A row's `round` is
   the round that last created, changed or moved it; a change in sources or list order does not move it. The view
-  marks a row *new* when `round == created_round == current` and *changed* when `round == current` only.
+  marks a row _new_ when `round == created_round == current` and _changed_ when `round == current` only.
 - **`shape_files`** (same migration) stores each dropped file's name, type, size and path under
   `<dataDir>/shapes`, which is also the Shape session's read-allowed directory.
 - **Files upload as the raw request body**, name in the query and type as the content type, to
