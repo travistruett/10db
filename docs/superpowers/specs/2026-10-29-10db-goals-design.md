@@ -473,7 +473,9 @@ areas work it builds lands. Extraction from a free-form document by an LLM is ph
 4. **Shaping and re-planning.** New Goal as a native conversation in 10db, its own terminal-like session (the
    builder's way of shaping work in Claude Code today, inside the app; the takeover and PTY work in
    `docs/open-items.md` is its base), taking chat, assets or a form; LLM extraction for Adopt; re-plan
-   proposals on the exhausted-tasks and Flip paths; the digest in prose.
+   proposals on the exhausted-tasks and Flip paths; the digest in prose. _Update: designed as Shape, an Agent
+   SDK session in 10db's own UI rather than a terminal (`2026-11-02-10db-brainstorm-chat-design.md`,
+   `docs/architecture/decisions/2026-11-02-shape-is-an-sdk-session-in-10dbs-own-ui.md`)._
 
 ## 13. Measures
 

@@ -73,6 +73,8 @@ favors legibility and calm over decoration.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).
   Nothing moves for decoration.
+- **Nudges:** a model's suggestion beside an input (Shape's fast-model nudges) is a `Button variant="subtle"
+size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at once; never a badge or a color.
 - **Alerts:** an `Alert` is for something the builder must act on, such as a missing tool or a
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
