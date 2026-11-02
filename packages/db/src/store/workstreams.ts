@@ -6,6 +6,7 @@ import {
   LANE_STATES,
   mintId,
   NotFoundError,
+  PARKED_NOTICE_KEY,
   TaskStatus,
   WorkstreamState,
   type AccountId,
@@ -176,6 +177,7 @@ export function insertWorkstream(
     taskId,
     projectId: project.id,
     batchId: opts.batchId ?? null,
+    workspaceMode: task.workspaceMode,
     state: WorkstreamState.Queued,
     nextAction: { kind: 'start' },
     attempt: 0,
@@ -365,13 +367,17 @@ export function setWorkstreamNotice(
   return true;
 }
 
-/** Clears every run's notice, as a daemon start does: the waits they describe ended with the last one. */
+/**
+ * Clears every run's notice, as a daemon start does: the waits they describe ended with the last one.
+ * A parked run keeps its own: it records what the builder answered, not a wait.
+ */
 export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
   const rows = ctx.tx
     .select()
     .from(schema.workstreams)
     .where(isNotNull(schema.workstreams.notice))
-    .all();
+    .all()
+    .filter((row) => row.notice?.key !== PARKED_NOTICE_KEY);
   for (const row of rows) {
     ctx.tx
       .update(schema.workstreams)

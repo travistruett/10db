@@ -4,6 +4,7 @@ import {
   existsSync,
   linkSync,
   mkdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -12,6 +13,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  EventType,
   mintId,
   WorkstreamState,
   type BatchId,
@@ -27,9 +29,11 @@ import {
   copyHazardNames,
   createTestStore,
   insertBatch,
+  insertPermissionRule,
   insertTask,
   insertWorkstream,
   listInbox,
+  listPermissionRules,
   getProject,
   patchBatch,
   patchProject,
@@ -54,6 +58,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { ANSWERED_CARDS_READ } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
@@ -1163,11 +1168,97 @@ describe('worktree checkouts', () => {
           patchWorkstream(ctx, lane.workstream.id, null, { baseHead: head });
         });
       };
-      /** Commits `rel` as the commit tool would. */
-      const commit = (root: string, rel: string) => {
-        git(root, 'add', rel);
-        git(root, 'commit', '-q', '-m', `Add ${rel}`);
+      let opCount = 0;
+      /**
+       * Commits `rel` in the lane's copy as the commit tool would, with its op trailer, and records the commit
+       * for the lane, or for `by`, another lane working in the same copy.
+       */
+      const commit = (
+        lane: { workstream: { id: WorkstreamId }; path: string },
+        rel: string,
+        by: { workstream: { id: WorkstreamId } } = lane,
+      ) => {
+        git(lane.path, 'add', rel);
+        opCount += 1;
+        git(lane.path, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
+        const sha = git(lane.path, 'rev-parse', 'HEAD').toString().trim();
+        state.write((ctx) => {
+          ctx.emit({
+            type: EventType.CommitRecorded,
+            entityType: 'workstream',
+            entityId: by.workstream.id,
+            data: { sha, paths: [rel], alreadyCommitted: false },
+          });
+        });
       };
+      /** Commits `rel` as the builder would, with no op trailer. */
+      const builderCommit = (root: string, rel: string) => {
+        git(root, 'add', rel);
+        git(root, 'commit', '-q', '-m', `Builder adds ${rel}`);
+      };
+
+      describe('in the main checkout', () => {
+        /** A lane running in the main checkout that launched holding nothing, as a task with no areas does. */
+        const bareLane = () => {
+          const lane = seedWorkstream(base, { project, title: 'Alpha', areas: ['ui'] });
+          state.write((ctx) => {
+            transitionWorkstream(ctx, lane.workstream.id, {
+              to: WorkstreamState.Starting,
+              fence: null,
+            });
+            transitionWorkstream(ctx, lane.workstream.id, {
+              to: WorkstreamState.Running,
+              fence: null,
+            });
+          });
+          const here = { ...lane, path: repo.path };
+          baseAt(here);
+          return here;
+        };
+        const grantUi = (lane: { workstream: { id: WorkstreamId } }) =>
+          state.write((ctx) =>
+            acquireClaims(ctx, {
+              projectId: project.id,
+              workstreamId: lane.workstream.id,
+              requests: [{ kind: ClaimKind.Area, name: 'ui' }],
+              leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+            }),
+          );
+        const writeUi = () => {
+          for (let i = 0; i < STRAY_BULK_THRESHOLD + 10; i += 1) {
+            const rel = `src/ui/file-${String(i).padStart(3, '0')}.ts`;
+            writeAt(repo.path, rel);
+          }
+        };
+
+        it('resolves once the lane covers its writes, although the builder committed an unrelated file', async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          writeAt(repo.path, 'docs/builder.md');
+          builderCommit(repo.path, 'docs/builder.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('stays open when a file the lane itself committed is covered by no claim', async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          writeAt(repo.path, 'zzz/last.ts');
+          await watcher.flush();
+          expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+          commit(lane, 'zzz/last.ts');
+          writeAt(repo.path, 'docs/builder.md');
+          builderCommit(repo.path, 'docs/builder.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
+      });
 
       it('stays open when an unlisted path the lane committed is not covered', async () => {
         const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
@@ -1177,7 +1268,7 @@ describe('worktree checkouts', () => {
         writeAt(lane.path, 'zzz/last.ts');
         await watcher.flush();
         expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
-        commit(lane.path, 'zzz/last.ts');
+        commit(lane, 'zzz/last.ts');
         grant(lane, 'ui');
         await watcher.flush();
         expect(bulk()).toHaveLength(1);
@@ -1189,10 +1280,102 @@ describe('worktree checkouts', () => {
         watcher.sync();
         writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
         await watcher.flush();
-        commit(lane.path, 'src/ui/file-029.ts');
+        commit(lane, 'src/ui/file-029.ts');
         grant(lane, 'ui');
         await watcher.flush();
         expect(flags()).toEqual([]);
+      });
+
+      describe("in a copy shared with another lane that commits in that lane's own area", () => {
+        beforeEach(() => {
+          state.write((ctx) =>
+            patchProject(ctx, project.id, {
+              areas: [
+                { name: 'ui', globs: ['src/ui/**'] },
+                { name: 'docs', globs: ['docs/**'] },
+              ],
+            }),
+          );
+          project = getProject(base.db, project.id);
+        });
+
+        it("resolves once the lane's claim covers all its writes", async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md', beta);
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('resolves after the other lane has committed and finished, releasing its claims', async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          // Beta commits in its own area through the commit tool, then ends and releases its claims.
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md', beta);
+          state.write((ctx) => {
+            transitionWorkstream(ctx, beta.workstream.id, {
+              to: WorkstreamState.Cancelled,
+              fence: null,
+            });
+            releaseClaims(ctx, beta.workstream.id);
+          });
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('stays open when an unlisted write, committed or not, is covered by no claim', async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          writeAt(lane.path, 'zzz/last.ts');
+          await watcher.flush();
+          expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md');
+          commit(lane, 'zzz/last.ts');
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
+
+        it("still judges a listed path by the granted lane's own claims", async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          launchIn(lane.batch, 'Beta', 'docs');
+          // A card from before Beta's claim, listing a path only Beta's claim covers.
+          inbox.flag({
+            projectId: project.id,
+            workstreamId: lane.workstream.id,
+            title: `${String(STRAY_BULK_THRESHOLD + 1)} writes outside every claim`,
+            body: `${lane.path}: docs/a.md\n…and 1 more`,
+            detail: {
+              count: STRAY_BULK_THRESHOLD + 1,
+              paths: ['docs/a.md'],
+              candidates: [lane.workstream.id],
+            },
+            foldKey: `stray-write:${lane.batch.id}:bulk`,
+          });
+          watcher.sync();
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
       });
 
       it('stays open when a path it lists is sensitive', async () => {
@@ -1422,16 +1605,21 @@ describe('worktree checkouts', () => {
   describe('a write a permission card allowed', () => {
     const SENSITIVE_FILE = '.mcp.json';
 
-    /** The Allow Edit card the broker raises for a lane's edit of `rel`, answered with `choice`. */
+    /**
+     * The Allow Edit card the broker raises for a lane's edit of `rel`, answered with `choice`. A `summary`
+     * that is no absolute path gives a card whose choice stores no rule, so the card alone stands for it.
+     */
     function editCard(
       lane: { workstream: WorkstreamDto },
       rel: string,
       choice: string,
       root = repo.path,
+      summary: string | null = null,
+      owner: ProjectDto = project,
     ): void {
       const path = join(root, rel);
       const { item } = inbox.ask({
-        projectId: project.id,
+        projectId: owner.id,
         workstreamId: lane.workstream.id,
         sessionId: mintId('Session'),
         kind: 'permission',
@@ -1446,7 +1634,7 @@ describe('worktree checkouts', () => {
         recommendation: null,
         category: 'environment',
         urgency: 'normal',
-        detail: { toolName: 'Edit', summary: path, path },
+        detail: { toolName: 'Edit', summary: summary ?? path, path },
         signal: new AbortController().signal,
       });
       inbox.answer(item.id, { choice });
@@ -1525,6 +1713,17 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it('excuses one write after an allow for the workstream that stored no rule, then cards the next', async () => {
+      const lane = running();
+      watcher.sync();
+      const globFile = 'docs/a[1].md';
+      editCard(lane, globFile, 'allow_workstream');
+      await write(globFile);
+      expect(flags()).toEqual([]);
+      await write(globFile);
+      expect(flags().map((f) => f.body)).toEqual([globFile]);
+    });
+
     it('does not let a card allowed for another lane excuse this one', async () => {
       const a = running('Alpha', ['api']);
       const b = running('Beta', ['ui']);
@@ -1536,6 +1735,140 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
       await write(SENSITIVE_FILE);
       expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('keeps excusing every later write on an allow-for-workstream card that stored no rule', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_workstream', repo.path, 'the manifest');
+      // The choice stored a rule for the tool but none scoped to the file.
+      expect(
+        listPermissionRules(base.db, project.id, lane.workstream.id).map((r) => r.pattern),
+      ).toEqual([null]);
+      await write(SENSITIVE_FILE);
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+    });
+
+    it.each([
+      ['for the workstream', true],
+      ['for the whole project', false],
+    ])('keeps excusing every later write on a stored rule %s, with no card', async (_name, own) => {
+      const lane = running();
+      watcher.sync();
+      state.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: project.id,
+          workstreamId: own ? lane.workstream.id : null,
+          toolName: 'Edit',
+          pattern: join(repo.path, SENSITIVE_FILE),
+          sourceInboxId: null,
+        }),
+      );
+      await write(SENSITIVE_FILE);
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+    });
+
+    it('cards a write when the stored rule names another file', async () => {
+      const lane = running();
+      watcher.sync();
+      state.write((ctx) =>
+        insertPermissionRule(ctx, {
+          projectId: project.id,
+          workstreamId: lane.workstream.id,
+          toolName: 'Edit',
+          pattern: join(repo.path, '.env'),
+          sourceInboxId: null,
+        }),
+      );
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it.each([['allow_once'], ['allow_workstream']])(
+      'does not let a card (%s) of a lane that finished excuse a write in the copy it shared',
+      async (choice) => {
+        const done = inWorktree('Alpha', 'ui');
+        launchIn(done.batch, 'Beta', 'api');
+        editCard(done, SENSITIVE_FILE, choice, done.path, 'the manifest');
+        state.write((ctx) =>
+          transitionWorkstream(ctx, done.workstream.id, {
+            to: WorkstreamState.Cancelled,
+            fence: null,
+          }),
+        );
+        watcher.sync();
+        writeAt(done.path, SENSITIVE_FILE);
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([`${done.path}: ${SENSITIVE_FILE}`]);
+      },
+    );
+
+    it.each([['allow_once'], ['allow_workstream']])(
+      "does not let a card (%s) of another workstream excuse this one's step end",
+      async (choice) => {
+        const mine = running('Alpha', ['api']);
+        const other = running('Beta', ['ui']);
+        editCard(other, SENSITIVE_FILE, choice, repo.path, 'the manifest');
+        touch(SENSITIVE_FILE);
+        expect(await watcher.stepEnd(mine.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      },
+    );
+
+    describe('a checkout reached through a symlink', () => {
+      /** A project whose checkout is a link to the repository, and a card naming the file by its real path. */
+      function linked() {
+        const link = join(tempDir('link').path, 'checkout');
+        symlinkSync(repo.path, link);
+        const owner = seedProject(base, { repoPath: link });
+        const seeded = seedWorkstream(base, { project: owner, title: 'Linked', areas: ['api'] });
+        state.write((ctx) => {
+          acquireClaims(ctx, {
+            projectId: owner.id,
+            workstreamId: seeded.workstream.id,
+            requests: claimRequestsForTask(seeded.task, owner),
+            leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+          });
+          transitionWorkstream(ctx, seeded.workstream.id, {
+            to: WorkstreamState.Starting,
+            fence: null,
+          });
+          transitionWorkstream(ctx, seeded.workstream.id, {
+            to: WorkstreamState.Running,
+            fence: null,
+          });
+        });
+        const real = realpathSync(repo.path);
+        expect(real).not.toBe(link);
+        return { link, real, owner, lane: seeded };
+      }
+
+      it("excuses a live write by the card's real path", async () => {
+        const { link, real, owner, lane } = linked();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once', real, null, owner);
+        writeFileSync(join(link, SENSITIVE_FILE), 'x');
+        fake.open.get(link)?.onChange(SENSITIVE_FILE);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
+      it("excuses a step end write by the card's real path", async () => {
+        const { link, real, owner, lane } = linked();
+        editCard(lane, SENSITIVE_FILE, 'allow_once', real, null, owner);
+        writeFileSync(join(link, SENSITIVE_FILE), 'x');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it('still cards a write whose card names another file', async () => {
+        const { link, real, owner, lane } = linked();
+        editCard(lane, '.env', 'allow_once', real, null, owner);
+        writeFileSync(join(link, SENSITIVE_FILE), 'x');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
     });
 
     it("excuses an allowed edit in a worktree, by the card's path in that copy", async () => {
@@ -1599,6 +1932,217 @@ describe('worktree checkouts', () => {
       await write(SENSITIVE_FILE);
       expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
       expect(flags()).toEqual([]);
+    });
+
+    it('does not let an excuse recorded while the file was missing excuse a later deletion of it', async () => {
+      const lane = running();
+      watcher.sync();
+      touch(SENSITIVE_FILE);
+      execFileSync('git', ['add', SENSITIVE_FILE], { cwd: repo.path, env: isolatedGitEnv() });
+      execFileSync('git', ['commit', '-q', '-m', 'Add .mcp.json'], {
+        cwd: repo.path,
+        env: isolatedGitEnv(),
+      });
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      // The lane removed the file inside the batch window, so the card is used with the file missing.
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      // Later the file is back, and a deletion no card allowed removes it again.
+      touch(SENSITIVE_FILE);
+      rmSync(join(repo.path, SENSITIVE_FILE));
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it("does not let a finished lane's excused write excuse another lane's write in the checkout", async () => {
+      const done = running('Alpha', ['ui']);
+      watcher.sync();
+      editCard(done, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      state.write((ctx) =>
+        transitionWorkstream(ctx, done.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      const next = running('Beta', ['api']);
+      watcher.sync();
+      // The file is unchanged since the excused write, so its stamp still matches.
+      expect(await watcher.stepEnd(next.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
+    describe('after the daemon restarts', () => {
+      const restart = (): void => {
+        watcher.stop();
+        watcher = createWatcher({
+          state,
+          inbox,
+          git: createGit(),
+          logger: silentLogger,
+          clock,
+          watch: fake.watch,
+          batchMs: 500,
+        });
+      };
+
+      it('still excuses at the step end the write the live watcher excused, unchanged', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        restart();
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it('cards at the step end a later write to that file that no card allowed', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restart();
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    describe('a directory the allowed write created', () => {
+      const FILE = '.codex/rules/new.rules';
+      const emitBoth = async (): Promise<void> => {
+        touch(FILE);
+        emit('.codex/rules');
+        emit(FILE);
+        await watcher.flush();
+      };
+
+      it('raises no stray card for the new directory that holds only the allowed file', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        await emitBoth();
+        expect(flags()).toEqual([]);
+      });
+
+      it('raises no stray card when only the directory is reported', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        touch(FILE);
+        emit('.codex/rules');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
+      it('still cards the directory that holds a file no card allowed', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        touch('.codex/rules/other.rules');
+        await emitBoth();
+        expect(flags().map((f) => f.body)).toContain('.codex/rules');
+      });
+
+      it('cards the directory again when a later write no card allowed lands in it', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        await emitBoth();
+        expect(flags()).toEqual([]);
+        await emitBoth();
+        expect(
+          flags()
+            .map((f) => f.body)
+            .sort(),
+        ).toEqual(['.codex/rules', FILE]);
+      });
+    });
+
+    describe('a folded Allow Edit card', () => {
+      /** Both lanes ask to edit `rel`; the inbox folds the two asks into one card, answered once. */
+      function foldedCard(
+        lanes: readonly { workstream: WorkstreamDto }[],
+        rel: string,
+        choice: string,
+      ): void {
+        const path = join(repo.path, rel);
+        const items = lanes.map(
+          (lane) =>
+            inbox.ask({
+              projectId: project.id,
+              workstreamId: lane.workstream.id,
+              sessionId: mintId('Session'),
+              kind: 'permission',
+              title: 'Allow Edit?',
+              body: path,
+              options: [
+                { label: 'allow_once', description: '' },
+                { label: 'deny', description: '' },
+              ],
+              recommendation: null,
+              category: 'environment',
+              urgency: 'normal',
+              detail: { toolName: 'Edit', summary: path, path },
+              signal: new AbortController().signal,
+            }).item,
+        );
+        expect(new Set(items.map((i) => i.id)).size).toBe(1);
+        const first = items[0];
+        if (!first) throw new Error('no card');
+        inbox.answer(first.id, { choice });
+      }
+
+      it('excuses one write per lane it targets, and cards the next', async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        foldedCard([a, b], SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        await write(SENSITIVE_FILE);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    it('cards a write that a card answered before the watcher started, whatever other projects hold', async () => {
+      const lane = running();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      // Another project answers more cards than one read takes, all newer than the card above, so the card
+      // is among its own project's latest answered but not among the latest across every project.
+      const other = seedProject(base, { repoPath: join(repo.path, 'other') });
+      const otherLane = seedWorkstream(base, { project: other, title: 'Other', areas: ['api'] });
+      for (let i = 0; i < ANSWERED_CARDS_READ + 20; i++) {
+        const { item } = inbox.ask({
+          projectId: other.id,
+          workstreamId: otherLane.workstream.id,
+          sessionId: mintId('Session'),
+          kind: 'permission',
+          title: 'Allow Edit?',
+          body: `other ${String(i)}`,
+          options: [{ label: 'deny', description: '' }],
+          recommendation: null,
+          category: 'environment',
+          urgency: 'normal',
+          detail: null,
+          signal: new AbortController().signal,
+        });
+        inbox.answer(item.id, { choice: 'deny' });
+      }
+      watcher.stop();
+      watcher = createWatcher({
+        state,
+        inbox,
+        git: createGit(),
+        logger: silentLogger,
+        clock,
+        watch: fake.watch,
+        batchMs: 500,
+      });
+      watcher.sync();
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
     });
   });
 });

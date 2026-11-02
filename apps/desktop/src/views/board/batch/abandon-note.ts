@@ -47,7 +47,7 @@ export function abandonNote(batch: BatchDto, workstreams: readonly WorkstreamDto
     live.length === 0
       ? null
       : live.length === 1
-        ? `${names(live)} is running: cancel it in Factory first.`
-        : `${names(live)} are running: cancel them in Factory first.`;
+        ? `${names(live)} is running: cancel it first.`
+        : `${names(live)} are running: cancel them first.`;
   return { refusal, line: refusal ? `${refusal} ${does}` : does };
 }

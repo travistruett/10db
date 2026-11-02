@@ -31,6 +31,24 @@ favors legibility and calm over decoration.
   (blue running, yellow waiting on you, orange paused, red failed); queued keeps the plain border. No
   fill, no left stripe, no pulsing. A card waiting on the builder is the most prominent: a full 2 px
   yellow border and "Waiting on you: answer in Inbox".
+- **Goal strip:** a goal with open tasks is one slim line above the Board's columns, in the same scroll
+  area as the batch strips: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
+  drawer. A goal is never a card in a column: cards are tasks, and the columns stay about tasks. Each of a
+  goal's task cards carries the goal's title as a small dimmed label.
+- **Goal status:** a goal says its status once, in a dot and one plain line, and the first match wins:
+  failed (red: a goal task failed and isn't retried), waiting on you (yellow: an open Inbox card on one of its
+  tasks), waiting on someone (yellow: a card owned by another person; from phase 3), paused (orange), running
+  (blue: a goal task's run is active), shipping (blue: every task is done but a pull request isn't merged),
+  not started (gray: nothing runs and tasks wait unstarted, such as "Not started · 11 tasks · Start Ready
+  Tasks on the Board") and done (green: every task not cancelled is done and merged). Gray is queued, so a
+  goal nobody has started is gray, not blue. Green is only for work that has merged: a goal with open pull
+  requests is Shipping, in blue, never green.
+- **Factory is one list, not cards:** goals are rows of one list separated by hairline dividers, and the open
+  goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
+  things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
+  until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
+  shipping, not started, the Ungrouped row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  no badge and no color.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).

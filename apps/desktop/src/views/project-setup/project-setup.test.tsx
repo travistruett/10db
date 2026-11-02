@@ -698,6 +698,25 @@ describe('the areas in the new project', () => {
     });
   });
 
+  it('does not say the project was created when creating without waiting fails', async () => {
+    const served = serve({ proposal: NEVER, createStatus: 400 });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await screen.findByText('Looking for the areas of this repository…');
+    await waitFor(() => {
+      expect(served.proposed).toHaveLength(1);
+    });
+    fireEvent.click(create());
+    await waitFor(() => {
+      expect(screen.getByTestId('error').textContent).toBe(
+        "Couldn't create the project: The folder changed.",
+      );
+    });
+    expect(screen.queryByText(/created/i)).toBeNull();
+    expect(screen.getByText(/Stopped waiting for proposed areas/)).toBeTruthy();
+    expect(names()).toEqual(['repo']);
+  });
+
   it('stops the proposal for a folder the builder has left for another', async () => {
     const served = serve({ proposal: NEVER });
     await openForm();

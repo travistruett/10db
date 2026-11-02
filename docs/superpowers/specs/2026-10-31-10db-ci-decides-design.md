@@ -81,7 +81,10 @@ batch's branch, so its push lands on the same pull request.
   the base's rules before the push)**
 - **A failure** is the gate's failure path with its card, titled "the pre-check failed", and nothing is pushed.
   The one-rerun rule for failures the batch couldn't have caused applies only when the log has failing tests, as
-  today, so it never fires for a pre-check that runs none.
+  today. This repository's pre-check can have them only from the `architecture-docs` and `agent-docs` rule
+  tests. Those tests' own files are not the batch's, so the rule can fire once for such a failure, although
+  the docs file the batch changed is the cause and the second run fails the same way. That costs one extra
+  run of a cheap pre-check; the failure card follows.
 - **The safety net.** When the ship ran the pre-check (not the gate) and GitHub answers "clean status" to
   auto-merge, the ship reads `prRequiredChecks` (§4) before #174's merge at once. GitHub says "clean status" both
   when the base has no required checks and when they have already passed on this head (a ship retried after CI
@@ -95,11 +98,17 @@ batch's branch, so its push lands on the same pull request.
   decide." or "Checked on the Mac: <command> (gate).", so a reviewer sees why no gate result is attached.
 - **This repository's pre-check** is `make precheck`: `scripts/check-changed.mjs --precheck`, which runs format
   and lint of the changed files, typecheck of the changed packages and every package depending on one, and drift
-  of the changed packages, and no tests, Rust checks or e2e. Where it cannot place a file (lockfile, a root config,
-  CI, the Makefile) or has no base, it runs those four steps over every package, never `scripts/gate.sh`. On this
-  branch's gate runs of 2026-10-30 those four steps over every package took 37 to 64 seconds; the tests alone took
-  250 to 361, and the daemon's own tests are over two minutes, so no choice of tests by package fits criterion 2.
-  CI runs every test. The lane still runs the tests of what it changed as it works (root `AGENTS.md`).
+  of the changed packages, plus knip (whole repo, about 15 seconds, for any change) and the `architecture-docs` and
+  `agent-docs` repo rule tests when a docs or agent file changed (all three where it cannot narrow). It runs no other
+  tests, no Rust checks and no e2e. Where it cannot place a file (lockfile, a root config,
+  CI, the Makefile) or has no base, it runs those steps over every package, never `scripts/gate.sh`. On this
+  branch's gate runs of 2026-10-30 format, lint, typecheck and drift over every package took 37 to 64 seconds; the
+  tests alone took 250 to 361, and the daemon's own tests are over two minutes, so no choice of tests by package
+  fits criterion 2. CI runs every test. The lane still runs the tests of what it changed as it works (root
+  `AGENTS.md`). **Knip and the two docs tests were added after #242 and #244** (commit 918854f): a decision file
+  without its `## Decision` / `## Why` layout (#242) and an unused exported type (#244) each passed the pre-check
+  and cost a CI-fix round. The rest of `tests/repo` takes about 40 seconds and is not about a docs change, so it
+  stays out. Do not take knip or these tests out on the strength of the earlier "no knip" wording.
 
 ## 4. A failed required check
 
@@ -254,7 +263,7 @@ must treat that answer as armed, not raise the refused card).
 | #   | Task                                                                                                                                                                                                                                                                                                                         | Depends on |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
 | T1  | Contracts and db: the columns and index above, the DTO fields, the migration, the Blocked rule. | — |
-| T2  | `make precheck` for this repository: `check-changed.mjs --precheck` (no tests, Rust or e2e; the four steps over every package where it cannot place a file), its timing measured on four kinds of change idle and under load, each under two minutes. | — |
+| T2  | `make precheck` for this repository: `check-changed.mjs --precheck` (knip for any change and the architecture-docs and agent-docs rule tests for a docs or agent file, no other tests, Rust or e2e; the same steps over every package where it cannot place a file), its timing measured on four kinds of change idle and under load, each under two minutes. | — |
 | T3  | gh: the spike, then `prRequiredChecks`, `jobLog`, `rerunFailed`, `mergeStateStatus`, with parsers and fixtures. | — |
 | T4  | The pre-check in the daemon and Settings: the setting and its refusal, the per-step check and ship step 2 running it, its failure card, the safety net on "clean status" (which reads `prRequiredChecks`), the pull request body line, `docs/architecture/02-batch-delivery.md`. | T1, T3 |
 | T5  | The watch: one read per pull request grouped by `pr_url`, `pr_state` recorded on every batch sharing it, cards keyed by the root, `pr_required` and `pr_merge_blocked` stored on the root, and the card line of §5 on the desktop. | T1, T3 |

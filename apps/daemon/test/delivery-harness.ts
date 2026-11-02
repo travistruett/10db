@@ -78,6 +78,7 @@ function fakePnpm(root: string): FakePnpm {
   const bin = join(dir, 'bin');
   const log = join(dir, 'calls.log');
   const verdict = join(dir, 'verdict');
+  const made = join(dir, 'made');
   mkdirSync(bin, { recursive: true });
   const script = join(bin, 'pnpm');
   writeFileSync(
@@ -85,6 +86,7 @@ function fakePnpm(root: string): FakePnpm {
     [
       '#!/bin/sh',
       `printf '%s | %s\\n' "$PWD" "$*" >> '${log}'`,
+      `if [ -d '${made}' ]; then cp -R '${made}/.' "$PWD"; fi`,
       `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
       '',
@@ -114,6 +116,12 @@ function fakePnpm(root: string): FakePnpm {
         `ERR_PNPM_META_FETCH_FAIL GET https://${host}/pkg: request to https://${host}/pkg failed, reason: CONNECT tunnel failed, response 403`,
         `[SandboxDebug] Connection blocked to ${host}:443`,
       );
+    },
+    makes(files) {
+      for (const [relative, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(made, relative)), { recursive: true });
+        writeFileSync(join(made, relative), content);
+      }
     },
     succeed() {
       rmSync(verdict, { force: true });
@@ -175,6 +183,8 @@ export interface FakePnpm {
    * on stderr, pnpm's error, exit 1.
    */
   blockedFrom(host: string): void;
+  /** Makes every later call write these files (path relative to its directory, content) first, as an install writes `node_modules`. */
+  makes(files: Readonly<Record<string, string>>): void;
   /** Makes every later call succeed again. */
   succeed(): void;
 }
@@ -200,6 +210,8 @@ export interface DeliveryHarness {
    * The ship trigger, when on, still calls the first one.
    */
   restartShipper(): Shipper;
+  /** The current shipper's clock: advancing it lets a throttled catch-up run again. */
+  readonly shipClock: ManualClock;
   /** Where the shipper writes PR bodies and gate logs. */
   readonly dataDir: string;
   /** The daemon's worktree root (its hashed level), a real path not made until the first cut. */
@@ -321,12 +333,13 @@ export function createDeliveryHarness(
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
+  let shipClock = new ManualClock();
   const makeShipper = (): Shipper =>
     createShipper({
       ...ctx,
       gate: opts.shipGate?.(shipGate) ?? shipGate,
       baseUpdates: createBaseUpdates(ctx),
-      clock: new ManualClock(),
+      clock: (shipClock = new ManualClock()),
       dataDir: data.path,
       sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
       identifyProcess: (pid) => systemProcesses.identify(pid),
@@ -361,6 +374,9 @@ export function createDeliveryHarness(
     restartShipper() {
       shipper = makeShipper();
       return shipper;
+    },
+    get shipClock() {
+      return shipClock;
     },
     dataDir: data.path,
     worktreeRoot,

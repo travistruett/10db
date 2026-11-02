@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { projectViewDto } from '../../test/fixtures';
 import { goalDto, goalListDto, goalSummaryDto } from '../../test/goal-fixtures';
 
 afterEach(() => {
@@ -66,6 +67,14 @@ const REFUSAL: GoalAdoptIssue[] = [
   { path: 'Task 1, areas', message: 'the project has no area "web"' },
 ];
 
+/** The dimmed line Factory shows while the project has no goals. */
+const NO_GOALS = /^Goals are outcomes 10db pursues across many tasks/;
+
+/** A goal's row: a button whose accessible name starts with the goal's title. */
+function rowOf(title: string): Promise<HTMLElement> {
+  return screen.findByRole('button', { name: new RegExp(`^${title}`) });
+}
+
 /** Mantine leaves `data-variant` off a button of its default, filled variant. */
 function isFilled(button: HTMLElement): boolean {
   return (button.getAttribute('data-variant') ?? 'filled') === 'filled';
@@ -73,7 +82,7 @@ function isFilled(button: HTMLElement): boolean {
 
 async function adopt(): Promise<void> {
   // The goal list appears once the project is selected and its goals have loaded.
-  await screen.findByRole('heading', { name: 'Goals' });
+  await screen.findByRole('group', { name: 'Goals' });
   fireEvent.click(await screen.findByRole('button', { name: 'Adopt a Plan…' }));
 }
 
@@ -83,7 +92,7 @@ describe('Adopt a Plan…', () => {
     serve();
     renderApp('/factory');
     const button = await screen.findByRole('button', { name: 'Adopt a Plan…' });
-    await screen.findByText('No workstreams are running.');
+    await screen.findByText(NO_GOALS);
     // The shell's navigation links are buttons too, but they are not Mantine Buttons.
     const buttons = screen
       .getAllByRole('button')
@@ -117,16 +126,13 @@ describe('Adopt a Plan…', () => {
       ),
     );
     renderApp('/factory');
-    await screen.findByText('No goals yet.');
+    await screen.findByText(NO_GOALS);
 
     await adopt();
 
-    const row = (await screen.findByText('Ship the importer')).closest('tr');
-    if (!row) throw new Error('the goal is not in a table row');
-    expect(within(row).getByText('Running')).toBeTruthy();
-    expect(within(row).getByText('1 of 3 tasks done')).toBeTruthy();
-    expect(within(row).getByText('2 new')).toBeTruthy();
-    expect(screen.queryByText('No goals yet.')).toBeNull();
+    const row = await rowOf('Ship the importer');
+    expect(row.textContent).toContain('Running · 1 of 3 tasks done · 2 new');
+    expect(screen.queryByText(NO_GOALS)).toBeNull();
     expect(screen.queryByText("This plan can't be adopted yet")).toBeNull();
   });
 
@@ -169,7 +175,7 @@ describe('Adopt a Plan…', () => {
 
     fireEvent.click(within(modal).getByRole('button', { name: 'Pick Again…' }));
 
-    expect(await screen.findByText('Ship the importer')).toBeTruthy();
+    expect(await rowOf('Ship the importer')).toBeTruthy();
     expect(native.asked).toHaveLength(2);
     expect(daemon.posted).toEqual([
       { path: PLAN, dryRun: false },
@@ -208,7 +214,99 @@ describe('Adopt a Plan…', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
     expect(daemon.posted).toHaveLength(1);
-    expect(screen.getByText('No goals yet.')).toBeTruthy();
+    expect(screen.getByText(NO_GOALS)).toBeTruthy();
+  });
+
+  it('Pick Again… shows a daemon failure inside the open refusal modal', async () => {
+    panel(PLAN, '/Users/me/plans/fixed.md');
+    // The second pick finds no answer queued, so the daemon fails with a 500.
+    serve({ errors: REFUSAL });
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: "This plan can't be adopted yet" });
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Pick Again…' }));
+
+    expect(await within(modal).findByText("Couldn't adopt that plan")).toBeTruthy();
+    expect(within(modal).getAllByRole('listitem')).toHaveLength(REFUSAL.length);
+  });
+
+  it('closes an open refusal when the project is switched', async () => {
+    const alpha = projectViewDto({ name: 'alpha', repoPath: '/Users/x/a' });
+    const beta = projectViewDto({ name: 'beta', repoPath: '/Users/x/b' });
+    window.localStorage.clear();
+    panel(PLAN);
+    serve({ errors: REFUSAL });
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+    renderApp('/factory');
+    await adopt();
+    await screen.findByRole('dialog', { name: "This plan can't be adopted yet" });
+
+    // Mantine's modal keeps the rest of the page aria-hidden while it is open, so the
+    // switcher is reached with `hidden`. The refusal belongs to the project it came from.
+    const hidden = { hidden: true } as const;
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Project: alpha. Switch project', ...hidden }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: /beta/, ...hidden }));
+
+    await screen.findByRole('button', { name: 'Project: beta. Switch project', ...hidden });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: "This plan can't be adopted yet" })).toBeNull();
+    });
+    expect(screen.queryByText(PLAN)).toBeNull();
+  });
+
+  it('shows a field error for a typed path that is not absolute', async () => {
+    const daemon = serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+
+    fireEvent.change(within(modal).getByLabelText('Plan path'), {
+      target: { value: 'plans/importer.md' },
+    });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+
+    expect(await within(modal).findByText(/starting with \//)).toBeTruthy();
+    expect(daemon.posted).toEqual([]);
+  });
+
+  it('reopens the typed-path form empty and without a field error after Cancel', async () => {
+    serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+    fireEvent.change(within(modal).getByLabelText('Plan path'), {
+      target: { value: 'plans/x.md' },
+    });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+    expect(await within(modal).findByText(/starting with \//)).toBeTruthy();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Adopt a Plan…' }));
+
+    const reopened = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+    const field = within(reopened).getByLabelText<HTMLInputElement>('Plan path');
+    expect(field.value).toBe('');
+    expect(within(reopened).queryByText(/starting with \//)).toBeNull();
+  });
+
+  it('shows a daemon failure on a typed Adopt inside the open modal', async () => {
+    const daemon = serve();
+    renderApp('/factory');
+    await adopt();
+    const modal = await screen.findByRole('dialog', { name: 'Adopt a plan' });
+
+    fireEvent.change(within(modal).getByLabelText('Plan path'), { target: { value: PLAN } });
+    fireEvent.click(within(modal).getByRole('button', { name: 'Adopt' }));
+
+    expect(await within(modal).findByText("Couldn't adopt that plan")).toBeTruthy();
+    expect(daemon.posted).toHaveLength(1);
+    expect(screen.getByRole('dialog', { name: 'Adopt a plan' })).toBeTruthy();
   });
 
   it('says so when the daemon fails for a reason other than the brief', async () => {
@@ -229,8 +327,6 @@ describe('the goal list', () => {
     );
     panel();
     renderApp('/factory');
-    const row = (await screen.findByText('Older goal')).closest('tr');
-    if (!row) throw new Error('the goal is not in a table row');
-    expect(within(row).getByText('Waiting on you')).toBeTruthy();
+    expect((await rowOf('Older goal')).textContent).toContain('Waiting on you');
   });
 });

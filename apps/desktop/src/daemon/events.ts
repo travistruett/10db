@@ -14,7 +14,7 @@ export const STREAM_RETRY_MAX_MS = 10_000;
 /** How long the head fetch may take before the stream retries. */
 const HEAD_TIMEOUT_MS = 2_000;
 
-/** A goal's status and progress are derived from its tasks' runs and cards, so they follow these. */
+/** A goal's status, progress and rows are read from its tasks' runs and cards, so they follow these. */
 const WORK: readonly QueryKey[] = [['workstreams'], ['tasks'], goalKeys.all];
 /** The batch sheet's proposal: its candidates, claims and step plans follow all of these. */
 const CANDIDATES: QueryKey = ['candidates'];
@@ -25,6 +25,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   task: [['tasks'], goalKeys.all, CANDIDATES],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
+  // The digest's Decisions and Deviations rows.
+  decision: [goalKeys.all],
+  deviation: [goalKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.

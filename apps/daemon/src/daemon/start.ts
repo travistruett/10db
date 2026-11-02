@@ -96,7 +96,7 @@ import {
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
-import { createInboxService } from '../inbox';
+import { createInboxService, createParkAnswers } from '../inbox';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -422,11 +422,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     waits: claimWaits,
     log: logger,
   });
+  // "Park the task" on a lane's question stops the run, as a cancel from the Board does, and parks it.
+  const parkAnswers = createParkAnswers({
+    state,
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    log: logger,
+  });
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
+    onParkAnswer: parkAnswers,
     onCheckAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer);

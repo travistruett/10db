@@ -44,7 +44,7 @@ import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
-import { branchBehindBase, joinsLanding, missingLandingBranch, sharedLanding } from './landing';
+import { joinsLanding, landingWarnings, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type CutTasks, type Plans } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -390,7 +390,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */
-  async function cut(
+  function cut(
+    batchId: BatchId,
+    tasks: readonly TaskDto[],
+    plans: CutTasks,
+    inBatch: ReadonlySet<TaskId>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // One operation: the checkout's git dirs are read once for the cut, not once per git call.
+    return ctx.git.operation(() => cutSteps(batchId, tasks, plans, inBatch, signal));
+  }
+
+  async function cutSteps(
     batchId: BatchId,
     tasks: readonly TaskDto[],
     plans: CutTasks,
@@ -450,12 +461,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));
         return;
       }
-      // Not a refusal: the builder may mean to land in a branch that is behind. A notice on the
-      // batch's tasks names it.
-      const behind = await branchBehindBase(ctx, project, batch, signal);
-      if (behind && !stopped()) {
+      // Not a refusal: the builder may mean to land in a branch that is behind, or that nothing
+      // else uses. A notice on the batch's tasks names it.
+      for (const notice of await landingWarnings(ctx, project, batch, inBatch, signal)) {
+        if (stopped()) break;
         try {
-          showNotice(ctx.state, batchId, behind);
+          showNotice(ctx.state, batchId, notice);
         } catch (error) {
           ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
         }

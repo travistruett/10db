@@ -27,12 +27,19 @@ export interface AdoptPlan {
 /**
  * Adopt a Plan…: pick a `.md` file, post its path, and keep a refusal up until the builder picks
  * again or cancels. Success needs no state here: the goal list refetches and shows the new goal.
+ * Its state belongs to one project: the caller remounts it (a `key`) when the project changes.
  */
 export function useAdoptPlan(projectId: ProjectId | null): AdoptPlan {
   const adopt = useAdoptGoal(projectId);
   const [refusal, setRefusal] = useState<Refusal | null>(null);
   const [typing, setTyping] = useState(false);
   const [pickError, setPickError] = useState<string | null>(null);
+  const resetAdopt = adopt.reset;
+
+  const clearProblem = () => {
+    setPickError(null);
+    resetAdopt();
+  };
 
   const adoptPath = (path: string) => {
     setPickError(null);
@@ -45,7 +52,7 @@ export function useAdoptPlan(projectId: ProjectId | null): AdoptPlan {
   };
 
   const pick = () => {
-    setPickError(null);
+    clearProblem();
     if (!canChoosePlan()) {
       setRefusal(null);
       setTyping(true);
@@ -70,9 +77,11 @@ export function useAdoptPlan(projectId: ProjectId | null): AdoptPlan {
     adoptPath,
     dismissRefusal: () => {
       setRefusal(null);
+      clearProblem();
     },
     dismissTyping: () => {
       setTyping(false);
+      clearProblem();
     },
   };
 }

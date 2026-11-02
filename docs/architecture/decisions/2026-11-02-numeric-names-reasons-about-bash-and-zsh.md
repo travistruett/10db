@@ -21,7 +21,10 @@ gives up.
 
 The scan looks through `repeat N` and zsh's `-` precommand modifier, in any nesting, to the command they run,
 so `repeat 1 print -vs x` and `- vared s` give up like the bare command. `print` and `printf` also give up
-when a word the shell expands sits where they still read options (`F=-v; print $F s x`). An assignment inside
+when a word the shell expands sits where they still read options (`F=-v; print $F s x`). A word of a
+declaring command that is not a `name=value` and that the parser marks dynamic (an unquoted `$`, backtick, glob
+character or `~`) may expand to a flag, so `touch ./-n; declare ?n r=s` gives up in `numericNames` and is unread
+in `firstUnread`; a quoted `'?n'=1` is not dynamic and stays read. An assignment inside
 a parameter expansion counts behind zsh flags and prefix characters (`${(L)s::=x}`, `${=s::=x}`, `${^s:=x}`).
 zsh's implicit names are added: `reply` (`read -A`, `-c`, `-l` with no name) and `dirstack` (`cd`, `pushd`,
 `popd`). Glob qualifiers that run code (`*(e:…:)`, `*(+fn)`) make the parse uncertain, as any word holding

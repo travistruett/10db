@@ -36,6 +36,10 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
     '(kind=unit); never put two kind=unit candidates in one area. Merge small neighbours that',
     'belong together. Every candidate goes in exactly one area.',
     '',
+    'The kind=rest candidate holds every file no other area holds, so the area that takes it becomes',
+    'the catch-all: tasks in it may change any file no other area holds, such as a new package.',
+    'Merging it into a unit makes that unit the catch-all, so keep it on its own unless nothing else fits.',
+    '',
     `Name each area in lowercase words joined by hyphens (letters, digits and hyphens, starting with a letter). Do not use ${[...RESERVED].join(', ')}: they are taken.`,
     'Give each area a reason: one short line on what it holds.',
     '',
@@ -49,11 +53,24 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
 
 /**
  * `text` with whitespace, line breaks and every other control character (an escape sequence, a NUL)
- * collapsed to single spaces and cut to one short line.
+ * collapsed to single spaces and cut to one short line. Format characters (a bidi override or
+ * isolate, a zero-width space or joiner, a BOM) are dropped: they draw nothing, but can reorder or
+ * hide the text around them where the reason is shown. Lone surrogates (a model's "\ud800" escape
+ * survives JSON.parse as one) are dropped too: they are not text, the desktop draws U+FFFD for them
+ * and a strict UTF-8 encoder may refuse the string. With the `u` flag a paired astral character is
+ * one code point, so only an unpaired half matches \p{Cs}.
  */
 function oneLine(text: string): string {
-  const line = text.replace(/[\s\p{Cc}]+/gu, ' ').trim();
-  return line.length <= MAX_REASON ? line : `${line.slice(0, MAX_REASON - 1).trimEnd()}…`;
+  const line = text
+    .replace(/[\p{Cf}\p{Cs}]+/gu, '')
+    .replace(/[\s\p{Cc}]+/gu, ' ')
+    .trim();
+  if (line.length <= MAX_REASON) return line;
+  // Cut on a code point boundary: slicing UTF-16 code units could leave half an astral character.
+  const cut = line.slice(0, MAX_REASON - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  const whole = last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+  return `${whole.trimEnd()}…`;
 }
 
 function modelJson(text: string): unknown {

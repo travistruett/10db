@@ -24,7 +24,7 @@ describe('holdOption', () => {
   ] as const)('refuses $name, saying the task is running and where to cancel it', ({ state }) => {
     expect(holdOption(task, workstreamDto({ state }))).toEqual({
       kind: 'refused',
-      reason: 'Alpha is running: cancel it in Factory first.',
+      reason: 'Alpha is running: cancel it first.',
     });
   });
 
@@ -35,7 +35,7 @@ describe('holdOption', () => {
   ] as const)('refuses a queued run with $name, saying it has already run', ({ over }) => {
     expect(holdOption(task, workstreamDto({ state: 'QUEUED', ...fresh, ...over }))).toEqual({
       kind: 'refused',
-      reason: 'Alpha has already run: cancel it in Factory first.',
+      reason: 'Alpha has already run: cancel it first.',
     });
   });
 

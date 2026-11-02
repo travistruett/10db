@@ -76,6 +76,13 @@ export interface PullRequestStatus {
    * DIRTY, `behind` for BEHIND, null for anything else (clean, blocked, unknown, a value added later).
    */
   readonly mergeBlocked: MergeBlocked | null;
+  /**
+   * GitHub's `mergeStateStatus` is BLOCKED and the review is not what it waits for (no review is
+   * required, or it is approved): a required check that has not reported is the likely cause. With no
+   * check at all on the head (`checks` is `none`) it is how 10db tells a base that requires checks
+   * whose runs never started from a base that has no CI.
+   */
+  readonly blockedOnChecks: boolean;
 }
 
 export const MergeBlocked = { Conflicts: 'conflicts', Behind: 'behind' } as const;
@@ -381,11 +388,12 @@ const PrStatusView = z.object({
     .transform((oid) => (oid === undefined || oid === null || oid === '' ? null : oid)),
   mergeable: z.enum(PrMergeable).catch(PrMergeable.Unknown),
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
-  mergeStateStatus: z
-    .string()
-    .nullish()
-    .transform((state) => MERGE_BLOCKED[state ?? ''] ?? null),
+  mergeStateStatus: z.string().nullish(),
+  reviewDecision: z.string().nullish(),
 });
+
+/** Review decisions that make a BLOCKED pull request wait for a person, not for a check. */
+const REVIEW_PENDING = new Set(['REVIEW_REQUIRED', 'CHANGES_REQUESTED']);
 
 /** One entry of `gh pr checks --json name,state,bucket,link,workflow,description`. */
 const RequiredCheckItem = z.object({
@@ -615,7 +623,7 @@ export function createGh(exec: GhExec): Gh {
         '-R',
         repo,
         '--json',
-        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
+        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision',
       ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
@@ -626,7 +634,9 @@ export function createGh(exec: GhExec): Gh {
         url: view.url,
         state: view.state,
         headSha: view.headRefOid,
-        mergeBlocked: view.mergeStateStatus,
+        mergeBlocked: MERGE_BLOCKED[view.mergeStateStatus ?? ''] ?? null,
+        blockedOnChecks:
+          view.mergeStateStatus === 'BLOCKED' && !REVIEW_PENDING.has(view.reviewDecision ?? ''),
         mergeable: view.mergeable,
         ...summariseChecks(view.statusCheckRollup ?? []),
       };

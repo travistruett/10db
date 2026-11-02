@@ -1230,6 +1230,24 @@ describe('MCP tools', () => {
       await Promise.all([alpha, beta]);
     });
 
+    it.each(['CANCELLED', 'FAILED', 'DONE'] as const)(
+      'stores no yield for a task that is already %s, whose wait has not noticed yet',
+      async (to) => {
+        const { a, alpha, beta, card } = await deadlocked();
+        // The task ended while its request_claim wait still runs; its terminal event has passed.
+        state.write((ctx) => {
+          // The fixture's task sits in QUEUED; DONE and FAILED are reached through VERIFYING.
+          const path = to === 'CANCELLED' ? [to] : (['STARTING', 'VERIFYING', to] as const);
+          for (const step of path)
+            transitionWorkstream(ctx, a.workstream.id, { to: step, fence: null });
+        });
+        inbox.answer(card.id, { choice: 'Alpha yields area api' });
+        expect(claimWaits.pendingYield(a.workstream.id)).toBeUndefined();
+        sessionAbort.abort();
+        await Promise.all([alpha, beta]);
+      },
+    );
+
     it('does not cancel a task that has already ended', async () => {
       const { a, alpha, beta, card } = await deadlocked();
       state.write((ctx) => {

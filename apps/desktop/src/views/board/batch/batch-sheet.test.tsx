@@ -218,7 +218,9 @@ describe('BatchSheet', () => {
       name: 'Add 1 task to Fix the login and start 1 task in a separate copy',
     });
     expect(
-      within(sheet).getByText('Fix the login is shipping; start once it has shipped'),
+      within(sheet).getByText(
+        'Fix the login is shipping; start once it has shipped, or untick the Your folder tasks to start the separate copies now',
+      ),
     ).toBeTruthy();
     fireEvent.click(within(sheet).getByRole('checkbox', { name: 'One' }));
     expect(

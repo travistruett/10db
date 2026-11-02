@@ -109,6 +109,17 @@ describe('the areas and hazards editor', () => {
       expect(screen.getAllByText(/holds every file no other area holds/).length).toBeGreaterThan(0);
     });
 
+    it('says its tasks may change every file no other area holds, not what its globs match', async () => {
+      serveProject([], withRest);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      expect(
+        screen.getByText('Tasks in "root" may change every file no other area holds.'),
+      ).toBeTruthy();
+      expect(screen.getByText(/^Tasks in "api" may change files in /)).toBeTruthy();
+      expect(screen.queryByText(/^Tasks in "root" may change files in /)).toBeNull();
+    });
+
     it('shows none when the project has none', async () => {
       serveProject([], project);
       renderApp('/settings/areas');

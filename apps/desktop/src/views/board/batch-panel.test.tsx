@@ -60,7 +60,7 @@ describe('BatchPanel', () => {
     expect(button.hasAttribute('disabled')).toBe(true);
     expect(
       screen.getByText(
-        'Alpha is running: cancel it in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+        'Alpha is running: cancel it first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
       ),
     ).toBeTruthy();
     fireEvent.click(button);

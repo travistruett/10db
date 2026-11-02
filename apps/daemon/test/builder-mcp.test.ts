@@ -29,15 +29,22 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { FakeGh } from './fake-gh';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  githubOrigin,
+  NETWORK_ENV,
+  tempDir,
+  waitForAsync,
+} from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 let client: Client;
-beforeEach(async () => {
-  data = tempDir('builder mcp');
-  repo = createTempRepo();
+/** Starts a daemon and connects the builder client to it; `extra` adds to the daemon's options. */
+async function boot(extra: Partial<Parameters<typeof startDaemon>[0]> = {}) {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
@@ -50,6 +57,7 @@ beforeEach(async () => {
     tickMs: 3_600_000,
     // No lane is free, so a started task stays queued and can be held.
     caps: { global: 0 },
+    ...extra,
   });
   client = new Client({ name: 'test', version: '0' });
   await client.connect(
@@ -57,6 +65,11 @@ beforeEach(async () => {
       requestInit: { headers: { Authorization: `Bearer ${daemon.token}` } },
     }),
   );
+}
+beforeEach(async () => {
+  data = tempDir('builder mcp');
+  repo = createTempRepo();
+  await boot();
 });
 afterEach(async () => {
   await client.close();
@@ -169,6 +182,25 @@ describe('the builder MCP endpoint', () => {
     );
     expect(projects[0]?.['isolate']).toEqual(['migrations', 'deps']);
     expect(projects[0]?.['columns']).toContainEqual({ id: column.id, name: 'Later' });
+  });
+
+  it('marks the catch-all area in list_projects and leaves the others unmarked', async () => {
+    await api().post('/projects', ProjectDto, {
+      name: 'proposed',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [
+        { name: 'src', globs: ['src/**'] },
+        { name: 'root', globs: ['*', '.*'], catchAll: true },
+      ],
+    });
+    const projects = z
+      .array(z.object({ areas: z.array(z.record(z.string(), z.unknown())) }).loose())
+      .parse(await callJson('list_projects'));
+    expect(projects[0]?.areas).toEqual([
+      { name: 'src', globs: ['src/**'] },
+      { name: 'root', globs: ['*', '.*'], catchAll: true },
+    ]);
   });
 
   it('lists flows', async () => {
@@ -689,6 +721,68 @@ describe('the builder MCP endpoint', () => {
           createdAt: open.createdAt,
         },
       ]);
+    });
+  });
+
+  describe('a landing branch origin lacks', () => {
+    let remote: ReturnType<typeof createTempRepoWithOrigin>;
+    let network: ReturnType<typeof githubOrigin>;
+    const MISSING = (what: string) =>
+      `origin has no branch named missing. Create it on origin, or choose another place for ${what} to land.`;
+
+    beforeEach(async () => {
+      // Replace the daemon the outer hook started with one whose project has a real origin.
+      await client.close();
+      await daemon.stop();
+      repo.cleanup();
+      remote = createTempRepoWithOrigin();
+      repo = remote.repo;
+      network = githubOrigin(remote.repo.path, remote.origin.path);
+      await boot({
+        gh: new FakeGh(),
+        networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
+      });
+    });
+    afterEach(() => {
+      remote.origin.cleanup();
+      network.cleanup();
+    });
+
+    const seedPullRequestProject = () =>
+      api().post('/projects', ProjectDto, {
+        name: 'demo',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        areas: [{ name: 'src', globs: ['src/**'] }],
+        delivery: 'pull_request',
+        prTitlePrefix: 'feat(app)',
+      });
+
+    it('edit_task refuses it in the API’s words and leaves the task’s landing', async () => {
+      const project = await seedPullRequestProject();
+      const task = await seedTask(project.id, 'keep');
+      const result = await call('edit_task', {
+        taskId: task.id,
+        landing: { kind: 'branch', branch: 'missing' },
+      });
+      expect(result).toEqual({ isError: true, text: MISSING('this task') });
+      expect((await tasksOf(project.id))[0]?.landing).toEqual({ kind: 'base' });
+    });
+
+    it('create_task refuses it in the API’s words and creates no task', async () => {
+      const project = await seedPullRequestProject();
+      const input = {
+        title: 't',
+        acceptanceCriteria: ['a'],
+        areas: ['src'],
+        landing: { kind: 'branch', branch: 'missing' },
+      };
+      const rest = await restRefusal(`/projects/${project.id}/tasks`, input);
+      expect(rest.status).toBe(400);
+      const result = await call('create_task', { projectId: project.id, ...input });
+      expect(result).toEqual({ isError: true, text: MISSING('this task') });
+      expect(result.text).toBe(restText(rest.body));
+      expect(await tasksOf(project.id)).toEqual([]);
     });
   });
 
