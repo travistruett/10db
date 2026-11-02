@@ -264,7 +264,7 @@ describe('cancelRefusedStartTask', () => {
     );
   });
 
-  it('refuses a task whose cancelled run had a session', () => {
+  it('closes a task whose latest run was cancelled after a session, as a refused restart leaves it', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
     const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
@@ -279,8 +279,33 @@ describe('cancelRefusedStartTask', () => {
       }),
     );
     store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
+      TaskStatus.Cancelled,
+    );
+    // The cancelled run stays as history.
+    expect(listWorkstreams(store.db, {}).map((w) => [w.id, w.state])).toEqual([
+      [ws.id, S.Cancelled],
+    ]);
+  });
+
+  it('refuses a cancelled-after-session task that an open task waits on', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id, 'Base');
+    seedTask(project.id, 'Child', [task.id]);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    store.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: ws.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'hash-dependents',
+      }),
+    );
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
     expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
-      TaskStartedError,
+      TaskHasDependentsError,
     );
   });
 
@@ -502,6 +527,17 @@ describe('a task whose pull request closed without merging', () => {
     store.write((ctx) => reopenTask(ctx, task.id));
     const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
     expect(again.state).toBe(S.Queued);
+  });
+
+  it('can be cancelled from a refused restart once reopened, keeping its finished run', () => {
+    const project = seedProject(store);
+    const { task } = inReview(project.id, 'closed');
+    store.write((ctx) => reopenTask(ctx, task.id));
+    expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
+      TaskStatus.Cancelled,
+    );
+    expect(listTasks(store.db, project.id)).toEqual([]);
+    expect(listWorkstreams(store.db, {}).map((w) => w.state)).toEqual([S.Done]);
   });
 
   it('judges a reopened task by its new run, not the earlier closed pull request', () => {

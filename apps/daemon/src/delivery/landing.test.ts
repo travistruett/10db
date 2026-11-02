@@ -1,5 +1,5 @@
 import { BatchDto, ConflictError, NOTICE_BODY_MAX, type TaskDto } from '@10db/contracts';
-import { getBatch, listBatches, listWorkstreams } from '@10db/db';
+import { cancelTask, getBatch, listBatches, listWorkstreams, setTaskStatus } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
@@ -109,6 +109,8 @@ describe('a pull request that lands in another branch', () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
     h.teammatePush('main', 'src/api/fix.txt');
+    // Another open task lands there, so only the behind notice is earned.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const batch = await start('Greetings', task);
     expect(batch.state).toBe('OPEN');
@@ -123,14 +125,96 @@ describe('a pull request that lands in another branch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('says nothing when the branch holds everything the base has', async () => {
+  it('says nothing when the branch holds everything the base has and other open work lands there', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(batch.notices).toEqual([]);
+  });
+
+  it('says so on the batch, naming the branch, when no other open work lands there, even level with the base', async () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
     const batch = await start(
       'Greetings',
       h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
     );
+    expect(batch.state).toBe('OPEN');
+    expect(batch.notices).toMatchObject([
+      {
+        key: 'landing-unused',
+        tone: 'warning',
+        line: expect.stringContaining('feature/x') as unknown,
+        body: expect.stringContaining('feature/x') as unknown,
+      },
+    ]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('says nothing about an unused branch while another open task lands there', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
     expect(batch.notices).toEqual([]);
+  });
+
+  it('counts a task that is done, and one that was removed, as no use', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const finished = h.addTask('Done', { landing: { kind: 'branch', branch: 'feature/x' } });
+    h.state.write((c) => {
+      setTaskStatus(c, finished.id, 'done');
+    });
+    const removed = h.addTask('Gone', { landing: { kind: 'branch', branch: 'feature/x' } });
+    h.state.write((c) => {
+      cancelTask(c, removed.id);
+    });
+    const batch = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
+  });
+
+  it('says nothing about the project default, or the branch a project lands new tasks in', async () => {
+    h = createDeliveryHarness();
+    const base = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'main' } }),
+    );
+    expect(base.notices).toEqual([]);
+    h.close();
+
+    h = createDeliveryHarness({ landing: 'branch', landingBranch: 'feature/x' });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const named = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(named.notices).toEqual([]);
+  });
+
+  it('says so for a separate copy too, until another batch lands in the branch', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    const first = await start(
+      'First',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(first.notices.map((n) => n.key)).toEqual(['landing-unused']);
+    const second = await start(
+      'Second',
+      h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(second.notices).toEqual([]);
   });
 
   it('refuses a branch origin does not have, in plain words, before anything starts', async () => {
@@ -480,6 +564,8 @@ describe('in worktree mode', () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
     h.teammatePush('main', 'src/api/fix.txt');
+    // Another open task lands there, so only the behind notice is earned.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();
@@ -499,6 +585,8 @@ describe('in worktree mode', () => {
   it('says nothing when its landing branch holds everything the base has', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
+    // Another open task lands there, so no unused-branch notice either.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();

@@ -35,8 +35,15 @@ const STUBS: Record<string, readonly string[]> = {
     "  'api repos/{owner}/{repo}/commits/'*)",
     '    [ -n "$STUB_HEAD_SHA" ] || { echo "gh: No commit found for SHA: x (HTTP 422)" >&2; exit 1; }',
     '    echo "$STUB_HEAD_SHA" ;;',
-    '  \'api repos/{owner}/{repo}/actions/runs/\'*/artifacts*) echo "${STUB_ARTIFACT_LIVE:-1}" ;;',
-    '  \'run list \'*\'--status success\'*) [ -z "$STUB_SUCCESS_RUN" ] || echo "$STUB_SUCCESS_RUN" ;;',
+    // The ref's newest commits, newest first, one per line.
+    '  \'api repos/{owner}/{repo}/commits?\'*) for sha in ${STUB_COMMITS:-$STUB_HEAD_SHA}; do echo "$sha"; done ;;',
+    "  'api repos/{owner}/{repo}/actions/runs/'*/artifacts*)",
+    '    id="${2#repos/\\{owner\\}/\\{repo\\}/actions/runs/}"; id="${id%%/*}"',
+    '    case " ${STUB_EXPIRED_RUNS:-} " in *" $id "*) echo 0 ;; *) echo "${STUB_ARTIFACT_LIVE:-1}" ;; esac ;;',
+    // Successful runs, newest first, as "<run id> <commit>": STUB_SUCCESS_RUN built the head, then STUB_RUNS.
+    "  'run list '*'--status success'*)",
+    '    [ -z "$STUB_SUCCESS_RUN" ] || echo "$STUB_SUCCESS_RUN $STUB_HEAD_SHA"',
+    '    for run in ${STUB_RUNS:-}; do echo "${run/@/ }"; done ;;',
     '  \'run list \'*\'--json databaseId,status \'*) [ -z "${STUB_ACTIVE_RUN:-}" ] || echo "$STUB_ACTIVE_RUN" ;;',
     "  'run list '*'--event workflow_dispatch'*) [ ! -f \"$STUB_STATE/dispatched\" ] || echo 101; echo 100 ;;",
     '  \'workflow run \'*) touch "$STUB_STATE/dispatched" ;;',

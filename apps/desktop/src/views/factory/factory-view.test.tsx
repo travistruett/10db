@@ -207,6 +207,11 @@ describe('FactoryView goal list', () => {
       summary: goal('Real areas', 'not_started', { digest: { progress: progress(0, 11) } }),
       line: 'Not started · 11 tasks · Start Ready Tasks on the Board',
     },
+    {
+      name: 'a goal whose open tasks are queued',
+      summary: goal('Real areas', 'queued', { digest: { progress: progress(6, 11) } }),
+      line: 'Queued · 6 of 11 tasks done · waiting for a lane',
+    },
   ])('says $name in one line', async ({ summary, line }) => {
     serve(goals(goalListDto(summary)));
     renderApp('/factory');

@@ -1202,6 +1202,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
     };
     let made = false;
     let before: string | null = null;
+    /** The head the base update wrote (its merge, then the generators' commit); null while none has. */
+    let wrote: string | null = null;
     let pushed = false;
     let keptAt: string | null = null;
     try {
@@ -1253,13 +1255,26 @@ export function createShipper(deps: ShipperDeps): Shipper {
         } else if (await deps.git.isAncestor(main, head, tip)) {
           // Only the merge an earlier catch-up of this run wrote, and neither pushed nor put back, goes:
           // this one starts from the head. Anything else, a merge the builder made included, stays.
-          if (unpushedHead.get(batchId) !== tip) {
-            const extra = (await deps.git.commitsSince(main, head, tip)).reverse();
+          const recorded = unpushedHead.get(batchId);
+          if (recorded !== tip) {
+            // When the tip descends from the merge 10db left unpushed, that merge is 10db's, not a
+            // commit to push: only the commits after it are named.
+            const ownMerge =
+              recorded !== undefined && (await deps.git.isAncestor(main, recorded, tip))
+                ? recorded
+                : null;
+            const extra = (await deps.git.commitsSince(main, ownMerge ?? head, tip)).reverse();
             const shown = extra.slice(0, 5).map((sha) => sha.slice(0, 7));
             const one = extra.length === 1;
+            const them = one ? 'it' : 'them';
+            // Pushing commits that sit on 10db's merge would push the merge too: they move onto the head first.
+            const action =
+              ownMerge === null
+                ? ` Push ${them} to the pull request, or drop ${them} from the local branch.`
+                : ` ${one ? 'It sits' : 'They sit'} on 10db's own unpushed merge ${ownMerge.slice(0, 7)}, which was not gated: pushing ${them} as ${one ? 'it is' : 'they are'} would push that merge too. Move ${them} onto the pull request's head with \`git rebase --onto ${head.slice(0, 7)} ${ownMerge.slice(0, 7)} ${branch}\` and push, or drop ${them} from the local branch.`;
             stop({
               kind: 'other',
-              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone. Push ${one ? 'it' : 'them'} to the pull request, or drop ${one ? 'it' : 'them'} from the local branch.`,
+              why: `${branch} here has ${one ? 'a commit' : `${String(extra.length)} commits`} the pull request's branch on GitHub lacks that 10db did not write (${shown.join(', ')}${extra.length > shown.length ? ', …' : ''}), so 10db left it alone.${action}`,
             });
             return;
           }
@@ -1294,6 +1309,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       let update: BaseUpdate | null = null;
       const bringBaseIn = async (): Promise<boolean> => {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
+        // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
+        // since the install and the generators run long enough for the builder to commit meanwhile.
+        if (update.kind === 'merged') wrote = update.head;
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
@@ -1364,22 +1382,35 @@ export function createShipper(deps: ShipperDeps): Shipper {
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
       if (pushed) unpushedHead.delete(batchId);
-      else if (before !== null) await rewind(batchId, main, branch, before, keptAt);
+      else if (before !== null) await rewind(batchId, main, branch, before, wrote, keptAt);
     }
   }
 
-  /** Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. */
+  /**
+   * Puts a branch 10db merged into, and did not push, back where it was; a failure is logged. Only
+   * the head the base update wrote (`wrote`) goes: a tip past it holds a commit the builder made
+   * meanwhile, and a tip with no head written (a stop before the update answered) is not known to be
+   * 10db's, so either stays, and the next catch-up's card names the commits.
+   */
   async function rewind(
     batchId: BatchId,
     main: string,
     branch: string,
     to: string,
+    wrote: string | null,
     keptAt: string | null,
   ): Promise<void> {
     let tip: string | null = null;
     try {
       tip = await deps.git.branchTip(main, branch);
       if (tip === null || tip === to) return;
+      if (tip !== wrote) {
+        deps.logger.warn(
+          { batchId, branch, tip, wrote },
+          'branch left as it is after a catch-up that was not pushed: it holds more than 10db wrote',
+        );
+        return;
+      }
       await deps.git.rewindBranch(keptAt ?? main, branch, tip, to);
       unpushedHead.delete(batchId);
     } catch (error) {
