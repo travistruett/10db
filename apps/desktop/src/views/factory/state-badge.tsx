@@ -8,9 +8,12 @@ export function StateBadge({ state }: { readonly state: WorkstreamState }) {
       color={STATE_COLORS[state]}
       variant="light"
       size="sm"
-      // Mantine clips a badge to an ellipsis, and an `overflow: hidden` box lets a table squeeze it
-      // to nothing; a state that can't be read defeats the column.
-      style={{ overflow: 'visible', textOverflow: 'clip', whiteSpace: 'nowrap' }}
+      // Mantine's badge root is an inline grid whose label span is `overflow: hidden` with an
+      // ellipsis, so its minimum width is 0 and a table can squeeze it to "FAI…". `max-content` keeps
+      // the pill as wide as its word; the label override drops the ellipsis as a second guard. A
+      // state that can't be read defeats the column.
+      style={{ minWidth: 'max-content' }}
+      styles={{ label: { overflow: 'visible', textOverflow: 'clip' } }}
     >
       {STATE_LABELS[state]}
     </Badge>
