@@ -128,6 +128,24 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
   });
 
+  it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const before = onOrigin(batch.branch);
+    h.state.write((c) =>
+      patchProject(c, h.project.id, { gateCommand: 'true', precheckCommand: 'false' }),
+    );
+
+    await catchUp(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('pre-check failed');
+    expect(card.body).toContain('10db settled these files itself in the merge');
+    expect(card.body).toContain('src/index.ts');
+  });
+
   it('puts the local branch back at the pull request head when the check fails in the worktree it kept', async () => {
     const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
