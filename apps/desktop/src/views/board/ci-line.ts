@@ -45,17 +45,23 @@ const FIX_RUNNING: ReadonlySet<BatchState> = new Set([
 /**
  * The batches with each CI fix batch titled by its fix task, as the line names it (CI-decides spec
  * §5). A fix batch starts with its task's title, but the task can be renamed; the workstream's
- * `taskTitle` is the task's current one. A fix batch with no workstream keeps its own title. Give
- * `ciLine` the result, so its "fixing in" names the task.
+ * `taskTitle` is the task's current one. A person can add a task to a fix batch that failed to ship,
+ * so the batch can have several workstreams; the CI fix task is the one the watch made, which is the
+ * batch's oldest workstream (the first listed when two share a `createdAt`). A fix batch with no
+ * workstream keeps its own title. Give `ciLine` the result, so its "fixing in" names the task.
  */
 export function withFixTaskTitles(
   batches: readonly BatchDto[],
   workstreams: readonly WorkstreamDto[],
 ): BatchDto[] {
-  const titles = new Map<BatchId, string>();
-  for (const ws of workstreams) if (ws.batchId !== null) titles.set(ws.batchId, ws.taskTitle);
+  const oldest = new Map<BatchId, WorkstreamDto>();
+  for (const ws of workstreams) {
+    if (ws.batchId === null) continue;
+    const seen = oldest.get(ws.batchId);
+    if (seen === undefined || ws.createdAt < seen.createdAt) oldest.set(ws.batchId, ws);
+  }
   return batches.map((b) => {
-    const title = b.ciFixOf === null ? undefined : titles.get(b.id);
+    const title = b.ciFixOf === null ? undefined : oldest.get(b.id)?.taskTitle;
     return title === undefined ? b : { ...b, title };
   });
 }

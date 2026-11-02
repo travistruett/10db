@@ -2,13 +2,21 @@ name: release-dry-run
 
 on:
   # The app follows main by itself and installs this build of each new commit. Building at the
-  # merge keeps it ready by the time the app looks. Never set cancel-in-progress: the app waits
-  # for the build of the commit it saw, and a newer push must not cancel it.
+  # merge keeps it ready by the time the app looks. A build that is running is never cancelled
+  # (see the concurrency group below).
   push:
     branches: [main]
   workflow_dispatch:
 
 permissions: {}
+
+# One build per branch runs and at most one waits. A newer push replaces the build still waiting,
+# so merges every few minutes against a 15-minute build don't pile up. cancel-in-progress stays
+# false: a running build always finishes, and install-app.sh installs the newest commit whose
+# build has finished instead of waiting for the head's. Never set it to true.
+concurrency:
+  group: release-dry-run-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   dry-run:

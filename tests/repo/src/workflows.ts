@@ -33,6 +33,7 @@ export type WorkflowJob = z.infer<typeof WorkflowJob>;
 const Workflow = z.looseObject({
   on: z.record(z.string(), z.unknown()),
   permissions: z.unknown().optional(),
+  concurrency: z.unknown().optional(),
   jobs: z.record(z.string(), WorkflowJob),
 });
 export type Workflow = z.infer<typeof Workflow>;

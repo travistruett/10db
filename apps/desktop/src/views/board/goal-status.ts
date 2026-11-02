@@ -16,6 +16,7 @@ export const GOAL_STATUS_LOOK: Readonly<Record<GoalStatus, GoalStatusLook>> = {
   [GoalStatus.WaitingOnSomeone]: { color: 'yellow', label: 'Waiting on someone' },
   [GoalStatus.Paused]: { color: 'orange', label: 'Paused' },
   [GoalStatus.Running]: { color: 'blue', label: 'Running' },
+  [GoalStatus.Queued]: { color: 'gray', label: 'Queued' },
   [GoalStatus.Shipping]: { color: 'blue', label: 'Shipping' },
   [GoalStatus.NotStarted]: { color: 'gray', label: 'Not started' },
   [GoalStatus.Done]: { color: 'green', label: 'Done' },

@@ -307,6 +307,8 @@ export const GoalStatus = {
   WaitingOnSomeone: 'waiting_on_someone',
   Paused: 'paused',
   Running: 'running',
+  /** Nothing is running, and an open task has started and waits in the queue for a lane. */
+  Queued: 'queued',
   /** Every task is done but a pull request is still open. */
   Shipping: 'shipping',
   NotStarted: 'not_started',

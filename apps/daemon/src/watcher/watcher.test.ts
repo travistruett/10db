@@ -1167,11 +1167,80 @@ describe('worktree checkouts', () => {
           patchWorkstream(ctx, lane.workstream.id, null, { baseHead: head });
         });
       };
-      /** Commits `rel` as the commit tool would. */
+      let opCount = 0;
+      /** Commits `rel` as the commit tool would, with its op trailer. */
       const commit = (root: string, rel: string) => {
         git(root, 'add', rel);
-        git(root, 'commit', '-q', '-m', `Add ${rel}`);
+        opCount += 1;
+        git(root, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
       };
+      /** Commits `rel` as the builder would, with no op trailer. */
+      const builderCommit = (root: string, rel: string) => {
+        git(root, 'add', rel);
+        git(root, 'commit', '-q', '-m', `Builder adds ${rel}`);
+      };
+
+      describe('in the main checkout', () => {
+        /** A lane running in the main checkout that launched holding nothing, as a task with no areas does. */
+        const bareLane = () => {
+          const lane = seedWorkstream(base, { project, title: 'Alpha', areas: ['ui'] });
+          state.write((ctx) => {
+            transitionWorkstream(ctx, lane.workstream.id, {
+              to: WorkstreamState.Starting,
+              fence: null,
+            });
+            transitionWorkstream(ctx, lane.workstream.id, {
+              to: WorkstreamState.Running,
+              fence: null,
+            });
+          });
+          baseAt({ workstream: lane.workstream, path: repo.path });
+          return lane;
+        };
+        const grantUi = (lane: { workstream: { id: WorkstreamId } }) =>
+          state.write((ctx) =>
+            acquireClaims(ctx, {
+              projectId: project.id,
+              workstreamId: lane.workstream.id,
+              requests: [{ kind: ClaimKind.Area, name: 'ui' }],
+              leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+            }),
+          );
+        const writeUi = () => {
+          for (let i = 0; i < STRAY_BULK_THRESHOLD + 10; i += 1) {
+            const rel = `src/ui/file-${String(i).padStart(3, '0')}.ts`;
+            writeAt(repo.path, rel);
+          }
+        };
+
+        it('resolves once the lane covers its writes, although the builder committed an unrelated file', async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          writeAt(repo.path, 'docs/builder.md');
+          builderCommit(repo.path, 'docs/builder.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('stays open when a file the lane itself committed is covered by no claim', async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          writeAt(repo.path, 'zzz/last.ts');
+          await watcher.flush();
+          expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+          commit(repo.path, 'zzz/last.ts');
+          writeAt(repo.path, 'docs/builder.md');
+          builderCommit(repo.path, 'docs/builder.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+        });
+      });
 
       it('stays open when an unlisted path the lane committed is not covered', async () => {
         const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
@@ -1822,6 +1891,43 @@ describe('worktree checkouts', () => {
       await write(SENSITIVE_FILE);
       expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
       expect(flags()).toEqual([]);
+    });
+
+    describe('after the daemon restarts', () => {
+      const restart = (): void => {
+        watcher.stop();
+        watcher = createWatcher({
+          state,
+          inbox,
+          git: createGit(),
+          logger: silentLogger,
+          clock,
+          watch: fake.watch,
+          batchMs: 500,
+        });
+      };
+
+      it('still excuses at the step end the write the live watcher excused, unchanged', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        restart();
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it('cards at the step end a later write to that file that no card allowed', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restart();
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
     });
 
     describe('a directory the allowed write created', () => {

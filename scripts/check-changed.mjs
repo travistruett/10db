@@ -20,7 +20,7 @@
 //
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
-//   node scripts/check-changed.mjs --precheck       run the pre-check (no tests, Rust or e2e)
+//   node scripts/check-changed.mjs --precheck       run the pre-check (knip and the docs rule tests; no other tests, Rust or e2e)
 //   node scripts/check-changed.mjs --plan [--precheck] [-- file…]
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
@@ -137,7 +137,7 @@ function withDependents(packages, start) {
  * What to run for these changed files (repo-relative, still present or deleted).
  * @param {string[]} files
  * @param {Pkg[]} packages
- * @param {boolean} [precheck] plan the pre-check: no tests, so no repo rule tests and no Rust
+ * @param {boolean} [precheck] plan the pre-check: knip and, for a docs or agent file, the architecture-docs and agent-docs rule tests; no other tests and no Rust
  */
 function planFor(files, packages, precheck = false) {
   /** @type {Set<string>} */
