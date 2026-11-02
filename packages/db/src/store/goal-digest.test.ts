@@ -33,7 +33,7 @@ import {
   openGoalDigest,
   ungroupedDigest,
 } from './goal-digest';
-import { insertGoal, lastGoalView } from './goals';
+import { insertGoal, lastGoalView, VISIT_MAX_MS } from './goals';
 import { insertInboxItem } from './inbox';
 import { insertDecision, insertDeviation, insertSource } from './knowledge';
 import { insertSession, updateSessionUsage } from './sessions';
@@ -641,6 +641,32 @@ describe('the window', () => {
     const later = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
     expect(later.since).toBe(at(12));
     expect(later.deviations.recent).toEqual([]);
+  });
+
+  it('a visit that keeps being reopened still ends once it has run past its bounded length', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(8);
+    deviation(ws, 'Split A in two');
+    const start = new Date(at(9)).getTime();
+    const openAt = (minutes: number) => {
+      clock = new Date(start + minutes * 60_000);
+      return store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    };
+    const first = openAt(0);
+    expect(first.since).toBeNull();
+    // Opened every 20 minutes (under the gap): the visit goes on while it is short.
+    for (let minutes = 20; minutes <= VISIT_MAX_MS / 60_000; minutes += 20) {
+      expect(openAt(minutes).since).toBeNull();
+    }
+    // The next opening, still under the gap from the last, is past the bound: a new window
+    // that starts at the previous opening, so what was read in the visit is no longer recent.
+    const lastOpening = new Date(start + (VISIT_MAX_MS / 60_000) * 60_000).toISOString();
+    const next = openAt(VISIT_MAX_MS / 60_000 + 20);
+    expect(next.since).toBe(lastOpening);
+    expect(next.deviations.recent).toEqual([]);
+    // And that window is itself a visit that refreshes keep.
+    expect(openAt(VISIT_MAX_MS / 60_000 + 25).since).toBe(lastOpening);
   });
 });
 

@@ -1,0 +1,1 @@
+ALTER TABLE `goal_views` ADD `visit_started_at` text;
