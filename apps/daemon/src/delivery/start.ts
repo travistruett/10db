@@ -69,6 +69,12 @@ export interface BatchStarter {
    */
   refuseIfJoining(taskId: TaskId): void;
   /**
+   * Throws what `startTask` would refuse, as if the batch `ending` had already ended, and writes
+   * nothing (a refusal's card is raised as the start's own would be). Starting over checks this
+   * before it abandons the failed attempt's batch, so a refused start leaves that batch as it was.
+   */
+  refuseStart(taskId: TaskId, ending: BatchId): void;
+  /**
    * After a workstream Retry: a FAILED worktree batch reopens in the cut queue once its worktree is
    * whole. Any other batch is left as it is.
    */
@@ -121,7 +127,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const tasks = input.taskIds.map((id) => getTask(db, id));
     for (const task of tasks) checkStartable(project, task);
     // Phase 1: every part is checked before any is written, so a refused start leaves no batch.
-    const { steps, placement } = prepare(project, input, tasks);
+    const { steps, placement } = prepare(project, input, tasks, undefined);
     // Phase 2: one transaction writes each task's placement and every batch, then the jobs queue.
     const batches = ctx.state.write((w) => {
       for (const task of tasks) {
@@ -146,6 +152,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     project: ProjectDto,
     input: BatchStartInput,
     tasks: readonly TaskDto[],
+    ending: BatchId | undefined,
   ): { steps: StartStep[]; placement: (task: TaskDto) => WorkspaceMode } {
     if (input.batchId !== undefined) {
       const copy = copyBatchOf(project, input.batchId);
@@ -156,7 +163,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         };
       // Anything else is the shared batch's join, or a refusal saying why it can't be.
       return {
-        steps: [prepareShared(project, input.title, input.batchId, tasks)],
+        steps: [prepareShared(project, input.title, input.batchId, tasks, ending)],
         placement: () => WorkspaceMode.Shared,
       };
     }
@@ -165,7 +172,9 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
     return {
       steps: [
-        ...(inFolder.length > 0 ? [prepareShared(project, input.title, undefined, inFolder)] : []),
+        ...(inFolder.length > 0
+          ? [prepareShared(project, input.title, undefined, inFolder, ending)]
+          : []),
         ...prepareWorktrees(project, inCopies),
       ],
       placement: (task) => task.workspaceMode,
@@ -189,8 +198,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     title: string,
     batchId: BatchId | undefined,
     tasks: readonly TaskDto[],
+    ending: BatchId | undefined,
   ): StartStep {
-    const existing = findUnfinishedBatch(db, project.id) ?? null;
+    const unfinished = findUnfinishedBatch(db, project.id) ?? null;
+    // A dry run before starting over treats the batch it will abandon as already gone.
+    const existing = unfinished?.id === ending ? null : unfinished;
     if (batchId !== undefined && batchId !== existing?.id)
       throw new ConflictError(
         existing
@@ -553,6 +565,19 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     },
     refuseIfJoining(taskId) {
       if (joining.has(taskId)) throw joiningRefusal(getTask(db, taskId));
+    },
+    refuseStart(taskId, ending) {
+      const task = getTask(db, taskId);
+      const project = getProject(db, task.projectId);
+      checkStartable(project, task);
+      if (project.delivery !== Delivery.PullRequest) return;
+      // The steps are only built, never written or launched.
+      prepare(
+        project,
+        BatchStartInput.parse({ title: task.title, taskIds: [taskId] }),
+        [task],
+        ending,
+      );
     },
     reopen(batchId) {
       const batch = getBatch(db, batchId);

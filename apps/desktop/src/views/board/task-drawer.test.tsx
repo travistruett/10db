@@ -546,6 +546,19 @@ describe('TaskDrawer', () => {
       expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
     });
 
+    it('offers no Start over to a parked task, which the daemon would refuse to start', async () => {
+      serve();
+      const batch = batchDto();
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      open({
+        task: { boardColumnId: mintId('BoardColumn') },
+        workstream: ws,
+        batch,
+        workstreams: [ws],
+      });
+      expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
+    });
+
     it('a retry refusal shows beside Retry', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(

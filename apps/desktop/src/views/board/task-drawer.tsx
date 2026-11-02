@@ -463,7 +463,7 @@ function WorkstreamLine({
   const failed = canRetry(workstream.state);
   // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
   const retryable = canRetryRun(workstream, batch);
-  const startableOver = canStartOver(workstream, batch);
+  const startableOver = canStartOver(task, workstream, batch);
   const closable = canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
   const queued = canRunNext(task, workstream.state);

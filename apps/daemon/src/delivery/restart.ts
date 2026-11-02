@@ -20,7 +20,8 @@ export interface FailedRestarts {
   /**
    * Before a task starts over from the base branch: abandons the batch that holds only the task's
    * failed attempt, so no open batch is left holding work nothing will finish. A batch that holds
-   * other tasks' work stays. Refuses while a run in the batch is live.
+   * other tasks' work stays. Refuses while a run in the batch is live, and, before it abandons
+   * anything, when the start that follows would be refused, so the attempt stays to be retried.
    */
   supersede(taskId: TaskId): void;
 }
@@ -56,6 +57,7 @@ export function createFailedRestarts(deps: {
       if (!failed) return;
       const members = listWorkstreams(db, { batchId: failed.batch.id });
       if (members.some((w) => w.taskId !== taskId)) return;
+      deps.starter.refuseStart(taskId, failed.batch.id);
       deps.shipper.abandon(failed.batch.id);
     },
   };
