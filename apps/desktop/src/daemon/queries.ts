@@ -34,6 +34,7 @@ import {
   queryOptions,
   skipToken,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -97,6 +98,24 @@ export function useTasks(projectId: ProjectId | null) {
           )
         : [],
     enabled: projectId !== null,
+  });
+}
+
+/**
+ * The tasks of several projects at once, in the order given. A link names a task by ID alone, so
+ * finding its project means asking each one; the entries share the cache of `useTasks`.
+ */
+export function useTasksOfProjects(projectIds: readonly ProjectId[]) {
+  const { client } = useDaemon();
+  return useQueries({
+    queries: projectIds.map((projectId) => ({
+      queryKey: queryKeys.tasks(projectId),
+      queryFn: async () =>
+        readJson(
+          await client.projects[':projectId'].tasks.$get({ param: { projectId } }),
+          TaskList,
+        ),
+    })),
   });
 }
 

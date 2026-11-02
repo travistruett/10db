@@ -574,12 +574,27 @@ export function listTasks(db: DbReader, projectId: ProjectId): TaskDto[] {
  * workstreams), so there is nothing to release.
  */
 export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, false);
+}
+
+/**
+ * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
+ * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
+ * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran.
+ */
+export function cancelRefusedStartTask(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, true);
+}
+
+function removeUnstarted(ctx: WriteContext, id: TaskId, refusedStart: boolean): TaskDto {
   const task = getTask(ctx.tx, id);
   if (task.status === TaskStatus.Cancelled) return task;
   const run = latestRun(ctx.tx, id);
   // A held run never ran, so it goes with its task; any other run belongs to the workstream's own cancel.
   const held = run?.state === WorkstreamState.Held ? run : undefined;
-  if (task.status !== TaskStatus.Open || (run && !held))
+  const refusedRun =
+    refusedStart && run?.state === WorkstreamState.Cancelled && !hadSession(ctx.tx, run.id);
+  if (task.status !== TaskStatus.Open || (run && !held && !refusedRun))
     throw new TaskStartedError(
       task.title,
       run ? { id: run.id, live: !isTerminal(run.state) } : null,
@@ -707,6 +722,17 @@ function latestRun(db: DbReader, taskId: TaskId) {
     .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
     .limit(1)
     .get();
+}
+
+function hadSession(db: DbReader, workstreamId: WorkstreamId): boolean {
+  return (
+    db
+      .select({ id: schema.sessions.id })
+      .from(schema.sessions)
+      .where(eq(schema.sessions.workstreamId, workstreamId))
+      .limit(1)
+      .get() !== undefined
+  );
 }
 
 /** A cancelled dependency is never done, so an open dependent would wait for ever. */

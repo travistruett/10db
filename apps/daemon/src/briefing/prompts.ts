@@ -130,6 +130,8 @@ const RULES = [
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
+  // In the brief as well as the persona: a builder's edited persona is never overwritten.
+  'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.',
   "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
   'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
@@ -224,6 +226,7 @@ export function briefedFromHandoff(
     case 'start':
     case 'resume':
     case 'uncommitted':
+    case 'merge':
     case 'verify':
     case 'revise':
     case 'builder_review':
@@ -252,6 +255,20 @@ const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
           : 'Take it into account, then call mcp__10db__complete_step.'
       }`
     : `The gate failed (exit ${String(evidence.exitCode)} from \`${evidence.command}\`).\n${failedStepsSection(evidence.summary)}\nFix the cause, commit, and end your turn; 10db runs the gate again.\n\nGate output (end):\n\`\`\`\n${evidence.summary}\n\`\`\``;
+
+/** What a session is told when 10db merged the base into its branch and left conflict markers. */
+function mergeSection(base: string, paths: readonly string[]): string {
+  return [
+    `10db merged ${base} into your branch, and both sides changed the same lines of these files, so git left its conflict markers (<<<<<<<, =======, >>>>>>>, and ||||||| for the common ancestor) in them:`,
+    bullets(paths),
+    '',
+    `Resolve each one: keep what both sides do, in one version of the code that has both. A signature, type or field one side changed also changes its callers on the other side, anywhere in the repository, so find them (the typecheck and the tests name them) and adapt them. Edit the files with the Edit tool, and commit each file you changed through mcp__10db__commit, naming every path, with the markers gone. A file outside your claims needs mcp__10db__request_claim for its area first, as any other edit does.`,
+    '',
+    'Never run git merge, checkout, reset or restore: the merge is already made and committed, and only the markers are left. Never edit a generated file (packages/contracts/generated, packages/db/drizzle) by hand: 10db makes them again from the sources once you are done, so resolve the sources and leave those alone.',
+    '',
+    `If a resolution would change what either side does, not only put the two together (the sides disagree on a behaviour, a name or a value, or one deletes what the other uses), do not guess: call mcp__10db__ask_human naming the files and why, and wait for the answer. Otherwise end your turn once the markers are gone and committed; 10db runs the gate on the merged branch.`,
+  ].join('\n');
+}
 
 function actionSection(input: PromptInput): string {
   switch (input.action.kind) {
@@ -291,6 +308,8 @@ function actionSection(input: PromptInput): string {
     }
     case 'uncommitted':
       return `Your step ended with changes in your claims that are not committed:\n${bullets(input.action.paths)}\nCommit each one through mcp__10db__commit, naming every path, then end your turn. 10db runs the gate once they are committed.`;
+    case 'merge':
+      return mergeSection(input.action.base, input.action.paths);
     case 'verify':
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
     case 'builder_review':

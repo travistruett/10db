@@ -19,7 +19,7 @@ import { baseConflictKey, baseKeptKey, keptWorktreeKey, worktreeCards } from './
 import { hideNotices, raise, showNotice, withdraw, type DeliveryContext } from './context';
 import { baseNotices, NOTICE_KEY } from './notices';
 import { installedLockfileKey } from './installed-lockfile';
-import { startRef } from './start-refs';
+import { mergeRef, startRef } from './start-refs';
 import { removeIfEmptyDirectory } from './worktree-leftover';
 import { withWorktreeLock } from './worktree-lock';
 
@@ -122,6 +122,13 @@ async function retire(ctx: DeliveryContext, batchId: BatchId): Promise<Retiremen
         'task start not dropped',
       );
     });
+  // So does the note of a merge whose conflict markers nobody resolved.
+  await ctx.git.deleteKeptRef(main, mergeRef(ctx.worktreeRoot, batchId)).catch((error: unknown) => {
+    ctx.logger.warn(
+      { batchId, err: error instanceof Error ? error.message : String(error) },
+      'base merge note not dropped',
+    );
+  });
   ctx.state.write((w) => {
     deleteAppSetting(w, worktreePinKey(batchId));
     deleteAppSetting(w, installedLockfileKey(batchId));

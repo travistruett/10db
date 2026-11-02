@@ -61,6 +61,7 @@ import {
   createBatchCardAnswers,
   createBranchCardAnswers,
   createCiStopAnswers,
+  createStartCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -98,7 +99,12 @@ import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
 import { protectedPaths } from '../guard';
 import { createBuilderMcpHandler } from '../builder';
-import { ClaimWaits, createMcpHandler, withdrawStaleClaimWaits } from '../mcp';
+import {
+  ClaimWaits,
+  createClaimDeadlockAnswers,
+  createMcpHandler,
+  withdrawStaleClaimWaits,
+} from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import {
   applyCheckAnswer,
@@ -398,7 +404,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
+  // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
+  const answerDeadlockCard = createClaimDeadlockAnswers({
+    state,
+    cancel: (id) => {
+      if (!runner) throw new RunnerNotStartedError();
+      return runner.cancel(id);
+    },
+    waits: claimWaits,
+    log: logger,
+  });
   const inbox = createInboxService({
     state,
     onParkedAnswer: (target, item) => {
@@ -414,6 +431,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
+      answerStartCard?.(item, answer);
+      answerDeadlockCard(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
@@ -565,6 +584,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
+  answerStartCard = createStartCardAnswers({ state, starter });
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
   // Before a task gets the migrations hazard, from request_claim or at its start.

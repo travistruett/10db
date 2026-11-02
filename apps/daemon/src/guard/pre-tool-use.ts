@@ -4,7 +4,7 @@ import { runsInBackground, startsEndlessBackgroundLoop } from './background-loop
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { firstUnread } from './unread-commands';
-import { hazardPrograms, unreadableHazard } from './unread-hazards';
+import { unreadableHazard } from './unread-hazards';
 
 /**
  * Tools whose `allowed_domains` names hosts the command may reach. In auto mode Claude Code's
@@ -99,7 +99,7 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
     if (unread !== undefined) return unread;
     // The checks `firstUnread` lacks: a word the shell fills in after a program with hazard forms,
     // a wrapper or feeder in front of one, a parse that is uncertain, and eval's text.
-    return unreadableHazard(command, hazardPrograms(hazards));
+    return unreadableHazard(command, hazards);
   } catch (cause) {
     if (isTooDeep(cause)) return command;
     throw cause;

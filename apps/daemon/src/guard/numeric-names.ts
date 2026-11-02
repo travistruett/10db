@@ -1,0 +1,174 @@
+import { isNumericExpression } from './arithmetic-words';
+import { commandName, leadingWords, parseShell } from './shell-words';
+
+/**
+ * Variables a command sets only to numbers, so the shell reading one in arithmetic (`$((t - s))`)
+ * evaluates a number and nothing else. Bash evaluates a bare name in arithmetic as the variable it
+ * names, and that variable's value as an expression again, so a name holding `a[$(cmd)]` runs `cmd`.
+ * A name is safe when every way the command can set it is a plain `name=value` whose value is a
+ * number by construction: digits, `$?`, `$#`, `$$`, `$!`, `$(date +%s)`, `$((…))` over numbers and
+ * names that are themselves safe, or one of those names. The environment the command starts with
+ * is not the command's text and is trusted, as it is everywhere else in the guard.
+ */
+
+const MAX_DEPTH = 4;
+const ASSIGNMENT = /^([A-Za-z_]\w*)(\+?)=([\s\S]*)$/;
+const ARITHMETIC_VALUE = /^\$\(\(([\s\S]*)\)\)$|^\$\[([\s\S]*)\]$/;
+const NUMBER_VALUE = /^(?:\d*|\$(?:[?#$!]|\{[?#$!]\})|\$\(date \+%s\))$/;
+const NAME_VALUE = /^\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})$/;
+/** An operator that sets a name inside arithmetic. */
+const ASSIGNING_OPERATOR = '(?:[-+*/%&|^]|<<|>>)?=(?!=)';
+
+/**
+ * Words that run text this scan does not follow, or define what a later command means. A command
+ * holding one has no safe name: a shell or `eval` can set a name from text the scan does not read.
+ */
+const UNFOLLOWED: ReadonlySet<string> = new Set([
+  'sh',
+  'bash',
+  'zsh',
+  'dash',
+  'ksh',
+  'fish',
+  'csh',
+  'tcsh',
+  'eval',
+  'source',
+  '.',
+  'coproc',
+  'trap',
+  'alias',
+  'function',
+  'builtin',
+  'find',
+  'xargs',
+  'parallel',
+]);
+
+interface Assignment {
+  readonly name: string;
+  readonly value: string;
+}
+
+interface Collected {
+  readonly assignments: Assignment[];
+  /** Every word that is not the name and value of a plain assignment before a command. */
+  readonly others: string[];
+  /** Names an assignment sets in a form this scan does not read. */
+  readonly spoiled: Set<string>;
+  /** Every word, assignments included. */
+  readonly all: string[];
+}
+
+/** Gathers every segment of the command and of the substitutions in it; false when it cannot be read. */
+function collect(command: string, depth: number, into: Collected, arithmetic = false): boolean {
+  if (depth > MAX_DEPTH) return false;
+  const parse = parseShell(command);
+  if (!parse.certain) return false;
+  for (const segment of parse.segments) {
+    if (!segment.wordsCertain || !segment.bracesCertain || segment.processSubstitution)
+      return false;
+    if (arithmetic) {
+      // The words are the expression, which the word holding it already stands for.
+      for (const body of segment.nested) {
+        if (!collect(body, depth + 1, into)) return false;
+      }
+      continue;
+    }
+    const offset = segment.words.length - leadingWords(segment.words).command.length;
+    let at = offset;
+    for (; at < segment.words.length; at += 1) {
+      const match = ASSIGNMENT.exec(segment.words[at] ?? '');
+      if (match === null) break;
+      const name = match[1] ?? '';
+      // `name+=value` appends text, which the scan does not read.
+      if (match[2] === '+') into.spoiled.add(name);
+      else into.assignments.push({ name, value: match[3] ?? '' });
+    }
+    into.others.push(...segment.words.slice(0, offset), ...segment.words.slice(at));
+    into.all.push(...segment.words);
+    for (const body of segment.nested) {
+      // The parser hands `$((expr))` over as the subshell `(expr)`.
+      const isArithmetic =
+        body.startsWith('(') &&
+        body.endsWith(')') &&
+        segment.words.some((word) => word.includes(`$((${body.slice(1, -1)}))`));
+      if (!collect(body, depth + 1, into, isArithmetic)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether a nested body is the `(expr)` the parser makes of a `$((expr))` in one of the words, with
+ * an `expr` that holds only numbers, so the shell evaluates it as arithmetic and runs nothing.
+ */
+export function isNumericArithmetic(
+  body: string,
+  words: readonly string[],
+  names: ReadonlySet<string>,
+): boolean {
+  if (!body.startsWith('(') || !body.endsWith(')')) return false;
+  const expression = body.slice(1, -1);
+  return (
+    isNumericExpression(expression, names) &&
+    words.some((word) => word.includes(`$((${expression}))`))
+  );
+}
+
+/** Whether a word sets or rebinds `name` in a way other than a plain assignment before a command. */
+function setsName(word: string, name: string, arithmetic: boolean): boolean {
+  if (word === name || word.startsWith(`${name}=`) || word.startsWith(`${name}+=`)) return true;
+  if (word.startsWith(`${name}[`)) return true;
+  // `${name:=x}`, `${name=x}`, `${name[0]}`, `${name%x}`: anything but the plain `${name}` read.
+  if (new RegExp(`\\$\\{${name}(?![\\w}])`).test(word)) return true;
+  if (!arithmetic) return false;
+  const bare = `(?<![\\w$])${name}(?!\\w)`;
+  return [
+    `${bare}\\s*${ASSIGNING_OPERATOR}`,
+    `${bare}\\s*(?:\\+\\+|--)`,
+    `(?:\\+\\+|--)\\s*${bare}`,
+    `${bare}\\s*\\[`,
+  ].some((pattern) => new RegExp(pattern).test(word));
+}
+
+/** Whether the value of an assignment is a number given the names already known to hold numbers. */
+function numericValue(value: string, names: ReadonlySet<string>): boolean {
+  if (NUMBER_VALUE.test(value)) return true;
+  const arithmetic = ARITHMETIC_VALUE.exec(value);
+  if (arithmetic !== null) return isNumericExpression(arithmetic[1] ?? arithmetic[2] ?? '', names);
+  const read = NAME_VALUE.exec(value);
+  return read !== null && names.has(read[1] ?? read[2] ?? '');
+}
+
+/** The names `command` sets only to numbers, or none when it holds text this scan cannot follow. */
+export function numericNames(command: string): ReadonlySet<string> {
+  const into: Collected = { assignments: [], others: [], spoiled: new Set(), all: [] };
+  const none: ReadonlySet<string> = new Set();
+  try {
+    if (!collect(command, 0, into)) return none;
+  } catch (cause) {
+    if (cause instanceof RangeError) return none;
+    throw cause;
+  }
+  if (into.all.some((word) => UNFOLLOWED.has(commandName(word)))) return none;
+  const inArithmetic = (word: string): boolean => word.includes('$((') || word.includes('$[');
+  const setElsewhere = (name: string): boolean =>
+    into.spoiled.has(name) ||
+    into.others.some((word) => setsName(word, name, inArithmetic(word))) ||
+    into.assignments.some((a) => setsName(a.value, name, inArithmetic(a.value)));
+  const names = new Set(
+    into.assignments.map((assignment) => assignment.name).filter((name) => !setElsewhere(name)),
+  );
+  // Drop a name with a value that is not a number, until what is left depends on nothing dropped.
+  for (let changed = true; changed;) {
+    changed = false;
+    for (const assignment of into.assignments) {
+      if (names.has(assignment.name) && !numericValue(assignment.value, names)) {
+        names.delete(assignment.name);
+        changed = true;
+      }
+    }
+  }
+  return names;
+}

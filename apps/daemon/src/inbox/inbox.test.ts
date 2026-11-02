@@ -1059,9 +1059,19 @@ describe('permission broker in a sandboxed lane', () => {
     },
     { name: 'a subshell after then', command: 'if true; then (cd $d && ls); fi', outcome: 'allow' },
     { name: 'a variable argument to echo', command: 'echo "$HOME" "$(date)"', outcome: 'allow' },
-    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'card' },
+    // A word the shell fills in, only as an argument to a fixed pnpm script or program.
+    { name: 'a variable after pnpm test', command: 'pnpm test $x', outcome: 'allow' },
+    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'allow' },
+    {
+      name: 'a variable after a filtered script',
+      command: 'pnpm --filter @10db/daemon test $x',
+      outcome: 'allow',
+    },
+    // A word that can pick the program or pnpm's subcommand.
     { name: 'a glob argument to pnpm run', command: 'pnpm run build *.ts', outcome: 'card' },
-    { name: 'pnpm exec of a known tool', command: 'pnpm exec tsc $x', outcome: 'card' },
+    { name: 'a variable as the pnpm subcommand', command: 'pnpm $SUB x', outcome: 'card' },
+    { name: 'a variable after pnpm exec', command: 'pnpm exec $X y', outcome: 'card' },
+    { name: 'a variable program with add', command: '$P add z', outcome: 'card' },
     {
       name: 'a redirection after the command',
       command: 'pnpm test 2>&1 | grep $x',

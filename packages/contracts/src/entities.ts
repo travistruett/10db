@@ -523,6 +523,15 @@ export const NextAction = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
   /** The step ended with these changes in its claims uncommitted; the next session commits them. */
   z.object({ kind: z.literal('uncommitted'), paths: z.array(z.string().min(1)).min(1) }),
+  /**
+   * 10db merged the batch's base into the branch and git left conflict markers in these files; the
+   * next session resolves them and commits, and 10db runs the gate on the merged branch.
+   */
+  z.object({
+    kind: z.literal('merge'),
+    base: z.string().min(1),
+    paths: z.array(z.string().min(1)).min(1),
+  }),
   z.object({ kind: z.literal('verify') }),
   /** Rerun a step a reviewer rejected; the rejecting step's notes are in its result. */
   z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
