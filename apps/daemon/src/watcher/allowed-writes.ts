@@ -3,12 +3,10 @@ import {
   closeSync,
   constants,
   fstatSync,
-  lstatSync,
   openSync,
   readSync,
   realpathSync,
   statSync,
-  type BigIntStats,
 } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
@@ -173,29 +171,36 @@ function deletionStamp(root: string, path: string): string | null {
 export const STAMP_ATTEMPTS = 3;
 
 /**
- * The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. `before` is the
- * stat taken just ahead of the open. The open is non-blocking, so a FIFO swapped in after that stat can't block
- * the daemon on the open, and the opened file must still be the regular file `before` described: 'not-a-file'
- * for something else (a FIFO, a device), 'swapped' for another regular file. Links are followed.
+ * One read of a regular file through a single descriptor: the file type and the metadata before and after
+ * come from that descriptor (`fstat`), never from path lookups that another process could answer differently.
+ * The open is non-blocking, so a FIFO can't block the daemon on the open, and it doesn't follow a link at the
+ * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The result is
+ * 'not-a-file' for anything but a regular file, 'changing' when the file changed while it was read, and the
+ * stamp otherwise. Other errors, ENOENT included, are thrown.
  */
-function hashFile(
-  path: string,
-  before: BigIntStats,
-): { hash: string } | { skip: 'not-a-file' | 'swapped' } {
-  const hash = createHash('sha256');
-  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
+function readStamp(path: string): { stamp: string } | { skip: 'not-a-file' | 'changing' } {
+  let fd: number;
   try {
-    const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile()) return { skip: 'not-a-file' };
-    if (opened.dev !== before.dev || opened.ino !== before.ino) return { skip: 'swapped' };
+    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') return { skip: 'not-a-file' };
+    throw error;
+  }
+  try {
+    const before = fstatSync(fd, { bigint: true });
+    if (!before.isFile()) return { skip: 'not-a-file' };
+    const hash = createHash('sha256');
     const chunk = Buffer.allocUnsafe(1024 * 1024);
     for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
       hash.update(chunk.subarray(0, n));
     }
+    // The file changed while it was read: the content may not be the one the time and size name.
+    const after = fstatSync(fd, { bigint: true });
+    if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return { skip: 'changing' };
+    return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}` };
   } finally {
     closeSync(fd);
   }
-  return { hash: hash.digest('hex') };
 }
 
 /**
@@ -231,31 +236,16 @@ export function stampOrReason(
   rel: string,
 ): { stamp: string } | { reason: UnstampedReason } {
   const path = resolve(root, rel);
-  try {
-    lstatSync(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
-    const stamp = deletionStamp(root, path);
-    return stamp === null ? { reason: 'unreadable' } : { stamp };
-  }
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
     try {
-      const before = statSync(path, { bigint: true });
-      if (!before.isFile()) return { reason: 'not-a-file' };
-      const read = hashFile(path, before);
-      if ('skip' in read) {
-        if (read.skip === 'not-a-file') return { reason: 'not-a-file' };
-        // Another regular file took the path since the stat: read again.
-        continue;
-      }
-      const { hash } = read;
-      // The file changed while it was read: the content may not be the one the time and size name.
-      const after = statSync(path, { bigint: true });
-      if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
-      return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash}` };
-    } catch {
-      return { reason: 'unreadable' };
+      const read = readStamp(path);
+      if ('stamp' in read) return read;
+      if (read.skip === 'not-a-file') return { reason: 'not-a-file' };
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
+      const stamp = deletionStamp(root, path);
+      return stamp === null ? { reason: 'unreadable' } : { stamp };
     }
   }
   return { reason: 'changing' };
