@@ -4,4 +4,5 @@ export type {
   GoalAdoptResult,
   TaskLookupServices,
   TaskRemovalServices,
+  TaskStarted,
 } from './services';
