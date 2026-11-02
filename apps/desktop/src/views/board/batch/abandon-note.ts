@@ -28,17 +28,21 @@ function names(titles: readonly string[]): string {
   return `${titles.slice(0, -1).join(', ')} and ${titles.at(-1) ?? ''}`;
 }
 
-/** What Abandon does to a batch: the branch is kept and every unfinished task on it is cancelled. */
+/**
+ * What Abandon does to a batch: its separate copy goes, the branch goes too when nothing is
+ * committed on it (and stays otherwise), and every unfinished task on it is cancelled.
+ */
 export function abandonNote(batch: BatchDto, workstreams: readonly WorkstreamDto[]): AbandonNote {
   const runs = workstreams.filter((w) => w.batchId === batch.id);
   const live = latestPerTask(runs.filter(isLive)).map((w) => w.taskTitle);
   const unfinished = latestPerTask(runs).filter((w) => !isTerminal(w.state)).length;
+  const branch = 'Abandon deletes the branch if nothing is committed on it and keeps it otherwise';
   const does =
     unfinished === 0
-      ? 'Abandon keeps the branch and closes it without shipping.'
+      ? `${branch}, and closes the batch without shipping.`
       : unfinished === 1
-        ? 'Abandon keeps the branch and cancels its unfinished task.'
-        : `Abandon keeps the branch and cancels its ${String(unfinished)} unfinished tasks.`;
+        ? `${branch}, and cancels its unfinished task.`
+        : `${branch}, and cancels its ${String(unfinished)} unfinished tasks.`;
   const refusal =
     live.length === 0
       ? null

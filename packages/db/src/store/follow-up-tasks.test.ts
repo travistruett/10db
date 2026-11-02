@@ -6,6 +6,7 @@ import {
   listBoardColumns,
   patchBoardColumn,
 } from './board-columns';
+import { patchProject } from './projects';
 import type { Store } from './store';
 import {
   FollowUpOrigin,
@@ -34,11 +35,36 @@ const input = (over: Partial<TaskInput> = {}): TaskInput => ({
 const followUp = { title: 'Make errors name the file', description: 'The error says nothing.' };
 
 describe('insertFollowUpTask', () => {
-  it('files an open task in the Icebox of the same project that names its source and keeps its landing and areas', () => {
+  it('lands on the base, not on the named branch its source lands on, when the project default is the base', () => {
     const project = seedProject(store);
     const source = store.write((ctx) =>
-      insertTask(ctx, project.id, input({ landing: { kind: 'branch', branch: 'feature/x' } })),
+      insertTask(ctx, project.id, input({ landing: { kind: 'branch', branch: 'next' } })),
     ).value;
+    const filed = store.write((ctx) => insertFollowUpTask(ctx, source.id, followUp)).value;
+    expect(filed.landing).toEqual({ kind: 'base' });
+  });
+
+  it('takes the landing the project names now, whatever its source landed on', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    store.write((ctx) =>
+      patchProject(ctx, project.id, { landing: 'branch', landingBranch: 'release' }),
+    );
+    const filed = store.write((ctx) => insertFollowUpTask(ctx, source.id, followUp)).value;
+    expect(filed.landing).toEqual({ kind: 'branch', branch: 'release' });
+  });
+
+  it('gets the project default when its source already lands there', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    expect(source.landing).toEqual({ kind: 'base' });
+    const filed = store.write((ctx) => insertFollowUpTask(ctx, source.id, followUp)).value;
+    expect(filed.landing).toEqual({ kind: 'base' });
+  });
+
+  it('files an open task in the Icebox of the same project that names its source and keeps its areas', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
     const filed = store.write((ctx) =>
       insertFollowUpTask(ctx, source.id, {
         ...followUp,
@@ -51,7 +77,7 @@ describe('insertFollowUpTask', () => {
       title: 'Make errors name the file',
       status: 'open',
       boardColumnId: icebox?.id,
-      landing: { kind: 'branch', branch: 'feature/x' },
+      landing: { kind: 'base' },
       areas: ['api'],
       acceptanceCriteria: ['Errors name the file'],
       dependsOn: [],
@@ -123,7 +149,7 @@ describe('insertRetryLimitFollowUp', () => {
   const notes =
     '1. BLOCKING src/api/a.ts:3 the empty state has no test.\n   Add one.\n2. NOTE the title is long.';
 
-  it('files a Ready task that names its source, holds the findings and lands where the source lands', () => {
+  it('files a Ready task that names its source, holds the findings and lands on the project default, not where the source lands', () => {
     const project = seedProject(store);
     const source = store.write((ctx) =>
       insertTask(ctx, project.id, input({ landing: { kind: 'branch', branch: 'feature/x' } })),
@@ -136,7 +162,7 @@ describe('insertRetryLimitFollowUp', () => {
       status: 'open',
       boardColumnId: null,
       boardStatus: 'ready',
-      landing: { kind: 'branch', branch: 'feature/x' },
+      landing: { kind: 'base' },
       areas: ['api'],
       dependsOn: [],
       riskTags: [],

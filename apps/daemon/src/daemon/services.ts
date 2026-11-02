@@ -9,6 +9,7 @@ import {
   ProjectLanding,
   type ProjectDto,
   type ProjectPatch,
+  WorkspaceMode,
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
@@ -369,7 +370,22 @@ export function createServices(deps: {
       // The store refuses a task that has started; a join still pending has not written yet.
       if (patch.workspaceMode !== undefined || patch.areas !== undefined)
         deps.starter.refuseIfJoining(id);
-      return deps.state.write((ctx) => patchTask(ctx, id, patch));
+      // The areas or risk tags can now match the placement rule. The store moves the task to a separate
+      // copy only if it hasn't started and the builder hasn't placed it.
+      return deps.state.write((ctx) => {
+        const task = getTask(ctx.tx, id);
+        const proposed =
+          patch.areas === undefined && patch.riskTags === undefined
+            ? undefined
+            : proposePlacement(getProject(ctx.tx, task.projectId), {
+                areas: patch.areas ?? task.areas,
+                riskTags: patch.riskTags ?? task.riskTags,
+              });
+        // A join still pending has not written yet, so the move would collide with it.
+        if (proposed?.workspaceMode === WorkspaceMode.Worktree && task.placementReason === null)
+          deps.starter.refuseIfJoining(id);
+        return patchTask(ctx, id, patch, proposed);
+      });
     },
     moveTask: (id, move) => deps.state.write((ctx) => moveTask(ctx, id, move)),
     listBoardColumns(projectId) {
@@ -394,10 +410,11 @@ export function createServices(deps: {
         },
         path,
       ),
-    proposeAreas: (path) =>
+    proposeAreas: (path, signal) =>
       proposeAreas(
         { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
+        signal,
       ),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);

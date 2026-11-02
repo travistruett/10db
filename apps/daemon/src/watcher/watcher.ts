@@ -20,7 +20,9 @@ import {
   getBatch,
   getProject,
   getWorkstream,
+  getWorkstreamRow,
   listInbox,
+  listPermissionRules,
   listWorkstreams,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -29,6 +31,14 @@ import type { EventBus, StateStore } from '../events';
 import { existsAsEntry, GitTrustError, type Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import {
+  ANSWERED_CARDS_READ,
+  ANSWERED_STATES,
+  cardAllowances,
+  relativeIn,
+  ruleAllowances,
+  writeStamp,
+} from './allowed-writes';
 import {
   bookkeepingAt,
   ignoredBookkeepingWrite,
@@ -297,6 +307,74 @@ export function createWatcher(deps: {
     ordinary.forEach(single);
   }
 
+  /** The recent answered Allow Edit cards that allowed one write, oldest first. */
+  const answeredEditCards = (projectId: ProjectId) =>
+    cardAllowances(
+      listInbox(db, { states: [...ANSWERED_STATES], projectId, recent: ANSWERED_CARDS_READ }),
+    ).reverse();
+
+  // The allow-once cards a write has used, so one card excuses one write; the cards answered before this
+  // watcher started are used up, since they allowed writes it never saw.
+  const usedCards = new Set<string>(
+    listInbox(db, { states: [...ANSWERED_STATES], recent: ANSWERED_CARDS_READ }).map((i) => i.id),
+  );
+  // The write each excused path last showed, by checkout and path: a write seen again unchanged, in a later
+  // batch, is the one its card already excused, and a different one is not.
+  const excusedWrites = new Map<string, string>();
+
+  /**
+   * The paths among `paths` that a permission card, or a rule one stored, allowed a lane among `lanes` to
+   * write in `root`: the builder decided about that exact write when they answered its Allow Edit card, so
+   * the stray-write card would only repeat it. An allow-once card excuses the next write to its file and
+   * is then used (`take`); a later write no card allowed still cards. A step end (`take` false) reads the
+   * checkout's whole diff, which holds every write of the step, so any such card excuses its file.
+   */
+  function allowedWrites(
+    projectId: ProjectId,
+    root: string,
+    paths: readonly string[],
+    lanes: readonly WorkstreamId[],
+    take: boolean,
+  ): Set<string> {
+    const allowed = new Set<string>();
+    if (paths.length === 0 || lanes.length === 0) return allowed;
+    const inScope = (a: { workstreamId: WorkstreamId | null }) =>
+      a.workstreamId !== null && lanes.includes(a.workstreamId);
+    const named = <T extends { path: string }>(list: readonly T[]) =>
+      list.flatMap((a) => {
+        const rel = relativeIn(root, a.path);
+        return rel === null ? [] : [{ rel, a }];
+      });
+    const cards = named(answeredEditCards(projectId).filter(inScope));
+    const standing = [
+      ...cards.filter(({ a }) => a.standing),
+      ...named(lanes.flatMap((id) => ruleAllowances(listPermissionRules(db, projectId, id)))),
+    ];
+    for (const path of paths) {
+      if (standing.some(({ rel }) => rel === path)) {
+        allowed.add(path);
+        continue;
+      }
+      const once = cards.filter(({ rel, a }) => rel === path && !a.standing);
+      if (!take) {
+        if (once.length > 0) allowed.add(path);
+        continue;
+      }
+      const key = `${root}\0${path}`;
+      const stamp = writeStamp(root, path);
+      if (excusedWrites.get(key) === stamp) {
+        allowed.add(path);
+        continue;
+      }
+      const unused = once.find(({ a }) => a.cardId !== null && !usedCards.has(a.cardId));
+      if (unused?.a.cardId == null) continue;
+      usedCards.add(unused.a.cardId);
+      excusedWrites.set(key, stamp);
+      allowed.add(path);
+    }
+    return allowed;
+  }
+
   /** Whether a card names the lane: as the workstream it targets, or as one of its candidates. */
   function names(item: InboxItemDto, lane: WorkstreamId): boolean {
     const candidates = item.detail?.['candidates'];
@@ -313,8 +391,8 @@ export function createWatcher(deps: {
    * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
    * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
    * Sensitive paths stay carded. A bulk card resolves only when every path it lists is covered and not
-   * sensitive and, when it lists fewer than it counts, the checkout's current changes hold nothing the claims
-   * leave uncovered, since the paths it leaves out can't be read from the card.
+   * sensitive and, when it lists fewer than it counts, nothing the lane changed since its base, committed or
+   * not, lies outside the claims, since the paths it leaves out can't be read from the card.
    */
   async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
@@ -331,11 +409,21 @@ export function createWatcher(deps: {
     const covered = (paths: readonly string[]): boolean =>
       paths.every((p) => !isSensitivePath(p)) && findStrays(paths, project, claims).length === 0;
     let unlistedCovered: boolean | null = null;
-    /** Whether nothing the checkout now has changed lies outside the claims, bar the sensitive paths with cards of their own. */
+    /**
+     * Whether nothing the lane has changed since its base lies outside the claims, bar the sensitive paths
+     * with cards of their own. Committed changes count: a write the lane committed through the commit tool
+     * is gone from the working tree's status but is still a write outside every claim. A lane with no
+     * recorded base has run no session, so its HEAD is the base.
+     */
     const noStraysNow = async (): Promise<boolean> => {
       if (unlistedCovered !== null) return unlistedCovered;
       try {
-        const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
+        const base = getWorkstreamRow(db, lane).baseHead ?? 'HEAD';
+        const changed = withoutBookkeeping(
+          ws.projectId,
+          root,
+          await deps.git.changedFilesSince(root, base),
+        );
         unlistedCovered =
           findStrays(
             changed.filter((p) => !isSensitivePath(p)),
@@ -502,9 +590,16 @@ export function createWatcher(deps: {
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
       else if (isSensitivePath(rel)) hidden.push(rel);
     }
-    const flagged = [...new Set([...strays, ...hidden])];
-    raise(project, site, flagged, candidates, null);
-    const outside = new Set(flagged);
+    const outside = new Set([...strays, ...hidden]);
+    // A write the builder allowed through its permission card needs no second card.
+    const allowed = allowedWrites(projectId, entry.root, [...outside], candidates, true);
+    raise(
+      project,
+      site,
+      [...outside].filter((rel) => !allowed.has(rel)),
+      candidates,
+      null,
+    );
     raiseForeign(
       project,
       site,
@@ -595,7 +690,10 @@ export function createWatcher(deps: {
         workstreamId,
       );
       // A write that can change what runs is flagged even inside the workstream's own claim.
-      const flagged = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
+      const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
+      // Not a write its permission card allowed: the builder decided about that one already.
+      const allowed = allowedWrites(ws.projectId, root, written, [workstreamId], false);
+      const flagged = written.filter((rel) => !allowed.has(rel));
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
       return flagged;
     },

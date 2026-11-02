@@ -36,7 +36,9 @@ hazards changes with it.
   matches only itself, so a Next.js screen `[orgId]` gets `[[]orgId]/**`, not a class matching `o/`. Node's
   matcher reads a backslash as a separator, never an escape, and a project refuses one, so where no exact glob
   exists (a backslash, a stray bracket, braces holding a comma or `..`) those characters become `?`, which also
-  matches a name differing only there.
+  matches a name differing only there. Because that `?` could match a sibling folder (`a?b/**` takes `axb/`
+  too), and the guard allows a write when any matching area is claimed, candidates whose `?` globs match
+  another candidate's files are made one candidate, so each file still lands in exactly one area.
 - **Candidates merged by history.** Two folder or route candidates that changed together in at least four
   commits, and in at least three quarters of the commits of the one that changed less, are merged. A commit that
   touched more than four candidates says nothing about any pair. A commit's files are placed by the folders each
@@ -58,6 +60,13 @@ hazards changes with it.
   the form starts from one area, `repo`, says so, and still lets the builder split it; a repository with no
   commit is proposed the same one area. Its globs are `WHOLE_REPOSITORY_GLOBS` in `@10db/contracts`: `**`,
   `**/.*` and `**/.*/**`, every file with at most one dot name in its path.
+- **The builder never has to wait for the proposal, and a proposal nobody wants stops.** While areas are
+  being proposed Create Project is enabled; using it drops the proposal and creates the project with the
+  `repo` area. Choosing another folder, creating, or closing the form aborts the request, and the daemon
+  aborts the model question with it (the request's signal reaches `AreaNamer` and `CompletionSpec.signal`),
+  which stops the Claude Code process it started. The model has `NAMING_MS` (30 s) in the daemon before
+  names come from paths; the form gives the whole proposal 45 s, then falls back to the `repo` area and says
+  the proposal took too long.
 
 ## Why
 

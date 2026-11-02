@@ -94,6 +94,7 @@ export const BuilderToolInputs = {
       riskTags: z.array(z.string()).optional(),
       flowId: z.string().nullable().optional(),
       areas: z.array(z.string()).optional(),
+      landing: TaskLanding.optional(),
     })
     .refine(changesSomething, { message: CHANGE_NOTHING }),
   [BuilderToolName.RemoveTask]: z.object({ taskId: TaskId }),
@@ -118,7 +119,7 @@ export const AdvertisedBuilderToolInputs: Record<BuilderToolName, z.ZodType> = {
   ...BuilderToolInputs,
   [BuilderToolName.CreateTask]: TaskInput.extend({ projectId: ProjectId }),
   [BuilderToolName.EditTask]: z
-    .object({ taskId: TaskId, ...TaskPatchFields.partial().shape })
+    .object({ taskId: TaskId, ...TaskPatchFields.partial().shape, landing: TaskLanding.optional() })
     .refine(changesSomething, { message: CHANGE_NOTHING }),
 };
 
@@ -146,8 +147,8 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
     'Lists the flows, the step sequences a task can run through, with their ids. Omit flowId on create_task for the default.',
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
-  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects. Add dependsOn and riskTags only when needed, and omit flowId for the project default. Refuses what the New Task form refuses, in the same words.`,
-  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, description, acceptanceCriteria (replaces the list), riskTags, flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here). ${DRAFTING} Send only the fields to change.`,
+  [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects. Add dependsOn and riskTags only when needed, and omit flowId for the project default. Omit landing too, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words.`,
+  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, description, acceptanceCriteria (replaces the list), riskTags, flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:

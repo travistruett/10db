@@ -34,14 +34,18 @@ describe('BatchPanel', () => {
     expect(await screen.findByText('10db/greetings-0a1b2c3d')).toBeTruthy();
     expect(buttons()).toEqual(['Abandon']);
     expect(
-      screen.getByText('Abandon keeps the branch and cancels its unfinished task.'),
+      screen.getByText(
+        'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its unfinished task.',
+      ),
     ).toBeTruthy();
   });
 
   it('names how many tasks Abandon cancels when several share the branch', async () => {
     panel(batch, [member('Alpha', 'QUEUED'), member('Beta', 'QUEUED'), member('Gamma', 'FAILED')]);
     expect(
-      await screen.findByText('Abandon keeps the branch and cancels its 2 unfinished tasks.'),
+      await screen.findByText(
+        'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+      ),
     ).toBeTruthy();
   });
 
@@ -58,7 +62,7 @@ describe('BatchPanel', () => {
     expect(button.hasAttribute('disabled')).toBe(true);
     expect(
       screen.getByText(
-        'Alpha is running: cancel it in Factory first. Abandon keeps the branch and cancels its 2 unfinished tasks.',
+        'Alpha is running: cancel it in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
       ),
     ).toBeTruthy();
     fireEvent.click(button);

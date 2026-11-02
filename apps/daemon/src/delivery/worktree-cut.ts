@@ -19,10 +19,10 @@ import { githubRepoOf } from '../github';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { stopCiFixing } from './ci-stop';
-import { ghCall, networkCall, raise, type DeliveryContext } from './context';
+import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
-import { missingLandingBranch } from './landing';
+import { branchBehindBase, missingLandingBranch } from './landing';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
 import { seedDirs, seedWorktree } from './worktree-seed';
@@ -112,6 +112,15 @@ export async function cutWorktree(
     } catch (error) {
       if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));
       return;
+    }
+    // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base.
+    const behind = await branchBehindBase(ctx, project, batch, signal);
+    if (behind && !stopped()) {
+      try {
+        showNotice(ctx.state, batchId, behind);
+      } catch (error) {
+        ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
+      }
     }
     const call = ghCall(ctx, signal);
     try {

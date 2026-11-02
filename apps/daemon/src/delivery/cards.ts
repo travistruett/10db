@@ -159,6 +159,16 @@ export const startCards = {
     title: 'Not started: tasks depend on unfinished work',
     body: `${blocked.map((b) => `- ${b.task.title} needs ${b.deps.map((d) => d.title).join(', ')}`).join('\n')}\n\nStart them together, or finish those tasks first.`,
   }),
+  /** `where` and `depWhere` are the placements in words ("Your folder", "a separate copy"). */
+  crossPlacementDependency: (
+    task: TaskDto,
+    where: string,
+    dep: TaskDto,
+    depWhere: string,
+  ): Card => ({
+    title: 'Not started: a task depends on a task that runs somewhere else',
+    body: `${task.title} runs in ${where} but needs ${dep.title}, which runs in ${depWhere}. Tasks that depend on each other must run in the same place: change where one of them runs, then start them again.`,
+  }),
   unmergedDependencies: (found: readonly UnmergedDependency[]): Card => ({
     title: 'Not started: tasks depend on code that is not on the base branch',
     body: `${found.map((f) => `- ${f.task.title} needs ${f.dep.title}: ${f.reason}`).join('\n')}\n\nMerge that work into the base branch, then start again.`,
@@ -965,6 +975,7 @@ export const prCards = {
 /** The fold keys of the cards about a task's local branch. */
 export const branchCardKey = {
   offer: (batchId: BatchId): string => `branch-offer:${batchId}`,
+  deleted: (batchId: BatchId): string => `branch-deleted:${batchId}`,
   /** One per project: the branches no batch names. */
   withoutBatch: 'branches-without-batch',
 } as const;
@@ -977,6 +988,16 @@ export const branchCards = {
     body: `Batch "${batch.title}" was abandoned, and its branch ${batch.branch ?? '(none)'} holds ${commitsOf(commits)} beyond ${batch.baseBranch}. 10db keeps it until you answer: Delete Branch removes it from your repository, so that work is gone; Keep leaves it.`,
     foldKey: branchCardKey.offer(batch.id),
     ...branchOffer(batch),
+  }),
+  /**
+   * 10db deleted an abandoned task's branch because it held no commits beyond its base;
+   * `withWorktree` when the batch's separate copy was removed with it.
+   */
+  abandonedBranchDeleted: (batch: BatchDto, withWorktree: boolean): Card => ({
+    title: `Batch "${batch.title}" abandoned: ${batch.branch ?? 'its branch'} deleted`,
+    body: `The branch ${batch.branch ?? '(none)'} held no commits beyond ${batch.baseBranch}, so 10db deleted it${withWorktree ? " along with the batch's worktree" : ''}. Nothing was lost.`,
+    foldKey: branchCardKey.deleted(batch.id),
+    detail: { batchId: batch.id },
   }),
   /** A Delete Branch answer git can't carry out while the branch is checked out. */
   checkedOut: (batch: BatchDto, path: string): Card => ({
