@@ -131,8 +131,8 @@ export function createBuilderTools(
       const task = services.getTask(taskId);
       // A held task already started once: the Board's Start queues its run again, so this does too.
       const held = isHeld(task);
-      // Starting over is the one start a failed task gets here; the daemon judges the rest (its
-      // dependencies, its batch) before it abandons anything.
+      // Starting over is the one start a failed task gets here. Its dependencies are checked below,
+      // before anything is abandoned: local delivery starts the task with no checks of its own.
       const startingOver = fresh === true && hasFailedRun(task);
       if (!held && !startingOver && task.boardStatus !== BoardStatus.Ready) {
         throw new DomainError(
@@ -140,8 +140,8 @@ export function createBuilderTools(
           `Task ${task.title} is ${task.boardStatus.replace('_', ' ')}, not ready, so it can't be started`,
         );
       }
-      if (held) {
-        // A held task is Blocked whatever it waits on, so its dependencies are checked here.
+      if (held || startingOver) {
+        // A held or failed task is Blocked whatever it waits on, so its dependencies are checked here.
         const waitingOn = task.dependsOn
           .map((id) => services.getTask(id))
           .filter(

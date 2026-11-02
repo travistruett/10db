@@ -476,6 +476,27 @@ describe('the builder MCP endpoint', () => {
         expect((await batchesOf(project.id)).find((b) => b.id === batchId)?.state).toBe('OPEN');
       });
 
+      it('refuses a failed local task whose dependency is unfinished, starting nothing', async () => {
+        const project = await seedProject();
+        const first = await seedTask(project.id, 'first');
+        const waiting = await seedTask(project.id, 'waiting', [first.id]);
+        const failedId = daemon.state.write((ctx) => {
+          const ws = insertWorkstream(ctx, waiting.id);
+          for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+            transitionWorkstream(ctx, ws.id, { to, fence: null });
+          return ws.id;
+        });
+        const result = await call('start_task', { taskId: waiting.id, fresh: true });
+        expect(result).toEqual({
+          isError: true,
+          text: "Task waiting waits on first, so it can't be started",
+        });
+        // No new workstream: the task still points at its failed run.
+        expect((await tasksOf(project.id)).find((t) => t.id === waiting.id)?.workstreamId).toBe(
+          failedId,
+        );
+      });
+
       it('is a plain start for a Ready task that never ran', async () => {
         const project = await seedProject();
         const task = await seedTask(project.id, 'first run');
