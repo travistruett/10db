@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATES,
   BoardStatus,
+  type GoalId,
   InvalidError,
   type PickerProposalDto,
   type ProjectId,
@@ -10,6 +11,7 @@ import {
 import {
   activeClaims,
   claimRequestsForTask,
+  getGoal,
   getProject,
   getTask,
   listTasks,
@@ -30,14 +32,22 @@ function heldClaims(db: DbReader, projectId: ProjectId): Map<string, string> {
   return held;
 }
 
-/** The approval sheet's input (spec §5.2.4): the picker's order and choices, with each candidate's plan. */
+/**
+ * The approval sheet's input (spec §5.2.4): the picker's order and choices, with each candidate's plan.
+ * With a `goalId` the pool is that goal's tasks alone (goals spec §9), cut before the picker counts
+ * `size`, so the sheet fills with the goal's work; a goal of another project is refused.
+ */
 export function proposeCandidates(
   db: DbReader,
   projectId: ProjectId,
   size: number,
+  goalId?: GoalId,
 ): PickerProposalDto {
   const project = getProject(db, projectId);
-  const tasks = listTasks(db, projectId);
+  if (goalId !== undefined && getGoal(db, goalId).projectId !== projectId) {
+    throw new InvalidError(`Goal ${goalId} is not in this project`);
+  }
+  const tasks = listTasks(db, projectId).filter((t) => goalId === undefined || t.goalId === goalId);
   const plans = new Map<TaskId, StepPlanDto>();
   const planErrors = new Map<TaskId, string>();
   const ruledOut = new Map<TaskId, string>();
