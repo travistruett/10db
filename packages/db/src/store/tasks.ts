@@ -603,9 +603,18 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
 /**
  * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
  * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
- * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran.
+ * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran. A task
+ * whose latest run failed (started again after it) is closed as `closeTask` does, and refused on
+ * the same terms.
  */
 export function cancelRefusedStartTask(ctx: WriteContext, id: TaskId): TaskDto {
+  // A task started again after a failed run is refused before it gets a new run, so its latest run
+  // is still the failed one: close it the way the Board's Close does.
+  if (
+    getTask(ctx.tx, id).status === TaskStatus.Open &&
+    latestRun(ctx.tx, id)?.state === WorkstreamState.Failed
+  )
+    return closeTask(ctx, id);
   return removeUnstarted(ctx, id, true);
 }
 
