@@ -399,7 +399,7 @@ export function createServices(deps: {
     patchBoardColumn: (id, patch) => deps.state.write((ctx) => patchBoardColumn(ctx, id, patch)),
     deleteBoardColumn: (id, del) => deps.state.write((ctx) => deleteBoardColumn(ctx, id, del)),
     stepPlan: (taskId) => resolveStepPlan(db, taskId),
-    proposeCandidates: (projectId, size) => proposeCandidates(db, projectId, size),
+    proposeCandidates: (projectId, size, goalId) => proposeCandidates(db, projectId, size, goalId),
     inspectFolder: (path) =>
       inspectFolder(
         {

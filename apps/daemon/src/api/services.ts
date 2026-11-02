@@ -26,6 +26,7 @@ import type {
   FlowInput,
   FlowPatch,
   FolderInspectResult,
+  GoalId,
   FoundHostDto,
   InboxAnswer,
   InboxItemDto,
@@ -236,8 +237,11 @@ export interface ApiServices {
   deleteBoardColumn(id: BoardColumnId, del: BoardColumnDelete): BoardColumnDto[];
   /** What starting the task would run; throws InvalidError when no flow or profile fits. */
   stepPlan(taskId: TaskId): StepPlanDto;
-  /** The picker's proposal for the approval sheet; reads only. */
-  proposeCandidates(projectId: ProjectId, size: number): PickerProposalDto;
+  /**
+   * The picker's proposal for the approval sheet; reads only. A `goalId` limits the pool to the
+   * goal's tasks; a goal of another project throws InvalidError.
+   */
+  proposeCandidates(projectId: ProjectId, size: number, goalId?: GoalId): PickerProposalDto;
   listAccounts(): AccountDto[];
   /** Answers the account and, for a subscription, how to sign it in (accounts spec §5). */
   createAccount(input: AccountConfig): AccountCreatedDto;
