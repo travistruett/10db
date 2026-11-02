@@ -229,6 +229,39 @@ tasks:
     ]);
   });
 
+  it('refuses a person name more than one person shares, unless a handle matches', () => {
+    const text = (person: string) => `---
+title: T
+objective: O
+criteria:
+  - { text: C, check: accept, person: ${person} }
+tasks:
+  - { key: a, title: A, areas: [repo] }
+---
+`;
+    const project = {
+      areaNames: ['repo'],
+      people: [
+        { handle: 'sam1', name: 'Sam' },
+        { handle: 'sam2', name: 'Sam' },
+        { handle: 'Sam', name: 'Samuel' },
+      ],
+    };
+    expect(checkBriefRules(brief(text('Sam')), project)).toEqual([]);
+    expect(checkBriefRules(brief(text('sam1')), project)).toEqual([]);
+    expect(
+      checkBriefRules(brief(text('Sam')), {
+        areaNames: ['repo'],
+        people: project.people.slice(0, 2),
+      }),
+    ).toEqual([
+      {
+        path: 'Criterion 1, person',
+        message: 'more than one person is called Sam; name them by handle instead',
+      },
+    ]);
+  });
+
   it('reports an unknown depends_on, a cycle and an unknown area together', () => {
     const errors = checkBriefRules(
       brief(`---
