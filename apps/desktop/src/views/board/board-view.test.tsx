@@ -95,6 +95,24 @@ describe('BoardView', () => {
         expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
       });
 
+      it('says the project could not be found, not that the task is gone, when a project fails to answer', async () => {
+        const first = projectViewDto({ gateCommand: null });
+        const second = projectViewDto({ gateCommand: null });
+        serve(
+          http.get(daemonUrl('/projects'), () => HttpResponse.json([first, second])),
+          http.get(daemonUrl('/projects/:projectId/tasks'), ({ params }) =>
+            params['projectId'] === first.id
+              ? HttpResponse.json([taskDto({ projectId: first.id, title: 'Alpha' })])
+              : HttpResponse.json({ error: 'boom' }, { status: 500 }),
+          ),
+          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+        );
+        renderApp(`/board?task=${mintId('Task')}`);
+        expect(await screen.findByText(/couldn't find the task's project/i)).toBeTruthy();
+        expect(screen.queryByText(/no longer exists/i)).toBeNull();
+        expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+      });
+
       it('says nothing when the task is on the selected project', async () => {
         const { here } = serveTwoProjects();
         renderApp(`/board?task=${here.id}`);
