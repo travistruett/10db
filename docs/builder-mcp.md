@@ -67,7 +67,7 @@ The bridge reads no other 10db variable.
 | `create_task`   | Makes a task from a title, description, criteria, areas, dependencies, risk tags and flow, and returns its id. |
 | `edit_task`     | Changes a task's title, description, criteria, risk tags, flow or areas (areas only before it has started).    |
 | `remove_task`   | Removes a task that has not started.                                                                           |
-| `start_task`    | Starts a **Ready** task; any other is refused.                                                                 |
+| `start_task`    | Starts a **Ready** task, or resumes a held one; any other is refused (see below).                              |
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                               |
 | `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).               |
 | `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                      |
@@ -82,6 +82,11 @@ while any are open the task runs once they finish, still ahead of the other queu
 refuses, in the same words: "Task <title> isn't waiting for a lane" for a task that hasn't started or whose latest
 workstream is running or finished, and the API's "not found" for an unknown task. Start a Ready task with `start_task`
 first; a task parked or held back is not queued.
+
+`start_task` also resumes a **held** task (one set aside with `POST /tasks/:taskId/hold`, shown in Blocked), the same
+way the Board's Start does: its run keeps its batch and worktree and goes back in the queue, and the tool answers
+`{ taskId, workstreamId }` for that run. It still refuses a task that waits on unfinished dependencies (a Backlog task,
+or a held one whose dependencies aren't done) and a task with a run in progress or one that is parked.
 
 Not available here, on purpose: answering a card, shipping or abandoning a batch, changing a project. They stay
 in the app.

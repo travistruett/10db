@@ -41,6 +41,8 @@ beforeEach(async () => {
     watch: false,
     // A tick long enough that a started task stays where the test left it.
     tickMs: 3_600_000,
+    // No lane is free, so a started task stays queued and can be held.
+    caps: { global: 0 },
   });
   client = new Client({ name: 'test', version: '0' });
   await client.connect(
@@ -382,6 +384,50 @@ describe('the builder MCP endpoint', () => {
       });
       const after = (await tasksOf(project.id)).find((t) => t.id === waiting.id);
       expect(after?.workstreamId).toBeNull();
+    });
+
+    describe('a held task', () => {
+      const StartResult = z.object({ taskId: z.string(), workstreamId: z.string() });
+      const holdPath = (taskId: string) => `/tasks/${taskId}/hold`;
+
+      it('starts again, with the Start the Board sends', async () => {
+        const project = await seedProject();
+        const task = await seedTask(project.id, 'held');
+        const started = StartResult.parse(await callJson('start_task', { taskId: task.id }));
+        expect((await restRefusal(holdPath(task.id), {})).status).toBe(200);
+        const held = (await tasksOf(project.id))[0];
+        expect(held?.boardStatus).toBe('blocked');
+
+        const result = StartResult.parse(await callJson('start_task', { taskId: task.id }));
+        expect(result).toEqual({ taskId: task.id, workstreamId: started.workstreamId });
+        const runs = await api().get(
+          '/workstreams',
+          z.array(z.object({ id: z.string(), state: z.string() })),
+        );
+        expect(runs.find((w) => w.id === started.workstreamId)?.state).toBe(WorkstreamState.Queued);
+        expect((await tasksOf(project.id))[0]?.boardStatus).toBe('in_progress');
+      });
+
+      it('is refused while its run is in progress', async () => {
+        const project = await seedProject();
+        const task = await seedTask(project.id, 'running');
+        await callJson('start_task', { taskId: task.id });
+        const result = await call('start_task', { taskId: task.id });
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain('in progress');
+      });
+
+      it('is still refused while a dependency is unfinished', async () => {
+        const project = await seedProject();
+        const first = await seedTask(project.id, 'first');
+        const waiting = await seedTask(project.id, 'waiting', [first.id]);
+        // The REST start queues it behind its dependency; holding sets that run aside.
+        await api().post(`/tasks/${waiting.id}/start`, z.unknown());
+        expect((await restRefusal(holdPath(waiting.id), {})).status).toBe(200);
+        const result = await call('start_task', { taskId: waiting.id });
+        expect(result.isError).toBe(true);
+        expect(result.text).toContain('waits on');
+      });
     });
   });
 
