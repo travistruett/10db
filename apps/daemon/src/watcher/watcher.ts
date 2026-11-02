@@ -23,6 +23,7 @@ import {
   getWorkstreamRow,
   listInbox,
   listPermissionRules,
+  listProjects,
   listWorkstreams,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -314,9 +315,17 @@ export function createWatcher(deps: {
     ).reverse();
 
   // The allow-once cards a write has used, so one card excuses one write; the cards answered before this
-  // watcher started are used up, since they allowed writes it never saw.
+  // watcher started are used up, since they allowed writes it never saw. Each project's own latest answered
+  // cards are read, as allowedWrites reads them; a read across every project could miss a card that is old
+  // among all of them yet still among its own project's latest.
   const usedCards = new Set<string>(
-    listInbox(db, { states: [...ANSWERED_STATES], recent: ANSWERED_CARDS_READ }).map((i) => i.id),
+    listProjects(db).flatMap((p) =>
+      listInbox(db, {
+        states: [...ANSWERED_STATES],
+        projectId: p.id,
+        recent: ANSWERED_CARDS_READ,
+      }).map((i) => i.id),
+    ),
   );
   // The write each excused path last showed, by checkout and path: a write seen again unchanged, in a later
   // batch, is the one its card already excused, and a different one is not.
