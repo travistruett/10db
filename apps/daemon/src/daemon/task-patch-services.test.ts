@@ -5,7 +5,7 @@ import {
   type BatchDto,
   type TaskDto,
 } from '@10db/contracts';
-import { getBatch, getTask, transitionBatch } from '@10db/db';
+import { getBatch, getTask, schema, transitionBatch } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { jobKey, JobQueue } from '../delivery';
@@ -133,6 +133,20 @@ describe('a placement patch through the task service during a pending join', () 
     h.starter.startBatch(h.project.id, { title: 'Beta', taskIds: ids(beta) });
     return { batch, beta, release };
   }
+
+  it('accepts a risk tag edit when the task is already a separate copy', async () => {
+    const { beta, release } = await pendingJoin();
+    // A task backfilled to a separate copy has no reason; the store changes only the reason.
+    // (Every task in this project changes; Alpha has already started and is not patched.)
+    h.store.db.update(schema.tasks).set({ workspaceMode: WorkspaceMode.Worktree }).run();
+    const patched = await taskService().patchTask(beta.id, { riskTags: [RiskTag.Migration] });
+    expect(patched).toMatchObject({
+      workspaceMode: WorkspaceMode.Worktree,
+      placementReason: 'touches migrations',
+    });
+    release();
+    await h.jobs.idle();
+  });
 
   it('answers a conflict and leaves the placement alone', async () => {
     const { beta, release } = await pendingJoin();
