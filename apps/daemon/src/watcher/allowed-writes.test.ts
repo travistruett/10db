@@ -93,6 +93,10 @@ import {
   writeStamp,
 } from './allowed-writes';
 
+// A sparse file far too big to read within any budget here, yet small enough for every filesystem a gate runs
+// on: ext4 (the CI runner's) refuses ftruncate past 16 TiB with EFBIG. At 8 TiB, even 2 GB/s takes over an hour.
+const HUGE_SPARSE_BYTES = 2 ** 43;
+
 describe('stampOrReason', () => {
   let root: string;
   beforeEach(() => {
@@ -193,9 +197,9 @@ describe('stampOrReason', () => {
   });
 
   describe('a file that cannot be read in bounded time', () => {
-    it('gives up on a sparse 1 PiB file once the time budget is spent, as too-large', async () => {
+    it('gives up on a sparse 8 TiB file once the time budget is spent, as too-large', async () => {
       writeFileSync(join(root, 'huge.bin'), '');
-      truncateSync(join(root, 'huge.bin'), 2 ** 50);
+      truncateSync(join(root, 'huge.bin'), HUGE_SPARSE_BYTES);
       const started = performance.now();
       const result = await stampOrReason(root, 'huge.bin', 300);
       expect(result).toEqual({ reason: 'too-large' });
@@ -226,7 +230,7 @@ describe('stampOrReason', () => {
 
     it('lets the event loop run while a huge file is read, so other work is never queued behind it', async () => {
       writeFileSync(join(root, 'huge.bin'), '');
-      truncateSync(join(root, 'huge.bin'), 2 ** 50);
+      truncateSync(join(root, 'huge.bin'), HUGE_SPARSE_BYTES);
       let other = false;
       setTimeout(() => {
         other = true;
