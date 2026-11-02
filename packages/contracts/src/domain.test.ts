@@ -10,6 +10,7 @@ import {
   NextAction,
   ProjectInput,
   ProjectPatch,
+  STOCK_HAZARD_REVISIONS,
   TaskId,
   WorkstreamId,
 } from './index';
@@ -120,6 +121,44 @@ describe('EvidenceDto', () => {
     ['builder with a command', { kind: 'builder', command: 'x', exitCode: 0 }, false],
   ])('%s', (_name, fields, ok) => {
     expect(EvidenceDto.safeParse({ ...common, ...fields }).success).toBe(ok);
+  });
+});
+
+describe('stock hazard revisions', () => {
+  // The stock commands of the first release, which every stored list started from.
+  const FIRST: Record<string, string[]> = {
+    migrations: ['drizzle-kit generate', 'pnpm db:migrate'],
+    deps: [
+      'pnpm add',
+      'pnpm remove',
+      'pnpm rm',
+      'pnpm install',
+      'pnpm i',
+      'pnpm update',
+      'pnpm up',
+      'npm install',
+      'npm i',
+      'npm uninstall',
+      'cargo add',
+      'cargo remove',
+    ],
+    harness: [],
+  };
+
+  it('add up, with the first release, to exactly the stock commands of each hazard', () => {
+    for (const hazard of DEFAULT_HAZARDS) {
+      const added = STOCK_HAZARD_REVISIONS.flatMap((r) => r[hazard.name] ?? []);
+      expect(new Set(added).size, hazard.name).toBe(added.length);
+      expect([...(FIRST[hazard.name] ?? []), ...added].sort(), hazard.name).toEqual(
+        [...hazard.commands].sort(),
+      );
+    }
+  });
+
+  it('name only stock hazards', () => {
+    const names = new Set(DEFAULT_HAZARDS.map((h) => h.name));
+    for (const revision of STOCK_HAZARD_REVISIONS)
+      for (const name of Object.keys(revision)) expect(names).toContain(name);
   });
 });
 
