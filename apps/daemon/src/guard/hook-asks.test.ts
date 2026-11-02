@@ -302,6 +302,11 @@ describe('arithmetic over a name the command can rebind', () => {
     expect(bash("declare -n r=s; s=1; r='a[$(id)]'; echo $((s+1))")).toBe('ask');
   });
 
+  it('asks when a glob in a declare may match a flag file that makes it a nameref', () => {
+    expect(bash("touch ./-n; s=1; declare ?n r=s; r='a[$(id)]'; echo $((s+1))")).toBe('ask');
+    expect(bash("touch ./-n; s=1; declare *n r=s; r='a[$(id)]'; echo $((s+1))")).toBe('ask');
+  });
+
   it('allows a timing check over a name set only to numbers', () => {
     expect(bash('s=$(date +%s); make check; echo $(( $(date +%s) - s ))')).toBe('allow');
   });
