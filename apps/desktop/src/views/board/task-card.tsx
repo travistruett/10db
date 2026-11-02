@@ -7,6 +7,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
+import { PlacementBadge } from './placement-badge';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
 
@@ -30,6 +31,8 @@ export interface TaskCardProps {
   readonly startNote?: StartNote | null | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
+  /** Whether the task's placement can still change; only then does the card say where it runs. */
+  readonly placementShown?: boolean | undefined;
 }
 
 /**
@@ -66,6 +69,7 @@ export function cardSummary(
   startNote: StartNote | null = null,
   place?: number,
   batches?: readonly BatchDto[],
+  placement: string | null = null,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
@@ -77,6 +81,7 @@ export function cardSummary(
   return [
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
+    placement ? `Runs in ${placement}.` : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
@@ -100,6 +105,7 @@ export function TaskCard({
   landing,
   startNote = null,
   place,
+  placementShown = false,
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
@@ -150,6 +156,7 @@ export function TaskCard({
               Cancelled
             </Badge>
           ) : null}
+          {placementShown ? <PlacementBadge task={task} /> : null}
         </Group>
         {waits.length > 0 ? (
           <Text size="xs" c="dimmed">{`Waits on ${waits.join(', ')}`}</Text>

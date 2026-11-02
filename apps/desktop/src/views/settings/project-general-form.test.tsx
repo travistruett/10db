@@ -40,6 +40,8 @@ async function pick(select: HTMLElement, option: string | RegExp): Promise<void>
   );
 }
 
+const CHANGE_NOTE =
+  'It applies to tasks made from now on and can change while work runs; tasks that already exist keep their own.';
 const NO_CHECK = 'No automatic check: each finished task waits for you.';
 const pullRequests = { delivery: 'pull_request', prTitlePrefix: 'feat(app)' } as const;
 const worktrees = { ...pullRequests, workspaceMode: 'worktree' } as const;
@@ -151,24 +153,37 @@ const rows: readonly Row[] = [
     sent: { maxLanes: 3 },
   },
   {
-    name: 'Where tasks work',
+    name: 'Default for new tasks',
     project: pullRequests,
-    label: 'Where tasks work',
-    line: 'Your folder: tasks change files in your checkout, so you can watch them land in your editor and dev server. While tasks run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself.',
-    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Separate copies' })),
+    label: 'Default for new tasks',
+    line: `Your folder: new tasks change files in your checkout, so you can watch them land in your editor and dev server. While they run, 10db switches this checkout to a new branch cut from the base branch, and it needs the checkout clean (no uncommitted changes) to start. When the batch ships, closes or is abandoned, 10db switches the checkout back to where it was, as long as it is still on that branch with nothing uncommitted. Otherwise 10db leaves it where it is, and a card says why unless you moved it yourself. ${CHANGE_NOTE}`,
+    change: () => fireEvent.click(screen.getByRole('radio', { name: 'Separate copy' })),
     sent: { workspaceMode: 'worktree' },
   },
   {
-    name: 'Where tasks work, Separate copies',
+    name: 'Default for new tasks, Separate copy',
     project: worktrees,
-    label: 'Where tasks work',
-    line: 'Separate copies: each task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request.',
+    label: 'Default for new tasks',
+    line: `Separate copy: each new task works in its own copy of the repository under ~/.10db/worktrees, so any tasks can run together. Your checkout is left alone. You see the work in its pull request. ${CHANGE_NOTE}`,
     change: () => fireEvent.click(screen.getByRole('radio', { name: 'Your folder' })),
     sent: { workspaceMode: 'shared' },
   },
   {
+    name: 'Separate copy for these areas',
+    project: pullRequests,
+    label: 'Separate copy for these areas',
+    line: 'Area and hazard names, such as migrations or deps. A new task that names one is proposed a separate copy, and its card says why. Changing the list moves no task that already exists.',
+    change: () => {
+      const isolate = screen.getByRole('combobox', { name: 'Separate copy for these areas' });
+      isolate.focus();
+      fireEvent.change(isolate, { target: { value: 'contracts' } });
+      fireEvent.blur(isolate);
+    },
+    sent: { isolate: ['migrations', 'deps', 'contracts'] },
+  },
+  {
     name: "Copy into each task's copy",
-    project: worktrees,
+    project: pullRequests,
     label: "Copy into each task's copy",
     line: 'Ignored folders, such as node_modules, copied from this checkout.',
     change: () => {
@@ -290,14 +305,24 @@ describe('ProjectGeneralForm', () => {
   });
 
   it.each([
-    { name: 'Your folder', project: pullRequests, shown: false },
-    { name: 'Separate copies', project: worktrees, shown: true },
-  ])("Copy into each task's copy shows only for Separate copies: $name", async (row) => {
-    serve(projectDto(row.project));
-    renderApp('/settings/general');
-    await open();
-    expect(screen.queryByText("Copy into each task's copy") !== null).toBe(row.shown);
-  });
+    { name: 'a local project', project: {}, shown: false },
+    { name: 'Your folder by default', project: pullRequests, shown: true },
+    { name: 'Separate copy by default', project: worktrees, shown: true },
+  ])(
+    'The default for new tasks, the isolate list and the seed show only for pull requests: $name',
+    async (row) => {
+      serve(projectDto(row.project));
+      renderApp('/settings/general');
+      await open();
+      for (const label of [
+        'Default for new tasks',
+        'Separate copy for these areas',
+        "Copy into each task's copy",
+      ]) {
+        expect(screen.queryByText(label) !== null).toBe(row.shown);
+      }
+    },
+  );
 
   it('clears the gate and shows what an empty one means', async () => {
     const patched = serve(projectDto({ gateCommand: 'make gate' }));

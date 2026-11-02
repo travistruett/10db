@@ -3,7 +3,6 @@ import {
   BoardStatus,
   Delivery,
   TaskStatus,
-  WorkspaceMode,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -48,6 +47,7 @@ import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
 import { ciLine } from './ci-line';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
+import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
 import { canRunNext } from './run-next';
 import { cardSummary, TaskCard } from './task-card';
@@ -313,6 +313,7 @@ function BoardColumns({
                 landing={landingOf(task, batch)}
                 startNote={noteOf(task)}
                 place={ws ? places.get(ws.id) : undefined}
+                placementShown={placementOpen(task, ws?.state)}
                 peers={peers}
               />
             );
@@ -346,6 +347,7 @@ function BoardColumns({
               noteOf(task),
               ws ? places.get(ws.id) : undefined,
               allBatches,
+              placementOpen(task, ws?.state) ? placementLabel(task.workspaceMode) : null,
             );
           }}
           renderMenu={(task) => {
@@ -446,7 +448,7 @@ function BoardColumns({
           batches={allBatches}
           workstreams={workstreams}
           {...(openPlace !== undefined ? { place: openPlace } : {})}
-          workspaceMode={project.workspaceMode}
+          placementEditable={pullRequests}
           gateCommand={project.gateCommand}
           areaNames={project.areas.map((area) => area.name)}
           {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
@@ -462,11 +464,12 @@ function BoardColumns({
   );
 }
 
-/** Worktree mode shows every open batch in the daemon's order, newest first; shared mode shows the one current batch. */
+/**
+ * Every unfinished batch of both kinds, in the daemon's order, newest first: a separate copy's
+ * batch beside the shared one. With none open, the project's current batch stands in.
+ */
 function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
-  if (project.workspaceMode === WorkspaceMode.Worktree && project.openBatches.length > 0) {
-    return project.openBatches;
-  }
+  if (project.openBatches.length > 0) return project.openBatches;
   return project.currentBatch ? [project.currentBatch] : [];
 }
 

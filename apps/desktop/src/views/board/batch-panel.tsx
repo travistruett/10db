@@ -4,7 +4,6 @@ import {
   latestPerTask,
   shipReadiness,
   ShipReadiness,
-  WorkspaceMode,
   type BatchDto,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -34,13 +33,12 @@ export interface BatchPanelProps {
   readonly batch: BatchDto;
   /** Every workstream, so the batch's members decide whether it can ship anyway. */
   readonly workstreams: readonly WorkstreamDto[];
-  readonly workspaceMode: WorkspaceMode;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand: string | null;
 }
 
 /** Where a task's work ships: its branch, its pull request, why a ship failed and what the builder can do about it. */
-export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: BatchPanelProps) {
+export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps) {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const [fixOpen, fix] = useDisclosure(false);
@@ -52,7 +50,10 @@ export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: B
     readiness === ShipReadiness.ShipAnyway &&
     members.some((w) => !isSettled(w.state));
   const canAbandon = batch.state === B.Open || failed;
-  const canAddFix = workspaceMode === WorkspaceMode.Worktree && canAbandon;
+  const path = batch.worktreePath;
+  // A fix task joins a separate copy's batch; the shared batch takes tasks through the sheet. A batch
+  // is a separate copy while it has a worktree.
+  const canAddFix = path !== null && canAbandon;
   const note = abandonNote(batch, workstreams);
   const error = ship.error ?? abandon.error;
   // Each action clears the other's error first, so the panel shows only the latest action's refusal.
@@ -64,7 +65,6 @@ export function BatchPanel({ batch, workstreams, workspaceMode, gateCommand }: B
     ship.reset();
     abandon.mutate(batch.id);
   };
-  const path = batch.worktreePath;
   const exit = batch.gateExitCode;
 
   return (
