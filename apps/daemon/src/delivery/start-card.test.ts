@@ -81,20 +81,24 @@ describe('the answers of a refused start', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('cancels a task that ran before and failed, when its restart is refused', async () => {
-    const task = h.addTask('Alpha', { areas: ['api'] });
+  it('cancels a task that ran before and failed, when its restart is refused', () => {
+    // An unfinished dependency refuses the start before any run is inserted, so the earlier
+    // FAILED run is still the task's latest when Cancel task is answered.
+    const base = h.addTask('Base', { areas: ['api'] });
+    const task = h.addTask('Alpha', { areas: ['ui'], dependsOn: [base.id] });
     const earlier = h.state.write((w) => insertWorkstream(w, task.id));
     h.settle(earlier.id, 'FAILED');
-    writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
-    h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] });
-    await h.jobs.idle();
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] }),
+    ).toThrow(ConflictError);
+    expect(getTask(h.store.db, task.id).workstreamId).toBe(earlier.id);
     const card = h.only(h.cards());
     expect(card.options.map((o) => o.label)).toContain(StartChoice.Cancel);
     inbox.answer(card.id, { choice: StartChoice.Cancel });
     expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
     expect(h.cards()).toEqual([]);
-    // The failed run stays as history.
-    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toContain(earlier.id);
+    // The failed run stays as history, and no other run was made.
+    expect(listWorkstreams(h.store.db, {}).map((w) => w.id)).toEqual([earlier.id]);
   });
 
   it('titles a repeated start after its first task, and keeps the title within 200 characters', () => {
