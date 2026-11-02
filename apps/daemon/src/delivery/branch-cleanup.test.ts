@@ -254,6 +254,8 @@ describe('an abandoned task whose branch holds commits', () => {
     const card = h.only(cardsAbout(batch.branch));
     expect(card.title).toBe(`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`);
     expect(card.body).toContain('no commits');
+    // 10db removed the worktree (the check above), so the card says it went with the branch.
+    expect(card.body).toContain("deleted it along with the batch's worktree");
     expect(card.options).toEqual([]);
   });
 
