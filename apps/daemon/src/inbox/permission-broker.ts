@@ -175,6 +175,20 @@ function summarize(req: ToolRequest): string {
   return JSON.stringify(req.input).slice(0, 2000);
 }
 
+/**
+ * The file an edit call writes, for its card's detail: the watcher reads it to tell that the builder allowed
+ * the write and raises no stray-write card for it. A sandboxed lane's is the real path the judge resolved.
+ */
+function editedPath(req: ToolRequest, ask: Ask | null): { path?: string } {
+  if (!EDIT_FAMILY.has(req.toolName)) return {};
+  const [real, ...more] = ask?.realPaths ?? [];
+  const path =
+    real !== undefined && more.length === 0
+      ? real
+      : (stringField(req.input, 'file_path') ?? stringField(req.input, 'notebook_path'));
+  return path === null ? {} : { path };
+}
+
 /** Decides every canUseTool call: stored rules first, then a card for the builder. Never an LLM. */
 export function createPermissionBroker(
   deps: {
@@ -256,7 +270,7 @@ export function createPermissionBroker(
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
-      detail: { toolName: req.toolName, summary },
+      detail: { toolName: req.toolName, summary, ...editedPath(req, ask) },
       signal: ctx.signal,
     });
     const result = await wait(item, answer);
