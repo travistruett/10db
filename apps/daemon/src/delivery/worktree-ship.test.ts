@@ -612,7 +612,6 @@ describe('Abandon of a worktree batch', () => {
     expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
     expect(h.git$('branch', '--list', batch.branch ?? '')).toContain(batch.branch ?? '');
     expect(h.cards().map((c) => c.title)).toEqual([
-      'Batch "Alpha" abandoned',
       `Delete ${batch.branch ?? ''}? It holds 1 commit`,
     ]);
   });
