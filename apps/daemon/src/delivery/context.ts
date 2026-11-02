@@ -18,6 +18,8 @@ export interface DeliveryLimits {
    * longer than a fetch of one branch.
    */
   readonly pushTimeoutMs: number;
+  /** How long the shipper waits before pushing again after GitHub's server failed the push. */
+  readonly pushRetryWaitMs: number;
   /** The shipping gate; the daemon passes the runner's gate timeout. */
   readonly gateTimeoutMs: number;
 }
@@ -25,6 +27,7 @@ export interface DeliveryLimits {
 export const DEFAULT_DELIVERY_LIMITS: DeliveryLimits = {
   networkTimeoutMs: 2 * 60_000,
   pushTimeoutMs: 30 * 60_000,
+  pushRetryWaitMs: 5_000,
   gateTimeoutMs: 30 * 60_000,
 };
 

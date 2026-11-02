@@ -116,6 +116,7 @@ describe('the cards of a batch that failed to ship', () => {
     'gate failed twice, unrelated': shipCards.gateFailedUnrelated(batch, null, []),
     'gate timed out': shipCards.gateTimedOut(batch, 60_000, '/data/logs/gate/b.log'),
     'push rejected': shipCards.pushRejected(batch, 'rejected: non-fast-forward'),
+    'push server error': shipCards.pushServerError(batch, 'fatal error in commit_refs_rules', 2),
     'push timed out': shipCards.pushTimedOut(batch, 60_000),
     network: shipCards.network(batch, 'gh pr create', new Error('connection reset')),
     'gh not installed': shipCards.network(batch, 'gh pr create', new GhError('not_installed', 'x')),
