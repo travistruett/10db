@@ -35,7 +35,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { Clock } from '../clock';
-import { GitNetworkError, GitNetworkFailure } from '../git';
+import { comparablePath, GitNetworkError, GitNetworkFailure, samePath } from '../git';
 import { gateNote as overloadNote, type LoadGuard } from '../load';
 import {
   MergeBlocked,
@@ -98,6 +98,13 @@ const CATCH_UP_RETRY_MS = 30 * 60_000;
 
 /** How long a merge GitHub refused waits before 10db asks again while the pull request stays clean. */
 const MERGE_RETRY_MS = 10 * 60_000;
+
+/** Batch states whose work can't run again, so a worktree of theirs stays until someone removes it. */
+const FINISHED_BATCH: readonly BatchState[] = [
+  BatchState.Shipped,
+  BatchState.Closed,
+  BatchState.Abandoned,
+];
 
 /** True when GitHub says the open pull request conflicts with its base. */
 const conflicting = (status: PullRequestStatus): boolean =>
@@ -988,9 +995,22 @@ export function createShipper(deps: ShipperDeps): Shipper {
     };
     let made = false;
     try {
-      // A live worktree, such as a CI fix's, holds the branch: asked again next round.
-      if ((await deps.git.branchInUse(main, branch)) !== null) {
-        lastCatchUp.delete(batchId);
+      const holder = await deps.git.branchInUse(main, branch);
+      // The batch's own worktree, kept after it shipped for a file 10db didn't seed: merged there, and kept.
+      const kept =
+        holder !== null &&
+        batch.worktreePath !== null &&
+        samePath(comparablePath(holder), comparablePath(batch.worktreePath));
+      if (holder !== null && !kept) {
+        // The worktree of a batch whose work still runs, such as a CI fix's, goes when it ends: asked again next round.
+        if (heldByLiveBatch(batch, holder)) {
+          lastCatchUp.delete(batchId);
+          return;
+        }
+        stop({
+          kind: 'other',
+          why: `${branch} is checked out at ${holder}, so 10db can't merge ${batch.baseBranch} into it. Close that checkout, or update the pull request on GitHub.`,
+        });
         return;
       }
       // The branch as GitHub has it: a fix, or Update branch, may have moved it past the local one.
@@ -1008,9 +1028,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
       } else if (tip !== head) {
         if (!(await deps.git.hasCommit(main, head)))
           await deps.git.fetchCommit(main, head, networkCall(deps, signal));
-        if (tip === null || (await deps.git.isAncestor(main, tip, head)))
-          await deps.git.fastForwardBranch(main, branch, head);
-        else if (await deps.git.isAncestor(main, head, tip))
+        if (tip === null || (await deps.git.isAncestor(main, tip, head))) {
+          // A checked-out branch can't be moved under its files: the kept worktree takes it as a merge.
+          if (kept && batch.worktreePath !== null)
+            await deps.git.mergeIntoBranch({
+              repo: batch.worktreePath,
+              branch,
+              from: head,
+              message: `Merge the pull request's branch ${branch} from GitHub`,
+            });
+          else await deps.git.fastForwardBranch(main, branch, head);
+        } else if (await deps.git.isAncestor(main, head, tip))
           // An earlier catch-up merged and its check failed, so nothing was pushed.
           unpushed = true;
         else {
@@ -1021,9 +1049,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           return;
         }
       }
-      const path = worktreePathFor(madeWorktreeRoot(deps.worktreeRoot), project, branch);
-      deps.state.write((w) => patchBatch(w, batchId, { worktreePath: path }));
-      made = true;
+      let path = batch.worktreePath ?? '';
+      if (!kept) {
+        path = worktreePathFor(madeWorktreeRoot(deps.worktreeRoot), project, branch);
+        deps.state.write((w) => patchBatch(w, batchId, { worktreePath: path }));
+        made = true;
+      }
       // Its own card says why when it refuses.
       if ((await ensureWorktreeWhole(deps, getBatch(db, batchId), signal)) === 'refused') return;
       if (stopped()) return;
@@ -1091,6 +1122,18 @@ export function createShipper(deps: ShipperDeps): Shipper {
     } finally {
       if (made) await retire(batchId);
     }
+  }
+
+  /** True when `holder` is the worktree of another batch of the project whose work may still run. */
+  function heldByLiveBatch(batch: BatchDto, holder: string): boolean {
+    const where = comparablePath(holder);
+    return listBatches(db, { projectId: batch.projectId }).some(
+      (other) =>
+        other.id !== batch.id &&
+        other.worktreePath !== null &&
+        !FINISHED_BATCH.includes(other.state) &&
+        samePath(comparablePath(other.worktreePath), where),
+    );
   }
 
   function catchUp(batchId: BatchId): void {

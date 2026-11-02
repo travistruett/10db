@@ -1,4 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
 import { getBatch, listWorkstreams, patchProject } from '@10db/db';
@@ -45,11 +46,20 @@ async function commitIn(batch: BatchDto, path: string, content = `${path}\n`): P
 }
 
 /** Ships one task that wrote `path`; resolves with the SHIPPED batch. */
-async function shipped(path = 'src/index.ts', content = BOTH.mine): Promise<BatchDto> {
+async function shipped(
+  path = 'src/index.ts',
+  content = BOTH.mine,
+  opts: { readonly keepWorktree?: boolean } = {},
+): Promise<BatchDto> {
   const started = h.starter.startTask(h.addTask('Alpha').id);
   await h.jobs.idle();
   const batch = getBatch(h.store.db, started.id);
   await commitIn(batch, path, content);
+  if (opts.keepWorktree) {
+    // A hand-made, git-ignored .env 10db didn't seed: the worktree stays after the ship.
+    writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
+    writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
+  }
   const ws: WorkstreamDto = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
   h.settle(ws.id, 'DONE');
   h.shipper.checkBatch(batch.id);
@@ -197,6 +207,50 @@ describe('a shipped pull request that conflicts with its base', () => {
     await h.jobs.idle();
 
     expect(h.gh.merged).toEqual([url]);
+  });
+
+  it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const kept = batch.worktreePath ?? '';
+    expect(kept).not.toBe('');
+    const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const before = onOrigin(batch.branch);
+    conflicts(batch);
+
+    const now = await catchUp(batch);
+
+    const tip = onOrigin(batch.branch);
+    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
+    expect(now.notices.map((n) => n.key)).toEqual(['pull-request-update']);
+    expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
+    // The kept worktree is still there and still named, with the builder's file in it.
+    expect(now.worktreePath).toBe(kept);
+    expect(existsSync(join(kept, '.env'))).toBe(true);
+    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(tip);
+  });
+
+  it('raises one card when a checkout 10db did not make holds the branch', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const before = onOrigin(batch.branch);
+    conflicts(batch);
+    const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
+    try {
+      h.git$('worktree', 'add', '-q', join(byHand, 'wt'), batch.branch ?? '');
+
+      const now = await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      const card = h.only(h.cards());
+      expect(card.title).toContain('conflicts with main');
+      expect(card.body).toContain(`${batch.branch ?? ''} is checked out at`);
+      expect(now.notices).toEqual([]);
+      // Not asked again for the same head.
+      await catchUp(now);
+      expect(h.cards()).toHaveLength(1);
+    } finally {
+      rmSync(byHand, { recursive: true, force: true });
+    }
   });
 
   it('does nothing once GitHub no longer says it conflicts', async () => {
