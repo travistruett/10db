@@ -49,10 +49,15 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
 
 /**
  * `text` with whitespace, line breaks and every other control character (an escape sequence, a NUL)
- * collapsed to single spaces and cut to one short line.
+ * collapsed to single spaces and cut to one short line. Format characters (a bidi override or
+ * isolate, a zero-width space or joiner, a BOM) are dropped: they draw nothing, but can reorder or
+ * hide the text around them where the reason is shown.
  */
 function oneLine(text: string): string {
-  const line = text.replace(/[\s\p{Cc}]+/gu, ' ').trim();
+  const line = text
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/[\s\p{Cc}]+/gu, ' ')
+    .trim();
   return line.length <= MAX_REASON ? line : `${line.slice(0, MAX_REASON - 1).trimEnd()}…`;
 }
 
