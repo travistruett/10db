@@ -24,7 +24,7 @@ import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
 import { recordInstall } from './installed-lockfile';
-import { branchBehindBase, missingLandingBranch } from './landing';
+import { landingWarnings, missingLandingBranch } from './landing';
 import { seedNotices } from './notices';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
@@ -119,11 +119,12 @@ export async function cutWorktree(
       if (!stopped()) await refuse(startCards.fetchFailed(batch.baseBranch, error));
       return;
     }
-    // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base.
-    const behind = await branchBehindBase(ctx, project, batch, signal);
-    if (behind && !stopped()) {
+    // Not a refusal: a notice on the batch's tasks names a landing branch that is behind the base
+    // or that nothing else uses.
+    for (const notice of await landingWarnings(ctx, project, batch, plans.keys(), signal)) {
+      if (stopped()) break;
       try {
-        showNotice(ctx.state, batchId, behind);
+        showNotice(ctx.state, batchId, notice);
       } catch (error) {
         ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
       }
