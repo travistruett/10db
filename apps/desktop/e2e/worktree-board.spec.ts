@@ -5,6 +5,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
+import { expectAccessible } from './expect-accessible';
 import { DESKTOP_DIR, E2E_DATA, E2E_DIR, E2E_TOKEN } from './paths';
 
 // Runs after loop.spec.ts (files run in name order with one worker); it adds its own project, on its
@@ -23,6 +24,18 @@ const OPEN_BATCHES = [
   { title: 'Document the greeting', state: 'QUEUED' },
 ] as const;
 const FINISHED_BATCH = 'Fix the typo';
+
+/** One goal whose task has not started, so the project holds a goal beside the running goal-less tasks. */
+const GOAL_TITLE = 'Greet properly';
+const GOAL_BRIEF = `---
+title: ${GOAL_TITLE}
+objective: Every greeting reads well.
+tasks:
+  - key: polish-greeting
+    title: Polish the greeting
+    areas: [docs]
+---
+`;
 
 const GOALS_REPO = join(E2E_DIR, 'goals-repo');
 
@@ -72,6 +85,11 @@ async function seedProject(request: Page['request']): Promise<string> {
   });
   expect(project.ok()).toBe(true);
   const projectId = Created.parse(await project.json()).id;
+  const adopted = await request.post(`${daemonUrl}/projects/${projectId}/goals/adopt`, {
+    headers: auth,
+    data: { text: GOAL_BRIEF },
+  });
+  expect(adopted.status()).toBe(201);
   const open = [];
   for (const batch of OPEN_BATCHES) {
     const task = await request.post(`${daemonUrl}/projects/${projectId}/tasks`, {
@@ -141,8 +159,14 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
   expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
 
-  // One task per batch: no strip above the columns, and the batch history is Factory's, not the Board's.
-  await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+  // One task per batch: no batch strip, so the only strip above the columns is the seeded goal's
+  // (it has an open task), and the batch history is Factory's, not the Board's.
+  const above = page.getByTestId('board-above-columns');
+  await expect(above.getByTestId('goal-strip')).toHaveCount(1);
+  await expect(above.getByRole('button', { name: GOAL_TITLE })).toBeVisible();
+  for (const { title } of OPEN_BATCHES) {
+    await expect(above.getByText(title)).toHaveCount(0);
+  }
   await expect(page.getByRole('button', { name: /^Batches \(\d+\)$/ })).toHaveCount(0);
   for (const { title } of OPEN_BATCHES) {
     await expect(page.getByRole('listitem', { name: title })).toBeAttached();
@@ -206,7 +230,7 @@ test.describe('the Board with several open batches', () => {
       await expectColumnsUsable(page);
       await expect(columnHeader(page)).toBeInViewport();
       if (size.roomy) {
-        // Nothing above the Board: it fills the window and the page does not scroll.
+        // Only the one goal strip above the columns: the Board fills the window and the page does not scroll.
         expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight - window.innerHeight,
@@ -244,6 +268,61 @@ test.describe('the Board with several open batches', () => {
       await expectColumnsBottomReachable(page);
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-board-${String(size.width)}.png`) });
+      }
+    });
+
+    test(`lists the goal and the running tasks in Factory at ${label}, accessibly in dark and light`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(size);
+      await claudeIsInstalled(page);
+      await page.addInitScript((id: string) => {
+        window.localStorage.setItem('tendb.project', JSON.stringify(id));
+      }, projectId);
+      await page.goto('/factory');
+      await expect(page.getByRole('heading', { name: 'Factory', level: 2 })).toBeVisible();
+
+      // Every row starts collapsed. The queued task is not running: only two of the three count.
+      const goal = page.getByRole('button', { name: new RegExp(`^${GOAL_TITLE}`) });
+      const ungrouped = page.getByRole('button', { name: /^Ungrouped/ });
+      await expect(goal).toHaveAttribute('aria-expanded', 'false');
+      await expect(ungrouped).toHaveAttribute('aria-expanded', 'false');
+      await expect(goal).toContainText('Not started');
+      await expect(ungrouped).toContainText('2 running');
+      await expect(ungrouped).not.toContainText('3 running');
+
+      for (const scheme of ['dark', 'light'] as const) {
+        if (scheme === 'light') {
+          await page.getByRole('button', { name: 'Switch to light mode' }).click();
+          await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', 'light');
+        }
+        await expectAccessible(page, `factory, collapsed, ${scheme}`);
+
+        await goal.click();
+        const goalRegion = page.getByRole('region', { name: GOAL_TITLE });
+        await expect(goalRegion.getByRole('heading', { name: 'Sessions' })).toBeVisible();
+        await expect(goalRegion.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
+        // The window's rows have loaded once the Δ row labels are there.
+        await expect(goalRegion.getByText(/^Deviations/)).toBeVisible();
+        await expectAccessible(page, `factory, goal open, ${scheme}`);
+
+        // One at a time: opening Ungrouped closes the goal, and the queued task is not among its sessions.
+        await ungrouped.click();
+        await expect(goal).toHaveAttribute('aria-expanded', 'false');
+        const sessions = page.getByRole('region', { name: 'Ungrouped' }).getByRole('table');
+        await expect(
+          sessions.getByRole('row', { name: new RegExp(OPEN_BATCHES[0].title) }),
+        ).toBeVisible();
+        await expect(sessions.getByText(OPEN_BATCHES[2].title)).toHaveCount(0);
+        await expect(sessions.getByText('Queued')).toHaveCount(0);
+        await expectAccessible(page, `factory, ungrouped open, ${scheme}`);
+
+        // Escape closes the open row.
+        await page.keyboard.press('Escape');
+        await expect(ungrouped).toHaveAttribute('aria-expanded', 'false');
+      }
+      if (SHOTS) {
+        await page.screenshot({ path: join(SHOTS, `e2e-factory-${String(size.width)}.png`) });
       }
     });
   }
