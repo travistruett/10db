@@ -61,6 +61,7 @@ import { ExternalLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
+import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
 import {
   canCloseRun,
@@ -97,6 +98,8 @@ export interface TaskDrawerProps {
   readonly gateCommand?: string | null;
   /** Starts the task afresh: offered when a failed run shipped anyway and its pull request closed. */
   readonly onStart?: () => void;
+  /** Cancels the task's run once the builder confirms; the board holds the confirm. */
+  readonly onCancelRun?: (workstream: WorkstreamDto) => void;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number;
   /**
@@ -124,6 +127,7 @@ export function TaskDrawer({
   placementEditable = false,
   gateCommand = null,
   onStart,
+  onCancelRun,
   place,
   pullRequestBase,
   areaNames,
@@ -244,6 +248,7 @@ export function TaskDrawer({
             batch={batch}
             place={place}
             onClosed={onClose}
+            {...(onCancelRun ? { onCancelRun } : {})}
           />
         ) : null}
         <TaskNotices notices={taskNotices(workstream, batch)} />
@@ -497,7 +502,9 @@ function WorkstreamLine({
   batch,
   place,
   onClosed,
+  onCancelRun,
 }: {
+  readonly onCancelRun?: (workstream: WorkstreamDto) => void;
   readonly task: TaskDto;
   readonly workstream: WorkstreamDto;
   /** Hold for a started task that has not run, or why it can't be held; null when there is nothing to hold. */
@@ -622,6 +629,19 @@ function WorkstreamLine({
               }}
             >
               Start over
+            </Button>
+          ) : null}
+          {onCancelRun && canCancelRun(task, workstream) ? (
+            <Button
+              size="xs"
+              variant="default"
+              color="red"
+              disabled={busy}
+              onClick={() => {
+                onCancelRun(workstream);
+              }}
+            >
+              Cancel Run
             </Button>
           ) : null}
           {closable ? (

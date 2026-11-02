@@ -1,1 +1,0 @@
-ALTER TABLE `workstreams` ADD `workspace_mode` text;

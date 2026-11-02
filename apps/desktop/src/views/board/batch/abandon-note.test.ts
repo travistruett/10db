@@ -54,8 +54,8 @@ describe('abandonNote', () => {
     ],
   ])('is blocked while a task is %s, because the daemon refuses', (_name, live) => {
     expect(abandonNote(batch, [live, member('Beta', 'QUEUED')])).toEqual({
-      refusal: 'Alpha is running: cancel it in Factory first.',
-      line: 'Alpha is running: cancel it in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+      refusal: 'Alpha is running: cancel it first.',
+      line: 'Alpha is running: cancel it first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
     });
   });
 
@@ -65,9 +65,9 @@ describe('abandonNote', () => {
 
   it('names every running task', () => {
     const note = abandonNote(batch, [member('Alpha', 'RUNNING'), member('Beta', 'VERIFYING')]);
-    expect(note.refusal).toBe('Alpha and Beta are running: cancel them in Factory first.');
+    expect(note.refusal).toBe('Alpha and Beta are running: cancel them first.');
     expect(note.line).toBe(
-      'Alpha and Beta are running: cancel them in Factory first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+      'Alpha and Beta are running: cancel them first. Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
     );
   });
 });

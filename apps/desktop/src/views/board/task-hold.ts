@@ -27,11 +27,11 @@ export function holdOption(
   if (!workstream || task.status !== TaskStatus.Open) return null;
   if (isTerminal(workstream.state) || isHeld(workstream)) return null;
   if (workstream.state !== WorkstreamState.Queued)
-    return { kind: 'refused', reason: `${task.title} is running: cancel it in Factory first.` };
+    return { kind: 'refused', reason: `${task.title} is running: cancel it first.` };
   if (workstream.sessionCount > 0 || workstream.attempt > 0 || workstream.recoveryAttempts > 0)
     return {
       kind: 'refused',
-      reason: `${task.title} has already run: cancel it in Factory first.`,
+      reason: `${task.title} has already run: cancel it first.`,
     };
   return { kind: 'hold' };
 }

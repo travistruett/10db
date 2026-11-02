@@ -901,6 +901,8 @@ export const goalViews = sqliteTable(
       .notNull()
       .references(() => people.id),
     openedAt: text('opened_at').notNull(),
+    /** Where the current visit's Δ window starts: the mark before the visit began; null for a first visit. */
+    visitSince: text('visit_since'),
   },
   (t) => [primaryKey({ columns: [t.goalId, t.personId] })],
 );

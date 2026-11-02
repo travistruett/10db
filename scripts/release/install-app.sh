@@ -3,7 +3,8 @@
 #   install-app.sh [ref]    ref is a branch or tag, default main (`make install-app REF=<ref>`)
 # It takes the unsigned-dmg artifact of the newest successful release-dry-run run for the ref's
 # head commit, or waits for a run of that commit already under way, or starts one and waits for
-# it. Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
+# it. release-dry-run runs on every push to main as well as by hand, so main's build is usually
+# ready already; starting one is the fallback (another ref, or a build that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
 # 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
 # quarantine and registers it with Launch Services. Only then does it delete older zips and all
 # but the newest 5 database backups. It refuses while 10db runs and never quits it.
