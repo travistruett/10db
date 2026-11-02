@@ -413,6 +413,62 @@ describe('install-app.sh', () => {
     expect(box.marker(app())).toBe('new build');
   });
 
+  describe('when the run it waits on ends cancelled', () => {
+    // release-dry-run's concurrency group cancels a run still waiting when a newer push arrives.
+    const waiting = {
+      STUB_SUCCESS_RUN: '',
+      STUB_ACTIVE_RUN: '77',
+      STUB_CANCELLED_RUNS: '77',
+    };
+
+    it('moves on to the newer run that replaced it', () => {
+      const result = install([], { ...waiting, STUB_ACTIVE_RUN_AFTER_CANCEL: '78' });
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('Run 77 was cancelled');
+      expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+      expect(box.marker(app())).toBe('new build');
+    });
+
+    it('takes a build that finished meanwhile instead of waiting again', () => {
+      const result = install([], {
+        ...waiting,
+        STUB_COMMITS: [HEAD_SHA, ...OLDER].join(' '),
+        STUB_RUNS_AFTER_CANCEL: `50@${HEAD_SHA}`,
+      });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 50 '))).toBe(true);
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+    });
+
+    it('starts a build when nothing replaced it', () => {
+      const result = install([], waiting);
+      expect(result.status).toBe(0);
+      expect(gh()).toContain('gh workflow run release-dry-run.yml --ref main');
+      expect(gh().some((call) => call.startsWith('gh run download 101 '))).toBe(true);
+    });
+
+    it('moves on from a dispatched run that was replaced too', () => {
+      const result = install([], {
+        STUB_SUCCESS_RUN: '',
+        STUB_CANCELLED_RUNS: '101',
+        STUB_ACTIVE_RUN_AFTER_CANCEL: '78',
+      });
+      expect(result.status).toBe(0);
+      expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
+    });
+
+    it('gives up after three cancelled runs in a row, naming the last', () => {
+      const result = install([], {
+        STUB_SUCCESS_RUN: '',
+        STUB_CANCELLED_RUNS: '101 102 103 104',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('ended in cancelled');
+      expectUntouched();
+    });
+  });
+
   it('keeps the old app as one zip outside Applications, tested before the app is removed', () => {
     const result = install();
     expect(result.status).toBe(0);
