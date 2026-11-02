@@ -5,6 +5,7 @@ import {
   TaskStatus,
   UNFINISHED_BATCH_STATES,
   type BatchDto,
+  type BatchId,
   type LandingTarget,
   type Notice,
   type ProjectDto,
@@ -67,13 +68,16 @@ export async function branchBehindBase(
  * against a retired branch is not started unwarned even when the branch is level with the base;
  * null when the branch is the project's base, or the branch it lands new tasks in, or when an open
  * task (not one of `own`, the tasks this batch starts) or an unfinished batch other than this one
- * lands there. A done or removed task and a shipped batch are no use.
+ * lands there. A done or removed task and a shipped batch are no use. `sameStart` is everything the
+ * one start request made, which is no use to a batch of it either: the tasks and batches of a start
+ * that makes several batches (a copy per dependency group) in one unused branch.
  */
 export function branchUnused(
   ctx: DeliveryContext,
   project: Pick<ProjectDto, 'id' | 'baseBranch' | 'landing' | 'landingBranch'>,
   batch: Pick<BatchDto, 'id' | 'baseBranch'>,
   own: Iterable<TaskId>,
+  sameStart?: SameStart,
 ): Notice | null {
   const branch = batch.baseBranch;
   if (branch === project.baseBranch) return null;
@@ -83,15 +87,25 @@ export function branchUnused(
     (t) =>
       t.status === TaskStatus.Open &&
       !mine.has(t.id) &&
+      !sameStart?.tasks.has(t.id) &&
       taskTarget(project, t).baseBranch === branch,
   );
   if (task !== undefined) return null;
   const batchUsing = listBatches(ctx.state.db, {
     projectId: project.id,
     states: UNFINISHED_BATCH_STATES,
-  }).find((b) => b.id !== batch.id && b.baseBranch === branch);
+  }).find((b) => b.id !== batch.id && !sameStart?.batches.has(b.id) && b.baseBranch === branch);
   if (batchUsing !== undefined) return null;
   return landingNotices.unused(branch, project.baseBranch);
+}
+
+/**
+ * The tasks and batches one start request makes. The batch ids fill in as the request writes its
+ * batches, which is before any of its cuts run.
+ */
+export interface SameStart {
+  readonly tasks: ReadonlySet<TaskId>;
+  readonly batches: Set<BatchId>;
 }
 
 /** Every notice a batch's landing branch earns at its start: behind the base, and used by nothing else. */
@@ -101,9 +115,10 @@ export async function landingWarnings(
   batch: Pick<BatchDto, 'id' | 'baseBranch'>,
   own: Iterable<TaskId>,
   signal: AbortSignal,
+  sameStart?: SameStart,
 ): Promise<Notice[]> {
   const behind = await branchBehindBase(ctx, project, batch, signal);
-  return [behind, branchUnused(ctx, project, batch, own)].filter((n) => n !== null);
+  return [behind, branchUnused(ctx, project, batch, own, sameStart)].filter((n) => n !== null);
 }
 
 /** The batch's landing as a task would state it: where it is built from and how it merges. */
