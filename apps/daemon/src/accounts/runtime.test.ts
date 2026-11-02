@@ -204,6 +204,42 @@ describe('the monthly cap', () => {
     expect(openCards()[0]?.body).toMatch(/\$7\.00 of its \$5\.00 cap.*\$2\.00 over/);
   });
 
+  it('keeps the raise on the cap card in step with the spend as sessions end', () => {
+    seedSpend(store, project, 5);
+    runtime.blocked(row(), project.id);
+    expect(openCards()[0]?.options.map((o) => o.label)).toEqual(['Raise cap to $20']);
+    seedSpend(store, project, 2);
+    runtime.sessionEnded(row(), project.id);
+    const card = openCards()[0];
+    expect(card?.options.map((o) => o.label)).toEqual(['Raise cap to $20']);
+    expect(card?.body).toContain('Raise cap to $20');
+  });
+
+  it('raises the cap and resumes the account when the builder answers Raise cap', () => {
+    seedSpend(store, project, 5);
+    runtime.blocked(row(), project.id);
+    const card = openCards()[0];
+    if (!card) throw new Error('no cap card');
+    const raised: number[] = [];
+    createAccountCardAnswers({
+      resume: () => undefined,
+      confirm: () => undefined,
+      move: () => undefined,
+      stay: () => undefined,
+      recheck: () => undefined,
+      raiseCap: (id, toUsd, answering) => {
+        raised.push(toUsd);
+        state.write((ctx) => patchAccount(ctx, id, { monthlyCapUsd: toUsd }));
+        runtime.saved(id, answering);
+      },
+    })(card, { choice: 'Raise cap to $20' });
+    inbox.answer(card.id, { choice: 'Raise cap to $20' });
+    expect(raised).toEqual([20]);
+    expect(getAccountRow(state.db, key.id).monthlyCapUsd).toBe(20);
+    expect(runtime.isPaused(key.id)).toBe(false);
+    expect(openCards()).toEqual([]);
+  });
+
   it('resumes when the cap is raised', () => {
     seedSpend(store, project, 5);
     runtime.blocked(row(), project.id);
@@ -362,6 +398,8 @@ describe('refusals and usage limits', () => {
       confirm: () => undefined,
       move: () => undefined,
       stay: () => undefined,
+      recheck: () => undefined,
+      raiseCap: () => undefined,
     });
     const item = openCards()[0];
     if (!item) throw new Error('the refusal raised no card');
