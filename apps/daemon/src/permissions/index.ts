@@ -12,6 +12,13 @@ export {
   removeNetworkHost,
   unallowedFoundHosts,
 } from './network-hosts';
+export {
+  ALLOWED_WRITES_KEY,
+  allowedWriteFor,
+  allowedWriteHash,
+  allowedWritesIn,
+  EXACT_WRITE_KEY,
+} from './expected-write';
 export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
 export {
   allowedToolsFor,

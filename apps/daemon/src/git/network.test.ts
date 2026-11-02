@@ -36,6 +36,26 @@ describe('failureKind', () => {
     [
       'a protected-branch hook decline',
       ' ! [remote rejected] a -> a (protected branch hook declined)\nerror: failed to push some refs',
+      GitNetworkFailure.Declined,
+    ],
+    [
+      'a pre-receive hook decline',
+      'remote: error: pre-receive hook declined\n ! [remote rejected] a -> a (pre-receive hook declined)\nerror: failed to push some refs',
+      GitNetworkFailure.Declined,
+    ],
+    [
+      'GH013 repository rule violations',
+      'remote: error: GH013: Repository rule violations found for refs/heads/a.\nremote: - Changes must be made through a pull request.\n ! [remote rejected] a -> a (push declined due to repository rule violations)\nerror: failed to push some refs',
+      GitNetworkFailure.Declined,
+    ],
+    [
+      'a rejection with no reason git gave',
+      'error: failed to push some refs to github.com',
+      GitNetworkFailure.Failed,
+    ],
+    [
+      'the hint git prints with a non-fast-forward',
+      'error: failed to push some refs\nhint: Updates were rejected because the tip of your current branch is behind',
       GitNetworkFailure.Rejected,
     ],
     [

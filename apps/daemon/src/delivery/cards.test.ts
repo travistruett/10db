@@ -117,6 +117,10 @@ describe('the cards of a batch that failed to ship', () => {
     'gate timed out': shipCards.gateTimedOut(batch, 60_000, '/data/logs/gate/b.log'),
     'push rejected': shipCards.pushRejected(batch, 'rejected: non-fast-forward'),
     'push server error': shipCards.pushServerError(batch, 'fatal error in commit_refs_rules', 2),
+    'push declined': shipCards.pushDeclined(
+      batch,
+      'push declined due to repository rule violations',
+    ),
     'push timed out': shipCards.pushTimedOut(batch, 60_000),
     network: shipCards.network(batch, 'gh pr create', new Error('connection reset')),
     'gh not installed': shipCards.network(batch, 'gh pr create', new GhError('not_installed', 'x')),
@@ -126,6 +130,24 @@ describe('the cards of a batch that failed to ship', () => {
   // Each offers Retry and Abandon, which the Inbox card shows as buttons over the ship and abandon routes.
   it.each(Object.entries(failures))('%s offers Retry and Abandon of its batch', (_name, f) => {
     expect(f.card.detail).toMatchObject({ batchId: batch.id, actions: ['retry', 'abandon'] });
+  });
+});
+
+describe('the card of a push the remote declined by rule or hook', () => {
+  const stderr =
+    'remote: error: GH013: Repository rule violations found for refs/heads/10db/x.\n ! [remote rejected] 10db/x -> 10db/x (push declined due to repository rule violations)';
+  const { card, failure } = shipCards.pushDeclined(batch, stderr);
+
+  it("quotes the remote's reason and names a repository rule or hook", () => {
+    expect(failure).toBe('network');
+    expect(card.title).toContain('refused the push');
+    expect(card.body).toContain('push declined due to repository rule violations');
+    expect(card.body).toMatch(/repository rule or hook/);
+  });
+
+  it('never claims missing commits or asks for a reconcile by hand', () => {
+    expect(card.body).not.toContain("has commits this checkout doesn't");
+    expect(card.body).not.toMatch(/reconcile|diverge/i);
   });
 });
 

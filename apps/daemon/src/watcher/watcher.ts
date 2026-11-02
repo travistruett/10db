@@ -50,6 +50,7 @@ import {
   isDeletionStamp,
   relativeIn,
   ruleAllowances,
+  stampMatchesExpected,
   unstampedReason,
   writeStamp,
 } from './allowed-writes';
@@ -479,21 +480,21 @@ export function createWatcher(deps: {
       }
       const excusedKeys = () =>
         lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
-      const unusedCard = () =>
-        cards.find(
+      const unusedCardsNow = () =>
+        cards.filter(
           ({ rel, a }) =>
             rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
         );
       // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
       // is read; any other write is carded as it is.
-      if (excusedKeys().length === 0 && unusedCard() === undefined) continue;
+      if (excusedKeys().length === 0 && unusedCardsNow().length === 0) continue;
       const stamp = await writeStamp(root, path);
       // Why there is no stamp matters only to an unused card; asking reads the file again.
       const reason =
-        stamp === null && unusedCard() !== undefined ? await unstampedReason(root, path) : null;
-      // Stamping yields to other work, which may have used the card or changed the excused writes since.
+        stamp === null && unusedCardsNow().length > 0 ? await unstampedReason(root, path) : null;
+      // Stamping yields to other work, which may have used a card or changed the excused writes since.
       const keys = excusedKeys();
-      const unused = unusedCard();
+      const unusedCards = unusedCardsNow();
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
         continue;
@@ -503,6 +504,18 @@ export function createWatcher(deps: {
         for (const k of keys) excusedWrites.delete(k);
         persistExcusedWrites();
       }
+      // A card that records the file its lane's allowed call makes excuses only that exact file: the watcher
+      // can't tell which lane wrote it, but another lane's write to the same path is not what the builder
+      // approved, and it leaves the card unused for the write that is. A card that asks for that exact write
+      // with none recorded (a NotebookEdit, a file the broker couldn't read) excuses no settled write. A file
+      // with no stamp goes on to the fail-closed handling below, which checks the write once it settles.
+      const unused = unusedCards.find(
+        ({ a }) =>
+          a.expected === undefined ||
+          (stamp === null
+            ? a.expected !== null
+            : a.expected !== null && stampMatchesExpected(stamp, a.expected)),
+      );
       const lane = unused?.a.workstreamId;
       const use = unused?.a.useKey;
       if (lane == null || use == null) continue;

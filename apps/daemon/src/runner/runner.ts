@@ -374,7 +374,7 @@ function needsOneTimeAllowance(choice: string, toolName: string, summary: string
 /** A permission card answered while the workstream was parked, as prompt text plus any one-time allowance. */
 function permissionAnswer(item: InboxItemDto): {
   prompt: { question: string; answer: string; note: string | null };
-  allowOnce: { toolName: string; summary: string } | null;
+  allowOnce: { toolName: string; summary: string; cardId: InboxItemId } | null;
 } | null {
   const toolName = item.detail?.['toolName'];
   const summary = item.detail?.['summary'];
@@ -386,7 +386,7 @@ function permissionAnswer(item: InboxItemDto): {
       note: item.answer.note ?? null,
     },
     allowOnce: needsOneTimeAllowance(item.answer.choice, toolName, summary)
-      ? { toolName, summary }
+      ? { toolName, summary, cardId: item.id }
       : null,
   };
 }
