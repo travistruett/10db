@@ -1824,6 +1824,43 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    describe('after the daemon restarts', () => {
+      const restart = (): void => {
+        watcher.stop();
+        watcher = createWatcher({
+          state,
+          inbox,
+          git: createGit(),
+          logger: silentLogger,
+          clock,
+          watch: fake.watch,
+          batchMs: 500,
+        });
+      };
+
+      it('still excuses at the step end the write the live watcher excused, unchanged', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        restart();
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it('cards at the step end a later write to that file that no card allowed', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restart();
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
     describe('a directory the allowed write created', () => {
       const FILE = '.codex/rules/new.rules';
       const emitBoth = async (): Promise<void> => {

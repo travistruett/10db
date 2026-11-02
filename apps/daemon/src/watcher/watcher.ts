@@ -17,6 +17,7 @@ import {
 import {
   activeClaims,
   copyHazardNames,
+  getAppSetting,
   getBatch,
   getProject,
   getWorkstream,
@@ -25,6 +26,7 @@ import {
   listPermissionRules,
   listProjects,
   listWorkstreams,
+  setAppSetting,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import { checkoutOf } from '../delivery';
@@ -61,6 +63,10 @@ import {
 
 const WATCH_BATCH_MS = 500;
 const BULK_LISTED = 20;
+/** The app setting that holds the writes a permission card excused, so a restart keeps them. */
+const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
+/** The most excused writes kept; the oldest go first. */
+const MAX_EXCUSED_WRITES = 500;
 /** The most files a sensitive directory may hold and still be read as the base's own; more cards it. */
 const MAX_DIR_FILES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
@@ -333,7 +339,36 @@ export function createWatcher(deps: {
   );
   // The write each excused path last showed, by checkout and path: a write seen again unchanged, in a later
   // batch, is the one its card already excused, and a different one is not.
-  const excusedWrites = new Map<string, string>();
+  // Kept in the database too, so a restarted daemon still excuses the write a card allowed before it: the
+  // cards answered before it started count as used, which alone would card that write again at the step end.
+  const excusedWrites = loadExcusedWrites();
+
+  function loadExcusedWrites(): Map<string, string> {
+    const stored = getAppSetting(db, EXCUSED_WRITES_SETTING);
+    const map = new Map<string, string>();
+    if (Array.isArray(stored)) {
+      for (const entry of stored) {
+        if (Array.isArray(entry) && typeof entry[0] === 'string' && typeof entry[1] === 'string') {
+          map.set(entry[0], entry[1]);
+        }
+      }
+    }
+    return map;
+  }
+
+  /** Records that the write to `key` showing `stamp` was excused, keeping the latest few entries. */
+  function excuse(key: string, stamp: string): void {
+    excusedWrites.delete(key);
+    excusedWrites.set(key, stamp);
+    while (excusedWrites.size > MAX_EXCUSED_WRITES) {
+      const oldest = excusedWrites.keys().next();
+      if (oldest.done) break;
+      excusedWrites.delete(oldest.value);
+    }
+    deps.state.write((ctx) => {
+      setAppSetting(ctx, EXCUSED_WRITES_SETTING, [...excusedWrites.entries()]);
+    });
+  }
 
   /**
    * The paths among `paths` that a permission card, or a rule one stored, allowed a lane among `lanes` to
@@ -378,7 +413,7 @@ export function createWatcher(deps: {
       const unused = once.find(({ a }) => a.useKey !== null && !usedCards.has(a.useKey));
       if (unused?.a.useKey == null) continue;
       usedCards.add(unused.a.useKey);
-      excusedWrites.set(key, stamp);
+      excuse(key, stamp);
       allowed.add(path);
     }
     return allowed;
