@@ -361,6 +361,103 @@ describe('git guard decisions', () => {
   });
 });
 
+describe('git guard with a wrapper option before the command', () => {
+  // An option the table doesn't know could take a value, so the guard can't tell which word is the
+  // command: it asks instead of guessing.
+  it.each<[string, string, Outcome]>([
+    ['sudo, unknown short option', 'sudo -Z git status', 'ask'],
+    ['sudo, unknown long option', 'sudo --bogus git status', 'ask'],
+    ['sudo, unknown option in a cluster', 'sudo -nZ git status', 'ask'],
+    ['sudo, unknown option hiding a push', 'sudo -Z V git push', 'ask'],
+    ['xargs, unknown long option', 'echo x | xargs --bogus V git status', 'ask'],
+    ['xargs, unknown short option', 'echo x | xargs -Y V git status', 'ask'],
+    ['env, unknown option', 'env --bogus V git status', 'ask'],
+    ['env, unknown short option', 'env -Y git status', 'ask'],
+    ['timeout, unknown option', 'timeout --bogus 5 git status', 'ask'],
+    ['nice, unknown option', 'nice -Y git status', 'ask'],
+    ['stdbuf, unknown option', 'stdbuf -Y git status', 'ask'],
+    ['exec, unknown option', 'exec -Y git status', 'ask'],
+    ['setsid, unknown option', 'setsid -Y git status', 'ask'],
+    ['time, unknown option', 'time -Y git status', 'ask'],
+    ['nohup, unknown option', 'nohup -Y git status', 'ask'],
+    ['a keyword takes no option', 'if -Y git status; then :; fi', 'ask'],
+    ['unknown option under an absolute wrapper path', '/usr/bin/sudo -Z git status', 'ask'],
+    ['unknown option after a known one', 'sudo -u bob -Z git status', 'ask'],
+    ['unknown option in a nested command', "bash -c 'sudo -Z git status'", 'ask'],
+    ['unknown option in a pipe', 'echo x | sudo -Z git status', 'ask'],
+    ['unknown option, and the verb would be denied', 'sudo -Z git add -A', 'deny'],
+    // Options the table knows keep letting a plain command through.
+    ['sudo -u', 'sudo -u bob git status', 'allow'],
+    ['sudo flag cluster', 'sudo -nE git status', 'allow'],
+    ['sudo --non-interactive', 'sudo --non-interactive git status', 'allow'],
+    ['sudo -H -k', 'sudo -H -k ls', 'allow'],
+    ['sudo --user=VALUE', 'sudo --user=root ls', 'allow'],
+    ['sudo --', 'sudo -- git status', 'allow'],
+    ['xargs -n', 'echo x | xargs -n 1 echo', 'allow'],
+    ['xargs -0 -r', 'echo x | xargs -0 -r echo', 'allow'],
+    ['xargs -I{}', 'echo x | xargs -I{} echo {}', 'allow'],
+    ['xargs -i{} attached, optional value', 'echo x | xargs -i{} echo {}', 'allow'],
+    ['xargs --process-slot-var NAME', 'echo x | xargs --process-slot-var V git status', 'allow'],
+    ['xargs --max-procs VALUE', 'echo x | xargs --max-procs 2 echo', 'allow'],
+    ['xargs --replace=VALUE', 'echo x | xargs --replace={} echo {}', 'allow'],
+    ['xargs --no-run-if-empty', 'echo x | xargs --no-run-if-empty echo', 'allow'],
+    ['xargs BSD -J REPL', 'echo x | xargs -J % git status %', 'allow'],
+    ['xargs BSD -R N', 'echo x | xargs -R 5 -I % git status %', 'allow'],
+    ['xargs BSD -S N', 'echo x | xargs -S 255 -I % git status %', 'allow'],
+    ['timeout with a duration', 'timeout 60 git status', 'allow'],
+    ['timeout --foreground', 'timeout --foreground 5 git status', 'allow'],
+    ['timeout -s', 'timeout -s KILL 60 ls', 'allow'],
+    ['nice -n', 'nice -n 5 git status', 'allow'],
+    ['nice -10, a legacy adjustment', 'nice -10 git status', 'allow'],
+    ['env -i with an assignment', 'env -i FOO=1 git status', 'allow'],
+    ['env -u', 'env -u FOO git status', 'allow'],
+    ['env -S, a split string', "env -S 'ls -l'", 'allow'],
+    ['env --ignore-environment', 'env --ignore-environment git status', 'allow'],
+    ['stdbuf -oL', 'stdbuf -oL git status', 'allow'],
+    ['exec -a', 'exec -a name git status', 'allow'],
+    ['setsid --fork', 'setsid --fork git status', 'allow'],
+    ['command -p', 'command -p git status', 'allow'],
+    ['time -p', 'time -p git status', 'allow'],
+  ])('%s', (_name, command, expected) => {
+    expect(runHook(bash(command, clean)).outcome).toBe(expected);
+  });
+
+  // Each value option of sudo takes the next word, so the command that follows is still seen.
+  it.each([
+    '-C',
+    '-D',
+    '-R',
+    '-T',
+    '-U',
+    '-c',
+    '-g',
+    '-h',
+    '-p',
+    '-r',
+    '-t',
+    '-u',
+    '--login-class',
+    '--close-from',
+    '--chdir',
+    '--chroot',
+    '--command-timeout',
+    '--group',
+    '--host',
+    '--other-user',
+    '--prompt',
+    '--role',
+    '--type',
+    '--user',
+  ])('sudo %s VALUE leaves the command visible', (option) => {
+    expect(runHook(bash(`sudo ${option} V git add -A`, clean)).outcome).toBe('deny');
+    expect(runHook(bash(`sudo ${option} V git status`, clean)).outcome).toBe('allow');
+  });
+
+  it.each(['-c', '-g', '-u'])('sudo %s attached to its value', (option) => {
+    expect(runHook(bash(`sudo ${option}V git add -A`, clean)).outcome).toBe('deny');
+  });
+});
+
 describe("git guard with another session's work already staged", () => {
   it.each<[string, string, Outcome]>([
     ['add then commit would sweep in the staged file', "git add a.ts && git commit -m 'x'", 'deny'],
