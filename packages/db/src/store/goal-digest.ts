@@ -107,6 +107,11 @@ function isRunning(run: Run | undefined): boolean {
   );
 }
 
+/** A run that has started and waits in the queue for a lane. */
+function isQueued(run: Run | undefined): boolean {
+  return run?.workstream.state === WorkstreamState.Queued;
+}
+
 /** A run that failed and did not ship anyway (a failed run whose work shipped is judged by its pull request). */
 function isFailed(run: Run | undefined): boolean {
   return (
@@ -300,7 +305,7 @@ function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
 
 /**
  * A goal's status, progress and rows. Status, first match wins: failed, waiting on you, running,
- * shipping (every task done, a pull request unmerged), not started, done. `since` is the builder's
+ * queued (nothing runs, an open task waits for a lane), shipping (every task done, a pull request unmerged), not started, done. `since` is the builder's
  * previous view of the goal; Δ rows hold what is newer, and null counts everything.
  */
 export function goalDigest(db: DbReader, goalId: GoalId, since: string | null): GoalDigestDto {
@@ -325,6 +330,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   if (open.some((t) => isFailed(facts.latest.get(t.id)))) status = GoalStatus.Failed;
   else if (waitingOn.length > 0) status = GoalStatus.WaitingOnYou;
   else if (open.some((t) => isRunning(facts.latest.get(t.id)))) status = GoalStatus.Running;
+  else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
     const shipped =
       project.delivery !== Delivery.PullRequest ||

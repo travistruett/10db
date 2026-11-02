@@ -69,9 +69,31 @@ describe('sheetMode', () => {
       expected: { kind: 'join', title },
     },
     {
-      name: 'a mix with a busy shared batch, which waits',
+      name: 'a mix with a shipping shared batch, which waits and says how to start the copies',
       state: 'SHIPPING',
       placements: ['worktree', 'shared'],
+      expected: {
+        kind: 'busy',
+        title,
+        reason:
+          'Fix the login is shipping; start once it has shipped, or untick the Your folder tasks to start the separate copies now',
+      },
+    },
+    {
+      name: 'a mix with a cutting shared batch, which waits and says how to start the copies',
+      state: 'CUTTING',
+      placements: ['shared', 'worktree'],
+      expected: {
+        kind: 'busy',
+        title,
+        reason:
+          'Fix the login is still cutting its branch; start when it is open, or untick the Your folder tasks to start the separate copies now',
+      },
+    },
+    {
+      name: 'only shared tasks with a busy shared batch, which has no copies to offer',
+      state: 'SHIPPING',
+      placements: ['shared'],
       expected: {
         kind: 'busy',
         title,
