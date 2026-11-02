@@ -139,6 +139,8 @@ class Scanner {
     this.closedExpansion = false;
     /** Open parentheses of the `$((...))` or `((...))` being read; heredocs can't start there. */
     this.arithParens = 0;
+    /** Whether the arithmetic being read opened with `$((`, an expansion, not a bare `((`. */
+    this.arithExpansion = false;
     /**
      * @type {{
      *   delimiter: string,
@@ -263,12 +265,17 @@ class Scanner {
     if (this.arithParens > 0) this.arithParens += 1;
     else if (this.source.startsWith('((', this.pos)) {
       // `$((` anywhere, or `((` where a command would start, opens an arithmetic expression.
-      if (this.word.endsWith('$') || this.raw === '') this.arithParens = 1;
+      if (this.word.endsWith('$') || this.raw === '') {
+        this.arithParens = 1;
+        this.arithExpansion = this.word.endsWith('$');
+      }
     }
     this.parenDepth += 1;
     // `$(`, `<(`, `>(` and the parentheses of `$((...))` open an expansion; any other `(` opens a
     // subshell or group. The scanner is looking at the raw text before the `(`, so adjacency holds.
-    this.openParens.push(this.arithParens > 0 || /(^|[^\\])[$<>]$/.test(this.raw));
+    // A bare `((` stays a group: bash reads it as nested subshells when its close isn't `))`.
+    const inArithExpansion = this.arithParens > 0 && this.arithExpansion;
+    this.openParens.push(inArithExpansion || /(^|[^\\])[$<>]$/.test(this.raw));
   }
 
   /** @returns {boolean} true when this `)` closes the substitution being read */

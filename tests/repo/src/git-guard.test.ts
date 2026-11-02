@@ -633,6 +633,10 @@ describe('git guard judging a push in the directory the command runs in', () => 
     ['cd in a subshell', '(cd WT); git push'],
     ['cd later in a subshell', '(true; cd WT); git push'],
     ['cd first in a subshell', '(cd WT; true); git push'],
+    // A bare `((` whose close is not `))` is two nested subshells, not arithmetic.
+    ['cd in nested subshells', '((cd WT; true); true); git push'],
+    ['cd in nested subshells, then &&', '((cd WT; true); true) && git push'],
+    ['cd, then nested subshells with a cd', 'cd MAIN && ((cd WT); true) && git push'],
     ['cd on a line of its own in a subshell', '(cd WT\ntrue)\ngit push'],
     ['cd in a subshell after a list', 'true; (cd WT && true); git push'],
     ['commit in a subshell, then push', "(cd WT && git commit -m 'x' -- a.ts) && git push"],
