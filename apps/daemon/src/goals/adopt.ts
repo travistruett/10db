@@ -60,7 +60,17 @@ type BriefText =
   | { readonly ok: false; readonly errors: GoalAdoptIssue[] };
 
 async function briefText(input: GoalAdoptInput): Promise<BriefText> {
-  if (input.text !== undefined) return { ok: true, text: input.text };
+  if (input.text !== undefined) {
+    // The same limit as a file, counted in bytes: a string of N characters is at least N bytes.
+    const { text } = input;
+    if (text.length > MAX_BRIEF_BYTES || Buffer.byteLength(text, 'utf8') > MAX_BRIEF_BYTES) {
+      return {
+        ok: false,
+        errors: [{ path: 'Text', message: 'the text is too large to be a brief' }],
+      };
+    }
+    return { ok: true, text };
+  }
   const path = input.path ?? '';
   const refuse = (message: string): BriefText => ({
     ok: false,
