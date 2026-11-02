@@ -19,6 +19,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   deleteJudgeCallsBefore,
+  getAccountRow,
   getAppSetting,
   listPermissionRules,
   listProjects,
@@ -61,6 +62,7 @@ import {
   createBatchCardAnswers,
   createBranchCardAnswers,
   createCiStopAnswers,
+  createGhCardAnswers,
   createStartCardAnswers,
   createWorktreeCardAnswers,
   createBatchStarter,
@@ -406,6 +408,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerGhCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
@@ -444,6 +447,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
+      answerGhCard?.(item, answer);
       answerStartCard?.(item, answer);
       answerWorktreeCard?.(item, answer);
       answerDeadlockCard(item, answer);
@@ -710,6 +714,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stay: (projectId) => {
       moves.stay(projectId);
     },
+    recheck: (id, projectId, answering, forgetIdentity) => {
+      preparer.retry(getAccountRow(state.db, id), projectId, answering, { forgetIdentity });
+    },
+    raiseCap: (id, toUsd, answering) => {
+      // A cap raised since the card was written is never lowered by it.
+      const raised = Math.max(toUsd, getAccountRow(state.db, id).monthlyCapUsd ?? 0);
+      state.write((ctx) => patchAccount(ctx, id, { monthlyCapUsd: raised }));
+      accounts.saved(id, answering);
+      scheduler?.requestTick();
+    },
   });
   const startGate = createStartGate();
   const preparer = createAccountPreparer({
@@ -871,6 +885,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     afterRound: (signal) => removeMergedBranches(delivery, signal),
   });
   const unsubscribePrWatch = subscribePrWatch(bus, prWatch);
+  answerGhCard = createGhCardAnswers(prWatch);
 
   // Lanes start and stop through workstream events; keep-awake and the watcher follow them.
   const unsubscribeLanes = bus.subscribe((event) => {

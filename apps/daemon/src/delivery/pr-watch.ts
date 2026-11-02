@@ -68,6 +68,12 @@ export interface PrWatch {
   start(): void;
   /** Reads again soon, such as right after a batch shipped. A poke during a round queues one more. */
   poke(): void;
+  /**
+   * The gh card's Check again: pokes, and the next round that finds gh down raises a fresh gh card
+   * if none is open, though every pull request it reads was unknown already. The answered card has
+   * closed by then, and without this nothing would say gh still fails.
+   */
+  recheck(): void;
   /** Stops the timer, aborts the gh call in flight and waits for the round to end. */
   stop(): Promise<void>;
   /** Settles once no round is running. */
@@ -193,6 +199,8 @@ export function createPrWatch(input: {
    * whose read always ends a round (one that always times out) can't keep the others unread.
    */
   let resumeAfter: BatchId | null = null;
+  /** Set by `recheck`; the next round to start takes it, so a round already running leaves it. */
+  let recheckDue = false;
 
   const now = (): string => clock.now().toISOString();
 
@@ -301,12 +309,15 @@ export function createPrWatch(input: {
    * Stores the reads gh gave no answer to with what they say about gh, in one write. gh is down
    * when a failure of gh itself ended the round, or when no read in it answered: then an open gh
    * card says how gh fails now, or one is raised in the project of the first pull request this
-   * round turned unknown. A round gh answered with nothing down withdraws the card.
+   * round turned unknown. A round gh answered with nothing down withdraws the card. `recheck`: the
+   * builder answered the gh card's Check again, so the first pull request gh gave no answer to raises
+   * the card, though it was unknown already.
    */
   function settle(
     unanswered: readonly Unanswered[],
     down: { readonly error: unknown } | null,
     answered: boolean,
+    recheck: boolean,
   ): void {
     if (unanswered.length === 0 && (!answered || ghCardProjects(ctx.state.db).length === 0)) return;
     ctx.state.write((write) => {
@@ -314,7 +325,9 @@ export function createPrWatch(input: {
       const open = ghCardProjects(write.tx);
       if (down !== null) {
         for (const id of open) rewriteIn(write, id, prCards.ghUnavailableText(down.error));
-        const first = unanswered.find(({ batch }) => batch.pr?.state !== PullRequestState.Unknown);
+        const first = recheck
+          ? unanswered[0]
+          : unanswered.find(({ batch }) => batch.pr?.state !== PullRequestState.Unknown);
         if (open.length === 0 && first !== undefined)
           raiseIn(write, first.batch.projectId, prCards.ghUnavailable(first.batch, down.error));
       } else if (answered) {
@@ -364,6 +377,8 @@ export function createPrWatch(input: {
   }
 
   async function readAll(signal: AbortSignal): Promise<void> {
+    const recheck = recheckDue;
+    recheckDue = false;
     const groups = startingAfter(
       groupByPullRequest(listWatchedPullRequests(ctx.state.db)),
       resumeAfter,
@@ -481,7 +496,7 @@ export function createPrWatch(input: {
       }
     }
     resumeAfter = ended?.at ?? null;
-    settle(unanswered, ended ?? (answered ? null : failed), answered);
+    settle(unanswered, ended ?? (answered ? null : failed), answered, recheck);
   }
 
   function arm(): void {
@@ -535,6 +550,11 @@ export function createPrWatch(input: {
     },
     poke() {
       if (started) begin();
+    },
+    recheck() {
+      if (!started || stopped) return;
+      recheckDue = true;
+      begin();
     },
     async stop() {
       stopped = true;

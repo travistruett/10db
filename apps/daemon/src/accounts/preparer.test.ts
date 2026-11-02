@@ -1,10 +1,17 @@
-import { ACCOUNT_CARD_DETAIL, AccountCardChoice, type AccountDto } from '@10db/contracts';
+import {
+  ACCOUNT_CARD_DETAIL,
+  AccountCardChoice,
+  ConflictError,
+  type AccountDto,
+  type InboxItemDto,
+} from '@10db/contracts';
 import {
   createTestStore,
   getAccount,
   getAccountRow,
   listInbox,
   patchAccount,
+  recordAccountSecret,
   seedAccount,
   seedDefaultAccount,
   seedProject,
@@ -94,7 +101,7 @@ describe('the preparer', () => {
       expect(ready).toBe(1);
       const cards = openCards();
       expect(cards.map((c) => c.title)).toEqual(['Claude plan runs as me@example.com']);
-      expect(cards[0]?.options.map((o) => o.label)).toEqual([]);
+      expect(cards[0]?.options.map((o) => o.label)).toEqual(['Record again']);
       expect(cards[0]?.body).toContain(configDir ?? 'claude /login');
       expect(cards[0]?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
         accountId: defaultAccount.id,
@@ -145,6 +152,8 @@ describe('the preparer', () => {
       },
       move: () => undefined,
       stay: () => undefined,
+      recheck: () => undefined,
+      raiseCap: () => undefined,
     });
     if (!card) throw new Error('no confirm card');
     answers(card, { choice: AccountCardChoice.Confirm });
@@ -311,6 +320,113 @@ describe('the preparer', () => {
       expect(openCards()).toEqual([]);
     },
   );
+
+  describe('retry, the answer of the sign-in, credentials, secret and recorded-login cards', () => {
+    /** Answers a card as the inbox does: the answer hook runs, then the inbox records the answer. */
+    function answer(card: InboxItemDto, choice: string): void {
+      createAccountCardAnswers({
+        resume: () => undefined,
+        confirm: () => undefined,
+        move: () => undefined,
+        stay: () => undefined,
+        recheck: (account, projectId, about) => {
+          preparer.retry(getAccountRow(state.db, account), projectId, about);
+        },
+        raiseCap: () => undefined,
+      })(card, { choice });
+      inbox.answer(card.id, { choice });
+    }
+
+    it('probes a signed-out account again at once, not a minute later, and a login records itself', async () => {
+      const { defaultAccount, projectId } = freshDefault();
+      adapter.probeSeen = { ...adapter.probeSeen, email: undefined, subscriptionType: undefined };
+      preparer.prepare(getAccountRow(state.db, defaultAccount.id), projectId);
+      await preparer.idle();
+      const card = openCards()[0];
+      if (!card) throw new Error('no sign-in card');
+      expect(card.options.map((o) => o.label)).toEqual([AccountCardChoice.CheckAgain]);
+
+      adapter.probeSeen = {
+        ...adapter.probeSeen,
+        email: 'me@example.com',
+        subscriptionType: 'Claude Max',
+      };
+      answer(card, AccountCardChoice.CheckAgain);
+      await preparer.idle();
+      expect(adapter.probes).toHaveLength(2);
+      expect(getAccount(state.db, defaultAccount.id).expectedIdentity).toBe('me@example.com');
+      expect(ready).toBe(1);
+      expect(openCards().map((c) => c.title)).toEqual(['Claude plan runs as me@example.com']);
+    });
+
+    it('raises the card again when the account is still signed out', async () => {
+      const { defaultAccount, projectId } = freshDefault();
+      adapter.probeSeen = { ...adapter.probeSeen, email: undefined, subscriptionType: undefined };
+      preparer.prepare(getAccountRow(state.db, defaultAccount.id), projectId);
+      await preparer.idle();
+      const card = openCards()[0];
+      if (!card) throw new Error('no sign-in card');
+      answer(card, AccountCardChoice.CheckAgain);
+      await preparer.idle();
+      expect(adapter.probes).toHaveLength(2);
+      const [again, ...others] = openCards();
+      expect(others).toEqual([]);
+      expect(again?.title).toBe('Sign in the account Claude plan');
+      expect(again?.id).not.toBe(card.id);
+    });
+
+    it('keeps the secret card open and says so while the secret is still missing', () => {
+      seedProject(store);
+      const key = seedAccount(store, { kind: 'anthropic_api_key', label: 'Client key' });
+      const projectId = seedProject(store, { accountId: key.id }).id;
+      preparer.prepare(getAccountRow(state.db, key.id), projectId);
+      const card = openCards()[0];
+      if (!card) throw new Error('no secret card');
+      expect(() => {
+        answer(card, AccountCardChoice.CheckAgain);
+      }).toThrow(ConflictError);
+      expect(openCards().map((c) => c.id)).toEqual([card.id]);
+    });
+
+    it('closes the secret card and asks for a tick once the secret is saved', () => {
+      seedProject(store);
+      const key = seedAccount(store, { kind: 'anthropic_api_key', label: 'Client key' });
+      const projectId = seedProject(store, { accountId: key.id }).id;
+      preparer.prepare(getAccountRow(state.db, key.id), projectId);
+      const card = openCards()[0];
+      if (!card) throw new Error('no secret card');
+      state.write((ctx) => recordAccountSecret(ctx, key.id, 'sha256:0000000000000000'));
+      answer(card, AccountCardChoice.CheckAgain);
+      expect(ready).toBe(1);
+      expect(openCards()).toEqual([]);
+    });
+
+    it('forgets the recorded login and records the one the directory holds now', async () => {
+      const { defaultAccount, projectId } = freshDefault();
+      adapter.probeSeen = { ...adapter.probeSeen, email: 'old@example.com' };
+      preparer.prepare(getAccountRow(state.db, defaultAccount.id), projectId);
+      await preparer.idle();
+      const card = openCards()[0];
+      if (!card) throw new Error('no recorded card');
+      expect(card.options.map((o) => o.label)).toEqual([AccountCardChoice.RecordAgain]);
+
+      adapter.probeSeen = { ...adapter.probeSeen, email: 'new@example.com' };
+      createAccountCardAnswers({
+        resume: () => undefined,
+        confirm: () => undefined,
+        move: () => undefined,
+        stay: () => undefined,
+        recheck: (account, project, about, forgetIdentity) => {
+          preparer.retry(getAccountRow(state.db, account), project, about, { forgetIdentity });
+        },
+        raiseCap: () => undefined,
+      })(card, { choice: AccountCardChoice.RecordAgain });
+      inbox.answer(card.id, { choice: AccountCardChoice.RecordAgain });
+      await preparer.idle();
+      expect(getAccount(state.db, defaultAccount.id).expectedIdentity).toBe('new@example.com');
+      expect(openCards().map((c) => c.title)).toEqual(['Claude plan runs as new@example.com']);
+    });
+  });
 
   it('does nothing for a ready account', async () => {
     // seedProject's default account is confirmed for builder@example.com.
