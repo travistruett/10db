@@ -103,6 +103,70 @@ describe('commit', () => {
     expect(commitCount()).toBe(2);
   });
 
+  describe("Claude Code's bookkeeping", () => {
+    const nested = '.claude/hooks/.claude';
+    const writeNested = () => {
+      mkdirSync(join(repo.path, nested, '.cc-writes'), { recursive: true });
+      write(`${nested}/.cc-writes/x.tmp`, 'tmp');
+      write(`${nested}/scheduled_tasks.lock`, '{}');
+      write('a.txt', 'a');
+    };
+    const tracked = () => rawGit('ls-tree', '-r', '--name-only', 'HEAD').split('\n');
+
+    it.each([
+      ['named by its folder', ['a.txt', nested]],
+      [
+        'named file by file',
+        ['a.txt', `${nested}/.cc-writes/x.tmp`, `${nested}/scheduled_tasks.lock`],
+      ],
+    ])('is never staged, nested in another .claude, %s', async (_name, paths) => {
+      writeNested();
+      const dropped: string[] = [];
+      const logging = createGit({
+        onBookkeepingDropped: (_repo, left) => dropped.push(...left.map((l) => l.rel)),
+      });
+      await logging.commit({
+        repo: repo.path,
+        paths,
+        message: 'Add a',
+        opId: 'op-bookkeeping-1',
+        branch: 'main',
+      });
+      expect(tracked()).toContain('a.txt');
+      expect(tracked().filter((p) => p.startsWith('.claude'))).toEqual([]);
+      expect(dropped.sort()).toEqual([
+        `${nested}/.cc-writes/x.tmp`,
+        `${nested}/scheduled_tasks.lock`,
+      ]);
+    });
+
+    it('commits nothing when only bookkeeping is named', async () => {
+      writeNested();
+      await expect(
+        git.commit({
+          repo: repo.path,
+          paths: [nested],
+          message: 'x',
+          opId: 'op-bookkeeping-2',
+          branch: 'main',
+        }),
+      ).rejects.toThrow(InvalidError);
+    });
+
+    it('still stages a real file under the nested .claude', async () => {
+      writeNested();
+      write(`${nested}/settings.json`, '{}');
+      await git.commit({
+        repo: repo.path,
+        paths: [nested],
+        message: 'Add settings',
+        opId: 'op-bookkeeping-3',
+        branch: 'main',
+      });
+      expect(tracked().filter((p) => p.startsWith('.claude'))).toEqual([`${nested}/settings.json`]);
+    });
+  });
+
   it('does not mistake another operation id for a retry', async () => {
     write('a.txt', 'a');
     const first = await git.commit({
