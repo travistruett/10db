@@ -6,7 +6,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
 } from '@10db/contracts';
-import { cancelTask, getTask } from '@10db/db';
+import { cancelRefusedStartTask, getTask } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
 import { START_REFUSED_DETAIL, StartChoice, startTitle } from './cards';
@@ -19,8 +19,9 @@ const Refused = z.object({ title: z.string().optional(), batchId: BatchId.option
  * start the same tasks again, as the first request did; a start that is refused in the request
  * itself (a task already running, an unfinished dependency) throws, which keeps the card open and
  * tells the builder why, and one refused later in the background raises a fresh card. Cancel task
- * removes each task the card names, as removing it from the Board does; a task that has started
- * since, or that another task waits on, throws and keeps the card open. Any other label changes
+ * removes each task the card names, as removing it from the Board does, though a run the refused
+ * cut cancelled before it had a session does not count as a start; a task that has started since,
+ * or that another task waits on, throws and keeps the card open. Any other label changes
  * nothing.
  */
 export function createStartCardAnswers(deps: {
@@ -48,7 +49,7 @@ export function createStartCardAnswers(deps: {
       }
       case StartChoice.Cancel:
         deps.state.write((w) => {
-          for (const taskId of taskIds.data) cancelTask(w, taskId);
+          for (const taskId of taskIds.data) cancelRefusedStartTask(w, taskId);
         });
         return;
     }
