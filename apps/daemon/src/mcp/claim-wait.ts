@@ -3,6 +3,7 @@ import {
   InboxState,
   InvalidError,
   type ClaimKind,
+  type InboxItemDto,
   type InboxItemId,
   type Notice,
   type ProjectId,
@@ -26,7 +27,7 @@ import {
 import { claimScopeOf } from '../delivery';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
-import { deadlockAnswers } from './claim-deadlock';
+import { DEADLOCK_DETAIL, deadlockAnswers } from './claim-deadlock';
 
 /** How often a task waiting for a claim looks again; the holder's release is not pushed to it. */
 export const CLAIM_POLL_MS = 2_000;
@@ -164,6 +165,14 @@ export class ClaimWaits {
     this.#yields.delete(workstreamId);
   }
 
+  /**
+   * Whether a wait in progress waits on this deadlock card. One that none waits on describes a deadlock
+   * that has ended (or a daemon that stopped), so an answer to it would act on nothing.
+   */
+  awaitsCard(inboxId: InboxItemId): boolean {
+    return [...this.#live.values()].some((w) => w.state.inboxId === inboxId);
+  }
+
   /** A wait started waiting on a holder, or on a new one. */
   waitingOn(): void {
     this.#onWait();
@@ -229,9 +238,19 @@ export class ClaimWaits {
 export function withdrawStaleClaimWaits(state: StateStore, inbox: InboxService): void {
   state.write((ctx) => clearWorkstreamNotices(ctx));
   for (const item of listInbox(state.db, { states: [InboxState.Open] }))
-    if (item.kind === InboxKind.Flag && item.detail?.['waitingFor'] !== undefined)
+    if (item.kind === InboxKind.Flag && (isWaitCard(item) || isDeadlockCard(item)))
       inbox.withdraw(item.id);
 }
+
+const isWaitCard = (item: InboxItemDto): boolean => item.detail?.['waitingFor'] !== undefined;
+
+/**
+ * A deadlock card belongs to a wait, and every wait ended with the daemon: an answer to it would free
+ * nothing, or cancel a task for a deadlock that is gone. An earlier build's card carries only `heldBy`.
+ */
+const isDeadlockCard = (item: InboxItemDto): boolean =>
+  item.detail?.[DEADLOCK_DETAIL] !== undefined ||
+  (item.detail?.['heldBy'] !== undefined && item.title.startsWith('Claim deadlock:'));
 
 const taskTitleOf = (db: DbReader, workstreamId: WorkstreamId): string =>
   getTask(db, getWorkstream(db, workstreamId).taskId).title;
@@ -423,6 +442,9 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         );
     }
   } finally {
+    // A card still up when the wait ends asks about a deadlock this wait no longer stands in: the
+    // session stopped, or the task was cancelled. An answer to it would free nothing.
+    if (wait.inboxId !== null && cardOpen(a, wait.inboxId)) a.inbox.withdraw(wait.inboxId);
     wait.heldBy = null;
     wait.inboxId = null;
     showNotice(null);

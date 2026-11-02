@@ -75,6 +75,10 @@ daemon that ran it. Startup withdraws the wait cards a stopped daemon left (`wit
 wait rewrites any card left under its fold key. The deadlock card has a fold key per workstream and claim, so an
 agent asking again while the deadlock holds rewrites the one card rather than raising a second; a later ask for
 that claim that is granted, or that starts a plain wait, withdraws it, since the deadlock it describes is gone.
+The card belongs to the wait that raised it: when that wait ends without the claim (its session stopped, or the
+task was cancelled) the card is withdrawn, startup withdraws any deadlock card a stopped daemon left, and an answer
+to a card no live wait waits on is refused (`InboxAnswerRefused`) and the card withdrawn, so a stale answer never
+cancels a task or reports a release that did not happen.
 
 **Lanes.** A waiting task stays `RUNNING` and keeps its lane, but the holder gives its lane up at every step
 boundary (a passed or failed gate, a crash retry, an answer after parking) while keeping its claims until `DONE`.

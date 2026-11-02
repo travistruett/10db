@@ -71,6 +71,8 @@ const git = createGit();
 let workstreamBranch: string | null = 'main';
 /** The signal every session's waits listen to; a test aborts it to end the session. */
 let sessionAbort = new AbortController();
+/** One session's own stop, beside `sessionAbort`; a test aborts it to end only that session. */
+const sessionStops = new Map<string, AbortController>();
 /** How long one request_claim call waits before answering "still waiting"; a test shortens it. */
 let claimWaitSliceMs = 60_000;
 /** The handler's claim waits, which the daemon also hands the scheduler. */
@@ -107,6 +109,7 @@ const JsonObject = z.record(z.string(), z.unknown());
 beforeEach(async () => {
   logged.length = 0;
   sessionAbort = new AbortController();
+  sessionStops.clear();
   claimWaitSliceMs = 60_000;
   workstreamBranch = 'main';
   repo = createTempRepo();
@@ -150,7 +153,10 @@ beforeEach(async () => {
     git,
     log: capturingLogger,
     waitObserverFor: () => undefined,
-    sessionSignal: () => sessionAbort.signal,
+    sessionSignal: (id) => {
+      const own = sessionStops.get(id);
+      return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
+    },
     claimWaits,
     claimPollMs: 5,
     get claimWaitSliceMs() {
@@ -241,6 +247,8 @@ async function seedSession(
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   await client.connect(transport);
+  const stop = new AbortController();
+  sessionStops.set(session.id, stop);
   const call = async (name: string, args: Record<string, unknown>) => {
     const result = await client.callTool({ name, arguments: args });
     const text = ToolContent.parse(result.content)
@@ -252,7 +260,11 @@ async function seedSession(
       json: result.isError === true ? null : JsonObject.parse(JSON.parse(text)),
     };
   };
-  return { ...seeded, session, token, client, call };
+  /** Ends this session only, as a lane stop or handoff does. */
+  const stopSession = (): void => {
+    stop.abort();
+  };
+  return { ...seeded, session, token, client, call, stopSession };
 }
 
 const writeRepoFile = (rel: string, text: string) => {
@@ -1069,6 +1081,54 @@ describe('MCP tools', () => {
       expect(openCards()).toEqual([]);
       sessionAbort.abort();
       await alpha;
+    });
+
+    it('withdraws the card when the wait that raised it ends without the claim', async () => {
+      const { b, alpha, beta, card } = await deadlocked();
+      b.stopSession();
+      expect((await beta).isError).toBe(true);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      expect(openCards()).toEqual([]);
+      sessionAbort.abort();
+      await alpha;
+    });
+
+    it('refuses and withdraws an answer once no wait waits on the card', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      // The daemon restarted: its waits are gone, and the card is still open.
+      const live = claimWaits;
+      claimWaits = new ClaimWaits();
+      expect(() => {
+        inbox.answer(card.id, { choice: 'Beta yields area ui' });
+      }).toThrow(/already ended/);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      expect(activeClaims(state.db, b.workstream.id).map((c) => c.name)).toContain('ui');
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).toContain('api');
+      claimWaits = live;
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('refuses a cancel once no wait waits on the card', async () => {
+      const { alpha, beta, card } = await deadlocked();
+      const live = claimWaits;
+      claimWaits = new ClaimWaits();
+      expect(() => {
+        inbox.answer(card.id, { choice: 'Cancel Alpha' });
+      }).toThrow(/already ended/);
+      expect(cancelled).toEqual([]);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      claimWaits = live;
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
+    });
+
+    it('is withdrawn at startup, since the waits it belongs to ended with the daemon', async () => {
+      const { alpha, beta, card } = await deadlocked();
+      withdrawStaleClaimWaits(state, inbox);
+      expect(getInboxItem(state.db, card.id).state).toBe('CANCELLED');
+      sessionAbort.abort();
+      await Promise.all([alpha, beta]);
     });
 
     it('does not cancel a task that has already ended', async () => {

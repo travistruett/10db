@@ -1,20 +1,23 @@
 import {
   ClaimKind,
+  InboxAnswerRefused,
   InboxKind,
   isTerminal,
   type InboxAnswer,
   type InboxItemDto,
+  type InboxItemId,
   type InboxOption,
   type WorkstreamId,
 } from '@10db/contracts';
 import { activeClaims, getWorkstreamRow, releaseClaim, type Json } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
+import { withdrawCard } from '../inbox';
 import type { Logger } from '../log';
 import type { ClaimWaits } from './claim-wait';
 
 /** Where a deadlock card keeps what each of its answers does. */
-const DEADLOCK_DETAIL = 'deadlock';
+export const DEADLOCK_DETAIL = 'deadlock';
 
 const DeadlockChoice = z.object({
   label: z.string(),
@@ -76,11 +79,21 @@ export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
   };
 }
 
+function refuseEnded(deps: { readonly state: StateStore }, inboxId: InboxItemId): never {
+  deps.state.write((ctx) => {
+    withdrawCard(ctx, inboxId);
+  });
+  throw new InboxAnswerRefused(
+    'This claim deadlock has already ended: neither task waits on it any more, so nothing was changed. The card was withdrawn.',
+  );
+}
+
 /**
  * Acts on the builder's answer to a claim deadlock card, before the card records it. A yield releases
  * the claims the card named for that task and ends its wait with a refusal naming them, so its agent
  * learns it lost them before it edits there again; the other task's wait, which waits on the card,
- * then takes the claim. A cancel ends the task unless it already ended. Any other card, and any other
+ * then takes the claim. A cancel ends the task unless it already ended. An answer to a card no wait
+ * waits on any more is refused, and the card withdrawn: its deadlock ended. Any other card, and any other
  * answer, is left alone.
  */
 export function createClaimDeadlockAnswers(deps: {
@@ -98,16 +111,15 @@ export function createClaimDeadlockAnswers(deps: {
     const choice = detail.data.choices.find((c) => c.label === answer.choice);
     if (!choice) return;
     const id = choice.workstreamId as WorkstreamId;
+    // The waits that raised the card ended (a session stopped, or the daemon restarted), so the
+    // deadlock it asks about is gone: a yield would free nothing and a cancel would end a task for
+    // nothing. The card goes, and the builder is told the answer was not applied.
+    if (!deps.waits.awaitsCard(item.id)) refuseEnded(deps, item.id);
     if (choice.action === 'yield') {
       // The task is told through its wait, so a claim is released only from a task that waits: one
       // that does not is in no deadlock, and losing a claim untold would let two tasks edit one area.
-      if (!deps.waits.yielded(id, { claims: choice.claims, inboxId: item.id })) {
-        deps.log.warn(
-          { workstreamId: id, inboxId: item.id },
-          'a claim deadlock answer named a task that no longer waits; nothing was released',
-        );
-        return;
-      }
+      if (!deps.waits.yielded(id, { claims: choice.claims, inboxId: item.id }))
+        refuseEnded(deps, item.id);
       deps.state.write((ctx) => {
         for (const claim of activeClaims(ctx.tx, id))
           if (choice.claims.some((c) => c.kind === claim.kind && c.name === claim.name))
