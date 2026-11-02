@@ -458,6 +458,63 @@ describe('findRegistryHostsAt', () => {
     await expect(findRegistryHostsAt(git, repo, 'refs/heads/nope')).rejects.toThrow();
   });
 
+  it('resolves the rev once and reads every listing and file from that commit', async () => {
+    const repo = committed({
+      'Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n',
+      'a/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
+    });
+    const tip = run(repo, 'rev-parse', 'refs/heads/main').toString().trim();
+    const revs: string[] = [];
+    const recording = {
+      commitAt: (r: string, rev: string) => {
+        revs.push(`resolve ${rev}`);
+        return git.commitAt(r, rev);
+      },
+      fileAt: (r: string, rev: string, path: string, max: number) => {
+        revs.push(rev);
+        return git.fileAt(r, rev, path, max);
+      },
+      folderAt: (r: string, rev: string, folder: string) => {
+        revs.push(rev);
+        return git.folderAt(r, rev, folder);
+      },
+    };
+
+    const found = await findRegistryHostsAt(recording, repo, 'refs/heads/main');
+
+    expect(found.length).toBeGreaterThan(0);
+    expect(revs.filter((r) => r.startsWith('resolve'))).toEqual(['resolve refs/heads/main']);
+    const reads = revs.filter((r) => !r.startsWith('resolve'));
+    expect(reads.length).toBeGreaterThan(2);
+    expect(new Set(reads)).toEqual(new Set([tip]));
+  });
+
+  it('reads one commit when the branch moves during the walk', async () => {
+    const repo = committed({
+      'Gemfile.lock': 'GEM\n  remote: https://rubygems.org/\n',
+      'a/x.txt': 'x',
+    });
+    let moved = false;
+    const moving = {
+      commitAt: git.commitAt.bind(git),
+      fileAt: git.fileAt.bind(git),
+      folderAt: async (r: string, rev: string, folder: string) => {
+        const listing = await git.folderAt(r, rev, folder);
+        if (!moved) {
+          moved = true;
+          run(repo, 'rm', '-q', 'Gemfile.lock');
+          run(repo, 'commit', '-q', '-m', 'drop the lockfile');
+        }
+        return listing;
+      },
+    };
+
+    const found = await findRegistryHostsAt(moving, repo, 'refs/heads/main');
+
+    expect(moved).toBe(true);
+    expect(found).toEqual([{ host: 'rubygems.org', file: 'Gemfile.lock' }]);
+  });
+
   it('lists each folder once, as the walk reaches it, never below three levels', async () => {
     const repo = committed({
       'a/b/c/Cargo.lock': 'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
@@ -466,6 +523,7 @@ describe('findRegistryHostsAt', () => {
     });
     const listed: string[] = [];
     const counting = {
+      commitAt: git.commitAt.bind(git),
       fileAt: git.fileAt.bind(git),
       folderAt: (r: string, rev: string, folder: string) => {
         listed.push(folder);
@@ -490,6 +548,7 @@ describe('findRegistryHostsAt', () => {
     });
     const listed: string[] = [];
     const counting = {
+      commitAt: git.commitAt.bind(git),
       fileAt: git.fileAt.bind(git),
       folderAt: (r: string, rev: string, folder: string) => {
         listed.push(folder);
