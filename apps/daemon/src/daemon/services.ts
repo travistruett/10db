@@ -13,6 +13,7 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   cancelTask,
@@ -65,7 +66,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import { proposePlacement } from '../placement';
-import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
+import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
   workstreamChanges,
@@ -232,23 +233,28 @@ export function createServices(deps: {
       }
       // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
       // the builder asked to start over: then the batch holding only that attempt ends first.
-      if (input?.fresh) restarts.supersede(taskId);
-      else {
+      if (input?.fresh) {
+        restarts.supersede(taskId);
+      } else {
         const retried = restarts.continueRun(taskId);
         if (retried) {
           deps.scheduler.requestTick();
           return { kind: 'workstream', workstream: retried };
         }
       }
+      // Here a new run replaces the failed one, whether the builder started over or its batch
+      // couldn't take it again (none, or no longer open).
+      const superseded: WorkstreamId | null =
+        held?.state === WorkstreamState.Failed ? held.id : null;
       const project = getProject(db, getTask(db, taskId).projectId);
-      if (project.delivery === Delivery.PullRequest) {
-        const batch = deps.starter.startTask(taskId);
-        deps.scheduler.requestTick();
-        return { kind: 'batch', batch };
-      }
-      const workstream = startTaskWithPlan(deps.state, taskId);
+      const started: TaskStarted =
+        project.delivery === Delivery.PullRequest
+          ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
+          : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
+      // The failed run is left behind by the new one; its card's Retry would be refused.
+      if (superseded) deps.inbox.cancelForWorkstream(superseded);
       deps.scheduler.requestTick();
-      return { kind: 'workstream', workstream };
+      return started;
     },
     runNext(taskId) {
       const result = deps.state.write((ctx) => runNext(ctx, taskId));
