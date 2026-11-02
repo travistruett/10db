@@ -203,6 +203,14 @@ describe('a goal’s status', () => {
     expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
   });
 
+  it('is not running while the only started task waits in the queue', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.NotStarted);
+    expect(digest.workingNow).toEqual([]);
+  });
+
   it('is waiting on you while an open card is on one of its tasks, ahead of running', () => {
     const { goal, a, b } = adopt();
     run(a, WorkstreamState.Running);
@@ -706,6 +714,14 @@ describe('the Ungrouped group', () => {
       running: 1,
       failed: 1,
     });
+  });
+
+  it('leaves out a task that only waits in the queue', () => {
+    run(insertGoalFreeTask('Queued'), WorkstreamState.Queued);
+    expect(ungroupedDigest(store.db, project.id)).toBeNull();
+    const running = insertGoalFreeTask('Running');
+    run(running, WorkstreamState.Running);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({ running: 1, failed: 0 });
   });
 
   it('comes with a goal’s digest', () => {
