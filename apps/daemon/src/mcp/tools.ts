@@ -4,6 +4,7 @@ import {
   EventType,
   FOLLOW_UPS_HEADING,
   InvalidError,
+  MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   McpToolName,
   McpToolOutputs,
@@ -17,6 +18,7 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
+  countSessionToolOps,
   findToolOp,
   FollowUpOrigin,
   getBatch,
@@ -92,7 +94,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
-    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts.',
+    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS); after that the call is refused.',
   request_claim:
     'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
   commit:
@@ -318,6 +320,14 @@ export function createToolHandlers(
       if (done !== undefined) return Promise.resolve(McpToolOutputs.file_follow_up.parse(done));
       return Promise.resolve(
         deps.state.write((ctx) => {
+          // A step runs in one session, so its filings are this session's records.
+          if (
+            countSessionToolOps(ctx.tx, workstreamId, sessionId, McpToolName.FileFollowUp) >=
+            MAX_FOLLOW_UPS
+          )
+            throw new InvalidError(
+              `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks and you have filed that many. Stop filing; put what is left in your summary or handoff, and end your turn.`,
+            );
           const task = insertFollowUpTask(
             ctx,
             getWorkstreamRow(ctx.tx, workstreamId).taskId,

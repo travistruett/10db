@@ -1,5 +1,5 @@
 import { mintId, type SessionId, type WorkstreamId } from '@10db/contracts';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, count, desc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import type { DbReader, WriteContext } from './store';
@@ -18,6 +18,28 @@ export function findToolOp(
     .from(schema.toolOps)
     .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.opId, opId)))
     .get();
+}
+
+/** How many calls of a tool a session has recorded; a replayed opId is one record, not two. */
+export function countSessionToolOps(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  sessionId: SessionId,
+  tool: string,
+): number {
+  return (
+    db
+      .select({ n: count() })
+      .from(schema.toolOps)
+      .where(
+        and(
+          eq(schema.toolOps.workstreamId, workstreamId),
+          eq(schema.toolOps.sessionId, sessionId),
+          eq(schema.toolOps.tool, tool),
+        ),
+      )
+      .get()?.n ?? 0
+  );
 }
 
 export function insertToolOp(
