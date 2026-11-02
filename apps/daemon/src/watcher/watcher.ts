@@ -43,6 +43,7 @@ import {
   isDeletionStamp,
   relativeIn,
   ruleAllowances,
+  unstampedReason,
   writeStamp,
 } from './allowed-writes';
 import {
@@ -337,6 +338,9 @@ export function createWatcher(deps: {
   // cards are read, as allowedWrites reads them; a read across every project could miss a card that is old
   // among all of them yet still among its own project's latest.
   // A folded card allows one write for each lane it targets, so a use is a card and a lane.
+  // The allow-once cards that excused a write whose file was still changing, without being used: a second
+  // such write under the same card is carded (allowedWrites).
+  const settling = new Set<string>();
   const usedCards = new Set<string>(
     listProjects(db).flatMap((p) =>
       cardUseKeys(
@@ -482,6 +486,9 @@ export function createWatcher(deps: {
       // is read; any other write is carded as it is.
       if (excusedKeys().length === 0 && unusedCard() === undefined) continue;
       const stamp = await writeStamp(root, path);
+      // Why there is no stamp matters only to an unused card; asking reads the file again.
+      const reason =
+        stamp === null && unusedCard() !== undefined ? await unstampedReason(root, path) : null;
       // Stamping yields to other work, which may have used the card or changed the excused writes since.
       const keys = excusedKeys();
       const unused = unusedCard();
@@ -497,12 +504,17 @@ export function createWatcher(deps: {
       const lane = unused?.a.workstreamId;
       const use = unused?.a.useKey;
       if (lane == null || use == null) continue;
-      // A write that can't be told apart from the next one (still changing, or no file) is allowed without
-      // using the card, which then still excuses that write once it settles, and nothing after it.
       if (stamp === null) {
+        // A write that can't be told apart from the next one fails closed, so the card never excuses writes
+        // without end: a path that can't be read, or is not a regular file (a directory, a FIFO, any link), is
+        // carded and leaves the card unused; a file still changing is excused once without using the card,
+        // which then excuses that write when it settles, and a second time it is still unsettled it is carded.
+        if (reason !== 'changing' || settling.has(use)) continue;
+        settling.add(use);
         allowed.add(path);
         continue;
       }
+      settling.delete(use);
       usedCards.add(use);
       // A deletion is remembered by its directory's stamp, which excuses it only while the file stays gone
       // and nothing else is added to or removed from that directory (forgetRestored, deletionStamp).

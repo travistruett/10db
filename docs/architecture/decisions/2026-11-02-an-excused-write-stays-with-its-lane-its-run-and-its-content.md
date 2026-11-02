@@ -19,8 +19,13 @@ kept in the app setting `watcher.excusedWrites`). Each remembered write now has 
 - **Its content.** A write is identified by the file's modification time to the nanosecond, its size and the
   SHA-256 of its content (`watcher/allowed-writes.ts`, `writeStamp`). A file changed behind a restored
   modification time and size is another write. When the file holds another write, the entry is dropped. A
-  file that keeps changing while it is read (three tries) has no stamp: it is allowed without using the card,
-  so the card still excuses that write once it settles.
+  write with no stamp fails closed, so an unused card never excuses writes without end:
+  - a path that can't be read is carded, and the card stays unused;
+  - a path that is not a regular file (a directory, a FIFO, or any symlink, which is never followed) is
+    carded the same way, at the live batch and the step end, and the card stays unused;
+  - a file that keeps changing while it is read (three tries) is excused once per card without using it, so
+    the card still excuses that write once it settles. A second unsettled write under the same card is
+    carded.
 - **Deletions.** An allowed deletion is stamped by the nearest ancestor directory that is still there: its
   path, change time and modification time to the nanosecond (`deletionStamp`). Adding or removing any entry
   in a directory changes both, and the change time can't be set back by hand, so a file restored and deleted
@@ -48,3 +53,11 @@ Limiting an entry to its lane's whole run, not to the states a session is live i
 restart or a step advance requeues the lane, and by then the card that allowed the write counts as used, so
 forgetting the entry there would card the write the builder allowed. Hashing only the files a card names
 keeps the watcher from reading large changed files on the daemon's event loop when no card concerns them.
+
+A later automated security review found that a write with no stamp was allowed without using the card,
+whatever the reason. A lane holding one allow-once card could then write the path again and again as a
+directory, a link to one, or an unreadable path, and each write was excused while the card stayed unused.
+Carding a non-file or an unreadable path outright, and excusing a still-changing file only once per card,
+bounds that. This replaces the earlier rule that such a write "is allowed and the card is not used". A
+non-file is carded rather than using the card up: using it up would excuse the write live but card it at the
+step end, since there is no stamp to remember it by.

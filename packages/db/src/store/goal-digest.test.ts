@@ -33,6 +33,7 @@ import {
   openGoalDigest,
   ungroupedDigest,
 } from './goal-digest';
+import { insertBoardColumn } from './board-columns';
 import { insertGoal, lastGoalView, VISIT_MAX_MS } from './goals';
 import { insertInboxItem } from './inbox';
 import { insertDecision, insertDeviation, insertSource } from './knowledge';
@@ -542,6 +543,61 @@ describe('the rows', () => {
       taskId: b,
       title: 'Drawer',
       waitsOn: [{ taskId: a, title: 'Patch route' }],
+    });
+  });
+
+  describe('with a parked task in an all-queued goal', () => {
+    const park = (...ids: TaskId[]) => {
+      const column = store.write((ctx) =>
+        insertBoardColumn(ctx, project.id, { name: 'Exploring' }),
+      ).value;
+      for (const id of ids) {
+        store.db
+          .update(schema.tasks)
+          .set({ boardColumnId: column.id })
+          .where(eq(schema.tasks.id, id))
+          .run();
+      }
+    };
+
+    /** Tasks `a` and `b`, no dependencies, both queued with `a` leading. */
+    function queuedPair(): { goal: GoalDto; a: TaskId; b: TaskId } {
+      const goal = store.write((ctx) =>
+        insertGoal(ctx, project.id, {
+          brief: {
+            title: 'Independent',
+            objective: 'No dependencies.',
+            tasks: [
+              { key: 'a', title: 'Patch route', areas: ['api'] },
+              { key: 'b', title: 'Drawer', areas: ['ui'] },
+            ],
+          },
+        }),
+      ).value;
+      const [a, b] = goal.taskIds;
+      if (!a || !b) throw new Error('the brief makes two tasks');
+      setClock(9);
+      run(a, WorkstreamState.Queued);
+      setClock(10);
+      run(b, WorkstreamState.Queued);
+      return { goal, a, b };
+    }
+
+    it('passes over a parked task that leads the queue, as the scheduler does', () => {
+      const { goal, a, b } = queuedPair();
+      expect(goalDigest(store.db, goal.id, null).next?.taskId).toBe(a);
+      park(a);
+      expect(goalDigest(store.db, goal.id, null).next).toEqual({
+        taskId: b,
+        title: 'Drawer',
+        waitsOn: [],
+      });
+    });
+
+    it('offers the task first in line when every queued task is parked', () => {
+      const { goal, a, b } = queuedPair();
+      park(a, b);
+      expect(goalDigest(store.db, goal.id, null).next?.taskId).toBe(a);
     });
   });
 

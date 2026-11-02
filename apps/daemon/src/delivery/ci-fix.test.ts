@@ -86,7 +86,7 @@ const job = (name: string, jobId: string | null = '77'): RequiredCheckJobDto => 
 });
 
 function fails(prUrl: string, ...jobs: RequiredCheckJobDto[]): void {
-  h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: jobs, pending: [] });
+  h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: jobs, pending: [], cancelled: [] });
 }
 
 const fixBatches = (root: BatchDto): BatchDto[] =>
@@ -284,15 +284,17 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it.each([
-    ['passing', { state: 'passing', failing: [], pending: [] }],
-    ['pending', { state: 'pending', failing: [], pending: [job('build')] }],
-    ['none', { state: 'none', failing: [], pending: [] }],
+    ['passing', { state: 'passing', failing: [], pending: [], cancelled: [] }],
+    ['pending', { state: 'pending', failing: [], pending: [job('build')], cancelled: [] }],
+    ['cancelled', { state: 'cancelled', failing: [], pending: [], cancelled: [job('build')] }],
+    ['none', { state: 'none', failing: [], pending: [], cancelled: [] }],
   ] as const)('starts no fix when the required checks are %s', async (_name, required) => {
     const { root } = await shippedRoot();
     h.gh.setRequiredChecks(root.prUrl ?? '', {
       ...required,
       failing: [...required.failing],
       pending: [...required.pending],
+      cancelled: [...required.cancelled],
     });
     await begin(watcher());
     expect(fixBatches(root)).toEqual([]);

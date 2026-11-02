@@ -86,7 +86,10 @@ function toBatchDto(row: BatchRow): BatchDto {
     repo: row.repo,
     prUrl: row.prUrl,
     pr: toPullRequestStatus(row),
-    prRequired: row.prRequired,
+    prRequired:
+      row.prRequired === null
+        ? null
+        : { ...row.prRequired, cancelled: row.prRequired.cancelled ?? [] },
     prMergeBlocked: row.prMergeBlocked,
     ciFixOf: row.ciFixOf,
     ciFixHead: row.ciFixHead,

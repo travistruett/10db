@@ -1841,7 +1841,7 @@ describe('BoardView', () => {
 
       it('says CI running and links the running job', async () => {
         serveShipped('in_review', read('open', 'pending'), 'DONE', [], {
-          prRequired: { state: 'pending', failing: [], pending: [job] },
+          prRequired: { state: 'pending', failing: [], pending: [job], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
@@ -1853,7 +1853,7 @@ describe('BoardView', () => {
 
       it('says CI failed with the job’s name and links that job', async () => {
         serveShipped('in_review', read('open', 'failing'), 'DONE', [], {
-          prRequired: { state: 'failing', failing: [job], pending: [] },
+          prRequired: { state: 'failing', failing: [job], pending: [], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'In review tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
@@ -1865,7 +1865,7 @@ describe('BoardView', () => {
 
       it('says Merged · CI passed on a Done card', async () => {
         serveShipped('done', read('merged', 'passing'), 'DONE', [], {
-          prRequired: { state: 'pending', failing: [], pending: [job] },
+          prRequired: { state: 'pending', failing: [], pending: [job], cancelled: [] },
         });
         const column = await screen.findByRole('list', { name: 'Done tasks' });
         const card = within(column).getByRole('listitem', { name: 'Alpha' });
@@ -1877,7 +1877,7 @@ describe('BoardView', () => {
 
       it('says conflicts with the base instead of CI running', async () => {
         serveShipped('in_review', read('open', 'pending'), 'DONE', [], {
-          prRequired: { state: 'pending', failing: [], pending: [job] },
+          prRequired: { state: 'pending', failing: [], pending: [job], cancelled: [] },
           prMergeBlocked: 'conflicts',
           baseBranch: 'main',
         });

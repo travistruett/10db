@@ -474,6 +474,7 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
       state: 'passing',
       failing: [],
       pending: [],
+      cancelled: [],
     });
     const shipped = await ship(await start('One', h.addTask('Alpha')));
     expect(shipped.prUrl).toBe('https://github.com/acme/widgets/pull/1');
@@ -481,7 +482,7 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
     expect(h.cards()).toEqual([]);
   });
 
-  it.each(['pending', 'failing'] as const)(
+  it.each(['pending', 'cancelled', 'failing'] as const)(
     'neither merges nor raises a card when the required checks are %s',
     async (state) => {
       h = createDeliveryHarness({ precheckCommand: 'true' });
@@ -490,6 +491,7 @@ describe('when only the pre-check ran and GitHub says the pull request has nothi
         state,
         failing: [],
         pending: [],
+        cancelled: [],
       });
       const shipped = await ship(await start('One', h.addTask('Alpha')));
       expect(shipped.state).toBe('SHIPPED');

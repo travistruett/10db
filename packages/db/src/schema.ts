@@ -17,6 +17,7 @@ import type {
   EventType,
   EvidenceId,
   EvidenceKind,
+  StoredRequiredChecks,
   FailingCheckDto,
   FlowId,
   FlowStepDef,
@@ -56,7 +57,6 @@ import type {
   ProposalKind,
   Provider,
   QuestionCategory,
-  RequiredChecksDto,
   RiskTag,
   RoutingRuleId,
   SessionId,
@@ -266,7 +266,7 @@ export const batches = sqliteTable(
     prCheckedAt: text('pr_checked_at'),
     prUnknownReason: text('pr_unknown_reason'),
     /** The pull request's required checks as the watch last read them; kept on the root batch. */
-    prRequired: text('pr_required', { mode: 'json' }).$type<RequiredChecksDto>(),
+    prRequired: text('pr_required', { mode: 'json' }).$type<StoredRequiredChecks>(),
     /** Why GitHub will not merge the pull request as it is (`conflicts` or `behind`). */
     prMergeBlocked: text('pr_merge_blocked').$type<PullRequestMergeBlocked>(),
     /** A CI fix batch's root batch and the pull request head it fixes; null on any other batch. */

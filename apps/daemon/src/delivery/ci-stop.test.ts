@@ -106,7 +106,7 @@ const job = (name: string, jobId: string | null = '77'): RequiredCheckJobDto => 
 });
 
 function fails(prUrl: string, ...jobs: RequiredCheckJobDto[]): void {
-  h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: jobs, pending: [] });
+  h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: jobs, pending: [], cancelled: [] });
 }
 
 const fixBatches = (root: BatchDto): BatchDto[] =>
@@ -357,8 +357,8 @@ describe('clearing a stop', () => {
   }
 
   it.each([
-    ['passing', { state: 'passing', failing: [], pending: [] }],
-    ['pending', { state: 'pending', failing: [], pending: [job('build')] }],
+    ['passing', { state: 'passing', failing: [], pending: [], cancelled: [] }],
+    ['pending', { state: 'pending', failing: [], pending: [job('build')], cancelled: [] }],
   ] as const)(
     'clears the stop and the card, and returns the task to In review, when the checks are %s',
     async (_name, required) => {
@@ -367,6 +367,7 @@ describe('clearing a stop', () => {
         ...required,
         failing: [...required.failing],
         pending: [...required.pending],
+        cancelled: [...required.cancelled],
       });
 
       await round(w);
@@ -412,7 +413,12 @@ describe('clearing a stop', () => {
 
   it('stops again when the rerun fails the same way, with a new card', async () => {
     const { root, w } = await stopped();
-    h.gh.setRequiredChecks(root.prUrl ?? '', { state: 'pending', failing: [], pending: [] });
+    h.gh.setRequiredChecks(root.prUrl ?? '', {
+      state: 'pending',
+      failing: [],
+      pending: [],
+      cancelled: [],
+    });
     await round(w);
     expect(stopCards()).toEqual([]);
 

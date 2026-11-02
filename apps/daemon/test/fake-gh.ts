@@ -13,7 +13,7 @@ import {
   type RequiredChecks,
 } from '../src/github';
 
-const NO_REQUIRED: RequiredChecks = { state: 'none', failing: [], pending: [] };
+const NO_REQUIRED: RequiredChecks = { state: 'none', failing: [], pending: [], cancelled: [] };
 
 export type GhMethod =
   | 'authStatus'

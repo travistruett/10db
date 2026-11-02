@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { constants, realpathSync, statSync } from 'node:fs';
-import { lstat, open } from 'node:fs/promises';
+import { lstat, open, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -165,16 +165,36 @@ const STAMP_OPEN_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O
 /** What `readStamp` returns for a file that changed while it was read. */
 const CHANGED = Symbol('changed while read');
 
+/** Why a path has no stamp: it is not a regular file, it can't be read, or it kept changing while read. */
+export type UnstampedReason = 'not-a-file' | 'unreadable' | 'changing';
+
+/** A path's stamp, or why it has none. */
+type StampResult = { readonly stamp: string } | { readonly reason: UnstampedReason };
+
+/** The `code` of a Node.js system error; undefined for anything else. */
+function errorCode(error: unknown): string | undefined {
+  return error instanceof Error && 'code' in error && typeof error.code === 'string'
+    ? error.code
+    : undefined;
+}
+
 /**
  * Reads `path` once: its modification time, size and SHA-256, all from one open descriptor, so what is
- * hashed is what the descriptor's metadata names. Null for anything but a regular file. The file is read a
- * chunk at a time through the thread pool, so a large one neither is held whole nor stalls the event loop.
+ * hashed is what the descriptor's metadata names. A link (which `O_NOFOLLOW` refuses with `ELOOP`), a FIFO
+ * or anything else but a regular file is 'not-a-file'; a path that can't be opened is 'unreadable'. The
+ * file is read a chunk at a time through the thread pool, so a large one neither is held whole nor stalls
+ * the event loop.
  */
-async function readStamp(path: string): Promise<string | null | typeof CHANGED> {
-  const file = await open(path, STAMP_OPEN_FLAGS);
+async function readStamp(path: string): Promise<StampResult | typeof CHANGED> {
+  let file: FileHandle;
+  try {
+    file = await open(path, STAMP_OPEN_FLAGS);
+  } catch (error) {
+    return { reason: errorCode(error) === 'ELOOP' ? 'not-a-file' : 'unreadable' };
+  }
   try {
     const before = await file.stat({ bigint: true });
-    if (!before.isFile()) return null;
+    if (!before.isFile()) return { reason: 'not-a-file' };
     const hash = createHash('sha256');
     const chunk = Buffer.allocUnsafe(1024 * 1024);
     for (;;) {
@@ -185,37 +205,54 @@ async function readStamp(path: string): Promise<string | null | typeof CHANGED> 
     // The file changed while it was read: the content may not be the one the time and size name.
     const after = await file.stat({ bigint: true });
     if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return CHANGED;
-    return `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}`;
+    return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}` };
   } finally {
     await file.close();
   }
+}
+
+/** `rel`'s stamp in `root` (`writeStamp`), or why it has none. */
+async function stampOrReason(root: string, rel: string): Promise<StampResult> {
+  const path = resolve(root, rel);
+  try {
+    await lstat(path);
+  } catch (error) {
+    const code = errorCode(error);
+    if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
+    const stamp = deletionStamp(root, path);
+    return stamp === null ? { reason: 'unreadable' } : { stamp };
+  }
+  for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
+    try {
+      const result = await readStamp(path);
+      if (result !== CHANGED) return result;
+    } catch {
+      return { reason: 'unreadable' };
+    }
+  }
+  return { reason: 'changing' };
 }
 
 /**
  * What identifies the current write to a file: its modification time to the nanosecond, its size and a
  * hash of its content, so a file changed behind a restored modification time and size is another write.
  * A deletion's stamp for a file that is not there (`deletionStamp`). Null for one that can't be told apart
- * from another write: a link (never followed), a directory or other non-file, one that can't be read, or
- * one that kept changing while it was read.
+ * from another write: a link (never followed), a directory, FIFO or other non-file, one that can't be read,
+ * or one that kept changing while it was read (`unstampedReason` says which).
  * A lane controls the path, so it is opened without following a link and without waiting on a FIFO, and
  * checked as a regular file on the descriptor itself; the content is read off the event loop. It reads the
  * whole file, so it is called only for a path a card or an excused write names.
  */
 export async function writeStamp(root: string, rel: string): Promise<string | null> {
-  const path = resolve(root, rel);
-  try {
-    await lstat(path);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    return code === 'ENOENT' || code === 'ENOTDIR' ? deletionStamp(root, path) : null;
-  }
-  for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
-    try {
-      const stamp = await readStamp(path);
-      if (stamp !== CHANGED) return stamp;
-    } catch {
-      return null;
-    }
-  }
-  return null;
+  const result = await stampOrReason(root, rel);
+  return 'stamp' in result ? result.stamp : null;
+}
+
+/**
+ * Why `writeStamp` gives null for `rel`, read again now. A path that stamps this time counts as 'changing':
+ * it was moving a moment ago.
+ */
+export async function unstampedReason(root: string, rel: string): Promise<UnstampedReason> {
+  const result = await stampOrReason(root, rel);
+  return 'stamp' in result ? 'changing' : result.reason;
 }

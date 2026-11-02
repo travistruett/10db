@@ -1,11 +1,24 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, statSync, symlinkSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import type * as FsPromises from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isDeletionStamp, writeStamp } from './allowed-writes';
+import {
+  isDeletionStamp,
+  unstampedReason,
+  writeStamp,
+  type UnstampedReason,
+} from './allowed-writes';
 
 // The race: a path is a regular file when the stamp looks, and a FIFO by the time it is opened. The
 // swap happens inside the open, the only place a plain open of a FIFO would block for ever.
@@ -99,5 +112,80 @@ describe('writeStamp', () => {
     hashing = false;
     expect(stamp).toMatch(/^\d+:268435456:[0-9a-f]{64}$/);
     expect(ticks).toBeGreaterThan(1);
+  });
+});
+
+describe('unstampedReason', () => {
+  const rows: readonly {
+    readonly name: string;
+    readonly arrange: () => string;
+    readonly reason: UnstampedReason;
+  }[] = [
+    {
+      name: 'a directory is not a file',
+      arrange: () => {
+        execFileSync('mkdir', [join(root, 'dir')]);
+        return 'dir';
+      },
+      reason: 'not-a-file',
+    },
+    {
+      name: 'a FIFO is not a file',
+      arrange: () => {
+        execFileSync('mkfifo', [join(root, 'pipe')]);
+        return 'pipe';
+      },
+      reason: 'not-a-file',
+    },
+    {
+      name: 'a path swapped for a FIFO before the open is not a file',
+      arrange: () => {
+        writeFileSync(join(root, 'swapped'), 'was a file\n');
+        race.swapToFifo = (target) => {
+          rmSync(target);
+          execFileSync('mkfifo', [target]);
+        };
+        return 'swapped';
+      },
+      reason: 'not-a-file',
+    },
+    {
+      name: 'a symlink to a regular file is not a file',
+      arrange: () => {
+        writeFileSync(join(root, 'target.txt'), 'secret\n');
+        symlinkSync(join(root, 'target.txt'), join(root, 'link'));
+        return 'link';
+      },
+      reason: 'not-a-file',
+    },
+    {
+      name: 'a dangling symlink is not a file',
+      arrange: () => {
+        symlinkSync(join(root, 'nowhere'), join(root, 'link'));
+        return 'link';
+      },
+      reason: 'not-a-file',
+    },
+    {
+      name: 'a file that cannot be opened is unreadable',
+      arrange: () => {
+        writeFileSync(join(root, 'locked.txt'), 'locked\n');
+        chmodSync(join(root, 'locked.txt'), 0o000);
+        return 'locked.txt';
+      },
+      reason: 'unreadable',
+    },
+    {
+      name: 'a regular file that stamps now was changing',
+      arrange: () => {
+        writeFileSync(join(root, 'a.txt'), 'hello\n');
+        return 'a.txt';
+      },
+      reason: 'changing',
+    },
+  ];
+
+  it.each(rows)('$name', async ({ arrange, reason }) => {
+    expect(await unstampedReason(root, arrange())).toBe(reason);
   });
 });
