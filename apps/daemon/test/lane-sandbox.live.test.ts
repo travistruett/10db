@@ -19,6 +19,7 @@ import {
   ClaimKind,
   mintId,
   PermissionChoice,
+  StepRole,
   ToolAccess,
   type AreaDef,
   type InboxItemDto,
@@ -28,6 +29,7 @@ import { createTestStore, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { buildSessionPrompt } from '../src/briefing';
 import { loadEnv } from '../src/env';
 import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
@@ -1246,6 +1248,115 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       expect.soft(drizzle?.output ?? '', 'drizzle-kit generate ran').not.toMatch(REFUSED);
       expect(run.guardVerdicts.filter((v) => v.decision === 'deny')).toEqual([]);
       expect(run.cards.map((c) => c.detail)).toEqual([]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it('makes a multi-line replacement with Edit, not a Bash write, and raises no card', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      const target = join(checkout, 'greeting.ts');
+      const before = [
+        'export function greet(name: string): string {',
+        '  const trimmed = name.trim();',
+        '  if (trimmed === "") {',
+        '    return "hello, stranger";',
+        '  }',
+        '  return "hello, " + trimmed;',
+        '}',
+        '',
+      ].join('\n');
+      writeFileSync(target, before);
+      gitIn(checkout, 'add', 'greeting.ts');
+      gitIn(checkout, 'commit', '-q', '-m', 'Add greeting');
+      // The real implement brief, as the runner builds it for a sandboxed lane, with the task that
+      // asks for the change. Only 10db's own tools are missing from this session.
+      const prompt = buildSessionPrompt({
+        step: {
+          index: 0,
+          count: 2,
+          role: StepRole.Implement,
+          personaName: 'Implementer',
+          instructions: null,
+          skills: [],
+          tools: ToolAccess.Edit,
+        },
+        priorResults: [],
+        previousResult: null,
+        earlierResults: [],
+        revisedBy: null,
+        sandboxed: true,
+        task: {
+          title: 'Greet by name with a fallback',
+          description: [
+            `In ${target}, replace the whole body of greet (the five lines between the signature's braces) with this:`,
+            '  const trimmed = name.trim();',
+            '  const who = trimmed === "" ? "stranger" : trimmed;',
+            '  return `hello, ${who}`;',
+            'The 10db tools are not connected in this check, so do not commit; make the change and end your turn.',
+          ].join('\n'),
+          acceptanceCriteria: ['greet has the new body in greeting.ts'],
+        },
+        claims: [{ kind: ClaimKind.Area, name: 'repo' }],
+        action: { kind: 'start' },
+        handoff: null,
+        answer: null,
+        evidence: null,
+        recovery: null,
+        contextPack: {
+          task: { title: '', description: '', acceptanceCriteria: [] },
+          claims: [],
+          handoff: null,
+          pendingAnswer: null,
+          knowledge: { decisions: [], budgetUsed: 0, droppedCount: 0, empty: true },
+        },
+      });
+      const run = await runLane({
+        ...AUTO,
+        checkout,
+        dataDir,
+        extraEnv: {},
+        areas: [{ name: 'repo', globs: ['**'] }],
+        claims: [{ kind: ClaimKind.Area, name: 'repo' }],
+        probe: () => 'true\n',
+        prompt,
+      });
+      report('auto-edit', run, []);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
+      // The change was made.
+      const after = readFileSync(target, 'utf8');
+      expect(after).toContain('const who = trimmed === "" ? "stranger" : trimmed;');
+      expect(after).not.toContain('hello, stranger');
+      // With Edit (or MultiEdit or Write), and the call succeeded.
+      const edits = run.calls.filter(
+        (c) => ['Edit', 'MultiEdit', 'Write'].includes(c.name) && pathOf(c.input) === target,
+      );
+      expect(edits.length, 'the file was changed with Edit, MultiEdit or Write').toBeGreaterThan(0);
+      expect(edits.some((c) => c.isError === false)).toBe(true);
+      // No Bash call wrote the file: an interpreter one-liner, an in-place edit, a redirect or tee
+      // in a command that names it (a script could name it indirectly, but the file's content is
+      // checked above and a card for such a call is checked below).
+      const WRITES = /python3?\s+-c|node\s+-e|perl\s+-\w*i|sed\s+-\w*i|>|<<|\btee\b/;
+      expect(
+        run.calls
+          .filter(
+            (c) =>
+              c.name === 'Bash' &&
+              commandOf(c.input).includes('greeting') &&
+              WRITES.test(commandOf(c.input)),
+          )
+          .map((c) => commandOf(c.input)),
+      ).toEqual([]);
+      // No permission card, and nothing reached the broker.
+      expect(run.cards).toEqual([]);
+      expect(run.brokerCalls).toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
