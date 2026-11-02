@@ -91,6 +91,7 @@ describe('a batch’s required checks, merge block and CI fix', () => {
         },
       ],
       pending: [{ name: 'e2e', link: null, jobId: null, runId: null, description: null }],
+      cancelled: [],
     };
     store.write((ctx) =>
       patchBatch(ctx, id, { prRequired, prMergeBlocked: 'behind', ciStopped: 'no_change' }),

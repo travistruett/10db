@@ -48,6 +48,7 @@ const failing = (...jobs: ReturnType<typeof job>[]): RequiredChecksDto => ({
   state: 'failing',
   failing: jobs,
   pending: [],
+  cancelled: [],
 });
 
 const root = batch({});
@@ -122,10 +123,12 @@ describe('ciFailureAction', () => {
     });
   });
 
-  it.each(['passing', 'pending', 'none'] as const)(
+  it.each(['passing', 'pending', 'cancelled', 'none'] as const)(
     'waits when the required checks are %s',
     (state) => {
-      expect(ciFailureAction(root, { state, failing: [], pending: [] }, [], HEAD)).toEqual({
+      expect(
+        ciFailureAction(root, { state, failing: [], pending: [], cancelled: [] }, [], HEAD),
+      ).toEqual({
         kind: 'wait',
       });
     },

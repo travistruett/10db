@@ -859,6 +859,7 @@ describe('TaskDrawer', () => {
             state: 'failing',
             failing: [{ name: 'build', link: jobUrl, jobId: '6', runId: '5', description: null }],
             pending: [],
+            cancelled: [],
           },
         });
         const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
@@ -873,7 +874,9 @@ describe('TaskDrawer', () => {
       });
 
       it('says nothing of CI for a pull request with no required checks', async () => {
-        const batch = shippedWith({ prRequired: { state: 'none', failing: [], pending: [] } });
+        const batch = shippedWith({
+          prRequired: { state: 'none', failing: [], pending: [], cancelled: [] },
+        });
         const ws = workstreamDto({ state: 'DONE', batchId: batch.id });
         const task = taskDto({ workstreamId: ws.id, status: 'done', boardStatus: 'in_review' });
         serve();
