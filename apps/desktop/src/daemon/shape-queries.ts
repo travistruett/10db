@@ -2,6 +2,7 @@ import {
   ShapeConvertError,
   ShapeConvertResult,
   ShapeDto,
+  ShapeFileDto,
   ShapeMessageDto,
   ShapeProposeResult,
   ShapeViewDto,
@@ -152,6 +153,66 @@ export function useRemoveDraftGoal() {
       await readJson(
         await client.goals[':goalId']['remove-draft'].$post({ param: { goalId } }),
         z.null(),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** The builder's actions on a proposal row (spec §6 Editing): each pins, unpins, restores or drops one row. */
+export type RowChange =
+  | { readonly kind: 'edit'; readonly fields: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'unpin'; readonly field?: string }
+  | { readonly kind: 'restore' }
+  | { readonly kind: 'drop' };
+
+export function useRowChange(shapeId: ShapeId | null) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly id: ShapeProposalId; readonly action: RowChange }) => {
+      if (shapeId === null) throw new Error('Open a conversation first.');
+      const param = { shapeId, proposalId: input.id };
+      const row = client.shapes[':shapeId'].proposals[':proposalId'];
+      const action = input.action;
+      const res =
+        action.kind === 'edit'
+          ? await row.$patch({ param, json: { fields: { ...action.fields } } })
+          : action.kind === 'unpin'
+            ? await row.unpin.$post({
+                param,
+                json: action.field === undefined ? {} : { field: action.field },
+              })
+            : action.kind === 'restore'
+              ? await row.restore.$post({ param })
+              : await row.drop.$post({ param });
+      await readJson(res, z.null());
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Drops a file into the conversation; the daemon's refusal (type, size, count) comes back as its words. */
+export function useUploadShapeFile() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      shapeId,
+      file,
+    }: {
+      readonly shapeId: ShapeId;
+      readonly file: File;
+    }): Promise<ShapeFileDto> => {
+      return readJson(
+        await client.shapes[':shapeId'].files.$post(
+          { param: { shapeId }, query: { name: file.name } },
+          {
+            headers: { 'content-type': file.type === '' ? 'application/octet-stream' : file.type },
+            init: { body: file },
+          },
+        ),
+        ShapeFileDto,
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),

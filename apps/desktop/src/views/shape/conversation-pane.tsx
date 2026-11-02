@@ -10,9 +10,11 @@ import {
   useProposeShape,
   useSendShapeMessage,
   useStopShape,
+  useUploadShapeFile,
 } from '../../daemon/shape-queries';
 import { Composer } from './composer';
-import { Transcript } from './transcript';
+import { addFiles } from './dropped-files';
+import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
 
 export interface ConversationPaneProps {
@@ -24,6 +26,8 @@ export interface ConversationPaneProps {
   readonly error: string | null;
   /** Told the id of a conversation the first send made, to open it. */
   readonly onOpened: (shapeId: ShapeId) => void;
+  /** The messages a row's Why? points at. */
+  readonly why: TranscriptProps['why'];
 }
 
 /** Left: the conversation's title, its transcript and the input. */
@@ -34,11 +38,13 @@ export function ConversationPane({
   loading,
   error,
   onOpened,
+  why,
 }: ConversationPaneProps) {
   const create = useCreateShape(projectId);
   const send = useSendShapeMessage();
   const propose = useProposeShape();
   const stop = useStopShape();
+  const upload = useUploadShapeFile();
 
   const answering = view?.turn.running ?? false;
   const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
@@ -65,7 +71,7 @@ export function ConversationPane({
         </Text>
         {loading ? <Loader size="xs" aria-label="Loading the conversation" /> : null}
       </Group>
-      <Transcript messages={view?.messages ?? []} />
+      <Transcript messages={view?.messages ?? []} why={why} />
       <Composer
         firstRun={!heardBuilder}
         answering={answering}
@@ -73,6 +79,22 @@ export function ConversationPane({
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
         error={error}
+        files={(view?.files ?? []).map((f) => f.name)}
+        onFiles={async (dropped) => {
+          // A drop into a conversation that doesn't exist yet starts it, as the first message does.
+          const made: { id: ShapeId | null } = { id: shapeId };
+          const problems = await addFiles(dropped, view?.files.length ?? 0, {
+            ensureConversation: async () => {
+              made.id ??= (await create.mutateAsync()).id;
+            },
+            upload: (file) => {
+              if (made.id === null) return Promise.reject(new Error('No conversation to add to.'));
+              return upload.mutateAsync({ shapeId: made.id, file });
+            },
+          });
+          if (shapeId === null && made.id !== null) onOpened(made.id);
+          return problems;
+        }}
         onSend={async (text) => {
           const id = shapeId ?? (await create.mutateAsync()).id;
           await send.mutateAsync({ shapeId: id, text });

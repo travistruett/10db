@@ -93,6 +93,20 @@ export function convertedLine(row: ShapeProposalDto): string | null {
     : 'Converted · on the Board';
 }
 
+/** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */
+export function markText(row: ShapeProposalDto): string | null {
+  switch (row.mark) {
+    case 'new':
+      return 'new';
+    case 'changed':
+      return 'changed';
+    case 'moved':
+      return 'moved to Earlier';
+    case null:
+      return null;
+  }
+}
+
 /** The short facts shown after a title on a collapsed row. */
 export function rowMeta(row: ShapeProposalDto): string {
   switch (row.kind) {

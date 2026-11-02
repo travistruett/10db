@@ -267,7 +267,7 @@ describe('Shape: the Proposed sidebar', () => {
     expect(scroller.contains(summary)).toBe(false);
   });
 
-  it('moves between rows with ↑/↓ and opens one with Enter, read-only', async () => {
+  it('moves between rows with ↑/↓ and opens one with Enter, without opening the editor', async () => {
     const view = proposed(six);
     serve(...conversations(view));
     open(view);
@@ -283,7 +283,7 @@ describe('Shape: the Proposed sidebar', () => {
     fireEvent.click(first);
     expect(first.getAttribute('aria-expanded')).toBe('true');
     expect(screen.getByText('Brainstorm, size and file work without leaving 10db.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /edit/i })).toBeNull();
+    expect(screen.queryByRole('form', { name: 'Edit row' })).toBeNull();
   });
 
   it('shows Superseded rows under a collapsed Earlier', async () => {
@@ -332,9 +332,9 @@ describe('Shape: the Proposed sidebar', () => {
       ...before,
       shape: { ...before.shape, round: 2 },
       proposals: [
-        looseTaskProposal('density', { round: 2 }),
-        looseTaskProposal('scrollbars', { round: 2 }),
-        goalProposal('brainstorm', ['one'], { round: 2 }),
+        looseTaskProposal('density', { round: 2, mark: 'changed' }),
+        looseTaskProposal('scrollbars', { round: 2, mark: 'new' }),
+        goalProposal('brainstorm', ['one'], { round: 2, mark: 'new' }),
       ],
     };
     await act(async () => {

@@ -3,6 +3,15 @@ import { Box, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
 import { useEffect, useRef } from 'react';
 
+/** Marks a transcript block with its message id, so Why? can find the messages a row came from. */
+const MESSAGE_ATTRIBUTE = 'data-message-id';
+
+export interface TranscriptProps {
+  readonly messages: readonly ShapeMessageDto[];
+  /** The messages a row's Why? points at; a new `nonce` scrolls to them again. */
+  readonly why: { readonly ids: readonly string[]; readonly nonce: number } | null;
+}
+
 /** One line of the transcript, as it is drawn. */
 type Block =
   | {
@@ -47,9 +56,20 @@ export function blocksOf(messages: readonly ShapeMessageDto[]): Block[] {
  * the default, tool use as one dimmed line. Text is never rendered as markup. Long conversations
  * keep their off-screen blocks cheap with `content-visibility`.
  */
-export function Transcript({ messages }: { readonly messages: readonly ShapeMessageDto[] }) {
+export function Transcript({ messages, why }: TranscriptProps) {
   const viewport = useRef<HTMLDivElement>(null);
   const blocks = blocksOf(messages);
+  const marked = new Set(why?.ids ?? []);
+
+  // Why? on a row scrolls to the first message it came from, whatever the builder was reading.
+  const nonce = why?.nonce;
+  const first = why?.ids.find((id) => blocks.some((b) => b.id === id));
+  useEffect(() => {
+    if (nonce === undefined || first === undefined) return;
+    viewport.current
+      ?.querySelector<HTMLElement>(`[${MESSAGE_ATTRIBUTE}="${first}"]`)
+      ?.scrollIntoView({ block: 'center' });
+  }, [nonce, first]);
 
   // New text scrolls into view, unless the builder has scrolled up to read.
   const last = blocks.length;
@@ -70,7 +90,20 @@ export function Transcript({ messages }: { readonly messages: readonly ShapeMess
         {blocks.map((block, index) => (
           <Box
             key={block.id}
-            style={{ contentVisibility: 'auto', containIntrinsicSize: 'auto 40px' }}
+            {...{ [MESSAGE_ATTRIBUTE]: block.id }}
+            {...(marked.has(block.id) ? { 'data-highlighted': true } : {})}
+            style={{
+              contentVisibility: 'auto',
+              containIntrinsicSize: 'auto 40px',
+              ...(marked.has(block.id)
+                ? {
+                    background: 'var(--mantine-color-default-hover)',
+                    borderRadius: 'var(--mantine-radius-sm)',
+                    margin: '0 calc(var(--mantine-spacing-xs) * -1)',
+                    padding: '0 var(--mantine-spacing-xs)',
+                  }
+                : {}),
+            }}
           >
             {block.kind === 'text' ? (
               <>

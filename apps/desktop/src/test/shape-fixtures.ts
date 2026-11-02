@@ -44,19 +44,24 @@ interface ProposalOverrides {
   readonly state?: ShapeProposalDto['state'];
   readonly round?: number;
   readonly converted?: ShapeProposalDto['converted'];
+  readonly pinned?: string[];
+  readonly mark?: ShapeProposalDto['mark'];
+  readonly sourceMessageIds?: ShapeProposalDto['sourceMessageIds'];
 }
+
+const SOURCE = mintId('ShapeMessage');
 
 const proposalBase = (overrides: ProposalOverrides) => ({
   id: mintId('ShapeProposal'),
   state: overrides.state ?? 'pending',
   round: overrides.round ?? 1,
-  pinned: [],
+  pinned: overrides.pinned ?? [],
+  mark: overrides.mark ?? null,
+  sourceMessageIds: overrides.sourceMessageIds ?? [SOURCE],
   converted: overrides.converted ?? null,
   createdAt: AT,
   updatedAt: AT,
 });
-
-const SOURCE = mintId('ShapeMessage');
 
 /** A pending goal with `taskKeys.length` tasks. */
 export function goalProposal(
@@ -154,6 +159,7 @@ export function shapeViewDto(
     messages: [],
     proposals: [],
     heard: [],
+    files: [],
     turn: { running: false, queued: 0, proposing: false },
     ...rest,
   });

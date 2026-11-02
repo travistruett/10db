@@ -3,7 +3,7 @@ import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState } from 'react';
 import { kindLabel } from './proposal-text';
-import { ProposalRow, type RowAction } from './proposal-row';
+import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import { SectionKey, type ProposedGroups } from './proposed-groups';
 
 interface Block {
@@ -32,13 +32,15 @@ export interface ProposedListProps {
   readonly groups: ProposedGroups;
   /** The row's menu items: Remove Draft Goal on a converted goal, Withdraw Decision… on a decision. */
   readonly actionsFor: (row: ShapeProposalDto) => readonly RowAction[];
+  /** Edit, pin, restore, drop and Why? on a row. */
+  readonly handlers: RowHandlers;
 }
 
 /**
  * The rows of the sidebar as one hairline-divided list, each kind labelled in a narrow left column.
  * A list, not cards (DESIGN.md); ↑/↓ move between the rows, and Earlier holds the superseded ones.
  */
-export function ProposedList({ groups, actionsFor }: ProposedListProps) {
+export function ProposedList({ groups, actionsFor, handlers }: ProposedListProps) {
   const [earlierOpen, setEarlierOpen] = useState(false);
   const rows = blocksOf(groups).flatMap((block) =>
     block.rows.map((row, index) => ({
@@ -60,6 +62,7 @@ export function ProposedList({ groups, actionsFor }: ProposedListProps) {
           section={section}
           tabbable={index === 0}
           actions={actionsFor(row)}
+          handlers={handlers}
         />
       ))}
       {groups.earlier.length === 0 ? null : (
@@ -93,6 +96,7 @@ export function ProposedList({ groups, actionsFor }: ProposedListProps) {
                   section={SectionKey.Earlier}
                   tabbable={false}
                   actions={[]}
+                  handlers={handlers}
                 />
               ))
             : null}

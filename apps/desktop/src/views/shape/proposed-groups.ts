@@ -78,6 +78,10 @@ export function groupProposals(proposals: readonly ShapeProposalDto[]): Proposed
   return groups;
 }
 
+/** The rows the latest round created, changed or moved to Earlier (spec §6 What changed, and why). */
+export const roundChanges = (proposals: readonly ShapeProposalDto[]): ShapeProposalDto[] =>
+  proposals.filter((row) => row.mark !== null && row.state !== ShapeProposalState.Rejected);
+
 export interface SummaryPart {
   readonly text: string;
   /** The section the count jumps to. */

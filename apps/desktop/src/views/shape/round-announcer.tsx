@@ -1,14 +1,12 @@
-import { ShapeProposalState, type ShapeViewDto } from '@10db/contracts';
+import type { ShapeViewDto } from '@10db/contracts';
 import { VisuallyHidden } from '@mantine/core';
 import { useState } from 'react';
+import { roundChanges } from './proposed-groups';
 
-/** "Round 3: 4 changes": the rows the round created or changed (superseded ones move to Earlier). */
+/** "Round 3: 4 changes": the rows the round created, changed or moved to Earlier. */
 export function roundSummary(view: ShapeViewDto): string {
-  const round = view.shape.round;
-  const changes = view.proposals.filter(
-    (p) => p.round === round && p.state !== ShapeProposalState.Rejected,
-  ).length;
-  return `Round ${String(round)}: ${String(changes)} ${changes === 1 ? 'change' : 'changes'}`;
+  const changes = roundChanges(view.proposals).length;
+  return `Round ${String(view.shape.round)}: ${String(changes)} ${changes === 1 ? 'change' : 'changes'}`;
 }
 
 /**

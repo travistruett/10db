@@ -1,14 +1,14 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useRef, useState } from 'react';
-import { useConvertShape, useStopShape } from '../../daemon/shape-queries';
+import { useConvertShape, useRowChange, useStopShape } from '../../daemon/shape-queries';
 import { shortAgo } from '../factory/short-ago';
 import { useNow } from '../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
 import { HeardSoFar } from './heard-so-far';
-import type { RowAction } from './proposal-row';
+import type { RowAction, RowHandlers } from './proposal-row';
 import { ProposedList } from './proposed-list';
-import { groupProposals, type SectionKey } from './proposed-groups';
+import { groupProposals, roundChanges, type SectionKey } from './proposed-groups';
 import { SummaryLine } from './summary-line';
 import {
   RemoveDraftGoalModal,
@@ -23,19 +23,32 @@ export interface ProposedPaneProps {
   readonly error: string | null;
   /** Whether the summary line sits here; in the drawer layout the view keeps it always on screen. */
   readonly summaryHere: boolean;
+  /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
+  readonly onWhy: (row: ShapeProposalDto) => void;
 }
 
-/** The sidebar: a header, a pinned summary line and the read-only list of proposals. */
-export function ProposedPane({ view, loading, error, summaryHere }: ProposedPaneProps) {
+/** The sidebar: a header, a pinned summary line and the list of proposals, each editable in place. */
+export function ProposedPane({ view, loading, error, summaryHere, onWhy }: ProposedPaneProps) {
   const now = useNow();
   const listRef = useRef<HTMLDivElement>(null);
   const [converting, setConverting] = useState(false);
+  const [changesOnly, setChangesOnly] = useState(false);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
   const [decisionToWithdraw, setDecisionToWithdraw] = useState<WithdrawTarget | null>(null);
+  const change = useRowChange(view?.shape.id ?? null);
 
-  const groups = groupProposals(view?.proposals ?? []);
+  const changes = roundChanges(view?.proposals ?? []);
+  // A filter on a round with nothing to show would hide the whole list: it shows only while there is something.
+  const filtering = changesOnly && changes.length > 0;
+  const groups = groupProposals(filtering ? changes : (view?.proposals ?? []));
   const rows = convertibleRows(view?.proposals ?? []);
   const hasProposals = (view?.proposals.length ?? 0) > 0;
+  const handlers: RowHandlers = {
+    onChange: (row, action) => {
+      change.mutate({ id: row.id, action });
+    },
+    onWhy,
+  };
 
   const jump = (section: SectionKey): void => {
     const target = listRef.current?.querySelector<HTMLElement>(`[data-section="${section}"]`);
@@ -96,7 +109,27 @@ export function ProposedPane({ view, loading, error, summaryHere }: ProposedPane
             Convert…
           </Button>
         </Group>
-        {summaryHere ? <SummaryLine groups={groups} onJump={jump} /> : null}
+        {summaryHere ? (
+          <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
+        ) : null}
+        {changes.length === 0 || view === undefined ? null : (
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            style={{ alignSelf: 'flex-start' }}
+            aria-pressed={filtering}
+            onClick={() => {
+              setChangesOnly((on) => !on);
+            }}
+          >
+            {`${String(changes.length)} ${changes.length === 1 ? 'change' : 'changes'} in round ${String(view.shape.round)}`}
+          </Button>
+        )}
+        {change.isError ? (
+          <Alert color="red" title="Couldn't change the row">
+            {change.error.message}
+          </Alert>
+        ) : null}
       </Stack>
       <ScrollArea
         style={{ flex: 1, minHeight: 0 }}
@@ -115,7 +148,7 @@ export function ProposedPane({ view, loading, error, summaryHere }: ProposedPane
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <ProposedList groups={groups} actionsFor={actionsFor} />
+            <ProposedList groups={groups} actionsFor={actionsFor} handlers={handlers} />
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
           )}

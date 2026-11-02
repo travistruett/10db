@@ -139,7 +139,8 @@ const StateList = z
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 const SHAPE_FILE_PATH = /^\/shapes\/[^/]+\/files$/;
-const ShapeFileName = z.string().min(1).max(255);
+const ShapeFileQuery = z.object({ name: z.string().min(1).max(255) });
+type ShapeFileQuery = z.infer<typeof ShapeFileQuery>;
 const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
 // A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
 // can name the limit in its refusal.
@@ -331,18 +332,22 @@ export function createApp(deps: ApiDeps) {
     })
     // The file itself is the body, so a 20 MB drop is not base64 inside JSON: its name is the query and
     // its type the content type.
-    .post('/shapes/:shapeId/files', async (c) => {
-      const name = ShapeFileName.parse(c.req.query('name'));
-      const bytes = new Uint8Array(await c.req.arrayBuffer());
-      return c.json(
-        deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), {
-          name,
-          mediaType: c.req.header('content-type') ?? '',
-          bytes,
-        }),
-        201,
-      );
-    })
+    .post(
+      '/shapes/:shapeId/files',
+      validator('query', (value): ShapeFileQuery => ShapeFileQuery.parse(value)),
+      async (c) => {
+        const { name } = c.req.valid('query');
+        const bytes = new Uint8Array(await c.req.arrayBuffer());
+        return c.json(
+          deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), {
+            name,
+            mediaType: c.req.header('content-type') ?? '',
+            bytes,
+          }),
+          201,
+        );
+      },
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
