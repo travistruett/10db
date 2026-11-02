@@ -68,7 +68,9 @@
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
       enough. Keep `tasks.workspace_mode` for this rather than dropping it. Designed:
-      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`; not built.
+      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`. Built so far: the stored placement and
+      the project's `isolate` list, and the proposal rule that sets a task's placement and reason when it is made
+      (`placement/` in the daemon); not built: start by placement and the desktop controls.
 - [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
       hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).
