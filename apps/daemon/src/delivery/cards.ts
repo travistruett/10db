@@ -426,6 +426,13 @@ export const worktreeCards = {
     refresh: true,
     ...worktreeOffer(offer),
   }),
+  /** A Remove worktree answer on an orphan's card found the path no longer an orphan, so 10db left it. */
+  orphanNotRemoved: (path: string, why: string): Card => ({
+    title: `10db removed nothing at ${path}`,
+    body: `You answered Remove worktree, but 10db checked again and ${why}, so it is no longer a worktree no batch uses. Nothing was removed.`,
+    foldKey: keptWorktreeKey.removeFailed(path),
+    refresh: true,
+  }),
   inTheWay: (batch: BatchDto, path: string, reason: string): Card => ({
     title: `Batch "${batch.title}" not retried: ${path} is in the way`,
     body: `10db makes the worktree whole on ${batch.branch ?? '(not cut)'} before a retry, and won't remove what is at ${path}: ${reason}. Look inside; if nothing there is needed, delete it, then answer Retry (Abandon batch gives the batch up).`,

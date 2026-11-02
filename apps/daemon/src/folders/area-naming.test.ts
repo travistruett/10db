@@ -61,4 +61,41 @@ describe('an area reason', () => {
     expect(areas?.[0]?.reason).not.toMatch(CONTROL);
     expect(areas?.[0]?.reason).toContain('reason');
   });
+
+  describe('holds no format character (bidi override, zero-width)', () => {
+    const FORMAT = /\p{Cf}/u;
+    // Right-to-left override, zero-width space and joiner, the four bidi isolates, a BOM.
+    const RLO = String.fromCodePoint(0x202e);
+    const ZWSP = String.fromCodePoint(0x200b);
+    const formats = [0x202e, 0x200b, 0x200d, 0x2066, 0x2067, 0x2068, 0x2069, 0xfeff].map((code) =>
+      String.fromCodePoint(code),
+    );
+
+    it('whatever the folder is called', () => {
+      const labels = formats.map((f) => `dir${f}name`);
+      const areas = areasFromStructure(labels.map((l) => candidate(AreaCandidateKind.Folder, l)));
+      expect(areas).toHaveLength(labels.length);
+      for (const area of areas) expect(area.reason, area.name).not.toMatch(FORMAT);
+    });
+
+    it('when a model wrote it', () => {
+      const candidates = [candidate(AreaCandidateKind.Folder, 'a')];
+      const reason = `Holds ${formats.join('')}the${RLO} daemon${ZWSP} code`;
+      const areas = areasFromModel(
+        JSON.stringify({ areas: [{ name: 'x', reason, candidates: [1] }] }),
+        candidates,
+      );
+      expect(areas?.[0]?.reason).not.toMatch(FORMAT);
+      expect(areas?.[0]?.reason).toBe('Holds the daemon code');
+    });
+
+    it('is not a reason when nothing but format characters is left', () => {
+      const candidates = [candidate(AreaCandidateKind.Folder, 'a')];
+      const areas = areasFromModel(
+        JSON.stringify({ areas: [{ name: 'x', reason: RLO + ZWSP, candidates: [1] }] }),
+        candidates,
+      );
+      expect(areas).toBeNull();
+    });
+  });
 });

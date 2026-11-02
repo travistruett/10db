@@ -50,7 +50,8 @@ const message = (error: unknown): string =>
  *   card closes.
  * - Remove worktree removes a kept worktree, whatever it holds, and Delete directory a directory git
  *   doesn't list as a worktree (only one under the worktree root). Both run in the project's queue; one
- *   that fails raises a new card saying why, with the same offer.
+ *   that fails raises a new card saying why, with the same offer. An orphan that is no longer one (git
+ *   doesn't list it, a batch holds it again, 10db no longer has it locked) is left, and a card says nothing was removed and why.
  * - Switch back, or Switch to the base branch, puts the shared checkout on the place the batch found it
  *   at (or on the batch's base branch) and raises the card for whatever is still in the way.
  *
@@ -123,7 +124,7 @@ export function createWorktreeCardAnswers(
         if (answer.choice !== WorktreeChoice.Remove) return;
         const project = getProject(ctx.state.db, item.projectId);
         removing(project.id, offer, offer.path, async () => {
-          await removeOrphanedWorktree(
+          const outcome = await removeOrphanedWorktree(
             {
               state: ctx.state,
               git: ctx.git,
@@ -134,6 +135,13 @@ export function createWorktreeCardAnswers(
             project,
             offer.path,
           );
+          if (!outcome.removed) {
+            ctx.logger.info(
+              { projectId: project.id, path: offer.path, why: outcome.why },
+              'orphaned worktree not removed: no longer an orphan',
+            );
+            raise(ctx.inbox, project.id, worktreeCards.orphanNotRemoved(offer.path, outcome.why));
+          }
         });
         return;
       }
