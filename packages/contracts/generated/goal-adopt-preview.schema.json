@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "dryRun": {
+      "type": "boolean",
+      "const": true
+    },
+    "title": {
+      "type": "string"
+    },
+    "taskKeys": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]*$"
+      }
+    },
+    "criteria": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    }
+  },
+  "required": [
+    "dryRun",
+    "title",
+    "taskKeys",
+    "criteria"
+  ]
+}

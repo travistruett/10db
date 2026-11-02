@@ -146,3 +146,4 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   config itself (`strictMcpConfig: true`). A repo stdio server reaches Claude Code only as its launch under srt
   (above); never hand it the session environment.
 - `permissions/network-hosts.ts` is the builder's way to allow a project's hosts ahead of a card: the same project-wide `SandboxNetworkAccess` rules, checked through `storableRule`, and refusing loopback and over-broad patterns (`decisions/2026-10-29-project-network-hosts.md`).
+- `goals/` adopts a goal brief (`decisions/2026-11-01-adopt-a-goal-from-a-brief.md`): `brief.ts` is pure (front matter, `yaml`, `GoalBrief`, then the rules that need the project, every error with a plain-words path), `adopt.ts` reads a `path` or `text`, answers a refusal, a dry run's preview or the goal `insertGoal` wrote in one transaction. The brief is import only: nothing is written into the repository.
