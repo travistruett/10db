@@ -1,6 +1,8 @@
 import {
   BatchStartResult,
   ConflictError,
+  GoalDigestDto,
+  GoalListDto,
   HealthResponse,
   InvalidError,
   mintId,
@@ -41,6 +43,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     startTask: none,
     holdTask: none,
     runNext: none,
+    adoptGoal: none,
+    getGoal: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,
@@ -90,6 +94,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     stepPlan: track('stepPlan'),
     startBatch: track('startBatch'),
     listBatches: track('listBatches'),
+    listGoals: track('listGoals'),
+    openGoalDigest: track('openGoalDigest'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -929,6 +935,59 @@ describe('batch routes', () => {
   );
 });
 
+describe('goal routes', () => {
+  const goalId = mintId('Goal');
+  const projectId = mintId('Project');
+  const digest = GoalDigestDto.parse({
+    goalId,
+    status: 'not_started',
+    since: null,
+    progress: { done: 0, total: 3, cancelled: [] },
+    openPullRequests: 0,
+    workingNow: [],
+    team: [],
+    waitingOn: { recent: [], earlier: [] },
+    next: null,
+    deviations: { recent: [], earlier: [] },
+    decisions: { recent: [], earlier: [] },
+    cost: { tokens: 0, dollars: null, sessions: 0 },
+    ungrouped: null,
+  });
+
+  it('GET /goals/:goalId/digest opens the goal and answers its digest', async () => {
+    const opened: string[] = [];
+    const services = stubServices({
+      openGoalDigest: (id) => {
+        opened.push(id);
+        return digest;
+      },
+    });
+    const ok = await app(services).request(`/goals/${goalId}/digest`, auth);
+    expect(ok.status).toBe(200);
+    expect(GoalDigestDto.parse(await ok.json())).toEqual(digest);
+    expect(opened).toEqual([goalId]);
+    expect((await app(services).request('/goals/not-a-goal/digest', auth)).status).toBe(400);
+  });
+
+  it('answers 404 for a goal that does not exist', async () => {
+    const services = stubServices({
+      openGoalDigest: () => {
+        throw new NotFoundError('goal', goalId);
+      },
+    });
+    expect((await app(services).request(`/goals/${goalId}/digest`, auth)).status).toBe(404);
+  });
+
+  it('GET /projects/:projectId/goals answers the goal list', async () => {
+    const list = { goals: [], ungrouped: null };
+    const services = stubServices({ listGoals: () => list });
+    const ok = await app(services).request(`/projects/${projectId}/goals`, auth);
+    expect(ok.status).toBe(200);
+    expect(GoalListDto.parse(await ok.json())).toEqual(list);
+    expect((await app(services).request('/projects/not-a-project/goals', auth)).status).toBe(400);
+  });
+});
+
 describe('board routes', () => {
   const taskId = mintId('Task');
   const projectId = mintId('Project');
@@ -1149,10 +1208,12 @@ describe('area proposal route', () => {
       },
     };
     const seen: string[] = [];
+    const signals: (AbortSignal | undefined)[] = [];
     const res = await app(
       stubServices({
-        proposeAreas: (path) => {
+        proposeAreas: (path, signal) => {
           seen.push(path);
+          signals.push(signal);
           return Promise.resolve(proposal);
         },
       }),
@@ -1164,6 +1225,8 @@ describe('area proposal route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(proposal);
     expect(seen).toEqual(['/repo']);
+    // The request's own signal, so a client that disconnects stops the proposal.
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
   });
 });
 

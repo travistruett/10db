@@ -123,6 +123,16 @@ export type GoalAdoptIssue = z.infer<typeof GoalAdoptIssue>;
 export const GoalAdoptError = z.object({ errors: z.array(GoalAdoptIssue) });
 export type GoalAdoptError = z.infer<typeof GoalAdoptError>;
 
+/** The 200 body of a dry run that found nothing wrong: what adopting the brief would write. */
+export const GoalAdoptPreview = z.object({
+  dryRun: z.literal(true),
+  title: z.string(),
+  /** The tasks that would reach the Board, by their brief keys, in brief order. */
+  taskKeys: z.array(BriefKey),
+  criteria: z.int().min(0),
+});
+export type GoalAdoptPreview = z.infer<typeof GoalAdoptPreview>;
+
 // --- The goal (§4, §5) --------------------------------------------------------------------------
 
 export const GoalCriterionDto = z.object({
@@ -288,3 +298,19 @@ export const GoalDigestDto = z.object({
   ungrouped: UngroupedDigestDto.nullable(),
 });
 export type GoalDigestDto = z.infer<typeof GoalDigestDto>;
+
+/** One row of the goal list: the goal, its digest and how many items its Δ rows hold ("3 new since 3h ago"). */
+export const GoalSummaryDto = z.object({
+  goal: GoalDto,
+  /** Computed against the previous view without advancing it; its `ungrouped` is null (the list carries it). */
+  digest: GoalDigestDto,
+  newItems: z.int().min(0),
+});
+export type GoalSummaryDto = z.infer<typeof GoalSummaryDto>;
+
+/** `GET /projects/:projectId/goals`: the project's goals, oldest first, and the Ungrouped group beside them. */
+export const GoalListDto = z.object({
+  goals: z.array(GoalSummaryDto),
+  ungrouped: UngroupedDigestDto.nullable(),
+});
+export type GoalListDto = z.infer<typeof GoalListDto>;

@@ -9,7 +9,7 @@ import {
   type FolderInspectResult,
 } from '@10db/contracts';
 import { clearMocks, mockIPC } from '@tauri-apps/api/mocks';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
@@ -98,6 +98,8 @@ interface Served {
   readonly inspected: string[];
   readonly proposed: string[];
   readonly posted: unknown[];
+  /** How many area proposals the client cancelled while the daemon was still working on them. */
+  readonly abandoned: () => number;
   readonly accountsRequested: () => boolean;
 }
 
@@ -112,10 +114,12 @@ function serve(
   } = {},
 ): Served {
   let accountsAsked = false; // set by the /accounts handler
+  let abandoned = 0; // counted when a proposal request is cancelled by the client
   const served: Served = {
     inspected: [],
     proposed: [],
     posted: [],
+    abandoned: () => abandoned,
     accountsRequested: () => accountsAsked,
   };
   const result = opts.result ?? { ok: true, inspection: inspection() };
@@ -126,6 +130,9 @@ function serve(
     }),
     http.post(daemonUrl('/folders/propose-areas'), async ({ request }) => {
       served.proposed.push(AreaProposalInput.parse(await request.json()).path);
+      request.signal.addEventListener('abort', () => {
+        abandoned += 1;
+      });
       const answer = opts.proposal ?? PROPOSAL;
       if (answer === 'fail') return HttpResponse.json({ error: 'internal' }, { status: 500 });
       return HttpResponse.json(await answer);
@@ -153,8 +160,14 @@ function serve(
   return served;
 }
 
-function Harness({ onCreated }: { readonly onCreated: () => void }) {
-  const setup = useProjectSetup(onCreated);
+function Harness({
+  onCreated,
+  proposalMs,
+}: {
+  readonly onCreated: () => void;
+  readonly proposalMs?: number;
+}) {
+  const setup = useProjectSetup(onCreated, proposalMs === undefined ? {} : { proposalMs });
   return (
     <>
       {setup.fields}
@@ -166,8 +179,11 @@ function Harness({ onCreated }: { readonly onCreated: () => void }) {
   );
 }
 
-async function openForm(onCreated: () => void = () => undefined): Promise<void> {
-  renderWithDaemon(<Harness onCreated={onCreated} />);
+async function openForm(
+  onCreated: () => void = () => undefined,
+  proposalMs?: number,
+): Promise<void> {
+  renderWithDaemon(<Harness onCreated={onCreated} {...(proposalMs ? { proposalMs } : {})} />);
   await screen.findByRole('textbox', { name: 'Folder path' });
 }
 
@@ -645,7 +661,10 @@ describe('the areas in the new project', () => {
     expect(screen.getByText('The web app.')).toBeTruthy();
   });
 
-  it('waits for the proposal before the project can be created', async () => {
+  /** A proposal the daemon never answers, as a model call that hangs. */
+  const NEVER = new Promise<AreaProposalResult>(() => undefined);
+
+  it('lets the project be created while areas are being proposed, and says so', async () => {
     let answer: (result: AreaProposalResult) => void = () => undefined;
     const held = new Promise<AreaProposalResult>((resolve) => {
       answer = resolve;
@@ -655,11 +674,69 @@ describe('the areas in the new project', () => {
     await typePath('/Users/me/widgets');
     await screen.findByRole('textbox', { name: 'Name' });
     expect(await screen.findByText('Looking for the areas of this repository…')).toBeTruthy();
-    expect(disabled(create())).toBe(true);
+    expect(screen.getByText(/create the project now with one area/)).toBeTruthy();
+    expect(disabled(create())).toBe(false);
     answer(PROPOSAL);
     await screen.findByRole('group', { name: 'Area 1' });
     expect(disabled(create())).toBe(false);
     expect(screen.queryByText('Looking for the areas of this repository…')).toBeNull();
+  });
+
+  it('creates with one area over every file without waiting, and stops the proposal', async () => {
+    const served = serve({ proposal: NEVER });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await screen.findByText('Looking for the areas of this repository…');
+    await waitFor(() => {
+      expect(served.proposed).toHaveLength(1);
+    });
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [{ name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] }],
+    });
+    await waitFor(() => {
+      expect(served.abandoned()).toBe(1);
+    });
+  });
+
+  it('stops the proposal for a folder the builder has left for another', async () => {
+    const served = serve({ proposal: NEVER });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await waitFor(() => {
+      expect(served.proposed).toHaveLength(1);
+    });
+    await typePath('/Users/me/other');
+    await waitFor(() => {
+      expect(served.abandoned()).toBe(1);
+    });
+  });
+
+  it('stops the proposal when the form closes', async () => {
+    const served = serve({ proposal: NEVER });
+    await openForm();
+    await typePath('/Users/me/widgets');
+    await waitFor(() => {
+      expect(served.proposed).toHaveLength(1);
+    });
+    cleanup();
+    await waitFor(() => {
+      expect(served.abandoned()).toBe(1);
+    });
+  });
+
+  it('falls back to one area and says why when the proposal takes too long', async () => {
+    const served = serve({ proposal: NEVER });
+    await openForm(undefined, 150);
+    await typePath('/Users/me/widgets');
+    await screen.findByRole('group', { name: 'Area 1' });
+    expect(screen.getByText(/Couldn't propose areas: .*took longer than/)).toBeTruthy();
+    expect(names()).toEqual(['repo']);
+    await waitFor(() => {
+      expect(served.abandoned()).toBe(1);
+    });
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [{ name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] }],
+    });
   });
 
   it('creates the project with exactly the areas the builder accepted', async () => {

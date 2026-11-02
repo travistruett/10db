@@ -26,8 +26,14 @@ import type {
   FlowInput,
   FlowPatch,
   FolderInspectResult,
-  GoalId,
   FoundHostDto,
+  GoalAdoptInput,
+  GoalAdoptIssue,
+  GoalAdoptPreview,
+  GoalDigestDto,
+  GoalDto,
+  GoalId,
+  GoalListDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -79,6 +85,12 @@ import type {
 export type TaskStarted =
   | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
   | { readonly kind: 'batch'; readonly batch: BatchDto };
+
+/** What adopting a goal brief came to: the goal written, a dry run's preview, or every reason it was refused. */
+export type GoalAdoptResult =
+  | { readonly kind: 'adopted'; readonly goal: GoalDto }
+  | { readonly kind: 'previewed'; readonly preview: GoalAdoptPreview }
+  | { readonly kind: 'refused'; readonly errors: GoalAdoptIssue[] };
 
 /** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
@@ -154,9 +166,27 @@ export interface ApiServices {
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
+  /**
+   * The project's goals, each with its digest and count of new items since the builder last opened
+   * it, and the Ungrouped group. Leaves every view mark as it was.
+   */
+  listGoals(projectId: ProjectId): GoalListDto;
+  /**
+   * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
+   * advances to now. Throws NotFoundError for an unknown goal.
+   */
+  openGoalDigest(goalId: GoalId): GoalDigestDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;
+  /**
+   * Reads a goal brief from a path or its text, checks it and, unless `dryRun`, writes the goal in
+   * `draft` with its tasks in one transaction. A refusal lists every error and writes nothing.
+   * Throws NotFoundError for an unknown project.
+   */
+  adoptGoal(projectId: ProjectId, input: GoalAdoptInput): Promise<GoalAdoptResult>;
+  /** Throws NotFoundError for an unknown goal. */
+  getGoal(id: GoalId): GoalDto;
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
@@ -186,9 +216,10 @@ export interface ApiServices {
   inspectFolder(path: string): Promise<FolderInspectResult>;
   /**
    * Areas for the repository at `path`, each with its globs and a reason, for a new project or for
-   * Settings. Reads git's object store only and runs nothing the repository names.
+   * Settings. Reads git's object store only and runs nothing the repository names. Aborting
+   * `signal` (the caller went away) stops the model question and ends the process it started.
    */
-  proposeAreas(path: string): Promise<AreaProposalResult>;
+  proposeAreas(path: string, signal?: AbortSignal): Promise<AreaProposalResult>;
   /** The hosts the project's tasks and checks may reach: its project-wide network rules, one per host. */
   listNetworkHosts(projectId: ProjectId): NetworkHostDto[];
   /**

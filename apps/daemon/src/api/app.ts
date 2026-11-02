@@ -16,6 +16,7 @@ import {
   FlowInput,
   FlowPatch,
   FolderInspectInput,
+  GoalAdoptInput,
   GoalId,
   HealthResponse,
   InboxAnswer,
@@ -49,6 +50,7 @@ import {
   TeamInput,
   WorkstreamId,
   type AccountConfig,
+  type GoalAdoptError,
 } from '@10db/contracts';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
@@ -179,11 +181,33 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
+    .post(
+      '/projects/:projectId/goals/adopt',
+      validator('json', (value): GoalAdoptInput => GoalAdoptInput.parse(value)),
+      async (c) => {
+        const result = await deps.services.adoptGoal(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        if (result.kind === 'adopted') return c.json(result.goal, 201);
+        if (result.kind === 'previewed') return c.json(result.preview, 200);
+        return c.json({ errors: result.errors } satisfies GoalAdoptError, 400);
+      },
+    )
+    .get('/goals/:goalId', (c) =>
+      c.json(deps.services.getGoal(GoalId.parse(c.req.param('goalId')))),
+    )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )
     .get('/projects/:projectId/batches', (c) =>
       c.json(deps.services.listBatches(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/goals', (c) =>
+      c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/goals/:goalId/digest', (c) =>
+      c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),
     )
     .post(
       '/projects/:projectId/batches',
@@ -208,7 +232,8 @@ export function createApp(deps: ApiDeps) {
     .post(
       '/folders/propose-areas',
       validator('json', (value): AreaProposalInput => AreaProposalInput.parse(value)),
-      async (c) => c.json(await deps.services.proposeAreas(c.req.valid('json').path)),
+      async (c) =>
+        c.json(await deps.services.proposeAreas(c.req.valid('json').path, c.req.raw.signal)),
     )
     .get('/flows', (c) => c.json(deps.services.listFlows()))
     .patch(

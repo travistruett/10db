@@ -8,6 +8,7 @@ import {
   mintId,
   NotFoundError,
   TaskStatus,
+  UNFINISHED_BATCH_STATES,
   WorkspaceMode,
   type BatchDto,
   type BatchId,
@@ -45,7 +46,7 @@ import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { branchBehindBase, joinsLanding, missingLandingBranch, sharedLanding } from './landing';
-import { cutWorktree, type Plans } from './worktree-cut';
+import { cutWorktree, type CutTasks, type Plans } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
 
@@ -74,6 +75,12 @@ export interface BatchStarter {
    * before it abandons the failed attempt's batch, so a refused start leaves that batch as it was.
    */
   refuseStart(taskId: TaskId, ending: BatchId): void;
+  /**
+   * Cuts a CUTTING batch again, as the start that made it would have: the daemon stopped mid-cut and
+   * startup recovery has cleared what that cut left (`recoverBatches`). Its tasks keep their
+   * workstreams. A refusal raises its card as a first cut's does.
+   */
+  recut(batchId: BatchId): void;
   /**
    * After a workstream Retry: a FAILED worktree batch reopens in the cut queue once its worktree is
    * whole. Any other batch is left as it is.
@@ -187,7 +194,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     };
   }
 
-  /** The project's batch `batchId` when it is a separate copy's; none when it is not, or names no batch. */
+  /**
+   * The project's batch `batchId` when it is a separate copy's; none when it is the shared batch's
+   * or names no batch (the shared join answers for those). A batch of another project, or one that
+   * has finished, is refused here saying so, since the shared join can't tell what is wrong with it.
+   */
   function copyBatchOf(project: ProjectDto, batchId: BatchId): BatchDto | undefined {
     let batch: BatchDto;
     try {
@@ -196,7 +207,15 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       if (error instanceof NotFoundError) return undefined;
       throw error;
     }
-    return batch.projectId === project.id && batch.worktreePath !== null ? batch : undefined;
+    if (batch.projectId !== project.id)
+      throw new ConflictError(`Batch "${batch.title}" is not a batch of ${project.name}`);
+    // A finished copy may keep its worktree path (retiring keeps a worktree holding unseeded
+    // ignored files), so the state alone decides; a shared batch's path is always null.
+    if (!UNFINISHED_BATCH_STATES.includes(batch.state))
+      throw new ConflictError(
+        `Batch "${batch.title}" has finished; start these tasks again on their own`,
+      );
+    return batch.worktreePath !== null ? batch : undefined;
   }
 
   function prepareShared(
@@ -375,7 +394,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   async function cut(
     batchId: BatchId,
     tasks: readonly TaskDto[],
-    plans: Plans,
+    plans: CutTasks,
     inBatch: ReadonlySet<TaskId>,
     signal: AbortSignal,
   ): Promise<void> {
@@ -388,7 +407,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       });
       raise(ctx.inbox, project.id, forTasks(card, plans.keys(), { title: batch.title }));
     };
-    // A shutdown mid-cut leaves the CUTTING row; startup deletes it and says so.
+    // A shutdown mid-cut leaves the CUTTING row; startup cuts it again (`recoverBatches`).
     const stopped = (): boolean => signal.aborted;
     if (stopped()) return;
     try {
@@ -593,6 +612,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         BatchStartInput.parse({ title: task.title, taskIds: [taskId] }),
         [task],
         ending,
+      );
+    },
+    recut(batchId) {
+      const batch = getBatch(db, batchId);
+      if (batch.state !== BatchState.Cutting) return;
+      // The workstreams came QUEUED with the row and are still its own, so the tasks keep their place.
+      const tasks = listWorkstreams(db, { batchId }).map((ws) => getTask(db, ws.taskId));
+      const ids = new Map(tasks.map((task) => [task.id, null]));
+      ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+        batch.worktreePath === null
+          ? cut(batchId, tasks, ids, new Set(ids.keys()), signal)
+          : cutWorktree(ctx, batchId, ids, signal),
       );
     },
     reopen(batchId) {

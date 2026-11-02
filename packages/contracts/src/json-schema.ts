@@ -53,10 +53,12 @@ import {
 import {
   GoalAdoptError,
   GoalAdoptInput,
+  GoalAdoptPreview,
   GoalBrief,
   GoalCriterionDto,
   GoalDigestDto,
   GoalDto,
+  GoalListDto,
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
@@ -170,10 +172,12 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'workstream-changes-dto': WorkstreamChangesDto,
   'goal-adopt-error': GoalAdoptError,
   'goal-adopt-input': GoalAdoptInput,
+  'goal-adopt-preview': GoalAdoptPreview,
   'goal-brief': GoalBrief,
   'goal-criterion-dto': GoalCriterionDto,
   'goal-digest-dto': GoalDigestDto,
   'goal-dto': GoalDto,
+  'goal-list-dto': GoalListDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
 };
