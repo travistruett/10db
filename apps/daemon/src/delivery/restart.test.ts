@@ -1,5 +1,13 @@
-import { ConflictError, type WorkstreamId } from '@10db/contracts';
-import { getBatch, getInboxItem, getTask, getWorkstream, listWorkstreams } from '@10db/db';
+import { ConflictError, mintId, WorkspaceMode, type WorkstreamId } from '@10db/contracts';
+import {
+  getBatch,
+  getInboxItem,
+  getTask,
+  getWorkstream,
+  insertToolOp,
+  listWorkstreams,
+  patchTask,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createFailedRestarts, type FailedRestarts } from './restart';
@@ -75,6 +83,69 @@ describe('a task whose latest run failed in an open batch', () => {
     restarts.supersede(a.taskId);
 
     expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+  });
+
+  /**
+   * Alpha and Beta share a batch; Beta finishes and Alpha fails, having committed through the
+   * commit tool when `committed`. Alpha then moves to a separate copy and starts over there, and the
+   * batch it left is checked for shipping, as the start does.
+   */
+  async function startedOverFromShared(committed: boolean) {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
+    if (!a || !b) throw new Error('two workstreams expected');
+    if (committed) {
+      const sha = h.commit('src/api/alpha.txt');
+      h.state.write((w) => {
+        insertToolOp(w, {
+          workstreamId: a.id,
+          sessionId: mintId('Session'),
+          opId: 'op-alpha-commit',
+          tool: 'commit',
+          result: { sha, alreadyCommitted: false },
+        });
+      });
+    }
+    h.settle(b.id, 'DONE');
+    h.settle(a.id, 'FAILED');
+
+    // The task moved to a separate copy, so its fresh start makes a batch of its own.
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    const left = restarts.supersede(a.taskId);
+    const [fresh] = h.starter.startBatch(h.project.id, {
+      title: 'Alpha again',
+      taskIds: [alpha.id],
+    });
+    await h.jobs.idle();
+    expect(left).toBe(batch.id);
+    expect(fresh?.id).not.toBe(batch.id);
+    h.shipper.checkBatch(batch.id);
+    return { batchId: batch.id };
+  }
+
+  it('lets the batch it left ship its other work on its own when the attempt committed nothing', async () => {
+    const { batchId } = await startedOverFromShared(false);
+
+    // The superseded attempt no longer holds the old batch open, and Ship anyway isn't needed.
+    expect(getBatch(h.store.db, batchId).state).not.toBe('OPEN');
+    expect(getBatch(h.store.db, batchId).notices).toEqual([]);
+  });
+
+  it('keeps the batch it left for Ship anyway, and says why, when the attempt left commits on it', async () => {
+    const { batchId } = await startedOverFromShared(true);
+
+    // The failed attempt's commits are unverified; they never ship without the builder seeing them.
+    const batch = getBatch(h.store.db, batchId);
+    expect(batch.state).toBe('OPEN');
+    const notice = h.only(batch.notices);
+    expect(notice).toMatchObject({ key: 'superseded-attempt', tone: 'warning' });
+    expect(notice.line).toContain('Alpha');
+    expect(notice.body).toContain('Ship anyway');
   });
 
   it('refuses to end the batch while a run in it is live', async () => {

@@ -30,7 +30,27 @@ export const NOTICE_KEY = {
   landingBehind: 'landing-behind',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
+  /** A task started over from a failed attempt whose commits are still on the batch's branch. */
+  supersededAttempt: 'superseded-attempt',
 } as const;
+
+/**
+ * What a batch's tasks are told when tasks in it failed, started over in a run of their own, and
+ * left their failed attempts' commits on the batch's branch: those commits are unverified, so the
+ * batch doesn't ship by itself, and Ship anyway would put them in its pull request.
+ */
+export const supersededNotices = {
+  committed: (batch: BatchDto, titles: readonly string[]): Notice => {
+    const named = titles.map((t) => `"${t}"`).join(', ');
+    const one = titles.length === 1;
+    return {
+      key: NOTICE_KEY.supersededAttempt,
+      tone: 'warning',
+      line: `${named} started over; ${one ? 'its' : 'their'} failed attempt${one ? '' : 's'}' commits are still on this branch`,
+      body: `${named} failed in this batch and ${one ? 'was' : 'were'} started over in a new run, which does the work again from ${batch.baseBranch}. Nothing will run the failed attempt${one ? '' : 's'} again, but the commits ${one ? 'it' : 'they'} made are still on ${batch.branch ?? "the batch's branch"}, and no gate or review passed them. So this batch doesn't ship by itself.\n\nShip anyway puts those commits in the pull request with the other tasks' work, and the new run may then conflict with them or repeat them. To keep them out, revert them on the branch first, then Ship anyway, or abandon the batch.`,
+    };
+  },
+};
 
 /**
  * What a copy's tasks are told when its cut skipped the seed because Your folder had an unfinished
