@@ -203,12 +203,30 @@ describe('a goal’s status', () => {
     expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
   });
 
-  it('is not running while the only started task waits in the queue', () => {
+  it('is queued, not running or not started, while a started task waits in the queue', () => {
     const { goal, a } = adopt();
     run(a, WorkstreamState.Queued);
     const digest = goalDigest(store.db, goal.id, null);
-    expect(digest.status).toBe(GoalStatus.NotStarted);
+    expect(digest.status).toBe(GoalStatus.Queued);
     expect(digest.workingNow).toEqual([]);
+  });
+
+  it('is queued when some tasks are done and the rest wait in the queue', () => {
+    const { goal, a, b, c } = adopt();
+    run(a, WorkstreamState.Done);
+    store.write((ctx) => {
+      setTaskStatus(ctx, a, TaskStatus.Done);
+    });
+    run(b, WorkstreamState.Queued);
+    run(c, WorkstreamState.Queued);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Queued);
+  });
+
+  it('is running, not queued, while one task runs and another waits in the queue', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Running);
+    run(b, WorkstreamState.Queued);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
   });
 
   it('is waiting on you while an open card is on one of its tasks, ahead of running', () => {

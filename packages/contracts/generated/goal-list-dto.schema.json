@@ -222,6 +222,7 @@
                   "waiting_on_someone",
                   "paused",
                   "running",
+                  "queued",
                   "shipping",
                   "not_started",
                   "done"
@@ -708,6 +709,7 @@
                           "waiting_on_someone",
                           "paused",
                           "running",
+                          "queued",
                           "shipping",
                           "not_started",
                           "done"
@@ -811,6 +813,7 @@
                 "waiting_on_someone",
                 "paused",
                 "running",
+                "queued",
                 "shipping",
                 "not_started",
                 "done"

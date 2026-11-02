@@ -243,10 +243,11 @@ decisions; phase 3 adds "Waiting on Mark" with the evidence sent.
   are for reading only.
 - **One row per goal:** title, a status dot and one line. **Status, first match wins:** failed (red: a goal
   task failed and isn't retried), waiting on you (yellow: a card owned by the owner), waiting on someone (yellow:
-  a card owned by another person), paused (orange), running (blue: a goal task's workstream is active), not
-  started (gray: nothing of it is running and tasks wait unstarted; "Not started · 11 tasks · Start Ready Tasks
-  on the Board"), done (green). Phase 1 has failed, waiting on you, running, not started and done. Colors follow
-  DESIGN.md (gray is queued).
+  a card owned by another person), paused (orange), running (blue: a goal task's workstream is active), queued
+  (gray: nothing runs and an open task has started and waits for a lane; "Queued · 6 of 11 tasks done · waiting
+  for a lane"), not started (gray: nothing of it is running and tasks wait unstarted; "Not started · 11 tasks ·
+  Start Ready Tasks on the Board"), done (green). Phase 1 has failed, waiting on you, running, queued, not started
+  and done. Colors follow DESIGN.md (gray is queued).
 - **Done in phase 1** means every goal task that isn't cancelled is done and its pull request merged (the pull
   request state 10db already tracks); until then the goal is blue, "Shipping · 11 of 11 tasks done · 3 pull
   requests open". In a project without pull requests, done means every task done. From phase 2, done is
