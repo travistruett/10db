@@ -23,6 +23,7 @@ import {
   type ProjectId,
   type SessionId,
   type WorkstreamId,
+  withParkedTasks,
   withParkOption,
 } from '@10db/contracts';
 import {
@@ -30,6 +31,8 @@ import {
   getInboxItem,
   getProject,
   getProposal,
+  getTask,
+  getWorkstreamRow,
   insertDecision,
   insertInboxItem,
   insertPermissionRule,
@@ -164,6 +167,22 @@ export function rewordCard(
 export function withdrawCard(ctx: WriteContext, id: InboxItemId): void {
   if (getInboxItem(ctx.tx, id).state === InboxState.Open)
     updateInboxItem(ctx, id, { state: InboxState.Cancelled });
+}
+
+/**
+ * A question card's options, with Park the task worded for the tasks the card's targets belong to:
+ * parking stops every target's run, so a card more than one lane raised says which tasks it parks.
+ */
+function optionsForTargets(
+  ctx: WriteContext,
+  options: readonly InboxOption[],
+  targets: readonly InboxTarget[],
+): InboxOption[] {
+  const taskIds = new Set(targets.map((t) => getWorkstreamRow(ctx.tx, t.workstreamId).taskId));
+  return withParkedTasks(
+    options,
+    [...taskIds].map((id) => getTask(ctx.tx, id).title),
+  );
 }
 
 /** Identical open questions fold into one card. */
@@ -340,7 +359,13 @@ export function createInboxService(deps: {
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
           const others = existing.targets.filter((t) => t.workstreamId !== input.workstreamId);
-          return updateInboxItem(ctx, existing.id, { targets: [...others, target] });
+          const targets = [...others, target];
+          return updateInboxItem(ctx, existing.id, {
+            targets,
+            ...(existing.kind === InboxKind.Question
+              ? { options: optionsForTargets(ctx, existing.options, targets) }
+              : {}),
+          });
         }
         return insertInboxItem(ctx, {
           projectId: input.projectId,
@@ -449,7 +474,14 @@ export function createInboxService(deps: {
           updateInboxItem(
             ctx,
             item.id,
-            targets.length === 0 ? { state: InboxState.Cancelled, targets } : { targets },
+            targets.length === 0
+              ? { state: InboxState.Cancelled, targets }
+              : {
+                  targets,
+                  ...(item.kind === InboxKind.Question
+                    ? { options: optionsForTargets(ctx, item.options, targets) }
+                    : {}),
+                },
           );
         }
       });
