@@ -748,17 +748,20 @@ export function createRunner(opts: RunnerOptions): Runner {
    * QA checks a change as its user would, and a change of Markdown files alone has no behavior to
    * exercise. Whether that is so is known only after implement, from the paths the commits touched, so
    * it is decided when an approving review is about to hand over to QA. The QA step then leaves the
-   * plan, as a step an existing skip rule drops never enters one, and the reason is logged.
+   * plan, as a step an existing skip rule drops never enters one, and the reason is logged. A review
+   * that rejects at the retry limit and ships anyway hands over to QA as an approval does, so it
+   * gets the same check (`shipping`).
    */
   async function withoutDocsOnlyQa(
     id: WorkstreamId,
     row: WorkstreamRow,
     step: WorkstreamStep,
+    shipping = step.result?.verdict === Verdict.Approve,
   ): Promise<WorkstreamRow> {
     const qaIndex = row.stepIndex + 1;
     if (
       step.role !== StepRole.Review ||
-      step.result?.verdict !== Verdict.Approve ||
+      !shipping ||
       row.steps[qaIndex]?.role !== StepRole.Qa ||
       row.baseHead === null
     )
@@ -1001,10 +1004,13 @@ export function createRunner(opts: RunnerOptions): Runner {
             };
             // The move an approval would get: a step that follows (QA after review) still runs. One
             // that rejects there is past the limit too, so it ships the same way with its own follow-up.
-            const to = row.stepIndex + 1;
-            if (to < row.steps.length) return advanceTo(id, ctl, row, step, to, atLimit);
-            return completeReadOnlySteps(id, ctl, row, step, {
-              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task`,
+            // A change of Markdown files alone skips QA here as it does after an approval.
+            const shipped = await withoutDocsOnlyQa(id, row, step, true);
+            const skippedQa = shipped.steps.length < row.steps.length;
+            const to = shipped.stepIndex + 1;
+            if (to < shipped.steps.length) return advanceTo(id, ctl, shipped, step, to, atLimit);
+            return completeReadOnlySteps(id, ctl, shipped, step, {
+              reason: `${step.role} rejected the work at the retry limit; shipped with its findings filed as a follow-up task${skippedQa ? '; QA skipped: only docs changed' : ''}`,
               atLimit,
             });
           }
