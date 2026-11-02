@@ -244,6 +244,11 @@ export function listShapeLinks(db: DbReader, shapeId: ShapeId): ShapeLinkRow[] {
     .all();
 }
 
+/** The link naming a goal Convert made, or undefined for a goal no conversation made. */
+export function findShapeLinkOfGoal(db: DbReader, goalId: GoalId): ShapeLinkRow | undefined {
+  return db.select().from(schema.shapeLinks).where(eq(schema.shapeLinks.goalId, goalId)).get();
+}
+
 /** Deletes the links of one proposal, when Remove Draft Goal makes it pending again. */
 export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalId): void {
   ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.proposalId, proposalId)).run();

@@ -5,6 +5,7 @@ export {
   FakeScriptBook,
   loadFakeScriptBook,
 } from './fake-adapter';
+export { scriptedShapeBehaviour } from './fake-shape';
 export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
 export { checkAccount, type SeenAccount } from './account-check';
 export { AccountProbeError, CompletionError, SessionEndReason } from './types';

@@ -10,6 +10,7 @@ import {
   BoardColumnInput,
   BoardColumnPatch,
   AreaProposalInput,
+  DecisionId,
   DomainError,
   EventsHead,
   FlowId,
@@ -41,6 +42,11 @@ import {
   PROTOCOL_VERSION,
   RetryInput,
   RoutingRulesInput,
+  ShapeConvertInput,
+  ShapeId,
+  ShapeInput,
+  ShapeMessageInput,
+  ShapeWithdrawInput,
   StartTaskInput,
   SystemCheckDto,
   TaskId,
@@ -51,6 +57,7 @@ import {
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type ShapeConvertError,
 } from '@10db/contracts';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
@@ -208,6 +215,68 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/goals/:goalId', (c) =>
       c.json(deps.services.getGoal(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/projects/:projectId/shapes', (c) =>
+      c.json(deps.services.listShapes(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/shapes',
+      validator('json', (value): ShapeInput => ShapeInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.createShape(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          201,
+        ),
+    )
+    .get('/shapes/:shapeId', (c) =>
+      c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
+    )
+    .post(
+      '/shapes/:shapeId/messages',
+      validator('json', (value): ShapeMessageInput => ShapeMessageInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.sendShapeMessage(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json').text,
+          ),
+          202,
+        ),
+    )
+    .post('/shapes/:shapeId/propose', (c) =>
+      c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
+    )
+    .post('/shapes/:shapeId/stop', async (c) => {
+      await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));
+      return c.body(null, 204);
+    })
+    .post(
+      '/shapes/:shapeId/convert',
+      validator('json', (value): ShapeConvertInput => ShapeConvertInput.parse(value)),
+      async (c) => {
+        const outcome = await deps.services.convertShape(
+          ShapeId.parse(c.req.param('shapeId')),
+          c.req.valid('json'),
+        );
+        if (outcome.kind === 'converted') return c.json(outcome.result, 200);
+        return c.json({ errors: outcome.errors } satisfies ShapeConvertError, 400);
+      },
+    )
+    .post('/goals/:goalId/remove-draft', (c) => {
+      deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));
+      return c.body(null, 204);
+    })
+    .post(
+      '/shapes/:shapeId/decisions/:decisionId/withdraw',
+      validator('json', (value): ShapeWithdrawInput => ShapeWithdrawInput.parse(value)),
+      (c) => {
+        deps.services.withdrawShapeDecision(
+          ShapeId.parse(c.req.param('shapeId')),
+          DecisionId.parse(c.req.param('decisionId')),
+          c.req.valid('json').reason,
+        );
+        return c.body(null, 204);
+      },
     )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),

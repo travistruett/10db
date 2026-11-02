@@ -51,6 +51,7 @@ import type {
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
+  DecisionId,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -65,6 +66,14 @@ import type {
   ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
+  ShapeConvertInput,
+  ShapeConvertResult,
+  ShapeDto,
+  ShapeId,
+  ShapeInput,
+  ShapeMessageDto,
+  ShapeProposeResult,
+  ShapeViewDto,
   StepPlanDto,
   StartTaskInput,
   SystemCheckDto,
@@ -91,6 +100,11 @@ export type GoalAdoptResult =
   | { readonly kind: 'adopted'; readonly goal: GoalDto }
   | { readonly kind: 'previewed'; readonly preview: GoalAdoptPreview }
   | { readonly kind: 'refused'; readonly errors: GoalAdoptIssue[] };
+
+/** What Convert came to: what it created, or every reason it was refused (nothing written). */
+export type ShapeConvertOutcome =
+  | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
+  | { readonly kind: 'refused'; readonly errors: string[] };
 
 /** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
@@ -178,6 +192,31 @@ export interface ApiServices {
    * advances to now. Throws NotFoundError for an unknown goal.
    */
   openGoalDigest(goalId: GoalId): GoalDigestDto;
+  /** The project's Shape conversations, the one touched last first. Throws NotFoundError for an unknown project. */
+  listShapes(projectId: ProjectId): ShapeDto[];
+  /** Opens a conversation; with no title it is named by its first message. */
+  createShape(projectId: ProjectId, input: ShapeInput): ShapeDto;
+  /** Everything the Shape screen renders for the conversation. Throws NotFoundError for an unknown one. */
+  getShapeView(id: ShapeId): ShapeViewDto;
+  /** Records a builder message and queues Claude's turn on it. */
+  sendShapeMessage(id: ShapeId, text: string): ShapeMessageDto;
+  /** Queues a Propose turn, or ignores the press while one is queued or running. */
+  proposeShape(id: ShapeId): ShapeProposeResult;
+  /** Interrupts the turn that is running; answering when nothing runs is a no-op. */
+  stopShape(id: ShapeId): Promise<void>;
+  /**
+   * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
+   * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
+   * caller asks to interrupt it.
+   */
+  convertShape(id: ShapeId, input: ShapeConvertInput): Promise<ShapeConvertOutcome>;
+  /**
+   * Remove Draft Goal: removes a goal a conversation made while none of its tasks has started, and
+   * makes its proposal pending again. Throws InvalidError for any other goal.
+   */
+  removeDraftGoal(goalId: GoalId): void;
+  /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
+  withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;

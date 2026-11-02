@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
   EventType,
+  InvalidError,
   PROTOCOL_VERSION,
+  StepRole,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -19,8 +21,11 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   deleteJudgeCallsBefore,
+  getAccount,
   getAccountRow,
   getAppSetting,
+  getProject,
+  listModelProfiles,
   listPermissionRules,
   listProjects,
   migrateDatabase,
@@ -110,6 +115,9 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
+import { offeredProfiles, roleDefault } from '../routing';
+import { createShapeService } from '../shape';
+import { createShapeServices } from './shape-services';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
@@ -246,6 +254,8 @@ export interface RunningDaemon {
 const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 /** Written by stop() after every runner has stopped; its absence at start means the last run crashed. */
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
+/** How long a Shape tool call may take: propose_plan validates and writes, and answers at once. */
+const SHAPE_TOOL_TIMEOUT_MS = 60_000;
 
 /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
@@ -766,6 +776,50 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
+  // Shape conversations (spec §5): a read-only session per conversation on the project's account and
+  // the `plan` role's model. The MCP address is known once the server listens, so it is read lazily.
+  const shape = createShapeService({
+    state,
+    adapter,
+    clock,
+    log: logger.child({ component: 'shape' }),
+    mcp: {
+      get url() {
+        return mcpUrl;
+      },
+      toolTimeoutMs: SHAPE_TOOL_TIMEOUT_MS,
+    },
+    launch(projectId) {
+      const project = getProject(db, projectId);
+      const row = getAccountRow(db, project.accountId);
+      const profile = roleDefault({
+        provider: project.provider,
+        role: StepRole.Plan,
+        floor: null,
+        profiles: offeredProfiles(
+          listModelProfiles(db),
+          getAccount(db, project.accountId).settings.aliases,
+        ),
+      })?.profile;
+      if (profile === undefined)
+        throw new InvalidError(`${row.label} offers no model for planning`);
+      const session = launcher.session(row, profile.model);
+      return {
+        cwd: project.repoPath,
+        model: session.model,
+        effort: profile.effort,
+        env: session.env,
+        account: session.expect,
+        access: {
+          checkout: project.repoPath,
+          home: homedir(),
+          protectedReads: guarded.map((p) => p.path),
+          filesDir: join(opts.dataDir, 'shapes'),
+          tempRoot: sandboxTempRoot ?? LANE_TEMP_ROOT,
+        },
+      };
+    },
+  });
   const laneSandbox =
     opts.sandbox && runtime
       ? createLaneSandbox({
@@ -931,6 +985,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       judge,
       off: opts.judgeOff === true,
     }),
+    shape: createShapeServices({ shape }),
     starter,
     shipper,
     accounts: accountService,
@@ -976,6 +1031,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       claimWaits,
       migrationsBase,
+      shapeTools: shape.toolsFor,
     }),
   });
   const wss = new WebSocketServer({ noServer: true });
@@ -1043,6 +1099,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.
       await preparer.idle();
+      await shape.close();
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();

@@ -1,25 +1,32 @@
 import {
   ConflictError,
+  EventType,
+  InvalidError,
   ShapeMessageAuthor,
   ShapeMessageKind,
   SessionMode,
+  type DecisionId,
   type Effort,
+  type GoalId,
   type ProjectId,
   type ShapeDto,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeOrigin,
   type ShapeProposalId,
+  type ShapeViewDto,
   type SessionId,
 } from '@10db/contracts';
 import {
   endSession,
+  findShapeLinkOfGoal,
   getShape,
   getShapeSdkSessionId,
   insertSession,
   insertShape,
   insertShapeMessage,
   listShapeMessages,
+  listShapes,
   markSessionStarted,
   patchShape,
   updateSessionUsage,
@@ -47,6 +54,8 @@ import {
   SHAPE_SYSTEM_PROMPT,
 } from './policy';
 import { createShapeToolHandlers } from './tools';
+import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
+import { buildShapeView } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
 // Propose and Convert guards, the move to a fresh session when the context fills, and the idle close.
@@ -83,6 +92,17 @@ export interface ShapeService {
   propose(shapeId: ShapeId): { status: 'started' | 'ignored' };
   /** Interrupts the turn that is running; the queue runs next. */
   stop(shapeId: ShapeId): Promise<void>;
+  /** Everything the screen renders for the conversation, with where its session is. */
+  view(shapeId: ShapeId): ShapeViewDto;
+  /** The project's conversations, the one touched last first. */
+  list(projectId: ProjectId): ShapeDto[];
+  /**
+   * Remove Draft Goal (spec §11), found through the conversation that made the goal. Throws
+   * InvalidError for a goal no conversation made and ConflictError once a task has started.
+   */
+  removeDraftGoal(goalId: GoalId): void;
+  /** Withdraw Decision…: a decision the conversation wrote, with the builder's reason. */
+  withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
    * Converts the selected proposals. Refused with a `ConflictError` while a turn runs, unless the
    * caller asks to interrupt it. Holds the queue while it writes.
@@ -98,6 +118,16 @@ export interface ShapeService {
   settled(shapeId: ShapeId): Promise<void>;
   /** Stops every session. */
   close(): Promise<void>;
+}
+
+/** A conversation's name until its first message gives it one. */
+export const DEFAULT_SHAPE_TITLE = 'New conversation';
+const TITLE_MAX = 60;
+
+/** The first non-empty line of a message, cut to fit a title. */
+function titleFrom(text: string): string {
+  const line = (text.split('\n').find((l) => l.trim() !== '') ?? '').replace(/\s+/g, ' ').trim();
+  return line.length <= TITLE_MAX ? line : `${line.slice(0, TITLE_MAX - 1).trimEnd()}…`;
 }
 
 const IDLE_MS = 10 * 60_000;
@@ -182,6 +212,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     state.write((ctx) => insertShapeMessage(ctx, shapeId, { author, kind, body }));
   const notice = (shapeId: ShapeId, body: string): void => {
     say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Notice, body);
+  };
+
+  /** Tells the screen the conversation changed, for what no row records (where its session is). */
+  const announce = (shapeId: ShapeId): void => {
+    state.write((ctx) => {
+      ctx.emit({
+        type: EventType.ShapeChanged,
+        entityType: 'shape',
+        entityId: shapeId,
+        data: { projectId: getShape(ctx.tx, shapeId).projectId },
+      });
+    });
   };
 
   const toolsFor: ShapeToolsFor = ({ shapeId }) =>
@@ -435,6 +477,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           const turn = rt.queue.shift();
           if (turn === undefined) break;
           rt.current = turn;
+          announce(shapeId);
           try {
             await runTurn(shapeId, rt, turn);
           } catch (error) {
@@ -442,6 +485,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             notice(shapeId, "Claude's turn failed; send the message again.");
           } finally {
             rt.current = null;
+            announce(shapeId);
           }
         }
       } finally {
@@ -466,6 +510,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     send(shapeId, text) {
       const rt = runtimeOf(shapeId);
       const message = say(shapeId, ShapeMessageAuthor.Builder, ShapeMessageKind.Text, text);
+      const title = titleFrom(text);
+      if (title !== '' && getShape(state.db, shapeId).title === DEFAULT_SHAPE_TITLE)
+        state.write((ctx) => {
+          patchShape(ctx, shapeId, { title });
+        });
       rt.queue.push({ kind: 'message', prompt: `[m:${message.id}] ${text}` });
       pump(shapeId, rt);
       return message;
@@ -488,6 +537,42 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       rt.queue.push({ kind: 'propose', prompt: `[m:${message.id}] ${instruction}` });
       pump(shapeId, rt);
       return { status: 'started' };
+    },
+
+    view(shapeId) {
+      const rt = runtimes.get(shapeId);
+      const queue = rt?.queue ?? [];
+      return buildShapeView(state.db, shapeId, {
+        running: rt !== undefined && rt.current !== null,
+        queued: queue.length,
+        proposing: rt?.current?.kind === 'propose' || queue.some((t) => t.kind === 'propose'),
+      });
+    },
+
+    list: (projectId) =>
+      listShapes(state.db, projectId).sort(
+        (a, b) => b.updatedAt.localeCompare(a.updatedAt) || b.id.localeCompare(a.id),
+      ),
+
+    removeDraftGoal(goalId) {
+      state.write((ctx) => {
+        const link = findShapeLinkOfGoal(ctx.tx, goalId);
+        if (link === undefined)
+          throw new InvalidError(`${goalId} is not a goal a conversation made`);
+        removeDraftGoalOf(ctx, link.shapeId, goalId);
+      });
+    },
+
+    withdrawDecision(shapeId, decisionId, reason) {
+      state.write((ctx) => {
+        withdrawConvertedDecision(ctx, shapeId, decisionId, reason);
+        ctx.emit({
+          type: EventType.ShapeChanged,
+          entityType: 'shape',
+          entityId: shapeId,
+          data: { projectId: getShape(ctx.tx, shapeId).projectId },
+        });
+      });
     },
 
     async stop(shapeId) {

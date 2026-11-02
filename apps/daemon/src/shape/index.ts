@@ -1,6 +1,6 @@
 // The Shape module (spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md): a
 // conversation's read-only session, its plan drafts and Convert. `createShapeService` (service.ts)
-// joins the composition root with the HTTP routes, which export it from here.
+// joins the composition root with the HTTP routes (daemon/shape-services.ts).
 
 export { judgeShapeCall } from './confinement';
 export {
@@ -9,3 +9,4 @@ export {
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_SYSTEM_PROMPT,
 } from './policy';
+export { createShapeService, DEFAULT_SHAPE_TITLE, type ShapeService } from './service';

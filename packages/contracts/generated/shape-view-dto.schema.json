@@ -181,6 +181,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -617,6 +620,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -823,6 +829,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -977,6 +986,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1106,6 +1118,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1267,6 +1282,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1423,6 +1441,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1557,6 +1578,9 @@
                             "type": "null"
                           }
                         ]
+                      },
+                      "withdrawn": {
+                        "type": "boolean"
                       }
                     },
                     "required": [

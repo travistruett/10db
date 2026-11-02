@@ -18,6 +18,8 @@ export const ShapeConvertedDto = z.object({
   goalId: GoalId.nullable(),
   taskIds: z.array(TaskId),
   decisionId: DecisionId.nullable(),
+  /** The converted decision was withdrawn (Withdraw Decision…); absent for every other kind. */
+  withdrawn: z.boolean().optional(),
 });
 export type ShapeConvertedDto = z.infer<typeof ShapeConvertedDto>;
 
