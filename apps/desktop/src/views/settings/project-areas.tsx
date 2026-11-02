@@ -171,11 +171,13 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
             <Text size="xs">
               {area.name.trim() === ''
                 ? 'Name this area.'
-                : `Tasks in "${area.name.trim()}" may change files in ${
-                    lines(area.paths)
-                      .map((g) => describePathPattern(g).words)
-                      .join('; ') || 'no paths yet'
-                  }.`}
+                : area.catchAll
+                  ? `Tasks in "${area.name.trim()}" may change every file no other area holds.`
+                  : `Tasks in "${area.name.trim()}" may change files in ${
+                      lines(area.paths)
+                        .map((g) => describePathPattern(g).words)
+                        .join('; ') || 'no paths yet'
+                    }.`}
             </Text>
             <Checkbox
               size="xs"
