@@ -2,7 +2,14 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DaemonEvent, ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
+import {
+  DaemonEvent,
+  isTerminal,
+  ProjectDto,
+  TaskDto,
+  WorkstreamDto,
+  WorkstreamState,
+} from '@10db/contracts';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -100,6 +107,21 @@ async function waitForProgress<T>(
   }, HANG_GUARD_MS);
 }
 
+/**
+ * Looks up workstream `id` and fails at once, with its state in the message, if it has ended in a state
+ * other than DONE (FAILED, CANCELLED): it can make no more progress, so a wait on it would only run out
+ * HANG_GUARD_MS. Like the daemon-exit check this is a fact about the run, not a time limit, so load cannot
+ * trip it.
+ */
+async function currentWorkstream(api: ReturnType<typeof apiClient>, id: string) {
+  const list = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
+  const mine = list.find((w) => w.id === id);
+  if (mine && isTerminal(mine.state) && mine.state !== WorkstreamState.Done) {
+    throw new Error(`the workstream ended ${mine.state} before the wait finished`);
+  }
+  return mine;
+}
+
 /** Connects to the daemon with `pid`; a daemon.json left by an earlier, killed daemon is skipped. */
 async function connect(daemon: ChildProcess) {
   return waitForProgress(daemon, async () => {
@@ -147,11 +169,13 @@ describe('kill -9 mid-step', () => {
         areas: ['x'],
       });
       const ws = await api.post(`/tasks/${task.id}/start`, WorkstreamDto);
-      await waitForProgress(first, async () =>
-        (await api.get('/events?after=0&limit=1000', z.array(DaemonEvent))).find(
+      await waitForProgress(first, async () => {
+        const hung = (await api.get('/events?after=0&limit=1000', z.array(DaemonEvent))).find(
           (e) => e.type === 'session.activity' && e.data['summary'] === 'about to hang',
-        ),
-      );
+        );
+        if (!hung) await currentWorkstream(api, ws.id);
+        return hung;
+      });
 
       const killed = new Promise((r) => first.once('exit', r));
       first.kill('SIGKILL');
@@ -161,9 +185,8 @@ describe('kill -9 mid-step', () => {
       child = second;
       api = await connect(second);
       const done = await waitForProgress(second, async () => {
-        const list = await api.get('/workstreams?active=false', z.array(WorkstreamDto));
-        const mine = list.find((w) => w.id === ws.id);
-        return mine?.state === 'DONE' ? mine : undefined;
+        const mine = await currentWorkstream(api, ws.id);
+        return mine?.state === WorkstreamState.Done ? mine : undefined;
       });
       // The kill counted as a failed attempt, then the step_done that followed reset the count.
       expect(done.recoveryAttempts).toBe(0);
