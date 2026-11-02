@@ -37,10 +37,16 @@ import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
-import { baseNotices, NOTICE_KEY } from './notices';
+import { baseNotices, ciNotices, NOTICE_KEY } from './notices';
 
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
+
+/**
+ * How long a head may have no check, while GitHub waits for a required one, before 10db takes the
+ * runs for lost. A workflow starts within seconds of a push, so this leaves room for a busy queue.
+ */
+const CHECKS_START_MS = 10 * 60_000;
 
 /** Longest reason kept on a batch: it is shown in the UI. */
 const MAX_REASON = 500;
@@ -88,6 +94,12 @@ export interface RetryMergeOptions {
 export interface PullRequestLanding {
   /** The open pull request conflicts with its base. */
   catchUp(batchId: BatchId): void;
+  /**
+   * The open pull request's head has had minutes to get its required checks and has none at all:
+   * merges the base into the pull request and pushes it, so GitHub starts its workflows on a new head.
+   * Pushes nothing when checks have appeared since.
+   */
+  restartCi(batchId: BatchId): void;
   /**
    * The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again.
    * `catchUpCardWasOpen`: this round withdrew the card for a catch-up that stopped, so a merge is due.
@@ -199,6 +211,12 @@ export function createPrWatch(input: {
    * whose read always ends a round (one that always times out) can't keep the others unread.
    */
   let resumeAfter: BatchId | null = null;
+  /**
+   * Each pull request whose head has no check while GitHub waits for a required one: the head, when
+   * the watch first saw it so, and whether the shipper was asked to start CI again. In memory: a
+   * restart counts the minutes again.
+   */
+  const awaitingRuns = new Map<BatchId, { head: string | null; since: number; asked: boolean }>();
   /** Set by `recheck`; the next round to start takes it, so a round already running leaves it. */
   let recheckDue = false;
 
@@ -369,6 +387,66 @@ export function createPrWatch(input: {
       clearCiStop(write, root.id);
   }
 
+  /**
+   * Follows a pull request whose head has no check at all while GitHub holds it for a required one:
+   * its workflows never started, as when GitHub could not build the merge ref at push time and so
+   * skipped them. The minutes a head gets for its runs to appear count from when the watch first saw
+   * it so. Then it asks the shipper once to start CI again (a merge of the base pushed onto the pull
+   * request) and gives the head that comes of it the same minutes; a head still without checks then,
+   * or one the shipper may not push to, shows a notice on the batch. A pull request with any check on
+   * its head is never asked for anything, and the notice goes when one appears.
+   */
+  function followMissingRuns(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+  ): void {
+    // A read that gave no answer says nothing: the count and the notice stay as they are.
+    if (read === null) return;
+    // The count and the notice end only when a check appears on the head, the pull request is no
+    // longer open, or it conflicts (the catch-up for conflicts takes over).
+    const over =
+      read.state !== PrState.Open ||
+      root.ciFixOf !== null ||
+      read.checks !== PullRequestChecks.None ||
+      (required !== null && required.state !== 'none') ||
+      read.mergeBlocked === MergeBlocked.Conflicts ||
+      read.mergeable === PrMergeable.Conflicting;
+    // Any other read that is not BLOCKED on checks is ambiguous: GitHub reports UNKNOWN for a while
+    // after each push and whenever the base moves. It neither counts nor resets.
+    const missing =
+      !over && required !== null && read.blockedOnChecks && read.mergeBlocked === null;
+    if (!over && !missing) return;
+    if (over) {
+      awaitingRuns.delete(root.id);
+      if (
+        getBatch(ctx.state.db, root.id).notices.some((n) => n.key === NOTICE_KEY.checksNeverStarted)
+      )
+        ctx.state.write((write) => clearBatchNotice(write, root.id, NOTICE_KEY.checksNeverStarted));
+      return;
+    }
+    const at = clock.now().getTime();
+    const seen = awaitingRuns.get(root.id);
+    const waiting = (seen?.head === read.headSha ? seen : undefined) ?? {
+      head: read.headSha,
+      since: at,
+      asked: seen?.asked ?? false,
+    };
+    awaitingRuns.set(root.id, waiting);
+    if (at - waiting.since < CHECKS_START_MS) return;
+    if (!waiting.asked && landing !== undefined && root.autoMerge) {
+      waiting.asked = true;
+      waiting.since = at;
+      landing.restartCi(root.id);
+      return;
+    }
+    ctx.state.write((write) => {
+      const now = getBatch(write.tx, root.id);
+      if (!now.notices.some((n) => n.key === NOTICE_KEY.checksNeverStarted))
+        setBatchNotice(write, root.id, ciNotices.neverStarted(now));
+    });
+  }
+
   async function round(signal: AbortSignal): Promise<void> {
     await readAll(signal);
     // After the reads, so a merge or close this round recorded ends its fixes in the same round.
@@ -469,6 +547,7 @@ export function createPrWatch(input: {
         else if (read.mergeable === PrMergeable.Mergeable && read.mergeBlocked === null)
           landing.retryMerge(root.id, { catchUpCardWasOpen });
       }
+      followMissingRuns(root, read, required);
       // A pull request that conflicts runs no workflow, so its failing checks are stale.
       if (
         ciFix !== undefined &&
