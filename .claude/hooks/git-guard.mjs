@@ -437,7 +437,6 @@ const WRAPPERS = new Map([
   ...['!', '{', '}', 'if', 'elif', 'while', 'until', 'then', 'do', 'else'].map(
     (keyword) => /** @type {[string, Wrapper]} */ ([keyword, PLAIN_WRAPPER]),
   ),
-<<<<<<< cbae95958dce7144c8916153c9a2eb488e42932b
   ['time', { ...PLAIN_WRAPPER, flags: ['-p'] }],
   ['command', { ...PLAIN_WRAPPER, flags: ['-p', '-v', '-V'] }],
   ['nohup', { ...PLAIN_WRAPPER, flags: INFO_OPTIONS }],
@@ -463,22 +462,6 @@ const WRAPPERS = new Map([
       operands: 0,
     },
   ],
-||||||| 16f661e
-  ...['time', 'command', 'nohup', 'setsid'].map(
-    (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
-  ),
-  ['exec', { valueOptions: ['-a'], operands: 0 }],
-  ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
-  ['env', { valueOptions: ['-u', '-C', '--unset', '--chdir'], operands: 0 }],
-=======
-  ...['time', 'command', 'nohup', 'setsid'].map(
-    (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
-  ),
-  ['exec', { valueOptions: ['-a'], operands: 0 }],
-  ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
-  // -P altpath is BSD/macOS env's.
-  ['env', { valueOptions: ['-u', '-C', '-P', '--unset', '--chdir'], operands: 0 }],
->>>>>>> 80849f7e53a65f2e24956766f99647a4de566fc4
   [
     'stdbuf',
     {
@@ -519,7 +502,6 @@ const WRAPPERS = new Map([
     'xargs',
     {
       valueOptions: [
-<<<<<<< cbae95958dce7144c8916153c9a2eb488e42932b
         ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a', '-J', '-R', '-S'],
         ...['--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file'],
         '--process-slot-var',
@@ -528,13 +510,6 @@ const WRAPPERS = new Map([
         ...['-0', '-o', '-p', '-r', '-t', '-x', '-z'],
         ...['--null', '--open-tty', '--interactive', '--no-run-if-empty', '--verbose'],
         ...['--exit', '--show-limits', ...INFO_OPTIONS],
-||||||| 16f661e
-        ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'],
-=======
-        ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'],
-        // BSD/macOS xargs: -J replstr, -R replacements, -S replsize.
-        ...['-J', '-R', '-S'],
->>>>>>> 80849f7e53a65f2e24956766f99647a4de566fc4
         // --replace, --eof and --max-lines take an optional value, given only with =, so
         // the word after them is the command.
         ...['--replace', '--eof', '--max-lines'],
