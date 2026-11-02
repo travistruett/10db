@@ -12,18 +12,29 @@ const startsExtglob = (ch: string, glob: string) =>
  * Each character `matchesGlob` reads as syntax, as a class that matches only that character. Node's
  * matcher takes a backslash as a separator, never an escape, so a class is the only escape there is.
  * A backslash has none, and neither do braces where the path could make them expand (a comma or a
- * `..` beside them): those become `?`.
+ * `..` beside them): those become `?`, and `loose` says one did.
  */
-function exactGlob(path: string): string {
+function exactGlob(path: string): { glob: string; loose: boolean } {
   const expands = path.includes('{') && (path.includes(',') || path.includes('..'));
   let glob = '';
+  let loose = false;
   for (const ch of path) {
     if (ch === '[' || ch === '*' || ch === '?') glob += `[${ch}]`;
     else if (startsExtglob(ch, glob)) glob += '[(]';
-    else if (ch === '\\' || (expands && (ch === '{' || ch === '}'))) glob += '?';
-    else glob += ch;
+    else if (ch === '\\' || (expands && (ch === '{' || ch === '}'))) {
+      glob += '?';
+      loose = true;
+    } else glob += ch;
   }
-  return glob;
+  return { glob, loose };
+}
+
+/** The glob `literalGlob` returns for `path`, and whether a character in it became `?`. */
+function globFor(path: string): { glob: string; loose: boolean } {
+  if (path === '') return { glob: '', loose: false };
+  const exact = exactGlob(path);
+  if (PathPattern.safeParse(exact.glob).success) return exact;
+  return { glob: looseGlob(path), loose: true };
 }
 
 /** Each character the matcher reads as syntax as `?`: a glob a project accepts, whatever the name. */
@@ -43,6 +54,10 @@ function looseGlob(path: string): string {
  * only there.
  */
 export function literalGlob(path: string): string {
-  const exact = exactGlob(path);
-  return path === '' || PathPattern.safeParse(exact).success ? exact : looseGlob(path);
+  return globFor(path).glob;
+}
+
+/** Whether `literalGlob(path)` also matches names other than `path`, because a character became `?`. */
+export function isLooseGlob(path: string): boolean {
+  return globFor(path).loose;
 }
