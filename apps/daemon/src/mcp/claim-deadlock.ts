@@ -53,7 +53,9 @@ export function deadlockAnswers(tasks: readonly DeadlockTask[]): {
   const claimsOf = (t: DeadlockTask): string =>
     t.yields.map((c) => `${c.kind} ${c.name}`).join(', ');
   const choices: { choice: DeadlockChoice; description: string }[] = [];
-  for (const t of tasks)
+  // A task with nothing to give up (the waits changed since the deadlock was found) gets no yield:
+  // choosing it would release nothing.
+  for (const t of tasks.filter((o) => o.yields.length > 0))
     choices.push({
       choice: {
         label: `${named(t)} yields ${claimsOf(t)}`,

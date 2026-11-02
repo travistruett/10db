@@ -44,6 +44,13 @@ describe('design and docs sizing', () => {
     expect(text).toContain('Icebox');
   });
 
+  it('tells the implementer to change files with Edit or Write, not an interpreter or a redirect', () => {
+    const text = persona('implementer');
+    expect(text).toContain('Edit or Write');
+    expect(text).toContain('python3 -c');
+    expect(text).toContain('shell redirection');
+  });
+
   it('tells the planner to plan a design to fit about one pull request and name what is left out', () => {
     const text = persona('planner');
     expect(text).toContain('about 300 changed lines');
