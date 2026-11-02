@@ -339,6 +339,37 @@ describe('a goal in a project with pull requests', () => {
     expect(digest.openPullRequests).toBe(0);
   });
 
+  it('counts a task whose batch closed with nothing to ship as on the base', () => {
+    const { goal, a, b, c } = adopt(prProject.id);
+    const closed = store.write((ctx) =>
+      insertBatch(ctx, {
+        projectId: prProject.id,
+        title: 'closed',
+        baseBranch: 'main',
+        worktreePath: '/tmp/wt/closed',
+      }),
+    ).value.id;
+    for (const to of [BatchState.Open, BatchState.Shipping])
+      store.write((ctx) => transitionBatch(ctx, closed, { to }));
+    store.write((ctx) =>
+      transitionBatch(ctx, closed, { to: BatchState.Closed, reason: 'no commits beyond the base' }),
+    );
+    const open = shippedBatch('open', PullRequestState.Open);
+    run(a, WorkstreamState.Done, { batchId: closed });
+    run(b, WorkstreamState.Done, { batchId: open });
+    run(c, WorkstreamState.Done, { batchId: open });
+    for (const id of [a, b, c]) finish(id);
+
+    let digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Shipping);
+    expect(digest.openPullRequests).toBe(1);
+
+    merge(open);
+    digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Done);
+    expect(digest.openPullRequests).toBe(0);
+  });
+
   it('is shipping while a finished task’s batch has no pull request yet', () => {
     const { goal, a, b, c } = adopt(prProject.id);
     const unshipped = store.write((ctx) =>

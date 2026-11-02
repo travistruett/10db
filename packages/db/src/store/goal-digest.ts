@@ -109,9 +109,13 @@ function isFailed(run: Run | undefined): boolean {
   );
 }
 
-/** Whether a done task's work has reached its base: no batch to merge, or a merged pull request. */
+/**
+ * Whether a done task's work has reached its base: no batch to merge, a batch closed with nothing to
+ * ship (as delivery's `notOnBase` counts it), or a merged pull request.
+ */
 function isMerged(run: Run | undefined): boolean {
   if (run?.batch == null) return true;
+  if (run.batch.state === BatchState.Closed) return true;
   return run.batch.state === BatchState.Shipped && run.batch.prState === PullRequestState.Merged;
 }
 
