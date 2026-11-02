@@ -1,8 +1,8 @@
-import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
+import { expectAccessible } from './expect-accessible';
 
 const Runs = z.array(z.object({ id: z.string(), taskTitle: z.string() }));
 const Changes = z.object({ commits: z.array(z.string()) });
@@ -11,20 +11,6 @@ const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
 const VIEWS = ['Board', 'Factory', 'Inbox', 'Settings'] as const;
-
-async function expectAccessible(page: Page, label: string): Promise<void> {
-  // The palette is Selenized exactly, so its contrast is Selenized's, not a WCAG ratio
-  // (docs/architecture/decisions/2026-10-28-selenized-exactly.md). Every other rule still runs.
-  const results = await new AxeBuilder({ page })
-    .withTags(['wcag2a', 'wcag2aa'])
-    .disableRules(['color-contrast'])
-    .analyze();
-  // Each entry names the rule and the offending nodes, so a failure says what to fix.
-  const found = results.violations.map(
-    (v) => `${label}: ${v.id} (${v.help}) on ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`,
-  );
-  expect(found).toEqual([]);
-}
 
 /** The Board has no page heading, so its link in the sidebar marks it as the open view. */
 async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
@@ -175,12 +161,15 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(QUESTION)).toBeHidden();
 
   // The work resumes, commits, passes 10db's gate and is DONE.
+  await open(page, 'Board');
+  await expect(
+    page.getByRole('list', { name: 'Done tasks' }).getByRole('listitem', { name: TASK }),
+  ).toBeVisible();
+  // Finished work with no goal is not Factory's: it shows the guide and nothing under Ungrouped.
   await open(page, 'Factory');
-  await page.getByRole('switch', { name: 'Show finished' }).check();
-  await expect(page.getByRole('switch', { name: 'Show finished' })).toBeChecked();
-  const factoryRow = page.getByRole('row', { name: new RegExp(TASK) });
-  await expect(factoryRow.getByText('Done', { exact: true })).toBeVisible();
-  await expectAccessible(page, 'factory, done, dark');
+  await expect(page.getByText(/^Goals are outcomes 10db pursues/)).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Ungrouped/ })).toHaveCount(0);
+  await expectAccessible(page, 'factory, no goals, dark');
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };

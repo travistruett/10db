@@ -96,10 +96,15 @@ function gatherFacts(db: DbReader, tasks: TaskRow[]): Facts {
   return { tasks, workstreams: rows.map((r) => r.workstream), latest, taskOfWorkstream };
 }
 
-/** A run still going: any state that is not terminal, except one the builder set aside. */
+/** A run that has started and is not over: not terminal, not waiting in the queue, not set aside. */
 function isRunning(run: Run | undefined): boolean {
   const state = run?.workstream.state;
-  return state !== undefined && state !== WorkstreamState.Held && ACTIVE_STATES.includes(state);
+  return (
+    state !== undefined &&
+    state !== WorkstreamState.Held &&
+    state !== WorkstreamState.Queued &&
+    ACTIVE_STATES.includes(state)
+  );
 }
 
 /** A run that failed and did not ship anyway (a failed run whose work shipped is judged by its pull request). */
