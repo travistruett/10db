@@ -1,12 +1,22 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
-import { DomainError, McpToolInputs, McpToolName } from '@10db/contracts';
+import {
+  DomainError,
+  McpToolInputs,
+  McpToolName,
+  ShapeToolInputs,
+  ShapeToolName,
+  type SessionId,
+  type ShapeId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { getLiveSessionByTokenHash, isLaneSession } from '@10db/db';
 import { z } from 'zod';
 import { GitTrustError } from '../git';
 import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
 import { ClaimWaits } from './claim-wait';
+import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
 function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): string {
@@ -27,6 +37,54 @@ function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): 
   return `The ${tool} call failed inside 10db and was not completed. Check that your input is valid for the current repository state; if it keeps failing, report the problem to the builder with ask_human.`;
 }
 
+/** A tool as the endpoint registers it: its name, words, input schema and what running it does. */
+interface RegisteredTool {
+  readonly name: string;
+  readonly description: string;
+  readonly schema: z.ZodType;
+  run(input: unknown): Promise<unknown>;
+}
+
+function laneTools(
+  deps: McpDeps,
+  sessionId: SessionId,
+  workstreamId: WorkstreamId,
+  claimWaits: ClaimWaits,
+): RegisteredTool[] {
+  const handlers = createToolHandlers(deps, sessionId, workstreamId, claimWaits);
+  return Object.values(McpToolName).map((name) => ({
+    name,
+    description: TOOL_DESCRIPTIONS[name],
+    schema: McpToolInputs[name],
+    // Each handler takes its own tool's parsed input; the registry pairs them by name.
+    run: (input) => (handlers[name] as (input: unknown) => Promise<unknown>)(input),
+  }));
+}
+
+/** The tools of a conversation's session, or null when 10db was given none to offer. */
+function shapeTools(
+  deps: McpDeps,
+  sessionId: SessionId,
+  shapeId: ShapeId,
+): RegisteredTool[] | null {
+  if (!deps.shapeTools) return null;
+  const handlers = deps.shapeTools({ sessionId, shapeId });
+  const tools = Object.values(ShapeToolName).flatMap((name) => {
+    const handler = handlers[name] as ((input: unknown) => Promise<unknown>) | undefined;
+    return handler
+      ? [
+          {
+            name,
+            description: SHAPE_TOOL_DESCRIPTIONS[name],
+            schema: ShapeToolInputs[name],
+            run: handler,
+          },
+        ]
+      : [];
+  });
+  return tools.length > 0 ? tools : null;
+}
+
 /** Stateless streamable-HTTP MCP endpoint; the bearer token identifies the calling session. */
 export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Response> {
   // Every session's claim waits in one place, so a deadlock check sees the waits of all of them.
@@ -34,27 +92,30 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
   return async (req) => {
     const token = /^Bearer (.+)$/.exec(req.headers.get('authorization') ?? '')?.[1];
     const session = token ? getLiveSessionByTokenHash(deps.state.db, hashToken(token)) : undefined;
-    // A Shape session has no lane, so it never gets a lane's tools; its own tool set comes with Shape.
-    if (!session || !isLaneSession(session))
-      return Response.json({ error: 'unauthorized' }, { status: 401 });
+    if (!session) return Response.json({ error: 'unauthorized' }, { status: 401 });
 
-    const handlers = createToolHandlers(deps, session.id, session.workstreamId, claimWaits);
+    // A session's tool set comes from its row: a lane's tools for a workstream, a conversation's for
+    // a shape. A Shape session holds no lane, claim or area, so it never gets a lane's tools.
+    const tools = isLaneSession(session)
+      ? laneTools(deps, session.id, session.workstreamId, claimWaits)
+      : session.shapeId === null
+        ? null
+        : shapeTools(deps, session.id, session.shapeId);
+    if (tools === null) return Response.json({ error: 'unauthorized' }, { status: 401 });
+
     const server = new McpServer({ name: '10db', version: '0.1.0' });
-    for (const name of Object.values(McpToolName)) {
-      const schema = McpToolInputs[name];
+    for (const tool of tools) {
       server.registerTool(
-        name,
-        { description: TOOL_DESCRIPTIONS[name], inputSchema: schema },
+        tool.name,
+        { description: tool.description, inputSchema: tool.schema },
         async (args: unknown) => {
           try {
-            // Each handler takes its own tool's parsed input; the registry pairs them by name.
-            const handler = handlers[name] as (input: unknown) => Promise<unknown>;
-            const output = await handler(schema.parse(args));
+            const output = await tool.run(tool.schema.parse(args));
             return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
           } catch (error) {
             return {
               isError: true,
-              content: [{ type: 'text' as const, text: errorText(error, deps, name, args) }],
+              content: [{ type: 'text' as const, text: errorText(error, deps, tool.name, args) }],
             };
           }
         },
