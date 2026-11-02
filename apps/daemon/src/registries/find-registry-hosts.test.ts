@@ -477,8 +477,31 @@ describe('findRegistryHostsAt', () => {
 
     expect(found.map((f) => f.host)).toEqual(['index.crates.io', 'static.crates.io']);
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.filter((f) => !f.includes('.'))).toEqual(['', 'a', 'a/b', 'a/b/c']);
+    expect(listed).toEqual(['', 'a', 'a/b', 'a/b/c']);
     expect(listed.some((f) => f.startsWith('node_modules') || f.startsWith('a/b/c/d'))).toBe(false);
+  });
+
+  it('lists a nested folder only when its parent names it', async () => {
+    const repo = committed({
+      'a/x.txt': 'x',
+      'b/c/y.txt': 'y',
+      'b/.cargo/config.toml': '[registries.r]\nindex = "sparse+https://cargo.example.net/index/"\n',
+      'b/c/d/z.txt': 'z',
+    });
+    const listed: string[] = [];
+    const counting = {
+      fileAt: git.fileAt.bind(git),
+      folderAt: (r: string, rev: string, folder: string) => {
+        listed.push(folder);
+        return git.folderAt(r, rev, folder);
+      },
+    };
+
+    const found = await findRegistryHostsAt(counting, repo, 'refs/heads/main');
+
+    expect(found).toEqual([{ host: 'cargo.example.net', file: 'b/.cargo/config.toml' }]);
+    // Walked folders: '', a, b, b/c, b/c/d. The one dot folder the parent names adds one listing.
+    expect([...listed].sort()).toEqual(['', 'a', 'b', 'b/.cargo', 'b/c', 'b/c/d']);
   });
 });
 
