@@ -1,5 +1,6 @@
-import { realpathSync, statSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
   InboxState,
@@ -123,15 +124,79 @@ export function relativeIn(root: string, path: string): string | null {
   return null;
 }
 
+/** What every deletion's stamp starts with. */
+const GONE_PREFIX = 'gone:';
+
+/** Whether `stamp` (`writeStamp`) is a deletion's. */
+export function isDeletionStamp(stamp: string): boolean {
+  return stamp.startsWith(GONE_PREFIX);
+}
+
 /**
- * What identifies the current write to a file: its modification time to the nanosecond, or null when the
- * file is missing. A missing file has no write to tell apart from the next deletion of it, so no stamp is
- * ever recorded or matched for one.
+ * The stamp of a deletion: the nearest ancestor of the missing path, up to `root`, that is there, with its
+ * change and modification times to the nanosecond. Adding or removing an entry in a directory changes both,
+ * so a file restored and deleted again, even unseen, gives another stamp; the change time can't be set back
+ * by hand. Null when not even `root` is there.
+ */
+function deletionStamp(root: string, path: string): string | null {
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    const rel = relative(root, dir);
+    if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+    try {
+      const { ctimeNs, mtimeNs } = statSync(dir, { bigint: true });
+      return `${GONE_PREFIX}${rel.split(sep).join('/')}:${String(ctimeNs)}:${String(mtimeNs)}`;
+    } catch {
+      if (rel === '') return null;
+    }
+  }
+}
+
+/** How many times a file that changes while it is read is read again before it counts as unstampable. */
+const STAMP_ATTEMPTS = 3;
+
+/** The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. */
+function hashFile(path: string): string {
+  const hash = createHash('sha256');
+  const fd = openSync(path, 'r');
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
+      hash.update(chunk.subarray(0, n));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest('hex');
+}
+
+/**
+ * What identifies the current write to a file: its modification time to the nanosecond, its size and a
+ * hash of its content, so a file changed behind a restored modification time and size is another write.
+ * A deletion's stamp for a file that is not there (`deletionStamp`). Null for one that can't be told apart
+ * from another write: a directory or other non-file, one that can't be read, or one that kept changing
+ * while it was read.
+ * It reads the whole file, so it is called only for a path a card or an excused write names.
  */
 export function writeStamp(root: string, rel: string): string | null {
+  const path = resolve(root, rel);
   try {
-    return String(statSync(resolve(root, rel), { bigint: true }).mtimeNs);
-  } catch {
-    return null;
+    lstatSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? deletionStamp(root, path) : null;
   }
+  for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
+    try {
+      const before = statSync(path, { bigint: true });
+      if (!before.isFile()) return null;
+      const hash = hashFile(path);
+      // The file changed while it was read: the content may not be the one the time and size name.
+      const after = statSync(path, { bigint: true });
+      if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
+      return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

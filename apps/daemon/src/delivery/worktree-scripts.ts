@@ -53,8 +53,9 @@ const valid = (names: Set<string>): string[] =>
 /**
  * Which packages the project lets run their install scripts: `allowBuilds` entries set to true
  * (pnpm-workspace.yaml), the older `onlyBuiltDependencies` lists, and `dangerouslyAllowAllBuilds`
- * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Read as
- * data from the copy's own files, which hold the base's content at the cut; nothing in them runs.
+ * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Under
+ * `legacy` (pnpm 9 and earlier) only package.json's `pnpm` field is read. Read as data from the
+ * copy's own files, which hold the base's content at the cut; nothing in them runs.
  */
 export function buildPolicy(root: string, legacy = false): BuildPolicy {
   const allowed = new Set<string>();
@@ -62,14 +63,18 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   let all = false;
   // Whether the project limits builds with a list, even an empty one or one this can't read.
   let limited = false;
+  // Whether a neverBuiltDependencies list has entries (valid or not): pnpm 9 reads it first.
+  let neverListed = false;
   const manifest = readData(join(root, 'package.json'));
   const sources: Record<string, unknown>[] = [];
-  const workspace = readData(join(root, 'pnpm-workspace.yaml'));
+  // pnpm 9 and earlier read only `packages` and catalogs from pnpm-workspace.yaml; build settings
+  // there came with pnpm 10, so under legacy they are read from package.json's `pnpm` field only.
+  // (Unverified against pnpm 9's source: no pnpm 9 was available to check.)
+  const workspace = legacy ? undefined : readData(join(root, 'pnpm-workspace.yaml'));
   if (isRecord(workspace)) {
     sources.push(workspace);
     const allow = workspace['allowBuilds'];
-    // pnpm 9 and earlier don't read allowBuilds.
-    if (!legacy && isRecord(allow))
+    if (isRecord(allow))
       for (const [name, value] of Object.entries(allow))
         if (value === true) allowed.add(nameOf(name));
         else if (value === false) denied.add(nameOf(name));
@@ -86,10 +91,14 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
     // pnpm 10.1 added ignoredBuiltDependencies; pnpm 9 and earlier don't read it.
     if (!legacy) namesIn(source['ignoredBuiltDependencies'], denied);
     namesIn(source['neverBuiltDependencies'], denied);
+    const never = source['neverBuiltDependencies'];
+    if (Array.isArray(never) && never.length > 0) neverListed = true;
   }
   // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list (or a file of
-  // them, which isn't read here) limits them: an empty list builds nothing.
-  if (legacy && !limited) all = true;
+  // them, which isn't read here) limits them: an empty list builds nothing. A non-empty
+  // neverBuiltDependencies list is checked first, though: pnpm then builds everything it doesn't
+  // name and ignores onlyBuiltDependencies and onlyBuiltDependenciesFile.
+  if (legacy && (!limited || neverListed)) all = true;
   return { all, allowed: valid(allowed), denied: valid(denied) };
 }
 

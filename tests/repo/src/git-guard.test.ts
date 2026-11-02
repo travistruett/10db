@@ -310,6 +310,36 @@ describe('git guard decisions', () => {
     ['timeout with a signal option', 'timeout -s KILL 60 git add -A', 'deny'],
     ['sudo', 'sudo git push --force', 'ask'],
     ['sudo -u', 'sudo -u bob git push --force', 'ask'],
+    // A long option's value is the next word, and any unambiguous prefix of the name counts.
+    ['sudo --user VALUE', 'sudo --user root git push --force', 'ask'],
+    ['sudo --use VALUE, a prefix', 'sudo --use root git add -A', 'deny'],
+    ['sudo --group VALUE', 'sudo --group wheel git add -A', 'deny'],
+    ['sudo --host VALUE', 'sudo --host box git add -A', 'deny'],
+    ['sudo --prompt VALUE', 'sudo --prompt pw git add -A', 'deny'],
+    ['sudo --role VALUE', 'sudo --role r git add -A', 'deny'],
+    ['sudo --type VALUE', 'sudo --type t git add -A', 'deny'],
+    ['sudo --other-user VALUE', 'sudo --other-user bob git add -A', 'deny'],
+    ['sudo --close-from VALUE', 'sudo --close-from 5 git add -A', 'deny'],
+    ['sudo --command-timeout VALUE', 'sudo --command-timeout 5 git add -A', 'deny'],
+    ['sudo --user=VALUE', 'sudo --user=root git add -A', 'deny'],
+    ['timeout --signal VALUE', 'timeout --signal KILL 5 git push --force', 'ask'],
+    ['timeout --kill-after VALUE', 'timeout --kill-after 5 10 git add -A', 'deny'],
+    ['nice --adjustment VALUE', 'nice --adjustment 5 git add -A', 'deny'],
+    ['stdbuf --input VALUE', 'stdbuf --input L git add -A', 'deny'],
+    ['stdbuf --output VALUE', 'stdbuf --output L git add -A', 'deny'],
+    ['stdbuf --error VALUE', 'stdbuf --error L git add -A', 'deny'],
+    ['xargs --max-args VALUE', 'echo x | xargs --max-args 1 git add -A', 'deny'],
+    // GNU xargs' --replace, --eof and --max-lines take an optional value, given only with =.
+    ['xargs --replace, no value', 'echo x | xargs --replace git push --force', 'ask'],
+    ['xargs --re, a prefix, no value', 'echo x | xargs --re git push --force', 'ask'],
+    ['xargs --replace=VALUE', 'echo x | xargs --replace={} git add -A', 'deny'],
+    ['xargs --max-lines, no value', 'echo x | xargs --max-lines git add -A', 'deny'],
+    ['xargs --max-l, a prefix, no value', 'echo x | xargs --max-l git add -A', 'deny'],
+    ['xargs --eof, no value', 'echo x | xargs --eof git add -A', 'deny'],
+    ['xargs --max-procs VALUE', 'echo x | xargs --max-procs 2 git add -A', 'deny'],
+    ['xargs --delimiter VALUE', 'echo x | xargs --delimiter , git add -A', 'deny'],
+    ['xargs --max-chars VALUE', 'echo x | xargs --max-chars 99 git add -A', 'deny'],
+    ['xargs --arg-file VALUE', 'echo x | xargs --arg-file f git add -A', 'deny'],
     ['xargs', 'echo a.ts | xargs git add -A', 'deny'],
     ['xargs with options', 'echo x | xargs -n 1 git push --force', 'ask'],
     ['env -S', "env -S 'git add -A'", 'deny'],
@@ -677,6 +707,9 @@ describe('git guard judging a push in the directory the command runs in', () => 
     ['sudo -nD DIR', 'sudo -nD MAIN git push'],
     ['env --ch DIR', 'env --ch MAIN git push'],
     ['env --ch=DIR', 'env --ch=MAIN git push'],
+    // A long option's value in the next word, so git is still found after it.
+    ['cd, then sudo --user root', 'cd WT && sudo --user root git -C MAIN push'],
+    ['cd, then timeout --signal KILL', 'cd WT && timeout --signal KILL 5 git -C MAIN push'],
     ['cd, then GIT_DIR', 'cd WT && GIT_DIR=MAIN/.git git push'],
     ['cd, then GIT_WORK_TREE exported', 'cd WT && export GIT_WORK_TREE=MAIN; git push'],
     ['cd, then git -C a variable', 'cd WT && git -C $D push'],
@@ -692,6 +725,15 @@ describe('git guard judging a push in the directory the command runs in', () => 
   it('still judges a push without a cd by the session directory', () => {
     expect(run('git push', checkout.dir)).toBe('ask');
     expect(run('git push', worktree)).toBe('allow');
+  });
+
+  it.each([
+    'sudo --user root git push',
+    'timeout --signal KILL 5 git push',
+    'nice --adjustment 5 git push',
+  ])('finds git after a wrapper long option value in %s', (command) => {
+    expect(run(command, checkout.dir)).toBe('ask');
+    expect(run(command, worktree)).toBe('allow');
   });
 
   // env takes any unambiguous prefix of --split-string (`--s` is the only long option starting
