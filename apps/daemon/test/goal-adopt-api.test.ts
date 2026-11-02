@@ -4,6 +4,7 @@ import {
   GoalAdoptError,
   GoalAdoptPreview,
   GoalDto,
+  GoalListDto,
   ProjectDto,
   TaskDto,
   type ProjectId,
@@ -113,8 +114,8 @@ const adopt = (projectId: ProjectId, body: unknown) =>
   post(`/projects/${projectId}/goals/adopt`, body);
 const tasksOf = (projectId: ProjectId) =>
   api().get(`/projects/${projectId}/tasks`, z.array(TaskDto));
-const goalsOf = (projectId: ProjectId) =>
-  api().get(`/projects/${projectId}/goals`, z.array(GoalDto));
+const goalsOf = async (projectId: ProjectId) =>
+  (await api().get(`/projects/${projectId}/goals`, GoalListDto)).goals.map((s) => s.goal);
 
 describe('POST /projects/:projectId/goals/adopt', () => {
   it('creates the goal in draft with its tasks on the Board and their dependencies', async () => {
