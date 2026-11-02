@@ -106,7 +106,10 @@ describe('a batch whose worktree is missing', () => {
     inbox.answer(raised.id, { choice: WorktreeChoice.Abandon });
     await h.jobs.idle();
 
-    expect(h.cards()).toEqual([]);
+    // Abandoning an empty branch leaves its own notice that the branch was deleted; the worktree card is gone.
+    expect(h.cards().map((c) => c.title)).toEqual([
+      `Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`,
+    ]);
   });
 });
 
