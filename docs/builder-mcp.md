@@ -61,7 +61,7 @@ The bridge reads no other 10db variable.
 
 | Tool            | Does                                                                                                                             |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `list_projects` | Projects with their areas, hazards, board columns (ids for `move_task`), default flow and delivery.                              |
+| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default flow and delivery.                |
 | `list_flows`    | Flows, with ids.                                                                                                                 |
 | `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                             |
 | `create_task`   | Makes a task from a title, description, criteria, areas, dependencies, risk tags, flow and landing, and returns its id.          |
