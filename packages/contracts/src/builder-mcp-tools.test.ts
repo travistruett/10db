@@ -206,6 +206,14 @@ describe('the drafting guidance', () => {
     expect(BUILDER_INSTRUCTIONS).not.toContain('Hazards are not areas');
   });
 
+  it('says a file no other area holds belongs to the catch-all area', () => {
+    const list = builderToolList().find((t) => t.name === BuilderToolName.ListProjects);
+    for (const text of [BUILDER_INSTRUCTIONS, list?.description ?? '']) {
+      expect(text).toContain('catchAll');
+      expect(text).toContain('no other area');
+    }
+  });
+
   it('edit_task points at the same guidance', () => {
     const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
     expect(edit?.description).toContain('seen or measured');
