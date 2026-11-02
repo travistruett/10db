@@ -217,6 +217,29 @@ describe('POST /projects/:projectId/goals/adopt', () => {
     ]);
   });
 
+  it('refuses a brief past 1 MiB the same way as text and as a path', async () => {
+    const project = await seed();
+    const big = `${GOOD}${'x'.repeat(1024 * 1024)}`;
+    const file = join(data.path, 'big.md');
+    writeFileSync(file, big);
+    const fromPath = await adopt(project.id, { path: file });
+    expect(fromPath.status).toBe(400);
+    expect(GoalAdoptError.parse(fromPath.body).errors).toEqual([
+      { path: 'File', message: `${file} is too large to be a brief` },
+    ]);
+    for (const dryRun of [false, true]) {
+      const fromText = await adopt(project.id, { text: big, dryRun });
+      expect(fromText.status).toBe(400);
+      expect(GoalAdoptError.parse(fromText.body).errors).toEqual([
+        { path: 'Text', message: 'the text is too large to be a brief' },
+      ]);
+    }
+    // Multi-byte characters count as bytes, as they do in a file.
+    const wide = await adopt(project.id, { text: 'é'.repeat(600 * 1024) });
+    expect(wide.status).toBe(400);
+    expect(await goalsOf(project.id)).toEqual([]);
+  });
+
   it('refuses a relative path', async () => {
     const project = await seed();
     const res = await adopt(project.id, { path: 'brief.md' });
