@@ -8,6 +8,7 @@ import {
   unreadArithmeticIn,
 } from './arithmetic-words';
 import { plainWordReadings, RUNNERS } from './command-forms';
+import { isNumericArithmetic, numericNames } from './numeric-names';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
   commandName,
@@ -203,6 +204,8 @@ interface Scanner {
   readonly moved: boolean;
   /** The script's standard input may be a pipe from an enclosing command. */
   readonly stdin: boolean;
+  /** Variables the whole command sets only to numbers, so arithmetic over them is read. */
+  readonly numeric: ReadonlySet<string>;
 }
 
 /** Programs that change the shell's working directory. */
@@ -325,6 +328,8 @@ function scanSegment(
   const text = segment.raw;
   if (segment.processSubstitution) return { reason: UnreadReason.ProcessSubstitution, text };
   for (const body of segment.nested) {
+    // The parser hands `$((expr))` over as a subshell `(expr)`; arithmetic over numbers is no command.
+    if (isNumericArithmetic(body, segment.words, scanner.numeric)) continue;
     const found = scanScript(body, depth, scanner);
     if (found !== null) return found;
   }
@@ -345,7 +350,7 @@ function scanSegment(
     keepCommandPath: true,
   });
   // Before the program is read: an assignment alone, `a[$(cmd)]=1`, has none.
-  if (segment.words.some((word) => unreadArithmeticIn(word))) {
+  if (segment.words.some((word) => unreadArithmeticIn(word, outer.numeric))) {
     return { reason: UnreadReason.Script, text };
   }
   const written = words[0];
@@ -468,5 +473,6 @@ export function firstUnread(command: string, hazards: readonly HazardDef[]): Unr
     patterns: hazardPatterns(hazards),
     moved: false,
     stdin: false,
+    numeric: numericNames(command),
   });
 }

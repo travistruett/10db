@@ -17,7 +17,6 @@ import type { Git } from '../git';
 import {
   firstUnread,
   hazardHit,
-  hazardPrograms,
   runsInBackground,
   startsEndlessBackgroundLoop,
   stringField,
@@ -348,7 +347,7 @@ export function createPermissionBroker(
     try {
       hit = hazardHit(command, sandbox.hazards);
       unread = firstUnread(command, sandbox.hazards);
-      unreadable = unreadableHazard(command, hazardPrograms(sandbox.hazards));
+      unreadable = unreadableHazard(command, sandbox.hazards);
     } catch (cause) {
       if (isTooDeep(cause)) return { summary: command };
       throw cause;
