@@ -34,7 +34,7 @@ function trustedRevs(project: ProjectDto): string[] {
 export async function takeFoundHostsReading(
   deps: {
     readonly state: StateStore;
-    readonly git: Pick<Git, 'folderAt' | 'fileAt'>;
+    readonly git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>;
     readonly logger: Logger;
   },
   projectId: ProjectId,

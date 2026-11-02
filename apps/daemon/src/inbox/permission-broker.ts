@@ -195,7 +195,7 @@ export function createPermissionBroker(
     readonly state: StateStore;
     readonly inbox: InboxService;
     /** Reads a project's package files from its default branch, for a project with no reading yet. */
-    readonly git: Pick<Git, 'folderAt' | 'fileAt'>;
+    readonly git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>;
     readonly logger: Logger;
   },
   ctx: BrokerContext,
