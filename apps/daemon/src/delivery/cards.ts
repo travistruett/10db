@@ -360,19 +360,59 @@ export const baseCards = {
   }),
 };
 
+/** The answers of a refused start's card, which the daemon acts on (`createStartCardAnswers`). */
+export const StartChoice = { Retry: 'Retry start', Cancel: 'Cancel task' } as const;
+export type StartChoice = (typeof StartChoice)[keyof typeof StartChoice];
+
+/** The `detail` key of a refused start's card: what Retry start asks the starter to do again. */
+export const START_REFUSED_DETAIL = 'startRefused';
+
+/** What a start was asked to do, kept on the card so Retry start can repeat it. */
+export interface StartRequest {
+  readonly title: string;
+  /** The batch the tasks were to join, when they were not starting a batch of their own. */
+  readonly batchId?: BatchId;
+}
+
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.
  * The same refusal of the same tasks folds into the card still open, so starting again after a
- * failure does not stack identical cards.
+ * failure does not stack identical cards. It offers two answers the daemon acts on: start the same
+ * tasks again once what the card says is fixed, or cancel them. `request` is null for the tasks of
+ * a CI fix batch, which a start can't repeat (the pull request's CI-stop card has the Retry): the
+ * card then offers Cancel task alone.
  */
-export function forTasks(card: Card, taskIds: Iterable<TaskId>): Card {
+export function forTasks(
+  card: Card,
+  taskIds: Iterable<TaskId>,
+  request: StartRequest | null,
+): Card {
   const ids = [...taskIds];
+  const these = ids.length > 1 ? 'these tasks' : 'this task';
   return {
     ...card,
     foldKey: card.foldKey ?? `start-refused:${[...ids].sort().join(',')}:${card.title}`,
     refresh: true,
-    detail: { ...card.detail, taskIds: ids },
+    detail: {
+      ...card.detail,
+      taskIds: ids,
+      [START_REFUSED_DETAIL]: {
+        ...(request ? { title: request.title } : {}),
+        ...(request?.batchId ? { batchId: request.batchId } : {}),
+      },
+    },
+    options: [
+      ...(request
+        ? [
+            {
+              label: StartChoice.Retry,
+              description: `Start ${these} again, once what the card says is fixed`,
+            },
+          ]
+        : []),
+      { label: StartChoice.Cancel, description: `Remove ${these} from the project's list` },
+    ],
     ...(ids.length > 0 ? { resolvesWhen: { event: 'tasks_started', taskIds: ids } } : {}),
   };
 }

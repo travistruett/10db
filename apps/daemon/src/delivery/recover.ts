@@ -113,7 +113,7 @@ export async function recoverBatches(deps: {
       deps.inbox,
       batch.projectId,
       left === null
-        ? forTasks(startCards.cutInterrupted(batch), taskIds)
+        ? forTasks(startCards.cutInterrupted(batch), taskIds, { title: batch.title })
         : worktreeCards.leftBehind(batch, left),
     );
     report.deleted.push(batch.id);

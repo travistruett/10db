@@ -34,7 +34,7 @@ import {
 import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
-import { forTasks, startCards, wrongBranchCard, type Card } from './cards';
+import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
 import { batchCheckout } from './checkout';
 import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { forgetCuttingTasks, recordCuttingTasks } from './cutting-tasks';
@@ -83,7 +83,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         return [startShared(project, input, tasks)];
       case WorkspaceMode.Worktree:
         return input.batchId === undefined
-          ? startWorktrees(project, tasks)
+          ? startWorktrees(project, input.title, tasks)
           : [joinWorktree(project, input.batchId, tasks)];
     }
   }
@@ -112,7 +112,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       ...input.taskIds,
       ...(existing ? listWorkstreams(db, { batchId: existing.id }).map((w) => w.taskId) : []),
     ]);
-    refuseUnfinished(project.id, unfinishedDependencies(db, tasks, inBatch));
+    refuseUnfinished(
+      project.id,
+      { title: input.title, ...(existing ? { batchId: existing.id } : {}) },
+      unfinishedDependencies(db, tasks, inBatch),
+    );
     const queue = jobKey(project, JobQueue.Cut);
     if (existing) {
       ctx.jobs.run(queue, (signal) => join(existing.id, tasks, plans, inBatch, signal));
@@ -136,13 +140,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
    * run apart: each inserted CUTTING with its worktree path and its workstreams QUEUED in its own
    * transaction, once every group passed the request's checks.
    */
-  function startWorktrees(project: ProjectDto, tasks: readonly TaskDto[]): BatchDto[] {
+  function startWorktrees(
+    project: ProjectDto,
+    title: string,
+    tasks: readonly TaskDto[],
+  ): BatchDto[] {
     const groups = groupByDependency(tasks);
     // Tasks that share a worktree share a pull request, so they must land alike; checked for every
     // group before any batch is made.
     const targets = groups.map((group) => sharedLanding(project, group.tasks, 'worktree'));
     refuseUnfinished(
       project.id,
+      { title },
       groups.flatMap((group) =>
         unfinishedDependencies(db, group.tasks, new Set(group.tasks.map((t) => t.id))),
       ),
@@ -191,7 +200,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       ...tasks.map((t) => t.id),
       ...listWorkstreams(db, { batchId }).map((w) => w.taskId),
     ]);
-    refuseUnfinished(project.id, unfinishedDependencies(db, tasks, inBatch));
+    refuseUnfinished(
+      project.id,
+      { title: batch.title, batchId },
+      unfinishedDependencies(db, tasks, inBatch),
+    );
     ctx.jobs.run(jobKey(project, JobQueue.Cut), (signal) =>
       join(batchId, tasks, plans, inBatch, signal),
     );
@@ -212,12 +225,17 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     return batch;
   }
 
-  function refuseUnfinished(projectId: ProjectId, blocked: readonly BlockedTask[]): void {
+  function refuseUnfinished(
+    projectId: ProjectId,
+    request: StartRequest,
+    blocked: readonly BlockedTask[],
+  ): void {
     if (blocked.length === 0) return;
     // Names the blocked tasks, so it folds on a repeat and closes once they start.
     const card = forTasks(
       startCards.unfinishedDependencies(blocked),
       blocked.map((b) => b.task.id),
+      request,
     );
     raise(ctx.inbox, projectId, card);
     throw new ConflictError(`${card.title}. ${card.body}`);
@@ -253,7 +271,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         deleteCuttingBatch(w, batchId, card.title);
         forgetCuttingTasks(w, batchId);
       });
-      raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
+      raise(ctx.inbox, project.id, forTasks(card, plans.keys(), { title: batch.title }));
     };
     // A shutdown mid-cut leaves the CUTTING row; startup deletes it and says so.
     const stopped = (): boolean => signal.aborted;
@@ -362,7 +380,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const reopening = batch.state === BatchState.Failed && batch.worktreePath !== null;
     // Every refusal names the tasks it refused; the API already answered 202 for them.
     const refuse = (card: Card): void => {
-      raise(ctx.inbox, project.id, forTasks(card, plans.keys()));
+      raise(ctx.inbox, project.id, forTasks(card, plans.keys(), { title: batch.title, batchId }));
     };
     // A function, so the checks after an await are not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;

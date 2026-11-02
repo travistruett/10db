@@ -19,6 +19,8 @@ export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';
 export { createCiStopAnswers } from './ci-stop';
 export { batchCardFields, createBatchCardAnswers } from './batch-card';
 export { createBranchCardAnswers } from './branch-card';
+export { StartChoice } from './cards';
+export { createStartCardAnswers } from './start-card';
 export { removeMergedBranches } from './branch-sweep';
 export {
   batchLaunchVerdict,

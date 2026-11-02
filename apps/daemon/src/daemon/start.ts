@@ -60,6 +60,7 @@ import {
   createBatchCardAnswers,
   createBranchCardAnswers,
   createCiStopAnswers,
+  createStartCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
@@ -393,6 +394,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   const inbox = createInboxService({
     state,
@@ -409,6 +411,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerGitCard?.(item, answer);
       answerBranchCard?.(item, answer);
       answerCiStopCard?.(item, answer);
+      answerStartCard?.(item, answer);
     },
   });
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
@@ -560,6 +563,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
+  answerStartCard = createStartCardAnswers({ state, starter });
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
   // Before a task gets the migrations hazard, from request_claim or at its start.

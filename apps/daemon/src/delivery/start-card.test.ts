@@ -1,0 +1,116 @@
+import { unlinkSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ConflictError, TaskStatus } from '@10db/contracts';
+import { getBatch, getTask, listBatches, listInbox, listWorkstreams } from '@10db/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { createInboxService, type InboxService } from '../inbox';
+import { forTasks, startCards } from './cards';
+import { createStartCardAnswers, StartChoice } from './index';
+
+let h: DeliveryHarness;
+let inbox: InboxService;
+beforeEach(() => {
+  h = createDeliveryHarness({}, { trigger: false });
+  inbox = createInboxService({
+    state: h.state,
+    onParkedAnswer: () => undefined,
+    onFlagAnswer: createStartCardAnswers({ state: h.state, starter: h.starter }),
+  });
+});
+afterEach(() => {
+  h.close();
+});
+
+/** Refuses a start of `title`'s tasks because the checkout is dirty; returns the card. */
+async function refusedStart(...titles: string[]) {
+  const tasks = titles.map((t, i) => h.addTask(t, { areas: [i === 0 ? 'api' : 'ui'] }));
+  writeFileSync(join(h.repo, 'scratch.txt'), 'uncommitted\n');
+  h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: tasks.map((t) => t.id) });
+  await h.jobs.idle();
+  return { tasks, card: h.only(h.cards()) };
+}
+
+describe('the answers of a refused start', () => {
+  it('offers Retry start and Cancel task, never a bare dismiss', async () => {
+    const { card } = await refusedStart('Alpha');
+    expect(card.options.map((o) => o.label)).toEqual([StartChoice.Retry, StartChoice.Cancel]);
+    expect(card.options.every((o) => o.description.length > 0)).toBe(true);
+  });
+
+  it('starts the same tasks again on Retry start, closing the card', async () => {
+    const { tasks, card } = await refusedStart('Alpha', 'Beta');
+    unlinkSync(join(h.repo, 'scratch.txt'));
+    inbox.answer(card.id, { choice: StartChoice.Retry });
+    await h.jobs.idle();
+    const batch = h.only(listBatches(h.store.db));
+    expect(batch).toMatchObject({ title: 'Greetings', state: 'OPEN' });
+    expect(
+      listWorkstreams(h.store.db, { batchId: batch.id })
+        .map((w) => w.taskId)
+        .sort(),
+    ).toEqual(tasks.map((t) => t.id).sort());
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('raises a fresh card when the retried start is refused again', async () => {
+    const { card } = await refusedStart('Alpha');
+    inbox.answer(card.id, { choice: StartChoice.Retry });
+    await h.jobs.idle();
+    const again = h.only(h.cards());
+    expect(again.id).not.toBe(card.id);
+    expect(again.options.map((o) => o.label)).toEqual([StartChoice.Retry, StartChoice.Cancel]);
+    expect(listInbox(h.store.db, { states: ['RESOLVED'] }).map((i) => i.id)).toEqual([card.id]);
+  });
+
+  it('cancels the tasks it names on Cancel task, and starts nothing', async () => {
+    const { tasks, card } = await refusedStart('Alpha', 'Beta');
+    inbox.answer(card.id, { choice: StartChoice.Cancel });
+    await h.jobs.idle();
+    for (const t of tasks) expect(getTask(h.store.db, t.id).status).toBe(TaskStatus.Cancelled);
+    expect(listBatches(h.store.db)).toEqual([]);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('offers Cancel task alone for the tasks of a CI fix batch, whose start cannot be repeated', () => {
+    const card = forTasks(startCards.notStarted(new Error('boom')), [h.addTask('Fix').id], null);
+    expect(card.options?.map((o) => o.label)).toEqual([StartChoice.Cancel]);
+  });
+
+  it('keeps unfinished-dependency refusals answerable: retry stays refused until the dependency is done', () => {
+    const base = h.addTask('Base', { areas: ['api'] });
+    const top = h.addTask('Top', { areas: ['ui'], dependsOn: [base.id] });
+    expect(() => h.starter.startBatch(h.project.id, { title: 'Top', taskIds: [top.id] })).toThrow(
+      ConflictError,
+    );
+    const card = h.only(h.cards());
+    expect(card.options.map((o) => o.label)).toEqual([StartChoice.Retry, StartChoice.Cancel]);
+    expect(() => inbox.answer(card.id, { choice: StartChoice.Retry })).toThrow(ConflictError);
+    expect(h.cards().map((c) => c.id)).toEqual([card.id]);
+  });
+
+  it('retries a refused join with the batch it named', async () => {
+    const first = h.addTask('First', { areas: ['api'] });
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [first.id] }),
+    );
+    await h.jobs.idle();
+    const fix = h.addTask('Fix', { areas: ['api'] });
+    h.git$('switch', '-q', '-c', 'elsewhere');
+    h.starter.startBatch(h.project.id, {
+      title: 'Greetings',
+      taskIds: [fix.id],
+      batchId: batch.id,
+    });
+    await h.jobs.idle();
+    const card = h.only(h.cards());
+    expect(card.options.map((o) => o.label)).toEqual([StartChoice.Retry, StartChoice.Cancel]);
+    h.git$('switch', '-q', getBatch(h.store.db, batch.id).branch ?? '');
+    inbox.answer(card.id, { choice: StartChoice.Retry });
+    await h.jobs.idle();
+    expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toContain(
+      fix.id,
+    );
+    expect(h.cards()).toEqual([]);
+  });
+});
