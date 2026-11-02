@@ -50,6 +50,13 @@ const READ_BY_REPO_TESTS = [
 ];
 
 /**
+ * `.env*` files, which the gate and lane sandboxes deny reading. Prettier stats every path it is
+ * named before it applies .prettierignore, so naming one fails the format step with EPERM, and git
+ * lists one as changed when it cannot stat it.
+ */
+const SANDBOX_DENIED = /(^|\/)\.env[^/]*$/;
+
+/**
  * @typedef {{ name: string, dir: string, deps: string[], scripts: string[] }} Pkg
  * @param {string} dir
  * @returns {Pkg[]}
@@ -146,6 +153,7 @@ function planFor(files, packages, precheck = false) {
     outside,
     rust: rust && !precheck,
     ...(precheck ? { precheck } : {}),
+    format: files.filter((f) => !SANDBOX_DENIED.test(f)),
     drift: packages
       .filter((p) => changed.has(p.name) && p.scripts.includes('drift'))
       .map((p) => p.name),
@@ -322,6 +330,7 @@ async function main() {
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );
   const present = files.filter((f) => existsSync(join(root, f)));
+  const formatTargets = plan.format.filter((f) => existsSync(join(root, f)));
   const lintable = (/** @type {string} */ f) => /\.(ts|tsx|js|mjs|cjs)$/.test(f);
   // The pre-check lints the changed files only; the changed-packages check lints whole packages.
   const lintTargets = precheck
@@ -329,11 +338,11 @@ async function main() {
     : [...plan.changed, ...plan.outside.filter((f) => lintable(f) && existsSync(join(root, f)))];
   /** @type {Step[]} */
   const together = [];
-  if (present.length > 0)
+  if (formatTargets.length > 0)
     together.push({
       name: 'format',
       command: 'pnpm',
-      args: ['exec', 'prettier', '--check', '--ignore-unknown', ...present],
+      args: ['exec', 'prettier', '--check', '--ignore-unknown', ...formatTargets],
     });
   if (lintTargets.length > 0)
     together.push({
