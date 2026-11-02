@@ -174,6 +174,12 @@ At startup, in today's order (workstream recovery, then batch recovery, then the
 - A `CUTTING` worktree batch: remove the worktree at `worktree_path` if git lists it (`remove --force
   --force`); an unlisted directory there is removed only when empty, else left and named on the card; cancel
   its workstreams, delete the row and the pin, card as today. A branch left by the crash is left alone, as in shared mode, and the next cut uses a new name.
+  _Amended 2026-11-02 (`architecture/decisions/2026-11-02-an-interrupted-cut-is-cut-again.md`): this is now
+  the fallback. Startup clears what the cut left in git and cuts the same row again, keeping its
+  workstreams, with no card; it deletes the row and raises the card only when a person must settle something
+  (files at the path, a branch with commits or checked out, no workstreams). A leftover branch that is an
+  ancestor of origin's base is deleted so the new cut reuses the name. `architecture/02-batch-delivery.md`
+  (Recovery) is current._
 - An `OPEN`, `SHIPPING` or `FAILED` worktree batch whose worktree is missing, unpinned, or on another branch
   fails with a card naming the path; Retry recreates it (§5).
 - A `SHIPPED` or `CLOSED` batch whose `worktree_path` is still set (a crash between recording the state and

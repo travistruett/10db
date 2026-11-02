@@ -50,10 +50,15 @@ export async function removeBranch(
  * branch while it is still at the commit it was cut from; an abandoned batch's raises one card
  * saying so. An abandoned batch whose branch holds
  * commits keeps it and raises one card offering to delete it. A closed batch's branch that moved is
- * kept without a card. Safe to repeat; a card is raised again only while the branch still holds the
+ * kept without a card. `worktreeRemoved` is whether `retireWorktree` just removed the batch's
+ * worktree, which the deleted card then says; a shared batch never had one. Safe to repeat; a card is raised again only while the branch still holds the
  * commits and no card for it is open, so answer Keep before the batch is retired again.
  */
-export async function settleBranch(ctx: DeliveryContext, batchId: BatchId): Promise<void> {
+export async function settleBranch(
+  ctx: DeliveryContext,
+  batchId: BatchId,
+  worktreeRemoved = false,
+): Promise<void> {
   const batch = getBatch(ctx.state.db, batchId);
   const base = batch.baseSha;
   if (batch.branch === null || base === null) return;
@@ -66,13 +71,7 @@ export async function settleBranch(ctx: DeliveryContext, batchId: BatchId): Prom
   );
   if (batch.state !== BatchState.Abandoned) return;
   if (removal.kind === 'removed') {
-    // retireWorktree settles the branch before it clears `worktree_path`, so a set path here means
-    // the batch's worktree was just removed; a shared batch never had one.
-    raise(
-      ctx.inbox,
-      batch.projectId,
-      branchCards.abandonedBranchDeleted(batch, batch.worktreePath !== null),
-    );
+    raise(ctx.inbox, batch.projectId, branchCards.abandonedBranchDeleted(batch, worktreeRemoved));
     return;
   }
   if (removal.kind !== 'kept' && removal.kind !== 'checked_out') return;

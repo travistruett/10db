@@ -194,6 +194,7 @@ describe('Gh.prStatus', () => {
       state: 'OPEN',
       headSha: HEAD,
       mergeBlocked: null,
+      blockedOnChecks: false,
       mergeable: 'CONFLICTING',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
@@ -205,7 +206,7 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable',
+      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision',
     ]);
   });
 
@@ -264,6 +265,37 @@ describe('Gh.prStatus', () => {
     });
     await expect(gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ mergeBlocked });
   });
+
+  // BLOCKED means GitHub waits for something required. When the review is not what it waits for, a
+  // required check that has not reported is the likely cause; 10db cannot tell that from a check
+  // that is only slow, so the watch gives the runs minutes to appear before it acts on this.
+  it.each([
+    ['BLOCKED', undefined, true],
+    ['BLOCKED', '', true],
+    ['BLOCKED', null, true],
+    ['BLOCKED', 'APPROVED', true],
+    ['BLOCKED', 'REVIEW_REQUIRED', false],
+    ['BLOCKED', 'CHANGES_REQUESTED', false],
+    ['CLEAN', undefined, false],
+    ['UNKNOWN', undefined, false],
+    ['DIRTY', undefined, false],
+    [undefined, undefined, false],
+  ])(
+    'reads mergeStateStatus %s with review decision %s as blockedOnChecks %s',
+    async (mergeStateStatus, reviewDecision, blockedOnChecks) => {
+      const { gh } = view({
+        exitCode: 0,
+        stdout: JSON.stringify({
+          url: INPUT.ref,
+          state: 'OPEN',
+          statusCheckRollup: [],
+          ...(mergeStateStatus === undefined ? {} : { mergeStateStatus }),
+          ...(reviewDecision === undefined ? {} : { reviewDecision }),
+        }),
+      });
+      await expect(gh.prStatus(INPUT, CALL)).resolves.toMatchObject({ blockedOnChecks });
+    },
+  );
 
   it('reads a pull request with no checks', async () => {
     const { gh } = view({
@@ -386,6 +418,7 @@ describe('Gh.prStatus', () => {
         state: 'OPEN',
         headSha: null,
         mergeBlocked: null,
+        blockedOnChecks: false,
         mergeable: 'UNKNOWN',
         checks,
         failingChecks: failing,

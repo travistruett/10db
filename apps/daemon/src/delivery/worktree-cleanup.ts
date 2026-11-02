@@ -123,15 +123,18 @@ async function removeWorktreeAndSettle(
 ): Promise<Retirement> {
   const batchId = batch.id;
   const main = project.repoPath;
+  let removed = true;
   try {
     await ctx.git.removeWorktree(main, path);
   } catch (error) {
     if (!(error instanceof WorktreeNotOursError)) throw error;
     // Something git doesn't list as 10db's: leave it, say so, and stop treating it as live.
-    if (!removeIfEmptyDirectory(ctx.worktreeRoot, path))
+    if (!removeIfEmptyDirectory(ctx.worktreeRoot, path)) {
+      removed = false;
       raise(ctx.inbox, batch.projectId, worktreeCards.leftBehind(batch, path));
+    }
   }
-  await settleBranch(ctx, batchId);
+  await settleBranch(ctx, batchId, removed);
   // The tasks' starts on the merged base mean nothing once their worktree is gone; one git won't
   // delete is left for the startup sweep.
   for (const ws of listWorkstreams(ctx.state.db, { batchId }))

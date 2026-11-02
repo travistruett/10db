@@ -483,47 +483,16 @@ describe('FactoryView sessions', () => {
     expect(await screen.findByText('not retryable now')).toBeTruthy();
   });
 
-  it('cancels after confirmation', async () => {
-    const ws = workstreamDto({ taskTitle: 'Alpha', state: 'WAITING_HUMAN' });
-    const cancelled: string[] = [];
-    open(ws, [
-      http.post(daemonUrl('/workstreams/:id/cancel'), ({ params }) => {
-        cancelled.push(String(params['id']));
-        return HttpResponse.json({ ...ws, state: 'CANCELLED' });
-      }),
-    ]);
+  it.each(['WAITING_HUMAN', 'RUNNING', 'QUEUED'] as const)(
+    'puts no Cancel on a %s session: a run is cancelled from its card or drawer',
+    async (state) => {
+      open(workstreamDto({ taskTitle: 'Alpha', state }));
 
-    fireEvent.click(within(await sessionRow('Alpha')).getByRole('button', { name: 'Cancel' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
-    expect(cancelled).toEqual([]);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
-    await waitFor(() => {
-      expect(cancelled).toEqual([ws.id]);
-    });
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
-  });
-
-  it('shows a refused cancel inside the dialog and clears it when the dialog closes', async () => {
-    const ws = workstreamDto({ taskTitle: 'Alpha', state: 'RUNNING' });
-    open(ws, [
-      http.post(daemonUrl('/workstreams/:id/cancel'), () =>
-        HttpResponse.json({ error: 'conflict', message: 'already finished' }, { status: 409 }),
-      ),
-    ]);
-
-    fireEvent.click(within(await sessionRow('Alpha')).getByRole('button', { name: 'Cancel' }));
-    const dialog = await screen.findByRole('dialog', { name: 'Cancel this workstream?' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel workstream' }));
-    expect(await within(dialog).findByText('already finished')).toBeTruthy();
-
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Keep running' }));
-    await waitFor(() => {
-      expect(screen.queryByRole('dialog')).toBeNull();
-    });
-    expect(screen.queryByText('already finished')).toBeNull();
-  });
+      const row = await sessionRow('Alpha');
+      expect(within(row).queryByRole('button')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Cancel' })).toBeNull();
+    },
+  );
 
   it('lists a finished session without Cancel or Retry', async () => {
     const done = workstreamDto({

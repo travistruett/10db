@@ -63,7 +63,9 @@ import {
   shippedAnywayAndClosed,
 } from './task-state';
 import { canStart, TaskCardMenu } from './task-card-menu';
+import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld } from './task-hold';
+import { CancelRunModal } from './cancel-run-modal';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 import { useLinkedTask } from './use-linked-task';
@@ -188,6 +190,8 @@ function BoardColumns({
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
   const reopenTask = useReopenTask();
+  // The run the builder is being asked to confirm cancelling, from a card's menu or the drawer.
+  const [cancelling, setCancelling] = useState<WorkstreamDto | null>(null);
   // What checks a step, as the daemon picks it: the changed-packages check where the project has one.
   const stepCheck =
     project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
@@ -394,6 +398,13 @@ function BoardColumns({
                       },
                     }
                   : {})}
+                {...(ws && canCancelRun(task, ws)
+                  ? {
+                      onCancelRun: () => {
+                        setCancelling(ws);
+                      },
+                    }
+                  : {})}
                 {...(ws && canRetryRun(ws, batch)
                   ? {
                       onRetry: () => {
@@ -466,11 +477,18 @@ function BoardColumns({
           onStart={() => {
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
           }}
+          onCancelRun={setCancelling}
           onClose={() => {
             setOpenId(null);
           }}
         />
       ) : null}
+      <CancelRunModal
+        run={cancelling}
+        onClose={() => {
+          setCancelling(null);
+        }}
+      />
     </Stack>
   );
 }

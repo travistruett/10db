@@ -121,6 +121,19 @@ const RUNNING_BATCH: readonly BatchState[] = [
 const conflicting = (status: PullRequestStatus): boolean =>
   status.mergeBlocked === MergeBlocked.Conflicts || status.mergeable === PrMergeable.Conflicting;
 
+/**
+ * True when the open pull request's head has no check at all while GitHub waits for a required one:
+ * the workflows never started. A head with any check, running or finished, is never this.
+ */
+const checksNeverStarted = (status: PullRequestStatus): boolean =>
+  status.state === PrState.Open &&
+  status.checks === 'none' &&
+  status.blockedOnChecks &&
+  !conflicting(status);
+
+/** Why 10db merges the base into a shipped pull request: it conflicts, or its head never got its checks. */
+type CatchUpCause = 'conflict' | 'checks';
+
 export interface ShipperDeps extends DeliveryContext {
   readonly gate: GateRunner;
   /** The daemon's one set of base updates, shared with the runner, so a batch's gates run in turn. */
@@ -153,6 +166,14 @@ export interface Shipper {
    * queued, or not one 10db lands, does nothing.
    */
   catchUp(batchId: BatchId): void;
+  /**
+   * The open pull request of a batch that merges by itself has had minutes to get its required
+   * checks and its head has none: merges the base into it the same way and pushes it, so GitHub
+   * starts its workflows on a new head. Pushes nothing when the head has any check by the time the
+   * job runs, when the branch already holds the base, or when the merge or its check fails; none of
+   * those raises a card, since the watch's notice says the checks never started.
+   */
+  restartCi(batchId: BatchId): void;
   /**
    * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
    * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
@@ -1112,7 +1133,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * the branch: the merge, the install and the generators of a gate's base update, the pre-check or the
    * gate on the result, then the push. A worktree made here goes again at the end, whatever happened.
    */
-  async function catchUpSteps(batchId: BatchId, signal: AbortSignal): Promise<void> {
+  async function catchUpSteps(
+    batchId: BatchId,
+    signal: AbortSignal,
+    cause: CatchUpCause,
+  ): Promise<void> {
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;
     const batch = getBatch(db, batchId);
@@ -1129,14 +1154,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
         deps.logger.warn({ batchId, err: detailOf(error) }, 'pull request not read to catch it up');
       return;
     }
-    if (status?.state !== PrState.Open || !conflicting(status)) return;
-    const startedAt = deps.clock.now().getTime();
-    const last = lastCatchUp.get(batchId);
-    // Once per head until the retry time: a failure that raised its card is not tried every round.
-    if (last?.head === status.headSha && startedAt - last.at < CATCH_UP_RETRY_MS) return;
-    lastCatchUp.set(batchId, { head: status.headSha, at: startedAt });
+    if (status?.state !== PrState.Open) return;
+    // The watch saw this a round ago: a check that has appeared since, running or finished, is
+    // never pushed over.
+    if (cause === 'checks' ? !checksNeverStarted(status) : !conflicting(status)) return;
+    if (cause === 'conflict') {
+      const startedAt = deps.clock.now().getTime();
+      const last = lastCatchUp.get(batchId);
+      // Once per head until the retry time: a failure that raised its card is not tried every round.
+      if (last?.head === status.headSha && startedAt - last.at < CATCH_UP_RETRY_MS) return;
+      lastCatchUp.set(batchId, { head: status.headSha, at: startedAt });
+    }
     /** Raises the one card; neither notice says the same thing as well. */
     const stop = (why: CatchUpStop): void => {
+      if (cause === 'checks') {
+        // Not a conflict: the watch's notice says the checks never started, and the card would not fit.
+        deps.logger.warn({ batchId, prUrl, stop: why.kind }, 'checks not started again');
+        return;
+      }
       raise(deps.inbox, batch.projectId, prCards.catchUpStopped(getBatch(db, batchId), why));
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict, NOTICE_KEY.merge]);
       mergeAgain.add(batchId);
@@ -1157,6 +1192,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // A CI fix of this pull request that still runs lets go of the branch when it ends: asked
         // again next round. Until then the pull request says it conflicts, as no card does yet.
         if (heldByRunningFix(batch, holder)) {
+          if (cause === 'checks') return;
           lastCatchUp.delete(batchId);
           showNotice(deps.state, batchId, updateNotices.waiting(getBatch(db, batchId)));
           return;
@@ -1280,7 +1316,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(getBatch(db, batchId), project, branch, signal);
       pushed = true;
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
-      showNotice(deps.state, batchId, updateNotices.merged(getBatch(db, batchId), resolved));
+      showNotice(
+        deps.state,
+        batchId,
+        cause === 'checks'
+          ? updateNotices.restarted(getBatch(db, batchId), resolved)
+          : updateNotices.merged(getBatch(db, batchId), resolved),
+      );
       hideNotices(deps.state, batchId, [NOTICE_KEY.baseConflict]);
       withdraw(deps.state, deps.inbox, batch.projectId, [prCardKey.catchUp(batchId)]);
       mergeAgain.add(batchId);
@@ -1343,18 +1385,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
   }
 
-  function catchUp(batchId: BatchId): void {
+  function queueCatchUp(batchId: BatchId, cause: CatchUpCause): void {
     const batch = getBatch(db, batchId);
     if (!landsItself(batch) || catchingUp.has(batchId)) return;
     catchingUp.add(batchId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
-        await catchUpSteps(batchId, signal);
+        await catchUpSteps(batchId, signal, cause);
       } finally {
         catchingUp.delete(batchId);
       }
     });
   }
+
+  const catchUp = (batchId: BatchId): void => {
+    queueCatchUp(batchId, 'conflict');
+  };
+  const restartCi = (batchId: BatchId): void => {
+    queueCatchUp(batchId, 'checks');
+  };
 
   function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
     const batch = getBatch(db, batchId);
@@ -1390,6 +1439,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   return {
     catchUp,
+    restartCi,
     retryMerge,
     checkBatch,
     checkOpenBatches() {

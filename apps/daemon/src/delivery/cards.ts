@@ -230,7 +230,7 @@ function ghCard(prefix: string, error: unknown, then: string): Card | null {
 export const startCards = {
   lanesRunning: (project: ProjectDto, lanes: number): Card => ({
     title: `${NOT_STARTED}: work is still running in ${project.name}`,
-    body: `10db switches branches only when no lane runs in the project, and ${String(lanes)} lane(s) run now. Let them finish, or cancel them in the Factory view, then start again.`,
+    body: `10db switches branches only when no lane runs in Your folder (${project.repoPath}); lanes in separate copies don't block it. ${String(lanes)} lane(s) run in Your folder now. Let them finish, or cancel them in the Factory view, then start again.`,
   }),
   dirtyCheckout: (project: ProjectDto, paths: readonly string[]): Card => ({
     title: `${NOT_STARTED}: the checkout has uncommitted changes`,
@@ -918,7 +918,7 @@ export const checkoutCards = {
       batch,
       place,
       `work is running in ${project.name}`,
-      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no work runs in the project, and ${String(lanes)} workstream(s) run now. Once they finish, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
+      `Batch "${batch.title}" ${ended(batch)}. 10db switches branches only when no lane runs in Your folder (${project.repoPath}); lanes in separate copies don't block it. ${String(lanes)} lane(s) run in Your folder now. Once they finish, answer Switch back, or switch back yourself with ${checkoutSwitchCommand(project.repoPath, place)}.`,
     ),
   failed: (batch: BatchDto, project: Checkout, place: CheckoutPlace, error: unknown): Card =>
     leftCard(

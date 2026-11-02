@@ -9,6 +9,7 @@ import {
   type PermissionRuleDto,
   type WorkstreamId,
 } from '@10db/contracts';
+import { storableRule } from '../permissions';
 
 /** The tools whose permission cards name the file they write (the broker's edit family). */
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -38,7 +39,8 @@ export interface EditAllowance {
 
 /**
  * The edits the answered permission cards allowed. `allow_once` allows one write; `allow_workstream` and
- * `allow_project` store a rule that allows every later one, so those stand. A card the builder denied, or
+ * `allow_project` store a rule that allows every later one, so those stand, unless no rule was storable
+ * for the card (then they allow one write, as the card says). A card the builder denied, or
  * one that names no file, allows nothing.
  */
 export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] {
@@ -59,6 +61,10 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
     const tool = item.detail?.['toolName'];
     const path = item.detail?.['path'];
     if (typeof tool !== 'string' || !EDIT_TOOLS.has(tool) || typeof path !== 'string') continue;
+    // A choice stands only when answering the card stored a rule (`applyPermissionChoice`); one that
+    // stored none, such as a sandboxed path with a glob character, behaves as allow-once.
+    const summary = item.detail?.['summary'];
+    const stored = typeof summary === 'string' && storableRule(tool, summary) !== undefined;
     // The inbox folds identical cards from several lanes into one, with a target for each lane; the
     // builder's answer allows each of those lanes' write.
     for (const target of item.targets) {
@@ -67,7 +73,7 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
         workstreamId: target.workstreamId,
         useKey: useKey(item.id, target.workstreamId),
         path,
-        standing: !once,
+        standing: !once && stored,
       });
     }
   }
