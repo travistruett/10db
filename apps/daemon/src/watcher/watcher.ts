@@ -20,6 +20,7 @@ import {
   getBatch,
   getProject,
   getWorkstream,
+  getWorkstreamRow,
   listInbox,
   listWorkstreams,
 } from '@10db/db';
@@ -313,8 +314,8 @@ export function createWatcher(deps: {
    * were carded; once that lane holds a claim over them they are its own work. A claim granted to any other
    * lane, in this checkout or another, resolves nothing: that lane didn't make the write, so the card stays.
    * Sensitive paths stay carded. A bulk card resolves only when every path it lists is covered and not
-   * sensitive and, when it lists fewer than it counts, the checkout's current changes hold nothing the claims
-   * leave uncovered, since the paths it leaves out can't be read from the card.
+   * sensitive and, when it lists fewer than it counts, nothing the lane changed since its base, committed or
+   * not, lies outside the claims, since the paths it leaves out can't be read from the card.
    */
   async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
@@ -331,11 +332,21 @@ export function createWatcher(deps: {
     const covered = (paths: readonly string[]): boolean =>
       paths.every((p) => !isSensitivePath(p)) && findStrays(paths, project, claims).length === 0;
     let unlistedCovered: boolean | null = null;
-    /** Whether nothing the checkout now has changed lies outside the claims, bar the sensitive paths with cards of their own. */
+    /**
+     * Whether nothing the lane has changed since its base lies outside the claims, bar the sensitive paths
+     * with cards of their own. Committed changes count: a write the lane committed through the commit tool
+     * is gone from the working tree's status but is still a write outside every claim. A lane with no
+     * recorded base has run no session, so its HEAD is the base.
+     */
     const noStraysNow = async (): Promise<boolean> => {
       if (unlistedCovered !== null) return unlistedCovered;
       try {
-        const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
+        const base = getWorkstreamRow(db, lane).baseHead ?? 'HEAD';
+        const changed = withoutBookkeeping(
+          ws.projectId,
+          root,
+          await deps.git.changedFilesSince(root, base),
+        );
         unlistedCovered =
           findStrays(
             changed.filter((p) => !isSensitivePath(p)),
