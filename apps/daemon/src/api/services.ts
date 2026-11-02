@@ -27,6 +27,11 @@ import type {
   FlowPatch,
   FolderInspectResult,
   FoundHostDto,
+  GoalAdoptInput,
+  GoalAdoptIssue,
+  GoalAdoptPreview,
+  GoalDto,
+  GoalId,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -78,6 +83,12 @@ import type {
 export type TaskStarted =
   | { readonly kind: 'workstream'; readonly workstream: WorkstreamDto }
   | { readonly kind: 'batch'; readonly batch: BatchDto };
+
+/** What adopting a goal brief came to: the goal written, a dry run's preview, or every reason it was refused. */
+export type GoalAdoptResult =
+  | { readonly kind: 'adopted'; readonly goal: GoalDto }
+  | { readonly kind: 'previewed'; readonly preview: GoalAdoptPreview }
+  | { readonly kind: 'refused'; readonly errors: GoalAdoptIssue[] };
 
 /** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
@@ -156,6 +167,16 @@ export interface ApiServices {
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;
+  /**
+   * Reads a goal brief from a path or its text, checks it and, unless `dryRun`, writes the goal in
+   * `draft` with its tasks in one transaction. A refusal lists every error and writes nothing.
+   * Throws NotFoundError for an unknown project.
+   */
+  adoptGoal(projectId: ProjectId, input: GoalAdoptInput): Promise<GoalAdoptResult>;
+  /** The project's goals, oldest first. Throws NotFoundError for an unknown project. */
+  listGoals(projectId: ProjectId): GoalDto[];
+  /** Throws NotFoundError for an unknown goal. */
+  getGoal(id: GoalId): GoalDto;
   listFlows(): FlowDto[];
   listWorkstreams(filter: { readonly active: boolean }): WorkstreamDto[];
   cancelWorkstream(id: WorkstreamId): Promise<WorkstreamDto>;
