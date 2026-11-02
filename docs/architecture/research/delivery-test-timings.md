@@ -94,8 +94,36 @@ A template clone to copy in `teammatePush` would save about 50 ms of a 1.4–2 s
 `teammatePush` is 5 spawns against the flow's 77, and its clone is 47 ms of them. It is not the
 next target.
 
-**Next step (not done here: it is production code in `src/git`, outside this task's claim):** trace
-who calls `rev-parse --absolute-git-dir`, `rev-parse --verify` and `remote get-url`, and read
-each once per operation where `pinned()` already reads the pin once, instead of once per call. Then
-re-run this note's method, ideally at a stated load, since the load moved the result more than the
-change did.
+## Git dirs and origin read once per operation
+
+Traced with the same throwaway spawn wrapper, adding the stack of each spawn (one task, `landing`'s
+path, same flow as above). Every `rev-parse --absolute-git-dir` is `pinned()` in
+`apps/daemon/src/git/git.ts`, which every `Git` method opens with, so a cut or a ship that makes N
+git calls read the git dirs N times: 16 in the flow (7 in the cut and 9 in the ship, one for every
+call). Every `remote get-url` came from two places: `pinned()`'s first sight of a checkout, which
+records the pin (2: fetch and push), and `pinnedUrl()`, which re-reads origin's URL for each
+`fetch`/`push`/`pinnedPushUrl`/`remoteUrl('origin')` (5). `rev-parse --verify` is `revParse()`, called
+for `HEAD` (by `head`, `changes` and `filters`), `origin/main`, the batch branch and `main`.
+
+`Git.operation(fn)` now runs a whole operation, and `start.ts` `cut`, `ship.ts` `shipSteps` and
+`catchUpSteps` use it. Inside one, `pinned()` reads the git dirs once per checkout and later calls
+check the same directories by device and inode (a `.git` replaced meanwhile is still refused) and
+re-read the `alternates` and `attributes` files, which cost no spawn. origin's URL is reused only
+while the repository's `config` and `config.worktree` read byte for byte the same, so a gate that
+rewrites origin between two calls is seen by the next one; a config with an `[include]` is never
+reused. Tests: `src/git/operation.test.ts` and `src/delivery/git-spawns.test.ts`.
+
+Re-measured (same flow, the result is spawn counts, which do not depend on load; no wall time was re-measured):
+
+| Call                             | Before | After | Why the rest stays                                                                |
+| -------------------------------- | ------ | ----- | --------------------------------------------------------------------------------- |
+| `rev-parse --absolute-git-dir`   | 16     | 2     | one per operation: the cut and the ship                                           |
+| `remote get-url` (fetch + push)  | 7      | 6     | 2 record the pin at first sight; one per direction per operation checks it        |
+| `rev-parse --verify`             | 13     | 13    | not redundant: `HEAD` and branch tips move between calls, and each result is used |
+| all spawns, start + ship + setup | 73     | 58    | cut 30 → 23 spawns                                                                |
+
+The 15 spawns removed are about 240 ms at the ~16 ms per spawn above, so about 18% of the flow's
+1.3 s; the saving per spawn grows with load the way every spawn does. `rev-parse --verify` was left
+alone because caching a ref across calls would hand a later call a tip that a lane, a gate or the
+cut itself had since moved. The two reads of `HEAD` that `filtersIn` and `changedPaths` make back to
+back in the cut are the only candidates, for one spawn.
