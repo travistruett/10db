@@ -116,7 +116,10 @@ describe('a pull request that lands in another branch', () => {
     expect(listBatches(h.store.db, { projectId: h.project.id })).toEqual([]);
     expect(h.git$('rev-parse', 'HEAD')).toBe(before);
     expect(h.git$('branch', '--show-current')).toBe('main');
-    expect(listWorkstreams(h.store.db, {})).toEqual([]);
+    // The workstream the start inserted with the row is cancelled with it, so nothing runs.
+    expect(listWorkstreams(h.store.db, {})).toMatchObject([
+      { taskId: task.id, state: 'CANCELLED', batchId: null },
+    ]);
   });
 });
 
