@@ -119,6 +119,10 @@ export function declaresNameref(head: string, words: readonly string[]): boolean
  * list names (`${!prefix*}`, `${!prefix@}`, `${!a[@]}`) name nothing to look up.
  */
 export function expandsIndirectly(word: string): boolean {
+  // zsh: `${(P)name}` reads the variable `name` holds, `${(e)name}` expands the value again (it
+  // runs substitutions in it) and `${(%)name}` expands it as a prompt. A flag list is read loosely,
+  // so a flag argument holding one of these letters (`${(j:e:)x}`) counts too.
+  if (/\$\{\([^}]*[Pe%]/.test(word)) return true;
   return [...word.matchAll(/\$\{!([^}]*)\}/g)].some(
     (match) => !/^(?:\w+[*@]|\w+\[[@*]\])$/.test(match[1] ?? ''),
   );
