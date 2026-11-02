@@ -46,3 +46,8 @@ export function literalGlob(path: string): string {
   const exact = exactGlob(path);
   return path === '' || PathPattern.safeParse(exact).success ? exact : looseGlob(path);
 }
+
+/** Whether `literalGlob(path)` also matches names other than `path`, because a character became `?`. */
+export function isLooseGlob(path: string): boolean {
+  return path !== '' && !PathPattern.safeParse(exactGlob(path)).success;
+}

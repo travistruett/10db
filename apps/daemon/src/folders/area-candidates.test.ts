@@ -286,6 +286,21 @@ describe('deriveAreaCandidates', () => {
         ...files('cd', ['a.ts', 'b.ts', 'c.ts']),
       ],
     },
+    {
+      name: 'siblings a glob can only tell apart by a character it cannot escape',
+      tracked: [
+        ...files('a]b', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('axb', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('a[b', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('a\\b', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('zzz', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('k{a,b}', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('kab', ['one.ts', 'two.ts', 'three.ts']),
+        ...files('web/pkg]', ['one.ts', 'two.ts', 'three.ts', '.env']),
+        ...files('web/pkgx', ['one.ts', 'two.ts', 'three.ts', '.env']),
+        'web/package.json',
+      ],
+    },
   ])(
     'gives every file to exactly one candidate, with globs a project accepts: $name',
     ({ tracked }) => {
