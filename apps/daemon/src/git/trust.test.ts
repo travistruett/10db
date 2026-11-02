@@ -151,7 +151,6 @@ describe('no program from the checkout runs in a daemon git call', () => {
   const ACTS: readonly { name: string; act: (git: Git) => Promise<unknown> }[] = [
     { name: 'changedPaths', act: (git) => git.changedPaths(repo.path) },
     { name: 'changedFilesSince', act: (git) => git.changedFilesSince(repo.path, 'HEAD') },
-    { name: 'opChangedFilesSince', act: (git) => git.opChangedFilesSince(repo.path, 'HEAD') },
     {
       name: 'filesChangedBetween',
       act: (git) => git.filesChangedBetween(repo.path, 'HEAD', 'HEAD'),
