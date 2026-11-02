@@ -42,6 +42,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     startTask: none,
     holdTask: none,
     runNext: none,
+    adoptGoal: none,
+    getGoal: none,
     listFlows: () => [],
     listWorkstreams: () => [],
     cancelWorkstream: none,
@@ -1171,10 +1173,12 @@ describe('area proposal route', () => {
       },
     };
     const seen: string[] = [];
+    const signals: (AbortSignal | undefined)[] = [];
     const res = await app(
       stubServices({
-        proposeAreas: (path) => {
+        proposeAreas: (path, signal) => {
           seen.push(path);
+          signals.push(signal);
           return Promise.resolve(proposal);
         },
       }),
@@ -1186,6 +1190,8 @@ describe('area proposal route', () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(proposal);
     expect(seen).toEqual(['/repo']);
+    // The request's own signal, so a client that disconnects stops the proposal.
+    expect(signals[0]).toBeInstanceOf(AbortSignal);
   });
 });
 

@@ -19,6 +19,7 @@ import {
   closeTask,
   reopenTask,
   deleteBoardColumn,
+  getGoal,
   getMcpApproval,
   getProject,
   getTask,
@@ -74,6 +75,7 @@ import {
 import { markGhRequired } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
+import { adoptGoal } from '../goals';
 import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
@@ -261,6 +263,8 @@ export function createServices(deps: {
     openGoalDigest: (goalId) => deps.state.write((ctx) => openGoalDigest(ctx, goalId)),
     shipBatch: (id) => deps.shipper.ship(id),
     abandonBatch: (id) => deps.shipper.abandon(id),
+    adoptGoal: (projectId, input) => adoptGoal(deps, projectId, input),
+    getGoal: (id) => getGoal(db, id),
     listFlows: () => listFlows(db),
     listWorkstreams: ({ active }) => listWorkstreams(db, active ? { states: ACTIVE_STATES } : {}),
     async cancelWorkstream(id) {
@@ -415,10 +419,11 @@ export function createServices(deps: {
         },
         path,
       ),
-    proposeAreas: (path) =>
+    proposeAreas: (path, signal) =>
       proposeAreas(
         { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
         path,
+        signal,
       ),
     reviewProjectMcp(projectId) {
       const project = getProject(db, projectId);

@@ -1,6 +1,6 @@
 import { AccountId, Delivery, ToolName, type ProjectDto } from '@10db/contracts';
 import { Stack, TextInput } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
 import { useInspectFolder, useProposeAreas } from '../../daemon/folder-queries';
 import { useCreateProject, useSystemCheck } from '../../daemon/queries';
@@ -30,6 +30,12 @@ export interface ProjectSetup {
   readonly error: string | null;
 }
 
+/**
+ * How long setup waits for the daemon's proposal before it starts from one area. Longer than the
+ * daemon's own bound on the model (30 s), which leaves the git survey time to finish first.
+ */
+const PROPOSAL_MS = 45_000;
+
 interface Prefilled {
   readonly name: string;
   readonly gate: string;
@@ -37,7 +43,11 @@ interface Prefilled {
 }
 
 /** The state, fields and submit for adding a project; the first run and the New Project modal share it. */
-export function useProjectSetup(onCreated: (project: ProjectDto) => void): ProjectSetup {
+export function useProjectSetup(
+  onCreated: (project: ProjectDto) => void,
+  options: { readonly proposalMs?: number } = {},
+): ProjectSetup {
+  const proposalMs = options.proposalMs ?? PROPOSAL_MS;
   const inspect = useInspectFolder();
   const propose = useProposeAreas();
   const create = useCreateProject();
@@ -71,24 +81,70 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
     );
   };
 
+  /** The proposal in flight, if any: its request and the timer that gives up on it. */
+  const inFlight = useRef<{ abort: AbortController; timer: number } | null>(null);
+
+  /** Cancels the request, which stops the daemon's model question; nothing it answers is used. */
+  const stopProposal = () => {
+    const current = inFlight.current;
+    if (current === null) return;
+    inFlight.current = null;
+    window.clearTimeout(current.timer);
+    current.abort.abort();
+    propose.reset();
+  };
+
+  // Closing the form, or leaving the view, abandons a proposal nobody is waiting for.
+  useEffect(
+    () => () => {
+      const current = inFlight.current;
+      if (current === null) return;
+      inFlight.current = null;
+      window.clearTimeout(current.timer);
+      current.abort.abort();
+    },
+    [],
+  );
+
   const proposeFor = (root: string) => {
-    propose.mutate(root, {
-      onSuccess: (answer) => {
-        if (answer.ok) {
-          setAreas(draftsFromAreas(answer.proposal.areas));
-          setAreaNote(null);
-        } else wholeRepository(answer.message);
+    stopProposal();
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => {
+      if (inFlight.current?.abort !== abort) return;
+      stopProposal();
+      wholeRepository(`the proposal took longer than ${String(proposalMs / 1000)} s.`);
+    }, proposalMs);
+    inFlight.current = { abort, timer };
+    // Settled answers are used only while this request is still the one in flight.
+    const current = () => inFlight.current?.abort === abort;
+    const settle = () => {
+      if (!current()) return false;
+      window.clearTimeout(timer);
+      inFlight.current = null;
+      return true;
+    };
+    propose.mutate(
+      { path: root, signal: abort.signal },
+      {
+        onSuccess: (answer) => {
+          if (!settle()) return;
+          if (answer.ok) {
+            setAreas(draftsFromAreas(answer.proposal.areas));
+            setAreaNote(null);
+          } else wholeRepository(answer.message);
+        },
+        onError: (error) => {
+          if (!settle()) return;
+          wholeRepository(error.message);
+        },
       },
-      onError: (error) => {
-        wholeRepository(error.message);
-      },
-    });
+    );
   };
 
   const onInspect = (path: string) => {
     create.reset();
     // The last folder's proposal and the builder's edits to it belong to that folder only.
-    propose.reset();
+    stopProposal();
     setAreas(null);
     setAreaNote(null);
     inspect.mutate(path, {
@@ -115,7 +171,8 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
     accountChoice ?? accounts.find((a) => a.isDefault)?.id ?? accounts[0]?.id ?? null;
   const chooseAccount = accounts.length > 1;
 
-  const areasReady = areas !== null && areas.length > 0 && draftProblems(areas).rows.size === 0;
+  // Null areas with a folder chosen means the proposal is still out: the builder need not wait for it.
+  const areasReady = areas === null || (areas.length > 0 && draftProblems(areas).rows.size === 0);
   const canSubmit =
     inspection !== null &&
     areasReady &&
@@ -123,7 +180,18 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
     (delivery === Delivery.Local || typed.baseBranch !== '');
 
   const submit = () => {
-    if (inspection === null || areas === null || !canSubmit) return;
+    if (inspection === null || !canSubmit) return;
+    // Creating without waiting: the proposal is dropped, and the project starts from one area over
+    // every file, which the builder can split later in Settings.
+    let chosen = areas;
+    if (chosen === null) {
+      stopProposal();
+      chosen = draftsFromAreas([WHOLE_REPOSITORY]);
+      setAreas(chosen);
+      setAreaNote(
+        'Created without waiting for proposed areas. One area covers the whole repository.',
+      );
+    }
     create.mutate(
       toProjectInput({
         name: typed.name,
@@ -131,7 +199,7 @@ export function useProjectSetup(onCreated: (project: ProjectDto) => void): Proje
         gateCommand: typed.gate,
         delivery,
         baseBranch: typed.baseBranch,
-        areas: areasOf(areas),
+        areas: areasOf(chosen),
         accountId: chooseAccount && accountId !== null ? AccountId.parse(accountId) : null,
       }),
       { onSuccess: onCreated },

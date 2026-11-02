@@ -123,6 +123,16 @@ export type GoalAdoptIssue = z.infer<typeof GoalAdoptIssue>;
 export const GoalAdoptError = z.object({ errors: z.array(GoalAdoptIssue) });
 export type GoalAdoptError = z.infer<typeof GoalAdoptError>;
 
+/** The 200 body of a dry run that found nothing wrong: what adopting the brief would write. */
+export const GoalAdoptPreview = z.object({
+  dryRun: z.literal(true),
+  title: z.string(),
+  /** The tasks that would reach the Board, by their brief keys, in brief order. */
+  taskKeys: z.array(BriefKey),
+  criteria: z.int().min(0),
+});
+export type GoalAdoptPreview = z.infer<typeof GoalAdoptPreview>;
+
 // --- The goal (§4, §5) --------------------------------------------------------------------------
 
 export const GoalCriterionDto = z.object({

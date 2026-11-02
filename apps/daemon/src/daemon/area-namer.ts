@@ -22,7 +22,7 @@ export interface AreaNamerDeps {
  * so nothing of the repository is read or run on its behalf.
  */
 export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
-  return async (prompt) => {
+  return async (prompt, signal) => {
     const id = defaultAccountId(deps.db);
     if (id === null) throw new CompletionError('There is no default account to ask.');
     const launch = deps.launcher.session(getAccountRow(deps.db, id), NAMING_MODEL);
@@ -34,6 +34,7 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
         model: launch.model,
         env: launch.env,
         account: launch.expect,
+        ...(signal === undefined ? {} : { signal }),
       });
     } finally {
       await rm(cwd, { recursive: true, force: true });
