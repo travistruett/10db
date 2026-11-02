@@ -54,8 +54,9 @@ cannot fall back to today's rule; a key in a file, a log, the database or a resp
   per decision, `{ enabled, model, floor }`. A missing or invalid value reads as the defaults.
 - **Log.** Table `judge_calls`: id, decision, model, the state and question sent (the text 10db built, never a
   secret), the answer and confidence, latency, cost when OpenRouter reports it, the outcome (`acted`,
-  `below_floor`, `fallback_off`, `fallback_no_key`, `fallback_timeout`, `fallback_error`), the workstream when
-  there is one, and the time. Rows older than 30 days are deleted at startup.
+  `below_floor`, `fallback_off`, `fallback_no_key`, `fallback_timeout`, `fallback_error`, and `stopped` for a
+  call a cancel or a shutdown cut short, which Settings › Decisions words as stopped, not failed), the workstream
+  when there is one, and the time. Rows older than 30 days are deleted at startup.
 
 ## 3. Settings › Decisions
 
