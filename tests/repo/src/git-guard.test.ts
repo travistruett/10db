@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -783,6 +783,80 @@ describe('git guard deleting a branch whose pull request merged', () => {
 
   it('keeps the other irreversible rules when a deletion is allowed', () => {
     expect(outcome('git branch -D merged && git reset --hard', [pr('merged', tip)])).toBe('ask');
+  });
+
+  describe('asks GitHub only for a deletion that would otherwise ask', () => {
+    let calls: string;
+    let recorder: string;
+
+    beforeAll(() => {
+      calls = join(bin, 'calls');
+      recorder = mkdtempSync(join(tmpdir(), '10db-guard-gh-rec-'));
+      writeFileSync(
+        join(recorder, 'gh'),
+        `#!/bin/sh\necho "$@" >> '${calls}'\nprintf '%s' "$FAKE_GH_OUT"\n`,
+        { mode: 0o755 },
+      );
+    });
+
+    afterAll(() => {
+      rmSync(recorder, { recursive: true, force: true });
+    });
+
+    const ghCalls = (command: string): string[] => {
+      rmSync(calls, { force: true });
+      runHook(bash(command, repo.dir), {
+        PATH: `${recorder}:${process.env['PATH'] ?? ''}`,
+        FAKE_GH_OUT: JSON.stringify([pr('merged', tip)]),
+      });
+      return existsSync(calls) ? readFileSync(calls, 'utf8').split('\n').filter(Boolean) : [];
+    };
+
+    it.each<[string, string]>([
+      ['-d', 'git branch -d merged'],
+      ['-df', 'git branch -df merged'],
+      ['listing', 'git branch --list'],
+      ['creating', 'git branch fresh merged'],
+      ['-D with a remote-tracking flag', 'git branch -r -D merged'],
+    ])('runs no gh for %s', (_name, command) => {
+      expect(ghCalls(command)).toEqual([]);
+    });
+
+    it('still asks gh about a -D deletion', () => {
+      expect(ghCalls('git branch -D merged')).toHaveLength(1);
+    });
+  });
+
+  describe('caps the total time spent waiting on gh', () => {
+    let slow: string;
+
+    beforeAll(() => {
+      slow = mkdtempSync(join(tmpdir(), '10db-guard-gh-slow-'));
+      // Each call answers after a second, with both pull requests merged.
+      writeFileSync(join(slow, 'gh'), '#!/bin/sh\nsleep 1\nprintf "%s" "$FAKE_GH_OUT"\n', {
+        mode: 0o755,
+      });
+    });
+
+    afterAll(() => {
+      rmSync(slow, { recursive: true, force: true });
+    });
+
+    const slowOutcome = (budget: string) =>
+      runHook(bash('git branch -D merged other-merged', repo.dir), {
+        PATH: `${slow}:${process.env['PATH'] ?? ''}`,
+        FAKE_GH_OUT: JSON.stringify([pr('merged', tip), pr('other-merged', tip)]),
+        TENDB_GIT_GUARD_GH_BUDGET_MS: budget,
+      }).outcome;
+
+    it('allows when every branch is confirmed inside the budget', () => {
+      expect(slowOutcome('20000')).toBe('allow');
+    });
+
+    it('counts the branches not yet confirmed as unconfirmed and asks', () => {
+      // The first lookup takes 1 s and confirms; the second gets the 0.5 s left, is cut off and asks.
+      expect(slowOutcome('1500')).toBe('ask');
+    });
   });
 });
 

@@ -98,7 +98,8 @@ export const BuilderToolInputs = {
     })
     .refine(changesSomething, { message: CHANGE_NOTHING }),
   [BuilderToolName.RemoveTask]: z.object({ taskId: TaskId }),
-  [BuilderToolName.StartTask]: z.object({ taskId: TaskId }),
+  // `fresh` is StartTaskInput's: start a task whose latest run failed over from the base branch.
+  [BuilderToolName.StartTask]: z.object({ taskId: TaskId, fresh: z.boolean().optional() }),
   [BuilderToolName.MoveTask]: z
     .object({
       taskId: TaskId,
@@ -152,7 +153,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:
-    "Starts a task that is Ready (nothing it depends on is unfinished), or starts a held task again (the Board's Start). Refuses any other task, one that waits on unfinished dependencies, and one with a run in progress.",
+    "Starts a task that is Ready (nothing it depends on is unfinished), or starts a held task again (the Board's Start). Refuses any other task, one that waits on unfinished dependencies, and one with a run in progress. A task whose latest run failed is not Ready: pass fresh: true to start it over from the base branch (the drawer's Start over), in a new batch; the failed attempt's batch is abandoned when it holds only that task's work, and its branch is kept. Omit fresh for any other start.",
   [BuilderToolName.MoveTask]:
     'Moves a task to a board column: to is a column id from list_projects, or null to return it to Planned. This is how to park a task. after and before are optional neighbour task ids for the position.',
   [BuilderToolName.RunNext]:

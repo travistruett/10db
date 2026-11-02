@@ -156,7 +156,7 @@ export interface Placement {
 }
 
 /** The reason stored when the builder sets a task's placement from its control. */
-const BUILDER_CHOSE_PLACEMENT = 'chosen by the builder';
+export const BUILDER_CHOSE_PLACEMENT = 'chosen by the builder';
 
 export function insertTask(
   ctx: WriteContext,
@@ -806,9 +806,11 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
 
 /**
  * `proposed` is the placement the daemon's rule gives the task as the patch leaves it. It is taken
- * only when it names a separate copy, the patch doesn't set the placement itself, the builder has not
- * chosen this task's placement, and the task could still be moved (see `placementRefusal`); otherwise it
- * is ignored, so a task that has started, or that the builder placed, is never moved by an edit.
+ * only when the patch doesn't set the placement itself, the builder has not chosen this task's
+ * placement, and the task could still be moved (see `placementRefusal`); a task with no reason takes it
+ * only if it names a separate copy, one whose reason the rule proposed follows the rule (see
+ * `movedByProposal`). Otherwise it is ignored, so a task that has started, or that the builder placed,
+ * is never moved by an edit.
  */
 export function patchTask(
   ctx: WriteContext,
@@ -895,17 +897,24 @@ function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictE
 }
 
 /**
- * The columns an edit sets when the placement rule now sends the task to a separate copy (the task's
- * areas or risk tags changed after it was made). Null when the task stays as it is: the rule names no
- * copy, the builder chose its placement, it already has a reason, or Start could no longer start it.
+ * The columns an edit sets when the placement rule gives the task a different placement (the task's
+ * areas or risk tags changed after it was made). Null when the task stays as it is: the builder chose
+ * its placement, or Start could no longer start it. Otherwise:
+ *
+ * - A task with no reason takes the proposal only when it names a separate copy.
+ * - A task whose reason the rule proposed (anything but the builder's) follows the rule: the reason
+ *   is refreshed to match the new tags and areas, and when the rule no longer matches, the task goes
+ *   back to the proposed placement (the project's default) with no reason, since only the rule had
+ *   sent it to a copy.
  */
 function movedByProposal(
   db: DbReader,
   task: TaskDto,
   proposed: Placement,
 ): { workspaceMode: WorkspaceMode; placementReason: string | null } | null {
-  if (proposed.workspaceMode !== WorkspaceMode.Worktree) return null;
-  if (task.placementReason !== null) return null;
+  if (task.placementReason === BUILDER_CHOSE_PLACEMENT) return null;
+  if (task.placementReason === null && proposed.workspaceMode !== WorkspaceMode.Worktree)
+    return null;
   if (placementRefusal(db, task) !== null) return null;
   return { workspaceMode: proposed.workspaceMode, placementReason: proposed.reason };
 }

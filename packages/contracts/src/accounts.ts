@@ -359,13 +359,16 @@ export const AccountCardDetail = z.object({
 export type AccountCardDetail = z.infer<typeof AccountCardDetail>;
 
 /**
- * The options on an account card: confirm a seen identity, try the account again after a fix, move a
- * project back or keep it where it is, or wait.
+ * The options on an account card: confirm a seen identity, try the account again after a fix, check
+ * it again now (a sign-in, secret or credentials card), record the default account's login again,
+ * move a project back or keep it where it is, or wait.
  */
 export const AccountCardChoice = {
   Confirm: 'Confirm',
   Resume: 'Resume',
   Later: 'Later',
+  CheckAgain: 'Check again',
+  RecordAgain: 'Record again',
   MoveBack: 'Move back',
   Stay: 'Stay',
 } as const;

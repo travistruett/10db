@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  type BatchId,
   Delivery,
   InvalidError,
   type McpServerStatusDto,
@@ -16,6 +17,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  BUILDER_CHOSE_PLACEMENT,
   cancelTask,
   closeTask,
   reopenTask,
@@ -233,9 +235,9 @@ export function createServices(deps: {
       }
       // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
       // the builder asked to start over: then the batch holding only that attempt ends first.
-      if (input?.fresh) {
-        restarts.supersede(taskId);
-      } else {
+      let left: BatchId | null = null;
+      if (input?.fresh) left = restarts.supersede(taskId);
+      else {
         const retried = restarts.continueRun(taskId);
         if (retried) {
           deps.scheduler.requestTick();
@@ -251,6 +253,8 @@ export function createServices(deps: {
         project.delivery === Delivery.PullRequest
           ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
           : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
+      // The batch it left no longer waits on the attempt it started over from.
+      if (left) deps.shipper.checkBatch(left);
       // The failed run is left behind by the new one; its card's Retry would be refused.
       if (superseded) deps.inbox.cancelForWorkstream(superseded);
       deps.scheduler.requestTick();
@@ -378,6 +382,7 @@ export function createServices(deps: {
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
+    getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     async patchTask(id, patch) {
@@ -397,7 +402,14 @@ export function createServices(deps: {
                 riskTags: patch.riskTags ?? task.riskTags,
               });
         // A join still pending has not written yet, so the move would collide with it.
-        if (proposed?.workspaceMode === WorkspaceMode.Worktree && task.placementReason === null)
+        // The same holds for any move the rule makes: a task the builder placed never moves, and one with
+        // no reason moves only to a copy.
+        if (
+          proposed !== undefined &&
+          proposed.workspaceMode !== task.workspaceMode &&
+          task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
+          (task.placementReason !== null || proposed.workspaceMode === WorkspaceMode.Worktree)
+        )
           deps.starter.refuseIfJoining(id);
         return patchTask(ctx, id, patch, proposed);
       });

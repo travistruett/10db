@@ -43,8 +43,9 @@ const FIXED_SCRIPTS: ReadonlySet<string> = new Set([
  * The words a pnpm command line names in plain text before its arguments, when the program or
  * script it runs is fixed: `pnpm exec prettier`, `pnpm --filter @x/y test`, `pnpm exec node
  * script.mjs`. Null when a filled-in word could pick the program or pnpm's subcommand, the program
- * is not one that takes its arguments as data, or a flag is in neither of pnpm's flag lists (it
- * might take the next word, so the subcommand could be a different word).
+ * is not one that takes its arguments as data, a flag is in neither of pnpm's flag lists (it
+ * might take the next word, so the subcommand could be a different word), or a value flag is
+ * followed by a word starting with `-` (pnpm may read that word as a flag, not as the value).
  */
 export function fixedPnpmCommand(line: readonly string[]): string[] | null {
   let at = 1;
@@ -56,7 +57,9 @@ export function fixedPnpmCommand(line: readonly string[]): string[] | null {
     const kind = pnpmFlagKind(equals < 0 ? flag : flag.slice(0, equals));
     if (kind === 'unknown') return null;
     if (kind === 'value' && equals < 0) {
-      if (!LITERAL.test(line[at + 1] ?? '')) return null;
+      // nopt may not take a `-` word as the value, and then the next word is a flag of its own.
+      const value = line[at + 1] ?? '';
+      if (!LITERAL.test(value) || value.startsWith('-')) return null;
       at += 2;
     } else at += 1;
   }

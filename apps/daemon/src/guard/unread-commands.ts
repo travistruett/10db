@@ -5,6 +5,8 @@ import {
   declaresNameref,
   expandsIndirectly,
   evaluatesUnread,
+  mayExpandToFlag,
+  NAMEREF_BUILTINS,
   unreadArithmeticIn,
 } from './arithmetic-words';
 import { plainWordReadings, RUNNERS } from './command-forms';
@@ -421,6 +423,13 @@ function declaresIntegerAnywhere(command: string, depth: number): boolean {
     });
     const head = commandName(words[0] ?? '');
     if (declaresInteger(head, words) || declaresNameref(head, words)) return true;
+    // A word the shell expands (`declare ?n r=s` after `touch ./-n`) may be the flag `-n`.
+    if (
+      NAMEREF_BUILTINS.has(head) &&
+      segment.words.some((word, at) => mayExpandToFlag(word, segment.dynamicWords[at] === true))
+    ) {
+      return true;
+    }
     if (segment.words.some((word) => expandsIndirectly(word))) return true;
     // A quoted body is data unless a shell reads it.
     const bodies = SHELLS.has(head)
