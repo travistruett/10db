@@ -2120,6 +2120,7 @@ describe('worktree checkouts', () => {
         await write(SENSITIVE_FILE);
         restartAndResume(a);
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
       });
 
       it("cards another lane's step end once it changed the file after a restart", async () => {

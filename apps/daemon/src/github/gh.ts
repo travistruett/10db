@@ -102,14 +102,16 @@ export interface CiJob {
 
 /**
  * The required checks of a pull request's base, as `gh pr checks --required` reports them: `failing`
- * if any failed, else `pending` if any is running, queued or cancelled (a run a newer push replaced),
- * else `passing`; `none` when GitHub reports no required checks. `pending` lists the pending and
- * cancelled ones, `failing` the failed ones.
+ * if any failed, else `cancelled` if any was cancelled (bucket `cancel`: GitHub or a newer push
+ * stopped the run, and nothing in it failed), else `pending` if any is running or queued, else
+ * `passing`; `none` when GitHub reports no required checks. `failing` lists the failed ones,
+ * `cancelled` the cancelled ones (also when a failed one wins), `pending` those still running.
  */
 export interface RequiredChecks {
-  readonly state: 'passing' | 'pending' | 'failing' | 'none';
+  readonly state: 'passing' | 'pending' | 'cancelled' | 'failing' | 'none';
   readonly failing: CiJob[];
   readonly pending: CiJob[];
+  readonly cancelled: CiJob[];
 }
 
 /** A failed job's log: `not_yet` while its run is still in progress, which is no error. */
@@ -485,12 +487,13 @@ const RUN_IN_PROGRESS =
  * auth error with the same exit code included, throws a GhError, so it is never read as `none`.
  */
 export function parseRequiredChecks(args: readonly string[], out: GhOutput): RequiredChecks {
-  const none: RequiredChecks = { state: 'none', failing: [], pending: [] };
+  const none: RequiredChecks = { state: 'none', failing: [], pending: [], cancelled: [] };
   const empty = out.stdout.trim() === '';
   if (CHECKS_EXITS.has(out.exitCode) && !empty) {
     const items = parseOutput(RequiredChecksView, args, out.stdout);
     const failing: CiJob[] = [];
     const pending: CiJob[] = [];
+    const cancelled: CiJob[] = [];
     for (const item of items) {
       const link = httpsOrNull(item.link);
       const job: CiJob = {
@@ -511,8 +514,10 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
           failing.push(job);
           break;
         case 'pending':
-        case 'cancel':
           pending.push(job);
+          break;
+        case 'cancel':
+          cancelled.push(job);
           break;
         default:
           throw new GhError(
@@ -521,9 +526,11 @@ export function parseRequiredChecks(args: readonly string[], out: GhOutput): Req
           );
       }
     }
-    if (failing.length > 0) return { state: 'failing', failing, pending };
-    if (pending.length > 0) return { state: 'pending', failing, pending };
-    return items.length === 0 ? none : { state: 'passing', failing, pending };
+    if (failing.length > 0) return { state: 'failing', failing, pending, cancelled };
+    // A cancelled check wins over a running one: the pull request cannot merge until it runs again.
+    if (cancelled.length > 0) return { state: 'cancelled', failing, pending, cancelled };
+    if (pending.length > 0) return { state: 'pending', failing, pending, cancelled };
+    return items.length === 0 ? none : { state: 'passing', failing, pending, cancelled };
   }
   if (out.exitCode === 1 && empty && NO_CHECKS.test(out.stderr.trim())) return none;
   throw failure(args, out);

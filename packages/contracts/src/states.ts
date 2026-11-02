@@ -231,10 +231,12 @@ export type PullRequestChecks = ValueOf<typeof PullRequestChecks>;
 
 /**
  * A pull request's required checks on its head (CI-decides spec §4): `none` means the base
- * requires none. A cancelled required check reads as pending.
+ * requires none. A required check GitHub cancelled (bucket `cancel`) is `cancelled`, never pending:
+ * nothing is running for it, and 10db runs it again once.
  */
 export const RequiredChecksState = {
   Pending: 'pending',
+  Cancelled: 'cancelled',
   Passing: 'passing',
   Failing: 'failing',
   None: 'none',
