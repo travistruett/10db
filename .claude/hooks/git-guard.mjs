@@ -414,12 +414,31 @@ const SHELLS = ['bash', 'sh', 'zsh'];
 // Programs that read their stdin or arguments as a script to run.
 const SCRIPT_RUNNERS = [...SHELLS, 'eval', 'source', '.'];
 
+<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
 /**
  * `loneDash`: a `-` on its own is an option (env reads it as `-i`), not the command.
  * @typedef {{ valueOptions: string[], operands: number, loneDash?: boolean }} Wrapper
  */
+||||||| 20f56e6
+/** @typedef {{ valueOptions: string[], operands: number }} Wrapper */
+=======
+/**
+ * @typedef {object} Wrapper
+ * @property {string[]} valueOptions options that take a value, attached or as the next word
+ * @property {string[]} flags options that take no value
+ * @property {string[]} [attachedOptions] options whose value, if any, is only ever attached
+ * @property {number} operands positional words before the command
+ */
+// The option tables decide only what the guard lets through without asking: an option before the
+// command that appears in none of a wrapper's lists could take a value, so the guard can't tell
+// which word is the command and asks (`unknownWrapperOption`). Add an option here only after
+// checking whether it takes a value; a missing one costs a question, a wrong one hides a command.
+>>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
 /** @type {Wrapper} */
-const PLAIN_WRAPPER = { valueOptions: [], operands: 0 };
+const PLAIN_WRAPPER = { valueOptions: [], flags: [], operands: 0 };
+/** @type {string[]} */
+const INFO_OPTIONS = ['--help', '--version'];
+const DIGITS = [...'0123456789'].map((d) => `-${d}`);
 // Words that run another command without changing what it is: shell keywords and wrappers. Each
 // lists the options that take a separate value and how many positional words precede the command.
 /** @type {Map<string, Wrapper>} */
@@ -427,6 +446,7 @@ const WRAPPERS = new Map([
   ...['!', '{', '}', 'if', 'elif', 'while', 'until', 'then', 'do', 'else'].map(
     (keyword) => /** @type {[string, Wrapper]} */ ([keyword, PLAIN_WRAPPER]),
   ),
+<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
   ...['time', 'command', 'nohup', 'setsid'].map(
     (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
   ),
@@ -441,18 +461,73 @@ const WRAPPERS = new Map([
       loneDash: true,
     },
   ],
+||||||| 20f56e6
+  ...['time', 'command', 'nohup', 'setsid'].map(
+    (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
+  ),
+  ['exec', { valueOptions: ['-a'], operands: 0 }],
+  ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
+  // -P altpath is BSD/macOS env's.
+  ['env', { valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'], operands: 0 }],
+=======
+  ['time', { ...PLAIN_WRAPPER, flags: ['-p'] }],
+  ['command', { ...PLAIN_WRAPPER, flags: ['-p', '-v', '-V'] }],
+  ['nohup', { ...PLAIN_WRAPPER, flags: INFO_OPTIONS }],
+  ['setsid', { ...PLAIN_WRAPPER, flags: ['-c', '-f', '-w', '--ctty', '--fork', '--wait'] }],
+  ['exec', { valueOptions: ['-a'], flags: ['-c', '-l'], operands: 0 }],
+  [
+    'nice',
+    { valueOptions: ['-n', '--adjustment'], flags: [...DIGITS, ...INFO_OPTIONS], operands: 0 },
+  ],
+  [
+    'env',
+    {
+      valueOptions: [
+        ...['-u', '-C', '-S', '-a', '-P'],
+        ...['--unset', '--chdir', '--split-string', '--argv0'],
+      ],
+      flags: [
+        ...['-i', '-0', '-v'],
+        ...['--ignore-environment', '--null', '--debug', ...INFO_OPTIONS],
+        // These take a value only with =.
+        ...['--block-signal', '--default-signal', '--ignore-signal', '--list-signal-handling'],
+      ],
+      operands: 0,
+    },
+  ],
+>>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
   [
     'stdbuf',
-    { valueOptions: [...['-i', '-o', '-e'], ...['--input', '--output', '--error']], operands: 0 },
+    {
+      valueOptions: [...['-i', '-o', '-e'], ...['--input', '--output', '--error']],
+      flags: INFO_OPTIONS,
+      operands: 0,
+    },
   ],
-  ['timeout', { valueOptions: [...['-s', '-k'], ...['--signal', '--kill-after']], operands: 1 }],
+  [
+    'timeout',
+    {
+      valueOptions: [...['-s', '-k'], ...['--signal', '--kill-after']],
+      flags: [
+        ...['-f', '-p', '-v'],
+        ...['--foreground', '--preserve-status', '--verbose', ...INFO_OPTIONS],
+      ],
+      operands: 1,
+    },
+  ],
   [
     'sudo',
     {
       valueOptions: [
-        ...['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t'],
+        ...['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t', '-c'],
         ...['--chdir', '--chroot', '--user', '--group', '--host', '--prompt', '--role', '--type'],
-        ...['--other-user', '--close-from', '--command-timeout'],
+        ...['--other-user', '--close-from', '--command-timeout', '--login-class'],
+      ],
+      flags: [
+        ...['-A', '-b', '-B', '-E', '-e', '-H', '-i', '-K', '-k', '-l', '-n', '-P', '-S', '-s'],
+        ...['-V', '-v', '--askpass', '--background', '--bell', '--edit', '--set-home', '--login'],
+        ...['--remove-timestamp', '--reset-timestamp', '--list', '--non-interactive', '--stdin'],
+        ...['--preserve-groups', '--shell', '--validate', '--preserve-env', ...INFO_OPTIONS],
       ],
       operands: 0,
     },
@@ -461,47 +536,73 @@ const WRAPPERS = new Map([
     'xargs',
     {
       valueOptions: [
-        ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a'],
-        // BSD/macOS xargs: -J replstr, -R replacements, -S replsize.
-        ...['-J', '-R', '-S'],
-        // --replace, --eof and --max-lines take an optional value, given only with =, so
-        // the word after them is the command.
+        ...['-n', '-I', '-L', '-P', '-d', '-s', '-E', '-a', '-J', '-R', '-S'],
         ...['--max-args', '--max-procs', '--delimiter', '--max-chars', '--arg-file'],
         '--process-slot-var',
       ],
+      flags: [
+        ...['-0', '-o', '-p', '-r', '-t', '-x', '-z'],
+        ...['--null', '--open-tty', '--interactive', '--no-run-if-empty', '--verbose'],
+        ...['--exit', '--show-limits', ...INFO_OPTIONS],
+        // --replace, --eof and --max-lines take an optional value, given only with =, so
+        // the word after them is the command.
+        ...['--replace', '--eof', '--max-lines'],
+      ],
+      // -e, -i and -l take an optional value, given only attached (`-i{}`).
+      attachedOptions: ['-e', '-i', '-l'],
       operands: 0,
     },
   ],
 ]);
 
+const ENV_WRAPPER = /** @type {Wrapper} */ (WRAPPERS.get('env'));
+
 /**
- * True when an option word leaves its value to the next word. getopt takes a short option's value
- * attached (`-CDIR`) or in the next word, so in a group of short options (`-iC DIR`) the value
- * comes next only when the option that takes one is last. A long option takes its value in the next
- * word unless it carries `=`, and getopt_long accepts any unambiguous prefix of a name, so a prefix
- * of a listed long option counts (`--ch DIR`).
- * @param {string} word starts with `-`
- * @param {string[]} valueOptions
+ * How a wrapper reads an option word that starts with `-` (not `-` or `--`): whether the table
+ * knows every part of it, and whether its value is the next word. getopt takes a short option's
+ * value attached (`-CDIR`) or in the next word, so in a group of short options (`-iC DIR`) the value
+ * comes next only when the option that takes one is last, and what follows a value option is its
+ * value. A long option takes its value in the next word unless it carries `=`, and getopt_long
+ * accepts any unambiguous prefix of a name, so a prefix of a listed long option counts (`--ch DIR`).
+ * An exact name wins over a prefix, as in getopt_long: sudo's `--login` is a flag even though it
+ * is also a prefix of the value option `--login-class`.
+ * @param {string} word
+ * @param {Wrapper} wrapper
+ * @returns {{ known: boolean, takesNext: boolean }}
  */
-function takesNextWord(word, valueOptions) {
+function readOption(word, wrapper) {
   if (word.startsWith('--')) {
-    if (word.includes('=')) return false;
-    return valueOptions.some((name) => name.startsWith('--') && name.startsWith(word));
+    const name = word.split('=')[0];
+    if (wrapper.valueOptions.includes(name)) return { known: true, takesNext: !word.includes('=') };
+    if (wrapper.flags.includes(name)) return { known: true, takesNext: false };
+    const prefixes = (/** @type {string[]} */ list) =>
+      list.some((option) => option.startsWith('--') && option.startsWith(name));
+    return {
+      known: prefixes([...wrapper.valueOptions, ...wrapper.flags]),
+      takesNext: !word.includes('=') && prefixes(wrapper.valueOptions),
+    };
   }
   for (let k = 1; k < word.length; k += 1) {
-    if (valueOptions.includes(`-${word[k]}`)) return k === word.length - 1;
+    const short = `-${word[k]}`;
+    if (wrapper.valueOptions.includes(short)) {
+      return { known: true, takesNext: k === word.length - 1 };
+    }
+    if (wrapper.attachedOptions?.includes(short)) return { known: true, takesNext: false };
+    if (!wrapper.flags.includes(short)) return { known: false, takesNext: false };
   }
-  return false;
+  return { known: true, takesNext: false };
 }
 
 /**
- * Index of the word after a wrapper's options and positional operands.
+ * Where the word after a wrapper's options and positional operands is, and whether one of those
+ * options is missing from the wrapper's table.
  * @param {string[]} words
  * @param {number} from index just past the wrapper word
  * @param {Wrapper} wrapper
  */
 function skipWrapperArguments(words, from, wrapper) {
   let i = from;
+<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
   while (
     i < words.length &&
     words[i].startsWith('-') &&
@@ -511,13 +612,41 @@ function skipWrapperArguments(words, from, wrapper) {
       i += 1;
       continue;
     }
+||||||| 20f56e6
+  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+=======
+  let unknown = false;
+  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+>>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
     if (words[i] === '--') {
       i += 1;
       break;
     }
-    i += takesNextWord(words[i], wrapper.valueOptions) ? 2 : 1;
+    const option = readOption(words[i], wrapper);
+    if (!option.known) unknown = true;
+    i += option.takesNext ? 2 : 1;
   }
-  return Math.min(i + wrapper.operands, words.length);
+  return { index: Math.min(i + wrapper.operands, words.length), unknown };
+}
+
+/**
+ * Index of the first word after leading `VAR=value` words, wrappers and their options, and whether
+ * a wrapper on the way has an option its table doesn't know.
+ * @param {string[]} words
+ */
+function walkWrappers(words) {
+  let i = 0;
+  let unknown = false;
+  while (i < words.length) {
+    const wrapper = WRAPPERS.get(posix.basename(words[i]));
+    if (ENV_ASSIGNMENT.test(words[i])) i += 1;
+    else if (wrapper) {
+      const skipped = skipWrapperArguments(words, i + 1, wrapper);
+      i = skipped.index;
+      unknown ||= skipped.unknown;
+    } else break;
+  }
+  return { start: i, unknown };
 }
 
 /**
@@ -525,14 +654,16 @@ function skipWrapperArguments(words, from, wrapper) {
  * @param {string[]} words
  */
 function commandStart(words) {
-  let i = 0;
-  while (i < words.length) {
-    const wrapper = WRAPPERS.get(posix.basename(words[i]));
-    if (ENV_ASSIGNMENT.test(words[i])) i += 1;
-    else if (wrapper) i = skipWrapperArguments(words, i + 1, wrapper);
-    else break;
-  }
-  return i;
+  return walkWrappers(words).start;
+}
+
+/**
+ * True when a wrapper before the command has an option the table doesn't know. It might take a
+ * value, so which word is the command is a guess.
+ * @param {string[]} words
+ */
+function unknownWrapperOption(words) {
+  return walkWrappers(words).unknown;
 }
 
 /**
@@ -660,7 +791,7 @@ function envSplitString(words) {
     }
     if (/^-[A-Za-z]*S$/.test(word)) return words[j + 1] ?? null;
     if (/^-[A-Za-z]*S./.test(word)) return word.slice(word.indexOf('S') + 1);
-    if (takesNextWord(word, ['-u', '-C', '--unset', '--chdir'])) j += 1;
+    if (word.startsWith('-') && word !== '-' && readOption(word, ENV_WRAPPER).takesNext) j += 1;
     else if (!word.startsWith('-') && !ENV_ASSIGNMENT.test(word)) break;
   }
   return null;
@@ -1122,6 +1253,13 @@ function judge(command, cwd, whole = command, startDir = cwd) {
         decision: 'deny',
         reason:
           'Agents never disable or reroute the git hooks (LEFTHOOK*, GIT_CONFIG*). Fix what the hook reports.',
+      });
+    }
+    if (unknownWrapperOption(seg.words)) {
+      verdicts.push({
+        decision: 'ask',
+        reason:
+          'A wrapper option the guard does not know comes before the command, so it cannot tell which word runs. Run the command without the wrapper, or approve it.',
       });
     }
     const program = programAt(seg.words, start);
