@@ -2029,7 +2029,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       fail(
         id,
         ctl.fence,
-        `The ${currentStep(row).role} step ended with uncommitted changes in its claims ${String(attempt)} times, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+        `The ${currentStep(row).role} step ended with uncommitted changes in its claims after ${String(row.attempt)} fix attempts and merge sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
       );
       return;
     }
@@ -2062,10 +2062,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     const attempt = row.attempt + 1;
     const batch = row.batchId === null ? null : getBatch(db, row.batchId);
     if (attempt > opts.limits.maxFixAttempts + 1) {
+      const base = batch?.baseBranch ?? 'the base';
+      const sessions = `${String(row.attempt)} fix and merge sessions of this step`;
+      const limit = `its retry limit (${String(opts.limits.maxFixAttempts)}, and one more session for a merge) is used up`;
       fail(
         id,
         ctl.fence,
-        `The conflict markers of the merge of ${batch?.baseBranch ?? 'the base'} are still in ${update.paths.join(', ')} after ${String(row.attempt)} fix and merge sessions of this step, and its retry limit (${String(opts.limits.maxFixAttempts)}, and one more session for a merge) is used up`,
+        // A merge this gate made just now left markers no session has seen: they are not "still" there.
+        update.fresh === true
+          ? `A new merge of ${base} left conflict markers in ${update.paths.join(', ')} that no session has seen yet, but the step has no session left to resolve them: it ran ${sessions}, and ${limit}`
+          : `The conflict markers of the merge of ${base} are still in ${update.paths.join(', ')} after ${sessions}, and ${limit}`,
       );
       return;
     }
