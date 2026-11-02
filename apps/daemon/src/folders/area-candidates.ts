@@ -389,65 +389,26 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
   }
 
   // A draft that ends up holding no file is no area: it would have no glob, and an area needs one.
-<<<<<<< 0b5ea352d55fd1a3e6d12abcc603826fc9914664
   // The rest is the exception: it becomes the project's catch-all, which a file added later falls
   // in, so it stays when everything else is a package and gets the top of the repository's globs.
-  return all.flatMap((draft): AreaCandidate[] => {
-||||||| acfae3a
-  return all.flatMap((draft): AreaCandidate[] => {
-=======
   const candidates: AreaCandidate[] = [];
   const indexOf = new Map<Draft, number>();
   /** For each candidate, the globs that name a folder with `?` for characters a glob cannot escape. */
   const looseGlobs = new Map<number, string[]>();
   for (const draft of all) {
->>>>>>> 9bd77b0716d36652ed36a9444d7e0fc568f9fd20
     const holding = held.get(draft);
-<<<<<<< 0b5ea352d55fd1a3e6d12abcc603826fc9914664
     const emptyRest = draft === leftovers && holding?.files === 0 && files.length > 0;
-    if (holding === undefined || (holding.files === 0 && !emptyRest)) return [];
+    if (holding === undefined || (holding.files === 0 && !emptyRest)) continue;
+    const loose: string[] = [];
     const globs = emptyRest
       ? ['*', '.*']
       : [...holding.patterns].flatMap(([folder, patterns]) =>
-          [...patterns].map((pattern) => prefixed(folder, pattern)),
+          [...patterns].map((pattern) => {
+            const glob = prefixed(folder, pattern);
+            if (isLooseGlob(folder)) loose.push(glob);
+            return glob;
+          }),
         );
-    return [
-      {
-        kind: draft.kind,
-        label: draft.label,
-        globs,
-        files: holding.files,
-        trees: [...draft.trees],
-        directs: [...draft.directs],
-      },
-    ];
-  });
-||||||| acfae3a
-    if (holding === undefined || holding.files === 0) return [];
-    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
-      [...patterns].map((pattern) => prefixed(folder, pattern)),
-    );
-    return [
-      {
-        kind: draft.kind,
-        label: draft.label,
-        globs,
-        files: holding.files,
-        trees: [...draft.trees],
-        directs: [...draft.directs],
-      },
-    ];
-  });
-=======
-    if (holding === undefined || holding.files === 0) continue;
-    const loose: string[] = [];
-    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
-      [...patterns].map((pattern) => {
-        const glob = prefixed(folder, pattern);
-        if (isLooseGlob(folder)) loose.push(glob);
-        return glob;
-      }),
-    );
     indexOf.set(draft, candidates.length);
     if (loose.length > 0) looseGlobs.set(candidates.length, loose);
     candidates.push({
@@ -503,7 +464,6 @@ function mergeOverlapping(
     }
   }
   return mergeGroups(candidates, find);
->>>>>>> 9bd77b0716d36652ed36a9444d7e0fc568f9fd20
 }
 
 /**
