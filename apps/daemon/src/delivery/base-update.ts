@@ -8,7 +8,7 @@ import {
   patchWorkstream,
 } from '@10db/db';
 import { z } from 'zod';
-import type { BranchMerge } from '../git';
+import type { BranchMerge, ResolvedConflict } from '../git';
 import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
 import {
   hideNotices,
@@ -49,10 +49,12 @@ export type BaseUpdate =
       readonly base: string;
       readonly head: string;
       readonly note: string | null;
+      /** The conflicts the merge settled; only when asked for a pull request (`forPullRequest`). */
+      readonly resolved?: readonly ResolvedConflict[];
     }
   /**
-   * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard
-   * only, says what in the branch kept the base out.
+   * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard or
+   * for a pull request only, says what in the branch kept the base out.
    */
   | { readonly kind: 'not_merged'; readonly note: string; readonly held?: BaseHeld }
   /**
@@ -83,6 +85,13 @@ export interface BeforeGateOptions {
    * branch that can't take the base says why in `held`.
    */
   readonly forMigrations?: { readonly task: string };
+  /**
+   * Brings the base into the branch of a batch whose pull request is open and conflicts with it
+   * (`ship.ts` catches it up). The merge runs the install and the generators as a gate's does. A
+   * branch that can't take the base is not told on its tasks: `held` says what kept it out, and
+   * the caller raises its one card. The merge lists the conflicts it settled in `resolved`.
+   */
+  readonly forPullRequest?: boolean;
   /**
    * The caller can send a session to resolve conflicts, as a task's verify gate can: a conflict
    * that only needs both sides' work put together is merged into the branch with its markers
@@ -618,7 +627,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Merging> {
     const migrationsFor = options.forMigrations?.task;
     const context = migrationsFor === undefined ? {} : { migrationsFor };
-    const holding = (held: BaseHeld) => (migrationsFor === undefined ? {} : { held });
+    const forPullRequest = options.forPullRequest === true;
+    const holding = (held: BaseHeld) =>
+      migrationsFor === undefined && !forPullRequest ? {} : { held };
     const origin = `origin/${batch.baseBranch}`;
     // An earlier gate merged the base and left markers: the merge stands, and what is left is whether
     // a session has resolved them.
@@ -673,13 +684,15 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         // taking the base's directory still shows the migration the branch must renumber.
         const taken = await takenIn(path, merged.from, merged.conflicted ?? paths);
         // The batch's tasks show it; no card asks the builder anything about a conflict that stands.
-        tell(batch, () => {
-          showNotice(
-            ctx.state,
-            batch.id,
-            baseNotices.conflict(batch, path, paths, { ...context, taken, reasons }),
-          );
-        });
+        // A pull request's caller raises the one card instead.
+        if (!forPullRequest)
+          tell(batch, () => {
+            showNotice(
+              ctx.state,
+              batch.id,
+              baseNotices.conflict(batch, path, paths, { ...context, taken, reasons }),
+            );
+          });
         return alone({
           ...notMerged(
             batch,
@@ -691,7 +704,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       }
       case 'blocked': {
         const { changed, kept } = merged;
-        if (kept.length > 0)
+        if (kept.length > 0 && !forPullRequest)
           tell(batch, () => {
             showNotice(ctx.state, batch.id, baseNotices.kept(batch, path, kept, context));
           });
@@ -785,6 +798,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         base: merged.from,
         head: merged.head,
         note: joined(settledNote(batch, merged), unmoved),
+        ...(forPullRequest ? { resolved: merged.resolved ?? [] } : {}),
       },
       regenerate: (merged.regenerate ?? []).length > 0 ? merged : null,
     };
