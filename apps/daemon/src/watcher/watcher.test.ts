@@ -2330,6 +2330,87 @@ describe('worktree checkouts', () => {
         pin('y');
         expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
+
+      describe('whose stamp cannot be read', () => {
+        const linkTo = (dir: string): void => {
+          const link = join(repo.path, SENSITIVE_FILE);
+          rmSync(link, { force: true });
+          mkdirSync(join(repo.path, dir), { recursive: true });
+          symlinkSync(join(repo.path, dir), link);
+        };
+
+        it('cards a symlink to a directory, and leaves the card unused', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          linkTo('dir-a');
+          emit(SENSITIVE_FILE);
+          await watcher.flush();
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+          rmSync(join(repo.path, SENSITIVE_FILE));
+          await write(SENSITIVE_FILE);
+          // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        });
+
+        it('cards a symlink to a directory when the card is already used up', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          await write(SENSITIVE_FILE);
+          expect(flags()).toEqual([]);
+          rmSync(join(repo.path, SENSITIVE_FILE));
+          linkTo('dir-a');
+          emit(SENSITIVE_FILE);
+          await watcher.flush();
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        });
+
+        it('cards a path that cannot be read, and leaves the card unused', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          // A dangling link: it is there, but there is nothing to read.
+          const link = join(repo.path, SENSITIVE_FILE);
+          symlinkSync(join(repo.path, 'nowhere'), link);
+          emit(SENSITIVE_FILE);
+          await watcher.flush();
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+          rmSync(link);
+          await write(SENSITIVE_FILE);
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+          // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        });
+
+        it('excuses a file still changing once per card, and cards the next such write', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          const stamp = vi.mocked(writeStamp);
+          // The file is stable on disk; the mock stands for a read that kept changing.
+          stamp.mockReturnValueOnce(null);
+          await write(SENSITIVE_FILE);
+          expect(flags()).toEqual([]);
+          stamp.mockReturnValueOnce(null);
+          await write(SENSITIVE_FILE);
+          expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        });
+
+        it('still excuses a changing file once it settles, using the card then', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          vi.mocked(writeStamp).mockReturnValueOnce(null);
+          await write(SENSITIVE_FILE);
+          expect(flags()).toEqual([]);
+          await write(SENSITIVE_FILE);
+          expect(flags()).toEqual([]);
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+          writeFileSync(join(repo.path, SENSITIVE_FILE), 'again');
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+        });
+      });
     });
 
     describe('a directory the allowed write created', () => {
