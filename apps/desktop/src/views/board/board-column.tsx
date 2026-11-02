@@ -63,10 +63,11 @@ export function BoardColumn({
               {hint}
             </Text>
           ) : null}
-          {/* Only the cards scroll; the hint above and the footer below stay in view. */}
+          {/* Only the cards scroll; the hint above and the footer below stay in view. The scrollbar shows on hover in a strip of its own beside the cards ('y' always reserves it, so cards never change width). */}
           <ScrollArea
             type="hover"
             scrollbars="y"
+            offsetScrollbars="y"
             flex={1}
             mih={0}
             styles={{ content: { minHeight: '100%' } }}
