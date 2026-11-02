@@ -42,7 +42,7 @@ import { insertTask, setTaskStatus } from './tasks';
 import { BUILDER_HANDLE, insertPerson } from './team';
 import { createTestStore, seedProject } from './test-support';
 import { insertBatch, recordPullRequestStatus, transitionBatch } from './batches';
-import { insertWorkstream } from './workstreams';
+import { insertWorkstream, runNext } from './workstreams';
 
 let store: Store;
 let close: () => void;
@@ -471,6 +471,31 @@ describe('the rows', () => {
     const { goal, a, b, c } = adopt();
     for (const id of [a, b, c]) run(id, WorkstreamState.Running);
     expect(goalDigest(store.db, goal.id, null).next).toBeNull();
+  });
+
+  it('offers the queued task first in line next when every open task is queued', () => {
+    const { goal, a, b, c } = adopt();
+    // Started in the order b, a, c, so b leads the queue even though a comes first on the Board.
+    setClock(9);
+    run(b, WorkstreamState.Queued);
+    setClock(10);
+    run(a, WorkstreamState.Queued);
+    setClock(11);
+    run(c, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Queued);
+    expect(digest.next).toEqual({ taskId: b, title: 'Drawer', waitsOn: [] });
+  });
+
+  it('puts a task the builder ran next ahead of the others in an all-queued goal’s next', () => {
+    const { goal, a, b, c } = adopt();
+    for (const [i, id] of [a, b, c].entries()) {
+      setClock(9 + i);
+      run(id, WorkstreamState.Queued);
+    }
+    setClock(13);
+    store.write((ctx) => runNext(ctx, c));
+    expect(goalDigest(store.db, goal.id, null).next?.taskId).toBe(c);
   });
 
   it('sums tokens over the goal’s sessions, and dollars only where a session has them', () => {
