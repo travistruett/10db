@@ -6,7 +6,8 @@
 # main has moved on; it prints that commit and how many commits behind the head it is. Only when
 # none of them has a finished build does it wait for a run of the head already under way, or start
 # one and wait for it; if that run ends cancelled (a newer push replaced it in the concurrency
-# group), it looks again, up to 3 cancelled runs. release-dry-run runs on every push to main as well as by hand (and keeps at
+# group, so a newer run of the ref exists), it looks again, up to 3 cancelled runs; a run cancelled
+# with no newer run was stopped by hand, and fails. release-dry-run runs on every push to main as well as by hand (and keeps at
 # most one build waiting per branch), so main's build is usually ready already; starting one is
 # the fallback (another ref, or builds that failed). Then it checks the DMG against SHA256SUMS, backs up the database, zips the current app to
 # 10db-previous/10db-<stamp>.zip beside the data directory, copies the new app in, clears its
@@ -211,10 +212,22 @@ while :; do
     sleep "$poll_seconds"
   done
   if [ "$conclusion" = cancelled ]; then
-    cancelled_runs=$((cancelled_runs + 1))
-    if [ "$cancelled_runs" -lt "$max_cancelled_runs" ]; then
-      echo "Run $run_id was cancelled, most likely replaced by a newer run of $ref; looking again."
-      continue
+    # Only a newer run of the workflow on the ref (run ids grow with creation) means the concurrency
+    # group replaced it; with none, the builder cancelled it to stop the install, and it stops here.
+    if ! ref_runs="$(gh run list --workflow "$workflow" --branch "$ref" --limit 20 --json databaseId \
+      --jq '.[].databaseId' 2> "$gh_err")"; then
+      fail "gh could not list the runs of $workflow on $ref: $(cat "$gh_err")"
+    fi
+    replaced=0
+    for id in $ref_runs; do
+      if [[ "$id" =~ ^[0-9]+$ ]] && [ "$id" -gt "$run_id" ]; then replaced=1; fi
+    done
+    if [ "$replaced" -eq 1 ]; then
+      cancelled_runs=$((cancelled_runs + 1))
+      if [ "$cancelled_runs" -lt "$max_cancelled_runs" ]; then
+        echo "Run $run_id was cancelled, most likely replaced by a newer run of $ref; looking again."
+        continue
+      fi
     fi
   fi
   [ "$conclusion" = success ] || fail "run $run_id ended in $conclusion; read it with gh run view $run_id --log-failed"
