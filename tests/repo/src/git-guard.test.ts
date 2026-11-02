@@ -340,6 +340,13 @@ describe('git guard decisions', () => {
     ['xargs --delimiter VALUE', 'echo x | xargs --delimiter , git add -A', 'deny'],
     ['xargs --max-chars VALUE', 'echo x | xargs --max-chars 99 git add -A', 'deny'],
     ['xargs --arg-file VALUE', 'echo x | xargs --arg-file f git add -A', 'deny'],
+    // macOS's xargs takes a value for -J, -R and -S; the lane runs on darwin.
+    ['xargs -J VALUE', 'echo x | xargs -J % git push --force', 'ask'],
+    ['xargs -R VALUE', 'echo x | xargs -R 1 git push --force', 'ask'],
+    ['xargs -S VALUE', 'echo x | xargs -S 255 git push --force', 'ask'],
+    ['xargs -J VALUE, git add', 'echo x | xargs -J % git add -A', 'deny'],
+    ['env -P VALUE', 'env -P /usr/bin git push --force', 'ask'],
+    ['env -P VALUE, git add', 'env -P /usr/bin git add -A', 'deny'],
     ['xargs', 'echo a.ts | xargs git add -A', 'deny'],
     ['xargs with options', 'echo x | xargs -n 1 git push --force', 'ask'],
     ['env -S', "env -S 'git add -A'", 'deny'],
