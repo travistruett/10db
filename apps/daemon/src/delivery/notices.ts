@@ -32,6 +32,8 @@ export const NOTICE_KEY = {
   seedSkipped: 'seed-skipped',
   /** A copy's install skipped the install scripts of packages the project allows to build. */
   scriptsSkipped: 'install-scripts-skipped',
+  /** The pull request's head has no run of the checks GitHub requires, and 10db could not start them. */
+  checksNeverStarted: 'checks-never-started',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
 } as const;
@@ -237,6 +239,23 @@ export const gateNotices = {
   }),
 };
 
+/** What delivery shows on a shipped batch's tasks about its pull request's required checks. */
+export const ciNotices = {
+  /** The head has no check at all while GitHub waits for a required one, and starting CI again did not help or is not 10db's to do. */
+  neverStarted: (batch: BatchDto): Notice => {
+    const prUrl = batch.prUrl;
+    const number = prUrl === null ? null : /\/pull\/(\d+)$/.exec(prUrl)?.[1];
+    const named =
+      number === undefined || number === null ? 'the pull request' : `pull request #${number}`;
+    return {
+      key: NOTICE_KEY.checksNeverStarted,
+      tone: 'warning',
+      line: `Checks never started on ${named}`,
+      body: `GitHub waits for the required checks of ${batch.baseBranch}, but the head of ${named}${prUrl === null ? '' : ` (${prUrl})`} has no run of them, minutes after it was pushed. GitHub skips a pull request's workflows when it cannot build the merge commit at push time, so the pull request waits for checks that will never come.\n\n${batch.autoMerge ? '10db tried to start them again by merging the base into the pull request, and they still did not start. ' : 'This pull request is held for you, so 10db pushes nothing to it. '}Push a commit to the branch, or merge ${batch.baseBranch} into it on GitHub (Update branch), to start the checks. This notice goes once any check appears on the head.`,
+    };
+  },
+};
+
 /** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
 export const updateNotices = {
   /** The pull request conflicts, and a CI fix still running holds its branch, so the merge waits for it. */
@@ -246,6 +265,23 @@ export const updateNotices = {
     line: `Pull request conflicts with ${batch.baseBranch}; 10db merges it after the CI fix ends`,
     body: `${batch.baseBranch} on origin changed files in ways that conflict with the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`}. A CI fix of it is still running in a checkout that holds the branch, so 10db can't merge ${batch.baseBranch} into it yet.\n\n10db tries again once that fix ends, and raises a card if it can't settle the conflict.`,
   }),
+  /** 10db merged the base into the pull request because its head got none of the checks GitHub requires. */
+  restarted: (
+    batch: BatchDto,
+    resolved: readonly { readonly path: string; readonly how: 'kept_both' | 'regenerated' }[],
+  ): Notice => {
+    const base = batch.baseBranch;
+    const settled =
+      resolved.length === 0
+        ? ''
+        : `\n\nThe merge settled these conflicts itself:\n${listPaths(resolved.map((r) => r.path))}`;
+    return {
+      key: NOTICE_KEY.update,
+      tone: 'info',
+      line: `10db merged ${base} into the pull request to start its checks`,
+      body: `The head of the pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} had no run of the checks ${base} requires, minutes after it was pushed, so it would have waited for them for ever. 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it, so GitHub starts its workflows on the new head.${settled}\n\nIf the checks still do not start, 10db says so on this task.`,
+    };
+  },
   /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
   merged: (
     batch: BatchDto,
