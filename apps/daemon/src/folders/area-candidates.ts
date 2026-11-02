@@ -389,21 +389,26 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
   }
 
   // A draft that ends up holding no file is no area: it would have no glob, and an area needs one.
+  // The rest is the exception: it becomes the project's catch-all, which a file added later falls
+  // in, so it stays when everything else is a package and gets the top of the repository's globs.
   const candidates: AreaCandidate[] = [];
   const indexOf = new Map<Draft, number>();
   /** For each candidate, the globs that name a folder with `?` for characters a glob cannot escape. */
   const looseGlobs = new Map<number, string[]>();
   for (const draft of all) {
     const holding = held.get(draft);
-    if (holding === undefined || holding.files === 0) continue;
+    const emptyRest = draft === leftovers && holding?.files === 0 && files.length > 0;
+    if (holding === undefined || (holding.files === 0 && !emptyRest)) continue;
     const loose: string[] = [];
-    const globs = [...holding.patterns].flatMap(([folder, patterns]) =>
-      [...patterns].map((pattern) => {
-        const glob = prefixed(folder, pattern);
-        if (isLooseGlob(folder)) loose.push(glob);
-        return glob;
-      }),
-    );
+    const globs = emptyRest
+      ? ['*', '.*']
+      : [...holding.patterns].flatMap(([folder, patterns]) =>
+          [...patterns].map((pattern) => {
+            const glob = prefixed(folder, pattern);
+            if (isLooseGlob(folder)) loose.push(glob);
+            return glob;
+          }),
+        );
     indexOf.set(draft, candidates.length);
     if (loose.length > 0) looseGlobs.set(candidates.length, loose);
     candidates.push({

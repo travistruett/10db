@@ -15,11 +15,15 @@ import { useState } from 'react';
 import { usePatchProject } from '../../daemon/queries';
 import { describePathPattern } from './path-pattern';
 
-interface AreaDraft {
+interface PathsDraft {
   readonly name: string;
   readonly paths: string;
 }
-interface HazardDraft extends AreaDraft {
+interface AreaDraft extends PathsDraft {
+  /** The project's catch-all: a file no other area holds falls in it. At most one area. */
+  readonly catchAll: boolean;
+}
+interface HazardDraft extends PathsDraft {
   readonly perCopy: boolean;
   readonly commands: string;
 }
@@ -31,7 +35,11 @@ const lines = (text: string): string[] =>
     .filter((line) => line !== '');
 
 const areaDrafts = (project: ProjectDto): AreaDraft[] =>
-  project.areas.map((a) => ({ name: a.name, paths: a.globs.join('\n') }));
+  project.areas.map((a) => ({
+    name: a.name,
+    paths: a.globs.join('\n'),
+    catchAll: a.catchAll === true,
+  }));
 const hazardDrafts = (project: ProjectDto): HazardDraft[] =>
   project.hazards.map((h) => ({
     name: h.name,
@@ -46,7 +54,11 @@ function toPatch(
   hazards: readonly HazardDraft[],
 ): { readonly patch: ProjectPatch } | { readonly error: string } {
   const parsed = ProjectPatch.safeParse({
-    areas: areas.map((a) => ({ name: a.name.trim(), globs: lines(a.paths) })),
+    areas: areas.map((a) => ({
+      name: a.name.trim(),
+      globs: lines(a.paths),
+      ...(a.catchAll ? { catchAll: true } : {}),
+    })),
     hazards: hazards.map((h) => ({
       name: h.name.trim(),
       globs: lines(h.paths),
@@ -101,6 +113,14 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
   };
   const setArea = (index: number, next: Partial<AreaDraft>) => {
     setAreas((all) => all.map((a, i) => (i === index ? { ...a, ...next } : a)));
+  };
+  /** Only one area is the catch-all, so choosing one clears the others. */
+  const setCatchAll = (index: number, catchAll: boolean) => {
+    setAreas((all) =>
+      all.map((a, i) =>
+        i === index ? { ...a, catchAll } : catchAll ? { ...a, catchAll: false } : a,
+      ),
+    );
   };
   const setHazard = (index: number, next: Partial<HazardDraft>) => {
     setHazards((all) => all.map((h, i) => (i === index ? { ...h, ...next } : h)));
@@ -157,6 +177,15 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
                       .join('; ') || 'no paths yet'
                   }.`}
             </Text>
+            <Checkbox
+              size="xs"
+              aria-label={`Area ${String(index + 1)} is the catch-all`}
+              label="Catch-all: holds every file no other area holds, such as a new package, app or folder, so a task that adds one can still change it. A file another area holds is never in the catch-all. Only one area can be."
+              checked={area.catchAll}
+              onChange={(e) => {
+                setCatchAll(index, e.currentTarget.checked);
+              }}
+            />
             <PathExamples paths={area.paths} />
           </Stack>
         ))}
@@ -164,7 +193,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
           <Button
             variant="light"
             onClick={() => {
-              setAreas((all) => [...all, { name: '', paths: '' }]);
+              setAreas((all) => [...all, { name: '', paths: '', catchAll: false }]);
             }}
           >
             Add area
