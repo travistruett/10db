@@ -696,6 +696,10 @@ function startSession(
           if (failure) continue;
           started = true;
         }
+        // Claude Code can change mode mid-session, for example leaving auto mode after repeated classifier refusals.
+        if (msg.type === 'system' && msg.subtype === 'status' && msg.permissionMode !== undefined) {
+          log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
+        }
         for (const event of mapSdkMessage(msg, { pid })) {
           if (event.type === 'turn_complete') {
             totals.inputTokens += event.inputTokens;
