@@ -60,6 +60,8 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   const allowed = new Set<string>();
   const denied = new Set<string>();
   let all = false;
+  // Whether the project limits builds with a list, even an empty one or one this can't read.
+  let limited = false;
   const manifest = readData(join(root, 'package.json'));
   const sources: Record<string, unknown>[] = [];
   const workspace = readData(join(root, 'pnpm-workspace.yaml'));
@@ -76,11 +78,18 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   for (const source of sources) {
     if (!legacy && source['dangerouslyAllowAllBuilds'] === true) all = true;
     namesIn(source['onlyBuiltDependencies'], allowed);
-    namesIn(source['ignoredBuiltDependencies'], denied);
+    if (
+      Array.isArray(source['onlyBuiltDependencies']) ||
+      typeof source['onlyBuiltDependenciesFile'] === 'string'
+    )
+      limited = true;
+    // pnpm 10.1 added ignoredBuiltDependencies; pnpm 9 and earlier don't read it.
+    if (!legacy) namesIn(source['ignoredBuiltDependencies'], denied);
     namesIn(source['neverBuiltDependencies'], denied);
   }
-  // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list limits them.
-  if (legacy && allowed.size === 0) all = true;
+  // pnpm 9 and earlier build every package unless an onlyBuiltDependencies list (or a file of
+  // them, which isn't read here) limits them: an empty list builds nothing.
+  if (legacy && !limited) all = true;
   return { all, allowed: valid(allowed), denied: valid(denied) };
 }
 
