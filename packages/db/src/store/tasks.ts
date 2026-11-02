@@ -915,7 +915,8 @@ function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictE
  * - A task whose reason the rule proposed (anything but the builder's) follows the rule: the reason
  *   is refreshed to match the new tags and areas, and when the rule no longer matches, the task goes
  *   back to the proposed placement (the project's default) with no reason, since only the rule had
- *   sent it to a copy.
+ *   sent it to a copy. It is always the default, never what the creator asked for: the store keeps
+ *   no record of the request (task placement spec, P2).
  */
 function movedByProposal(
   db: DbReader,
