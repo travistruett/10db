@@ -205,6 +205,21 @@ describe('the drafting guidance', () => {
     expect(JSON.stringify(edit?.inputSchema)).toContain('"areas"');
   });
 
+  it('edit_task takes landing, in the tool list and when parsed', () => {
+    const taskId = mintId('Task');
+    expect(
+      BuilderToolInputs.edit_task.parse({ taskId, landing: { kind: 'branch', branch: 'next' } }),
+    ).toMatchObject({ landing: { kind: 'branch', branch: 'next' } });
+    expect(BuilderToolInputs.edit_task.safeParse({ taskId, landing: { kind: 'x' } }).success).toBe(
+      false,
+    );
+    const edit = builderToolList().find((t) => t.name === BuilderToolName.EditTask);
+    expect(JSON.stringify(edit?.inputSchema)).toContain('"landing"');
+    expect(edit?.description).toContain('landing');
+    const create = builderToolList().find((t) => t.name === BuilderToolName.CreateTask);
+    expect(create?.description).toContain('landing');
+  });
+
   it('list_tasks says it returns open tasks only', () => {
     const tool = builderToolList().find((t) => t.name === BuilderToolName.ListTasks);
     expect(tool?.description).toContain('open');
