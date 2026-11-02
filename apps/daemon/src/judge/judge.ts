@@ -42,7 +42,7 @@ export type JudgeAnswer =
     }
   | {
       readonly kind: 'fallback';
-      readonly reason: 'off' | 'no_key' | 'timeout' | 'error';
+      readonly reason: 'off' | 'no_key' | 'timeout' | 'error' | 'stopped';
       readonly detail: string;
       readonly callId: string;
     };
@@ -84,13 +84,14 @@ const FALLBACK_OUTCOME = {
   no_key: 'fallback_no_key',
   timeout: 'fallback_timeout',
   error: 'fallback_error',
+  stopped: 'stopped',
 } as const satisfies Record<string, JudgeOutcome>;
 
 type Attempt =
   | { readonly kind: 'answered'; readonly answer: ModelAnswer; readonly latencyMs: number }
   | {
       readonly kind: 'fallback';
-      readonly reason: 'no_key' | 'timeout' | 'error';
+      readonly reason: 'no_key' | 'timeout' | 'error' | 'stopped';
       readonly detail: string;
       readonly latencyMs: number | null;
     };
@@ -175,6 +176,14 @@ export function createJudge(deps: JudgeDeps): JudgeService {
           kind: 'fallback',
           reason: 'timeout',
           detail: `No answer within ${String(timeoutMs / 1000)} s`,
+          latencyMs: elapsed(),
+        };
+      // The caller's signal is a cancel or a shutdown: the call did not fail, it was stopped.
+      if (q.signal?.aborted)
+        return {
+          kind: 'fallback',
+          reason: 'stopped',
+          detail: 'Stopped by a cancel or a shutdown',
           latencyMs: elapsed(),
         };
       return {

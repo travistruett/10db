@@ -333,8 +333,9 @@ describe('judge.choose falls back', () => {
     const controller = new AbortController();
     const pending = build().choose({ ...request, signal: controller.signal });
     controller.abort();
-    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'stopped' });
     expect(seen).toEqual([]);
+    expect(logged()[0]).toMatchObject({ outcome: 'stopped' });
   });
 
   it('stops when the caller aborts', async () => {
@@ -348,7 +349,33 @@ describe('judge.choose falls back', () => {
     const pending = build().choose({ ...request, signal: controller.signal });
     await Promise.resolve();
     controller.abort();
-    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'error' });
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'stopped' });
+    expect(logged()[0]).toMatchObject({ outcome: 'stopped' });
+  });
+
+  it('logs a call whose signal was already aborted as stopped, not as an error', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(await build().choose({ ...request, signal: controller.signal })).toMatchObject({
+      kind: 'fallback',
+      reason: 'stopped',
+    });
+    expect(seen).toEqual([]);
+    expect(logged()[0]).toMatchObject({ outcome: 'stopped' });
+  });
+
+  it('still logs a timeout as a timeout when a signal was passed and not aborted', async () => {
+    const controller = new AbortController();
+    handler = (_seen, signal) =>
+      new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => {
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    const pending = build().choose({ ...request, signal: controller.signal });
+    await Promise.resolve();
+    clock.advance(4_000);
+    expect(await pending).toMatchObject({ kind: 'fallback', reason: 'timeout' });
   });
 
   it('cancels its timer when the call finishes', async () => {
