@@ -64,6 +64,44 @@ describe('BoardView', () => {
       await screen.findByRole('button', { name: 'Alpha' });
       expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
     });
+
+    describe('with two projects', () => {
+      function serveTwoProjects() {
+        const first = projectViewDto({ gateCommand: null });
+        const second = projectViewDto({ gateCommand: null });
+        const here = taskDto({ projectId: first.id, title: 'Alpha' });
+        const there = taskDto({ projectId: second.id, title: 'Beta' });
+        serve(
+          http.get(daemonUrl('/projects'), () => HttpResponse.json([first, second])),
+          http.get(daemonUrl('/projects/:projectId/tasks'), ({ params }) =>
+            HttpResponse.json(params['projectId'] === first.id ? [here] : [there]),
+          ),
+          http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+        );
+        return { here, there };
+      }
+
+      it('switches the board to the task’s project and opens its drawer', async () => {
+        const { there } = serveTwoProjects();
+        renderApp(`/board?task=${there.id}`);
+        const drawer = await screen.findByRole('dialog', { name: 'Task' });
+        expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+      });
+
+      it('says a task that no longer exists is gone instead of showing an empty board', async () => {
+        serveTwoProjects();
+        renderApp(`/board?task=${mintId('Task')}`);
+        expect(await screen.findByText(/no longer exists/i)).toBeTruthy();
+        expect(screen.queryByRole('dialog', { name: 'Task' })).toBeNull();
+      });
+
+      it('says nothing when the task is on the selected project', async () => {
+        const { here } = serveTwoProjects();
+        renderApp(`/board?task=${here.id}`);
+        await screen.findByRole('dialog', { name: 'Task' });
+        expect(screen.queryByText(/no longer exists/i)).toBeNull();
+      });
+    });
   });
 
   it('says a failed ship once, on the card, and retries it from the drawer', async () => {

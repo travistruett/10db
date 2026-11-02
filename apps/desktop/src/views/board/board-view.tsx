@@ -62,6 +62,7 @@ import { canStart, TaskCardMenu } from './task-card-menu';
 import { holdOption, isHeld } from './task-hold';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
+import { useLinkedTask } from './use-linked-task';
 
 const NEW_TASK_FORM_ID = 'new-task-form';
 
@@ -156,8 +157,8 @@ interface BoardColumnsProps {
   readonly started: ReadonlyMap<TaskId, string>;
   /** Opens the New Task form from the foot of Ready. */
   readonly onAddTask: () => void;
-  /** The task whose drawer is open when the board appears: the one a `?task=` link names. */
-  readonly initialOpenId: TaskId | null;
+  /** The task a `?task=` link names: its drawer is open until the builder opens or closes another. */
+  readonly linkedId: TaskId | null;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -171,7 +172,7 @@ function BoardColumns({
   peers,
   started,
   onAddTask,
-  initialOpenId,
+  linkedId,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
@@ -183,7 +184,13 @@ function BoardColumns({
     project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
-  const [openId, setOpenId] = useState<TaskId | null>(initialOpenId);
+  // The link opens its task's drawer without a state change, so it works once the board has moved to
+  // the task's project; `choice` takes over as soon as the builder opens or closes a drawer.
+  const [choice, setChoice] = useState<{ readonly id: TaskId | null } | null>(null);
+  const openId = choice ? choice.id : linkedId;
+  const setOpenId = (id: TaskId | null) => {
+    setChoice({ id });
+  };
   const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
   const openWorkstream = openTask?.workstreamId
     ? workstreamById.get(openTask.workstreamId)
@@ -463,13 +470,14 @@ function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
 }
 
 export function BoardView() {
-  const { projects, project } = useSelectedProject();
+  const { projects, project, select } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
   const columns = useBoardColumns(project?.id ?? null);
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
   const { task } = useSearch({ from: '/board' });
+  const linked = useLinkedTask(task, projects.data ?? [], project?.id ?? null, select);
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
     pending: false,
@@ -564,6 +572,16 @@ export function BoardView() {
           {batches.error.message}
         </Alert>
       ) : null}
+      {linked.missing ? (
+        <Alert color="yellow" title="That task no longer exists">
+          The link points to a task that has been removed, so there is nothing to open.
+        </Alert>
+      ) : null}
+      {linked.error ? (
+        <Alert color="red" title="Couldn't find the task's project">
+          {linked.error.message}
+        </Alert>
+      ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
       {strips.length > 0 ? (
         <ScrollArea.Autosize
@@ -592,7 +610,7 @@ export function BoardView() {
           peers={peers}
           started={started}
           onAddTask={taskModal.open}
-          initialOpenId={task ?? null}
+          linkedId={task ?? null}
         />
       ) : null}
 
