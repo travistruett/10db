@@ -124,6 +124,58 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(card.body).toContain('main');
     expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
     expect(now.worktreePath).toBeNull();
+    // 10db's merge, which it did not push, is not left on the local branch.
+    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+  });
+
+  it('puts the local branch back at the pull request head when the check fails in the worktree it kept', async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const kept = batch.worktreePath ?? '';
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const before = onOrigin(batch.branch);
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+
+    await catchUp(batch);
+
+    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+    expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
+    expect(h.git$('-C', kept, 'status', '--porcelain')).toBe('');
+    expect(h.git$('-C', kept, 'show', 'HEAD:src/index.ts')).toBe(BOTH.mine.trimEnd());
+  });
+
+  it('catches up again after a failed check and the builder updating the branch on GitHub', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    const url = conflicts(batch);
+    const branch = batch.branch ?? '';
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    await catchUp(batch);
+    expect(h.cards()).toHaveLength(1);
+
+    // The builder presses Update branch: GitHub's head gains a commit the local branch lacks.
+    const byHand = h.origin$(
+      '-c',
+      'user.name=Builder',
+      '-c',
+      'user.email=builder@example.com',
+      'commit-tree',
+      `refs/heads/${branch}^{tree}`,
+      '-p',
+      onOrigin(branch),
+      '-m',
+      'Update branch',
+    );
+    h.origin$('update-ref', `refs/heads/${branch}`, byHand);
+    // The base moves again, and the builder's fix of the check is in.
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'true' }));
+    h.gh.setHead(url, byHand);
+
+    await catchUp(getBatch(h.store.db, batch.id));
+
+    expect(h.cards().filter((c) => c.body.includes("can't tell which is current"))).toEqual([]);
+    expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
   });
 
   it('merges it once GitHub says it is clean, when it had refused the merge', async () => {
