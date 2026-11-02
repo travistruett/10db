@@ -681,6 +681,33 @@ export function withParkOption(options: readonly InboxOption[]): InboxOption[] {
   return options.some((o) => isParkChoice(o.label)) ? [...options] : [...options, PARK_TASK_OPTION];
 }
 
+const MANY_TASKS_PARK_PREFIX = 'Stops these ';
+
+/**
+ * The options with the park option worded for the tasks it parks. A card several lanes raised parks
+ * every one of them, so with more than one task the option names them before the builder answers.
+ * With one (or none) the option has its plain wording again, when this function had reworded it. A
+ * park option the lane wrote is reworded for several tasks too, since the builder needs the names.
+ */
+export function withParkedTasks(
+  options: readonly InboxOption[],
+  taskTitles: readonly string[],
+): InboxOption[] {
+  if (taskTitles.length < 2) {
+    return options.map((o) =>
+      isParkChoice(o.label) && o.description.startsWith(MANY_TASKS_PARK_PREFIX)
+        ? { ...o, description: PARK_TASK_OPTION.description }
+        : o,
+    );
+  }
+  const description = `${MANY_TASKS_PARK_PREFIX}${String(taskTitles.length)} runs and parks their tasks in the Icebox: ${taskTitles
+    .map((t) => `“${t}”`)
+    .join(
+      ', ',
+    )}. This question and your answer go on each drawer. No review follows; start them again when you can answer.`;
+  return options.map((o) => (isParkChoice(o.label) ? { ...o, description } : o));
+}
+
 /** The key of the notice a parked run keeps for its task's drawer: the question and the builder's answer. */
 export const PARKED_NOTICE_KEY = 'parked-answer';
 

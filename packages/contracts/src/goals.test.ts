@@ -281,6 +281,7 @@ describe('GoalDigestDto', () => {
         'failed',
         'not_started',
         'paused',
+        'queued',
         'running',
         'shipping',
         'waiting_on_someone',
