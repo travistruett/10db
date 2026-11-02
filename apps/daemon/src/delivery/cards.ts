@@ -10,6 +10,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type RequiredCheckJobDto,
+  type TaskDto,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -24,6 +25,7 @@ import type { GateResult } from '../verify';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
+import { placementWords } from './placement';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -157,6 +159,10 @@ export const startCards = {
   unfinishedDependencies: (blocked: readonly BlockedTask[]): Card => ({
     title: 'Not started: tasks depend on unfinished work',
     body: `${blocked.map((b) => `- ${b.task.title} needs ${b.deps.map((d) => d.title).join(', ')}`).join('\n')}\n\nStart them together, or finish those tasks first.`,
+  }),
+  crossPlacementDependency: (task: TaskDto, dep: TaskDto): Card => ({
+    title: `Not started: ${task.title} runs in ${placementWords(task.workspaceMode)} but needs ${dep.title}, which runs in ${placementWords(dep.workspaceMode)}`,
+    body: 'Tasks that depend on each other must run in the same place: change where one of them runs, then start them again.',
   }),
   unmergedDependencies: (found: readonly UnmergedDependency[]): Card => ({
     title: 'Not started: tasks depend on code that is not on the base branch',

@@ -42,7 +42,7 @@ import { ghCall, networkCall, raise, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
-import { refuseCrossPlacementDependency } from './placement';
+import { crossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
@@ -160,7 +160,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         placement: () => WorkspaceMode.Shared,
       };
     }
-    refuseCrossPlacementDependency(tasks);
+    refuseCrossPlacement(project.id, tasks);
     const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
     const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
     return {
@@ -308,6 +308,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         queueJoin(batch, tasks, plans, inBatch);
       },
     };
+  }
+
+  /** Refuses a dependency across placements with a card naming both tasks, before anything is written. */
+  function refuseCrossPlacement(projectId: ProjectId, tasks: readonly TaskDto[]): void {
+    const found = crossPlacementDependency(tasks);
+    if (found === undefined) return;
+    const card = forTasks(startCards.crossPlacementDependency(found.task, found.dep), [
+      found.task.id,
+      found.dep.id,
+    ]);
+    raise(ctx.inbox, projectId, card);
+    throw new ConflictError(`${card.title}. ${card.body}`);
   }
 
   function refuseUnfinished(projectId: ProjectId, blocked: readonly BlockedTask[]): void {

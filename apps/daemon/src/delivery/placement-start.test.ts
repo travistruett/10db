@@ -169,6 +169,19 @@ describe('starting a mix of placements', () => {
     expect(listBatches(h.store.db)).toEqual([]);
   });
 
+  it('raises one folded start-refused card naming both tasks, however often the start is retried', () => {
+    const a = shared('Alpha');
+    const b = copy('Beta', { dependsOn: ids(a) });
+    for (let i = 0; i < 2; i += 1)
+      expect(() =>
+        h.starter.startBatch(h.project.id, { title: 'Mixed', taskIds: ids(a, b) }),
+      ).toThrow(ConflictError);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('Beta');
+    expect(card.title).toContain('Alpha');
+    expect(card.detail).toMatchObject({ taskIds: [b.id, a.id] });
+  });
+
   it('refuses the same dependency the other way round', () => {
     const a = copy('Alpha');
     const b = shared('Beta', { dependsOn: ids(a) });
