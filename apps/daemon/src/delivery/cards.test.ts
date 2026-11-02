@@ -46,13 +46,32 @@ const gate = {
   blockedHosts: [],
 };
 
+// A worktree card carries its own answers, which the daemon acts on, so it names no drawer.
+const worktreeAnswered: Record<string, { card: Card; labels: string[] }> = {
+  'worktree missing, waits': {
+    card: worktreeCards.missing(batch, '/wt/greetings', 'waits'),
+    labels: ['Abandon batch'],
+  },
+  'worktree missing, failed': {
+    card: worktreeCards.missing(batch, '/wt/greetings', 'failed'),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree in the way': {
+    card: worktreeCards.inTheWay(batch, '/wt/greetings', 'a file'),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree not reopened': {
+    card: worktreeCards.notReopened(batch, new Error('boom')),
+    labels: ['Retry', 'Abandon batch'],
+  },
+  'worktree not whole': {
+    card: worktreeCards.notWhole(batch, '/wt/greetings', 'main', ['a.ts']),
+    labels: ['Retry', 'Abandon batch'],
+  },
+};
+
 // Every card that tells the builder to Retry or Abandon a batch from the Board.
 const cards: Record<string, Card> = {
-  'worktree missing, waits': worktreeCards.missing(batch, '/wt/greetings', 'waits'),
-  'worktree missing, failed': worktreeCards.missing(batch, '/wt/greetings', 'failed'),
-  'worktree in the way': worktreeCards.inTheWay(batch, '/wt/greetings', 'a file'),
-  'worktree not reopened': worktreeCards.notReopened(batch, new Error('boom')),
-  'worktree not whole': worktreeCards.notWhole(batch, '/wt/greetings', 'main', ['a.ts']),
   'wrong branch, waits': wrongBranchCard(batch, 'main', '/repo', 'waits'),
   'wrong branch, failed': wrongBranchCard(batch, 'main', '/repo', 'failed'),
   'wrong branch, not shipped': wrongBranchCard(batch, 'main', '/repo', 'not_shipped'),
@@ -71,6 +90,15 @@ describe('batch cards', () => {
     expect(card.body).not.toMatch(/strip/i);
     expect(card.body).toContain("task's drawer on the Board");
   });
+
+  it.each(Object.entries(worktreeAnswered))(
+    '%s offers its answers on the card',
+    (_name, { card, labels }) => {
+      expect(card.body).not.toMatch(/strip/i);
+      expect(card.options?.map((o) => o.label)).toEqual(labels);
+      expect(card.detail).toMatchObject({ batchId: batch.id });
+    },
+  );
 
   it('the failed-workstream card defers to the drawer, not a strip', () => {
     const fields = batchCardFields({ id: mintId('Workstream'), batchId: batch.id });
