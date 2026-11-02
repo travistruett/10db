@@ -6,10 +6,10 @@ import {
   type InboxAnswer,
   type InboxItemDto,
 } from '@10db/contracts';
-import { cancelTask } from '@10db/db';
+import { cancelTask, getTask } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import { START_REFUSED_DETAIL, StartChoice } from './cards';
+import { START_REFUSED_DETAIL, StartChoice, startTitle } from './cards';
 import type { BatchStarter } from './start';
 
 const Refused = z.object({ title: z.string().optional(), batchId: BatchId.optional() });
@@ -34,7 +34,14 @@ export function createStartCardAnswers(deps: {
     if (!refused.success || !taskIds.success) return;
     switch (answer.choice) {
       case StartChoice.Retry: {
-        const request = BatchStartInput.safeParse({ ...refused.data, taskIds: taskIds.data });
+        // A card that kept no title (one refused before its batch had one) is titled after its tasks.
+        const title =
+          refused.data.title ?? startTitle(taskIds.data.map((id) => getTask(deps.state.db, id)));
+        const request = BatchStartInput.safeParse({
+          ...refused.data,
+          title,
+          taskIds: taskIds.data,
+        });
         if (!request.success) throw new InvalidError('This card has no start to repeat');
         deps.starter.startBatch(item.projectId, request.data);
         return;

@@ -5,7 +5,7 @@ import { getBatch, getTask, listBatches, listInbox, listWorkstreams } from '@10d
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
-import { forTasks, startCards } from './cards';
+import { forTasks, startCards, startTitle } from './cards';
 import { createStartCardAnswers, StartChoice } from './index';
 
 let h: DeliveryHarness;
@@ -44,7 +44,8 @@ describe('the answers of a refused start', () => {
     inbox.answer(card.id, { choice: StartChoice.Retry });
     await h.jobs.idle();
     const batch = h.only(listBatches(h.store.db));
-    expect(batch).toMatchObject({ title: 'Greetings', state: 'OPEN' });
+    // The refused cut deleted its batch, so the retried start is titled after its tasks.
+    expect(batch).toMatchObject({ title: 'Alpha and 1 more', state: 'OPEN' });
     expect(
       listWorkstreams(h.store.db, { batchId: batch.id })
         .map((w) => w.taskId)
@@ -70,6 +71,15 @@ describe('the answers of a refused start', () => {
     for (const t of tasks) expect(getTask(h.store.db, t.id).status).toBe(TaskStatus.Cancelled);
     expect(listBatches(h.store.db)).toEqual([]);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('titles a repeated start after its first task, and keeps the title within 200 characters', () => {
+    const one = h.addTask('Alpha');
+    expect(startTitle([one])).toBe('Alpha');
+    const long = h.addTask('x'.repeat(200));
+    const title = startTitle([long, one, one]);
+    expect(title).toHaveLength(200);
+    expect(title.endsWith(' and 2 more')).toBe(true);
   });
 
   it('offers Cancel task alone for the tasks of a CI fix batch, whose start cannot be repeated', () => {

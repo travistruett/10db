@@ -10,6 +10,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type RequiredCheckJobDto,
+  type TaskDto,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -374,19 +375,27 @@ export interface StartRequest {
   readonly batchId?: BatchId;
 }
 
+/** A batch title (at most 200 characters) for a repeated start of `tasks`: the first one's, and how many more. */
+export function startTitle(tasks: readonly TaskDto[]): string {
+  const [first, ...rest] = tasks;
+  const more = rest.length > 0 ? ` and ${String(rest.length)} more` : '';
+  return `${(first?.title ?? 'Tasks').slice(0, 200 - more.length)}${more}`;
+}
+
 /**
  * A refused start's card names its tasks (and the batch it tried to join), so a client can tell a
  * refused start from a join that is still on its way: a joined task gets a workstream instead.
  * The same refusal of the same tasks folds into the card still open, so starting again after a
  * failure does not stack identical cards. It offers two answers the daemon acts on: start the same
- * tasks again once what the card says is fixed, or cancel them. `request` is null for the tasks of
- * a CI fix batch, which a start can't repeat (the pull request's CI-stop card has the Retry): the
- * card then offers Cancel task alone.
+ * tasks again once what the card says is fixed, or cancel them. A `request` without a title is
+ * repeated under one made from its tasks (`startTitle`). `request` is null for the tasks of a CI
+ * fix batch, which a start can't repeat (the pull request's CI-stop card has the Retry): the card
+ * then offers Cancel task alone.
  */
 export function forTasks(
   card: Card,
   taskIds: Iterable<TaskId>,
-  request: StartRequest | null,
+  request: Partial<StartRequest> | null = {},
 ): Card {
   const ids = [...taskIds];
   const these = ids.length > 1 ? 'these tasks' : 'this task';
@@ -398,7 +407,7 @@ export function forTasks(
       ...card.detail,
       taskIds: ids,
       [START_REFUSED_DETAIL]: {
-        ...(request ? { title: request.title } : {}),
+        ...(request?.title ? { title: request.title } : {}),
         ...(request?.batchId ? { batchId: request.batchId } : {}),
       },
     },
