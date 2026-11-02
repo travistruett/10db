@@ -74,6 +74,14 @@ export interface PrWatch {
   idle(): Promise<void>;
 }
 
+/** What the watch asks of the shipper for a pull request that merges by itself (`Shipper`). */
+export interface PullRequestLanding {
+  /** The open pull request conflicts with its base. */
+  catchUp(batchId: BatchId): void;
+  /** The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again. */
+  retryMerge(batchId: BatchId): void;
+}
+
 const STATE_OF: Record<PrState, PullRequestState> = {
   [PrState.Open]: PullRequestState.Open,
   [PrState.Merged]: PullRequestState.Merged,
@@ -157,8 +165,14 @@ export function createPrWatch(input: {
    * member through the runner, then abandons the batch through the shipper. Without it a fix runs on.
    */
   readonly endFixes?: FixEnds;
+  /**
+   * Lands the pull requests of batches that merge by themselves: brings the base into one that
+   * conflicts with it, and merges one again that GitHub refused earlier. Without it a conflict is a
+   * notice for the builder to resolve on GitHub.
+   */
+  readonly landing?: PullRequestLanding;
 }): PrWatch {
-  const { ctx, clock, afterRound, ciFix, endFixes } = input;
+  const { ctx, clock, afterRound, ciFix, endFixes, landing } = input;
   const intervalMs = input.intervalMs ?? PR_WATCH_INTERVAL_MS;
   const logger = ctx.logger.child({ module: 'pr-watch' });
   const controller = new AbortController();
@@ -258,6 +272,8 @@ export function createPrWatch(input: {
       clearBatchNotice(write, batch.id, NOTICE_KEY.baseConflict);
     else if (read.mergeable === PrMergeable.Conflicting) {
       const now = getBatch(write.tx, batch.id);
+      // 10db brings the base in itself: it says so, or raises its one card, instead of this notice.
+      if (landing !== undefined && now.autoMerge && now.ciFixOf === null) return;
       if (!now.notices.some((n) => n.key === NOTICE_KEY.baseConflict))
         setBatchNotice(write, batch.id, baseNotices.shippedConflict(now));
     }
@@ -403,7 +419,27 @@ export function createPrWatch(input: {
           followConflict(write, batch, read);
         }
         if (read !== null) storeRequired(write, root, read, required);
+        // The catch-up card closes when the pull request merges cleanly or is gone.
+        if (
+          read !== null &&
+          (read.state !== PrState.Open || read.mergeable === PrMergeable.Mergeable)
+        )
+          withdrawIn(write, root.projectId, [prCardKey.catchUp(root.id)]);
       });
+      if (
+        landing !== undefined &&
+        read?.state === PrState.Open &&
+        root.ciFixOf === null &&
+        root.autoMerge
+      ) {
+        if (
+          read.mergeBlocked === MergeBlocked.Conflicts ||
+          read.mergeable === PrMergeable.Conflicting
+        )
+          landing.catchUp(root.id);
+        else if (read.mergeable === PrMergeable.Mergeable && read.mergeBlocked === null)
+          landing.retryMerge(root.id);
+      }
       // A pull request that conflicts runs no workflow, so its failing checks are stale.
       if (
         ciFix !== undefined &&

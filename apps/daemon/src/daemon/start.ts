@@ -814,6 +814,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     ctx: delivery,
     clock,
     ciFix: { dataDir: opts.dataDir },
+    // A pull request that conflicts gets its base merged in, and a merge GitHub refused is retried.
+    landing: shipper,
     // A pull request that merges or closes ends the fix session still working on it.
     endFixes: {
       cancel: (id) => createdRunner.cancel(id),
