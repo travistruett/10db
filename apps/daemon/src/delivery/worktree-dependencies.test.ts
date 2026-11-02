@@ -13,7 +13,7 @@ import { mintId, type BatchDto, type ProjectDto } from '@10db/contracts';
 import { createTestStore, deleteAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
-  createTempRepo,
+  createTempRepoWithOrigin,
   isolatedGitEnv,
   SANDBOXED,
   tempDir,
@@ -303,7 +303,8 @@ describe('refreshing a worktree’s dependencies', () => {
 
 describe('raiseInstallHostCards', () => {
   it('names the file and recommends Allow for a project added before readings', async () => {
-    const repo = createTempRepo();
+    const remote = createTempRepoWithOrigin();
+    const repo = remote.repo;
     const { store, close } = createTestStore();
     try {
       const repoGit = (...args: string[]) =>
@@ -315,6 +316,8 @@ describe('raiseInstallHostCards', () => {
       );
       repoGit('add', 'apps');
       repoGit('commit', '-q', '-m', 'lock');
+      // A reading takes only origin's copy of the default branch, which a lane can't move.
+      repoGit('push', '-q', 'origin', 'main');
       const state = createStateStore(store, createEventBus());
       const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
       const seeded = seedProject(store, { repoPath: repo.path, delivery: 'pull_request' });
@@ -345,7 +348,7 @@ describe('raiseInstallHostCards', () => {
       expect(listNetworkHosts(state.db, seeded.id)).toEqual([]);
     } finally {
       close();
-      repo.cleanup();
+      remote.cleanup();
     }
   });
 });

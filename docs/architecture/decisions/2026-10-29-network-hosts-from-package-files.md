@@ -72,13 +72,12 @@ only when the project still has no reading, in the write's own transaction, so a
 replaced; an empty one counts. A branch git can't read leaves the project without a reading, logged and tried again at
 the next card.
 
-Which commit it reads depends on who can move it, since a lane must never write its own card's recommendation. Under
-`pull_request` delivery a lane commits only on its task's branch and the base branch moves by pull requests the builder
-merges, so it reads `refs/heads/<baseBranch>`, else `refs/remotes/origin/<baseBranch>`. Under `local` delivery (the
-default) a lane's commit tool commits on the branch the checkout is on, which is often the base branch itself, so a
-lane could commit an `.npmrc` there and have its own card recommend the host. It therefore reads only
-`refs/remotes/origin/<baseBranch>`, which a lane can't move: it can't push or write `.git`. A local project whose origin
-holds no copy of the base branch gets no reading, and its cards name no file. Folders are read three levels below the
+Which commit it reads is one a lane can't move, since a lane must never write its own card's recommendation. A lane's
+commit tool commits on the branch its workstream pinned, which under `local` delivery (the default) is often the base
+branch itself, and the builder can switch the project to `pull_request` later (or while a lane runs), so the local base
+branch can hold a lane's commit under any delivery mode. It therefore reads only `refs/remotes/origin/<baseBranch>`
+whatever the mode, which a lane can't move: it can't push or write `.git`. A project whose origin holds no copy of the
+base branch gets no reading, and its cards name no file. Folders are read three levels below the
 root (it was two), so
 `apps/desktop/src-tauri/Cargo.lock` is found, for adding a project, the folder preview, Look Again and this reading alike.
 

@@ -1,4 +1,4 @@
-import { Delivery, type ProjectDto, type ProjectId } from '@10db/contracts';
+import type { ProjectDto, ProjectId } from '@10db/contracts';
 import { getAppSetting, getProject } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
@@ -9,17 +9,14 @@ import { findRegistryHostsAt } from './find-registry-hosts';
 const key = (projectId: ProjectId): string => `network-hosts-found:${projectId}`;
 
 /**
- * The commits a reading may take a project's files from, first choice first: ones no lane can move.
- * Under `pull_request` delivery a lane commits only on its task's branch and the base branch moves by
- * pull requests the builder merges, so the local base branch counts. Under `local` delivery a lane's
- * commit tool commits on the branch the checkout is on, often the base branch itself, so only the
- * fetched `origin` copy counts: a lane can neither push nor write `.git`.
+ * The commit a reading may take a project's files from: one no lane can move. Only the fetched
+ * `origin` copy of the base branch counts, whatever the delivery mode now: a lane's commit tool
+ * commits on the branch its workstream pinned, often the local base branch itself, and it did so
+ * under `local` delivery even if the builder has since switched the project to `pull_request`. A lane
+ * can neither push nor write `.git`.
  */
 function trustedRevs(project: ProjectDto): string[] {
-  const remote = `refs/remotes/origin/${project.baseBranch}`;
-  return project.delivery === Delivery.PullRequest
-    ? [`refs/heads/${project.baseBranch}`, remote]
-    : [remote];
+  return [`refs/remotes/origin/${project.baseBranch}`];
 }
 
 /**
