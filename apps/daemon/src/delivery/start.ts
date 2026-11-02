@@ -38,13 +38,13 @@ import { insertPlannedWorkstream, planForStart } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
 import { batchCheckout } from './checkout';
-import { ghCall, networkCall, raise, type DeliveryContext } from './context';
+import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
-import { joinsLanding, missingLandingBranch, sharedLanding } from './landing';
+import { branchBehindBase, joinsLanding, missingLandingBranch, sharedLanding } from './landing';
 import { cutWorktree, type Plans } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 import { reopenWhenWhole, reopenWorktreeBatch } from './worktree-repair';
@@ -423,6 +423,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       } catch (error) {
         if (!stopped()) refuse(startCards.fetchFailed(batch.baseBranch, error));
         return;
+      }
+      // Not a refusal: the builder may mean to land in a branch that is behind. A notice on the
+      // batch's tasks names it.
+      const behind = await branchBehindBase(ctx, project, batch, signal);
+      if (behind && !stopped()) {
+        try {
+          showNotice(ctx.state, batchId, behind);
+        } catch (error) {
+          ctx.logger.warn({ batchId, err: error }, 'landing notice not written');
+        }
       }
       const call = ghCall(ctx, signal);
       try {
