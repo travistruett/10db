@@ -326,15 +326,15 @@ export function createWatcher(deps: {
    * The paths among `paths` that a permission card, or a rule one stored, allowed a lane among `lanes` to
    * write in `root`: the builder decided about that exact write when they answered its Allow Edit card, so
    * the stray-write card would only repeat it. An allow-once card excuses the next write to its file and
-   * is then used (`take`); a later write no card allowed still cards. A step end (`take` false) reads the
-   * checkout's whole diff, which holds every write of the step, so any such card excuses its file.
+   * is then used, and its write's stamp recorded; a later write no card allowed still cards. The live batch
+   * and the step end both go through here, so a write excused by one is excused unchanged by the other, and
+   * a later write the live batch never saw is carded at the step end.
    */
   function allowedWrites(
     projectId: ProjectId,
     root: string,
     paths: readonly string[],
     lanes: readonly WorkstreamId[],
-    take: boolean,
   ): Set<string> {
     const allowed = new Set<string>();
     if (paths.length === 0 || lanes.length === 0) return allowed;
@@ -356,10 +356,6 @@ export function createWatcher(deps: {
         continue;
       }
       const once = cards.filter(({ rel, a }) => rel === path && !a.standing);
-      if (!take) {
-        if (once.length > 0) allowed.add(path);
-        continue;
-      }
       const key = `${root}\0${path}`;
       const stamp = writeStamp(root, path);
       if (excusedWrites.get(key) === stamp) {
@@ -592,7 +588,7 @@ export function createWatcher(deps: {
     }
     const outside = new Set([...strays, ...hidden]);
     // A write the builder allowed through its permission card needs no second card.
-    const allowed = allowedWrites(projectId, entry.root, [...outside], candidates, true);
+    const allowed = allowedWrites(projectId, entry.root, [...outside], candidates);
     raise(
       project,
       site,
@@ -692,7 +688,7 @@ export function createWatcher(deps: {
       // A write that can change what runs is flagged even inside the workstream's own claim.
       const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
       // Not a write its permission card allowed: the builder decided about that one already.
-      const allowed = allowedWrites(ws.projectId, root, written, [workstreamId], false);
+      const allowed = allowedWrites(ws.projectId, root, written, [workstreamId]);
       const flagged = written.filter((rel) => !allowed.has(rel));
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
       return flagged;
