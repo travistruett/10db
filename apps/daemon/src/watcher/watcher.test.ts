@@ -1714,7 +1714,11 @@ describe('worktree checkouts', () => {
         await emitBoth();
         expect(flags()).toEqual([]);
         await emitBoth();
-        expect(flags().map((f) => f.body).sort()).toEqual(['.codex/rules', FILE]);
+        expect(
+          flags()
+            .map((f) => f.body)
+            .sort(),
+        ).toEqual(['.codex/rules', FILE]);
       });
     });
 
