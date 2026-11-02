@@ -26,6 +26,18 @@ export function findToolOp(
     .get();
 }
 
+/** Whether any session of the workstream has recorded a call of the tool. */
+export function hasToolOp(db: DbReader, workstreamId: WorkstreamId, tool: string): boolean {
+  return (
+    db
+      .select({ id: schema.toolOps.id })
+      .from(schema.toolOps)
+      .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.tool, tool)))
+      .limit(1)
+      .get() !== undefined
+  );
+}
+
 /**
  * How many calls of a tool the workstream's current step has recorded, across every session
  * of the step (a handoff, re-launch or recovery starts a new session in the same step): the
