@@ -422,7 +422,11 @@ describe('install-app.sh', () => {
     };
 
     it('moves on to the newer run that replaced it', () => {
-      const result = install([], { ...waiting, STUB_ACTIVE_RUN_AFTER_CANCEL: '78' });
+      const result = install([], {
+        ...waiting,
+        STUB_ACTIVE_RUN_AFTER_CANCEL: '78',
+        STUB_NEWER_RUNS: '78',
+      });
       expect(result.status).toBe(0);
       expect(result.stdout).toContain('Run 77 was cancelled');
       expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
@@ -434,34 +438,46 @@ describe('install-app.sh', () => {
       const result = install([], {
         ...waiting,
         STUB_COMMITS: [HEAD_SHA, ...OLDER].join(' '),
-        STUB_RUNS_AFTER_CANCEL: `50@${HEAD_SHA}`,
+        STUB_RUNS_AFTER_CANCEL: `90@${HEAD_SHA}`,
+        STUB_NEWER_RUNS: '90',
       });
       expect(result.status).toBe(0);
-      expect(gh().some((call) => call.startsWith('gh run download 50 '))).toBe(true);
+      expect(gh().some((call) => call.startsWith('gh run download 90 '))).toBe(true);
       expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
     });
 
-    it('starts a build when nothing replaced it', () => {
+    it('fails and starts nothing when no newer run exists, as when the builder cancelled it', () => {
       const result = install([], waiting);
-      expect(result.status).toBe(0);
-      expect(gh()).toContain('gh workflow run release-dry-run.yml --ref main');
-      expect(gh().some((call) => call.startsWith('gh run download 101 '))).toBe(true);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('ended in cancelled');
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
+      expect(gh().filter((call) => call.startsWith('gh run download'))).toEqual([]);
+      expectUntouched();
+    });
+
+    it('does not take an older run for the one that replaced it', () => {
+      const result = install([], { ...waiting, STUB_NEWER_RUNS: '60' });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('ended in cancelled');
+      expect(gh().filter((call) => call.startsWith('gh workflow run'))).toEqual([]);
     });
 
     it('moves on from a dispatched run that was replaced too', () => {
       const result = install([], {
         STUB_SUCCESS_RUN: '',
         STUB_CANCELLED_RUNS: '101',
-        STUB_ACTIVE_RUN_AFTER_CANCEL: '78',
+        STUB_ACTIVE_RUN_AFTER_CANCEL: '178',
+        STUB_NEWER_RUNS: '178',
       });
       expect(result.status).toBe(0);
-      expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
+      expect(gh().some((call) => call.startsWith('gh run download 178 '))).toBe(true);
     });
 
     it('gives up after three cancelled runs in a row, naming the last', () => {
       const result = install([], {
         STUB_SUCCESS_RUN: '',
         STUB_CANCELLED_RUNS: '101 102 103 104',
+        STUB_NEWER_RUNS: '200',
       });
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('ended in cancelled');

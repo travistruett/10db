@@ -22,6 +22,7 @@ import {
   deleteCuttingBatch,
   findUnfinishedBatch,
   getBatch,
+  getAppSetting,
   getBoardColumn,
   getProject,
   getTask,
@@ -44,6 +45,12 @@ import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
+import {
+  forgetStartSiblings,
+  recordStartSiblings,
+  startSiblings,
+  startSiblingsKey,
+} from './start-siblings';
 import {
   joinsLanding,
   landingWarnings,
@@ -119,6 +126,23 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     });
   }
 
+  /**
+   * Runs a batch's cut as its job. Once the cut is done (opened or refused, not stopped by a
+   * shutdown, which leaves the row for `recut`) the record of the batches of its start goes.
+   */
+  function runCut(batch: BatchDto, run: (signal: AbortSignal) => Promise<void>): void {
+    ctx.jobs.run(jobKey(batch, JobQueue.Cut), async (signal) => {
+      try {
+        await run(signal);
+      } finally {
+        if (!signal.aborted && getAppSetting(db, startSiblingsKey(batch.id)) !== undefined)
+          ctx.state.write((w) => {
+            forgetStartSiblings(w, batch.id);
+          });
+      }
+    });
+  }
+
   function joiningRefusal(task: TaskDto): ConflictError {
     return new ConflictError(
       `${task.title} is joining a batch; where it works and its areas can't change, and it can't start again, until it has joined or been refused`,
@@ -146,7 +170,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         const mode = placement(task);
         if (task.workspaceMode !== mode) patchTask(w, task.id, { workspaceMode: mode });
       }
-      return steps.map((step) => step.write(w));
+      const written = steps.map((step) => step.write(w));
+      // A join returns a batch that is already open; only the CUTTING ones are this start's cuts.
+      recordStartSiblings(
+        w,
+        written.filter((b) => b.state === BatchState.Cutting).map((b) => b.id),
+      );
+      return written;
     });
     steps.forEach((step, i) => {
       const batch = batches[i];
@@ -281,9 +311,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         return inserted;
       },
       launch: (batch) => {
-        ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
-          cut(batch.id, tasks, plans, inBatch, signal, sameStart),
-        );
+        runCut(batch, (signal) => cut(batch.id, tasks, plans, inBatch, signal, sameStart));
       },
     };
   }
@@ -334,9 +362,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           return inserted;
         },
         launch: (batch) => {
-          ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
-            cutWorktree(ctx, batch.id, groupPlans, signal, sameStart),
-          );
+          runCut(batch, (signal) => cutWorktree(ctx, batch.id, groupPlans, signal, sameStart));
         },
       };
     });
@@ -649,10 +675,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       // The workstreams came QUEUED with the row and are still its own, so the tasks keep their place.
       const tasks = listWorkstreams(db, { batchId }).map((ws) => getTask(db, ws.taskId));
       const ids = new Map(tasks.map((task) => [task.id, null]));
-      ctx.jobs.run(jobKey(batch, JobQueue.Cut), (signal) =>
+      // What the start that made this batch made, so a sibling cut again with it is no use of the branch.
+      const sameStart = startSiblings(db, batchId);
+      runCut(batch, (signal) =>
         batch.worktreePath === null
-          ? cut(batchId, tasks, ids, new Set(ids.keys()), signal)
-          : cutWorktree(ctx, batchId, ids, signal),
+          ? cut(batchId, tasks, ids, new Set(ids.keys()), signal, sameStart)
+          : cutWorktree(ctx, batchId, ids, signal, sameStart),
       );
     },
     reopen(batchId) {
