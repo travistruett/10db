@@ -2,6 +2,7 @@ import { chmodSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
   AccountKind,
+  AccountPauseReason,
   AccountProblem,
   AccountSecretInput,
   ConflictError,
@@ -12,6 +13,7 @@ import {
   type AccountId,
   type AccountIdentityDto,
   type AccountPatch,
+  type AccountPauseDto,
   type AccountSignInDto,
   type AccountUsageDto,
 } from '@10db/contracts';
@@ -42,6 +44,7 @@ import {
   type SessionAdapter,
 } from '../sessions';
 import { monthOf, monthWindow, usageWindow } from './month';
+import type { AccountPauses } from './pauses';
 import type { AccountRuntime } from './runtime';
 import type { StartGate } from './start-gate';
 
@@ -54,6 +57,13 @@ export interface AccountService {
   signIn(id: AccountId): AccountSignInDto;
   identity(id: AccountId): Promise<AccountIdentityDto>;
   usage(id: AccountId, month: string | null): AccountUsageDto;
+  /** Every account paused now, with why, since when and until when. */
+  pauses(): AccountPauseDto[];
+  /**
+   * Lifts a refused or monthly-cap pause, as saving the account unchanged does, and answers the pauses
+   * still in force. A usage-limit pause ends by itself, so resuming it is a conflict.
+   */
+  resume(id: AccountId): AccountPauseDto[];
 }
 
 /** The directory and every level 10db made above it: readable by the builder only (accounts spec §4). */
@@ -82,6 +92,7 @@ export function createAccountService(deps: {
   readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
   readonly startGate: StartGate;
   readonly runtime: Pick<AccountRuntime, 'saved'>;
+  readonly pauses: Pick<AccountPauses, 'pausedFor' | 'resume'>;
   /** An account changed: the scheduler looks again. */
   onSaved(): void;
 }): AccountService {
@@ -100,8 +111,42 @@ export function createAccountService(deps: {
         }
       : null;
 
+  const pauses = (): AccountPauseDto[] =>
+    listAccounts(db, { includeArchived: true }).flatMap((account) => {
+      const held = deps.pauses.pausedFor(account.id);
+      return held
+        ? [
+            {
+              accountId: account.id,
+              reason: held.reason,
+              since: held.since.toISOString(),
+              until: held.until?.toISOString() ?? null,
+            },
+          ]
+        : [];
+    });
+
   return {
     list: () => listAccounts(db, { includeArchived: true }),
+    pauses,
+    resume(id) {
+      const row = getAccountRow(db, id);
+      const held = deps.pauses.pausedFor(id);
+      if (held) {
+        switch (held.reason) {
+          case AccountPauseReason.UsageLimit:
+            throw new ConflictError(
+              `Account "${row.label}" is paused by its usage limit, which ends by itself`,
+            );
+          case AccountPauseReason.MonthlyCap:
+          case AccountPauseReason.Refused:
+            deps.pauses.resume(id, { only: held.reason });
+            deps.onSaved();
+            break;
+        }
+      }
+      return pauses();
+    },
     create(input) {
       const account = deps.state.write((ctx) => {
         const created = insertAccount(ctx, input, {

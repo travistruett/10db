@@ -19,7 +19,7 @@ import type { InboxService } from '../inbox';
 import { capStatus } from './cap';
 import { accountFoldKey, capCard, refusedCard, usageLimitCard } from './cards';
 import { moveTargets, projectsWithWork } from './moves';
-import { usageLimitEnd, type AccountPause, type AccountPauses } from './pauses';
+import { usageLimitEnd, type AccountPause, type AccountPauses, type PauseRequest } from './pauses';
 import { unready } from './readiness';
 import { closeSettledCards } from './stale-cards';
 
@@ -51,7 +51,7 @@ export function createAccountRuntime(opts: {
   const capCarded = new Map<AccountId, Set<ProjectId>>();
 
   /** A cap pause holds every project on the account; each gets its own card (accounts spec §6). */
-  function ensureCapCard(account: AccountRow, projectId: ProjectId, pause: AccountPause): void {
+  function ensureCapCard(account: AccountRow, projectId: ProjectId, pause: PauseRequest): void {
     const seen = capCarded.get(account.id) ?? new Set<ProjectId>();
     capCarded.set(account.id, seen);
     if (seen.has(projectId)) return;
@@ -115,14 +115,14 @@ export function createAccountRuntime(opts: {
       capCarded.delete(account.id);
       const cap = capStatus(db, account, opts.clock.now());
       if (!cap || cap.spentUsd < cap.capUsd) return null;
-      const pause: AccountPause = { reason: AccountPauseReason.MonthlyCap, until: cap.window.end };
+      const pause: PauseRequest = { reason: AccountPauseReason.MonthlyCap, until: cap.window.end };
       opts.pauses.pause(account.id, pause, {
         projectId,
         card: capCard(account, cap),
         data: { month: cap.window.month, spentUsd: cap.spentUsd, capUsd: cap.capUsd },
       });
       capCarded.set(account.id, new Set([projectId]));
-      return pause;
+      return opts.pauses.pausedFor(account.id) ?? { ...pause, since: opts.clock.now() };
     },
     rateLimited(accountId, resetsAt, projectId) {
       const now = opts.clock.now();
