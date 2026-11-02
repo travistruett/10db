@@ -1,4 +1,4 @@
-import { GoalId, TaskId } from '@10db/contracts';
+import { GoalId, ShapeId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -12,6 +12,7 @@ import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
+import { ShapeView } from './views/shape/shape-view';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
 
@@ -47,6 +48,24 @@ function SettingsPage() {
   );
 }
 
+function NewShapePage() {
+  return (
+    <ViewBoundary name="Shape">
+      <ShapeView shapeId={null} />
+    </ViewBoundary>
+  );
+}
+
+function ShapePage() {
+  const { shapeId } = shapeRoute.useParams();
+  const id = ShapeId.safeParse(shapeId);
+  return (
+    <ViewBoundary name="Shape">
+      <ShapeView shapeId={id.success ? id.data : null} />
+    </ViewBoundary>
+  );
+}
+
 const rootRoute = createRootRoute({ component: AppLayout, errorComponent: AppError });
 
 const indexRoute = createRoute({
@@ -62,6 +81,22 @@ const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
   component: FactoryPage,
+});
+// The new conversation: nothing exists in the daemon until the first message is sent.
+const newShapeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/shape',
+  component: NewShapePage,
+});
+const shapeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/shape/$shapeId',
+  beforeLoad: ({ params }) => {
+    // A link that isn't a conversation id opens the new conversation instead.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- TanStack Router redirects by throwing.
+    if (!ShapeId.safeParse(params.shapeId).success) throw redirect({ to: '/shape' });
+  },
+  component: ShapePage,
 });
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -116,6 +151,8 @@ const routeTree = rootRoute.addChildren([
   indexRoute,
   boardRoute,
   factoryRoute,
+  newShapeRoute,
+  shapeRoute,
   inboxRoute,
   tasksRoute,
   settingsIndexRoute,

@@ -1,12 +1,4 @@
-import {
-  GoalAdoptError,
-  GoalDigestDto,
-  GoalDto,
-  GoalListDto,
-  type GoalAdoptIssue,
-  type GoalId,
-  type ProjectId,
-} from '@10db/contracts';
+import { GoalDigestDto, GoalListDto, type GoalId, type ProjectId } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -48,40 +40,5 @@ export function useOpenGoal() {
       readJson(await client.goals[':goalId'].digest.$get({ param: { goalId } }), GoalDigestDto),
     // The list counted this goal's news from the old mark; the move makes it zero.
     onSuccess: () => queryClient.invalidateQueries({ queryKey: goalKeys.all }),
-  });
-}
-
-/** What the daemon made of a brief: the new goal, or every reason it refused. */
-export type AdoptResult =
-  | { readonly kind: 'adopted'; readonly goal: GoalDto }
-  | { readonly kind: 'refused'; readonly errors: readonly GoalAdoptIssue[] };
-
-/**
- * Adopts the plan at `path`. A refused brief is an answer, not an error: the form shows its list.
- * Anything else the daemon says (an unreadable file, a server fault) rejects the mutation.
- */
-export function useAdoptGoal(projectId: ProjectId | null) {
-  const { client } = useDaemon();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: async (path: string): Promise<AdoptResult> => {
-      if (!projectId) throw new Error('Choose a project first.');
-      const res = await client.projects[':projectId'].goals.adopt.$post({
-        param: { projectId },
-        json: { path, dryRun: false },
-      });
-      if (res.status === 400) {
-        const body: unknown = await res
-          .clone()
-          .json()
-          .catch(() => null);
-        const refusal = GoalAdoptError.safeParse(body);
-        if (refusal.success) return { kind: 'refused', errors: refusal.data.errors };
-      }
-      return { kind: 'adopted', goal: await readJson(res, GoalDto) };
-    },
-    onSuccess: (result) => {
-      if (result.kind === 'adopted') void queryClient.invalidateQueries({ queryKey: goalKeys.all });
-    },
   });
 }
