@@ -104,7 +104,11 @@ beforeEach(() => {
     move: (projectId, to, why, answering) => {
       moves.move(projectId, to, why, { answering });
     },
-    stay: () => undefined,
+    stay: (projectId) => {
+      moves.stay(projectId);
+    },
+    recheck: () => undefined,
+    raiseCap: () => undefined,
   });
   second = seedAccount(store, { kind: 'claude_subscription', label: 'Second plan' });
   // Ready to run: a usable fallback is never an account still waiting for its sign-in.
@@ -145,10 +149,38 @@ describe('usage thresholds', () => {
     expect(moved?.title).toBe(
       'demo moved to Second plan: Claude plan is at 96% of its 5-hour limit',
     );
-    expect(moved?.options).toEqual([]);
+    expect(moved?.options.map((o) => o.label)).toEqual(['Move back', 'Stay']);
     expect(moved?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
       accountId: plan,
       usage: { limitType: 'five_hour', utilization: 0.96 },
+    });
+  });
+
+  it('moves the project back when the builder answers Move back on the card that says it moved', () => {
+    const project = busy(seedProject(store, { fallbackAccountId: second.id }));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [moved] = openCards();
+    if (!moved) throw new Error('no moved card');
+    inbox.answer(moved.id, { choice: AccountCardChoice.MoveBack });
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: plan,
+      movedFromAccountId: null,
+    });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('forgets the move back when the builder answers Stay on the card that says it moved', () => {
+    const project = busy(seedProject(store, { fallbackAccountId: second.id }));
+    const plan = project.accountId;
+    limits.usageReported(plan, report(0.96));
+    const [moved] = openCards();
+    if (!moved) throw new Error('no moved card');
+    inbox.answer(moved.id, { choice: AccountCardChoice.Stay });
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: second.id,
+      movedFromAccountId: null,
+      moveBackAt: null,
     });
   });
 
