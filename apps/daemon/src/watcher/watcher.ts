@@ -36,6 +36,7 @@ import {
   ANSWERED_CARDS_READ,
   ANSWERED_STATES,
   cardAllowances,
+  cardUseKeys,
   relativeIn,
   ruleAllowances,
   writeStamp,
@@ -318,13 +319,16 @@ export function createWatcher(deps: {
   // watcher started are used up, since they allowed writes it never saw. Each project's own latest answered
   // cards are read, as allowedWrites reads them; a read across every project could miss a card that is old
   // among all of them yet still among its own project's latest.
+  // A folded card allows one write for each lane it targets, so a use is a card and a lane.
   const usedCards = new Set<string>(
     listProjects(db).flatMap((p) =>
-      listInbox(db, {
-        states: [...ANSWERED_STATES],
-        projectId: p.id,
-        recent: ANSWERED_CARDS_READ,
-      }).map((i) => i.id),
+      cardUseKeys(
+        listInbox(db, {
+          states: [...ANSWERED_STATES],
+          projectId: p.id,
+          recent: ANSWERED_CARDS_READ,
+        }),
+      ),
     ),
   );
   // The write each excused path last showed, by checkout and path: a write seen again unchanged, in a later
@@ -371,9 +375,9 @@ export function createWatcher(deps: {
         allowed.add(path);
         continue;
       }
-      const unused = once.find(({ a }) => a.cardId !== null && !usedCards.has(a.cardId));
-      if (unused?.a.cardId == null) continue;
-      usedCards.add(unused.a.cardId);
+      const unused = once.find(({ a }) => a.useKey !== null && !usedCards.has(a.useKey));
+      if (unused?.a.useKey == null) continue;
+      usedCards.add(unused.a.useKey);
       excusedWrites.set(key, stamp);
       allowed.add(path);
     }
@@ -603,6 +607,14 @@ export function createWatcher(deps: {
     const outside = new Set([...strays, ...hidden]);
     // A write the builder allowed through its permission card needs no second card.
     const allowed = allowedWrites(projectId, entry.root, [...outside], candidates);
+    // A directory the allowed write created holds only that write, so it is allowed with it.
+    for (const rel of outside) {
+      if (allowed.has(rel) || !isRealDirectory(join(entry.root, rel))) continue;
+      const files = filesUnder(entry.root, rel);
+      if (files === null || files.length === 0) continue;
+      const fileAllowed = allowedWrites(projectId, entry.root, files, candidates);
+      if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
+    }
     raise(
       project,
       site,
