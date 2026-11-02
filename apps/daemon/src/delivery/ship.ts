@@ -741,7 +741,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * merging on that answer alone could land work nothing but the pre-check checked. It says the same
    * when the base has no required checks and when they already passed on this head, so read them:
    * passing merges at once; none leaves the pull request open with a notice; anything else (pending,
-   * failing, a read that failed) merges nothing and raises nothing, and the pull request watch takes over.
+   * cancelled, failing, a read that failed) merges nothing and raises nothing, and the pull request watch takes over.
    */
   async function mergeIfRequiredChecksPassed(
     batch: BatchDto,
@@ -772,6 +772,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         tellMerge(batch, mergeNotices.preCheckOnly(batch, prUrl));
         return;
       case 'pending':
+      case 'cancelled':
       case 'failing':
         return;
     }

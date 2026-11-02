@@ -13,8 +13,8 @@ const job = (name: string, link: string | null) => ({
 });
 const required = (
   state: RequiredChecksDto['state'],
-  jobs: Partial<Pick<RequiredChecksDto, 'failing' | 'pending'>> = {},
-): RequiredChecksDto => ({ state, failing: [], pending: [], ...jobs });
+  jobs: Partial<Pick<RequiredChecksDto, 'failing' | 'pending' | 'cancelled'>> = {},
+): RequiredChecksDto => ({ state, failing: [], pending: [], cancelled: [], ...jobs });
 
 const read = (state: 'open' | 'merged' | 'closed' | 'unknown') => ({
   state,
@@ -41,6 +41,19 @@ describe('ciLine', () => {
       line: 'Pull request open · CI running',
       color: 'blue',
       link: { url: 'https://github.com/acme/widgets/actions/runs/1/job/2', label: 'CI job' },
+    });
+  });
+
+  it('says a cancelled required check was cancelled, never running, and links its job', () => {
+    const batch = shipped({
+      prRequired: required('cancelled', {
+        cancelled: [job('desktop', 'https://github.com/acme/widgets/actions/runs/1/job/9')],
+      }),
+    });
+    expect(ciLine(batch, [batch])).toEqual({
+      line: 'Pull request open · CI cancelled: desktop',
+      color: 'orange',
+      link: { url: 'https://github.com/acme/widgets/actions/runs/1/job/9', label: 'CI job' },
     });
   });
 

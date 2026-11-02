@@ -54,8 +54,12 @@ export const RequiredChecksDto = z.object({
   state: z.enum(RequiredChecksState),
   failing: z.array(RequiredCheckJobDto),
   pending: z.array(RequiredCheckJobDto),
+  /** The cancelled ones; rows stored before this field existed have none. */
+  cancelled: z.array(RequiredCheckJobDto).default([]),
 });
 export type RequiredChecksDto = z.infer<typeof RequiredChecksDto>;
+/** The same as a stored row holds it: rows written before `cancelled` existed lack the field. */
+export type StoredRequiredChecks = z.input<typeof RequiredChecksDto>;
 
 /** One batch: one branch and one pull request (batch delivery spec §3). */
 export const BatchDto = z.object({

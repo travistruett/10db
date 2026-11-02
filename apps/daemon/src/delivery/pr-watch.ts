@@ -37,7 +37,7 @@ import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
-import { baseNotices, ciNotices, NOTICE_KEY } from './notices';
+import { baseNotices, cancelledNotices, ciNotices, NOTICE_KEY, type CancelledWhy } from './notices';
 
 /** How often the watch reads every followed pull request. */
 const PR_WATCH_INTERVAL_MS = 2 * 60_000;
@@ -161,7 +161,29 @@ function requiredOf(read: RequiredChecks): RequiredChecksDto {
     runId: job.runId,
     description: job.description,
   });
-  return { state: read.state, failing: read.failing.map(dto), pending: read.pending.map(dto) };
+  return {
+    state: read.state,
+    failing: read.failing.map(dto),
+    pending: read.pending.map(dto),
+    cancelled: read.cancelled.map(dto),
+  };
+}
+
+/**
+ * Where a pull request's cancelled required check stands, for one head. In memory: a restart starts
+ * from the stored notice instead.
+ */
+interface CancelledRun {
+  readonly head: string | null;
+  /** Reads in a row that listed a cancelled check, before 10db ran it again. */
+  streak: number;
+  /** 10db ran the cancelled check(s) again, and when. */
+  asked: boolean;
+  askedAt: number;
+  /** A read after the rerun listed no cancelled check: the rerun took, so a cancellation now is a second one. */
+  active: boolean;
+  /** The notice is shown. */
+  notified: boolean;
 }
 
 /**
@@ -217,6 +239,8 @@ export function createPrWatch(input: {
    * restart counts the minutes again.
    */
   const awaitingRuns = new Map<BatchId, { head: string | null; since: number; asked: boolean }>();
+  /** Each open pull request with a cancelled required check, by its root batch. */
+  const cancelledRuns = new Map<BatchId, CancelledRun>();
   /** Set by `recheck`; the next round to start takes it, so a round already running leaves it. */
   let recheckDue = false;
 
@@ -447,6 +471,117 @@ export function createPrWatch(input: {
     });
   }
 
+  /** Shows the cancelled-check notice on the batch, naming each check with its link. */
+  function noticeCancelled(root: BatchDto, checks: RequiredChecks['cancelled'], why: CancelledWhy) {
+    ctx.state.write((write) => {
+      const now = getBatch(write.tx, root.id);
+      setBatchNotice(write, root.id, cancelledNotices.stuck(now, checks, why));
+    });
+  }
+
+  function clearCancelledNotice(rootId: BatchId): void {
+    if (getBatch(ctx.state.db, rootId).notices.some((n) => n.key === NOTICE_KEY.checksCancelled))
+      ctx.state.write((write) => clearBatchNotice(write, rootId, NOTICE_KEY.checksCancelled));
+  }
+
+  /**
+   * Follows an open pull request's cancelled required checks (a runner problem, say, or a run
+   * GitHub stopped). A cancelled check is its own state, never pending: nothing runs for it, and the
+   * pull request cannot merge. The second read in a row that lists one (a newer push's run replaces
+   * a superseded one within minutes, and rerunning that old run could cancel the new one) runs its
+   * Actions run again, once for the head. It is never run a second time: a check cancelled again after it ran
+   * (or still cancelled 10 minutes after the rerun) shows a notice naming the check and its link, as
+   * does a check with no Actions run to start. The notice goes when no check is cancelled. A failing
+   * required check, a conflict and a pull request that is no longer open leave all of it alone.
+   * Throws gh's failure only when gh itself is down, so the next round asks again.
+   */
+  async function followCancelled(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+    signal: AbortSignal,
+  ): Promise<void> {
+    if (read === null || required === null) return;
+    if (
+      read.state !== PrState.Open ||
+      root.ciFixOf !== null ||
+      read.mergeBlocked === MergeBlocked.Conflicts ||
+      read.mergeable === PrMergeable.Conflicting
+    ) {
+      cancelledRuns.delete(root.id);
+      clearCancelledNotice(root.id);
+      return;
+    }
+    // A failing check starts a fix, which pushes a new head: the cancelled one is not the question.
+    if (required.state === 'failing') return;
+    const cancelled = required.cancelled;
+    const seen = cancelledRuns.get(root.id);
+    const sameHead = seen?.head === read.headSha;
+    if (cancelled.length === 0) {
+      if (seen !== undefined && sameHead) {
+        // Rerun: it took. Not rerun: the cancellation went away by itself (a newer run).
+        if (seen.asked) seen.active = true;
+        else seen.streak = 0;
+        seen.notified = false;
+      } else cancelledRuns.delete(root.id);
+      clearCancelledNotice(root.id);
+      return;
+    }
+    const stored = getBatch(ctx.state.db, root.id).notices.some(
+      (n) => n.key === NOTICE_KEY.checksCancelled,
+    );
+    let track: CancelledRun;
+    if (seen !== undefined && sameHead) track = seen;
+    else {
+      // A new head starts over. After a restart the stored notice says 10db is done with this head.
+      if (seen !== undefined) clearCancelledNotice(root.id);
+      const restarted = seen === undefined && stored;
+      track = {
+        head: read.headSha,
+        streak: 0,
+        asked: restarted,
+        askedAt: 0,
+        active: false,
+        notified: restarted,
+      };
+    }
+    cancelledRuns.set(root.id, track);
+    if (track.notified) return;
+    const at = clock.now().getTime();
+    if (track.asked) {
+      if (track.active || at - track.askedAt >= CHECKS_START_MS) {
+        track.notified = true;
+        noticeCancelled(root, cancelled, { kind: 'again' });
+      }
+      return;
+    }
+    track.streak += 1;
+    if (track.streak < 2) return;
+    const runs = [...new Set(cancelled.flatMap((job) => (job.runId === null ? [] : [job.runId])))];
+    const repo = root.repo;
+    // A check with no Actions run (a commit status from another CI) has nothing 10db can run.
+    if (repo === null || cancelled.some((job) => job.runId === null)) {
+      track.notified = true;
+      noticeCancelled(root, cancelled, { kind: 'no_run' });
+      return;
+    }
+    try {
+      for (const runId of runs) await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
+    } catch (error) {
+      if (controller.signal.aborted || ghDown(error)) throw error;
+      logger.warn(
+        { batchId: root.id, err: detailOf(error) },
+        'could not run a cancelled check again',
+      );
+      track.notified = true;
+      noticeCancelled(root, cancelled, { kind: 'refused', detail: detailOf(error) });
+      return;
+    }
+    track.asked = true;
+    track.askedAt = at;
+    track.active = false;
+  }
+
   async function round(signal: AbortSignal): Promise<void> {
     await readAll(signal);
     // After the reads, so a merge or close this round recorded ends its fixes in the same round.
@@ -548,6 +683,16 @@ export function createPrWatch(input: {
           landing.retryMerge(root.id, { catchUpCardWasOpen });
       }
       followMissingRuns(root, read, required);
+      try {
+        await followCancelled(root, read, required, signal);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        logger.warn(
+          { batchId: root.id, err: detailOf(error) },
+          'could not follow a cancelled check',
+        );
+        if (ghDown(error)) ended = { error, at: root.id };
+      }
       // A pull request that conflicts runs no workflow, so its failing checks are stale.
       if (
         ciFix !== undefined &&

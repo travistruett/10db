@@ -111,6 +111,14 @@ export function ciLine(batch: BatchDto | undefined, batches: readonly BatchDto[]
         color: 'blue',
         link: jobLink(required.pending, batch.prUrl),
       };
+    case RequiredChecksState.Cancelled: {
+      const named = required.cancelled[0] ? `: ${required.cancelled[0].name}` : '';
+      return {
+        line: `Pull request open · CI cancelled${named}`,
+        color: 'orange',
+        link: jobLink(required.cancelled, batch.prUrl),
+      };
+    }
     case RequiredChecksState.Passing:
       return { line: 'Pull request open · CI passed', color: 'green', link: checks };
     case RequiredChecksState.Failing: {

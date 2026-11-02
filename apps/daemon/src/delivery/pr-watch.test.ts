@@ -1406,7 +1406,12 @@ describe('the required checks of a pull request', () => {
   it('stores the required checks of an open pull request on its batch', async () => {
     setup();
     const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setRequiredChecks(prUrl, { state: 'pending', failing: [], pending: [job('build')] });
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'pending',
+      failing: [],
+      pending: [job('build')],
+      cancelled: [],
+    });
     const w = watcher();
     w.start();
     await w.idle();
@@ -1414,9 +1419,15 @@ describe('the required checks of a pull request', () => {
       state: 'pending',
       failing: [],
       pending: [job('build')],
+      cancelled: [],
     });
 
-    h.gh.setRequiredChecks(prUrl, { state: 'failing', failing: [job('build')], pending: [] });
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'failing',
+      failing: [job('build')],
+      pending: [],
+      cancelled: [],
+    });
     await round(w);
     expect(stored(id).prRequired).toMatchObject({ state: 'failing', failing: [job('build')] });
   });
@@ -1427,7 +1438,12 @@ describe('the required checks of a pull request', () => {
     const w = watcher();
     w.start();
     await w.idle();
-    expect(stored(id).prRequired).toEqual({ state: 'none', failing: [], pending: [] });
+    expect(stored(id).prRequired).toEqual({
+      state: 'none',
+      failing: [],
+      pending: [],
+      cancelled: [],
+    });
   });
 
   it('stores why GitHub will not merge the pull request, and clears it', async () => {
@@ -1449,7 +1465,7 @@ describe('the required checks of a pull request', () => {
   it('keeps what it stored when the required checks cannot be read, and writes nothing for a read that changes nothing', async () => {
     setup();
     const { id, prUrl } = shipped(h.project.id, 'Alpha');
-    h.gh.setRequiredChecks(prUrl, { state: 'passing', failing: [], pending: [] });
+    h.gh.setRequiredChecks(prUrl, { state: 'passing', failing: [], pending: [], cancelled: [] });
     const w = watcher();
     w.start();
     await w.idle();
@@ -1471,7 +1487,12 @@ describe('the required checks of a pull request', () => {
     setup();
     const root = shipped(h.project.id, 'Alpha');
     const fix = shippedFix(root, 'Fix CI: build', 'abc');
-    h.gh.setRequiredChecks(root.prUrl, { state: 'pending', failing: [], pending: [job('build')] });
+    h.gh.setRequiredChecks(root.prUrl, {
+      state: 'pending',
+      failing: [],
+      pending: [job('build')],
+      cancelled: [],
+    });
     const w = watcher();
     w.start();
     await w.idle();
@@ -1537,5 +1558,225 @@ describe('the required checks of a pull request', () => {
     expect(reads(a.prUrl)).toBe(1);
     expect(reads(b.prUrl)).toBe(1);
     expect(polls()).toBe(2);
+  });
+});
+
+describe('a required check GitHub cancelled', () => {
+  const HEAD_A = 'a'.repeat(40);
+  const HEAD_B = 'b'.repeat(40);
+  const GRACE_ROUNDS = 5; // 10 minutes of 2-minute rounds
+
+  const job = (name: string, runId: string | null = '77') => ({
+    name,
+    link: `https://github.com/acme/widgets/actions/runs/${runId ?? 'x'}/job/${name}1`,
+    jobId: `${name}1`,
+    runId,
+    description: null,
+  });
+  const cancelled = (...names: string[]) => ({
+    state: 'cancelled' as const,
+    failing: [],
+    pending: [],
+    cancelled: names.map((n) => job(n)),
+  });
+  const running = (...names: string[]) => ({
+    state: 'pending' as const,
+    failing: [],
+    pending: names.map((n) => job(n)),
+    cancelled: [],
+  });
+  const passing = { state: 'passing' as const, failing: [], pending: [], cancelled: [] };
+
+  const stored = (id: BatchId) => getBatch(h.store.db, id);
+  const noticeOf = (id: BatchId) => stored(id).notices.find((n) => n.key === 'checks-cancelled');
+
+  function watching(autoMerge = true): { id: BatchId; prUrl: string; w: PrWatch } {
+    setup();
+    const made = shipped(h.project.id, 'Alpha', undefined, autoMerge);
+    h.gh.setHead(made.prUrl, HEAD_A);
+    const w = watcher();
+    return { ...made, w };
+  }
+
+  it('is stored as cancelled, never pending, with the cancelled check listed', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    expect(stored(id).prRequired).toMatchObject({
+      state: 'cancelled',
+      pending: [],
+      cancelled: [job('desktop')],
+    });
+  });
+
+  it('runs the check again once, from the second read in a row, without a card', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    // One read can be a run a newer push replaced: it is not rerun yet.
+    expect(h.gh.reruns).toEqual([]);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+    expect(h.cards()).toEqual([]);
+
+    // GitHub still lists the old cancellation for a moment: no second rerun, no notice.
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('runs a run once even when two of its jobs were cancelled', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop', 'gate'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('does not rerun a cancellation that is gone by the next read (a newer push replaced it)', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    h.gh.setRequiredChecks(prUrl, running('desktop'));
+    await round(w);
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('shows a notice naming the check and its link when it is cancelled again, and runs nothing more', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+
+    h.gh.setRequiredChecks(prUrl, running('desktop'));
+    await round(w);
+    expect(noticeOf(id)).toBeUndefined();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    await round(w);
+
+    const notice = noticeOf(id);
+    expect(notice).toMatchObject({ tone: 'warning' });
+    expect(notice?.line).toContain('desktop');
+    expect(notice?.body).toContain(job('desktop').link);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(stored(id).prRequired?.state).toBe('cancelled');
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('shows the notice when the rerun never took, after the minutes a run gets to start', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    for (let i = 0; i < GRACE_ROUNDS - 1; i++) await round(w);
+    expect(noticeOf(id)).toBeUndefined();
+    await round(w);
+    expect(noticeOf(id)?.line).toContain('desktop');
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('takes the notice away once the check runs or passes', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    h.gh.setRequiredChecks(prUrl, running('desktop'));
+    await round(w);
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    await round(w);
+    expect(noticeOf(id)).toBeDefined();
+    h.gh.setRequiredChecks(prUrl, passing);
+    await round(w);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('says so at once when the check has no Actions run to start again', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [{ ...job('ci/other', null), link: 'https://ci.example.com/b/1', jobId: null }],
+    });
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+    const notice = noticeOf(id);
+    expect(notice?.line).toContain('ci/other');
+    expect(notice?.body).toContain('https://ci.example.com/b/1');
+  });
+
+  it('says so when GitHub refuses the rerun', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    h.gh.failNext.set('rerunFailed', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)?.body).toContain('Resource not accessible');
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+  });
+
+  it('gives a new head its own rerun', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    h.gh.setHead(prUrl, HEAD_B);
+    await round(w);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77', '77']);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('leaves a check that is genuinely running pending, with nothing rerun', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, running('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    await round(w);
+    expect(stored(id).prRequired).toMatchObject({ state: 'pending', cancelled: [] });
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('runs nothing on a pull request that conflicts with its base', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.gh.setMergeBlocked(prUrl, 'conflicts');
+    w.start();
+    await w.idle();
+    await round(w);
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+  });
+
+  it('runs the check of a pull request held for the builder too', async () => {
+    const { prUrl, w } = watching(false);
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
   });
 });

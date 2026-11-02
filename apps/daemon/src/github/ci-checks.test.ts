@@ -143,6 +143,7 @@ describe('what the spike saw gh print', () => {
       state: 'passing',
       failing: [],
       pending: [],
+      cancelled: [],
     });
   });
 
@@ -161,6 +162,7 @@ describe('what the spike saw gh print', () => {
         },
       ],
       pending: [],
+      cancelled: [],
     });
   });
 
@@ -169,6 +171,7 @@ describe('what the spike saw gh print', () => {
       state: 'none',
       failing: [],
       pending: [],
+      cancelled: [],
     });
   });
 
@@ -204,6 +207,7 @@ describe('what the spike saw gh print', () => {
         },
       ],
       pending: [],
+      cancelled: [],
     });
   });
 
@@ -272,14 +276,50 @@ describe('parseRequiredChecks', () => {
       expected: { state: 'failing', failing: [job('lint')], pending: [job('test')] },
     },
     {
-      name: 'one cancelled and none failed: pending, the run is usually replaced by a newer push',
+      name: 'one cancelled and none failed: cancelled, not pending',
       out: out(1, list(check('build', 'pass'), check('test', 'cancel'))),
-      expected: { state: 'pending', failing: [], pending: [job('test')] },
+      expected: { state: 'cancelled', failing: [], pending: [], cancelled: [job('test')] },
     },
     {
-      name: 'one cancelled and one failed: failing',
+      name: 'one cancelled and another still running: cancelled, and the running one stays pending',
+      out: out(8, list(check('build', 'pending'), check('test', 'cancel'))),
+      expected: {
+        state: 'cancelled',
+        failing: [],
+        pending: [job('build')],
+        cancelled: [job('test')],
+      },
+    },
+    {
+      name: 'one cancelled and one failed: failing, the cancelled one still listed',
       out: out(1, list(check('test', 'cancel'), check('lint', 'fail'))),
-      expected: { state: 'failing', failing: [job('lint')], pending: [job('test')] },
+      expected: {
+        state: 'failing',
+        failing: [job('lint')],
+        pending: [],
+        cancelled: [job('test')],
+      },
+    },
+    {
+      name: 'PR #333: desktop cancelled after 25 minutes, the rest passed',
+      out: out(
+        0,
+        '[{"bucket":"cancel","description":"","link":"https://github.com/travistruett/10db/actions/runs/41480000000/job/125201910780","name":"desktop","state":"CANCELLED","workflow":"ci"},{"bucket":"pass","description":"","link":"https://github.com/travistruett/10db/actions/runs/41480000000/job/125201910781","name":"gate","state":"SUCCESS","workflow":"ci"}]\n',
+      ),
+      expected: {
+        state: 'cancelled',
+        failing: [],
+        pending: [],
+        cancelled: [
+          {
+            name: 'desktop',
+            link: 'https://github.com/travistruett/10db/actions/runs/41480000000/job/125201910780',
+            runId: '41480000000',
+            jobId: '125201910780',
+            description: null,
+          },
+        ],
+      },
     },
     {
       name: 'a failing check with no Actions job (a commit status)',
@@ -347,7 +387,7 @@ describe('parseRequiredChecks', () => {
       expected: { state: 'none', failing: [], pending: [] },
     },
   ])('reads $name', ({ out: output, expected }) => {
-    expect(parseRequiredChecks(['pr', 'checks'], output)).toEqual(expected);
+    expect(parseRequiredChecks(['pr', 'checks'], output)).toEqual({ cancelled: [], ...expected });
   });
 
   // The exit code alone does not tell "none" from a failed call: exit 1 is both. Stderr decides.
@@ -498,6 +538,7 @@ describe('Gh.prRequiredChecks, Gh.jobLog and Gh.rerunFailed', () => {
       state: 'passing',
       failing: [],
       pending: [],
+      cancelled: [],
     });
     expect(seen).toEqual([
       [
@@ -519,7 +560,7 @@ describe('Gh.prRequiredChecks, Gh.jobLog and Gh.rerunFailed', () => {
         { repo: REPO, url: PR },
         CALL,
       ),
-    ).resolves.toEqual({ state: 'none', failing: [], pending: [] });
+    ).resolves.toEqual({ state: 'none', failing: [], pending: [], cancelled: [] });
     await expect(
       gh(out(1, '', 'dial tcp 1.2.3.4:443: connection refused')).gh.prRequiredChecks(
         { repo: REPO, url: PR },

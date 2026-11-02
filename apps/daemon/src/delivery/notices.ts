@@ -36,6 +36,8 @@ export const NOTICE_KEY = {
   scriptsSkipped: 'install-scripts-skipped',
   /** The pull request's head has no run of the checks GitHub requires, and 10db could not start them. */
   checksNeverStarted: 'checks-never-started',
+  /** A required check GitHub cancelled stayed cancelled after 10db ran it again, or 10db could not run it again. */
+  checksCancelled: 'checks-cancelled',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
 } as const;
@@ -272,6 +274,54 @@ export const ciNotices = {
       tone: 'warning',
       line: `Checks never started on ${named}`,
       body: `GitHub waits for the required checks of ${batch.baseBranch}, but the head of ${named}${prUrl === null ? '' : ` (${prUrl})`} has no run of them, minutes after it was pushed. GitHub skips a pull request's workflows when it cannot build the merge commit at push time, so the pull request waits for checks that will never come.\n\n${batch.autoMerge ? '10db tried to start them again by merging the base into the pull request, and they still did not start. ' : 'This pull request is held for you, so 10db pushes nothing to it. '}Push a commit to the branch, or merge ${batch.baseBranch} into it on GitHub (Update branch), to start the checks. This notice goes once any check appears on the head.`,
+    };
+  },
+};
+
+/** Why 10db stopped trying to get a cancelled required check to run. */
+export type CancelledWhy =
+  | { readonly kind: 'again' }
+  | { readonly kind: 'no_run' }
+  | { readonly kind: 'refused'; readonly detail: string };
+
+/** What delivery shows on a shipped batch's tasks when a required check stays cancelled. */
+export const cancelledNotices = {
+  /** `checks` are the cancelled required checks; each is named with its link. */
+  stuck: (
+    batch: BatchDto,
+    checks: readonly { readonly name: string; readonly link: string | null }[],
+    why: CancelledWhy,
+  ): Notice => {
+    const prUrl = batch.prUrl;
+    const number = prUrl === null ? null : /\/pull\/(\d+)$/.exec(prUrl)?.[1];
+    const named =
+      number === undefined || number === null ? 'the pull request' : `pull request #${number}`;
+    const names = checks.map((c) => `"${c.name}"`).join(', ');
+    const one = checks.length === 1;
+    const list = checks.map((c) => `- ${c.name}${c.link === null ? '' : `: ${c.link}`}`).join('\n');
+    const what = one ? `Required check ${names}` : `Required checks ${names}`;
+    const it = one ? 'it' : 'them';
+    let line: string;
+    let tail: string;
+    switch (why.kind) {
+      case 'again':
+        line = `${what} on ${named} was cancelled again`;
+        tail = `10db ran ${it} again once and GitHub cancelled ${it} again, so 10db leaves ${it} alone now.`;
+        break;
+      case 'no_run':
+        line = `${what} on ${named} was cancelled and can't be run again by 10db`;
+        tail = `${one ? 'It is' : 'They are'} not a GitHub Actions job, so 10db has nothing to run again.`;
+        break;
+      case 'refused':
+        line = `${what} on ${named} was cancelled and 10db could not run ${it} again`;
+        tail = `GitHub refused to run ${it} again: ${why.detail.slice(0, 300)}`;
+        break;
+    }
+    return {
+      key: NOTICE_KEY.checksCancelled,
+      tone: 'warning',
+      line,
+      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that ${batch.baseBranch} requires, so ${named}${prUrl === null ? '' : ` (${prUrl})`} cannot merge.\n\n${list}\n\n${tail} Run ${one ? 'it' : 'them'} again from the link${one ? '' : 's'} above (Re-run jobs), or push a commit to the branch. This notice goes once the check runs again or passes.`,
     };
   },
 };
