@@ -2,7 +2,9 @@ import { unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BranchName, ConflictError, InvalidError, mintId, type TaskDto } from '@10db/contracts';
 import {
+  clearWorktreePath,
   getBatch,
+  insertBatch,
   insertWorkstream,
   listBatches,
   listInbox,
@@ -401,6 +403,69 @@ describe('joining a batch', () => {
       beta.id,
     );
   });
+
+  it("refuses a batchId of another project's batch, naming it as not this project's", () => {
+    const elsewhere = seedProject(h.store, {
+      repoPath: `${h.repo}-other`,
+      delivery: 'pull_request',
+      prTitlePrefix: 'fix',
+    });
+    const foreign = h.state.write((w) =>
+      insertBatch(w, { projectId: elsewhere.id, title: 'Theirs', baseBranch: 'main' }),
+    );
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Fix', taskIds: [beta.id], batchId: foreign.id }),
+    ).toThrow(`Batch "Theirs" is not a batch of ${h.project.name}`);
+  });
+
+  it.each(['shared', 'worktree'] as const)(
+    'refuses a batchId of a shipped %s batch, saying it has finished',
+    async (mode) => {
+      const alpha = h.addTask('Alpha', { areas: ['api'], workspaceMode: mode });
+      const first = await started('Greetings', alpha);
+      h.settle(h.only(listWorkstreams(h.store.db, { batchId: first.id })).id, 'DONE');
+      const url = h.gh.openPr(first.branch ?? '');
+      h.state.write((c) => {
+        transitionBatch(c, first.id, { to: 'SHIPPING' });
+        transitionBatch(c, first.id, { to: 'SHIPPED', patch: { prUrl: url } });
+        // A finished copy's worktree is removed and its path forgotten.
+        if (mode === 'worktree') clearWorktreePath(c, first.id);
+      });
+      const beta = h.addTask('Beta', { areas: ['ui'], workspaceMode: mode });
+      expect(() =>
+        h.starter.startBatch(h.project.id, {
+          title: 'Fix',
+          taskIds: [beta.id],
+          batchId: first.id,
+        }),
+      ).toThrow(`Batch "${first.title}" has finished`);
+    },
+  );
+
+  it.each(['SHIPPED', 'CLOSED'] as const)(
+    'refuses a batchId of a %s copy whose worktree was kept, saying it has finished',
+    async (end) => {
+      const alpha = h.addTask('Alpha', { areas: ['api'], workspaceMode: 'worktree' });
+      const first = await started('Greetings', alpha);
+      h.settle(h.only(listWorkstreams(h.store.db, { batchId: first.id })).id, 'DONE');
+      const url = h.gh.openPr(first.branch ?? '');
+      // Retiring keeps a worktree that holds unseeded ignored files, so its path stays set.
+      h.state.write((c) => {
+        transitionBatch(c, first.id, { to: 'SHIPPING' });
+        transitionBatch(c, first.id, { to: end, patch: { prUrl: url } });
+      });
+      expect(getBatch(h.store.db, first.id).worktreePath).not.toBeNull();
+      const beta = h.addTask('Beta', { areas: ['ui'], workspaceMode: 'worktree' });
+      expect(() =>
+        h.starter.startBatch(h.project.id, {
+          title: 'Fix',
+          taskIds: [beta.id],
+          batchId: first.id,
+        }),
+      ).toThrow(`Batch "${first.title}" has finished`);
+    },
+  );
 
   it.each(['CUTTING', 'SHIPPING'] as const)(
     'refuses a start while the batch is %s',

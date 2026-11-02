@@ -19,7 +19,9 @@ import { jobKey, JobQueue } from './index';
 let h: DeliveryHarness;
 beforeEach(() => {
   // A project whose default is Your folder: each task's own placement decides where it runs.
-  h = createDeliveryHarness({}, { trigger: false });
+  // The cuts run real git against a local origin; on a loaded CI runner the default 10 s fetch limit
+  // can refuse a cut, which deletes its batch, so the limit is generous here.
+  h = createDeliveryHarness({}, { trigger: false, networkTimeoutMs: 60_000 });
 });
 afterEach(() => {
   h.close();
@@ -90,6 +92,18 @@ describe('starting a mix of placements', () => {
     expect(kinds.filter((copied) => !copied)).toHaveLength(1);
     expect(kinds.filter(Boolean)).toHaveLength(2);
     await h.jobs.idle();
+    // A refused cut deletes its batch and raises a card; say which, so a failure names its cause.
+    const missing = answered.filter(
+      (batch) => !listBatches(h.store.db).some((row) => row.id === batch.id),
+    );
+    if (missing.length > 0)
+      throw new Error(
+        `batches ${missing.map((batch) => batch.id).join(', ')} were removed; cards: ${JSON.stringify(
+          h.cards().map((card) => ({ title: card.title, body: card.body })),
+        )}; batches left: ${JSON.stringify(
+          listBatches(h.store.db).map((row) => ({ id: row.id, state: row.state })),
+        )}`,
+      );
     const now = answered.map((batch) => getBatch(h.store.db, batch.id));
     expect(now.map((batch) => batch.state)).toEqual(['OPEN', 'OPEN', 'OPEN']);
     const tasksOf = (batch: BatchDto) =>
