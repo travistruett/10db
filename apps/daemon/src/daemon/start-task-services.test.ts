@@ -1,5 +1,14 @@
 import { WorkspaceMode } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchTask } from '@10db/db';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+  cancelRefusedStartTask,
+  getBatch,
+  getTask,
+  getWorkstream,
+  listWorkstreams,
+  patchTask,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createServices } from './services';
@@ -55,5 +64,61 @@ describe('a fresh start of one task of a shared batch through the task service',
     expect(started.batch.id).not.toBe(batch.id);
     // The old batch no longer waits on the superseded attempt: the cut that ended moved it out of OPEN.
     expect(getBatch(h.store.db, batch.id).state).not.toBe('OPEN');
+  });
+
+  /**
+   * Alpha and Beta share a batch; Beta is done and Alpha failed having committed nothing. Alpha then
+   * moves to a separate copy and starts over there, and the copy's cut is refused (its install fails),
+   * which leaves Alpha's latest run cancelled and detached from any batch.
+   */
+  async function startOverRefused() {
+    h.commit('.gitignore', 'node_modules/\n');
+    h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    h.git$('push', '-q', 'origin', 'main');
+    mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(h.repo, 'node_modules', 'pkg', 'index.js'), 'module.exports = 1;\n');
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
+    if (!a || !b) throw new Error('two workstreams expected');
+    h.settle(b.id, 'DONE');
+    h.settle(a.id, 'FAILED');
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    h.pnpm.failWith(1, 'install failed');
+
+    startService().startTask(alpha.id, { fresh: true });
+    await h.jobs.idle();
+
+    const latestId = getTask(h.store.db, alpha.id).workstreamId;
+    if (latestId === null) throw new Error('the start made a workstream');
+    expect(getWorkstream(h.store.db, latestId)).toMatchObject({
+      state: 'CANCELLED',
+      batchId: null,
+    });
+    return { alpha, batchId: batch.id };
+  }
+
+  it('tells the builder why the batch waits when the copy’s cut was refused, and what to do', async () => {
+    const { batchId } = await startOverRefused();
+
+    const batch = getBatch(h.store.db, batchId);
+    expect(batch.state).toBe('OPEN');
+    const notice = h.only(batch.notices);
+    expect(notice).toMatchObject({ key: 'superseded-attempt', tone: 'warning' });
+    expect(notice.line).toContain('Alpha');
+    expect(notice.body).toContain('start');
+    expect(notice.body).toContain('Ship anyway');
+  });
+
+  it('lets the batch ship its other work once the builder closes the task', async () => {
+    const { alpha, batchId } = await startOverRefused();
+
+    h.state.write((w) => cancelRefusedStartTask(w, alpha.id));
+
+    expect(getBatch(h.store.db, batchId).state).not.toBe('OPEN');
   });
 });

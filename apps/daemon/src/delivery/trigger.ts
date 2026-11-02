@@ -1,4 +1,4 @@
-import { BatchState, EventType, WorkstreamId, WorkstreamState } from '@10db/contracts';
+import { BatchState, EventType, TaskStatus, WorkstreamId, WorkstreamState } from '@10db/contracts';
 import { getWorkstreamRow, type DbReader } from '@10db/db';
 import type { EventBus } from '../events';
 import type { Shipper } from './ship';
@@ -13,6 +13,12 @@ export function subscribeShipTrigger(bus: EventBus, db: DbReader, shipper: Shipp
     // A cut that ended, cut or refused: a batch a task started over from has held its superseded
     // attempt until now (`members`), and nothing else tells that batch the wait is over.
     if (event.type === EventType.BatchUpdated && event.data['from'] === BatchState.Cutting) {
+      shipper.checkSupersededBatches();
+      return;
+    }
+    // A task closed: a batch held a superseded attempt of it for a start the builder can now no
+    // longer make (`replacementUnsettled`), so that batch is looked at again.
+    if (event.type === EventType.TaskChanged && event.data['status'] === TaskStatus.Cancelled) {
       shipper.checkSupersededBatches();
       return;
     }
