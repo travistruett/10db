@@ -8,6 +8,7 @@ import {
   NotFoundError,
   PullRequestState,
   UNFINISHED_BATCH_STATES,
+  WorkspaceMode,
   WorkstreamState,
   type BatchDto,
   type BatchFailure,
@@ -25,11 +26,13 @@ import {
   asc,
   desc,
   eq,
+  exists,
   inArray,
   isNotNull,
   isNull,
   notInArray,
   or,
+  sql,
   type SQL,
 } from 'drizzle-orm';
 import type { Json } from '../json';
@@ -127,6 +130,46 @@ export function findUnfinishedBatch(db: DbReader, projectId: ProjectId): BatchDt
     )
     .get();
   return row ? toBatchDto(row) : undefined;
+}
+
+/**
+ * Whether a lane has ever run in the project's own checkout: a workstream made to work there that
+ * left QUEUED (never ran) and HELD, or any session, which a cancelled workstream keeps. Where it
+ * worked is the workstream's own placement, so moving its task to a copy afterwards changes nothing;
+ * a row older than that column falls back to its task's. A shared lane's writes to the checkout's
+ * ignored directories outlive its batch, so this stays true for good; a workstream a refused cut
+ * cancelled before it ran does not count. A copy's seed asks it (task placement spec §7).
+ */
+export function sharedLaneRan(db: DbReader, projectId: ProjectId): boolean {
+  const ran = db
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+    .where(
+      and(
+        eq(schema.workstreams.projectId, projectId),
+        eq(
+          sql`coalesce(${schema.workstreams.workspaceMode}, ${schema.tasks.workspaceMode})`,
+          WorkspaceMode.Shared,
+        ),
+        or(
+          notInArray(schema.workstreams.state, [
+            WorkstreamState.Queued,
+            WorkstreamState.Held,
+            WorkstreamState.Cancelled,
+          ]),
+          exists(
+            db
+              .select({ one: schema.sessions.id })
+              .from(schema.sessions)
+              .where(eq(schema.sessions.workstreamId, schema.workstreams.id)),
+          ),
+        ),
+      ),
+    )
+    .limit(1)
+    .get();
+  return ran !== undefined;
 }
 
 /** Every unfinished batch of the project in any mode, newest first. */

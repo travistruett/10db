@@ -177,6 +177,7 @@ export function insertWorkstream(
     taskId,
     projectId: project.id,
     batchId: opts.batchId ?? null,
+    workspaceMode: task.workspaceMode,
     state: WorkstreamState.Queued,
     nextAction: { kind: 'start' },
     attempt: 0,
