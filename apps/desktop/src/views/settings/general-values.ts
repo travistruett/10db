@@ -29,6 +29,22 @@ export function checkSeedNames(names: readonly string[]): {
   };
 }
 
+/**
+ * The isolate names trimmed and without blanks, or the contract's message for the first rule they
+ * break (a name that is not an area or hazard name, or more names than a project may list).
+ */
+export function checkIsolateNames(names: readonly string[]): {
+  readonly names: string[];
+  readonly error: string | null;
+} {
+  const trimmed = names.map((name) => name.trim()).filter((name) => name !== '');
+  const checked = ProjectPatch.safeParse({ isolate: trimmed });
+  return {
+    names: trimmed,
+    error: checked.success ? null : (checked.error.issues[0]?.message ?? 'Check the area names'),
+  };
+}
+
 /** The General form's fields; an emptied number field is ''. */
 export interface GeneralValues {
   readonly name: string;
@@ -58,6 +74,8 @@ export interface GeneralValues {
   readonly workspaceMode: WorkspaceMode;
   /** Directory names; blanks are dropped on save. */
   readonly worktreeSeed: readonly string[];
+  /** Area and hazard names whose new tasks are proposed a separate copy; blanks are dropped on save. */
+  readonly isolate: readonly string[];
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -86,6 +104,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     sandboxLoopback: project.sandboxLoopback,
     workspaceMode: project.workspaceMode,
     worktreeSeed: project.worktreeSeed,
+    isolate: project.isolate,
   };
 }
 
@@ -144,6 +163,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const checkedSeed = checkSeedNames(values.worktreeSeed);
   if (checkedSeed.error !== null) errors.worktreeSeed = checkedSeed.error;
   const seed = checkedSeed.names;
+  const checkedIsolate = checkIsolateNames(values.isolate);
+  if (checkedIsolate.error !== null) errors.isolate = checkedIsolate.error;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -181,6 +202,7 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
     patch.sandboxLoopback = values.sandboxLoopback;
   if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
   if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
+  if (!sameCommands(checkedIsolate.names, project.isolate)) patch.isolate = checkedIsolate.names;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 

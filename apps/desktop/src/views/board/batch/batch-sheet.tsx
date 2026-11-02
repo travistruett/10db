@@ -1,6 +1,8 @@
 import {
   batchBranchStem,
+  Delivery,
   PICK_MAX,
+  WorkspaceMode,
   type GoalId,
   type PickerProposalDto,
   type ProjectViewDto,
@@ -43,7 +45,7 @@ function ModeNote({ mode }: { readonly mode: SheetMode }) {
     case 'worktrees':
       return (
         <Text size="sm" c="dimmed">
-          Each task gets its own worktree, branch and pull request.
+          Each task gets its own copy, branch and pull request.
         </Text>
       );
     case 'join':
@@ -58,29 +60,52 @@ function ModeNote({ mode }: { readonly mode: SheetMode }) {
   }
 }
 
+/** Tasks that go in a separate copy, said under the shared batch's own note when the two mix. */
+function CopiesNote({ titles }: { readonly titles: readonly string[] }) {
+  const [only] = titles;
+  if (only === undefined) return null;
+  return (
+    <Text size="sm" c="dimmed">
+      {titles.length === 1
+        ? `${only} gets its own copy, branch and pull request.`
+        : `${String(titles.length)} tasks each get their own copy, branch and pull request.`}
+    </Text>
+  );
+}
+
 interface ChoicesProps {
   readonly project: ProjectViewDto;
-  readonly mode: SheetMode;
   readonly proposal: PickerProposalDto;
   readonly onStarted: () => void;
 }
 
-function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
+function Choices({ project, proposal, onStarted }: ChoicesProps) {
   const [selection, setSelection] = useState(() => initialSelection(proposal));
   const ordered = orderedSelection(proposal, selection);
+  const candidateOf = new Map(proposal.candidates.map((c) => [c.task.id, c.task]));
   const titleOf = new Map(proposal.candidates.map((c) => [c.task.id, c.task.title]));
+  const placements = ordered.map(
+    (id) => candidateOf.get(id)?.workspaceMode ?? WorkspaceMode.Shared,
+  );
+  const mode = sheetMode(project, placements);
+  const copyTitles = ordered.flatMap((id, i) =>
+    placements[i] === WorkspaceMode.Worktree ? [titleOf.get(id) ?? id] : [],
+  );
   const [title, setTitle] = useState<string | null>(null);
-  // Until the builder types one, the batch is named after the first ticked task.
-  const first = ordered[0];
+  // Until the builder types one, the batch is named after the first ticked task that goes in Your folder.
+  const first = ordered.find((_, i) => placements[i] !== WorkspaceMode.Worktree) ?? ordered[0];
   const batchTitle = title ?? (first === undefined ? '' : (titleOf.get(first) ?? ''));
   const start = useStartWork(project.id);
   const blockers = startBlockers(proposal, selection, mode, batchTitle);
+  const placementEditable = project.delivery === Delivery.PullRequest;
   if (proposal.candidates.length === 0)
     return (
       <Text c="dimmed">No ready tasks. A task is ready when everything it depends on is done.</Text>
     );
   return (
     <Stack>
+      <ModeNote mode={mode} />
+      {mode.kind === 'worktrees' ? null : <CopiesNote titles={copyTitles} />}
       {mode.kind === 'new_batch' ? (
         <>
           <TextInput
@@ -105,6 +130,7 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
         <BatchCandidate
           key={c.task.id}
           candidate={c}
+          placementEditable={placementEditable}
           ticked={selection.has(c.task.id)}
           onToggle={() => {
             setSelection((s) => toggle(s, c.task.id));
@@ -155,7 +181,7 @@ function Choices({ project, mode, proposal, onStarted }: ChoicesProps) {
             );
           }}
         >
-          {submitLabel(mode, ordered.length)}
+          {submitLabel(mode, ordered.length, copyTitles.length)}
         </Button>
       </Group>
     </Stack>
@@ -174,7 +200,6 @@ export interface BatchSheetProps {
 export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) {
   const [size, setSize] = useState(project.maxLanes);
   const proposal = useCandidates(project.id, size, opened, goal?.id ?? null);
-  const mode = sheetMode(project);
   return (
     <Drawer
       opened={opened}
@@ -200,7 +225,6 @@ export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) 
           yet.
         </Text>
         {goal ? <Text size="sm">{`Only tasks of the goal ${goal.title}.`}</Text> : null}
-        <ModeNote mode={mode} />
         {proposal.isError ? (
           <Alert color="red" title="Couldn't load the proposal">
             {proposal.error.message}
@@ -211,13 +235,7 @@ export function BatchSheet({ project, opened, onClose, goal }: BatchSheetProps) 
         ) : null}
         {/* A new size is a new proposal, so the ticks and the title start over. */}
         {proposal.data ? (
-          <Choices
-            key={size}
-            project={project}
-            mode={mode}
-            proposal={proposal.data}
-            onStarted={onClose}
-          />
+          <Choices key={size} project={project} proposal={proposal.data} onStarted={onClose} />
         ) : null}
       </Stack>
     </Drawer>

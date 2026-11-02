@@ -57,8 +57,8 @@ function batchTitleOf(
 /**
  * Starts the ticked tasks in the sheet's order, which the daemon keeps as launch order. In a
  * pull-request project that is one batch request: it starts a new batch, joins the open one or
- * reopens the failed one, and ignores the title unless the batch is new; a worktree-mode project
- * gets a batch per task from the same request. A local project has no batch, so each task starts on
+ * reopens the failed one, and ignores the title unless the batch is new; the tasks placed in a
+ * separate copy get a batch each from the same request. A local project has no batch, so each task starts on
  * its own.
  */
 export function useStartWork(projectId: ProjectId) {

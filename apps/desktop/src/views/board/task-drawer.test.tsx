@@ -1,4 +1,11 @@
-import { mintId, RiskTag, type BatchDto, type TaskPatch } from '@10db/contracts';
+import {
+  mintId,
+  RiskTag,
+  type BatchDto,
+  type TaskDto,
+  type TaskPatch,
+  type WorkstreamDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -29,6 +36,8 @@ interface Opts {
   readonly place?: number;
   /** The project's area names, which let an unstarted task's areas change. */
   readonly areaNames?: readonly string[];
+  /** The project delivers by pull request, so a separate copy can be chosen. */
+  readonly placementEditable?: boolean;
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -46,6 +55,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.place ? { place: opts.place } : {})}
       {...(opts.areaNames ? { areaNames: opts.areaNames } : {})}
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
+      {...(opts.placementEditable ? { placementEditable: true } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -65,6 +75,105 @@ async function edit(label: string, value: string): Promise<void> {
 function discardPrompt(): HTMLElement | null {
   return screen.queryByText('Discard your changes to this task?');
 }
+
+describe('TaskDrawer placement', () => {
+  it('shows the badge with the reason as its tooltip, and a control, while the placement is open', async () => {
+    serve();
+    open({
+      task: { workspaceMode: 'worktree', placementReason: 'touches migrations' },
+      placementEditable: true,
+    });
+    const d = await dialog();
+    const badge = within(d).getByTestId('placement-badge');
+    expect(badge.textContent).toBe('Separate copy');
+    fireEvent.mouseEnter(badge);
+    expect(await screen.findByText('touches migrations')).toBeTruthy();
+    const group = within(d).getByRole('radiogroup', { name: 'Where Write the greeting runs' });
+    expect(within(group).getByRole('radio', { name: 'Separate copy' })).toHaveProperty(
+      'checked',
+      true,
+    );
+  });
+
+  it.each<{
+    name: string;
+    editable: boolean;
+    state?: WorkstreamDto['state'];
+    status?: TaskDto['status'];
+  }>([
+    { name: 'a local project', editable: false },
+    { name: 'a task with a running workstream', editable: true, state: 'RUNNING' },
+    { name: 'a queued workstream', editable: true, state: 'QUEUED' },
+    { name: 'a done task', editable: true, status: 'done', state: 'DONE' },
+  ])('shows no control for $name', async ({ editable, state, status }) => {
+    serve();
+    open({
+      placementEditable: editable,
+      ...(status ? { task: { status } } : {}),
+      ...(state ? { workstream: workstreamDto({ state }) } : {}),
+    });
+    const d = await dialog();
+    expect(within(d).queryByRole('radiogroup')).toBeNull();
+  });
+
+  it('shows the badge in a local project but no control', async () => {
+    serve();
+    open({ placementEditable: false });
+    const d = await dialog();
+    expect(within(d).getByTestId('placement-badge').textContent).toBe('Your folder');
+    expect(within(d).queryByRole('radiogroup')).toBeNull();
+  });
+
+  it('shows neither once the task has run past its placement', async () => {
+    serve();
+    open({
+      placementEditable: true,
+      workstream: workstreamDto({ state: 'RUNNING' }),
+    });
+    const d = await dialog();
+    expect(within(d).queryByTestId('placement-badge')).toBeNull();
+  });
+
+  it('keeps both for a failed run, which can start again anywhere', async () => {
+    serve();
+    open({ placementEditable: true, workstream: workstreamDto({ state: 'FAILED' }) });
+    const d = await dialog();
+    expect(within(d).getByTestId('placement-badge')).toBeTruthy();
+    expect(within(d).getByRole('radiogroup')).toBeTruthy();
+  });
+
+  it('patches only the placement when it is chosen, without closing or saving the rest', async () => {
+    const patched: unknown[] = [];
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push(await request.json());
+        return HttpResponse.json(taskDto({ workspaceMode: 'worktree' }));
+      }),
+    );
+    const { closed } = open({ placementEditable: true });
+    const d = await dialog();
+    fireEvent.click(within(d).getByRole('radio', { name: 'Separate copy' }));
+    await waitFor(() => {
+      expect(patched).toEqual([{ workspaceMode: 'worktree' }]);
+    });
+    expect(closed()).toBe(0);
+  });
+
+  it("shows the daemon's refusal beside the control", async () => {
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'Its start is still in progress' },
+          { status: 409 },
+        ),
+      ),
+    );
+    open({ placementEditable: true });
+    const d = await dialog();
+    fireEvent.click(within(d).getByRole('radio', { name: 'Separate copy' }));
+    expect(await within(d).findByText('Its start is still in progress')).toBeTruthy();
+  });
+});
 
 describe('TaskDrawer', () => {
   it('shows the title, column, areas and waits-on', async () => {

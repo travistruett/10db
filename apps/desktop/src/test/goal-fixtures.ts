@@ -6,19 +6,17 @@ import {
   mintId,
   type GoalCriterionDto,
   type GoalId,
-  type PersonId,
-  type ProjectId,
-  type TaskId,
 } from '@10db/contracts';
 
-const AT = '2026-10-31T12:00:00.000Z';
+const AT = '2026-10-13T12:00:00.000Z';
 
-function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
+/** Schema-valid goal DTOs for UI tests; each is parsed, so a contract change breaks the fixture first. */
+export function goalDto(overrides: Partial<GoalDto> = {}): GoalDto {
   return GoalDto.parse({
     id: mintId('Goal'),
     projectId: mintId('Project'),
-    title: 'Ship the greeting',
-    objective: 'Every visitor is greeted by name.',
+    title: 'Ship the importer',
+    objective: 'Importing a CSV works end to end.',
     caresMost: null,
     description: '',
     ownerId: mintId('Person'),
@@ -53,12 +51,12 @@ export function goalCriterionDto(
   };
 }
 
-function goalDigestDto(goalId: GoalId, overrides: Partial<GoalDigestDto> = {}): GoalDigestDto {
+function digestFor(goalId: GoalId, overrides: Partial<GoalDigestDto>): GoalDigestDto {
   return GoalDigestDto.parse({
     goalId,
     status: 'not_started',
     since: null,
-    progress: { done: 0, total: 0, cancelled: [] },
+    progress: { done: 0, total: 3, cancelled: [] },
     openPullRequests: 0,
     workingNow: [],
     team: [],
@@ -72,32 +70,15 @@ function goalDigestDto(goalId: GoalId, overrides: Partial<GoalDigestDto> = {}): 
   });
 }
 
-/** A goal with its digest: `taskIds` are the goal's, `done` how many of them are finished. */
 export function goalSummaryDto(
-  input: {
-    readonly goal?: Partial<GoalDto>;
-    readonly digest?: Partial<GoalDigestDto>;
-    readonly projectId?: ProjectId;
-    readonly taskIds?: readonly TaskId[];
-    readonly owner?: PersonId;
-  } = {},
+  goal: Partial<GoalDto> = {},
+  digest: Partial<GoalDigestDto> = {},
+  newItems = 0,
 ): GoalSummaryDto {
-  const goal = goalDto({
-    ...(input.projectId ? { projectId: input.projectId } : {}),
-    ...(input.taskIds ? { taskIds: [...input.taskIds] } : {}),
-    ...(input.owner ? { ownerId: input.owner } : {}),
-    ...input.goal,
-  });
-  return GoalSummaryDto.parse({
-    goal,
-    digest: goalDigestDto(goal.id, {
-      progress: { done: 0, total: goal.taskIds.length, cancelled: [] },
-      ...input.digest,
-    }),
-    newItems: 0,
-  });
+  const dto = goalDto(goal);
+  return GoalSummaryDto.parse({ goal: dto, digest: digestFor(dto.id, digest), newItems });
 }
 
-export function goalListDto(goals: readonly GoalSummaryDto[] = []): GoalListDto {
+export function goalListDto(...goals: GoalSummaryDto[]): GoalListDto {
   return GoalListDto.parse({ goals, ungrouped: null });
 }

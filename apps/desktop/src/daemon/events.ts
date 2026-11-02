@@ -5,7 +5,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys } from './account-queries';
-import { GOALS_KEY } from './goal-queries';
+import { goalKeys } from './goal-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 
@@ -14,29 +14,30 @@ export const STREAM_RETRY_MAX_MS = 10_000;
 /** How long the head fetch may take before the stream retries. */
 const HEAD_TIMEOUT_MS = 2_000;
 
-const WORK: readonly QueryKey[] = [['workstreams'], ['tasks']];
+/** A goal's status and progress are derived from its tasks' runs and cards, so they follow these. */
+const WORK: readonly QueryKey[] = [['workstreams'], ['tasks'], goalKeys.all];
 /** The batch sheet's proposal: its candidates, claims and step plans follow all of these. */
 const CANDIDATES: QueryKey = ['candidates'];
 
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects, CANDIDATES],
+  task: [['tasks'], goalKeys.all, CANDIDATES],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
-  goal: [GOALS_KEY],
-  task: [['tasks'], CANDIDATES, GOALS_KEY],
+  goal: [goalKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
-  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, GOALS_KEY],
+  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, GOALS_KEY],
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
   session: WORK,
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all],
-  inbox: [queryKeys.inbox, ['workstreams'], GOALS_KEY],
+  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
   persona: [CANDIDATES],

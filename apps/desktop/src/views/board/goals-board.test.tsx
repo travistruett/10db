@@ -27,24 +27,23 @@ const swept = taskDto({
 });
 const loose = taskDto({ ...inProject, title: 'Fix a typo', boardOrder: 4 });
 
-const greetings = goalSummaryDto({
-  projectId: project.id,
-  goal: { title: 'Greet the visitor', objective: 'Every visitor is greeted by name.' },
-  taskIds: [hello.id, named.id, shipped.id],
-  digest: { status: 'running', progress: { done: 1, total: 3, cancelled: [] } },
-});
-const farewells = goalSummaryDto({
-  projectId: project.id,
-  goal: { title: 'Say farewell' },
-  taskIds: [bye.id],
-  digest: { status: 'not_started' },
-});
-const cleanup = goalSummaryDto({
-  projectId: project.id,
-  goal: { title: 'Tidy up' },
-  taskIds: [swept.id],
-  digest: { status: 'done', progress: { done: 1, total: 1, cancelled: [] } },
-});
+const greetings = goalSummaryDto(
+  {
+    ...inProject,
+    title: 'Greet the visitor',
+    objective: 'Every visitor is greeted by name.',
+    taskIds: [hello.id, named.id, shipped.id],
+  },
+  { status: 'running', progress: { done: 1, total: 3, cancelled: [] } },
+);
+const farewells = goalSummaryDto(
+  { ...inProject, title: 'Say farewell', taskIds: [bye.id] },
+  { status: 'not_started', progress: { done: 0, total: 1, cancelled: [] } },
+);
+const cleanup = goalSummaryDto(
+  { ...inProject, title: 'Tidy up', taskIds: [swept.id] },
+  { status: 'done', progress: { done: 1, total: 1, cancelled: [] } },
+);
 
 const withGoal = (task: TaskDto, goalId: GoalId): TaskDto => ({ ...task, goalId });
 const tasks = [
@@ -63,7 +62,7 @@ function serve(...overrides: RequestHandler[]): void {
     http.get(daemonUrl('/projects/:projectId/board-columns'), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(tasks)),
     http.get(daemonUrl('/projects/:projectId/goals'), () =>
-      HttpResponse.json(goalListDto([greetings, farewells, cleanup])),
+      HttpResponse.json(goalListDto(greetings, farewells, cleanup)),
     ),
     http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     ...baseHandlers(),
@@ -151,7 +150,7 @@ describe('the Board with goals', () => {
     it('opens on a click with the objective, criteria, tasks and what blocks it', async () => {
       serve(
         http.get(daemonUrl('/projects/:projectId/goals'), () =>
-          HttpResponse.json(goalListDto([detailed, farewells])),
+          HttpResponse.json(goalListDto(detailed, farewells)),
         ),
       );
       const above = await openBoard();
