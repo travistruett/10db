@@ -1,10 +1,8 @@
 export { CheckoutPin, memoryPinStore, worktreePinKey, type PinStore } from './checkout-pin';
 export {
   bookkeepingAt,
-  CLAUDE_CODE_BOOKKEEPING,
   ignoredBookkeepingWrite,
   isInsideClaudeCodeBookkeeping,
-  leftOutOfCommits,
 } from './claude-code-bookkeeping';
 export { equalOrUnder, samePath, surelyInside } from './lane-writable';
 export { comparablePath, existsAsEntry } from './path-entries';
