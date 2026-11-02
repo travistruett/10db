@@ -116,6 +116,52 @@ describe('batch selection', () => {
     expect(startBlockers(proposal, selection, mode, title)).toEqual(blockers);
   });
 
+  describe('a ticked task that depends on a ticked task in the other placement', () => {
+    const base = taskDto({ projectId: project.id, title: 'Base' });
+    const top = (workspaceMode: 'shared' | 'worktree', baseMode: 'shared' | 'worktree') => {
+      const dep = { ...base, workspaceMode: baseMode };
+      const dependent = {
+        ...taskDto({ projectId: project.id, title: 'Top' }),
+        workspaceMode,
+        dependsOn: [dep.id],
+      };
+      return {
+        dep,
+        dependent,
+        proposal: PickerProposalDto.parse({
+          projectId: project.id,
+          size: 2,
+          candidates: [candidate(dep), candidate(dependent)],
+        }),
+      };
+    };
+
+    it.each([
+      ['a separate copy', 'Your folder', 'worktree', 'shared'],
+      ['Your folder', 'a separate copy', 'shared', 'worktree'],
+    ] as const)('says %s needs a task in %s', (where, depWhere, mode, baseMode) => {
+      const { dep, dependent, proposal: p } = top(mode, baseMode);
+      expect(startBlockers(p, new Set([dep.id, dependent.id]), NEW, 'Base')).toEqual([
+        `Top runs in ${where} but needs Base, which runs in ${depWhere}. Tasks that depend on each other must run in the same place: change where one of them runs.`,
+      ]);
+    });
+
+    it('is not a blocker when both run in the same place', () => {
+      const { dep, dependent, proposal: p } = top('worktree', 'worktree');
+      expect(startBlockers(p, new Set([dep.id, dependent.id]), NEW, 'Base')).toEqual([]);
+    });
+
+    it('is not a blocker while the dependency is not ticked', () => {
+      const { dependent, proposal: p } = top('worktree', 'shared');
+      expect(startBlockers(p, new Set([dependent.id]), NEW, 'Top')).toEqual([]);
+    });
+
+    it('is not a blocker in a local project, which has no placement', () => {
+      const { dep, dependent, proposal: p } = top('worktree', 'shared');
+      expect(startBlockers(p, new Set([dep.id, dependent.id]), LOCAL, '')).toEqual([]);
+    });
+  });
+
   it('names a task whose plan failed', () => {
     const failed = PickerProposalDto.parse({
       projectId: project.id,
