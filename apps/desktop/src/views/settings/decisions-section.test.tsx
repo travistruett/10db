@@ -171,6 +171,7 @@ describe('Settings › Decisions', () => {
     ['no answer, decisions off', 'fallback_off', null, 'Decisions were off; the review ran'],
     ['no answer, no key', 'fallback_no_key', null, 'No key; the review ran'],
     ['no answer, error', 'fallback_error', null, 'The call failed; the review ran'],
+    ['cut short by a cancel or a shutdown', 'stopped', null, 'Stopped before it answered'],
   ] as const)(
     'says what 10db did from the answer and the outcome together: %s',
     async (_name, outcome, answer, text) => {

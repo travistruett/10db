@@ -14,6 +14,8 @@ export const JudgeOutcome = {
   FallbackNoKey: 'fallback_no_key',
   FallbackTimeout: 'fallback_timeout',
   FallbackError: 'fallback_error',
+  /** A cancel or a shutdown cut the call short: there is no answer, and the call did not fail. */
+  Stopped: 'stopped',
 } as const;
 export type JudgeOutcome = (typeof JudgeOutcome)[keyof typeof JudgeOutcome];
 
