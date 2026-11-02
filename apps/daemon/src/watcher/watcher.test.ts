@@ -2008,6 +2008,50 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it("keeps another checkout's batches moving while one path's stamp is still being read", async () => {
+      const a = inWorktree('Alpha', 'ui');
+      const b = inWorktree('Beta', 'api');
+      watcher.sync();
+      editCard(a, SENSITIVE_FILE, 'allow_once', a.path);
+      // The stamp of A's file never finishes until released: a file too big to hash quickly.
+      let release: (r: { reason: 'too-large' }) => void = () => undefined;
+      vi.mocked(stampOrReason).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      writeAt(a.path, SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      writeAt(b.path, 'docs/stray.md');
+      void watcher.flush();
+      await vi.waitFor(() => {
+        expect(flags().map((f) => f.body)).toEqual([`${b.path}: docs/stray.md`]);
+      });
+      release({ reason: 'too-large' });
+      await flushing;
+      // The path that could not be stamped fails closed: carded, and the card is left unused.
+      expect(
+        flags()
+          .map((f) => f.body)
+          .sort(),
+      ).toEqual([`${a.path}: ${SENSITIVE_FILE}`, `${b.path}: docs/stray.md`].sort());
+    });
+
+    it('cards a path too large to stamp and leaves the card for the write that can be', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      vi.mocked(stampOrReason).mockResolvedValueOnce({ reason: 'too-large' });
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+      // The card was not used: the file as it settles is the allowed write.
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+    });
+
     it('does not let a card allowed in the main checkout excuse a write in a worktree copy', async () => {
       const lane = inWorktree('Alpha', 'ui');
       watcher.sync();
@@ -2223,7 +2267,7 @@ describe('worktree checkouts', () => {
         const a = running('Alpha', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
-        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+        vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
         put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -2232,7 +2276,7 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
         expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
         // The card is used: a later write is carded, settled or not.
-        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+        vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
         put(SENSITIVE_FILE, 'later');
         await watcher.flush();
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
@@ -2636,10 +2680,10 @@ describe('worktree checkouts', () => {
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           const stamp = vi.mocked(stampOrReason);
           // The file is stable on disk; the mock stands for a read that kept changing.
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
         });
@@ -2650,7 +2694,7 @@ describe('worktree checkouts', () => {
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           const stamp = vi.mocked(stampOrReason);
           stamp.mockClear();
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
           expect(stamp.mock.calls.map((c) => c[1])).toEqual([SENSITIVE_FILE]);
@@ -2660,7 +2704,7 @@ describe('worktree checkouts', () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+          vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
           await write(SENSITIVE_FILE);

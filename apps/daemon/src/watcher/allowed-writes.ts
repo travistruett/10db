@@ -1,13 +1,6 @@
 import { createHash } from 'node:crypto';
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
+import { constants, realpathSync, statSync } from 'node:fs';
+import { open, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -170,36 +163,60 @@ function deletionStamp(root: string, path: string): string | null {
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 export const STAMP_ATTEMPTS = 3;
 
+/** The size of one read, and so of one turn of the event loop while a file is hashed. */
+const STAMP_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * How long one stamp may spend reading a file, all its attempts together. A file the hash can't finish in this
+ * time (a sparse file of petabytes, which costs no disk but reads as zeros at the disk's speed) is given up on
+ * as 'too-large', so no file holds a step end or a checkout's batch for longer than this. At about 2 GB/s it
+ * still hashes tens of gigabytes, far more than any file a builder allows an edit to.
+ */
+export const STAMP_BUDGET_MS = 30_000;
+
 /**
  * One read of a regular file through a single descriptor: the file type and the metadata before and after
  * come from that descriptor (`fstat`), never from path lookups that another process could answer differently.
  * The open is non-blocking, so a FIFO can't block the daemon on the open, and it doesn't follow a link at the
- * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The result is
- * 'not-a-file' for anything but a regular file, 'changing' when the file changed while it was read, and the
- * stamp otherwise. Other errors, ENOENT included, are thrown.
+ * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The read is
+ * asynchronous, a chunk at a time, so the event loop turns between chunks, and it stops at the size the first
+ * `fstat` gave: a file that keeps growing is 'changing', not endless. The result is 'not-a-file' for anything
+ * but a regular file, 'changing' when the file changed while it was read, 'too-large' when `deadline` (a
+ * `performance.now()` time) passed before the hash was done, and the stamp otherwise. Other errors, ENOENT
+ * included, are thrown.
  */
-function readStamp(path: string): { stamp: string } | { skip: 'not-a-file' | 'changing' } {
-  let fd: number;
+async function readStamp(
+  path: string,
+  deadline: number,
+): Promise<{ stamp: string } | { skip: 'not-a-file' | 'changing' | 'too-large' }> {
+  let handle: FileHandle;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+    handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') return { skip: 'not-a-file' };
     throw error;
   }
   try {
-    const before = fstatSync(fd, { bigint: true });
+    const before = await handle.stat({ bigint: true });
     if (!before.isFile()) return { skip: 'not-a-file' };
     const hash = createHash('sha256');
-    const chunk = Buffer.allocUnsafe(1024 * 1024);
-    for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
-      hash.update(chunk.subarray(0, n));
+    const chunk = Buffer.allocUnsafe(STAMP_CHUNK_BYTES);
+    // Never past the size it started at: bytes appended meanwhile show in the size check below.
+    let remaining = before.size;
+    while (remaining > 0n) {
+      if (performance.now() > deadline) return { skip: 'too-large' };
+      const want = remaining < BigInt(chunk.length) ? Number(remaining) : chunk.length;
+      const { bytesRead } = await handle.read(chunk, 0, want, null);
+      if (bytesRead === 0) break;
+      hash.update(chunk.subarray(0, bytesRead));
+      remaining -= BigInt(bytesRead);
     }
     // The file changed while it was read: the content may not be the one the time and size name.
-    const after = fstatSync(fd, { bigint: true });
+    const after = await handle.stat({ bigint: true });
     if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return { skip: 'changing' };
     return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}` };
   } finally {
-    closeSync(fd);
+    await handle.close();
   }
 }
 
@@ -207,12 +224,16 @@ function readStamp(path: string): { stamp: string } | { skip: 'not-a-file' | 'ch
  * What identifies the current write to a file: its modification time to the nanosecond, its size and a
  * hash of its content, so a file changed behind a restored modification time and size is another write.
  * A deletion's stamp for a file that is not there (`deletionStamp`). Null for one that can't be told apart
- * from another write: a directory or other non-file, one that can't be read, or one that kept changing
- * while it was read.
+ * from another write: a directory or other non-file, one that can't be read, one that kept changing
+ * while it was read, or one too large to read within `budgetMs`.
  * It reads the whole file, so it is called only for a path a card or an excused write names.
  */
-export function writeStamp(root: string, rel: string): string | null {
-  const result = stampOrReason(root, rel);
+export async function writeStamp(
+  root: string,
+  rel: string,
+  budgetMs: number = STAMP_BUDGET_MS,
+): Promise<string | null> {
+  const result = await stampOrReason(root, rel, budgetMs);
   return 'stamp' in result ? result.stamp : null;
 }
 
@@ -224,23 +245,28 @@ export function stampMatchesExpected(stamp: string, expected: string): boolean {
   return !isDeletionStamp(stamp) && stamp.split(':')[2] === expected;
 }
 
-/** Why a path has no stamp: it is not a regular file, it can't be read, or it kept changing while read. */
-export type UnstampedReason = 'not-a-file' | 'unreadable' | 'changing';
+/**
+ * Why a path has no stamp: it is not a regular file, it can't be read, it kept changing while read, or it was
+ * too large to read within the time budget. Like an unreadable path, a too-large one fails closed.
+ */
+export type UnstampedReason = 'not-a-file' | 'unreadable' | 'changing' | 'too-large';
 
 /**
  * The stamp of `rel` (`writeStamp`), or why it has none, from one read: at most STAMP_ATTEMPTS reads of the
- * file, so the reason is the one that read found and never another read's.
+ * file, all within `budgetMs`, so the reason is the one that read found and never another read's.
  */
-export function stampOrReason(
+export async function stampOrReason(
   root: string,
   rel: string,
-): { stamp: string } | { reason: UnstampedReason } {
+  budgetMs: number = STAMP_BUDGET_MS,
+): Promise<{ stamp: string } | { reason: UnstampedReason }> {
   const path = resolve(root, rel);
+  const deadline = performance.now() + budgetMs;
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
     try {
-      const read = readStamp(path);
+      const read = await readStamp(path, deadline);
       if ('stamp' in read) return read;
-      if (read.skip === 'not-a-file') return { reason: 'not-a-file' };
+      if (read.skip !== 'changing') return { reason: read.skip };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
