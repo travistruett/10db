@@ -49,8 +49,26 @@ export const Title = z
   .max(200)
   .refine((t) => !CONTROL_CHARACTER.test(t), 'no control characters such as newlines or tabs');
 
-export const AreaDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(1) });
+const GlobbedDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(1) });
+
+/**
+ * An area: the files its globs match. `catchAll` makes it the project's fallback, as CODEOWNERS
+ * falls back to its widest rule: a path no other area matches falls in it, so a file added later
+ * (a new package, a first dotfile) is in an area. A path another area matches is never in it. A
+ * project has at most one (`atMostOneCatchAll`); absent or false is an ordinary area.
+ */
+export const AreaDef = GlobbedDef.extend({ catchAll: z.boolean().optional() });
 export type AreaDef = z.infer<typeof AreaDef>;
+
+/** The refusal for a project with two catch-all areas. */
+export const ONE_CATCH_ALL = 'Only one area can be the catch-all';
+
+/** Whether at most one of `areas` is the catch-all. */
+export function atMostOneCatchAll(
+  areas: readonly Pick<AreaDef, 'catchAll'>[] | undefined,
+): boolean {
+  return (areas ?? []).filter((a) => a.catchAll === true).length <= 1;
+}
 
 /**
  * What a hazard is exclusive across. `copy`: one checkout, so tasks in separate worktrees hold it at
@@ -66,7 +84,7 @@ export type HazardScope = (typeof HazardScope)[keyof typeof HazardScope];
  * `pnpm --filter y add x` both match `pnpm add`. `scope` is absent in a project stored before
  * hazards had one; `hazardScope` reads it.
  */
-export const HazardDef = AreaDef.extend({
+export const HazardDef = GlobbedDef.extend({
   commands: z.array(z.string().min(1)),
   scope: z.enum([HazardScope.Copy, HazardScope.Project]).optional(),
 });
@@ -332,6 +350,7 @@ export const ProjectInput = z
     message: PRECHECK_NEEDS_GATE,
     path: ['precheckCommand'],
   })
+  .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
     {
@@ -427,6 +446,7 @@ export const ProjectPatch = z
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
+  .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
   .refine(
     (p) => {
       const names = [...(p.areas ?? []), ...(p.hazards ?? [])].map((d) => d.name);

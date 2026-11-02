@@ -333,3 +333,46 @@ describe('MCP tool inputs', () => {
     expect(HandoffInput.safeParse(handoff).success).toBe(false);
   });
 });
+
+describe('the catch-all area', () => {
+  const project = {
+    name: 'demo',
+    repoPath: '/tmp/demo',
+    gateCommand: 'make gate',
+  };
+  const api = { name: 'api', globs: ['api/**'] };
+  const rest = { name: 'root', globs: ['*'], catchAll: true };
+
+  it('is optional: areas without the flag parse as before', () => {
+    const parsed = ProjectInput.parse({ ...project, areas: [api] });
+    expect(parsed.areas).toEqual([api]);
+    expect(parsed.areas[0]).not.toHaveProperty('catchAll');
+  });
+
+  it('is kept when a project is made or patched with one', () => {
+    expect(ProjectInput.parse({ ...project, areas: [api, rest] }).areas).toEqual([api, rest]);
+    expect(ProjectPatch.parse({ areas: [api, rest] }).areas).toEqual([api, rest]);
+  });
+
+  it('allows at most one per project, on create and on patch', () => {
+    const second = { name: 'other', globs: ['other/**'], catchAll: true };
+    const created = ProjectInput.safeParse({ ...project, areas: [api, rest, second] });
+    const patched = ProjectPatch.safeParse({ areas: [rest, second] });
+    expect(created.success).toBe(false);
+    expect(patched.success).toBe(false);
+    expect(JSON.stringify(patched.error?.issues)).toContain('Only one area can be the catch-all');
+  });
+
+  it('treats catchAll: false as no catch-all, so several may say it', () => {
+    const areas = [
+      { ...api, catchAll: false },
+      { name: 'ui', globs: ['ui/**'], catchAll: false },
+    ];
+    expect(ProjectInput.safeParse({ ...project, areas }).success).toBe(true);
+  });
+
+  it('is not a field of a hazard', () => {
+    const hazard = { name: 'locks', globs: ['x'], commands: [], catchAll: true };
+    expect(ProjectPatch.parse({ hazards: [hazard] }).hazards?.[0]).not.toHaveProperty('catchAll');
+  });
+});
