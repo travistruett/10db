@@ -1,4 +1,10 @@
-import { ConflictError, WorkspaceMode, type BatchDto, type TaskDto } from '@10db/contracts';
+import {
+  ConflictError,
+  RiskTag,
+  WorkspaceMode,
+  type BatchDto,
+  type TaskDto,
+} from '@10db/contracts';
 import { getBatch, getTask, transitionBatch } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -40,6 +46,59 @@ function hold(key: string): () => void {
   h.jobs.run(key, () => gate);
   return release;
 }
+
+describe('a risk tag edit through the task service', () => {
+  it('moves an unstarted shared task to a separate copy with a reason', async () => {
+    const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
+    const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Migration] });
+    expect(patched).toMatchObject({
+      workspaceMode: WorkspaceMode.Worktree,
+      placementReason: 'touches migrations',
+    });
+    expect(getTask(h.store.db, task.id).workspaceMode).toBe(WorkspaceMode.Worktree);
+  });
+
+  it('does the same for a dependency tag', async () => {
+    const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
+    const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Dependency] });
+    expect(patched).toMatchObject({
+      workspaceMode: WorkspaceMode.Worktree,
+      placementReason: 'touches dependencies',
+    });
+  });
+
+  it('leaves a placement the builder chose, and a tag that the rule ignores, alone', async () => {
+    const chosen = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
+    await taskService().patchTask(chosen.id, { workspaceMode: WorkspaceMode.Shared });
+    const patched = await taskService().patchTask(chosen.id, { riskTags: [RiskTag.Migration] });
+    expect(patched).toMatchObject({
+      workspaceMode: WorkspaceMode.Shared,
+      placementReason: 'chosen by the builder',
+    });
+    const other = h.addTask('Beta', { workspaceMode: WorkspaceMode.Shared });
+    const unrelated = await taskService().patchTask(other.id, { riskTags: [RiskTag.Security] });
+    expect(unrelated).toMatchObject({ workspaceMode: WorkspaceMode.Shared, placementReason: null });
+  });
+
+  it('is refused while the task is joining a batch, and changes nothing', async () => {
+    const batch = one(
+      h.starter.startBatch(h.project.id, {
+        title: 'Alpha',
+        taskIds: ids(h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared })),
+      }),
+    );
+    await h.jobs.idle();
+    const beta = h.addTask('Beta', { workspaceMode: WorkspaceMode.Shared });
+    const release = hold(jobKey(getBatch(h.store.db, batch.id), JobQueue.Cut));
+    h.starter.startBatch(h.project.id, { title: 'Beta', taskIds: ids(beta) });
+    await expect(
+      taskService().patchTask(beta.id, { riskTags: [RiskTag.Migration] }),
+    ).rejects.toThrow(/Beta.*joining/);
+    expect(getTask(h.store.db, beta.id).riskTags).toEqual([]);
+    release();
+    await h.jobs.idle();
+  });
+});
 
 describe('a placement patch through the task service during a pending join', () => {
   /** An OPEN shared batch of one task. */
