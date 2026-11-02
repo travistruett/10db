@@ -610,6 +610,45 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(tip);
   });
 
+  it("names only the builder's commit, and 10db's own unpushed merge as 10db's, in the kept worktree", async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const kept = batch.worktreePath ?? '';
+    const branch = batch.branch ?? '';
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    // A round's merge of main fails its check and can't be put back: it stays in the kept worktree, unpushed.
+    vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
+    await catchUp(batch);
+    const merge = h.git$('rev-parse', `refs/heads/${branch}`);
+    expect(merge).not.toBe(onOrigin(branch));
+    expect(h.git$('log', '-1', '--format=%P', merge).split(' ')).toHaveLength(2);
+
+    // The builder commits on top of that merge in the kept worktree.
+    await commitIn(getBatch(h.store.db, batch.id), 'src/mine.ts');
+    const builders = h.git$('rev-parse', `refs/heads/${branch}`);
+    expect(builders).not.toBe(merge);
+    h.shipClock.advance(31 * 60_000);
+
+    await catchUp(getBatch(h.store.db, batch.id));
+
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(builders);
+    const card = h.only(h.cards().filter((c) => c.body.includes('lacks')));
+    // Listed as the commit 10db did not write: the builder's alone.
+    expect(card.body).toContain(`(${builders.slice(0, 7)})`);
+    // The merge is named as 10db's own, not among the commits the builder is asked to push.
+    expect(card.body).toContain(`10db's own unpushed merge ${merge.slice(0, 7)}`);
+    expect(card.body).not.toContain(`(${merge.slice(0, 7)}`);
+    expect(card.body).not.toContain(`, ${merge.slice(0, 7)}`);
+    // Pushing the builder's commit would push the merge under it: the card moves it onto the head first.
+    const head = onOrigin(branch);
+    expect(card.body).toContain(
+      `git rebase --onto ${head.slice(0, 7)} ${merge.slice(0, 7)} ${branch}`,
+    );
+    expect(card.body).not.toContain('Push it to the pull request');
+    expect(kept).not.toBe('');
+  });
+
   it('raises one card when a checkout 10db did not make holds the branch', async () => {
     const batch = await shipped();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
