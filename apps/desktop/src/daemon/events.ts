@@ -5,6 +5,7 @@ import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys } from './account-queries';
+import { GOALS_KEY } from './goal-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 
@@ -20,20 +21,22 @@ const CANDIDATES: QueryKey = ['candidates'];
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects, CANDIDATES],
-  task: [['tasks'], CANDIDATES],
+  // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
+  goal: [GOALS_KEY],
+  task: [['tasks'], CANDIDATES, GOALS_KEY],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
-  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
+  batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES, GOALS_KEY],
   // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, GOALS_KEY],
   session: WORK,
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all],
-  inbox: [queryKeys.inbox, ['workstreams']],
+  inbox: [queryKeys.inbox, ['workstreams'], GOALS_KEY],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
   persona: [CANDIDATES],
