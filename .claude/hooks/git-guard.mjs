@@ -420,6 +420,7 @@ const SCRIPT_RUNNERS = [...SHELLS, 'eval', 'source', '.'];
  * @property {string[]} flags options that take no value
  * @property {string[]} [attachedOptions] options whose value, if any, is only ever attached
  * @property {number} operands positional words before the command
+ * @property {boolean} [loneDash] a `-` on its own is an option (env reads it as `-i`), not the command
  */
 // The option tables decide only what the guard lets through without asking: an option before the
 // command that appears in none of a wrapper's lists could take a value, so the guard can't tell
@@ -460,6 +461,7 @@ const WRAPPERS = new Map([
         ...['--block-signal', '--default-signal', '--ignore-signal', '--list-signal-handling'],
       ],
       operands: 0,
+      loneDash: true,
     },
   ],
   [
@@ -569,9 +571,19 @@ function readOption(word, wrapper) {
 function skipWrapperArguments(words, from, wrapper) {
   let i = from;
   let unknown = false;
-  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
+  while (
+    i < words.length &&
+    words[i].startsWith('-') &&
+    (words[i] !== '-' || wrapper.loneDash === true)
+  ) {
+    if (words[i] === '-') {
+      i += 1;
+      continue;
+    }
     if (words[i] === '--') {
       i += 1;
+      // GNU env checks for a lone `-` after its getopt loop has used up `--`.
+      if (wrapper.loneDash === true && words[i] === '-') i += 1;
       break;
     }
     const option = readOption(words[i], wrapper);
@@ -751,13 +763,15 @@ function envSplitString(words) {
 
 /**
  * The command a `bash -c`, `sh -c`, `zsh -c`, `eval` or `env -S` segment runs, so it can be
- * judged too. A flag cluster such as `-ce` or `-lc` counts as `-c`.
+ * judged too. A flag cluster such as `-ce` or `-lc` counts as `-c`. env puts the words an -S
+ * string splits into back in its arguments and keeps parsing options from them, so that string is
+ * judged as `env <string>`.
  * @param {string[]} words
  * @returns {string | null}
  */
 function nestedCommand(words) {
   const split = envSplitString(words);
-  if (split !== null) return split;
+  if (split !== null) return `env ${split}`;
   const i = commandStart(words);
   if (words[i] === 'eval') return words.slice(i + 1).join(' ');
   if (!SHELLS.includes(programAt(words, i))) return null;
