@@ -1718,6 +1718,7 @@ describe('worktree checkouts', () => {
         urgency: 'normal',
         detail: { toolName: 'Edit', summary: summary ?? path, path, ...extra },
         signal: new AbortController().signal,
+        foldPerLane: true,
       });
       inbox.answer(item.id, { choice });
     }
@@ -2234,11 +2235,57 @@ describe('worktree checkouts', () => {
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
       });
 
-      it("excuses each folded lane's own write, and neither lane's write for the other", async () => {
+      it("excuses two lanes' Edits to one file that land one after the other, each on its own card", async () => {
+        // The broker gives each lane's Edit its own card and hashes the file when that card is allowed, so
+        // Beta's hash is of its edit applied on top of Alpha's write. The file held {"a":1,"b":1}.
         const a = running('Alpha', ['ui']);
         const b = running('Beta', ['api']);
         watcher.sync();
+        editCard(
+          a,
+          SENSITIVE_FILE,
+          'allow_once',
+          repo.path,
+          null,
+          project,
+          exact(a, '{"a":2,"b":1}'),
+        );
+        put(SENSITIVE_FILE, '{"a":2,"b":1}');
+        await watcher.flush();
+        editCard(
+          b,
+          SENSITIVE_FILE,
+          'allow_once',
+          repo.path,
+          null,
+          project,
+          exact(b, '{"a":2,"b":2}'),
+        );
+        put(SENSITIVE_FILE, '{"a":2,"b":2}');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+      });
+
+      it('excuses an allowed Edit that deletes a line, newline and all', async () => {
+        const a = running('Alpha', ['ui']);
+        watcher.sync();
+        // The hash the broker records for {old_string: 'B=2', new_string: ''} on A=1\nB=2\nC=3\n.
+        editCard(a, '.env', 'allow_once', repo.path, null, project, exact(a, 'A=1\nC=3\n'));
+        put('.env', 'A=1\nC=3\n');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+      });
+
+      it("excuses each folded lane's own Write, and neither lane's write for the other", async () => {
+        const a = running('Alpha', ['ui']);
+        const b = running('Beta', ['api']);
+        watcher.sync();
+        // Only Writes fold across lanes: a Write's content does not depend on the file it lands on.
         foldedCard([a, b], SENSITIVE_FILE, 'allow_once', {
+          toolName: 'Write',
           exactWrite: true,
           allowedWrites: { [a.workstream.id]: sha('X'), [b.workstream.id]: sha('Y') },
         });

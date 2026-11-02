@@ -22,6 +22,22 @@ describe('editResult', () => {
     expect(editResult('Edit', { old_string: '', new_string: 'new' }, null)).toBe('new');
   });
 
+  it('takes the newline after deleted text with it, as Claude Code does', () => {
+    const env = 'A=1\nB=2\nC=3\n';
+    expect(editResult('Edit', { old_string: 'B=2', new_string: '' }, env)).toBe('A=1\nC=3\n');
+    // An old_string that ends in a newline, or text no newline follows, is deleted as it is.
+    expect(editResult('Edit', { old_string: 'B=2\n', new_string: '' }, env)).toBe('A=1\nC=3\n');
+    expect(editResult('Edit', { old_string: 'C=3\n', new_string: '' }, 'A=1\nC=3\n')).toBe('A=1\n');
+    expect(editResult('Edit', { old_string: 'b', new_string: '' }, 'ab')).toBe('a');
+    // With replace_all only the occurrences a newline follows go.
+    expect(
+      editResult('Edit', { old_string: 'B', new_string: '', replace_all: true }, 'B\nAB C\nB\n'),
+    ).toBe('AB C\n');
+    expect(editResult('MultiEdit', { edits: [{ old_string: 'B=2', new_string: '' }] }, env)).toBe(
+      'A=1\nC=3\n',
+    );
+  });
+
   it('applies a MultiEdit one edit after another', () => {
     expect(
       editResult(

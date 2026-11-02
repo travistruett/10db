@@ -326,6 +326,10 @@ export function createPermissionBroker(
       urgency: Urgency.Normal,
       detail: { toolName: req.toolName, summary, ...editDetail(req, ask) },
       signal: ctx.signal,
+      // An edit's result depends on the file it lands on. Folded with another lane's, both lanes would read the
+      // file on the one answer, before either writes, and the second write would match neither record.
+      // A Write's content doesn't depend on the file, so Writes still fold.
+      foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
     });
     const result = await wait(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.

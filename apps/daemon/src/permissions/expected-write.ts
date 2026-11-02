@@ -39,10 +39,17 @@ function applyEdit(current: string | null, edit: unknown): string | undefined {
   if (current === null) return undefined;
   const at = current.indexOf(oldText);
   if (at < 0) return undefined;
-  if (fields['replace_all'] === true) return current.split(oldText).join(newText);
+  const replaceAll = fields['replace_all'] === true;
   // Without replace_all an old_string found more than once is refused, and nothing is written.
-  if (current.includes(oldText, at + 1)) return undefined;
-  return current.slice(0, at) + newText + current.slice(at + oldText.length);
+  if (!replaceAll && current.includes(oldText, at + 1)) return undefined;
+  // A deletion takes the newline after its text with it, where one follows (Claude Code's applyEditToFile).
+  const search =
+    newText === '' && !oldText.endsWith('\n') && current.includes(`${oldText}\n`)
+      ? `${oldText}\n`
+      : oldText;
+  if (replaceAll) return current.split(search).join(newText);
+  const from = current.indexOf(search);
+  return current.slice(0, from) + newText + current.slice(from + search.length);
 }
 
 /**

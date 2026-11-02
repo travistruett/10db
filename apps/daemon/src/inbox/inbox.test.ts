@@ -2137,17 +2137,63 @@ describe('permission broker in a sandboxed lane', () => {
       });
     });
 
-    it("keeps each folded lane's own write", async () => {
+    it('records the line an allowed Edit deletes with its newline, as Claude Code writes it', async () => {
+      const ws = seedWorkstream(base);
+      const env = join(fileAccess.checkout, 'src', '.env');
+      writeFileSync(env, 'A=1\nB=2\nC=3\n');
+      const decision = sandboxed(ws)(
+        request('Edit', { file_path: env, old_string: 'B=2', new_string: '' }),
+      );
+      const card = onlyOpenCard();
+      inbox.answer(card.id, { choice: 'allow_once' });
+      expect(await decision).toEqual({ behavior: 'allow' });
+      expect(getInboxItem(state.db, card.id).detail).toMatchObject({
+        allowedWrites: { [ws.workstream.id]: sha('A=1\nC=3\n') },
+      });
+    });
+
+    it("gives two lanes' Edits to one file a card each, so each records the file its own write makes", async () => {
       const a = seedWorkstream(base);
       const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
-      writeFileSync(file(), '{"a":1}');
-      const first = sandboxed(a)(edit('"a":2'));
-      const second = sandboxed(b)(edit('"a":3'));
+      writeFileSync(file(), '{"a":1,"b":1}');
+      const first = sandboxed(a)(
+        request('Edit', { file_path: file(), old_string: '"a":1', new_string: '"a":2' }),
+      );
+      const second = sandboxed(b)(
+        request('Edit', { file_path: file(), old_string: '"b":1', new_string: '"b":2' }),
+      );
+      const cards = openCards();
+      expect(cards).toHaveLength(2);
+      const cardOf = (lane: typeof a) => {
+        const card = cards.find((c) => c.targets[0]?.workstreamId === lane.workstream.id);
+        if (card === undefined) throw new Error('no card for the lane');
+        return card;
+      };
+      // Alpha's write lands before the builder answers Beta's card.
+      inbox.answer(cardOf(a).id, { choice: 'allow_once' });
+      expect(await first).toEqual({ behavior: 'allow' });
+      writeFileSync(file(), '{"a":2,"b":1}');
+      inbox.answer(cardOf(b).id, { choice: 'allow_once' });
+      expect(await second).toEqual({ behavior: 'allow' });
+      expect(getInboxItem(state.db, cardOf(a).id).detail).toMatchObject({
+        allowedWrites: { [a.workstream.id]: sha('{"a":2,"b":1}') },
+      });
+      expect(getInboxItem(state.db, cardOf(b).id).detail).toMatchObject({
+        allowedWrites: { [b.workstream.id]: sha('{"a":2,"b":2}') },
+      });
+    });
+
+    it("still folds two lanes' Writes to one file, keeping each lane's content", async () => {
+      const a = seedWorkstream(base);
+      const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+      const write = (content: string) => request('Write', { file_path: file(), content });
+      const first = sandboxed(a)(write('X'));
+      const second = sandboxed(b)(write('Y'));
       const card = onlyOpenCard();
       inbox.answer(card.id, { choice: 'allow_once' });
       await Promise.all([first, second]);
       expect(getInboxItem(state.db, card.id).detail).toMatchObject({
-        allowedWrites: { [a.workstream.id]: sha('{"a":2}'), [b.workstream.id]: sha('{"a":3}') },
+        allowedWrites: { [a.workstream.id]: sha('X'), [b.workstream.id]: sha('Y') },
       });
     });
 
