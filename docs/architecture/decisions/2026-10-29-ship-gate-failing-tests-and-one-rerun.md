@@ -19,8 +19,8 @@
   path matching a changed path or its end), and every done member's latest gate evidence passed. Anything
   10db can't read counts as the batch's. Then the shipper logs it and runs the gate once more, in the same
   slot and with the same base update as any shipping gate. One rerun per ship attempt; Retry starts a new one.
-- **After the rerun.** If it passes, the batch ships and a card says the gate passed when 10db ran it again
-  and lists the tests that may be flaky. If it fails and the new failure is again outside the batch, the
+- **After the rerun.** If it passes, the batch ships and a notice on its tasks (`gate-rerun`, no card) says the gate passed when 10db
+  ran it again and lists the tests that may be flaky. If it fails and the new failure is again outside the batch, the
   card says the failure looks unrelated to the batch's work, that 10db ran the gate again by itself and
   started no fix session, and offers Retry and Abandon (`detail.actions`), which the Inbox card shows as
   buttons over the batch's existing ship and abandon routes, dismissing the card once done. It doesn't

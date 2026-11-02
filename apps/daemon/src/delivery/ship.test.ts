@@ -771,8 +771,10 @@ describe('Ship anyway, Retry and Abandon', () => {
     expect(getWorkstream(h.store.db, alpha.id).state).toBe('DONE');
     expect(activeClaims(h.store.db, beta.id)).toEqual([]);
     expect(h.git$('branch', '--list', batch.branch ?? '')).toContain(batch.branch ?? '');
-    expect(h.only(h.cards()).body).toContain('Alpha');
+    // The builder just asked for this: no "abandoned" card, only the offer to delete the branch.
+    expect(h.cards()).toEqual([]);
     await h.jobs.idle();
+    expect(h.only(h.cards()).title).toContain(`Delete ${batch.branch ?? ''}?`);
     expect(getBatch(h.store.db, batch.id).state).toBe('ABANDONED');
   });
 

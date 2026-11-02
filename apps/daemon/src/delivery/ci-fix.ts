@@ -101,7 +101,7 @@ export async function startCiFix(input: {
     }
     // The run is still going: its log is not whole, so the next round reads again.
     if (log.kind === 'not_yet') return false;
-    const file = join(dir, ciFixLogName(check.name, head));
+    const file = join(dir, ciFixLogName(check.name, check.jobId, head));
     logs.push({ file, text: stripAnsi(log.log) });
     jobs.push({
       check,
