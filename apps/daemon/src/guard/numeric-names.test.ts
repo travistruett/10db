@@ -29,6 +29,10 @@ describe('numericNames', () => {
       ['a flag from a variable', 's=1; declare -$f r=s; echo $((s))'],
       ['a flag from a substitution', 's=1; declare "-$(echo n)" r=s; echo $((s))'],
       ['a quoted flag', "s=1; declare '-n' r=s; r=x; echo $((s))"],
+      ['a flag word that is all a variable', 's=1; declare $x r=s; r=y; echo $((s))'],
+      ['a flag word in quotes from a variable', 's=1; declare "$x" r=s; echo $((s))'],
+      ['a flag word from a substitution', 's=1; local $(echo -n) r=s; echo $((s))'],
+      ['a flag word from backticks', 's=1; typeset `echo -n` r=s; echo $((s))'],
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
@@ -64,6 +68,28 @@ describe('numericNames', () => {
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
+    });
+  });
+
+  describe('a builtin or keyword that sets a name it does not name as a word', () => {
+    const rows: readonly (readonly [string, string])[] = [
+      ['read with no name sets REPLY', 'REPLY=1; read < f; echo $((REPLY))'],
+      ['read -r with no name', 'REPLY=1; read -r < f; echo $((REPLY))'],
+      ['select sets REPLY', 'REPLY=1; select x in a b; do break; done < f; echo $((REPLY))'],
+      ['=~ sets BASH_REMATCH', 'BASH_REMATCH=1; [[ x =~ y ]]; echo $((BASH_REMATCH))'],
+      ['=~ sets zsh MATCH', 'MATCH=1; [[ x =~ y ]]; echo $((MATCH))'],
+      ['=~ sets zsh match', 'match=1; [[ x =~ y ]]; echo $((match))'],
+      ['=~ sets zsh MBEGIN', 'MBEGIN=1; [[ x =~ y ]]; echo $((MBEGIN))'],
+      ['=~ sets zsh MEND', 'MEND=1; [[ x =~ y ]]; echo $((MEND))'],
+      ['cd sets PWD and OLDPWD', 'PWD=1; OLDPWD=1; cd x; echo $((PWD + OLDPWD))'],
+    ];
+    it.each(rows)('%s', (_, command) => {
+      expect(names(command)).toEqual([]);
+    });
+
+    it('keeps the other names of such a command', () => {
+      expect(names('s=1; REPLY=1; read < f; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; MATCH=1; [[ x =~ y ]]; echo $((s))')).toEqual(['s']);
     });
   });
 });

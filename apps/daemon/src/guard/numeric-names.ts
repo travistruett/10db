@@ -46,22 +46,23 @@ const UNFOLLOWED: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Every builtin and keyword bash has. A command named by one of these is understood only when it is
- * in `UNDERSTOOD`; a command that is not a builtin (`make`, `pnpm`, `node`) runs a program in its
- * own process, which cannot set the shell's names.
+ * Every builtin bash has, with `[[` and `select`, the keywords that set names. A command named by
+ * one of these is understood only when it is in `UNDERSTOOD`; a command that is not a builtin
+ * (`make`, `pnpm`, `node`) runs a program in its own process, which cannot set the shell's names.
+ * The other keywords (`for`, `while`, `if` and the rest) set no name but one they name as a word.
  */
 const BUILTINS: ReadonlySet<string> = new Set(
   (
     '. : [ [[ alias bg bind break builtin caller cd command compgen complete compopt continue ' +
     'declare dirs disown echo enable eval exec exit export false fc fg getopts hash help history ' +
-    'jobs kill let local logout mapfile popd printf pushd pwd read readarray readonly return set ' +
+    'jobs kill let local logout mapfile popd printf pushd pwd read readarray readonly return select set ' +
     'shift shopt source suspend test time times trap true type typeset ulimit umask unalias unset wait'
   ).split(' '),
 );
 
 /**
- * The builtins this scan reads: each sets a name only by naming it as a word (`read s`, `unset s`,
- * `let s=…`, `export s=…`), which `setsName` sees. Every other builtin (`getopts`, `mapfile -C`,
+ * The builtins this scan reads: each sets a name by naming it as a word (`read s`, `unset s`,
+ * `let s=…`, `export s=…`), which `setsName` sees, or sets only names in `IMPLICIT`. Every other builtin (`getopts`, `mapfile -C`,
  * `enable`, `hash`, `history` and the rest) may set or run something the scan does not read, so a
  * command naming one has no safe name. `command`, `exec` and `time` run the command after them,
  * which is checked in turn. `declare`, `typeset` and `local` are read except for a nameref or a
@@ -70,9 +71,26 @@ const BUILTINS: ReadonlySet<string> = new Set(
 const UNDERSTOOD: ReadonlySet<string> = new Set(
   (
     ': [ [[ break cd command continue declare echo exec exit export false jobs let local popd ' +
-    'printf pushd pwd read readonly return set shift shopt test time true type typeset unset wait'
+    'printf pushd pwd read readonly return select set shift shopt test time true type typeset ' +
+    'unset wait'
   ).split(' '),
 );
+
+/**
+ * Names a builtin or keyword sets without naming them as a word: `read` and `select` with no name
+ * write `REPLY`; `cd`, `pushd` and `popd` write `PWD`, `OLDPWD` and `DIRSTACK`; `=~` writes
+ * `BASH_REMATCH` in bash and `MATCH`, `match`, `MBEGIN` and `MEND` in zsh. The scan treats them as
+ * set to text whenever the word appears, with a named operand or without.
+ */
+const DIRECTORY_NAMES = ['PWD', 'OLDPWD', 'DIRSTACK'];
+const IMPLICIT: ReadonlyMap<string, readonly string[]> = new Map([
+  ['read', ['REPLY']],
+  ['select', ['REPLY']],
+  ['cd', DIRECTORY_NAMES],
+  ['pushd', DIRECTORY_NAMES],
+  ['popd', DIRECTORY_NAMES],
+  ['=~', ['BASH_REMATCH', 'MATCH', 'match', 'MBEGIN', 'MEND']],
+]);
 
 const NAMEREF_BUILTINS: ReadonlySet<string> = new Set(['declare', 'typeset', 'local']);
 
@@ -162,10 +180,12 @@ function rebindsNames(words: readonly string[]): boolean {
   });
   const heads = [words[0], stripped[0]].map((word) => commandName(word ?? ''));
   if (heads.some((head) => BUILTINS.has(head) && !UNDERSTOOD.has(head))) return true;
-  // A declaring builtin anywhere in the command, behind any wrapper, with a flag naming `n`, a
-  // flag the shell expands, or a quoted one: `declare -gn r=s`, `declare -$f r`, `local +n r`.
+  // A declaring builtin anywhere in the command, behind any wrapper, with a flag naming `n`, or a
+  // word the shell expands that is not an assignment, which may expand to a flag: `declare -gn r=s`,
+  // `declare -$f r`, `declare $x r=s`, `local +n r`.
   if (words.some((word) => NAMEREF_BUILTINS.has(commandName(word)))) {
-    if (words.some((word) => /^[-+]/.test(word) && /[n$`]/.test(word))) return true;
+    if (words.some((word) => /^[-+]/.test(word) && word.includes('n'))) return true;
+    if (words.some((word) => !ASSIGNMENT.test(word) && /[$`]/.test(word))) return true;
   }
   return heads.includes('printf') && words.some((word) => word.startsWith('-v'));
 }
@@ -216,6 +236,9 @@ export function numericNames(command: string): ReadonlySet<string> {
   // later; either can reach a name by a path the scan does not follow.
   if (into.all.some((word) => expandsIndirectly(word) || word.includes('()'))) return none;
   if (into.commands.some(rebindsNames)) return none;
+  for (const word of into.all) {
+    for (const name of IMPLICIT.get(commandName(word)) ?? []) into.spoiled.add(name);
+  }
   const inArithmetic = (word: string): boolean => word.includes('$((') || word.includes('$[');
   const setElsewhere = (name: string): boolean =>
     into.spoiled.has(name) ||
