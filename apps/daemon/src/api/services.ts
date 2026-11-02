@@ -59,6 +59,7 @@ import type {
   RoutingRuleDto,
   RoutingRulesInput,
   StepPlanDto,
+  StartTaskInput,
   SystemCheckDto,
   TaskDto,
   TaskId,
@@ -128,8 +129,13 @@ export interface ApiServices {
    * answer may come after asking origin.
    */
   createTask(projectId: ProjectId, input: TaskInput): TaskDto | Promise<TaskDto>;
-  /** Starts a task; a held one is queued again as the run it was, in any delivery mode. */
-  startTask(taskId: TaskId): TaskStarted;
+  /**
+   * Starts a task; a held one is queued again as the run it was, in any delivery mode. A task whose
+   * latest run failed in an open or failed batch runs again in that batch, keeping its commits; with
+   * `fresh` it starts over from the base branch instead, and the batch that held only its failed
+   * attempt is abandoned.
+   */
+  startTask(taskId: TaskId, input?: StartTaskInput): TaskStarted;
   /**
    * Puts the started task's queued workstream first in line for the next free lane. Throws
    * ConflictError for a task whose latest workstream isn't waiting for one.

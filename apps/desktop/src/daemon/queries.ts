@@ -279,6 +279,35 @@ export function useStartTask() {
   });
 }
 
+/**
+ * Starts a task whose latest run failed in an open batch over from the base branch, where Start
+ * would continue the run in that batch.
+ */
+export function useStartTaskOver() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(
+        await client.tasks[':taskId'].start.$post(
+          { param: { taskId } },
+          // `init.headers` would replace the client's, token included, so only the body is set; the
+          // daemon reads a start's body as text.
+          { init: { body: JSON.stringify({ fresh: true }) } },
+        ),
+        TaskStartResult,
+      ),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.inbox }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+        queryClient.invalidateQueries({ queryKey: ['workstreams'] }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.projects }),
+        queryClient.invalidateQueries({ queryKey: ['batches'] }),
+      ]),
+  });
+}
+
 /** Puts a queued task first in line for the next free lane. */
 export function useRunNext() {
   const { client } = useDaemon();

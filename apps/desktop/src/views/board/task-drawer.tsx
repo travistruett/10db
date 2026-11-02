@@ -35,6 +35,7 @@ import {
   useRetryWorkstream,
   useRunNext,
   useStartTask,
+  useStartTaskOver,
 } from '../../daemon/queries';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
@@ -60,6 +61,7 @@ import { holdOption, isHeld, type HoldOption } from './task-hold';
 import {
   canCloseRun,
   canRetryRun,
+  canStartOver,
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
@@ -456,10 +458,12 @@ function WorkstreamLine({
   const runNext = useRunNext();
   const hold = useHoldTask();
   const start = useStartTask();
+  const startOver = useStartTaskOver();
   const remove = useRemoveTask();
   const failed = canRetry(workstream.state);
   // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
   const retryable = canRetryRun(workstream, batch);
+  const startableOver = canStartOver(task, workstream, batch);
   const closable = canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
   const queued = canRunNext(task, workstream.state);
@@ -467,8 +471,8 @@ function WorkstreamLine({
   if (isTerminal(workstream.state) && !failed) {
     return null;
   }
-  const busy = hold.isPending || start.isPending || remove.isPending;
-  const refusal = [hold, start, remove].find((m) => m.error)?.error?.message ?? null;
+  const busy = hold.isPending || start.isPending || startOver.isPending || remove.isPending;
+  const refusal = [hold, start, startOver, remove].find((m) => m.error)?.error?.message ?? null;
   return (
     <Stack gap={4}>
       <Group justify="space-between" wrap="nowrap">
@@ -547,6 +551,22 @@ function WorkstreamLine({
               }}
             >
               Retry
+            </Button>
+          ) : null}
+          {startableOver ? (
+            <Button
+              size="xs"
+              variant="default"
+              title="Starts the task again from the base branch in a new batch; the failed attempt's batch is abandoned and its branch kept."
+              disabled={busy}
+              loading={startOver.isPending}
+              onClick={() => {
+                closeTask.reset();
+                retry.reset();
+                startOver.mutate(taskId);
+              }}
+            >
+              Start over
             </Button>
           ) : null}
           {closable ? (

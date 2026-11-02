@@ -872,6 +872,30 @@ describe('batch routes', () => {
     expect(await res.json()).toEqual(body);
   });
 
+  it.each([
+    { name: 'no body', body: undefined, input: {} },
+    { name: 'fresh', body: { fresh: true }, input: { fresh: true } },
+  ])('hands a task start with $name to the service as $input', async ({ body, input }) => {
+    const seen: unknown[] = [];
+    const services = stubServices({
+      startTask: (_id, got) => {
+        seen.push(got);
+        return { kind: 'workstream', workstream };
+      },
+    });
+    const res = await app(services).request(`/tasks/${mintId('Task')}/start`, post('', body));
+    expect(res.status).toBe(201);
+    expect(seen).toEqual([input]);
+  });
+
+  it('refuses a task start whose body is not a start request', async () => {
+    const res = await app(stubServices({})).request(
+      `/tasks/${mintId('Task')}/start`,
+      post('', { fresh: 'yes' }),
+    );
+    expect(res.status).toBe(400);
+  });
+
   it('answers Run Next with the workstream and what it waits on, and refuses a bad task id', async () => {
     const result = { workstream, waitingOn: ['Fix the gate'] };
     const services = stubServices({ runNext: () => result });
