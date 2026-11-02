@@ -580,6 +580,18 @@ describe('git guard judging a push in the directory the command runs in', () => 
     ],
     ['cd, then push in a subshell', 'cd WT && (git push)', 'allow'],
     ['cd and push in one subshell', '(cd WT && git push)', 'allow'],
+    // The `)` of a command substitution is not a subshell's: it keeps the directory the cd set.
+    [
+      'cd, then a command substitution, then push',
+      "cd WT && git add $(git diff --name-only) && git commit -m 'x' -- a.ts && git push",
+      'allow',
+    ],
+    ['cd, then an arithmetic expansion, then push', 'cd WT && n=$((1 + 2)) && git push', 'allow'],
+    [
+      'cd, then a nested substitution, then push',
+      'cd WT && echo $(echo $(pwd)) && git push',
+      'allow',
+    ],
     // The rest of the push rules hold after a cd.
     ['force push', 'cd WT && git push --force origin feat/pr147', 'ask'],
     ['push to main', 'cd WT && git push origin HEAD:main', 'ask'],
@@ -621,6 +633,10 @@ describe('git guard judging a push in the directory the command runs in', () => 
     ['cd in a subshell', '(cd WT); git push'],
     ['cd later in a subshell', '(true; cd WT); git push'],
     ['cd first in a subshell', '(cd WT; true); git push'],
+    // A bare `((` whose close is not `))` is two nested subshells, not arithmetic.
+    ['cd in nested subshells', '((cd WT; true); true); git push'],
+    ['cd in nested subshells, then &&', '((cd WT; true); true) && git push'],
+    ['cd, then nested subshells with a cd', 'cd MAIN && ((cd WT); true) && git push'],
     ['cd on a line of its own in a subshell', '(cd WT\ntrue)\ngit push'],
     ['cd in a subshell after a list', 'true; (cd WT && true); git push'],
     ['commit in a subshell, then push', "(cd WT && git commit -m 'x' -- a.ts) && git push"],
@@ -630,6 +646,9 @@ describe('git guard judging a push in the directory the command runs in', () => 
     ['cd in a list sent to the background', 'cd WT && true & git push'],
     ['cd in a list sent to the background, then a line', 'cd WT && true &\ngit push'],
     ['cd in a command substitution', 'echo $(cd WT); git push'],
+    ['a subshell cd after a substitution', 'cd WT && echo $(pwd) && (cd MAIN; true); git push'],
+    ['a subshell inside a substitution', 'cd WT && echo $( (cd MAIN); pwd ) && git push'],
+    ['cd in a substitution, then push', 'cd WT && echo $(cd MAIN; pwd) && git push'],
     ['cd in a group', 'if cd WT; then true; fi; git push'],
     ['cd in a loop', 'for i in 1; do cd WT; done; git push'],
     ['cd in a function', 'f() { cd WT; }; f; git push'],

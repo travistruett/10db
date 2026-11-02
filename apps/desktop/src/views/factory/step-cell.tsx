@@ -1,8 +1,25 @@
+import { WorkstreamState, type WorkstreamDto } from '@10db/contracts';
 import { Badge, Stack, Text } from '@mantine/core';
-import type { WorkstreamDto } from '@10db/contracts';
 
-/** The step a workstream is on, who runs it and on which profile; a pre-flow workstream shows its model. */
+/**
+ * The step a workstream is on, who runs it and on which profile; a pre-flow workstream shows its
+ * model. A run that has not started names no step: its plan would read as work under way.
+ */
 export function StepCell({ workstream }: { readonly workstream: WorkstreamDto }) {
+  if (workstream.state === WorkstreamState.Queued) {
+    return (
+      <Text size="sm" c="dimmed">
+        Waiting for a free lane
+      </Text>
+    );
+  }
+  if (workstream.state === WorkstreamState.Held) {
+    return (
+      <Text size="sm" c="dimmed">
+        Held: not in the queue
+      </Text>
+    );
+  }
   const step = workstream.steps[workstream.stepIndex];
   if (!step) return <Text size="sm">{`${workstream.model}@${workstream.effort}`}</Text>;
   return (

@@ -26,7 +26,13 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { eq } from 'drizzle-orm';
-import { goalDigest, listGoalSummaries, openGoalDigest, ungroupedDigest } from './goal-digest';
+import {
+  goalDigest,
+  listGoalSummaries,
+  newItemCount,
+  openGoalDigest,
+  ungroupedDigest,
+} from './goal-digest';
 import { insertGoal, lastGoalView } from './goals';
 import { insertInboxItem } from './inbox';
 import { insertDecision, insertDeviation, insertSource } from './knowledge';
@@ -195,6 +201,14 @@ describe('a goal’s status', () => {
     const { goal, a } = adopt();
     run(a, WorkstreamState.Running);
     expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Running);
+  });
+
+  it('is not running while the only started task waits in the queue', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Queued);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.NotStarted);
+    expect(digest.workingNow).toEqual([]);
   });
 
   it('is waiting on you while an open card is on one of its tasks, ahead of running', () => {
@@ -556,6 +570,60 @@ describe('the window', () => {
     expect(second.deviations.earlier).toHaveLength(1);
     expect(lastGoalView(store.db, goal.id, builder.id)).toBe(at(12));
   });
+
+  it('a refresh in the same visit answers the same Δ rows', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(9);
+    deviation(ws, 'Split A in two');
+    setClock(10);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    setClock(11);
+    deviation(ws, 'Split B in two');
+
+    setClock(12);
+    const first = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(12)).getTime() + 5_000);
+    const refresh = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(12)).getTime() + 4 * 60_000);
+    const remount = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+
+    expect(first.deviations.recent).toHaveLength(1);
+    expect(refresh.since).toBe(first.since);
+    expect(refresh.deviations).toEqual(first.deviations);
+    expect(remount.since).toBe(first.since);
+    expect(remount.deviations).toEqual(first.deviations);
+    expect(newItemCount(refresh)).toBe(newItemCount(first));
+    // Opening still closes the list's window.
+    expect(listGoalSummaries(store.db, project.id).goals[0]?.newItems).toBe(0);
+  });
+
+  it('a first visit refreshed keeps every item recent', () => {
+    const { goal, a } = adopt();
+    deviation(run(a, WorkstreamState.Running), 'Split A in two');
+    setClock(9);
+    const first = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    clock = new Date(new Date(at(9)).getTime() + 5_000);
+    const refresh = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(first.since).toBeNull();
+    expect(refresh.since).toBeNull();
+    expect(refresh.deviations.recent).toHaveLength(1);
+  });
+
+  it('a visit ends after a quiet spell, and the next opening starts a new window', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Running);
+    setClock(10);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    setClock(11);
+    deviation(ws, 'Split B in two');
+    setClock(12);
+    store.write((ctx) => openGoalDigest(ctx, goal.id));
+    clock = new Date(new Date(at(12)).getTime() + 31 * 60_000);
+    const later = store.write((ctx) => openGoalDigest(ctx, goal.id)).value;
+    expect(later.since).toBe(at(12));
+    expect(later.deviations.recent).toEqual([]);
+  });
 });
 
 describe('the goal list', () => {
@@ -646,6 +714,14 @@ describe('the Ungrouped group', () => {
       running: 1,
       failed: 1,
     });
+  });
+
+  it('leaves out a task that only waits in the queue', () => {
+    run(insertGoalFreeTask('Queued'), WorkstreamState.Queued);
+    expect(ungroupedDigest(store.db, project.id)).toBeNull();
+    const running = insertGoalFreeTask('Running');
+    run(running, WorkstreamState.Running);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({ running: 1, failed: 0 });
   });
 
   it('comes with a goal’s digest', () => {

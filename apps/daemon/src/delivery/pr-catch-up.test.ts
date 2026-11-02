@@ -536,6 +536,119 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 });
 
+describe('a shipped pull request whose head never got its required checks', () => {
+  /** GitHub holds the pull request, which merges cleanly, for a required check that has no run. */
+  function waitsForChecks(batch: BatchDto): string {
+    const url = batch.prUrl ?? '';
+    h.gh.setHead(url, onOrigin(batch.branch));
+    h.gh.setBlockedOnChecks(url, true);
+    return url;
+  }
+
+  async function restartCi(batch: BatchDto): Promise<BatchDto> {
+    h.shipper.restartCi(batch.id);
+    await h.jobs.idle();
+    return getBatch(h.store.db, batch.id);
+  }
+
+  it('has the base merged into it and pushed, so a new head gets its workflows', async () => {
+    const batch = await shipped();
+    const teammate = h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    waitsForChecks(batch);
+
+    const now = await restartCi(batch);
+
+    const tip = onOrigin(batch.branch);
+    expect(tip).not.toBe(before);
+    expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(now.notices);
+    expect(notice).toMatchObject({ key: 'pull-request-update', tone: 'info' });
+    expect(notice.line).toBe('10db merged main into the pull request to start its checks');
+    expect(now.worktreePath).toBeNull();
+  });
+
+  it('pushes nothing when the branch already holds the base, and raises no card', async () => {
+    const batch = await shipped();
+    const before = onOrigin(batch.branch);
+    waitsForChecks(batch);
+
+    const now = await restartCi(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+  });
+
+  it.each([
+    ['running', [{ name: 'build', conclusion: null }]],
+    ['passed', [{ name: 'build', conclusion: 'SUCCESS' }]],
+    ['failed', [{ name: 'build', conclusion: 'FAILURE' }]],
+  ])('never pushes to a pull request whose checks are %s', async (_name, runs) => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    const url = waitsForChecks(batch);
+    h.gh.setChecks(
+      url,
+      runs.map((r) => ({
+        __typename: 'CheckRun' as const,
+        name: r.name,
+        status: r.conclusion === null ? 'IN_PROGRESS' : 'COMPLETED',
+        conclusion: r.conclusion,
+        detailsUrl: null,
+      })),
+    );
+
+    const now = await restartCi(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    expect(now.notices).toEqual([]);
+  });
+
+  it('pushes nothing when GitHub is not blocked on checks, such as a base with no CI', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    const url = waitsForChecks(batch);
+    h.gh.setBlockedOnChecks(url, false);
+
+    await restartCi(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+  });
+
+  it('runs the gate on the merged branch, and on a failure pushes nothing and raises no card', async () => {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    waitsForChecks(batch);
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+
+    const now = await restartCi(batch);
+
+    expect(onOrigin(batch.branch)).toBe(before);
+    // The watch's notice says the checks never started; a card about conflicts would be wrong.
+    expect(h.cards()).toEqual([]);
+    expect(now.notices).toEqual([]);
+    expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+  });
+
+  it('pushes nothing to a pull request held for the builder', async () => {
+    h.close();
+    h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
+    h.commit('src/index.ts', "import a from './a';\nexport {};\n");
+    h.git$('push', '-q', 'origin', 'main');
+    const batch = await shipped();
+    h.teammatePush('main', 'src/other.ts', 'export {};\n');
+    const before = onOrigin(batch.branch);
+    waitsForChecks(batch);
+    await restartCi(batch);
+    expect(onOrigin(batch.branch)).toBe(before);
+  });
+});
+
 describe('a merge GitHub refused for a reason that has gone', () => {
   it('is retried, once, and merged', async () => {
     h.gh.noRequiredChecks = true;

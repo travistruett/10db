@@ -4,8 +4,12 @@ import {
   GoalListDto,
   GoalSummaryDto,
   mintId,
+  type DigestDeviation,
+  type DigestWaitingOn,
   type GoalCriterionDto,
   type GoalId,
+  type GoalStatus,
+  type UngroupedDigestDto,
 } from '@10db/contracts';
 
 const AT = '2026-10-13T12:00:00.000Z';
@@ -51,7 +55,10 @@ export function goalCriterionDto(
   };
 }
 
-function digestFor(goalId: GoalId, overrides: Partial<GoalDigestDto>): GoalDigestDto {
+export function goalDigestDto(
+  goalId: GoalId,
+  overrides: Partial<GoalDigestDto> = {},
+): GoalDigestDto {
   return GoalDigestDto.parse({
     goalId,
     status: 'not_started',
@@ -76,9 +83,37 @@ export function goalSummaryDto(
   newItems = 0,
 ): GoalSummaryDto {
   const dto = goalDto(goal);
-  return GoalSummaryDto.parse({ goal: dto, digest: digestFor(dto.id, digest), newItems });
+  return GoalSummaryDto.parse({ goal: dto, digest: goalDigestDto(dto.id, digest), newItems });
 }
 
 export function goalListDto(...goals: GoalSummaryDto[]): GoalListDto {
   return GoalListDto.parse({ goals, ungrouped: null });
+}
+
+export function digestDeviation(summary: string, at: string): DigestDeviation {
+  return { id: mintId('Deviation'), taskId: null, summary, at };
+}
+
+export function digestWaitingOn(title: string, at: string): DigestWaitingOn {
+  return {
+    inboxItemId: mintId('InboxItem'),
+    taskId: mintId('Task'),
+    title,
+    assigneeId: null,
+    assigneeName: 'You',
+    at,
+  };
+}
+
+export function ungroupedDto(
+  overrides: Partial<UngroupedDigestDto> & { status?: GoalStatus } = {},
+): UngroupedDigestDto {
+  return {
+    goalId: null,
+    status: 'running',
+    running: 1,
+    failed: 0,
+    workstreams: [],
+    ...overrides,
+  };
 }

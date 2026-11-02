@@ -189,7 +189,7 @@ export function useProjectSetup(
       chosen = draftsFromAreas([WHOLE_REPOSITORY]);
       setAreas(chosen);
       setAreaNote(
-        'Created without waiting for proposed areas. One area covers the whole repository.',
+        'Stopped waiting for proposed areas. One area covers the whole repository; split it here.',
       );
     }
     create.mutate(

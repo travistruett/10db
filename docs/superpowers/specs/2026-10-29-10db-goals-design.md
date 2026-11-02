@@ -204,8 +204,13 @@ task under a rule is open (§14).
 
 ## 8. Factory
 
-**Built:** Factory lists workstreams (task, state, step, context, sessions, last activity, Retry, Cancel) and,
-below them, every batch with its pull request (`apps/desktop/src/views/factory/`).
+**Built:** Factory is the project's goals as described below (`apps/desktop/src/views/factory/`): the status-ordered
+list, the Ungrouped and Done (n) rows, each goal's digest, its Sessions and Pull requests, and the header's
+**Adopt a Plan…** with its refusal sheet (§11). The workstream table's columns (task, state, step, context,
+sessions, last activity, Retry) live on in Sessions; a queued or held run names no step and the digest
+never counts one as running. **Cancel Run** for a running task is in its card menu and its drawer, after a
+confirm (`views/board/cancel-run-modal.tsx`); Sessions rows have no Cancel, and the project-wide workstream table,
+the Show finished switch and the batch history are gone from Factory.
 
 **Designed.** Factory becomes the project's goals, with the project switcher above it as today.
 
@@ -296,7 +301,9 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   them. The same response carries the Ungrouped group (`goalId: null`).
   **Built:** the daemon computes it (`packages/db/src/store/goal-digest.ts`). `GET /projects/:projectId/goals`
   answers `GoalListDto` (each goal's digest and count of new items, plus Ungrouped) and leaves every mark
-  alone; only `GET /goals/:goalId/digest` advances its goal's mark. In phase 1 every open card on a goal's
+  alone; only `GET /goals/:goalId/digest` advances its goal's mark. A visit lasts while the goal is opened again
+  within 30 minutes of its last opening: `goal_views.visit_since` keeps the window the visit began with, so a
+  refetch or remount in the same visit answers the same Δ rows, and the list's count still drops to zero. In phase 1 every open card on a goal's
   tasks counts as waiting on you, tokens are input plus output (cached tokens aside), and a task whose
   work is done but whose batch has no merged pull request keeps the goal at Shipping.
 
