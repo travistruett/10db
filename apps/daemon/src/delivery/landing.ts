@@ -1,4 +1,5 @@
 import {
+  ACTIVE_STATES,
   ConflictError,
   landingTarget,
   ProjectLanding,
@@ -11,7 +12,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { listBatches, listTasks } from '@10db/db';
+import { listBatches, listTasks, listWorkstreams } from '@10db/db';
 import { startCards, type Card } from './cards';
 import { networkCall, type DeliveryContext } from './context';
 import { landingNotices } from './notices';
@@ -65,9 +66,10 @@ export async function branchBehindBase(
 /**
  * A notice when no other open work lands in the branch a batch lands in, so a task still filed
  * against a retired branch is not started unwarned even when the branch is level with the base;
- * null when the branch is the project's base, or the branch it lands new tasks in, or when an open
- * task (not one of `own`, the tasks this batch starts) or an unfinished batch other than this one
- * lands there. A done or removed task and a shipped batch are no use.
+ * null when the branch is the project's base, or the branch it lands new tasks in, or when a task
+ * with an active workstream (not one of `own`, the tasks this batch starts) or an unfinished batch
+ * other than this one lands there. A task only filed against the branch, wherever it sits on the
+ * Board, a done or removed task and a shipped batch are no use.
  */
 export function branchUnused(
   ctx: DeliveryContext,
@@ -79,9 +81,17 @@ export function branchUnused(
   if (branch === project.baseBranch) return null;
   if (project.landing === ProjectLanding.Branch && project.landingBranch === branch) return null;
   const mine = new Set(own);
+  // Work under way is use; a task merely filed against the branch is not, or two follow-ups still
+  // filed against a retired branch would hide each other's warning.
+  const underWay = new Set(
+    listWorkstreams(ctx.state.db, { projectId: project.id, states: ACTIVE_STATES }).map(
+      (w) => w.taskId,
+    ),
+  );
   const task = listTasks(ctx.state.db, project.id).find(
     (t) =>
       t.status === TaskStatus.Open &&
+      underWay.has(t.id) &&
       !mine.has(t.id) &&
       taskTarget(project, t).baseBranch === branch,
   );

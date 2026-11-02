@@ -1,5 +1,12 @@
 import { BatchDto, ConflictError, NOTICE_BODY_MAX, type TaskDto } from '@10db/contracts';
-import { cancelTask, getBatch, listBatches, listWorkstreams, setTaskStatus } from '@10db/db';
+import {
+  cancelTask,
+  getBatch,
+  insertWorkstream,
+  listBatches,
+  listWorkstreams,
+  setTaskStatus,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError } from '../github';
@@ -29,6 +36,15 @@ async function ship(batch: BatchDto): Promise<BatchDto> {
 }
 
 const autoMergeCalls = () => h.gh.calls.filter((c) => c.method === 'prAutoMerge');
+
+/** A task landing in `feature/x` that work is under way on: it has a queued workstream. */
+function underWay(title: string): TaskDto {
+  const task = h.addTask(title, { landing: { kind: 'branch', branch: 'feature/x' } });
+  h.state.write((c) => {
+    insertWorkstream(c, task.id);
+  });
+  return task;
+}
 
 describe('a pull request that lands in the base branch', () => {
   it('is opened against it and merges by itself once checks pass', async () => {
@@ -109,8 +125,8 @@ describe('a pull request that lands in another branch', () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
     h.teammatePush('main', 'src/api/fix.txt');
-    // Another open task lands there, so only the behind notice is earned.
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    // Work is under way on another task there, so only the behind notice is earned.
+    underWay('Beta');
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const batch = await start('Greetings', task);
     expect(batch.state).toBe('OPEN');
@@ -125,10 +141,10 @@ describe('a pull request that lands in another branch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('says nothing when the branch holds everything the base has and other open work lands there', async () => {
+  it('says nothing when the branch holds everything the base has and other work is under way there', async () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    underWay('Beta');
     const batch = await start(
       'Greetings',
       h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
@@ -155,15 +171,27 @@ describe('a pull request that lands in another branch', () => {
     expect(h.cards()).toEqual([]);
   });
 
-  it('says nothing about an unused branch while another open task lands there', async () => {
+  it('says nothing about an unused branch while work is under way on another task there', async () => {
     h = createDeliveryHarness();
     h.teammatePush('feature/x', 'src/api/feature.txt');
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    underWay('Beta');
     const batch = await start(
       'Greetings',
       h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
     );
     expect(batch.notices).toEqual([]);
+  });
+
+  it('says so when the only other tasks there are not started, wherever they sit on the Board', async () => {
+    h = createDeliveryHarness();
+    h.teammatePush('feature/x', 'src/api/feature.txt');
+    // Two follow-ups still filed against a retired branch: neither is use of it for the other.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    const batch = await start(
+      'Greetings',
+      h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } }),
+    );
+    expect(batch.notices.map((n) => n.key)).toEqual(['landing-unused']);
   });
 
   it('counts a task that is done, and one that was removed, as no use', async () => {
@@ -564,8 +592,8 @@ describe('in worktree mode', () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
     h.teammatePush('main', 'src/api/fix.txt');
-    // Another open task lands there, so only the behind notice is earned.
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    // Work is under way on another task there, so only the behind notice is earned.
+    underWay('Beta');
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();
@@ -585,8 +613,8 @@ describe('in worktree mode', () => {
   it('says nothing when its landing branch holds everything the base has', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
-    // Another open task lands there, so no unused-branch notice either.
-    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
+    // Work is under way on another task there, so no unused-branch notice either.
+    underWay('Beta');
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();
