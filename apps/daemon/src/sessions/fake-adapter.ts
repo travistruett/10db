@@ -190,6 +190,11 @@ export class FakeAdapter implements SessionAdapter {
   }[] = [];
   /** How a Shape session answers a message; the default writes a short reply. */
   shapeBehaviour: FakeShapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+  /**
+   * When set, a Shape session's stop waits for it before the session ends, as a real process can
+   * take seconds to close after it is asked to.
+   */
+  shapeStopGate: Promise<void> | null = null;
 
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
@@ -208,7 +213,10 @@ export class FakeAdapter implements SessionAdapter {
         inner.send(text);
       },
       interrupt: () => inner.interrupt(),
-      stop: () => inner.stop(),
+      stop: async () => {
+        if (this.shapeStopGate !== null) await this.shapeStopGate;
+        await inner.stop();
+      },
     };
     this.shapeSessions.push({ spec, sent, handle });
     return handle;

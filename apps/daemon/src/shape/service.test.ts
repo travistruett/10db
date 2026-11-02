@@ -16,7 +16,7 @@ import {
   listShapeMessages,
   listShapeProposals,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
@@ -370,6 +370,69 @@ describe('idle and resume', () => {
     expect(second.spec.resumeProviderSessionId).toBe('fake-shape-1');
     expect(second.spec.prompt).not.toContain('fresh session');
     expect(adapter.shapeSessions).toHaveLength(2);
+  });
+
+  it('starts no new session until the idle one has closed, and its end does not end the next turn', async () => {
+    service.send(shapeId, 'one');
+    await service.settled(shapeId);
+    const first = must(adapter.shapeSessions[0], 'a session');
+    const closing = gate();
+    const hold = gate();
+    // A failed assertion still lets afterEach close the sessions.
+    onTestFinished(() => {
+      closing.open();
+      hold.open();
+    });
+    adapter.shapeStopGate = closing.wait;
+    clock.advance(10 * 60_000);
+    await tick();
+    // The process is still closing when the builder comes back.
+    expect(getSession(c.store.db, first.spec.sessionId).endedAt).toBeNull();
+    adapter.shapeBehaviour = async () => {
+      await hold.wait;
+      return { text: 'two done' };
+    };
+    service.send(shapeId, 'two');
+    let done = false;
+    void service.settled(shapeId).then(() => {
+      done = true;
+    });
+    await tick();
+    expect(adapter.shapeSessions).toHaveLength(1);
+    expect(service.propose(shapeId)).toEqual({ status: 'started' });
+    expect(service.propose(shapeId)).toEqual({ status: 'ignored' });
+    await expect(service.convert(shapeId, [mintId('ShapeProposal')])).rejects.toThrow(
+      ConflictError,
+    );
+
+    closing.open();
+    await tick();
+    expect(getSession(c.store.db, first.spec.sessionId)).toMatchObject({ exitReason: 'idle' });
+    const second = must(adapter.shapeSessions[1], 'a resumed session');
+    expect(second.spec.resumeProviderSessionId).toBe('fake-shape-1');
+    // The old session's end leaves the turn of the new one running.
+    expect(done).toBe(false);
+    expect(service.propose(shapeId)).toEqual({ status: 'ignored' });
+    await expect(service.convert(shapeId, [mintId('ShapeProposal')])).rejects.toThrow(
+      ConflictError,
+    );
+    expect(second.sent).toEqual([]);
+
+    hold.open();
+    await service.settled(shapeId);
+    expect(done).toBe(true);
+    expect(second.sent).toHaveLength(1);
+    expect(adapter.shapeSessions).toHaveLength(2);
+  });
+
+  it('ends the running turn when the service closes', async () => {
+    adapter.shapeBehaviour = () => new Promise(() => undefined);
+    service.send(shapeId, 'one');
+    await tick();
+    await service.close();
+    await service.settled(shapeId);
+    const session = must(adapter.shapeSessions[0], 'a session');
+    expect(getSession(c.store.db, session.spec.sessionId)).toMatchObject({ exitReason: 'stopped' });
   });
 
   it('does not close a session that has a turn running', async () => {

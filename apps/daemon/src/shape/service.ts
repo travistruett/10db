@@ -118,6 +118,8 @@ interface Live {
   readonly sessionId: SessionId;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
   endReason: string | null;
+  /** Resolves when its events have ended: the session has ended and its row says so. */
+  done: Promise<void>;
 }
 
 interface Runtime {
@@ -136,6 +138,11 @@ interface Runtime {
   refused: number;
   /** Stop or Convert interrupted the turn running now. */
   interrupted: boolean;
+  /**
+   * Resolves when the session the daemon last closed has ended. No new session starts before it,
+   * so two processes never run, or resume the same SDK session, at once.
+   */
+  closing: Promise<void> | null;
 }
 
 export function createShapeService(deps: ShapeServiceDeps): ShapeService {
@@ -159,6 +166,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         proposed: false,
         refused: 0,
         interrupted: false,
+        closing: null,
       };
       runtimes.set(shapeId, rt);
     }
@@ -192,6 +200,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   // --- Events from a session --------------------------------------------------------------------
 
   const onEvent = (shapeId: ShapeId, rt: Runtime, live: Live, event: SessionEvent): void => {
+    // A session the daemon has closed still records its own row, but it no longer runs the
+    // conversation: its events never end the turn of the session that replaced it.
+    const running = rt.live === live;
     switch (event.type) {
       case 'started':
         state.write((ctx) => {
@@ -221,7 +232,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               body: event.text,
             });
         });
-        rt.waiting?.({ kind: 'complete', result: event.result });
+        if (running) rt.waiting?.({ kind: 'complete', result: event.result });
         break;
       case 'rate_limit':
         if (event.status === 'rejected')
@@ -236,10 +247,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         state.write((ctx) => {
           endSession(ctx, live.sessionId, live.endReason ?? event.reason);
         });
-        if (rt.live === live) rt.live = null;
+        if (running) rt.live = null;
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
-        rt.waiting?.({ kind: 'ended' });
+        if (running) rt.waiting?.({ kind: 'ended' });
         break;
       case 'activity':
       case 'compacted':
@@ -320,17 +331,39 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         return verdict;
       },
     };
-    const live: Live = { handle: adapter.startShape(spec), sessionId: row.id, endReason: null };
+    const live: Live = {
+      handle: adapter.startShape(spec),
+      sessionId: row.id,
+      endReason: null,
+      done: Promise.resolve(),
+    };
     rt.live = live;
-    void consume(shapeId, rt, live);
+    live.done = consume(shapeId, rt, live);
   };
 
-  const closeLive = async (rt: Runtime, reason: string): Promise<void> => {
+  /** Stops the running session; resolves, as `rt.closing` does, once it has ended. */
+  const closeLive = (rt: Runtime, reason: string): Promise<void> => {
     const live = rt.live;
-    if (live === null) return;
+    if (live === null) return rt.closing ?? Promise.resolve();
     live.endReason = reason;
     rt.live = null;
-    await live.handle.stop();
+    // A turn waiting on this session ends with it: its own `ended` event no longer counts.
+    rt.waiting?.({ kind: 'ended' });
+    const previous = rt.closing;
+    const closing = (async () => {
+      try {
+        await live.handle.stop();
+      } catch (error) {
+        log.warn({ err: error, sessionId: live.sessionId }, 'shape session did not stop cleanly');
+      }
+      await live.done;
+      await previous;
+    })();
+    rt.closing = closing;
+    void closing.finally(() => {
+      if (rt.closing === closing) rt.closing = null;
+    });
+    return closing;
   };
 
   const armIdle = (rt: Runtime): void => {
@@ -350,6 +383,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rt.proposed = false;
     rt.refused = 0;
     rt.interrupted = false;
+    // The turn counts as running (rt.current) while the last session finishes closing.
+    if (rt.live === null && rt.closing !== null) await rt.closing;
     const ended = new Promise<TurnEnd>((resolve) => {
       rt.waiting = resolve;
     });
