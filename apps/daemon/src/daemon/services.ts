@@ -381,6 +381,7 @@ export function createServices(deps: {
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
+    getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),
     reopenTask: (id) => deps.state.write((ctx) => reopenTask(ctx, id)),
     async patchTask(id, patch) {
