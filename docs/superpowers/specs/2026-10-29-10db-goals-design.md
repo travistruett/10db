@@ -299,7 +299,9 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   them. The same response carries the Ungrouped group (`goalId: null`).
   **Built:** the daemon computes it (`packages/db/src/store/goal-digest.ts`). `GET /projects/:projectId/goals`
   answers `GoalListDto` (each goal's digest and count of new items, plus Ungrouped) and leaves every mark
-  alone; only `GET /goals/:goalId/digest` advances its goal's mark. In phase 1 every open card on a goal's
+  alone; only `GET /goals/:goalId/digest` advances its goal's mark. A visit lasts while the goal is opened again
+  within 30 minutes of its last opening: `goal_views.visit_since` keeps the window the visit began with, so a
+  refetch or remount in the same visit answers the same Δ rows, and the list's count still drops to zero. In phase 1 every open card on a goal's
   tasks counts as waiting on you, tokens are input plus output (cached tokens aside), and a task whose
   work is done but whose batch has no merged pull request keeps the goal at Shipping.
 

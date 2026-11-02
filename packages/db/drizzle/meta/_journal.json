@@ -155,6 +155,13 @@
       "when": 1793574578118,
       "tag": "0021_goals",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1793614992663,
+      "tag": "0022_goal_visit_since",
+      "breakpoints": true
     }
   ]
 }
