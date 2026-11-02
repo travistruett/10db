@@ -1734,6 +1734,63 @@ describe('a required check GitHub cancelled', () => {
     expect(h.gh.reruns).toEqual([]);
   });
 
+  it('waits while another job of the cancelled check’s run is still running, then runs it once', async () => {
+    const { id, prUrl, w } = watching();
+    const desktopCancelledGateRunning = {
+      state: 'cancelled' as const,
+      failing: [],
+      pending: [job('gate')],
+      cancelled: [job('desktop')],
+    };
+    h.gh.setRequiredChecks(prUrl, desktopCancelledGateRunning);
+    w.start();
+    await w.idle();
+    for (let i = 0; i < GRACE_ROUNDS + 2; i++) await round(w);
+    // GitHub refuses to rerun a run still in progress: 10db neither asks nor gives up.
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+    expect(h.cards()).toEqual([]);
+
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    await round(w);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('does not wait on a running job of another run', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [job('lint', '88')],
+      cancelled: [job('desktop')],
+    });
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('tries again later, with no notice, when GitHub says the run is still running', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    h.gh.failNext.set(
+      'rerunFailed',
+      new GhError('failed', 'run 77 cannot be rerun; This workflow is already running'),
+    );
+    await round(w);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
   it('gives a new head its own rerun', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, cancelled('desktop'));

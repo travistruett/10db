@@ -47,6 +47,8 @@ const PR_WATCH_INTERVAL_MS = 2 * 60_000;
  * runs for lost. A workflow starts within seconds of a push, so this leaves room for a busy queue.
  */
 const CHECKS_START_MS = 10 * 60_000;
+/** GitHub's refusal of `gh run rerun` on a run still in progress ("This workflow is already running"). */
+const RUN_STILL_RUNNING = /already running/i;
 
 /** Longest reason kept on a batch: it is shown in the UI. */
 const MAX_REASON = 500;
@@ -489,7 +491,8 @@ export function createPrWatch(input: {
    * GitHub stopped). A cancelled check is its own state, never pending: nothing runs for it, and the
    * pull request cannot merge. The second read in a row that lists one (a newer push's run replaces
    * a superseded one within minutes, and rerunning that old run could cancel the new one) runs its
-   * Actions run again, once for the head. It is never run a second time: a check cancelled again after it ran
+   * Actions run again, once for the head. While another job of that run is still running, GitHub
+   * refuses the rerun, so 10db waits for the run to finish before it counts a read. It is never run a second time: a check cancelled again after it ran
    * (or still cancelled 10 minutes after the rerun) shows a notice naming the check and its link, as
    * does a check with no Actions run to start. The notice goes when no check is cancelled. A failing
    * required check, a conflict and a pull request that is no longer open leave all of it alone.
@@ -555,9 +558,12 @@ export function createPrWatch(input: {
       }
       return;
     }
+    const runs = [...new Set(cancelled.flatMap((job) => (job.runId === null ? [] : [job.runId])))];
+    // GitHub refuses to rerun a run that is still in progress (another of its jobs is running), so
+    // the cancelled one waits for its run to finish: no read counts, nothing is rerun or shown.
+    if (required.pending.some((job) => job.runId !== null && runs.includes(job.runId))) return;
     track.streak += 1;
     if (track.streak < 2) return;
-    const runs = [...new Set(cancelled.flatMap((job) => (job.runId === null ? [] : [job.runId])))];
     const repo = root.repo;
     // A check with no Actions run (a commit status from another CI) has nothing 10db can run.
     if (repo === null || cancelled.some((job) => job.runId === null)) {
@@ -569,6 +575,8 @@ export function createPrWatch(input: {
       for (const runId of runs) await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
     } catch (error) {
       if (controller.signal.aborted || ghDown(error)) throw error;
+      // The run is still going (a job gh doesn't list as required, say): ask again next round.
+      if (RUN_STILL_RUNNING.test(detailOf(error))) return;
       logger.warn(
         { batchId: root.id, err: detailOf(error) },
         'could not run a cancelled check again',
