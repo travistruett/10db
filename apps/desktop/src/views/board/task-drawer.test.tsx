@@ -519,6 +519,46 @@ describe('TaskDrawer', () => {
       });
     });
 
+    it('offers Start over beside Retry for a failed run in an open batch, and posts fresh', async () => {
+      const batch = batchDto();
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      const bodies: unknown[] = [];
+      serve(
+        http.post(daemonUrl('/tasks/:taskId/start'), async ({ request }) => {
+          // The body rides along without replacing the client's headers.
+          expect(request.headers.get('authorization')).toBe('Bearer test-token');
+          bodies.push(await request.json());
+          return HttpResponse.json({ ...ws, state: 'QUEUED' }, { status: 201 });
+        }),
+      );
+      open({ workstream: ws, batch, workstreams: [ws] });
+      const d = await dialog();
+      expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Start over' }));
+      await waitFor(() => {
+        expect(bodies).toEqual([{ fresh: true }]);
+      });
+    });
+
+    it('offers no Start over for a failed run outside a batch, or in one that shipped', async () => {
+      serve();
+      open({ workstream: workstreamDto({ state: 'FAILED', failureReason: 'boom' }) });
+      expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
+    });
+
+    it('offers no Start over to a parked task, which the daemon would refuse to start', async () => {
+      serve();
+      const batch = batchDto();
+      const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom', batchId: batch.id });
+      open({
+        task: { boardColumnId: mintId('BoardColumn') },
+        workstream: ws,
+        batch,
+        workstreams: [ws],
+      });
+      expect(within(await dialog()).queryByRole('button', { name: 'Start over' })).toBeNull();
+    });
+
     it('a retry refusal shows beside Retry', async () => {
       const ws = workstreamDto({ state: 'FAILED', failureReason: 'boom' });
       serve(

@@ -39,6 +39,7 @@ import {
   PROTOCOL_VERSION,
   RetryInput,
   RoutingRulesInput,
+  StartTaskInput,
   SystemCheckDto,
   TaskId,
   TaskInput,
@@ -474,8 +475,12 @@ export function createApp(deps: ApiDeps) {
       if (!deps.taskRemoval) return c.json({ error: 'not_implemented' }, 501);
       return c.json(deps.taskRemoval.reopenTask(taskId));
     })
-    .post('/tasks/:taskId/start', (c) => {
-      const started = deps.services.startTask(TaskId.parse(c.req.param('taskId')));
+    .post('/tasks/:taskId/start', async (c) => {
+      const taskId = TaskId.parse(c.req.param('taskId'));
+      // An empty body is a plain start, whatever its content type; a body that is not JSON is a 400.
+      const text = await c.req.text();
+      const input = StartTaskInput.parse(text.trim() === '' ? {} : JSON.parse(text));
+      const started = deps.services.startTask(taskId, input);
       // A pull-request start answers before its branch is cut: 202, as a batch start does.
       switch (started.kind) {
         case 'workstream':
