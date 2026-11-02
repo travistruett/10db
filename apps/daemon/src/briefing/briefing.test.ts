@@ -745,6 +745,21 @@ describe('the gate in a brief', () => {
     expect(brief).toContain('Icebox');
   });
 
+  it('tells an implement step to change files with Edit or Write, not an interpreter or a redirect', () => {
+    for (const sandboxed of [false, true]) {
+      const brief = buildSessionPrompt({ ...base, sandboxed, action: { kind: 'start' } });
+      expect(brief).toContain('Change files with the Edit or Write tool');
+      expect(brief).toContain('python3 -c');
+      expect(brief).toContain('shell redirection');
+      expect(brief).toContain('Allow Bash');
+    }
+  });
+
+  it('does not tell a read-only step to edit files', () => {
+    const brief = buildSessionPrompt({ ...base, step: reviewStep, action: { kind: 'start' } });
+    expect(brief).not.toContain('Change files with the Edit or Write tool');
+  });
+
   it('tells a plan step to keep a design or docs plan to about one pull request', () => {
     const brief = buildSessionPrompt({
       ...base,
