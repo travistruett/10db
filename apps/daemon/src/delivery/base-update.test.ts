@@ -1197,6 +1197,43 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 
+  it("starts the lane without the base when a sibling's uncommitted changes are in the way, with a notice naming the paths that the next merge clears", async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    const original = readFileSync(join(path, 'README.md'), 'utf8');
+    // Another task of the batch is mid-session, with an edit in a file the base changes.
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    const before = state(path);
+    const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(update.kind).toBe('not_merged');
+    expect(state(path)).toEqual(before);
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice).toMatchObject({
+      key: 'base-uncommitted',
+      tone: 'warning',
+      line: 'Uncommitted changes in README.md: this lane started without main’s newer commits',
+    });
+    expect(notice.body).toContain('README.md');
+    expect(notice.body).toContain('without the newer commits');
+    expect(h.cards()).toEqual([]);
+    // The sibling commits; the next launch takes the base and the notice goes.
+    writeFileSync(join(path, 'README.md'), original);
+    await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
+  it('shows no launch notice for uncommitted changes a gate meets', async () => {
+    h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+    const { batch } = await opened();
+    const path = pathOf(batch);
+    h.teammatePush('main', 'README.md', '# theirs\n');
+    writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
+    await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
   it("leaves a fix batch's branch, which is the pull request's, as it is", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     const { batch } = await opened();
