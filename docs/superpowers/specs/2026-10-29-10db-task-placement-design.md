@@ -194,6 +194,14 @@ exposure already exists in Your folder; (b) skip the seed clone, and install, wh
 unfinished shared batch; (c) deny a lane's writes to the seed directories in a shared checkout. (b) is the
 smallest. This design recommends (b), to be settled before T2 builds the cut change.
 
+Built as (b). The install runs with `--ignore-scripts`, so a package the project allows to build
+(`allowBuilds`, or `onlyBuiltDependencies`) and whose seed would have carried built output (a native addon, a
+generated client) is installed but unbuilt in a copy cut this way. 10db does not run those scripts: the
+install runs no code from the repository. After the install it reads the copy's `node_modules/.pnpm` and the
+project's allow list as data, and a warning notice (`install-scripts-skipped`) on the batch's tasks names each
+allowed package that has an install script (or a `binding.gyp`), saying to run `pnpm rebuild <name>` in the
+copy or to start the task again once Your folder's batch has ended.
+
 Nothing else is new. A copy's lane profile is today's. The shared cut and the switch back keep their git rules
 (decision 129 and `decisions/2026-10-29-shared-checkout-switch-back.md`).
 
