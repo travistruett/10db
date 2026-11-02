@@ -21,6 +21,7 @@ export function nextActionAfterCrash(
     case 'fix':
     case 'revise':
     case 'uncommitted':
+    case 'merge':
     case 'builder_review':
       return previous;
     case 'answer':
@@ -57,6 +58,7 @@ export function nextActionOnAnotherAccount(
     case 'continue_from_handoff':
     case 'fix':
     case 'uncommitted':
+    case 'merge':
     case 'verify':
     case 'revise':
     case 'builder_review':

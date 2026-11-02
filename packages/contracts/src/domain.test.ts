@@ -248,6 +248,7 @@ describe('NextAction', () => {
     [{ kind: 'verify' }],
     [{ kind: 'resume', providerSessionId: 'abc', reason: 'daemon restarted' }],
     [{ kind: 'uncommitted', paths: ['src/api/a.ts'] }],
+    [{ kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] }],
   ])('accepts %j', (value) => {
     expect(NextAction.parse(value)).toEqual(value);
   });
