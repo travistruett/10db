@@ -318,22 +318,42 @@ export interface FollowUpFields {
   readonly acceptanceCriteria?: readonly string[];
 }
 
+/** How a follow-up task came about, which decides how its description names the source. */
+export const FollowUpOrigin = {
+  /** A step checking the source found it. */
+  Found: 'found',
+  /** The source's implementer left it out of the source. */
+  Left: 'left',
+} as const;
+export type FollowUpOrigin = (typeof FollowUpOrigin)[keyof typeof FollowUpOrigin];
+
+function originLine(origin: FollowUpOrigin, source: TaskDto): string {
+  switch (origin) {
+    case FollowUpOrigin.Found:
+      return `Found while checking the task "${source.title}" (${source.id}).`;
+    case FollowUpOrigin.Left:
+      return `Work left from the task "${source.title}" (${source.id}).`;
+  }
+}
+
 /**
- * Files a follow-up found while a step checked `sourceId`: an open task in the same project, parked
- * in the Icebox column (the project's first column when the builder renamed it, the derived board
- * when it has none), landing where the source lands and touching the same areas. Its description
- * names the source. It depends on nothing, so it never holds the source up.
+ * Files a follow-up for `sourceId`: an open task in the same project, parked in the Icebox column
+ * (the project's first column when the builder renamed it, the derived board when it has none),
+ * landing where the source lands and touching the same areas. Its description names the source and
+ * says whether a step found it or the source's implementer left it. It depends on nothing, so it
+ * never holds the source up.
  */
 export function insertFollowUpTask(
   ctx: WriteContext,
   sourceId: TaskId,
   fields: FollowUpFields,
+  how: FollowUpOrigin = FollowUpOrigin.Found,
 ): TaskDto {
   const source = getTask(ctx.tx, sourceId);
   const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
   const columns = listBoardColumns(ctx.tx, source.projectId);
   const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
-  const origin = `Found while checking the task "${source.title}" (${source.id}).`;
+  const origin = originLine(how, source);
   return writeTask(ctx, source.projectId, {
     landing: source.landing,
     workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),

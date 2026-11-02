@@ -6,15 +6,16 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 200,
-      "description": "The outcome, as what is true when it is done."
+      "description": "The outcome, as what is true when this remaining section is done."
     },
     "description": {
       "type": "string",
       "minLength": 1,
-      "description": "What you saw, where, and why it matters."
+      "description": "What is left to do, what this task already covers, and where the next session should start."
     },
     "acceptanceCriteria": {
       "default": [],
+      "description": "What must be true for this remaining section to count as done.",
       "type": "array",
       "items": {
         "type": "string",

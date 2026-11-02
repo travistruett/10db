@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_HAZARDS,
   EvidenceDto,
+  FollowUpInput,
   HandoffInput,
   hazardScope,
   HazardScope,
@@ -309,6 +310,15 @@ describe('MCP tool inputs', () => {
         ],
       }).success,
     ).toBe(true);
+  });
+
+  it('words the file_follow_up fields for an implementer filing a remaining section, not a reviewer finding', () => {
+    const { description, title, acceptanceCriteria } = McpToolInputs.file_follow_up.shape;
+    expect(description.description).toMatch(/left to do/i);
+    expect(description.description).not.toMatch(/what you saw/i);
+    expect(title.description).toBeDefined();
+    expect(acceptanceCriteria.description).toBeDefined();
+    expect(FollowUpInput.shape.description.description).toMatch(/what you saw/i);
   });
 
   it('requires a next action in the handoff', () => {

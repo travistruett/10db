@@ -1627,6 +1627,8 @@ describe('file_follow_up', () => {
     });
     expect(filed[0]?.description).toContain(s.task.title);
     expect(filed[0]?.description).toContain(s.task.id);
+    expect(filed[0]?.description).toContain('Work left from the task');
+    expect(filed[0]?.description).not.toContain('Found while checking');
     expect(first.json).toEqual({ taskId: filed[0]?.id, title: args.title });
   });
 });

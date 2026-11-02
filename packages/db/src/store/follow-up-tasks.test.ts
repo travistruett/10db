@@ -7,7 +7,13 @@ import {
   patchBoardColumn,
 } from './board-columns';
 import type { Store } from './store';
-import { getTask, insertFollowUpTask, insertRetryLimitFollowUp, insertTask } from './tasks';
+import {
+  FollowUpOrigin,
+  getTask,
+  insertFollowUpTask,
+  insertRetryLimitFollowUp,
+  insertTask,
+} from './tasks';
 import { createTestStore, seedProject } from './test-support';
 
 let store: Store;
@@ -54,6 +60,26 @@ describe('insertFollowUpTask', () => {
     expect(filed.description).toContain(source.id);
     expect(filed.description).toContain('The error says nothing.');
     expect(getTask(store.db, filed.id).boardColumnId).toBe(icebox?.id);
+  });
+
+  it('says it was found while checking the task by default', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    const filed = store.write((ctx) => insertFollowUpTask(ctx, source.id, followUp)).value;
+    expect(filed.description).toContain('Found while checking the task');
+  });
+
+  it('says it is work left from the task when the implementer files it', () => {
+    const project = seedProject(store);
+    const source = store.write((ctx) => insertTask(ctx, project.id, input())).value;
+    const filed = store.write((ctx) =>
+      insertFollowUpTask(ctx, source.id, followUp, FollowUpOrigin.Left),
+    ).value;
+    expect(filed.description).toContain(
+      `Work left from the task "${source.title}" (${source.id}).`,
+    );
+    expect(filed.description).not.toContain('Found while checking');
+    expect(filed.description).toContain('The error says nothing.');
   });
 
   it('puts the task last on the board, after the one it came from', () => {
