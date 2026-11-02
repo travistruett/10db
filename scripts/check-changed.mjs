@@ -5,6 +5,7 @@
 // `make check-changed`); the ship gate still runs the full `make gate` before the push.
 //
 // The diff is everything since the branch left its base, uncommitted and untracked files included.
+// A file the sandbox will not let it stat counts only when a commit or the index changes it.
 // The base is the merge-base with origin/main, else the upstream branch, else main. With no base,
 // or with a changed file this script cannot place in a package or a docs-like path (a root config,
 // the lockfile, the gate script, CI), it runs the full gate: it never narrows what it cannot place.
@@ -217,40 +218,73 @@ function baseRef() {
   return null;
 }
 
-/** @param {string} base */
-function changedFiles(base) {
-  const lines = [
-    git(['diff', '--name-only', base]),
-    git(['ls-files', '--others', '--exclude-standard']),
-  ].join('\n');
-  return [...new Set(lines.split('\n').filter(Boolean))].sort();
+/**
+ * Whether lstat sees a file: 'present'; 'gone' when it is deleted (ENOENT, ENOTDIR); 'unreadable'
+ * for any other error, as for a file on the sandbox's read deny list (apps/daemon/.env.example in
+ * a lane fails with EPERM).
+ * @param {string} file repo-relative
+ * @returns {'present' | 'gone' | 'unreadable'}
+ */
+function statOf(file) {
+  try {
+    lstatSync(join(root, file));
+    return 'present';
+  } catch (error) {
+    const code = /** @type {NodeJS.ErrnoException} */ (error).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'gone' : 'unreadable';
+  }
+}
+
+/** @param {string[]} unreadable @param {boolean} [toStderr] */
+function reportSkipped(unreadable, toStderr = false) {
+  if (unreadable.length === 0) return;
+  const line = `check-changed: skipping what it cannot read: ${unreadable.join(', ')}`;
+  if (toStderr) console.error(line);
+  else console.log(line);
 }
 
 /**
- * The changed files that can be formatted and linted: those lstat can see. A deleted file (ENOENT,
- * ENOTDIR) drops out silently. A file the sandbox denies reading (apps/daemon/.env.example in a
- * lane) passes existsSync but fails lstat with EPERM, and Prettier lstats every path it is named
- * before it applies .prettierignore, so one such path would fail the whole format step. It is
- * skipped with one printed line, so the skip stays visible; it still counts toward which packages
- * are checked.
+ * The files changed since base: the diff against the worktree, and the untracked files. git cannot
+ * compare a file it cannot lstat with the index, so the worktree diff lists every such file as
+ * changed. Such a file stays only when a commit since base or the index changes it, which the
+ * tree-to-tree and index diffs show without reading the worktree; a worktree edit to it could not
+ * be checked here anyway. The ones dropped are returned so the caller can name them.
+ * @param {string} base
+ */
+function changedFiles(base) {
+  const lines = (/** @type {string[]} */ args) => (git(args) ?? '').split('\n').filter(Boolean);
+  const all = new Set([
+    ...lines(['diff', '--name-only', base]),
+    ...lines(['ls-files', '--others', '--exclude-standard']),
+  ]);
+  const unreadable = [...all].filter((f) => statOf(f) === 'unreadable');
+  /** @type {string[]} */
+  const dropped = [];
+  if (unreadable.length > 0) {
+    const committed = new Set([
+      ...lines(['diff', '--name-only', base, 'HEAD']),
+      ...lines(['diff', '--name-only', '--cached', base]),
+    ]);
+    for (const file of unreadable) {
+      if (committed.has(file)) continue;
+      all.delete(file);
+      dropped.push(file);
+    }
+  }
+  return { files: [...all].sort(), dropped: dropped.sort() };
+}
+
+/**
+ * The changed files that can be formatted and linted: those lstat can see. A deleted file drops out
+ * silently. Prettier lstats every path it is named before it applies .prettierignore, so one
+ * unreadable path would fail the whole format step; it is skipped with one printed line, so the
+ * skip stays visible. Such a file reaches here only when named after `--` or changed by a commit,
+ * and then it still counts toward which packages are checked.
  * @param {string[]} files repo-relative
  */
 function readableFiles(files) {
-  /** @type {string[]} */
-  const kept = [];
-  /** @type {string[]} */
-  const unreadable = [];
-  for (const file of files) {
-    try {
-      lstatSync(join(root, file));
-      kept.push(file);
-    } catch (error) {
-      const code = /** @type {NodeJS.ErrnoException} */ (error).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') unreadable.push(file);
-    }
-  }
-  if (unreadable.length > 0)
-    console.log(`check-changed: skipping what it cannot read: ${unreadable.join(', ')}`);
+  const kept = files.filter((f) => statOf(f) === 'present');
+  reportSkipped(files.filter((f) => statOf(f) === 'unreadable'));
   return kept;
 }
 
@@ -387,7 +421,10 @@ async function main() {
       if (precheck) return runPrecheckEverywhere(reason);
       runFull(reason);
     }
-    files = changedFiles(base);
+    const changed = changedFiles(base);
+    files = changed.files;
+    // With --plan stdout is the JSON alone.
+    reportSkipped(changed.dropped, planOnly);
   }
   const plan = planFor(files, packages, precheck);
   if (planOnly) {

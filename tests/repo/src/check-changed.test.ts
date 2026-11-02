@@ -11,7 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { envWithoutGitVariables } from './fixtures';
+import { createThrowawayRepo, envWithoutGitVariables } from './fixtures';
 import { readRepoFile, repoRoot } from './workspace';
 
 interface Plan {
@@ -343,6 +343,53 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
       );
     } finally {
       chmodSync(join(dir, 'apps/x/locked'), 0o755);
+    }
+  });
+
+  it('counts a file it cannot stat as changed only when a commit or the index changes it', () => {
+    const repo = createThrowawayRepo('check-changed-git');
+    const locked = ['apps/x/locked', 'apps/y/locked', 'apps/z/locked'];
+    try {
+      const write = (path: string, content: string) => {
+        mkdirSync(join(repo.dir, path, '..'), { recursive: true });
+        writeFileSync(join(repo.dir, path), content);
+      };
+      write('scripts/check-changed.mjs', readRepoFile('scripts/check-changed.mjs'));
+      for (const name of ['x', 'y', 'z']) {
+        write(`apps/${name}/package.json`, JSON.stringify({ name }));
+        write(`apps/${name}/locked/a.ts`, 'export {};\n');
+      }
+      write('docs/a.md', 'a\n');
+      repo.git('add', '.');
+      repo.commit('base');
+      repo.git('branch', 'main');
+      // apps/y's file changes in a commit, apps/z's only in the index, apps/x's not at all.
+      write('docs/a.md', 'b\n');
+      write('apps/y/locked/a.ts', 'export const y = 1;\n');
+      repo.git('add', 'docs/a.md', 'apps/y/locked/a.ts');
+      repo.commit('change');
+      write('apps/z/locked/a.ts', 'export const z = 1;\n');
+      repo.git('add', 'apps/z/locked/a.ts');
+      // Without search permission lstat of what is inside fails with EACCES, as the sandbox's read
+      // deny list makes it fail with EPERM for apps/daemon/.env.example. git cannot compare such a
+      // file with the index, so a diff against the worktree reports it as changed.
+      for (const dir of locked) chmodSync(join(repo.dir, dir), 0o000);
+      const result = spawnSync(
+        process.execPath,
+        ['scripts/check-changed.mjs', '--plan', '--precheck'],
+        { cwd: repo.dir, encoding: 'utf8', env: repo.env },
+      );
+      expect(result.status, result.stderr).toBe(0);
+      const plan = JSON.parse(result.stdout) as Plan & { files: string[] };
+      expect(plan.files).toEqual(['apps/y/locked/a.ts', 'apps/z/locked/a.ts', 'docs/a.md']);
+      expect(plan.changed).toEqual(['apps/y', 'apps/z']);
+      expect(plan.affected).toEqual(['apps/y', 'apps/z']);
+      expect(result.stderr).toContain(
+        'check-changed: skipping what it cannot read: apps/x/locked/a.ts\n',
+      );
+    } finally {
+      for (const dir of locked) chmodSync(join(repo.dir, dir), 0o755);
+      repo.remove();
     }
   });
 
