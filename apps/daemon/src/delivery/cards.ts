@@ -4,26 +4,26 @@ import {
   type BatchDto,
   type CardResolvesWhen,
   type BatchId,
+  type CiStopped,
   type FailingCheckDto,
   type InboxOption,
   type ProjectDto,
   type ProjectId,
+  type RequiredCheckJobDto,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
 import {
   checkoutSwitchCommand,
   GitNetworkError,
-  worktreeMergeCommand,
   worktreeRemovalCommand,
-  worktreeRestoreCommand,
   type CheckoutPlace,
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
+import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
-import type { TakenNumber } from './migration-numbers';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
 
 /** A flag card's text. Every delivery card says what to fix (batch delivery spec §1). */
@@ -317,90 +317,46 @@ export const worktreeCards = {
   },
 };
 
-/** The fold key of a batch's conflict-with-its-base card, so a clean merge can withdraw it. */
+/**
+ * The fold keys of the cards an earlier build raised for a batch's conflict with its base and for files
+ * in its way. Now a notice on the batch's tasks shows both (`notices.ts`); the keys stay so that the
+ * removal of the batch's worktree can still close a card such a build left open.
+ */
 export const baseConflictKey = (batchId: BatchId): string => `base-conflict:${batchId}`;
-
-/** The fold key of a batch's files-in-the-way card, so a clean merge can withdraw it. */
 export const baseKeptKey = (batchId: BatchId): string => `base-kept:${batchId}`;
 
-/** Why a base card was raised beyond the gate, and what more it found. */
-export interface BaseCardContext {
-  /** The task that asked for the migrations hazard, which 10db holds back until the branch holds its base. */
-  readonly migrationsFor?: string;
-  /** The branch's migrations whose number the base already gives another. */
-  readonly taken?: readonly TakenNumber[];
-}
+/**
+ * The fold keys of the cards an earlier build raised for a pull request that waits to be merged by hand:
+ * the project's repository doesn't allow auto-merge, and GitHub refused it for one batch. The batch's
+ * `pull-request-merge` notice says both now; a ship that writes or clears it closes such a card.
+ */
+export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
+export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-refused:${batchId}`;
 
-/** What a task held back from the migrations hazard is told on the card, after its first paragraph. */
-function migrationsHeld(batch: BatchDto, context: BaseCardContext, until: string): string {
-  return context.migrationsFor === undefined
-    ? ''
-    : `\n\nTask "${context.migrationsFor}" asked for the migrations hazard. 10db gives it only once this branch holds ${batch.baseBranch}, so that a migration it generates is numbered after ${batch.baseBranch}'s latest: until ${until}, the task generates no migration.`;
-}
+/** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
+export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
 
-/** The migrations a conflict renumbers, in a title: "migration 0009_x" or "migrations 0009_x, 0010_y". */
-function migrationNames(taken: readonly TakenNumber[]): string {
-  const tags = [...new Set(taken.map((t) => t.ours))];
-  return `${tags.length === 1 ? 'migration' : 'migrations'} ${tags.join(', ')}`;
-}
-
-/** How the builder makes the branch's migrations again on top of the base, step by step. */
-function regenerateSteps(batch: BatchDto, worktree: string, taken: readonly TakenNumber[]): string {
-  const base = batch.baseBranch;
-  const dirs = [...new Set(taken.map((t) => t.dir))];
-  const named = dirs.map((d) => `${d}/`).join(' and ');
-  const each = taken
-    .map(
-      (t) =>
-        `Migration ${t.ours} takes number ${t.number}, which ${base}'s ${t.theirs} already has.`,
-    )
-    .join('\n');
-  const restores = dirs.map((d) => worktreeRestoreCommand(worktree, base, d)).join(', then ');
-  return `${each}\n\nMigrations are numbered in order, and ${named} is generated, so it is never merged by hand: the batch's migration has to be generated again on top of ${base}. In the worktree:\n1. ${worktreeMergeCommand(worktree, base)}, which stops at the conflict.\n2. ${restores}, which takes ${base}'s migrations whole and drops the batch's own.\n3. Run drizzle-kit generate the way the project does, in the package that holds ${named}, so the batch's schema change becomes the migration after ${base}'s latest.\n4. Resolve any other file listed above, then git add and git commit, with hooks off as in step 1.\n\nUntil then the gates test the branch without ${base}'s newer commits. The next gate tests the result, and this card goes once the branch holds ${base}.`;
-}
-
-/** What delivery tells the builder when a worktree batch's branch can't take its base before a gate. */
+/**
+ * What delivery tells the builder when a worktree batch's branch took its base but its generated files
+ * could not be made again. A conflict or files in the way are notices instead (`notices.ts`).
+ */
 export const baseCards = {
   /**
-   * `worktree` is the batch's worktree, where the builder can merge by hand. A conflict that renumbers
-   * a migration says how to generate it again instead of how to merge.
+   * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
+   * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
+   * `worktree` is the batch's worktree.
    */
-  conflict: (
+  regenerate: (
     batch: BatchDto,
     worktree: string,
-    paths: readonly string[],
-    context: BaseCardContext = {},
-  ): Card => {
-    const taken = context.taken ?? [];
-    const conflicting = `${batch.baseBranch} on origin changed these files in ways that conflict with the batch's own changes:\n${listPaths(paths)}`;
-    const held = migrationsHeld(batch, context, 'the conflict is resolved');
-    return {
-      title:
-        taken.length > 0
-          ? `Batch "${batch.title}" must regenerate ${migrationNames(taken)} on top of ${batch.baseBranch}`
-          : `Batch "${batch.title}" conflicts with ${batch.baseBranch}`,
-      body:
-        taken.length > 0
-          ? `${conflicting}${held}\n\n${regenerateSteps(batch, worktree, taken)}`
-          : `${conflicting}${held}\n\nBefore each gate 10db merges ${batch.baseBranch} into the batch's branch, so the gate tests what the pull request would merge. It can't resolve a conflict: a lane commits only its own files and never records a merge. Until the conflict is resolved, the gates test the branch without ${batch.baseBranch}'s newer commits, so a failure they fix still shows.\n\nOnce the pull request is open, resolve it there (GitHub's Update branch, then Resolve conflicts). Or merge it yourself in the worktree: ${worktreeMergeCommand(worktree, batch.baseBranch)}. That command turns the repository's hooks off, because lanes write in the worktree, so the hook config there is theirs to choose. The next gate tests the result, and this card goes once the branch holds ${batch.baseBranch}.`,
-      foldKey: baseConflictKey(batch.id),
-      // Asked for the migrations hazard, the open card is rewritten to say the task is held back.
-      ...(context.migrationsFor === undefined ? {} : { refresh: true }),
-      detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
-    };
-  },
-  /** `worktree` is the batch's worktree, which holds `paths`. */
-  kept: (
-    batch: BatchDto,
-    worktree: string,
-    paths: readonly string[],
-    context: BaseCardContext = {},
+    dirs: readonly string[],
+    problem: { readonly why: string; readonly logPath: string | null; readonly restored: boolean },
   ): Card => ({
-    title: `Batch "${batch.title}" can't take ${batch.baseBranch}: files git doesn't track are in the way`,
-    body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}${migrationsHeld(batch, context, 'they are out of the way')}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this card goes once the branch holds ${batch.baseBranch}.`,
-    foldKey: baseKeptKey(batch.id),
-    ...(context.migrationsFor === undefined ? {} : { refresh: true }),
-    detail: { batchId: batch.id, paths: paths.slice(0, MAX_LISTED_PATHS) },
+    title: `Batch "${batch.title}": 10db couldn't regenerate files after merging ${batch.baseBranch}`,
+    body: `10db merged ${batch.baseBranch} into the batch's branch. Both sides changed generated files, which are regenerated from their sources and never merged by hand, so 10db took ${batch.baseBranch}'s version of these directories to regenerate them:\n${listPaths(dirs)}\n\nBut ${problem.why}.${problem.restored ? ` 10db removed what the failed run wrote there, so they hold ${batch.baseBranch}'s version as the merge left them.` : ''}\n\nRegenerate them in the worktree ${worktree} (each package's generate script) and commit the result. Until then the gates see generated files that may not match the sources${problem.logPath === null ? '' : `. The log: ${problem.logPath}`}.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    detail: { batchId: batch.id, paths: dirs.slice(0, MAX_LISTED_PATHS) },
   }),
 };
 
@@ -472,6 +428,12 @@ export function duration(ms: number): string {
   if (ms >= 60_000) return `${String(Math.round(ms / 60_000))} min`;
   return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`;
 }
+/** What ran before the push, as a failed ship's card names it. */
+export type ShipCheckName = 'gate' | 'pre-check';
+
+/** The fold key of a batch's card for a pull request left open because only the pre-check checked it. */
+export const preCheckOnlyKey = (batchId: BatchId): string => `pre-check-only:${batchId}`;
+
 const RETRY = "Press Retry in a task's drawer on the Board to ship again; nothing was merged.";
 
 /** How many failing tests a gate card lists. */
@@ -543,6 +505,7 @@ export const shipCards = {
     note: string | null = null,
     steps: readonly GateStepFailure[] = [],
     reran = false,
+    check: ShipCheckName = 'gate',
   ): ShipFailure => {
     const what =
       steps.length > 0
@@ -551,7 +514,7 @@ export const shipCards = {
     return {
       failure: BatchFailure.GateFailed,
       card: {
-        title: `${notShipped(batch)}: the gate failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
+        title: `${notShipped(batch)}: the ${check} failed (exit ${String(gate.exitCode)})${inSteps(steps)}`,
         body: `${note === null ? '' : `${note}\n\n`}${reran ? `${RERAN}, and it failed again.\n\n` : ''}${what}\n\nStart a fix task in the batch (it reopens the batch), or ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)}`,
         detail: stepsDetail(batch, steps),
       },
@@ -584,11 +547,12 @@ export const shipCards = {
     timeoutMs: number,
     logPath: string,
     note: string | null = null,
+    check: ShipCheckName = 'gate',
   ): ShipFailure => ({
     failure: BatchFailure.GateTimedOut,
     card: {
-      title: `${notShipped(batch)}: the gate timed out after ${duration(timeoutMs)}`,
-      body: `${note === null ? '' : `${note}\n\n`}10db stopped the gate and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
+      title: `${notShipped(batch)}: the ${check} timed out after ${duration(timeoutMs)}`,
+      body: `${note === null ? '' : `${note}\n\n`}10db stopped the ${check} and pushed nothing. Log: ${logPath}\n\n${RETRY}`,
       detail: { batchId: batch.id },
     },
   }),
@@ -622,6 +586,16 @@ export const shipCards = {
           },
         };
   },
+  /**
+   * GitHub has nothing to wait for on the pull request and the base has no required checks, so only
+   * the pre-check ever checked the work: 10db leaves the pull request open for the builder.
+   */
+  notMergedPreCheckOnly: (batch: BatchDto, prUrl: string): Card => ({
+    title: `not merged: ${batch.baseBranch} has no required checks and only the pre-check ran`,
+    body: `Batch "${batch.title}" was checked on the Mac by the project's pre-check, which stands in for the gate only where ${batch.baseBranch} has required checks on GitHub. It has none, so nothing but the pre-check would have checked this work, and 10db did not merge it.\n\nPull request: ${prUrl}\n\nReview and merge it yourself, add required checks to ${batch.baseBranch}, or clear the project's pre-check in Settings › General to run the full gate again.`,
+    foldKey: preCheckOnlyKey(batch.id),
+    detail: { batchId: batch.id, prUrl },
+  }),
   abandoned: (batch: BatchDto, doneTitles: readonly string[]): Card => ({
     title: `Batch "${batch.title}" abandoned`,
     body:
@@ -632,37 +606,14 @@ export const shipCards = {
   }),
 };
 
-/** The fold key of the project's repository-doesn't-allow-auto-merge card: one stays open at a time. */
-export const autoMergeOffKey = (projectId: ProjectId): string => `auto-merge-off:${projectId}`;
-
-/** What delivery tells the builder when a pull request that should merge by itself can't. */
-export const mergeCards = {
-  /** The repository's own setting is off; every later pull request of the project waits the same way. */
-  notAllowed: (
-    project: Pick<ProjectDto, 'id'>,
-    repo: string,
-    batch: BatchDto,
-    prUrl: string,
-  ): Card => ({
-    title: "This repository doesn't allow auto-merge",
-    body: `GitHub's "Allow auto-merge" setting is off for ${repo}, so a pull request can't merge itself when its checks pass. The pull request for batch "${batch.title}" is open and waits for you to merge it: ${prUrl}\n\nTurn on Allow auto-merge in ${repo}'s settings on GitHub (Settings, General, Pull Requests) and 10db will have later pull requests merge by themselves.`,
-    foldKey: autoMergeOffKey(project.id),
-    detail: { batchId: batch.id },
-  }),
-  /** GitHub turned this one pull request down, or gh could not ask. */
-  refused: (batch: BatchDto, prUrl: string, error: unknown): Card => {
-    const detail = detailOf(error);
-    const nothingToWaitFor = /clean status/i.test(detail)
-      ? `\n\nGitHub says nothing is left for it to wait for, which usually means ${batch.baseBranch} has no required checks, so there is nothing for auto-merge to wait on.`
-      : '';
-    return {
-      title: `Pull request opened but not set to merge by itself: batch "${batch.title}"`,
-      body: `${detail}${nothingToWaitFor}\n\nThe pull request is open and waits for you to merge it: ${prUrl}`,
-      foldKey: `auto-merge-refused:${batch.id}`,
-      detail: { batchId: batch.id },
-    };
-  },
-};
+/**
+ * GitHub's answer to turning on auto-merge for a pull request that has nothing left to wait for:
+ * either "is in clean status" (checks all pass), or "Protected branch rules not configured for
+ * this branch" (the base branch has no protection rules, as `next` has none).
+ */
+export function nothingToWaitFor(error: unknown): boolean {
+  return /clean status|protected branch rules not configured/i.test(detailOf(error));
+}
 
 /** The place 10db switches a checkout back to, in words. */
 function placeName(place: CheckoutPlace): string {
@@ -755,6 +706,8 @@ export const checkoutCards = {
 export const prCardKey = {
   checks: (batchId: BatchId): string => `pr-checks:${batchId}`,
   closed: (batchId: BatchId): string => `pr-closed:${batchId}`,
+  /** Fixing the pull request's failing required checks stopped: the root batch's id. */
+  ciStopped: (batchId: BatchId): string => `ci-stopped:${batchId}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -764,8 +717,73 @@ function prDetail(batch: BatchDto, link: string): Record<string, Json> {
   return { batchId: batch.id, prUrl: batch.prUrl, link };
 }
 
+/** The `detail` key of a stop card that offers Retry; it holds the root batch's id. */
+export const CI_RERUN_DETAIL = 'ciRerun';
+
+/** The answer of a stop card that reruns the failed jobs on GitHub. */
+export const CI_RERUN_CHOICE = 'Retry';
+
+const fixesOf = (n: number): string => `${String(n)} ${n === 1 ? 'fix' : 'fixes'}`;
+
+/** What a stop card says of why 10db stopped fixing; `note` is the cut's reason for `no_cut`. */
+const CI_STOP_REASON: Record<CiStopped, (fixes: number, note: string | null) => string> = {
+  limit: (fixes) =>
+    `10db made ${fixesOf(fixes)} for this pull request and the checks still fail. It stops at ${String(maxCiFixes)} and starts no more.`,
+  no_change: (fixes) =>
+    `The last fix changed nothing, so the cause may not be in the code (a flaky check, or the base branch). 10db ran ${fixesOf(fixes)} and starts no more.`,
+  no_log: (fixes) =>
+    `10db could not read a log for the failing check (it is not a GitHub Actions job, or GitHub no longer keeps its log), so it started ${fixes === 0 ? 'no fix' : 'no more fixes'}.`,
+  no_cut: (fixes, note) =>
+    `10db could not set up a fix session on the pull request's branch${note === null ? '' : `: ${note}`}. It ran ${fixesOf(fixes)} and starts no more.`,
+};
+
 /** What the pull request watch tells the builder about a shipped pull request. */
 export const prCards = {
+  /**
+   * Fixing stopped and the task is Blocked. Names each failing check with its link, and offers to
+   * rerun the failed jobs of each failing Actions run on GitHub. `fixes` is how many ran; `note` is
+   * the cut's reason when a fix cut was refused.
+   */
+  ciStopped: (
+    root: BatchDto,
+    reason: CiStopped,
+    failing: readonly RequiredCheckJobDto[],
+    fixes: number,
+    note: string | null = null,
+  ): Card => {
+    const prUrl = root.prUrl ?? '(no pull request)';
+    const link = failing[0]?.link ?? prUrl;
+    const rerun = failing.some((job) => job.runId !== null);
+    return {
+      title: `CI still failing on ${root.title}: ${failing.map((job) => job.name).join(', ') || 'a required check'}`,
+      body: [
+        link,
+        `Failing:\n${failing.map((c) => `- ${c.name}${c.link ? `: ${c.link}` : ' (no link)'}`).join('\n')}`,
+        CI_STOP_REASON[reason](fixes, note),
+        `Pull request: ${prUrl}`,
+        `${rerun ? 'Retry reruns the failed jobs on GitHub. ' : ''}Or push a commit to ${root.branch ?? 'the branch'}. The task is Blocked on the Board until the required checks pass or start again, or the pull request merges or closes; 10db then closes this card.`,
+      ].join('\n\n'),
+      foldKey: prCardKey.ciStopped(root.id),
+      ...(rerun
+        ? {
+            options: [
+              {
+                label: CI_RERUN_CHOICE,
+                description: 'Rerun the failed jobs on GitHub (gh run rerun --failed)',
+              },
+            ],
+          }
+        : {}),
+      detail: { ...prDetail(root, link), [CI_RERUN_DETAIL]: { batchId: root.id } },
+    };
+  },
+  /** GitHub refused the rerun the stop card's Retry asked for. */
+  rerunFailed: (root: BatchDto, error: unknown): Card => ({
+    title: `Could not rerun the failed CI jobs for ${root.title}`,
+    body: `GitHub did not rerun the failed jobs: ${detailOf(error)}\n\nPull request: ${root.prUrl ?? '(none)'}\n\nRerun them from the pull request's checks page, or push a commit to ${root.branch ?? 'the branch'}.`,
+    foldKey: `${prCardKey.ciStopped(root.id)}:rerun`,
+    detail: prDetail(root, root.prUrl ?? ''),
+  }),
   /** `failing` is never empty; the first check's link leads the body and is the card's link. */
   checksFailed: (batch: BatchDto, failing: readonly FailingCheckDto[]): Card => {
     const prUrl = batch.prUrl ?? '(no pull request)';

@@ -1,5 +1,6 @@
 import {
   AccountIdentityDto,
+  AccountPauseDto,
   AccountSignInDto,
   AccountUsageDto,
   mintId,
@@ -59,6 +60,17 @@ export function accountIdentityDto(
     tokenSource: null,
     subscription: true,
     refusal: null,
+    ...overrides,
+  });
+}
+
+/** A pause that began on 2026-10-30 and has no end, as a refusal does. */
+export function accountPauseDto(overrides: Partial<AccountPauseDto> = {}): AccountPauseDto {
+  return AccountPauseDto.parse({
+    accountId: DEFAULT_ACCOUNT.id,
+    reason: 'refused',
+    since: '2026-10-30T18:00:00.000Z',
+    until: null,
     ...overrides,
   });
 }

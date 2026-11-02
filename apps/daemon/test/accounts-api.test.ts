@@ -7,6 +7,7 @@ import {
   AccountCreatedDto,
   AccountDto,
   AccountIdentityDto,
+  AccountPauseDto,
   AccountPauseReason,
   AccountProblem,
   AccountSignInDto,
@@ -191,11 +192,13 @@ describe('accounts over HTTP', () => {
     const { api, url, token } = await start({
       keychain: {
         read: () => null,
+        readAsync: () => Promise.resolve(null),
         write: (account) => {
           throw new KeychainError(
             `Writing the Keychain item ${account} failed (security exit status 36)`,
           );
         },
+        remove: () => undefined,
       },
     });
     const { account } = await api.post('/accounts', AccountCreatedDto, {
@@ -335,6 +338,16 @@ describe('accounts over HTTP', () => {
     } finally {
       repo.cleanup();
     }
+  });
+
+  it('lists no pause for a free account, and resuming one changes nothing', async () => {
+    const { api } = await start();
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'anthropic_api_key',
+      label: 'K',
+    });
+    expect(await api.get('/accounts/pauses', z.array(AccountPauseDto))).toEqual([]);
+    expect(await api.post(`/accounts/${account.id}/resume`, z.array(AccountPauseDto))).toEqual([]);
   });
 
   const AnyCard = {
@@ -492,11 +505,15 @@ describe('account identity over HTTP', () => {
         write: (name, secret) => {
           memory.write(name, secret);
         },
+        remove: (name) => {
+          memory.remove(name);
+        },
         read: (name) => {
           if (locked)
             throw new KeychainError('Reading the Keychain failed (security exit status 51)');
           return memory.read(name);
         },
+        readAsync: (name) => Promise.resolve(memory.read(name)),
       },
     });
     const { account } = await api.post('/accounts', AccountCreatedDto, {

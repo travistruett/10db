@@ -35,6 +35,10 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.changedCheckCommand === seed.changedCheckCommand
         ? next.changedCheckCommand
         : current.changedCheckCommand,
+    precheckCommand:
+      current.precheckCommand === seed.precheckCommand
+        ? next.precheckCommand
+        : current.precheckCommand,
     maxLanes: current.maxLanes === seed.maxLanes ? next.maxLanes : current.maxLanes,
     handoffPct: current.handoffPct === seed.handoffPct ? next.handoffPct : current.handoffPct,
     nudgePct: current.nudgePct === seed.nudgePct ? next.nudgePct : current.nudgePct,
@@ -48,6 +52,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
     delivery: current.delivery === seed.delivery ? next.delivery : current.delivery,
     baseBranch: current.baseBranch === seed.baseBranch ? next.baseBranch : current.baseBranch,
     landing: current.landing === seed.landing ? next.landing : current.landing,
+    landingBranch:
+      current.landingBranch === seed.landingBranch ? next.landingBranch : current.landingBranch,
     prTitlePrefix:
       current.prTitlePrefix === seed.prTitlePrefix ? next.prTitlePrefix : current.prTitlePrefix,
     allowedCommands:
@@ -65,6 +71,13 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       : current.worktreeSeed,
   };
 }
+
+const landingChoice = (value: string): ProjectLanding =>
+  value === ProjectLanding.Hold
+    ? ProjectLanding.Hold
+    : value === ProjectLanding.Branch
+      ? ProjectLanding.Branch
+      : ProjectLanding.Merge;
 
 const sameList = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((name, i) => name === b[i]);
@@ -180,6 +193,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+        <SettingRow
+          label="Pre-check command"
+          description="Runs on the Mac in place of the gate when the pull request's base branch has required checks on GitHub. Leave it empty to keep running the gate."
+        >
+          <TextInput
+            aria-label="Pre-check command"
+            styles={MONO_INPUT}
+            value={values.precheckCommand}
+            error={errors.precheckCommand}
+            onChange={(e) => {
+              set({ precheckCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
       </SettingsCard>
 
       <SettingsCard title="When work is finished">
@@ -231,9 +258,9 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
           <SettingRow
             label="When checks pass"
             description={
-              values.landing === ProjectLanding.Merge
-                ? `GitHub merges each pull request into ${values.baseBranch.trim() || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
-                : 'Pull requests wait for you to merge them. A task can choose to merge.'
+              values.landing === ProjectLanding.Hold
+                ? 'Pull requests wait for you to merge them. A task can choose to merge.'
+                : `GitHub merges each pull request into ${(values.landing === ProjectLanding.Branch ? values.landingBranch.trim() : values.baseBranch.trim()) || 'the base branch'} by itself once its required checks pass. A task can choose another branch, or hold.`
             }
           >
             <SegmentedControl
@@ -245,13 +272,28 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
                   value: ProjectLanding.Merge,
                   label: `Merge into ${values.baseBranch.trim() || 'the base branch'}`,
                 },
+                { value: ProjectLanding.Branch, label: 'Merge into a branch' },
                 { value: ProjectLanding.Hold, label: 'Hold for my review' },
               ]}
               onChange={(value) => {
-                set({
-                  landing:
-                    value === ProjectLanding.Hold ? ProjectLanding.Hold : ProjectLanding.Merge,
-                });
+                set({ landing: landingChoice(value) });
+              }}
+            />
+          </SettingRow>
+        ) : null}
+        {pullRequests && values.landing === ProjectLanding.Branch ? (
+          <SettingRow
+            label="New tasks land in"
+            description="A branch on origin, such as an integration branch. Each new task starts out landing there; a task can choose another place."
+          >
+            <TextInput
+              aria-label="New tasks land in"
+              placeholder="next"
+              styles={MONO_INPUT}
+              value={values.landingBranch}
+              error={errors.landingBranch}
+              onChange={(e) => {
+                set({ landingBranch: e.currentTarget.value });
               }}
             />
           </SettingRow>

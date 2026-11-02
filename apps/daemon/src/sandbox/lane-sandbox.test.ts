@@ -22,7 +22,9 @@ import {
   tempDir,
   type TempDir,
 } from '../../test/fixtures';
+import { ManualClock } from '../clock';
 import { projectAtCheckout } from '../delivery';
+import { SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
   createLaneSandbox,
@@ -31,6 +33,7 @@ import {
   SandboxProfileError,
   SandboxTempDirError,
   SYSTEM_READS,
+  type LaneProcessSetup,
   type LaneSandbox,
   type LaneSessionInput,
 } from './index';
@@ -66,7 +69,12 @@ function sandbox(
 
 function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   return {
-    project: { id: projectId, repoPath: repo.path, sandboxLoopback: false },
+    project: {
+      id: projectId,
+      repoPath: repo.path,
+      sandboxLoopback: false,
+      gateCommand: 'make gate',
+    },
     env: { PATH: '/usr/bin:/bin', HOME: home, ANTHROPIC_API_KEY: 'sk-test' },
     rules: [],
     resumeProviderSessionId: null,
@@ -141,7 +149,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     ['on', true, true],
   ])("opens localhost when the project's switch is %s", async (_name, sandboxLoopback, binding) => {
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: repo.path, sandboxLoopback } }),
+      input({
+        project: { id: projectId, repoPath: repo.path, sandboxLoopback, gateCommand: 'make gate' },
+      }),
     );
     try {
       expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
@@ -207,7 +217,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       });
       const commonDir = join(checkout, '.git');
       const session = await sandbox().forSession(
-        input({ project: { id: projectId, repoPath: worktree, sandboxLoopback: false } }),
+        input({
+          project: {
+            id: projectId,
+            repoPath: worktree,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
+        }),
       );
       try {
         const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
@@ -362,7 +379,12 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         gitDirs: () => Promise.resolve({ gitDir: inner, commonDir: inner }),
       }).forSession(
         input({
-          project: { id: projectId, repoPath: work, sandboxLoopback: false },
+          project: {
+            id: projectId,
+            repoPath: work,
+            sandboxLoopback: false,
+            gateCommand: 'make gate',
+          },
           checkouts: [work],
         }),
       );
@@ -384,7 +406,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     symlinkSync(checkout, link);
     const env = writeIn(checkout, '.env');
     const session = await sandbox().forSession(
-      input({ project: { id: projectId, repoPath: link, sandboxLoopback: false } }),
+      input({
+        project: {
+          id: projectId,
+          repoPath: link,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
@@ -549,6 +578,42 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('forbids the tools that start worktrees, schedules and remote triggers outside the lane', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(session.spec.disallowedTools).toEqual(
+        expect.arrayContaining(['EnterWorktree', 'CronCreate', 'ScheduleWakeup', 'RemoteTrigger']),
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('gives a lane command none of an account credential, though the session env holds them all', async () => {
+    const names = [...SECRET_VARIABLES, 'AWS_ACCESS_KEY_ID', 'AWS_PROFILE', 'ANTHROPIC_BASE_URL'];
+    const session = await sandbox().forSession(
+      input({
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          ...Object.fromEntries(names.map((name) => [name, `secret-${name}`])),
+        },
+      }),
+    );
+    try {
+      const denied = new Set(session.spec.settings.credentials.envVars.map((entry) => entry.name));
+      for (const name of names) {
+        expect(denied.has(name), `${name} is denied to Bash`).toBe(true);
+        expect(session.commandEnv).not.toHaveProperty(name);
+        expect(readFileSync(session.spec.env['CLAUDE_ENV_FILE'] ?? '', 'utf8')).not.toContain(
+          `secret-${name}`,
+        );
+      }
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("asks before an edit or write of the checkout's Claude-protected files and directories", async () => {
     const session = await sandbox().forSession(input());
     try {
@@ -562,6 +627,24 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           `Write(/${hooks}/**)`,
         ]),
       );
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("hands the classifier a rule naming the project's gate command", async () => {
+    const session = await sandbox().forSession(
+      input({
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: false,
+          gateCommand: 'make gate',
+        },
+      }),
+    );
+    try {
+      expect(session.spec.autoMode.hard_deny[1]).toContain(JSON.stringify('make gate'));
     } finally {
       session.dispose();
     }
@@ -986,6 +1069,222 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       second.dispose();
     }
     expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+});
+
+describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
+  const T = 'Thu Oct 30 12:00:00 2026';
+  /** Fake processes: a signal ends the process (or the whole group when negative). */
+  let rows: { pid: number; ppid: number; pgid: number; startedAt: string }[];
+  /** Working directories and open files, by pid, as `lsof` would report them. */
+  let open: Map<number, string[]>;
+  let tableFails: boolean;
+  function withProcesses(
+    overrides: Partial<LaneProcessSetup> = {},
+    log?: LaneSandboxDeps['log'],
+  ): LaneSandbox {
+    return createLaneSandbox({
+      home,
+      dataDir,
+      loginConfigDir: null,
+      tmpRoot,
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      processes: {
+        table: () =>
+          tableFails
+            ? Promise.reject(new Error('ps failed'))
+            : Promise.resolve(rows.map((r) => ({ ...r }))),
+        openPaths: (pids) =>
+          Promise.resolve(
+            new Map(pids.flatMap((pid) => (open.has(pid) ? [[pid, open.get(pid) ?? []]] : []))),
+          ),
+        signal: (target) => {
+          const before = rows.length;
+          rows = rows.filter((r) => (target < 0 ? r.pgid !== -target : r.pid !== target));
+          return rows.length < before;
+        },
+        sleep: () => Promise.resolve(),
+        ownPid: 100,
+        timers: { setTimeout: () => ({ cancel: () => undefined }) },
+        ...overrides,
+      },
+      ...(log === undefined ? {} : { log }),
+    });
+  }
+  /** Lets what a timer started finish: everything it awaits is already settled. */
+  const settle = () => new Promise((r) => setImmediate(r));
+  const ledgers = () => readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
+  beforeEach(() => {
+    rows = [
+      { pid: 100, ppid: 1, pgid: 100, startedAt: T },
+      { pid: 200, ppid: 100, pgid: 200, startedAt: T },
+      { pid: 300, ppid: 200, pgid: 300, startedAt: T },
+      { pid: 301, ppid: 300, pgid: 300, startedAt: T },
+    ];
+    open = new Map();
+    tableFails = false;
+  });
+
+  it('stops a job its command handed to launchd at once by a path in the temp dir, never by the checkout alone', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      rows.push(
+        { pid: 600, ppid: 1, pgid: 600, startedAt: T },
+        { pid: 610, ppid: 1, pgid: 610, startedAt: T },
+        { pid: 700, ppid: 1, pgid: 700, startedAt: T },
+        { pid: 710, ppid: 1, pgid: 710, startedAt: T },
+      );
+      const checkoutDir = join(realpathSync(repo.path), 'src');
+      const tmp = realpathSync(session.tmpDir);
+      // `pnpm dev &`: works in the checkout, writes to the command's output file in the temp dir.
+      open.set(600, [checkoutDir, join(tmp, 'claude-501', 's', 'tasks', 'b1.output')]);
+      open.set(610, [tmp]);
+      open.set(700, [home]);
+      // Another lane's or the builder's job in the same checkout.
+      open.set(710, [checkoutDir, join(checkoutDir, 'dev.log')]);
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      await session.endProcesses();
+      expect(rows.map((r) => r.pid)).toEqual([100, 700, 710]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps the ledger when the session’s processes could not be stopped, for the next start', async () => {
+    const session = await withProcesses().forSession(input());
+    await session.trackProcesses({ pid: 200, startedAt: T });
+    tableFails = true;
+    await expect(session.endProcesses()).rejects.toThrow('ps failed');
+    session.dispose();
+    const left = readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
+    expect(left).toHaveLength(1);
+    // Named for the daemon that kept it, so a later daemon knows whether its owner still runs.
+    expect(left[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
+    const ledger = JSON.parse(readFileSync(join(tmpRoot, left[0] ?? ''), 'utf8')) as {
+      members: { pid: number }[];
+    };
+    expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
+  });
+
+  it('tells the log once per kind what it could not do while it watched a session’s processes', async () => {
+    const warnings: { fields: Record<string, unknown>; message: string }[] = [];
+    const clock = new ManualClock();
+    const session = await withProcesses(
+      {
+        timers: clock,
+        intervalMs: 1_000,
+        openPaths: () => Promise.reject(new Error('lsof failed')),
+      },
+      {
+        warn: (fields, message) => {
+          warnings.push({ fields: { ...fields }, message });
+        },
+      },
+    ).forSession(input());
+    try {
+      // A child of launchd started since the session began, whose open paths can't be read.
+      rows.push({ pid: 600, ppid: 1, pgid: 600, startedAt: T });
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      // A sample every second, none of which can read the table.
+      tableFails = true;
+      for (let n = 0; n < 3; n += 1) {
+        clock.advance(1_000);
+        await settle();
+      }
+      expect(warnings.map((w) => w.fields['failure']).sort()).toEqual(['open_paths', 'table']);
+      expect(warnings.every((w) => w.fields['projectId'] === projectId)).toBe(true);
+    } finally {
+      tableFails = false;
+      await session.endProcesses();
+      session.dispose();
+    }
+  });
+
+  it('sweeps a kept ledger again while the daemon runs, and removes it once what it names is stopped', async () => {
+    const clock = new ManualClock();
+    const session = await withProcesses({ timers: clock }).forSession(input());
+    await session.trackProcesses({ pid: 200, startedAt: T });
+    tableFails = true;
+    await expect(session.endProcesses()).rejects.toThrow('ps failed');
+    session.dispose();
+    expect(ledgers()).toHaveLength(1);
+    // Half a minute on, the machine can be read again.
+    tableFails = false;
+    clock.advance(30_000);
+    await settle();
+    expect(rows.map((r) => r.pid)).toEqual([100]);
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('never sweeps the ledger of a session that still runs', async () => {
+    const clock = new ManualClock();
+    const lanes = withProcesses({ timers: clock, intervalMs: 3_600_000 });
+    // A second session's claude and its dev server.
+    rows.push(
+      { pid: 250, ppid: 100, pgid: 250, startedAt: T },
+      { pid: 350, ppid: 250, pgid: 350, startedAt: T },
+    );
+    const ended = await lanes.forSession(input());
+    const running = await lanes.forSession(input());
+    try {
+      await ended.trackProcesses({ pid: 200, startedAt: T });
+      await running.trackProcesses({ pid: 250, startedAt: T });
+      tableFails = true;
+      await expect(ended.endProcesses()).rejects.toThrow('ps failed');
+      ended.dispose();
+      tableFails = false;
+      clock.advance(30_000);
+      await settle();
+      expect(rows.map((r) => r.pid).sort()).toEqual([100, 250, 350]);
+      expect(ledgers()).toHaveLength(1);
+    } finally {
+      await running.endProcesses();
+      running.dispose();
+    }
+  });
+
+  it('stops what the session’s commands started when the session ends', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      await session.endProcesses();
+      expect(rows.map((r) => r.pid)).toEqual([100]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps a ledger in the temp root while the session lives, and removes it with the rest', async () => {
+    const session = await withProcesses().forSession(input());
+    expect(readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'))).toHaveLength(1);
+    session.dispose();
+    expect(readdirSync(tmpRoot)).toEqual([]);
+  });
+
+  it('writes the ledger a later daemon uses to stop what a dead one left', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.trackProcesses({ pid: 200, startedAt: T });
+      const name = readdirSync(tmpRoot).find((n) => n.startsWith('10db-proc-')) ?? '';
+      const ledger = JSON.parse(readFileSync(join(tmpRoot, name), 'utf8')) as {
+        members: { pid: number }[];
+      };
+      expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('does nothing at the end of a session that never started a process', async () => {
+    const session = await withProcesses().forSession(input());
+    try {
+      await session.endProcesses();
+      expect(rows).toHaveLength(4);
+    } finally {
+      session.dispose();
+    }
   });
 });
 

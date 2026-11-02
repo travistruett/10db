@@ -41,6 +41,7 @@ import {
   createDeliveryJobs,
   createShipper,
   createWorktreeDependencies,
+  createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
   type BatchStarter,
@@ -281,6 +282,16 @@ export function createDeliveryHarness(
   const logs = captureLogs();
   const data = tempDir('delivery-data');
   const pnpm = fakePnpm(data.path);
+  const worktreeTools = {
+    gate: createGateRunner({ sandbox: installSandbox, logger: silentLogger }),
+    clock: new ManualClock(),
+    dataDir: data.path,
+    sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
+    resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
+    rules: () => [],
+    checkouts: () => [remote.repo.path],
+    timeoutMs: opts.gateTimeoutMs ?? 20_000,
+  };
   const ctx: DeliveryContext = {
     state,
     git,
@@ -299,16 +310,8 @@ export function createDeliveryHarness(
       ticks.count += 1;
     },
     worktreeRoot,
-    dependencies: createWorktreeDependencies({
-      gate: createGateRunner({ sandbox: installSandbox, logger: silentLogger }),
-      clock: new ManualClock(),
-      dataDir: data.path,
-      sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
-      resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
-      rules: () => [],
-      checkouts: () => [remote.repo.path],
-      timeoutMs: opts.gateTimeoutMs ?? 20_000,
-    }),
+    dependencies: createWorktreeDependencies(worktreeTools),
+    generators: createWorktreeGenerators(worktreeTools),
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });

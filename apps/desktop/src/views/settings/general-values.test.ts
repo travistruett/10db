@@ -35,6 +35,21 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { landing: 'hold' } },
     },
     {
+      name: 'merging new tasks into a named branch',
+      change: { landing: 'branch', landingBranch: ' next ' },
+      expected: { ok: true, patch: { landing: 'branch', landingBranch: 'next' } },
+    },
+    {
+      name: 'a named branch with no name',
+      change: { landing: 'branch', landingBranch: ' ' },
+      expected: { ok: false, errors: { landingBranch: 'Name the branch new tasks land in' } },
+    },
+    {
+      name: 'a named branch that git would refuse',
+      change: { landing: 'branch', landingBranch: '-d' },
+      expected: { ok: false, errors: { landingBranch: 'Name the branch new tasks land in' } },
+    },
+    {
       name: 'a worktree per task',
       change: { delivery: 'pull_request', prTitlePrefix: 'feat(app)', workspaceMode: 'worktree' },
       expected: {
@@ -93,6 +108,19 @@ describe('checkGeneral', () => {
       name: 'an emptied changed-packages check clears it',
       change: { changedCheckCommand: ' ' },
       expected: { ok: true, patch: null },
+    },
+    {
+      name: 'a pre-check, trimmed',
+      change: { precheckCommand: ' make precheck ' },
+      expected: { ok: true, patch: { precheckCommand: 'make precheck' } },
+    },
+    {
+      name: 'a pre-check with no gate command',
+      change: { gateCommand: '', precheckCommand: 'make precheck' },
+      expected: {
+        ok: false,
+        errors: { precheckCommand: 'A pre-check needs a gate command: set a gate command first' },
+      },
     },
     {
       name: 'an empty lane cap',
@@ -180,6 +208,21 @@ describe('checkGeneral', () => {
     expect(checkGeneral(project, { ...base, allowedCommands })).toEqual(expected);
   });
 
+  it('shows a branch default, renames it, and leaves it by choosing another landing', () => {
+    const onBranch = projectDto({ landing: 'branch', landingBranch: 'next' });
+    const values = generalValues(onBranch);
+    expect(values).toMatchObject({ landing: 'branch', landingBranch: 'next' });
+    expect(checkGeneral(onBranch, values)).toEqual({ ok: true, patch: null });
+    expect(checkGeneral(onBranch, { ...values, landingBranch: 'dev' })).toEqual({
+      ok: true,
+      patch: { landingBranch: 'dev' },
+    });
+    expect(checkGeneral(onBranch, { ...values, landing: 'merge' })).toEqual({
+      ok: true,
+      patch: { landing: 'merge' },
+    });
+  });
+
   it('names the first line that is not a plain command prefix', () => {
     const checked = checkGeneral(project, { ...base, allowedCommands: 'pnpm test\npnpm --run' });
     expect(checked.ok).toBe(false);
@@ -189,6 +232,17 @@ describe('checkGeneral', () => {
   it('shows the project list as one command per line', () => {
     const listed = projectDto({ allowedCommands: ['pnpm test', 'pnpm exec prettier'] });
     expect(generalValues(listed).allowedCommands).toBe('pnpm test\npnpm exec prettier');
+  });
+
+  it('shows a set pre-check, sends nothing while it is unchanged, and clears it when emptied', () => {
+    const checked = projectDto({ gateCommand: 'make gate', precheckCommand: 'make precheck' });
+    const values = generalValues(checked);
+    expect(values.precheckCommand).toBe('make precheck');
+    expect(checkGeneral(checked, values)).toEqual({ ok: true, patch: null });
+    expect(checkGeneral(checked, { ...values, precheckCommand: ' ' })).toEqual({
+      ok: true,
+      patch: { precheckCommand: null },
+    });
   });
 
   it('sends nothing for the list when it is unchanged, and clears it when emptied', () => {

@@ -226,3 +226,42 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     .all()
     .map(toDto);
 }
+
+/** A call the builder denied, as a later session of the workstream is told about it. */
+export interface DeniedPermission {
+  readonly toolName: string;
+  readonly summary: string;
+  readonly note: string | null;
+}
+
+/**
+ * The permission cards the builder answered with a denial for this workstream, oldest first, at most
+ * the newest `limit`. A denial belongs to the workstream, not to the session that asked: every later
+ * session is told of it, so a lane does not ask for, or try again, what was refused.
+ */
+export function deniedPermissionsForWorkstream(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  limit = 20,
+): DeniedPermission[] {
+  const rows = db
+    .select()
+    .from(schema.inboxItems)
+    .where(
+      and(
+        eq(schema.inboxItems.kind, 'permission'),
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+        sql`json_extract(${schema.inboxItems.answer}, '$.choice') = 'deny'`,
+        sql`EXISTS (SELECT 1 FROM json_each(${schema.inboxItems.targets}) WHERE json_extract(value, '$.workstreamId') = ${workstreamId})`,
+      ),
+    )
+    .orderBy(desc(schema.inboxItems.createdAt), desc(schema.inboxItems.id))
+    .limit(limit)
+    .all();
+  return rows.reverse().flatMap((row) => {
+    const toolName = row.detail?.['toolName'];
+    const summary = row.detail?.['summary'];
+    if (typeof toolName !== 'string' || typeof summary !== 'string') return [];
+    return [{ toolName, summary, note: row.answer?.note ?? null }];
+  });
+}

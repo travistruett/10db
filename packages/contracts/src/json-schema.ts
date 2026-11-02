@@ -12,11 +12,19 @@ import {
   AccountIdentityDto,
   AccountInput,
   AccountPatch,
+  AccountPauseDto,
   AccountSecretInput,
   AccountSignInDto,
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
+import {
+  JudgeCallDto,
+  JudgeConfigPatch,
+  JudgeKeyInput,
+  JudgeStatusDto,
+  JudgeTestResultDto,
+} from './judge';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
@@ -73,6 +81,7 @@ import {
   EventsHead,
   KeepAwakeInput,
   KeepAwakeStatus,
+  LanePermissionsDto,
   McpServerReview,
   McpServerStatusDto,
   SystemCheckDto,
@@ -100,6 +109,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'account-identity-dto': AccountIdentityDto,
   'account-input': AccountInput,
   'account-patch': AccountPatch,
+  'account-pause-dto': AccountPauseDto,
   'account-secret-input': AccountSecretInput,
   'account-sign-in-dto': AccountSignInDto,
   'account-usage-dto': AccountUsageDto,
@@ -120,10 +130,16 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'keep-awake-status': KeepAwakeStatus,
   'events-head': EventsHead,
   'keep-awake-input': KeepAwakeInput,
+  'lane-permissions-dto': LanePermissionsDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,
   'benchmark-status-dto': BenchmarkStatusDto,
+  'judge-call-dto': JudgeCallDto,
+  'judge-config-patch': JudgeConfigPatch,
+  'judge-key-input': JudgeKeyInput,
+  'judge-status-dto': JudgeStatusDto,
+  'judge-test-result-dto': JudgeTestResultDto,
   'board-column-delete': BoardColumnDelete,
   'board-column-dto': BoardColumnDto,
   'board-column-input': BoardColumnInput,

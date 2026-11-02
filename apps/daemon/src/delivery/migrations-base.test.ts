@@ -95,30 +95,32 @@ describe("bringing main into a task's branch before it takes the migrations haza
     expect(h.cards()).toEqual([]);
   });
 
-  it('holds the hazard back while main conflicts, on one card that says the task generates no migration until it is resolved', async () => {
+  it('holds the hazard back while main conflicts, with a notice on the batch that says the task generates no migration until it is resolved, and no card', async () => {
     const { batch, ws, checkout, bases } = await opened();
     await commitOnBatch(batch, 'README.md', '# ours\n');
     mainGainsMigration();
     h.teammatePush('main', 'README.md', '# theirs\n');
 
     const held = await bases.take(ws.id, signal);
-    const card = h.only(h.cards());
-    expect(held).toMatchObject({ kind: 'held', inboxId: card.id });
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(held.kind).toBe('held');
     expect(held.kind === 'held' && held.instruction).toBe(
-      "origin/main conflicts with this branch in README.md, so 10db couldn't bring it in and has not given you the migrations hazard: a migration generated now would be numbered before main's latest. Don't generate or write a migration. The builder has a card to resolve the conflict. Carry on with your other work, and call request_claim again with the same opId once it is resolved; if the migration is all that is left, ask the builder with ask_human to resolve it.",
+      "origin/main conflicts with this branch in README.md, so 10db couldn't bring it in and has not given you the migrations hazard: a migration generated now would be numbered before main's latest. Don't generate or write a migration. The batch's task cards show the conflict. Carry on with your other work, and call request_claim again with the same opId once it is resolved; if the migration is all that is left, ask the builder with ask_human to resolve it.",
     );
-    expect(card.title).toBe('Batch "Alpha" conflicts with main');
-    expect(card.body).toContain('- README.md');
-    expect(card.body).toContain(
+    expect(notice.line).toBe('Conflicts with main: README.md');
+    expect(notice.body).toContain('- README.md');
+    expect(notice.body).toContain(
       'Task "Alpha" asked for the migrations hazard. 10db gives it only once this branch holds main, so that a migration it generates is numbered after main\'s latest: until the conflict is resolved, the task generates no migration.',
     );
     expect(tagsIn(checkout)).toEqual(['0000_init']);
 
-    // Asked again: still one card.
+    // Asked again: the same notice, and still no card.
     expect((await bases.take(ws.id, signal)).kind).toBe('held');
-    expect(h.cards()).toHaveLength(1);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([notice]);
+    expect(h.cards()).toEqual([]);
 
-    // The builder merges by hand in the worktree; the next ask gets the hazard and the card goes.
+    // The builder merges by hand in the worktree; the next ask gets the hazard and the notice goes.
     gitIn(
       checkout,
       '-c',
@@ -133,7 +135,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
     );
     expect(await bases.take(ws.id, signal)).toEqual({ kind: 'ready' });
     expect(tagsIn(checkout)).toEqual(['0000_init', '0001_track_prs']);
-    expect(h.cards()).toEqual([]);
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
 
   it("holds the hazard back while the task's own uncommitted change is in main's way, and says to commit it, with no card", async () => {
@@ -144,7 +146,6 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
     expect(await bases.take(ws.id, signal)).toEqual({
       kind: 'held',
-      inboxId: null,
       instruction:
         "Uncommitted changes in README.md are in the way of origin/main's newer commits, so 10db couldn't bring them in and has not given you the migrations hazard: a migration generated now would be numbered before main's latest. Don't generate or write a migration. Commit those files with the commit tool, or undo your change to them, then call request_claim again with the same opId.",
     });

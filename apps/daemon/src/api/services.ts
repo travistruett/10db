@@ -6,6 +6,7 @@ import type {
   AccountId,
   AccountIdentityDto,
   AccountPatch,
+  AccountPauseDto,
   AccountSecretInput,
   AccountSignInDto,
   AccountUsageDto,
@@ -30,8 +31,14 @@ import type {
   InboxItemDto,
   InboxItemId,
   InboxState,
+  JudgeCallDto,
+  JudgeConfigPatch,
+  JudgeKeyInput,
+  JudgeStatusDto,
+  JudgeTestResultDto,
   KeepAwakeMode,
   KeepAwakeStatus,
+  LanePermissionsDto,
   McpServerStatusDto,
   ModelProfileDto,
   NetworkHostDto,
@@ -103,6 +110,15 @@ export interface TaskLookupServices {
 
 /** What the HTTP layer needs from the daemon. Implemented in the daemon module. */
 export interface ApiServices {
+  /** The judge's status, key, connection test and call log. */
+  judgeStatus(): Promise<JudgeStatusDto>;
+  patchJudge(patch: JudgeConfigPatch): Promise<JudgeStatusDto>;
+  /** Write-only: the key goes to the Keychain and is never answered, logged or stored elsewhere. */
+  setJudgeKey(input: JudgeKeyInput): Promise<JudgeStatusDto>;
+  removeJudgeKey(): Promise<JudgeStatusDto>;
+  testJudge(): Promise<JudgeTestResultDto>;
+  /** The most recent calls, newest first. */
+  listJudgeCalls(limit: number): JudgeCallDto[];
   listProjects(): ProjectViewDto[];
   /** Registers the project and allows the registries its package files name. */
   createProject(input: ProjectInput): Promise<ProjectDto>;
@@ -152,6 +168,9 @@ export interface ApiServices {
   systemCheck(options: { readonly recheck: boolean }): Promise<SystemCheckDto>;
   keepAwake(): KeepAwakeStatus;
   setKeepAwake(mode: KeepAwakeMode): KeepAwakeStatus;
+  /** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
+  lanePermissions(): LanePermissionsDto;
+  setLanePermissions(autoMode: boolean): LanePermissionsDto;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */
@@ -195,7 +214,8 @@ export interface ApiServices {
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
-  patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto;
+  /** Throws InvalidError when the default landing names a branch origin does not have, after asking origin. */
+  patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
   getTeam(projectId: ProjectId): TeamDto;
   setTeam(projectId: ProjectId, input: TeamInput): TeamDto;
   listRoutingRules(projectId: ProjectId): RoutingRuleDto[];
@@ -224,4 +244,8 @@ export interface ApiServices {
   accountIdentity(id: AccountId): Promise<AccountIdentityDto>;
   /** A month's tokens and dollars, in total and per project; `null` is the current month. */
   accountUsage(id: AccountId, month: string | null): AccountUsageDto;
+  /** The accounts paused now, with why, since when and until when. */
+  listAccountPauses(): AccountPauseDto[];
+  /** Lifts a refused or monthly-cap pause and answers the pauses still in force; a usage-limit pause is a conflict. */
+  resumeAccount(id: AccountId): AccountPauseDto[];
 }

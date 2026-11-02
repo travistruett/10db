@@ -17,7 +17,7 @@ import {
 import { Alert, Button, Group, Loader, Menu, ScrollArea, Stack, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
-import { useNavigate } from '@tanstack/react-router';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   useAbandonBatch,
@@ -46,7 +46,8 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
-import { PullRequestLink } from './pull-request-link';
+import { ciLine } from './ci-line';
+import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { queuePlaces } from './queue-place';
 import { canRunNext } from './run-next';
 import { cardSummary, TaskCard } from './task-card';
@@ -82,6 +83,7 @@ function cardWorkstream(
   task: TaskDto,
   ws: WorkstreamDto | undefined,
   batch: BatchDto | undefined,
+  batches: readonly BatchDto[],
 ): WorkstreamDto | undefined {
   if (!ws) return undefined;
   if (SHOWN_STATES.includes(ws.state)) return ws;
@@ -89,7 +91,7 @@ function cardWorkstream(
   if (ws.state !== WorkstreamState.Done || task.status !== TaskStatus.Done || !batch)
     return undefined;
   // Finished work shows its pull request's checks until the pull request merges.
-  return UNSHIPPED_BATCH_STATES.includes(batch.state) || pullRequestState(batch) !== null
+  return UNSHIPPED_BATCH_STATES.includes(batch.state) || pullRequestState(batch, batches) !== null
     ? ws
     : undefined;
 }
@@ -154,6 +156,8 @@ interface BoardColumnsProps {
   readonly started: ReadonlyMap<TaskId, string>;
   /** Opens the New Task form from the foot of Ready. */
   readonly onAddTask: () => void;
+  /** The task whose drawer is open when the board appears: the one a `?task=` link names. */
+  readonly initialOpenId: TaskId | null;
 }
 
 /** The columns and their cards, with drag and drop; split out so the actions hook gets a project. */
@@ -167,6 +171,7 @@ function BoardColumns({
   peers,
   started,
   onAddTask,
+  initialOpenId,
 }: BoardColumnsProps) {
   const actions = useBoardActions(projectId);
   const retry = useRetryWorkstream();
@@ -178,7 +183,7 @@ function BoardColumns({
     project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
   const [showAllDone, setShowAllDone] = useState(false);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
-  const [openId, setOpenId] = useState<TaskId | null>(null);
+  const [openId, setOpenId] = useState<TaskId | null>(initialOpenId);
   const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
   const openWorkstream = openTask?.workstreamId
     ? workstreamById.get(openTask.workstreamId)
@@ -186,6 +191,8 @@ function BoardColumns({
   const openBatch = openWorkstream?.batchId ? batchById.get(openWorkstream.batchId) : undefined;
   const batchOf = (ws: WorkstreamDto | undefined) =>
     ws?.batchId ? batchById.get(ws.batchId) : undefined;
+  // A CI fix batch finds the root that holds the pull request's required checks among all of them.
+  const allBatches = [...batchById.values()];
   // Local delivery has no pull request to place.
   const pullRequests = project.delivery === Delivery.PullRequest;
   const landingOf = (task: TaskDto, batch: BatchDto | undefined): string | undefined =>
@@ -291,8 +298,9 @@ function BoardColumns({
             return (
               <TaskCard
                 task={task}
-                workstream={cardWorkstream(task, ws, batch)}
+                workstream={cardWorkstream(task, ws, batch, allBatches)}
                 batch={batch}
+                batches={allBatches}
                 gateCommand={stepCheck}
                 pullRequest={shippedPullRequest(task, ws, batchById)}
                 landing={landingOf(task, batch)}
@@ -303,12 +311,19 @@ function BoardColumns({
             );
           }}
           renderLink={(task) => {
-            const url = shippedPullRequest(
-              task,
-              task.workstreamId ? workstreamById.get(task.workstreamId) : undefined,
-              batchById,
-            );
-            if (url) return <PullRequestLink url={url} />;
+            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+            const url = shippedPullRequest(task, ws, batchById);
+            if (url) {
+              const ci = ciLine(batchOf(ws), allBatches);
+              return (
+                <Group gap="sm" wrap="nowrap">
+                  <PullRequestLink url={url} />
+                  {ci && ci.link.url !== url ? (
+                    <ExternalLink url={ci.link.url} label={ci.link.label} />
+                  ) : null}
+                </Group>
+              );
+            }
             return noteOf(task)?.inbox ? <InboxLink /> : null;
           }}
           summary={(task) => {
@@ -316,13 +331,14 @@ function BoardColumns({
             const batch = batchOf(ws);
             return cardSummary(
               task,
-              cardWorkstream(task, ws, batch),
+              cardWorkstream(task, ws, batch, allBatches),
               peers,
               batch,
               stepCheck,
               landingOf(task, batch) ?? null,
               noteOf(task),
               ws ? places.get(ws.id) : undefined,
+              allBatches,
             );
           }}
           renderMenu={(task) => {
@@ -420,6 +436,7 @@ function BoardColumns({
           peers={peers}
           {...(openWorkstream ? { workstream: openWorkstream } : {})}
           {...(openBatch ? { batch: openBatch } : {})}
+          batches={allBatches}
           workstreams={workstreams}
           {...(openPlace !== undefined ? { place: openPlace } : {})}
           workspaceMode={project.workspaceMode}
@@ -452,6 +469,7 @@ export function BoardView() {
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
+  const { task } = useSearch({ from: '/board' });
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
     pending: false,
@@ -574,6 +592,7 @@ export function BoardView() {
           peers={peers}
           started={started}
           onAddTask={taskModal.open}
+          initialOpenId={task ?? null}
         />
       ) : null}
 

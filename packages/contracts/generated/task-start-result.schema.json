@@ -453,6 +453,23 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "shippedAtLimit": {
+                "type": "object",
+                "properties": {
+                  "followUpTaskId": {
+                    "type": "string",
+                    "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "followUpTitle": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "followUpTaskId",
+                  "followUpTitle"
+                ]
               }
             },
             "required": [
@@ -539,6 +556,46 @@
               "type": "string",
               "format": "date-time",
               "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "notice": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 200
+                },
+                "tone": {
+                  "type": "string",
+                  "enum": [
+                    "info",
+                    "warning"
+                  ]
+                },
+                "line": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 500
+                },
+                "body": {
+                  "type": "string",
+                  "maxLength": 8000
+                }
+              },
+              "required": [
+                "key",
+                "tone",
+                "line",
+                "body"
+              ]
             },
             {
               "type": "null"
@@ -708,6 +765,168 @@
             }
           ]
         },
+        "prRequired": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "passing",
+                    "failing",
+                    "none"
+                  ]
+                },
+                "failing": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "link": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "jobId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "runId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "description": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "link",
+                      "jobId",
+                      "runId",
+                      "description"
+                    ]
+                  }
+                },
+                "pending": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "link": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "jobId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "runId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "description": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "link",
+                      "jobId",
+                      "runId",
+                      "description"
+                    ]
+                  }
+                }
+              },
+              "required": [
+                "state",
+                "failing",
+                "pending"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prMergeBlocked": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "conflicts",
+                "behind"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ciFixOf": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^bat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ciFixHead": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ciStopped": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "limit",
+                "no_change",
+                "no_log",
+                "no_cut"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "gateExitCode": {
           "anyOf": [
             {
@@ -750,6 +969,42 @@
             "string",
             "null"
           ]
+        },
+        "notices": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "tone": {
+                "type": "string",
+                "enum": [
+                  "info",
+                  "warning"
+                ]
+              },
+              "line": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "body": {
+                "type": "string",
+                "maxLength": 8000
+              }
+            },
+            "required": [
+              "key",
+              "tone",
+              "line",
+              "body"
+            ]
+          }
         },
         "createdAt": {
           "type": "string",

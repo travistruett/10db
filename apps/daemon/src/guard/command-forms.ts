@@ -146,6 +146,93 @@ export function startsWithWords(words: readonly string[], prefix: readonly strin
   return prefix.length > 0 && prefix.every((p, i) => words[i] === p);
 }
 
+/** The most readings of one package manager line followed; past it the line is refused as unread. */
+const VARIANT_LIMIT = 4000;
+const HELP_FLAGS: ReadonlySet<string> = new Set(['--version', '-v', '--help', '-h']);
+const RUN_ALIASES: ReadonlySet<string> = new Set(['run', 'run-script', 'rum', 'urn']);
+
+/** npm's subcommand spellings, by the canonical name a hazard lists. */
+const NPM_SPELLINGS: Readonly<Record<string, readonly string[]>> = {
+  install: [
+    'i',
+    'in',
+    'ins',
+    'inst',
+    'insta',
+    'instal',
+    'isnt',
+    'isnta',
+    'isntal',
+    'isntall',
+    'add',
+  ],
+  ci: ['clean-install', 'ic', 'install-clean', 'isntall-clean'],
+  'install-test': ['it', 'cit', 'install-ci-test'],
+  uninstall: ['un', 'uni', 'unlink', 'remove', 'rm', 'r'],
+  update: ['up', 'upgrade', 'udpate'],
+};
+const NPM_ALIASES: ReadonlyMap<string, string> = new Map(
+  Object.entries(NPM_SPELLINGS).flatMap(([canonical, spellings]) =>
+    spellings.map((spelling): [string, string] => [spelling, canonical]),
+  ),
+);
+const BUN_ALIASES: Readonly<Record<string, string>> = { a: 'add', rm: 'remove', i: 'install' };
+
+/** The ways one reading of a package manager's plain words is read otherwise, one rewrite apart. */
+function rewrites(plain: readonly string[], words: readonly string[]): string[][] {
+  const [manager, subcommand, ...rest] = plain;
+  const out: string[][] = [];
+  if (manager !== 'pnpm' && manager !== 'npm' && manager !== 'yarn' && manager !== 'bun')
+    return out;
+  if (subcommand !== undefined && RUN_ALIASES.has(subcommand)) out.push([manager, ...rest]);
+  if ((manager === 'pnpm' || manager === 'yarn') && subcommand !== undefined) {
+    out.push(plain.slice(1));
+  }
+  if (manager === 'yarn' && subcommand === 'workspace') out.push(['yarn', ...plain.slice(3)]);
+  if (manager === 'yarn' && plain.length === 1 && !words.some((w) => HELP_FLAGS.has(w))) {
+    out.push(['yarn', 'install']);
+  }
+  const canonical =
+    subcommand === undefined
+      ? undefined
+      : manager === 'npm'
+        ? NPM_ALIASES.get(subcommand)
+        : manager === 'bun'
+          ? BUN_ALIASES[subcommand]
+          : undefined;
+  if (canonical !== undefined) out.push([manager, canonical, ...rest]);
+  return out;
+}
+
+/**
+ * How a package manager reads the plain words other than as written, applying the rewrites until
+ * none gives a new reading: `run` and its aliases name a script as the subcommand does (`pnpm run
+ * db:migrate` is `pnpm db:migrate`), pnpm and yarn run a package binary given as the subcommand
+ * (`pnpm drizzle-kit generate`), `yarn workspace <name>` runs the subcommand after it
+ * (`yarn workspace a run s` is `yarn s`), a bare `yarn` installs, and npm's and bun's short and
+ * misspelled subcommands read as the canonical one (`npm r x` is `npm uninstall x`).
+ */
+function packageManagerVariants(plain: readonly string[], words: readonly string[]): string[][] {
+  const seen = new Map<string, string[]>();
+  const queue = [[...plain]];
+  while (queue.length > 0) {
+    // Every rewrite drops words or settles on a canonical name, so the readings are a few per
+    // suffix of the words; a count past this is a command nothing can read, not one to pass.
+    if (seen.size > VARIANT_LIMIT) {
+      throw new RangeError('A package manager command line has too many readings to follow.');
+    }
+    const next = queue.pop();
+    if (next === undefined) break;
+    for (const variant of rewrites(next, words)) {
+      const key = variant.join('\u0000');
+      if (key === plain.join('\u0000') || seen.has(key)) continue;
+      seen.set(key, variant);
+      queue.push(variant);
+    }
+  }
+  return [...seen.values()];
+}
+
 /**
  * Every way a command line can be read, each as one space-joined string: the line as written, the
  * line without flags (in every reading of its unknown flags), and, for a runner such as `npx` or
@@ -156,7 +243,7 @@ export function commandForms(words: readonly string[]): { bare: string[][]; line
   const lines = [words.join(' ')];
   for (const reading of plainWordReadings(words)) {
     const plain = reading.map((p) => p.word);
-    bare.push(plain);
+    bare.push(plain, ...packageManagerVariants(plain, words));
     lines.push(plain.join(' '));
     const runner = RUNNERS.find((r) => startsWithWords(plain, r));
     if (runner) {

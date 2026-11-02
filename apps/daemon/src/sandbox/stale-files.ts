@@ -20,7 +20,11 @@ export interface TempRootClaim {
   release(): void;
 }
 
-function alive(pid: number): boolean {
+/** The name of the mark a running daemon keeps in the temp root. */
+export const daemonMarkName = (pid: number): string => `10db-daemon-${String(pid)}`;
+
+/** Whether `pid` names a running process, this user's or another's. */
+export function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
@@ -64,7 +68,7 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
     const marked = Number(DAEMON_MARK.exec(name)?.[1]);
     if (!Number.isInteger(marked) || uid === undefined) continue;
     if (ownedKind(join(root, name), uid) !== 'file') continue;
-    if (marked !== pid && alive(marked)) sharedWith = marked;
+    if (marked !== pid && processAlive(marked)) sharedWith = marked;
     else rmSync(join(root, name), { force: true });
   }
   let removed = 0;
@@ -85,7 +89,7 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
       }
     }
   }
-  const mark = join(root, `10db-daemon-${String(pid)}`);
+  const mark = join(root, daemonMarkName(pid));
   let marked = false;
   try {
     writeFileSync(mark, '', { flag: 'wx', mode: 0o400 });

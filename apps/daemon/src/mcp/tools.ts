@@ -2,7 +2,9 @@ import {
   ClaimKind,
   currentStep,
   EventType,
+  FOLLOW_UPS_HEADING,
   InvalidError,
+  MAX_STEP_SUMMARY,
   McpToolName,
   McpToolOutputs,
   QuestionCategory,
@@ -25,6 +27,7 @@ import {
   insertDeviation,
   insertEvidence,
   insertHandoff,
+  insertFollowUpTask,
   insertInboxItem,
   insertProposal,
   insertSource,
@@ -80,6 +83,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   propose:
     'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
+  file_follow_up:
+    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts.',
   request_claim:
     'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means waiting would deadlock (the holder is waiting for a claim you hold), or, for the migrations hazard, that your branch could not take its base first: follow the instruction it returns.',
   commit:
@@ -180,7 +185,7 @@ export function createToolHandlers(
       granted: false,
       waiting: false,
       heldBy: null,
-      inboxId: taken.inboxId,
+      inboxId: null,
       instruction: taken.instruction,
     };
   }
@@ -296,6 +301,21 @@ export function createToolHandlers(
       );
     },
 
+    file_follow_up: (input) => {
+      const done = prior(input.opId, McpToolName.FileFollowUp);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.file_follow_up.parse(done));
+      return Promise.resolve(
+        deps.state.write((ctx) => {
+          const task = insertFollowUpTask(ctx, getWorkstreamRow(ctx.tx, workstreamId).taskId, {
+            title: input.title,
+            description: input.description,
+            acceptanceCriteria: input.acceptanceCriteria,
+          });
+          return record('file_follow_up', input.opId, { taskId: task.id, title: task.title }, ctx);
+        }),
+      );
+    },
+
     report_deviation: (input) => {
       const done = prior(input.opId, McpToolName.ReportDeviation);
       if (done !== undefined) return Promise.resolve(McpToolOutputs.report_deviation.parse(done));
@@ -354,13 +374,14 @@ export function createToolHandlers(
       try {
         let result = await Promise.race([wait.done, slice]);
         if (result === 'slice') {
-          const { heldBy, inboxId } = wait.state;
-          if (heldBy !== null && inboxId !== null)
+          const { heldBy } = wait.state;
+          if (heldBy !== null)
             return {
               granted: false,
               waiting: true,
               heldBy,
-              inboxId,
+              // The wait shows on the task's card, not in the Inbox: the builder is asked nothing.
+              inboxId: null,
               instruction: `Still waiting for ${kind} ${input.name}: task "${getTask(db, getWorkstream(db, heldBy).taskId).title}" holds it. Call request_claim again with the same opId to keep waiting, and edit nothing in it until a call returns granted: true.`,
             };
           // The wait ended as the slice did; its result is a moment away.
@@ -469,7 +490,30 @@ export function createToolHandlers(
             throw new InvalidError('This review step needs a verdict: approve or reject.');
           // Only a review role gives a verdict; a plan step's is dropped so a later reader cannot mistake it for one.
           const verdict = REVIEW_ROLES.includes(step.role) ? input.verdict : null;
-          const result = { summary: input.summary, verdict, sessionId, at: ctx.now };
+          if (input.followUps.length > 0 && !REVIEW_ROLES.includes(step.role))
+            throw new InvalidError(
+              'Only a review, plan review or QA step files follow-up tasks; leave followUps out of a plan.',
+            );
+          const filed = input.followUps.map((followUp) => {
+            const task = insertFollowUpTask(ctx, row.taskId, followUp);
+            return { taskId: task.id, title: task.title };
+          });
+          // The builder finds the follow-ups from the step's result, so they are written into it.
+          const summary =
+            filed.length === 0
+              ? input.summary
+              : [
+                  input.summary,
+                  '',
+                  FOLLOW_UPS_HEADING,
+                  ...filed.map((f) => `- ${f.taskId} ${f.title}`),
+                ].join('\n');
+          // Throwing here rolls back the tasks filed above.
+          if (summary.length > MAX_STEP_SUMMARY)
+            throw new InvalidError(
+              `Your notes and the list of follow-up tasks 10db adds are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
+            );
+          const result = { summary, verdict, sessionId, at: ctx.now };
           patchWorkstream(ctx, workstreamId, null, {
             steps: row.steps.map((s, i) => (i === row.stepIndex ? { ...s, result } : s)),
           });
@@ -477,9 +521,14 @@ export function createToolHandlers(
             type: EventType.StepChanged,
             entityType: 'workstream',
             entityId: workstreamId,
-            data: { stepIndex: row.stepIndex, role: step.role, verdict },
+            data: {
+              stepIndex: row.stepIndex,
+              role: step.role,
+              verdict,
+              followUps: filed.map((f) => f.taskId),
+            },
           });
-          const reply = { instruction: 'Recorded. End your turn now.' };
+          const reply = { instruction: 'Recorded. End your turn now.', followUps: filed };
           if (!earlier) return record('complete_step', input.opId, reply, ctx);
           replaceToolOp(ctx, {
             workstreamId,

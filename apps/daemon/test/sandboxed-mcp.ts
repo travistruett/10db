@@ -34,7 +34,12 @@ export async function sandboxedMcpServer(
       systemPrefixes: [],
       runtime: FAKE_SRT,
     }).forSession({
-      project: { id: mintId('Project'), repoPath: repo.path, sandboxLoopback: false },
+      project: {
+        id: mintId('Project'),
+        repoPath: repo.path,
+        sandboxLoopback: false,
+        gateCommand: 'make gate',
+      },
       env: { PATH: '/usr/bin:/bin', HOME: home },
       rules: [],
       resumeProviderSessionId: null,

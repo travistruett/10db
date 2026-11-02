@@ -1,10 +1,17 @@
-import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
+import {
+  execFile,
+  execFileSync,
+  type ExecFileSyncOptionsWithStringEncoding,
+} from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { SECRET_CHARACTERS } from '@10db/contracts';
+import { z } from 'zod';
 
 export const KEYCHAIN_SERVICE = '10db';
 /** The Keychain account of the builder's Artificial Analysis key. */
 export const AA_KEY_ACCOUNT = 'artificial-analysis-api-key';
+/** The Keychain account of the builder's OpenRouter key. */
+export const OPENROUTER_KEY_ACCOUNT = 'openrouter-api-key';
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 /** `security` exits with this status when the Keychain has no such item. */
 const ITEM_NOT_FOUND = 44;
@@ -17,6 +24,49 @@ type KeychainExec = (
   options: ExecFileSyncOptionsWithStringEncoding,
 ) => string;
 
+/** `exec` without blocking the event loop: what a read on a request or a decision uses. */
+type KeychainExecAsync = (
+  command: string,
+  args: readonly string[],
+  options: { readonly encoding: 'utf8'; readonly timeout: number },
+) => Promise<string>;
+
+/**
+ * `execFile` as a promise, failing with the shape `execFileSync` fails with (`status` the exit status,
+ * `code` ETIMEDOUT on a timeout), so one reading of a failure serves both.
+ */
+export const execFileAsync: KeychainExecAsync = (command, args, options) =>
+  new Promise((resolve, reject) => {
+    execFile(command, [...args], { ...options }, (error, stdout) => {
+      if (error === null) {
+        resolve(stdout);
+        return;
+      }
+      // Node reports an exit status as a numeric `code`, and a timeout as `killed` with a signal.
+      const e = execFailure(error);
+      reject(
+        Object.assign(new Error('security failed'), {
+          status: typeof e.code === 'number' ? e.code : null,
+          code: e.killed === true ? 'ETIMEDOUT' : typeof e.code === 'string' ? e.code : undefined,
+          signal: e.signal ?? null,
+        }),
+      );
+    });
+  });
+
+/** What a failed child process carries that is safe to read: codes only, never its command line or output. */
+const ExecFailure = z.object({
+  status: z.number().nullish(),
+  code: z.union([z.string(), z.number()]).nullish(),
+  signal: z.string().nullish(),
+  killed: z.boolean().nullish(),
+});
+
+function execFailure(error: unknown): z.infer<typeof ExecFailure> {
+  const parsed = ExecFailure.safeParse(error);
+  return parsed.success ? parsed.data : {};
+}
+
 /** The Keychain could not be read or written. The message names the item and the status, never a value. */
 export class KeychainError extends Error {
   override readonly name = 'KeychainError';
@@ -26,16 +76,20 @@ export class KeychainError extends Error {
 export interface Keychain {
   /** The secret, or null when the item is missing or empty. */
   read(account: string): string | null;
+  /** `read` without blocking the event loop, for a request or a decision that waits on it. */
+  readAsync(account: string): Promise<string | null>;
   /** Adds or replaces the item, then reads it back. */
   write(account: string, secret: string): void;
+  /** Deletes the item; one that is already missing is not an error. */
+  remove(account: string): void;
 }
 
 function failure(error: unknown): string {
   // Execution errors carry the command line and its output, which can hold a value; only the codes are used.
-  const e = error as { status?: number | null; code?: string; signal?: string | null };
+  const e = execFailure(error);
   if (e.code === 'ETIMEDOUT') return `timed out after ${String(KEYCHAIN_TIMEOUT_MS / 1000)} s`;
   if (typeof e.status === 'number') return `security exit status ${String(e.status)}`;
-  return e.code ?? e.signal ?? 'unknown error';
+  return (typeof e.code === 'string' ? e.code : null) ?? e.signal ?? 'unknown error';
 }
 
 /**
@@ -43,23 +97,58 @@ function failure(error: unknown): string {
  * unreachable Keychain or a denied prompt throws, because telling the builder to add a secret that
  * exists would send them the wrong way.
  */
-export function keychainWith(exec: KeychainExec): Keychain {
+export function keychainWith(
+  exec: KeychainExec,
+  // A caller with no async exec reads through the sync one, which blocks only as long as it does.
+  execAsync: KeychainExecAsync = (command, args, options) =>
+    Promise.resolve().then(() =>
+      exec(command, args, { ...options, stdio: ['ignore', 'pipe', 'ignore'] }),
+    ),
+): Keychain {
+  const READ_ARGS = (account: string): string[] => [
+    'find-generic-password',
+    '-s',
+    KEYCHAIN_SERVICE,
+    '-a',
+    account,
+    '-w',
+  ];
+  const valueOf = (output: string): string | null => {
+    const value = output.trim();
+    return value.length > 0 ? value : null;
+  };
+  const readFailed = (account: string, error: unknown): null => {
+    // A thrown exec error has a numeric `status` when security ran and exited non-zero.
+    if (execFailure(error).status === ITEM_NOT_FOUND) return null;
+    throw new KeychainError(`Reading the Keychain item ${account} failed (${failure(error)})`);
+  };
   const read = (account: string): string | null => {
     try {
-      const value = exec(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account, '-w'],
-        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: KEYCHAIN_TIMEOUT_MS },
-      ).trim();
-      return value.length > 0 ? value : null;
+      return valueOf(
+        exec('/usr/bin/security', READ_ARGS(account), {
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+          timeout: KEYCHAIN_TIMEOUT_MS,
+        }),
+      );
     } catch (error) {
-      // A thrown exec error has a numeric `status` when security ran and exited non-zero.
-      if ((error as { status?: unknown }).status === ITEM_NOT_FOUND) return null;
-      throw new KeychainError(`Reading the Keychain item ${account} failed (${failure(error)})`);
+      return readFailed(account, error);
     }
   };
   return {
     read,
+    async readAsync(account) {
+      try {
+        return valueOf(
+          await execAsync('/usr/bin/security', READ_ARGS(account), {
+            encoding: 'utf8',
+            timeout: KEYCHAIN_TIMEOUT_MS,
+          }),
+        );
+      } catch (error) {
+        return readFailed(account, error);
+      }
+    },
     write(account, secret) {
       if (!SAFE_ACCOUNT.test(account))
         throw new KeychainError(`${account} is not a Keychain account name 10db writes`);
@@ -82,17 +171,41 @@ export function keychainWith(exec: KeychainExec): Keychain {
       if (read(account) !== secret)
         throw new KeychainError(`The Keychain did not store the secret for ${account} as given`);
     },
+    remove(account) {
+      if (!SAFE_ACCOUNT.test(account))
+        throw new KeychainError(`${account} is not a Keychain account name 10db removes`);
+      try {
+        exec(
+          '/usr/bin/security',
+          ['delete-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account],
+          {
+            encoding: 'utf8',
+            stdio: ['ignore', 'ignore', 'ignore'],
+            timeout: KEYCHAIN_TIMEOUT_MS,
+          },
+        );
+      } catch (error) {
+        if (execFailure(error).status === ITEM_NOT_FOUND) return;
+        throw new KeychainError(`Removing the Keychain item ${account} failed (${failure(error)})`);
+      }
+    },
   };
 }
 
-export const systemKeychain: Keychain = keychainWith(execFileSync);
+export const systemKeychain: Keychain = keychainWith(execFileSync, execFileAsync);
 
 /** For a daemon started without a Keychain (tests): nothing to read, and writing is refused. */
 export const unavailableKeychain: Keychain = {
   read: () => null,
+  readAsync: () => Promise.resolve(null),
   write: (account) => {
     throw new KeychainError(
       `No Keychain is available to this daemon, so ${account} was not written`,
+    );
+  },
+  remove: (account) => {
+    throw new KeychainError(
+      `No Keychain is available to this daemon, so ${account} was not removed`,
     );
   },
 };

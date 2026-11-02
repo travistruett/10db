@@ -889,15 +889,54 @@ describe('allowedToolsFor', () => {
     const scope = `/${checkout}/**`;
     const sandboxed = { sandboxed: { checkout: repo.path } };
     expect(allowedToolsFor(project, 'edit', sandboxed)).toEqual(
-      baseAllowedTools(project).map((entry) =>
-        ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
-      ),
+      baseAllowedTools(project)
+        .filter((entry) => entry !== 'Bash(make gate)')
+        .map((entry) =>
+          ['Read', 'Glob', 'Grep', 'LS'].includes(entry) ? `${entry}(${scope})` : entry,
+        ),
     );
     const readOnly = allowedToolsFor(project, 'read_only', sandboxed);
     for (const tool of ['Read', 'Glob', 'Grep', 'LS']) {
       expect(readOnly).toContain(`${tool}(${scope})`);
       expect(readOnly).not.toContain(tool);
     }
+  });
+
+  it('leaves the gate command out of a sandboxed lane, so the classifier can refuse it', () => {
+    const withChecks = { ...project, changedCheckCommand: 'make check-changed' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const edit = allowedToolsFor(withChecks, 'edit', sandboxed);
+    expect(edit).not.toContain('Bash(make gate)');
+    expect(edit).toContain('Bash(make check-changed)');
+    expect(allowedToolsFor(withChecks, 'edit')).toContain('Bash(make gate)');
+  });
+
+  it.each([
+    ['a prefix that covers the gate', ['make'], 'Bash(make:*)'],
+    ['a longer prefix that covers the gate', ['make gate'], 'Bash(make gate:*)'],
+  ])('leaves out %s from a sandboxed lane', (_name, allowedCommands, entry) => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    const listed = allowedToolsFor({ ...project, allowedCommands }, 'edit', sandboxed);
+    expect(listed).not.toContain(entry);
+    expect(allowedToolsFor({ ...project, allowedCommands }, 'edit')).toContain(entry);
+  });
+
+  it('keeps an allowed prefix that does not cover the gate', () => {
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(
+      allowedToolsFor(
+        { ...project, allowedCommands: ['make test', 'pnpm test'] },
+        'edit',
+        sandboxed,
+      ),
+    ).toEqual(expect.arrayContaining(['Bash(make test:*)', 'Bash(pnpm test:*)']));
+  });
+
+  it('keeps the gate out of a sandboxed lane even when it is also the changed-check command', () => {
+    const same = { ...project, changedCheckCommand: 'make gate' };
+    const sandboxed = { sandboxed: { checkout: repo.path } };
+    expect(allowedToolsFor(same, 'edit', sandboxed)).not.toContain('Bash(make gate)');
+    expect(allowedToolsFor(same, 'edit')).toContain('Bash(make gate)');
   });
 
   it('names the real path when the checkout is reached through a link', () => {
@@ -1052,13 +1091,41 @@ describe('commandPrefix: a flag whose value the guard cannot place', () => {
   });
 });
 
+/**
+ * The CPU time `fn` takes, in ms. CPU time, not wall time: under full-gate load the process is
+ * descheduled for a while, which adds wall time (2096 ms against a 2000 ms limit, for a 211 ms run)
+ * but no CPU time. Exponential backtracking burns CPU, so it still shows.
+ */
+function cpuMillis(fn: () => void): number {
+  const before = process.cpuUsage();
+  fn();
+  const used = process.cpuUsage(before);
+  return (used.user + used.system) / 1000;
+}
+
+/** Far above a linear run (about 200 ms) and far below exponential backtracking (hours). */
+const BACKTRACKING_LIMIT_MS = 10_000;
+
+describe('cpuMillis', () => {
+  it('measures a CPU-bound exponential function and not time spent waiting', () => {
+    const fib = (n: number): number => (n < 2 ? n : fib(n - 1) + fib(n - 2));
+    expect(cpuMillis(() => fib(34))).toBeGreaterThan(20);
+    const waited = cpuMillis(() => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 300);
+    });
+    expect(waited).toBeLessThan(150);
+  });
+});
+
 describe('commandPrefix: a crafted command', () => {
   it('finishes within a deadline and is allowed once only', () => {
     const flags = Array.from({ length: 30 }, (_, i) => `--f${String(i)} v${String(i)}`).join(' ');
     const nested = Array.from({ length: 12 }, () => `pnpm ${flags} exec`).join(' ');
-    const started = performance.now();
-    const prefix = commandPrefix(nested);
-    expect(performance.now() - started).toBeLessThan(2000);
+    let prefix: string | null = 'unset';
+    const used = cpuMillis(() => {
+      prefix = commandPrefix(nested);
+    });
+    expect(used).toBeLessThan(BACKTRACKING_LIMIT_MS);
     expect(prefix).toBeNull();
   });
 });

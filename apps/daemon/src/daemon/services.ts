@@ -6,7 +6,9 @@ import {
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
+  ProjectLanding,
   type ProjectDto,
+  type ProjectPatch,
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
@@ -58,6 +60,7 @@ import {
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
 import { workstreamChanges, type BatchStarter, type Shipper } from '../delivery';
 import { markGhRequired } from '../environment';
@@ -72,12 +75,15 @@ import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import {
   allowFoundHosts,
   allowNetworkHost,
+  laneAutoMode,
   listNetworkHosts,
   removeNetworkHost,
+  setLaneAutoMode,
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import type { JudgeApiServices } from './judge-services';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -91,6 +97,7 @@ export function createServices(deps: {
   /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
+  readonly judge: JudgeApiServices;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
@@ -116,24 +123,52 @@ export function createServices(deps: {
    * A task that lands in a branch other than its project's base is built from that branch, so it has
    * to be on origin; refused here, before the task exists, in the words the builder reads.
    */
-  async function refuseMissingLandingBranch(
-    project: ProjectDto,
-    landing: TaskLanding | undefined,
+  async function refuseMissingBranch(
+    project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'delivery'>,
+    branch: string,
+    elsewhere: string,
   ): Promise<void> {
-    if (landing?.kind !== 'branch' || project.delivery !== Delivery.PullRequest) return;
-    if (landing.branch === project.baseBranch) return;
+    if (project.delivery !== Delivery.PullRequest || branch === project.baseBranch) return;
     let there: boolean;
     try {
-      there = await deps.branchOnOrigin(project.repoPath, landing.branch);
+      there = await deps.branchOnOrigin(project.repoPath, branch);
     } catch (error) {
       throw new InvalidError(
-        `10db couldn't ask origin whether it has ${landing.branch}: ${error instanceof Error ? error.message : String(error)}`,
+        `10db couldn't ask origin whether it has ${branch}: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
     if (!there)
       throw new InvalidError(
-        `origin has no branch named ${landing.branch}. Create it on origin, or choose another place for this task to land.`,
+        `origin has no branch named ${branch}. Create it on origin, or choose another place for ${elsewhere} to land.`,
       );
+  }
+
+  async function refuseMissingLandingBranch(
+    project: ProjectDto,
+    landing: TaskLanding | undefined,
+  ): Promise<void> {
+    if (landing?.kind !== 'branch') return;
+    await refuseMissingBranch(project, landing.branch, 'this task');
+  }
+
+  /** The same refusal for a project default that names a branch, when a patch or a new project sets it. */
+  async function refuseMissingDefaultBranch(
+    project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'delivery' | 'landing' | 'landingBranch'>,
+    patch: Pick<ProjectPatch, 'landing' | 'landingBranch' | 'delivery' | 'baseBranch'>,
+  ): Promise<void> {
+    if (patch.landing === undefined && patch.landingBranch === undefined) return;
+    const landing = patch.landing ?? project.landing;
+    const branch = patch.landingBranch ?? project.landingBranch;
+    if (landing !== ProjectLanding.Branch || branch === null) return;
+    await refuseMissingBranch(
+      {
+        repoPath: project.repoPath,
+        baseBranch: patch.baseBranch ?? project.baseBranch,
+        delivery: patch.delivery ?? project.delivery,
+      },
+      branch,
+      'new tasks',
+    );
   }
   return {
     listProjects: () => listProjectViews(db),
@@ -147,6 +182,10 @@ export function createServices(deps: {
           `${config.repoPath} overlaps the worktree root ${deps.worktreeRoot}: a checkout may not contain it or lie inside it. Set TENDB_WORKTREE_ROOT to a directory elsewhere.`,
         );
       }
+      await refuseMissingDefaultBranch(
+        { ...config, landingBranch: null, landing: ProjectLanding.Merge },
+        config,
+      );
       const project = deps.state.write((ctx) => insertProject(ctx, config));
       deps.pinCheckout(project.repoPath);
       // The registries the project's own files name are allowed from the start; reading them runs nothing.
@@ -156,7 +195,18 @@ export function createServices(deps: {
     listTasks: (projectId) => listTasks(db, projectId),
     async createTask(projectId, input) {
       await refuseMissingLandingBranch(getProject(db, projectId), input.landing);
-      const task = deps.state.write((ctx) => insertTask(ctx, projectId, input));
+      const task = deps.state.write((ctx) =>
+        insertTask(
+          ctx,
+          projectId,
+          input,
+          proposePlacement(getProject(ctx.tx, projectId), {
+            areas: input.areas,
+            riskTags: input.riskTags ?? [],
+            workspaceMode: input.workspaceMode,
+          }),
+        ),
+      );
       deps.scheduler.requestTick();
       return task;
     },
@@ -234,6 +284,13 @@ export function createServices(deps: {
     },
     keepAwake: () => deps.keepAwake.status(),
     setKeepAwake: (mode) => deps.keepAwake.setMode(mode),
+    lanePermissions: () => ({ autoMode: laneAutoMode(db) }),
+    setLanePermissions(autoMode) {
+      deps.state.write((ctx) => {
+        setLaneAutoMode(ctx, autoMode);
+      });
+      return { autoMode };
+    },
     eventsHead: () => latestEventSeq(db),
     listNetworkHosts(projectId) {
       getProject(db, projectId);
@@ -255,14 +312,17 @@ export function createServices(deps: {
     patchFlow: (id, patch) => deps.state.write((ctx) => patchFlow(ctx, id, patch)),
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
+    ...deps.judge,
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    patchProject: (id, patch) =>
-      patch.accountId === undefined
+    async patchProject(id, patch) {
+      await refuseMissingDefaultBranch(getProject(db, id), patch);
+      return patch.accountId === undefined
         ? deps.state.write((ctx) => patchProject(ctx, id, patch))
         : // The account through the move, with the other fields in the same write.
-          deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch }),
+          deps.moves.move(id, patch.accountId, { cause: MoveCause.Builder }, { patch });
+    },
     listAccounts: () => deps.accounts.list(),
     createAccount: (input) => deps.accounts.create(input),
     patchAccount: (id, patch) => deps.accounts.patch(id, patch),
@@ -271,6 +331,8 @@ export function createServices(deps: {
     accountSignIn: (id) => deps.accounts.signIn(id),
     accountIdentity: (id) => deps.accounts.identity(id),
     accountUsage: (id, month) => deps.accounts.usage(id, month),
+    listAccountPauses: () => deps.accounts.pauses(),
+    resumeAccount: (id) => deps.accounts.resume(id),
     getTeam(projectId) {
       getProject(db, projectId);
       return getTeam(db, projectId);
