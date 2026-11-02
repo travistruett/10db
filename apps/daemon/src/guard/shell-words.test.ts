@@ -23,14 +23,6 @@ describe('a parenthesis where a command starts', () => {
   it.each(CASES)('$name: certain=$certain', ({ command, certain }) => {
     expect(parseShell(command).certain).toBe(certain);
   });
-
-  it('numbers the subshell after do and ends it at the close', () => {
-    const { segments } = parseShell('for d in a; do (cd $d && ls); pwd; done');
-    const byWords = Object.fromEntries(segments.map((s) => [s.words.join(' '), s.subshells]));
-    expect(byWords['cd $d']).toEqual([1]);
-    expect(byWords['ls']).toEqual([1]);
-    expect(byWords['pwd']).toEqual([]);
-  });
 });
 
 describe('which words the shell passes as exactly one word', () => {

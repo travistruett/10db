@@ -179,7 +179,10 @@ describe('cutting a branch', () => {
     expect(h.only(h.cards()).detail).toMatchObject({ taskIds: [task.id] });
     expect(h.git$('rev-parse', 'HEAD')).toBe(head);
     expect(h.git$('branch', '--show-current')).toBe(branch);
-    expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toEqual([]);
+    // The workstream the start inserted with the row is cancelled with it, so the task can start again.
+    expect(listWorkstreams(h.store.db, {}).filter((w) => w.taskId === task.id)).toMatchObject([
+      { state: 'CANCELLED', batchId: null },
+    ]);
   });
 
   it('names the files in the way, in plain words, when the checkout has uncommitted changes', async () => {

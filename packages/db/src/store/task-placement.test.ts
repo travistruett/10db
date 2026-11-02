@@ -84,7 +84,7 @@ describe('task placement', () => {
     const fresh = addTask(p.id);
     expect(place(fresh.id, 'worktree')).toMatchObject({
       workspaceMode: 'worktree',
-      placementReason: null,
+      placementReason: 'chosen by the builder',
     });
     for (const state of ['FAILED', 'CANCELLED']) {
       const task = addTask(p.id);
@@ -97,7 +97,24 @@ describe('task placement', () => {
     expect(place(parked.id, 'worktree').workspaceMode).toBe('worktree');
   });
 
-  it('a placement patch clears a stored reason', () => {
+  it('a new task stores the placement and reason it is given, over the one it names', () => {
+    const p = project();
+    const made = store.write((ctx) =>
+      insertTask(
+        ctx,
+        p.id,
+        { title: 'Alpha', acceptanceCriteria: ['x'], areas: ['api'], workspaceMode: 'shared' },
+        { workspaceMode: 'worktree', reason: 'touches migrations' },
+      ),
+    ).value;
+    expect(made).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches migrations',
+    });
+    expect(getTask(store.db, made.id).placementReason).toBe('touches migrations');
+  });
+
+  it('a placement the builder sets replaces a proposed reason with one saying the builder chose it', () => {
     const p = project();
     const task = addTask(p.id);
     store.db
@@ -106,7 +123,11 @@ describe('task placement', () => {
       .where(eq(schema.tasks.id, task.id))
       .run();
     expect(getTask(store.db, task.id).placementReason).toBe('touches migrations');
-    expect(place(task.id, 'worktree').placementReason).toBeNull();
+    expect(place(task.id, 'shared')).toMatchObject({
+      workspaceMode: 'shared',
+      placementReason: 'chosen by the builder',
+    });
+    expect(getTask(store.db, task.id).placementReason).toBe('chosen by the builder');
   });
 
   it.each(['QUEUED', 'RUNNING', 'WAITING_HUMAN', 'PAUSED_LIMIT'])(
