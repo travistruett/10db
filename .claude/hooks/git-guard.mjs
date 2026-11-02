@@ -414,26 +414,18 @@ const SHELLS = ['bash', 'sh', 'zsh'];
 // Programs that read their stdin or arguments as a script to run.
 const SCRIPT_RUNNERS = [...SHELLS, 'eval', 'source', '.'];
 
-<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
-/**
- * `loneDash`: a `-` on its own is an option (env reads it as `-i`), not the command.
- * @typedef {{ valueOptions: string[], operands: number, loneDash?: boolean }} Wrapper
- */
-||||||| 20f56e6
-/** @typedef {{ valueOptions: string[], operands: number }} Wrapper */
-=======
 /**
  * @typedef {object} Wrapper
  * @property {string[]} valueOptions options that take a value, attached or as the next word
  * @property {string[]} flags options that take no value
  * @property {string[]} [attachedOptions] options whose value, if any, is only ever attached
  * @property {number} operands positional words before the command
+ * @property {boolean} [loneDash] a `-` on its own is an option (env reads it as `-i`), not the command
  */
 // The option tables decide only what the guard lets through without asking: an option before the
 // command that appears in none of a wrapper's lists could take a value, so the guard can't tell
 // which word is the command and asks (`unknownWrapperOption`). Add an option here only after
 // checking whether it takes a value; a missing one costs a question, a wrong one hides a command.
->>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
 /** @type {Wrapper} */
 const PLAIN_WRAPPER = { valueOptions: [], flags: [], operands: 0 };
 /** @type {string[]} */
@@ -446,30 +438,6 @@ const WRAPPERS = new Map([
   ...['!', '{', '}', 'if', 'elif', 'while', 'until', 'then', 'do', 'else'].map(
     (keyword) => /** @type {[string, Wrapper]} */ ([keyword, PLAIN_WRAPPER]),
   ),
-<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
-  ...['time', 'command', 'nohup', 'setsid'].map(
-    (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
-  ),
-  ['exec', { valueOptions: ['-a'], operands: 0 }],
-  ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
-  // -P altpath is BSD/macOS env's.
-  [
-    'env',
-    {
-      valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'],
-      operands: 0,
-      loneDash: true,
-    },
-  ],
-||||||| 20f56e6
-  ...['time', 'command', 'nohup', 'setsid'].map(
-    (name) => /** @type {[string, Wrapper]} */ ([name, PLAIN_WRAPPER]),
-  ),
-  ['exec', { valueOptions: ['-a'], operands: 0 }],
-  ['nice', { valueOptions: ['-n', '--adjustment'], operands: 0 }],
-  // -P altpath is BSD/macOS env's.
-  ['env', { valueOptions: ['-u', '-C', '-a', '-P', '--unset', '--chdir', '--argv0'], operands: 0 }],
-=======
   ['time', { ...PLAIN_WRAPPER, flags: ['-p'] }],
   ['command', { ...PLAIN_WRAPPER, flags: ['-p', '-v', '-V'] }],
   ['nohup', { ...PLAIN_WRAPPER, flags: INFO_OPTIONS }],
@@ -493,9 +461,9 @@ const WRAPPERS = new Map([
         ...['--block-signal', '--default-signal', '--ignore-signal', '--list-signal-handling'],
       ],
       operands: 0,
+      loneDash: true,
     },
   ],
->>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
   [
     'stdbuf',
     {
@@ -602,7 +570,7 @@ function readOption(word, wrapper) {
  */
 function skipWrapperArguments(words, from, wrapper) {
   let i = from;
-<<<<<<< d75987291b5435bf13f08517e2216bd2713f10c2
+  let unknown = false;
   while (
     i < words.length &&
     words[i].startsWith('-') &&
@@ -612,12 +580,6 @@ function skipWrapperArguments(words, from, wrapper) {
       i += 1;
       continue;
     }
-||||||| 20f56e6
-  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
-=======
-  let unknown = false;
-  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
->>>>>>> 62bd96747d827f6f3717400e8126afcc8ce974f8
     if (words[i] === '--') {
       i += 1;
       break;
@@ -795,44 +757,6 @@ function envSplitString(words) {
     else if (!word.startsWith('-') && !ENV_ASSIGNMENT.test(word)) break;
   }
   return null;
-}
-
-// The options GNU and BSD/macOS env know. `-S` and `--split-string` hand the rest to a nested env.
-const ENV_FLAG_LETTERS = 'i0v';
-const ENV_VALUE_LETTERS = 'uCaP';
-const ENV_FLAG_LONG = [
-  ...['--ignore-environment', '--null', '--debug', '--version', '--help'],
-  ...['--block-signal', '--default-signal', '--ignore-signal', '--list-signal-handling'],
-];
-const ENV_VALUE_LONG = ['--unset', '--chdir', '--argv0'];
-const ENV_VALUE_OPTIONS = [...[...ENV_VALUE_LETTERS].map((l) => `-${l}`), ...ENV_VALUE_LONG];
-
-/**
- * True when the leading env options in `words` (the words after `env`) include one this guard
- * doesn't know, so it can't tell whether the word after it is a value or the command.
- * @param {string[]} words
- */
-function hasUnknownEnvOption(words) {
-  let i = 0;
-  while (i < words.length && words[i].startsWith('-') && words[i] !== '-') {
-    const word = words[i];
-    if (word === '--') return false;
-    if (word.startsWith('--')) {
-      const name = word.split('=')[0];
-      if (name.length > 2 && '--split-string'.startsWith(name)) return false;
-      const known = [...ENV_FLAG_LONG, ...ENV_VALUE_LONG];
-      if (name.length <= 2 || !known.some((long) => long.startsWith(name))) return true;
-    } else {
-      for (let k = 1; k < word.length; k += 1) {
-        const letter = word[k];
-        if (letter === 'S') return false;
-        if (ENV_VALUE_LETTERS.includes(letter)) break;
-        if (!ENV_FLAG_LETTERS.includes(letter)) return true;
-      }
-    }
-    i += takesNextWord(word, ENV_VALUE_OPTIONS) ? 2 : 1;
-  }
-  return false;
 }
 
 /**
@@ -1235,14 +1159,6 @@ function judge(command, cwd, whole = command, startDir = cwd) {
       if (destination === null) listCertain = false;
       else followedCd = true;
     } else listCertain = false;
-    const split = envSplitString(seg.words);
-    if (split !== null && hasUnknownEnvOption(segments(split)[0]?.words ?? [])) {
-      verdicts.push({
-        decision: 'ask',
-        reason:
-          'An env option inside the -S string is not one the guard knows, so it cannot tell which word is the command.',
-      });
-    }
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
       const verdict = inner === null ? null : judge(inner, cwd, whole, dir);
