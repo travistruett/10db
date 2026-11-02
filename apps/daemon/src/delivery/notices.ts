@@ -38,6 +38,11 @@ export const NOTICE_KEY = {
   checksNeverStarted: 'checks-never-started',
   /** A required check GitHub cancelled stayed cancelled after 10db ran it again, or 10db could not run it again. */
   checksCancelled: 'checks-cancelled',
+  /**
+   * 10db ran a cancelled required check again. The key ends in `:` and the head it ran for, so a
+   * restarted daemon reads that head as already asked and never runs it a second time.
+   */
+  checksRerun: 'checks-rerun',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
 } as const;
@@ -336,6 +341,30 @@ export const cancelledNotices = {
       tone: 'warning',
       line,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that ${batch.baseBranch} requires, so ${named}${prUrl === null ? '' : ` (${prUrl})`} cannot merge.\n\n${list}\n\n${tail} Run ${one ? 'it' : 'them'} again from the link${one ? '' : 's'} above (Re-run jobs), or push a commit to the branch. This notice goes once the check runs again or passes.`,
+    };
+  },
+};
+
+/** The key of the rerun notice for one pull request head. */
+export const rerunNoticeKey = (head: string): string => `${NOTICE_KEY.checksRerun}:${head}`;
+
+/** The head a stored notice key says 10db ran a cancelled check for; null for any other key. */
+export function rerunNoticeHead(key: string): string | null {
+  const prefix = `${NOTICE_KEY.checksRerun}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+/** What delivery shows on a shipped batch's tasks once it ran a cancelled required check again. */
+export const rerunNotices = {
+  /** Also the record that the head was asked: it is read back after a restart. */
+  ran: (head: string, checks: readonly { readonly name: string }[]): Notice => {
+    const names = checks.map((c) => `"${c.name}"`).join(', ');
+    const one = checks.length === 1;
+    return {
+      key: rerunNoticeKey(head),
+      tone: 'info',
+      line: `${one ? `Required check ${names} was` : `Required checks ${names} were`} cancelled; 10db ran ${one ? 'it' : 'them'} again`,
+      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. This notice goes when the pull request merges, closes or gets a new commit.`,
     };
   },
 };
