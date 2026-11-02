@@ -210,6 +210,19 @@ it) and, with no `onlyBuiltDependencies` list, names every package in the store 
 `binding.gyp`, less the `neverBuiltDependencies` ones. Under pnpm 10 with no list nothing builds by default, so
 nothing is named; a `.modules.yaml` with no version also names nothing.
 
+The allow list can also live in a file. `onlyBuiltDependenciesFile` (in `pnpm-workspace.yaml`, or in
+`package.json`'s `pnpm` field) names a file of package names, and the cut reads it as data along with
+`onlyBuiltDependencies`. It reads the file only when the path stays inside the copy's root and no link lies on
+the way to it (a link could lead out of the copy), so the notice never reads a file the project's own tree
+doesn't hold. A path that leads outside the root or through a link is not read, and it adds no names. Whether
+or not it can be read, the setting counts as a list that limits builds: under pnpm 9 and earlier a missing,
+unreadable or empty file is a list that builds nothing, so with such a file the cut names no package (and not
+the whole store, as it does with no list at all). A non-empty `neverBuiltDependencies` list still wins under
+pnpm 9: pnpm then builds everything the list doesn't name and ignores `onlyBuiltDependencies` and
+`onlyBuiltDependenciesFile`, so the notice names every package with an install script less those. So a reader
+sees the notice name the listed packages when the file is inside the copy, holds those names and has no link in
+its path; with the file unread, the notice names nothing from it.
+
 Nothing else is new. A copy's lane profile is today's. The shared cut and the switch back keep their git rules
 (decision 129 and `decisions/2026-10-29-shared-checkout-switch-back.md`).
 
