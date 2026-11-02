@@ -4,6 +4,7 @@ import { batchCardFields } from './batch-card';
 import { GhError } from '../github';
 import {
   checkoutCards,
+  prCards,
   shipCards,
   worktreeCards,
   wrongBranchCard,
@@ -152,5 +153,29 @@ describe('the cards that say why a checkout stays on its branch', () => {
     const card = checkoutCards.dirty(shipped, { name: 'App', repoPath }, place, ['a.ts']);
     expect(card.body).toContain(command);
     expect(card.body).not.toContain(`-C ${repoPath}`);
+  });
+});
+
+describe('the card for a pull request not updated after the base merged', () => {
+  const gateStop = { kind: 'gate' as const, name: 'pre-check' as const, logPath: null };
+
+  it('names the files 10db settled itself', () => {
+    const card = prCards.catchUpStopped(batch, {
+      ...gateStop,
+      settled: ['apps/daemon/src/api/app.ts', 'apps/daemon/src/api/services.ts'],
+    });
+    expect(card.title).toBe(
+      'Pull request for "Greetings" not updated: the pre-check failed after merging main',
+    );
+    expect(card.body).toContain('10db settled these files itself');
+    expect(card.body).toContain('apps/daemon/src/api/app.ts');
+    expect(card.body).toContain('apps/daemon/src/api/services.ts');
+  });
+
+  it('says nothing of settled files when 10db settled none', () => {
+    expect(prCards.catchUpStopped(batch, gateStop).body).not.toContain('settled');
+    expect(prCards.catchUpStopped(batch, { ...gateStop, settled: [] }).body).not.toContain(
+      'settled',
+    );
   });
 });
