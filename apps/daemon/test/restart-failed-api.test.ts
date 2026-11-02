@@ -3,10 +3,19 @@ import {
   ProjectDto,
   TaskDto,
   WorkstreamDto,
+  type InboxItemId,
   type ProjectId,
   type TaskId,
+  type WorkstreamId,
 } from '@10db/contracts';
-import { insertBatch, transitionBatch, transitionWorkstream, insertWorkstream } from '@10db/db';
+import {
+  getInboxItem,
+  insertBatch,
+  transitionBatch,
+  transitionWorkstream,
+  insertWorkstream,
+} from '@10db/db';
+import { flagCard } from '../src/inbox';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -117,6 +126,40 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     const old = (await batchesOf(project.id)).find((b) => b.id === batchId);
     expect(old?.state).toBe('ABANDONED');
     // The repo has no origin, so the new batch's cut is refused; wait for it before the daemon stops.
+    await waitForAsync(async () =>
+      (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,
+    );
+  });
+
+  const failedCard = (project: ProjectId, workstream: WorkstreamId): InboxItemId =>
+    daemon.state.write((ctx) =>
+      flagCard(ctx, {
+        projectId: project,
+        workstreamId: workstream,
+        title: 'Workstream failed: Alpha',
+        body: 'The gate failed',
+      }),
+    ).id;
+  const cardState = (id: InboxItemId) => getInboxItem(daemon.state.db, id).state;
+
+  it('closes the failed card when Start reruns the workstream', async () => {
+    const { project, task, workstreamId } = await failedInOpenBatch();
+    const card = failedCard(project.id, workstreamId);
+
+    await startTask(task.id, {});
+
+    expect(cardState(card)).not.toBe('OPEN');
+    await api().post(`/workstreams/${workstreamId}/cancel`, WorkstreamDto);
+  });
+
+  it('closes the failed card when Start over abandons the batch', async () => {
+    const { project, task, workstreamId } = await failedInOpenBatch();
+    const card = failedCard(project.id, workstreamId);
+
+    const res = await startTask(task.id, { fresh: true });
+
+    expect(cardState(card)).not.toBe('OPEN');
+    const fresh = BatchDto.parse(res.body);
     await waitForAsync(async () =>
       (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,
     );

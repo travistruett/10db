@@ -1,5 +1,5 @@
-import { ConflictError } from '@10db/contracts';
-import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
+import { ConflictError, type WorkstreamId } from '@10db/contracts';
+import { getBatch, getInboxItem, getTask, getWorkstream, listWorkstreams } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createFailedRestarts, type FailedRestarts } from './restart';
@@ -9,7 +9,12 @@ let restarts: FailedRestarts;
 beforeEach(() => {
   // These tests move batches by hand; the ship trigger would race them.
   h = createDeliveryHarness({}, { trigger: false });
-  restarts = createFailedRestarts({ state: h.state, starter: h.starter, shipper: h.shipper });
+  restarts = createFailedRestarts({
+    state: h.state,
+    starter: h.starter,
+    shipper: h.shipper,
+    inbox: h.inbox,
+  });
 });
 afterEach(() => {
   h.close();
@@ -79,6 +84,67 @@ describe('a task whose latest run failed in an open batch', () => {
     expect(() => {
       restarts.supersede(alpha.id);
     }).toThrow(ConflictError);
+  });
+});
+
+describe('the failed card of a task that is started again', () => {
+  /** The card the runner raises when the workstream fails. */
+  function failedCard(ws: { id: WorkstreamId }) {
+    return h.inbox.flag({
+      projectId: h.project.id,
+      workstreamId: ws.id,
+      title: 'Workstream failed: Alpha',
+      body: 'The gate failed',
+    });
+  }
+
+  it('closes when the run continues', async () => {
+    const { alpha, ws } = await failedAlone();
+    const card = failedCard(ws);
+
+    restarts.continueRun(alpha.id);
+
+    expect(getInboxItem(h.store.db, card.id).state).not.toBe('OPEN');
+  });
+
+  it('closes when the task starts over', async () => {
+    const { alpha, ws } = await failedAlone();
+    const card = failedCard(ws);
+
+    restarts.supersede(alpha.id);
+
+    expect(getInboxItem(h.store.db, card.id).state).not.toBe('OPEN');
+  });
+
+  it('stays open when starting over is refused', async () => {
+    const { alpha, ws } = await failedAlone();
+    const card = failedCard(ws);
+    h.running.add(ws.id);
+
+    expect(() => {
+      restarts.supersede(alpha.id);
+    }).toThrow(ConflictError);
+
+    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+  });
+
+  it('stays open when starting over leaves a shared batch as it is', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
+    if (!a || !b) throw new Error('two workstreams expected');
+    h.settle(b.id, 'DONE');
+    h.settle(a.id, 'FAILED');
+    const card = failedCard(a);
+
+    restarts.supersede(a.taskId);
+
+    // supersede leaves the shared batch alone; the later start continues the run, which closes the card.
+    expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
   });
 });
 
