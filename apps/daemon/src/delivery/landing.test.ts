@@ -564,6 +564,8 @@ describe('in worktree mode', () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
     h.teammatePush('main', 'src/api/fix.txt');
+    // Another open task lands there, so only the behind notice is earned.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();
@@ -583,6 +585,8 @@ describe('in worktree mode', () => {
   it('says nothing when its landing branch holds everything the base has', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('feature/x', 'src/api/feature.txt');
+    // Another open task lands there, so no unused-branch notice either.
+    h.addTask('Beta', { landing: { kind: 'branch', branch: 'feature/x' } });
     const task = h.addTask('Alpha', { landing: { kind: 'branch', branch: 'feature/x' } });
     const started = h.only(h.starter.startBatch(h.project.id, { title: 'A', taskIds: [task.id] }));
     await h.jobs.idle();
