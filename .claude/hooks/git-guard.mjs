@@ -474,22 +474,87 @@ const GIT_OPTIONS_WITH_VALUE = [
 
 /**
  * The git verb and its arguments, skipping leading `VAR=value` words, wrappers, and git's global
- * options. `config` collects every `-c key=value` and `--config-env key=VAR` passed to git itself.
+ * options. `config` collects every `-c key=value` and `--config-env key=VAR` passed to git itself,
+ * and `dirs` every `-C <dir>`, in order. `retargeted` is true when something else points git at
+ * another repository: `--git-dir`, `--work-tree`, a `GIT_DIR`-style assignment, or a wrapper's own
+ * directory option (`env -C`, `sudo -D`, `--chdir`), which the guard doesn't follow.
  * @param {string[]} words
  */
 function gitSubcommand(words) {
   let i = commandStart(words);
   if (programAt(words, i) !== 'git') return null;
+  let retargeted = words
+    .slice(0, i)
+    .some(
+      (w) =>
+        /^(-C|-D|-R|--chdir|--chroot)(=|$)/.test(w) || /^GIT_(DIR|WORK_TREE|COMMON_DIR)=/.test(w),
+    );
   i += 1;
   /** @type {string[]} */
   const config = [];
+  /** @type {string[]} */
+  const dirs = [];
   while (i < words.length && words[i].startsWith('-')) {
     const word = words[i];
     if (word === '-c' || word === '--config-env') config.push(words[i + 1] ?? '');
     if (word.startsWith('--config-env=')) config.push(word.slice('--config-env='.length));
+    if (word === '-C') dirs.push(words[i + 1] ?? '');
+    if (/^--(git-dir|work-tree)(=|$)/.test(word)) retargeted = true;
     i += GIT_OPTIONS_WITH_VALUE.includes(word) ? 2 : 1;
   }
-  return { verb: words[i] ?? '', args: words.slice(i + 1), config };
+  return { verb: words[i] ?? '', args: words.slice(i + 1), config, dirs, retargeted };
+}
+
+// Programs and keywords that can change the shell's directory, or run text that can.
+const DIRECTORY_CHANGERS = ['cd', 'pushd', 'popd', 'chdir', 'builtin', 'eval', 'source', '.'];
+
+/**
+ * True when a segment may change the directory the following segments run in: it names a
+ * directory-changing builtin or a script runner as its command, has `cd`, `pushd`, `popd`, `chdir`
+ * or `builtin` anywhere as a word (`command cd`, `time cd`), or its command word is built by the
+ * shell (`$X dir`).
+ * @param {string[]} words
+ */
+function mayChangeDirectory(words) {
+  const start = commandStart(words);
+  const command = words[start] ?? '';
+  return (
+    DIRECTORY_CHANGERS.includes(programAt(words, start)) ||
+    DIRECTORY_CHANGERS.includes(command) ||
+    /[$`]/.test(command) ||
+    words.some((w) => ['cd', 'pushd', 'popd', 'chdir', 'builtin'].includes(w))
+  );
+}
+
+/**
+ * The directory `target` names from `base`, or null when the guard can't tell: no known base for
+ * a relative path, a path the shell expands (`$`, backtick, `~`, glob, braces), an empty path, or
+ * one that is not an existing directory.
+ * @param {string | null} base
+ * @param {string} target
+ * @returns {string | null}
+ */
+function resolveDirectory(base, target) {
+  if (target === '' || target === '-' || /[$`~*?[\]{}\\]/.test(target)) return null;
+  if (!posix.isAbsolute(target) && base === null) return null;
+  const dir = posix.resolve(base ?? '/', target);
+  return attempt(() => statSync(dir).isDirectory()) === true ? dir : null;
+}
+
+/**
+ * The directory a plain `cd` segment leaves the shell in, or null when it can't be read: a cd with
+ * no operand, more than one, or a path `resolveDirectory` can't resolve. `-L` and `--` are the
+ * only options read.
+ * @param {string[]} words the segment's words, the first being `cd`
+ * @param {string | null} base the directory it runs in
+ * @returns {string | null}
+ */
+function cdDestination(words, base) {
+  let i = 1;
+  if (words[i] === '-L') i += 1;
+  if (words[i] === '--') i += 1;
+  if (words.length !== i + 1) return null;
+  return resolveDirectory(base, words[i]);
 }
 
 /**
@@ -676,6 +741,9 @@ function inAgentWorktree(cwd) {
 const RETARGETS =
   /(^|[\s;&|(){}`'"=])(cd|pushd|popd|chdir|-C|--chdir(=\S*)?|--git-dir(=\S*)?|--work-tree(=\S*)?)(?=$|[\s;&|(){}`'"])|\bGIT_(DIR|WORK_TREE|COMMON_DIR|INDEX_FILE|OBJECT_DIRECTORY)\b/;
 
+// Variables that point git at a repository; after a cd they make the directory unknowable.
+const GIT_REPOSITORY_VARIABLE = /\bGIT_(DIR|WORK_TREE|COMMON_DIR)\b/;
+
 /**
  * True when every pathspec names one file: no option, glob, pathspec magic, expansion syntax
  * (`$`, backtick, `~`, braces), `.`, directory or parent path, and the index holds exactly one
@@ -828,27 +896,58 @@ const SEVERITY = { warn: 1, ask: 2, deny: 3 };
  * @param {string} command
  * @param {string} cwd
  * @param {string} [whole] the command as the agent ran it, when `command` is a script nested in it
+ * @param {string | null} [startDir] the directory `command` starts in, null when a `cd` before it
+ *   left the guard unable to tell; `cwd` when it is the hook's own directory
  * @returns {Verdict | null} the most severe verdict any segment earns
  */
-function judge(command, cwd, whole = command) {
+function judge(command, cwd, whole = command, startDir = cwd) {
   const segs = segments(command);
   /** @type {Verdict[]} */
   const verdicts = [];
   /** @type {string[]} */
   const addedPaths = [];
+  // The directory each segment runs in, as far as `cd` earlier in the command line moves it: null
+  // when the guard can't tell. Rules that read the repository fall back to `cwd` then, as before;
+  // a bare push into an unknown directory asks.
+  let dir = startDir;
+  let touchedDirectory = startDir !== cwd;
+  // Whether every segment of the current `&&`/`||` list so far was a cd that is certain to have run.
+  let listCertain = true;
+  // A cd that follows a command in its list may not have run when the next list starts.
+  let uncertainAtListEnd = false;
+  // Past the first parenthesis or substitution, a cd may be in a subshell and not last.
+  let grouped = false;
   /** @type {string | null | undefined} undefined until looked up; null when git can't say */
   let prefix;
   const repoPrefix = () => {
     if (prefix === undefined) {
-      prefix = attempt(() => gitOutput(cwd, ['rev-parse', '--show-prefix']).trim());
+      prefix = attempt(() => gitOutput(dir ?? cwd, ['rev-parse', '--show-prefix']).trim());
     }
     return prefix;
   };
   for (const [index, seg] of segs.entries()) {
     const start = commandStart(seg.words);
+    const previous = index > 0 ? segs[index - 1].separator : '';
+    if (['(', ')', '`'].includes(previous)) grouped = true;
+    if (['', ';', '\n'].includes(previous)) {
+      if (uncertainAtListEnd) dir = null;
+      uncertainAtListEnd = false;
+      listCertain = true;
+    }
+    if (mayChangeDirectory(seg.words)) {
+      touchedDirectory = true;
+      const inLine = ['', ';', '\n', '&&'];
+      const plainCd = start === 0 && seg.words[0] === 'cd';
+      const readable =
+        plainCd && !grouped && inLine.includes(previous) && inLine.includes(seg.separator);
+      const destination = readable ? cdDestination(seg.words, dir) : null;
+      if (destination !== null && !listCertain) uncertainAtListEnd = true;
+      dir = destination;
+      if (destination === null) listCertain = false;
+    } else listCertain = false;
     const scripts = [nestedCommand(seg.words), ...seg.substitutions, ...stdinScripts(seg, start)];
     for (const inner of scripts) {
-      const verdict = inner === null ? null : judge(inner, cwd, whole);
+      const verdict = inner === null ? null : judge(inner, cwd, whole, dir);
       if (verdict) verdicts.push(verdict);
     }
     if (seg.words.some((w) => HOOK_SKIP.test(w) && !HOOK_SKIP_HARMLESS.test(w))) {
@@ -951,7 +1050,9 @@ function judge(command, cwd, whole = command) {
         const dirs = paths.filter(
           (p) =>
             !BULK_ADD.includes(p) &&
-            attempt(() => existsSync(join(cwd, p)) && statSync(join(cwd, p)).isDirectory()),
+            attempt(
+              () => existsSync(join(dir ?? cwd, p)) && statSync(join(dir ?? cwd, p)).isDirectory(),
+            ),
         );
         if (dirs.length > 0) {
           verdicts.push({
@@ -988,7 +1089,7 @@ function judge(command, cwd, whole = command) {
           // When git can't list the index (no repository), this one rule is skipped.
           const covered = (/** @type {string} */ p) =>
             addedPaths.some((added) => p === added || p.startsWith(`${added}/`));
-          const staged = attempt(() => stagedPaths(cwd));
+          const staged = attempt(() => stagedPaths(dir ?? cwd));
           const foreign =
             staged === null
               ? []
@@ -1004,10 +1105,17 @@ function judge(command, cwd, whole = command) {
         }
       }
       const pushTargets = git.verb === 'push' ? a.filter((x) => !x.startsWith('-')).slice(1) : [];
+      // A bare push sends the branch checked out where git runs: the directory the command line's
+      // `cd` and `-C` lead to. Unknown (null) when a cd or retargeting can't be read, and then it asks.
+      let pushDir = dir;
+      for (const target of git.dirs) pushDir = resolveDirectory(pushDir, target);
+      if (git.retargeted || (touchedDirectory && GIT_REPOSITORY_VARIABLE.test(whole))) {
+        pushDir = null;
+      }
       const pushesMain =
         git.verb === 'push' &&
         (pushTargets.some((t) => MAIN_REFSPEC.test(t)) ||
-          (pushTargets.length === 0 && currentBranch(cwd) === 'main'));
+          (pushTargets.length === 0 && (pushDir === null || currentBranch(pushDir) === 'main')));
       // A `+` refspec forces the update and a `:` refspec deletes the remote ref.
       const rewritesRefs =
         git.verb === 'push' &&

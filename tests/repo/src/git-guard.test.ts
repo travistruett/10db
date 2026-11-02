@@ -519,6 +519,129 @@ describe('git guard in an agent worktree beside the checkout', () => {
   });
 });
 
+// A bare `git push` pushes the branch checked out in the directory the command runs in, which a
+// `cd` earlier in the same command line can change. The guard follows a `cd` it can read and
+// keeps asking when it can't tell.
+describe('git guard judging a push in the directory the command runs in', () => {
+  let layout: string;
+  let checkout: ThrowawayRepo;
+  let worktree: string;
+  let onMainSub: string;
+
+  beforeAll(() => {
+    layout = mkdtempSync(join(tmpdir(), '10db-guard-cd-'));
+    checkout = createThrowawayRepo('10db-guard', join(layout, '10db'));
+    checkout.stage('a.ts', 'x\n');
+    checkout.commit('seed');
+    checkout.git('branch', '-m', 'main');
+    worktree = join(layout, '10db-worktrees', 'pr147');
+    checkout.git('worktree', 'add', '-q', '-b', 'feat/pr147', worktree);
+    onMainSub = join(checkout.dir, 'sub');
+    mkdirSync(onMainSub);
+  });
+
+  afterAll(() => {
+    rmSync(layout, { recursive: true, force: true });
+  });
+
+  // WT, MAIN and SUB stand for the feature worktree, the main checkout and a directory in it.
+  const run = (command: string, cwd: string): Outcome =>
+    runHook(
+      bash(
+        command
+          .replaceAll('WT', worktree)
+          .replaceAll('MAIN', checkout.dir)
+          .replaceAll('SUB', onMainSub),
+        cwd,
+      ),
+    ).outcome;
+
+  it.each<[string, string, Outcome]>([
+    ['cd to the worktree, then push', 'cd WT && git push', 'allow'],
+    ['commit then push after the cd', "cd WT && git commit -m 'x' -- a.ts && git push", 'allow'],
+    ['cd ; push', 'cd WT; git push', 'allow'],
+    ['cd on its own line', 'cd WT\ngit push', 'allow'],
+    ['cd -- path', 'cd -- WT && git push', 'allow'],
+    ['cd -L path', 'cd -L WT && git push', 'allow'],
+    ['quoted path', "cd 'WT' && git push", 'allow'],
+    ['relative cd', 'cd ../10db-worktrees/pr147 && git push', 'allow'],
+    ['push with a remote and no refspec', 'cd WT && git push origin', 'allow'],
+    ['git -C the worktree', 'git -C WT push', 'allow'],
+    ['cd, then git -C a relative path', 'cd WT/.. && git -C pr147 push', 'allow'],
+    ['cd then bash -c', "cd WT && bash -c 'git push'", 'allow'],
+    ['cd chain', 'cd MAIN && cd WT && git push', 'allow'],
+    ['cd after another command', 'git status && cd WT && git push', 'allow'],
+    ['cd into a checkout on main, then cd away', 'cd MAIN; cd WT; git push', 'allow'],
+    ['push inside a bash -c with its own cd', "bash -c 'cd WT && git push'", 'allow'],
+    [
+      'pull request with a message that says cd',
+      "cd WT && git commit -m 'cd MAIN' -- a.ts",
+      'allow',
+    ],
+    // A cd to a checkout on main, or a cd the guard can't read, still asks.
+    ['cd to the main checkout', 'cd MAIN && git push', 'ask'],
+    ['cd to a subdirectory of the main checkout', 'cd SUB && git push', 'ask'],
+    ['git -C the main checkout', 'git -C MAIN push', 'ask'],
+    ['cd to a variable', 'cd $DIR && git push', 'ask'],
+    ['cd to a braced variable', 'cd ${DIR} && git push', 'ask'],
+    ['cd to a substitution', 'cd $(pwd) && git push', 'ask'],
+    ['cd to a backtick substitution', 'cd `pwd` && git push', 'ask'],
+    ['cd to a tilde path', 'cd ~/work && git push', 'ask'],
+    ['cd to a glob', 'cd WT* && git push', 'ask'],
+    ['cd to a directory that is not there', 'cd /no/such/dir && git push', 'ask'],
+    ['cd to a file', 'cd WT/.git && git push', 'ask'],
+    ['cd with no operand', 'cd && git push', 'ask'],
+    ['cd -', 'cd - && git push', 'ask'],
+    ['cd with two operands', 'cd WT MAIN && git push', 'ask'],
+    ['cd to a variable, then a relative cd', 'cd $DIR && cd sub && git push', 'ask'],
+    ['pushd', 'pushd WT && git push', 'ask'],
+    ['popd', 'popd && git push', 'ask'],
+    ['chdir', 'chdir WT && git push', 'ask'],
+    ['builtin cd', 'builtin cd WT && git push', 'ask'],
+    ['command cd', 'command cd WT && git push', 'ask'],
+    ['a command word spelled through a variable', 'X=cd; $X WT && git push', 'ask'],
+    ['eval of a cd', "eval 'cd WT'; git push", 'ask'],
+    ['source a script', 'source ./go.sh && git push', 'ask'],
+    ['cd that may not run (||)', 'true || cd WT; git push', 'ask'],
+    ['cd on the left of ||', 'cd WT || true; git push', 'ask'],
+    ['cd in the background', 'cd WT & git push', 'ask'],
+    ['cd in a pipeline', 'cd WT | cat; git push', 'ask'],
+    ['cd in a subshell', '(cd WT); git push', 'ask'],
+    ['cd later in a subshell', '(true; cd WT); git push', 'ask'],
+    ['cd in a command substitution', 'echo $(cd WT); git push', 'ask'],
+    ['cd in a group', 'if cd WT; then true; fi; git push', 'ask'],
+    ['cd in a loop', 'for i in 1; do cd WT; done; git push', 'ask'],
+    ['cd in a function', 'f() { cd WT; }; f; git push', 'ask'],
+    // After an earlier command, the cd may not have run by the time a later list starts.
+    ['a conditional cd, then a push in the next list', 'test -d WT && cd WT; git push', 'ask'],
+    ['a conditional cd, then a push in the same list', 'test -d WT && cd WT && git push', 'allow'],
+    // Whatever else retargets git after the cd.
+    ['cd, then git -C the main checkout', 'cd WT && git -C MAIN push', 'ask'],
+    ['cd, then git --git-dir', 'cd WT && git --git-dir=MAIN/.git push', 'ask'],
+    ['cd, then git --work-tree', 'cd WT && git --work-tree=MAIN push', 'ask'],
+    ['cd, then env -C', 'cd WT && env -C MAIN git push', 'ask'],
+    ['cd, then GIT_DIR', 'cd WT && GIT_DIR=MAIN/.git git push', 'ask'],
+    ['cd, then GIT_WORK_TREE exported', 'cd WT && export GIT_WORK_TREE=MAIN; git push', 'ask'],
+    ['cd, then git -C a variable', 'cd WT && git -C $D push', 'ask'],
+    // The rest of the push rules hold after a cd.
+    ['force push', 'cd WT && git push --force origin feat/pr147', 'ask'],
+    ['push to main', 'cd WT && git push origin HEAD:main', 'ask'],
+    ['push --no-verify', 'cd WT && git push --no-verify', 'deny'],
+  ])('%s', (_name, command, expected) => {
+    expect(run(command, checkout.dir)).toBe(expected);
+  });
+
+  it('still judges a push without a cd by the session directory', () => {
+    expect(run('git push', checkout.dir)).toBe('ask');
+    expect(run('git push', worktree)).toBe('allow');
+  });
+
+  it('judges a cd to the main checkout from a session directory in the worktree', () => {
+    expect(run('cd MAIN && git push', worktree)).toBe('ask');
+    expect(run('cd .. && git push', onMainSub)).toBe('ask');
+  });
+});
+
 // The repository squash-merges, so a merged branch is never an ancestor of main and only `-D`
 // deletes it. A branch whose pull request merged and whose tip is that pull request's head commit
 // loses nothing, so deleting it doesn't ask. A fake `gh` on PATH answers from FAKE_GH_OUT.
