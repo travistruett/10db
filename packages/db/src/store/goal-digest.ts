@@ -289,7 +289,8 @@ function openDependenciesOf(db: DbReader, taskId: TaskId): { taskId: TaskId; tit
  * The first task that can start now, else the first that cannot yet and what it waits on. With no
  * unstarted task left, the queued task the scheduler would start: the first in line whose
  * dependencies are done (it skips a queued task that waits, even one the builder ran next), else
- * the first in line with the open dependencies it waits on.
+ * the first in line with the open dependencies it waits on. A parked queued task is passed over
+ * while one that isn't parked is queued.
  */
 function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNext | null {
   const unstarted = tasks.filter((t) => {
@@ -308,7 +309,11 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
         queued.push({ task, ws: run.workstream });
       }
     }
-    const inLine = queued.toSorted((x, y) => queueOrder(x.ws, y.ws));
+    // The scheduler never starts a parked task, so one that isn't parked leads when there is one.
+    const unparked = queued.filter((q) => q.task.boardColumnId === null);
+    const inLine = (unparked.length > 0 ? unparked : queued).toSorted((x, y) =>
+      queueOrder(x.ws, y.ws),
+    );
     const startable = inLine.find((q) => dependenciesDone(db, q.task.id));
     if (startable) return { taskId: startable.task.id, title: startable.task.title, waitsOn: [] };
     const first = inLine[0];
