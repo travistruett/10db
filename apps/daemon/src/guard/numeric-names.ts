@@ -92,12 +92,13 @@ const BUILTINS: ReadonlySet<string> = new Set(
  * read, `printf` except for `-v`, and `print` except for a flag cluster with `v`, which sets a
  * name. `whence`, `where` and `which` only report. `repeat` runs the command after its count, and
  * zsh's `-` modifier the command after it; `commandHeads` reads that command in turn. `foreach` sets its variable from a word list the scan does
- * not read, so it is not understood.
+ * not read, so it is not understood. Nor is bash's `jobs`: `jobs -x cmd` runs `cmd` in the current
+ * shell, so a builtin it runs (`jobs -x getopts a: o -a x` sets `OPTARG`) can set a name.
  */
 const UNDERSTOOD: ReadonlySet<string> = new Set(
   (
     ': [ [[ break cd chdir command continue declare echo exec exit export false float ' +
-    'integer jobs let local popd print printf private pushd pwd read readonly repeat return ' +
+    'integer let local popd print printf private pushd pwd read readonly repeat return ' +
     'select set shift shopt test time true type typeset unset wait whence where which'
   ).split(' '),
 );
