@@ -340,13 +340,11 @@ export interface Git {
   changedFilesSince(repo: string, base: string): Promise<string[]>;
   /**
    * As `changedFilesSince`, but the committed files are only those of commits made through the commit
-   * tool in this checkout: commits on its own first-parent line since `base` that carry a `10db-Op`
-   * trailer and whose sha is in `made` (the shas the commit tool returned to the lanes that ran here),
+   * tool: commits on the checkout's own first-parent line since `base` that carry a `10db-Op` trailer,
    * each read against its first parent. A commit with no such trailer (the builder's own, a merge, a
-   * squash) or whose sha is not in `made` (a fast-forward or rebase-pull that brought in commits other
-   * lanes made elsewhere, trailers and all) adds nothing. The uncommitted changes all count.
+   * squash or fast-forward that pulled commits in) adds nothing. The uncommitted changes all count.
    */
-  opChangedFilesSince(repo: string, base: string, made: readonly string[]): Promise<string[]>;
+  opChangedFilesSince(repo: string, base: string): Promise<string[]>;
   /** Files whose committed content differs between `base` and `tip`, sorted; nothing uncommitted. */
   filesChangedBetween(repo: string, base: string, tip: string): Promise<string[]>;
   /**
@@ -2499,10 +2497,9 @@ export function createGit(opts: GitOptions = {}): Git {
         .filter(Boolean);
       return [...new Set([...committed, ...working])].sort();
     },
-    async opChangedFilesSince(repo, base, made) {
+    async opChangedFilesSince(repo, base) {
       const c = await pinned(repo);
       const working = await changes(c);
-      const madeHere = new Set(made);
       const log = await git(c, [
         'log',
         '--no-show-signature',
@@ -2514,9 +2511,7 @@ export function createGit(opts: GitOptions = {}): Git {
       const own = log
         .split('\x1e')
         .map((record) => record.trim().split('\x1f'))
-        .flatMap(([sha, ops]) =>
-          sha && OBJECT_ID.test(sha) && ops?.trim() && madeHere.has(sha) ? [sha] : [],
-        );
+        .flatMap(([sha, ops]) => (sha && OBJECT_ID.test(sha) && ops?.trim() ? [sha] : []));
       const committed: string[] = [];
       for (const sha of own) {
         const out = await git(c, [

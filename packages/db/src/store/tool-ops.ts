@@ -5,7 +5,7 @@ import {
   type StepPosition,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, count, desc, eq, gt, inArray } from 'drizzle-orm';
+import { and, count, desc, eq, gt } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import type { DbReader, WriteContext } from './store';
@@ -24,33 +24,6 @@ export function findToolOp(
     .from(schema.toolOps)
     .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.opId, opId)))
     .get();
-}
-
-/**
- * The commits the workstreams made through the commit tool: the `sha` each recorded call returned.
- * A call whose result holds no sha is skipped.
- */
-export function commitShasOf(db: DbReader, workstreamIds: readonly WorkstreamId[]): string[] {
-  if (workstreamIds.length === 0) return [];
-  const shas = new Set<string>();
-  const rows = db
-    .select({ result: schema.toolOps.result })
-    .from(schema.toolOps)
-    .where(
-      and(
-        inArray(schema.toolOps.workstreamId, [...workstreamIds]),
-        eq(schema.toolOps.tool, 'commit'),
-      ),
-    )
-    .all();
-  for (const { result } of rows) {
-    const sha =
-      typeof result === 'object' && result !== null && !Array.isArray(result)
-        ? result['sha']
-        : undefined;
-    if (typeof sha === 'string') shas.add(sha);
-  }
-  return [...shas];
 }
 
 /** Whether any session of the workstream has recorded a call of the tool. */
