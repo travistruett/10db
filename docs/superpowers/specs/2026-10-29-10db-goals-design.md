@@ -204,8 +204,11 @@ task under a rule is open (§14).
 
 ## 8. Factory
 
-**Built:** Factory lists workstreams (task, state, step, context, sessions, last activity, Retry, Cancel) and,
-below them, every batch with its pull request (`apps/desktop/src/views/factory/`).
+**Built:** Factory is the project's goals as described below (`apps/desktop/src/views/factory/`): the status-ordered
+list, the Ungrouped and Done (n) rows, each goal's digest, and its Sessions and Pull requests. The header's
+**Adopt a Plan…** is not built yet. The workstream table's columns (task, state, step, context, sessions, last
+activity, Retry, Cancel) live on in Sessions; a queued or held run names no step and the digest never counts one
+as running.
 
 **Designed.** Factory becomes the project's goals, with the project switcher above it as today.
 

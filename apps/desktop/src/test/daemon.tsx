@@ -58,6 +58,9 @@ export function baseHandlers(
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/projects/:projectId/goals', base), () =>
+      HttpResponse.json({ goals: [], ungrouped: null }),
+    ),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>
       HttpResponse.json(KeepAwakeStatus.parse({ mode: 'while_running', active: false })),
