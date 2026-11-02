@@ -471,6 +471,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
+    onBookkeepingDropped: (root, dropped) => {
+      for (const { rel, writtenBy } of dropped)
+        logger.info(
+          { root, path: rel, writtenBy },
+          'left a Claude Code bookkeeping file out of a commit',
+        );
+    },
     refusedCheckouts: refusedTrustCheckouts(state.db),
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,

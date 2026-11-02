@@ -460,13 +460,28 @@ describe('seeding a new copy', () => {
         expect(batch.notices).toEqual([]);
       });
 
-      it('says nothing when the list is in a file, which is not read', async () => {
+      it('says nothing when the list file is absent: nothing builds', async () => {
         pnpmField({ onlyBuiltDependenciesFile: 'allowed.json' });
         allowing('packages: []\n');
         h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
         await startedOne(shared('Alpha'));
         const batch = await startedOne(copy('Copied'));
         expect(batch.notices).toEqual([]);
+      });
+
+      it('names the script-bearing packages the list file names', async () => {
+        pnpmField({ onlyBuiltDependenciesFile: 'allowed.json' });
+        allowing('packages: []\n');
+        h.commit('allowed.json', JSON.stringify(['prisma', 'left-pad']));
+        h.git$('push', '-q', 'origin', 'main');
+        h.pnpm.makes({ ...madeBy('9.15.0'), ...natives });
+        await startedOne(shared('Alpha'));
+        const batch = await startedOne(copy('Copied'));
+        const notice = h.only(batch.notices);
+        expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+        expect(notice.line).toContain('prisma');
+        expect(notice.line).not.toContain('sharp');
+        expect(notice.line).not.toContain('left-pad');
       });
 
       it('does not apply ignoredBuiltDependencies, which pnpm 9 does not read', async () => {

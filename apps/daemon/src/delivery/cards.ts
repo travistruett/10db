@@ -787,6 +787,19 @@ export const shipCards = {
       detail: answers(batch),
     },
   }),
+  /**
+   * GitHub's server failed the push (an HTTP 5xx, or a remote rejection with its own error as the
+   * reason) and 10db pushed `retries` more times by itself. This says nothing of the branch having
+   * diverged: it never learned of a divergence.
+   */
+  pushServerError: (batch: BatchDto, detail: string, retries: number): ShipFailure => ({
+    failure: BatchFailure.Network,
+    card: {
+      title: `${notShipped(batch)}: GitHub failed the push`,
+      body: `GitHub said:\n${detail}\n\nThis is an error on GitHub's side, not a sign the branch diverged. 10db pushed again ${String(retries)} times, a few seconds apart, and it failed each time. Nothing was merged.\n\n${RETRY}`,
+      detail: answers(batch),
+    },
+  }),
   pushTimedOut: (batch: BatchDto, timeoutMs: number): ShipFailure => ({
     failure: BatchFailure.Network,
     card: {
