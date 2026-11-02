@@ -11,6 +11,8 @@ describe('unreadableHazard reads pnpm value flags from the shared flag table', (
     'pnpm --loglevel lint $SUB x',
     'pnpm --registry build $SUB x',
     'pnpm --store-dir test $SUB x',
+    // The tag's value may be empty, leaving `test` after `--filter` and $SUB as the subcommand.
+    'pnpm --tag --filter test $SUB x',
   ])('asks for %s with the deps hazard unclaimed', (command) => {
     expect(unreadableHazard(command, deps)).not.toBeNull();
   });
@@ -41,6 +43,15 @@ describe('fixedPnpmCommand', () => {
 
   it('reads a listed value flag written with an equals sign', () => {
     expect(fixedPnpmCommand(['pnpm', '--filter=@x/y', 'test'])).toEqual(['pnpm', 'test']);
+  });
+
+  it.each([
+    // nopt may leave the value empty and read the next `-` word as a flag, so the subcommand moves.
+    [['pnpm', '--tag', '--filter', 'test', '$SUB', 'x']],
+    [['pnpm', '--reporter', '-r', 'test', '$F']],
+    [['pnpm', '--filter', '-F', 'test', '$F']],
+  ])('returns null when a value flag is followed by a word starting with a dash: %j', (line) => {
+    expect(fixedPnpmCommand(line)).toBeNull();
   });
 
   it.each([
