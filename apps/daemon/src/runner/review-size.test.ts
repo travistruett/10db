@@ -88,6 +88,13 @@ describe('reviewSizeRule', () => {
       'CLAUDE.md',
       'docs/CLAUDE.md',
       '.codex/rules/default.rules',
+      'tools/.scripts/package.json',
+      '.tools/package.json',
+      'a/.b/.c/pnpm-lock.yaml',
+      'tools/.scripts/Cargo.lock',
+      'tools/.db/migrations/001.sql',
+      'packages/.db/drizzle/0001_x.sql',
+      'tools/.hidden/AGENTS.md',
     ].map((path) => ({
       name: `a change to ${path} forces review`,
       files: [file('a.ts', 1, 1), file(path, 1, 1)],
@@ -98,6 +105,17 @@ describe('reviewSizeRule', () => {
       files: [file('contracts/api.ts', 1, 1)],
       hazards: [{ name: 'contracts', globs: ['contracts/**'], commands: [] }],
       want: 'review',
+    },
+    {
+      name: "a path in a hidden folder of the project's own hazard forces review",
+      files: [file('contracts/.gen/api.ts', 1, 1)],
+      hazards: [{ name: 'contracts', globs: ['contracts/**'], commands: [] }],
+      want: 'review',
+    },
+    {
+      name: 'an ordinary file in a hidden folder is asked about',
+      files: [file('tools/.scripts/run.ts', 1, 1), file('.eslintrc.js', 1, 1)],
+      want: 'ask',
     },
     {
       name: 'an ordinary source file and a README are asked about',

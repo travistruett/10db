@@ -88,7 +88,9 @@ export function reviewSizeRule(
   const hazards = [...projectHazards, ...DEFAULT_HAZARDS, REVIEW_FORCING_PATHS];
   for (const f of changes.files) {
     if (f.added === null && f.removed === null) return 'review';
-    if (classifyPath(f.path, [], hazards).hazards.length > 0) return 'review';
+    // Matched as areas: a hazard glob read as a hazard lets no `*` or `**` match a dot name, so
+    // `**/package.json` would miss `tools/.scripts/package.json`.
+    if (classifyPath(f.path, hazards, []).areas.length > 0) return 'review';
   }
   const lines = changes.files.reduce((sum, f) => sum + (f.added ?? 0) + (f.removed ?? 0), 0);
   return lines > REVIEW_SIZE_MAX_LINES ? 'review' : 'ask';
