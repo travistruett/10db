@@ -3,4 +3,3 @@ export { ClaimWaits, forgetEndedYields, withdrawStaleClaimWaits } from './claim-
 export { createMcpHandler } from './server';
 export { mintSessionToken } from './tokens';
 export type { ShapeToolHandlers, ShapeToolsFor } from './shape-tools';
-export type { McpDeps } from './tools';

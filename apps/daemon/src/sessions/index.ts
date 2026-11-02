@@ -5,7 +5,7 @@ export {
   FakeScriptBook,
   loadFakeScriptBook,
 } from './fake-adapter';
-export type { FakeShapeBehaviour, FakeShapeTurn, FakeShapeTurnResult } from './fake-shape';
+export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
 export { checkAccount, type SeenAccount } from './account-check';
 export { AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
@@ -13,7 +13,6 @@ export type {
   SessionEvent,
   SessionHandle,
   SessionSpec,
-  ShapeAgentDefinition,
   ShapeSessionHandle,
   ShapeSessionSpec,
   ShapeToolRequest,

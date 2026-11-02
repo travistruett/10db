@@ -2,7 +2,6 @@ import {
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
-  type PlanDraft,
   type ProjectDto,
   type ShapeDto,
   type ShapeMessageId,
@@ -71,5 +70,3 @@ export function looseDraft(source: ShapeMessageId, ...keys: string[]): Record<st
     })),
   };
 }
-
-export type RawDraft = Record<string, unknown> | PlanDraft;

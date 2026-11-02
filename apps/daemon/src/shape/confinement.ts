@@ -9,7 +9,6 @@ import { readAccess, readPathsOf, type FileAccessContext } from '../sandbox';
 
 /** The reviewers a Shape session may launch with `Agent` (§7). */
 export const SHAPE_REVIEWERS = ['scope', 'engineering', 'rehearsal'] as const;
-export type ShapeReviewer = (typeof SHAPE_REVIEWERS)[number];
 
 /** Where a Shape session may read. */
 export interface ShapeAccess {
