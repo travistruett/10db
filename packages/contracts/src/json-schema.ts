@@ -67,6 +67,16 @@ import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
 import { RunNextResult } from './run-next';
 import { PlanDraft, ShapeDto, ShapeMessageDto, ShapeToolInputs, ShapeToolName } from './shape';
+import {
+  ShapeConvertError,
+  ShapeConvertInput,
+  ShapeConvertResult,
+  ShapeInput,
+  ShapeMessageInput,
+  ShapeProposeResult,
+  ShapeViewDto,
+  ShapeWithdrawInput,
+} from './shape-view';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -189,6 +199,14 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'plan-draft': PlanDraft,
   'shape-dto': ShapeDto,
   'shape-message-dto': ShapeMessageDto,
+  'shape-view-dto': ShapeViewDto,
+  'shape-input': ShapeInput,
+  'shape-message-input': ShapeMessageInput,
+  'shape-propose-result': ShapeProposeResult,
+  'shape-convert-input': ShapeConvertInput,
+  'shape-convert-result': ShapeConvertResult,
+  'shape-convert-error': ShapeConvertError,
+  'shape-withdraw-input': ShapeWithdrawInput,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,
