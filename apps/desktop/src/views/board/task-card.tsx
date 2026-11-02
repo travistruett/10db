@@ -31,6 +31,8 @@ export interface TaskCardProps {
   readonly startNote?: StartNote | null | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
+  /** The title of the goal the task belongs to, shown dimmed above its title. */
+  readonly goalTitle?: string | undefined;
   /** Whether the task's placement can still change; only then does the card say where it runs. */
   readonly placementShown?: boolean | undefined;
 }
@@ -105,6 +107,7 @@ export function TaskCard({
   landing,
   startNote = null,
   place,
+  goalTitle,
   placementShown = false,
 }: TaskCardProps) {
   const waits = waitsOn(task, peers);
@@ -135,6 +138,11 @@ export function TaskCard({
       }
     >
       <Stack gap="xs">
+        {goalTitle ? (
+          <Text size="xs" c="dimmed" truncate="end" pr={28} data-testid="task-card-goal">
+            {goalTitle}
+          </Text>
+        ) : null}
         {/* The card's menu sits over the top-right corner, outside this element; the title leaves room. */}
         <Text size="sm" fw={500} pr={28}>
           {task.title}

@@ -34,9 +34,21 @@ describe('numericNames', () => {
       ['a flag word in quotes from a variable', 's=1; declare "$x" r=s; echo $((s))'],
       ['a flag word from a substitution', 's=1; local $(echo -n) r=s; echo $((s))'],
       ['a flag word from backticks', 's=1; typeset `echo -n` r=s; echo $((s))'],
+      ['a glob that may match a flag file: ?', 'touch ./-n; s=1; declare ?n r=s; echo $((s))'],
+      ['a glob that may match a flag file: *', 'touch ./-n; s=1; declare *n r=s; echo $((s))'],
+      ['a glob that may match a flag file: [-]', 'touch ./-n; s=1; declare [-]n r=s; echo $((s))'],
+      ['a glob in typeset', 'touch ./-n; s=1; typeset ?n r=s; echo $((s))'],
+      ['a glob in local', 'touch ./-n; s=1; local ?n r=s; echo $((s))'],
+      ['a glob behind command', 'touch ./-n; s=1; command declare ?n r=s; echo $((s))'],
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
+    });
+
+    it('does not take a quoted glob character for a glob', () => {
+      expect(names("s=1; declare '?n'=1; echo $((s))")).toEqual(['s']);
+      expect(names('s=1; declare "*n"=1; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; declare x=*; echo $((s))')).toEqual(['s']);
     });
   });
 

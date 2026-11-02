@@ -642,6 +642,17 @@ const BRANCH_DELETE_OPTIONS = [
 // A branch name made of characters git allows and no revision syntax: no `~`, `^`, `@{`, `:`, `..`
 // or glob. A name that doesn't fit is asked about, never resolved.
 const PLAIN_BRANCH_NAME = /^[A-Za-z0-9_][A-Za-z0-9_./+-]*$/;
+// One `gh pr list` may wait this long, and all the lookups for one command together wait at most
+// GH_BUDGET_MS. Claude Code cancels a hook that outlasts its timeout (60 s by default) and then
+// runs the command unjudged, so the total stays well below that. TENDB_GIT_GUARD_GH_BUDGET_MS
+// overrides the total, for tests.
+const GH_LOOKUP_TIMEOUT_MS = 15000;
+const GH_BUDGET_MS = 20000;
+
+function ghBudgetMs() {
+  const override = Number(process.env.TENDB_GIT_GUARD_GH_BUDGET_MS);
+  return Number.isFinite(override) && override > 0 ? override : GH_BUDGET_MS;
+}
 
 /**
  * True when `git branch <delete flags> <names>` deletes only local branches whose pull request has
@@ -659,12 +670,16 @@ function deletesOnlyMergedBranches(args, cwd) {
   if (!options.every((x) => BRANCH_DELETE_OPTIONS.includes(x))) return false;
   if (!options.some((x) => x === '--delete' || /^-[a-zA-Z]*[dD]/.test(x))) return false;
   const checkedOut = currentBranch(cwd);
+  const deadline = Date.now() + ghBudgetMs();
   return names.every((name) => {
     if (!PLAIN_BRANCH_NAME.test(name) || name.includes('..') || name === checkedOut) return false;
     const tip = attempt(() =>
       gitOutput(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}^{commit}`]).trim(),
     );
     if (!tip) return false;
+    // The branches share one budget; a lookup that starts with none left is an unconfirmed branch.
+    const left = deadline - Date.now();
+    if (left <= 0) return false;
     const pulls = attempt(() =>
       JSON.parse(
         execFileSync(
@@ -681,7 +696,12 @@ function deletesOnlyMergedBranches(args, cwd) {
             '--json',
             'headRefName,headRefOid,state',
           ],
-          { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 15000 },
+          {
+            cwd,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'ignore'],
+            timeout: Math.min(GH_LOOKUP_TIMEOUT_MS, left),
+          },
         ),
       ),
     );
@@ -1162,12 +1182,17 @@ function judge(command, cwd, whole = command, startDir = cwd) {
         inAgentWorktree(cwd);
       // Deleting a branch whose pull request merged loses nothing, but only as a lone plain git
       // call, for the same reason as above; the cwd is the repository the branch names live in.
-      const mergedBranchDelete =
-        loneGitCall &&
-        git.verb === 'branch' &&
-        !RETARGETS.test(whole) &&
-        deletesOnlyMergedBranches(a, cwd);
-      if (irreversible && !ownDiscard && !mergedBranchDelete) {
+      // GitHub is asked only for a call that would ask otherwise (`&&` stops before the lookup).
+      if (
+        irreversible &&
+        !ownDiscard &&
+        !(
+          loneGitCall &&
+          git.verb === 'branch' &&
+          !RETARGETS.test(whole) &&
+          deletesOnlyMergedBranches(a, cwd)
+        )
+      ) {
         verdicts.push({
           decision: 'ask',
           reason: pushesMain

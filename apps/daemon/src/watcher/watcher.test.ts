@@ -1570,6 +1570,28 @@ describe('worktree checkouts', () => {
       expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
     });
 
+    it('cards at the step end a later write the live watcher never processed', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('excuses at the step end an allowed write, and the live batch after it raises no card', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      touch(SENSITIVE_FILE);
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      emit(SENSITIVE_FILE);
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+    });
+
     it('still excuses the write at the step end after the live watcher used the card', async () => {
       const lane = running();
       watcher.sync();

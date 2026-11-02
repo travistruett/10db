@@ -1,4 +1,4 @@
-import type { BatchDto } from '@10db/contracts';
+import { PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, workstreamDto } from '../../test/fixtures';
 import { taskNotices, taskState } from './task-state';
@@ -300,6 +300,22 @@ describe('taskState', () => {
         conflict,
       ]);
       expect(taskNotices(undefined, batch)).toEqual([]);
+    });
+
+    it('keeps the question and answer of a run the builder parked, though it was cancelled', () => {
+      const parked = {
+        key: PARKED_NOTICE_KEY,
+        tone: 'info' as const,
+        line: 'Parked after your answer to: Can you capture the checks?',
+        body: 'Question: Can you capture the checks?\n\nYour answer: Park the task',
+      };
+      expect(taskNotices(workstreamDto({ state: 'CANCELLED', notice: parked }), undefined)).toEqual(
+        [parked],
+      );
+      // Any other notice of a cancelled run is stale.
+      expect(
+        taskNotices(workstreamDto({ state: 'CANCELLED', notice: waiting }), undefined),
+      ).toEqual([]);
     });
   });
 });
