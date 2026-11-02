@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { BatchState, InvalidError, type BatchDto, type BatchId } from '@10db/contracts';
 import { getBatch, getProject, transitionBatch, type WriteContext } from '@10db/db';
 import { existsAsEntry, GitTrustError, WorktreeNotOursError } from '../git';
-import { worktreeCards } from './cards';
+import { worktreeCards, worktreeOffer } from './cards';
 import { raise, type DeliveryContext } from './context';
 import { recordInstall } from './installed-lockfile';
 import { jobKey, JobQueue } from './jobs';
@@ -137,7 +137,11 @@ async function makeWhole(
     // Without current packages the worktree is not whole: the next Retry makes it again.
     await dropUninstalled();
     if (installed.kind === 'failed') {
-      raise(ctx.inbox, batch.projectId, worktreeCards.installFailed(batch, installed));
+      // A Retry's repair, not a start: the batch is FAILED, and its card offers Retry and Abandon.
+      raise(ctx.inbox, batch.projectId, {
+        ...worktreeCards.installFailed(batch, installed),
+        ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
+      });
       await raiseInstallHostCards(ctx, batch.projectId, installed);
     }
     return 'refused';

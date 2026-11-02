@@ -942,6 +942,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         expect(card.title).toContain("couldn't regenerate");
         expect(card.body).toContain(`${DB}/`);
         expect(card.body).toContain('update-ref failed');
+        // The branch's own migration is gone from the directory the merge took from the base.
+        expect(card.body).toContain(`${DB}/0001_mine.sql`);
       });
     });
   });
