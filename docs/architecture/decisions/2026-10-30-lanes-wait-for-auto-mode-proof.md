@@ -81,7 +81,9 @@ To run them, on a machine signed in to Claude Code (never in CI or a lane):
 TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run test/lane-sandbox.live.test.ts -t 'auto mode'
 ```
 
-**What switching needs.** All five cases pass. Then a follow-up change sets `LANE_PERMISSION_MODE`
+**What switching needs.** All six cases pass; the sixth gives a lane the real implement brief and a
+multi-line replacement, and shows it changes the file with Edit, MultiEdit or Write, with no Bash
+write and no card. Then a follow-up change sets `LANE_PERMISSION_MODE`
 to `'auto'`, updates the unit test that expects `'default'`, and records a decision that supersedes
 124's "auto mode is gone" with the results.
 
