@@ -262,6 +262,8 @@ describe('shipping', () => {
       'apps/desktop/src-tauri/Cargo.lock',
       'source = "registry+https://github.com/rust-lang/crates.io-index"\n',
     );
+    // A reading takes only origin's copy of the default branch, which a lane can't move.
+    h.git$('push', '-q', 'origin', 'main');
     h.state.write((ctx) => {
       deleteAppSetting(ctx, `network-hosts-found:${h.project.id}`);
     });

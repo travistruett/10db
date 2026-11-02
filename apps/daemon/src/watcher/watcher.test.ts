@@ -32,6 +32,7 @@ import {
   getProject,
   patchBatch,
   patchProject,
+  patchWorkstream,
   renewClaimLeases,
   transitionBatch,
   releaseClaims,
@@ -1151,6 +1152,46 @@ describe('worktree checkouts', () => {
         grant(lane, 'ui');
         await watcher.flush();
         expect(bulk()).toHaveLength(1);
+      });
+
+      const git = (cwd: string, ...args: string[]) =>
+        execFileSync('git', args, { cwd, env: isolatedGitEnv(), stdio: 'pipe' });
+      const baseAt = (lane: { workstream: { id: WorkstreamId }; path: string }) => {
+        const head = git(lane.path, 'rev-parse', 'HEAD').toString().trim();
+        state.write((ctx) => {
+          patchWorkstream(ctx, lane.workstream.id, null, { baseHead: head });
+        });
+      };
+      /** Commits `rel` as the commit tool would. */
+      const commit = (root: string, rel: string) => {
+        git(root, 'add', rel);
+        git(root, 'commit', '-q', '-m', `Add ${rel}`);
+      };
+
+      it('stays open when an unlisted path the lane committed is not covered', async () => {
+        const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+        baseAt(lane);
+        watcher.sync();
+        writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+        writeAt(lane.path, 'zzz/last.ts');
+        await watcher.flush();
+        expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+        commit(lane.path, 'zzz/last.ts');
+        grant(lane, 'ui');
+        await watcher.flush();
+        expect(bulk()).toHaveLength(1);
+      });
+
+      it('resolves once a claim covers every path, the committed ones too', async () => {
+        const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+        baseAt(lane);
+        watcher.sync();
+        writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+        await watcher.flush();
+        commit(lane.path, 'src/ui/file-029.ts');
+        grant(lane, 'ui');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
       });
 
       it('stays open when a path it lists is sensitive', async () => {
