@@ -22,7 +22,6 @@ import {
   deleteCuttingBatch,
   findUnfinishedBatch,
   getBatch,
-  getAppSetting,
   getBoardColumn,
   getProject,
   getTask,
@@ -45,12 +44,7 @@ import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
-import {
-  forgetStartSiblings,
-  recordStartSiblings,
-  startSiblings,
-  startSiblingsKey,
-} from './start-siblings';
+import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
 import {
   joinsLanding,
   landingWarnings,
@@ -127,20 +121,11 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /**
-   * Runs a batch's cut as its job. Once the cut is done (opened or refused, not stopped by a
-   * shutdown, which leaves the row for `recut`) the record of the batches of its start goes.
+   * Runs a batch's cut as its job. The record of the batches of its start goes in the write that
+   * opens or deletes the row, so a crash can't leave it; a shutdown mid-cut leaves both for `recut`.
    */
   function runCut(batch: BatchDto, run: (signal: AbortSignal) => Promise<void>): void {
-    ctx.jobs.run(jobKey(batch, JobQueue.Cut), async (signal) => {
-      try {
-        await run(signal);
-      } finally {
-        if (!signal.aborted && getAppSetting(db, startSiblingsKey(batch.id)) !== undefined)
-          ctx.state.write((w) => {
-            forgetStartSiblings(w, batch.id);
-          });
-      }
-    });
+    ctx.jobs.run(jobKey(batch, JobQueue.Cut), run);
   }
 
   function joiningRefusal(task: TaskDto): ConflictError {
@@ -457,6 +442,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       // Cancels the workstreams the start inserted with the row, so its tasks can start again.
       ctx.state.write((w) => {
         deleteCuttingBatch(w, batchId, card.title);
+        forgetStartSiblings(w, batchId);
       });
       raise(ctx.inbox, project.id, forTasks(card, plans.keys(), { title: batch.title }));
     };
@@ -552,6 +538,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         });
         // Its workstreams came QUEUED with the row; opening the batch lets the scheduler launch them.
         transitionBatch(w, batchId, { to: BatchState.Open, reason: 'branch cut' });
+        forgetStartSiblings(w, batchId);
       });
       ctx.logger.info(
         { batchId, projectId: project.id, branch, baseSha, repo },
