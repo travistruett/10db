@@ -9,6 +9,7 @@ import {
   type PermissionRuleDto,
   type WorkstreamId,
 } from '@10db/contracts';
+import { storableRule } from '../permissions';
 
 /** The tools whose permission cards name the file they write (the broker's edit family). */
 const EDIT_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -36,7 +37,8 @@ export interface EditAllowance {
 
 /**
  * The edits the answered permission cards allowed. `allow_once` allows one write; `allow_workstream` and
- * `allow_project` store a rule that allows every later one, so those stand. A card the builder denied, or
+ * `allow_project` store a rule that allows every later one, so those stand, unless no rule was storable
+ * for the card (then they allow one write, as the card says). A card the builder denied, or
  * one that names no file, allows nothing.
  */
 export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] {
@@ -57,8 +59,12 @@ export function cardAllowances(items: readonly InboxItemDto[]): EditAllowance[] 
     const tool = item.detail?.['toolName'];
     const path = item.detail?.['path'];
     if (typeof tool !== 'string' || !EDIT_TOOLS.has(tool) || typeof path !== 'string') continue;
+    // A choice stands only when answering the card stored a rule (`applyPermissionChoice`); one that
+    // stored none, such as a sandboxed path with a glob character, behaves as allow-once.
+    const summary = item.detail?.['summary'];
+    const stored = typeof summary === 'string' && storableRule(tool, summary) !== undefined;
     const workstreamId = item.targets[0]?.workstreamId ?? null;
-    allowed.push({ cardId: item.id, workstreamId, path, standing: !once });
+    allowed.push({ cardId: item.id, workstreamId, path, standing: !once && stored });
   }
   return allowed;
 }
