@@ -14,6 +14,7 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   cancelTask,
@@ -66,7 +67,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import { proposePlacement } from '../placement';
-import type { ApiServices, TaskLookupServices, TaskRemovalServices } from '../api';
+import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
   createFailedRestarts,
   workstreamChanges,
@@ -242,17 +243,21 @@ export function createServices(deps: {
           return { kind: 'workstream', workstream: retried };
         }
       }
+      // Here a new run replaces the failed one, whether the builder started over or its batch
+      // couldn't take it again (none, or no longer open).
+      const superseded: WorkstreamId | null =
+        held?.state === WorkstreamState.Failed ? held.id : null;
       const project = getProject(db, getTask(db, taskId).projectId);
-      if (project.delivery === Delivery.PullRequest) {
-        const batch = deps.starter.startTask(taskId);
-        // The batch it left no longer waits on the attempt it started over from.
-        if (left) deps.shipper.checkBatch(left);
-        deps.scheduler.requestTick();
-        return { kind: 'batch', batch };
-      }
-      const workstream = startTaskWithPlan(deps.state, taskId);
+      const started: TaskStarted =
+        project.delivery === Delivery.PullRequest
+          ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
+          : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
+      // The batch it left no longer waits on the attempt it started over from.
+      if (left) deps.shipper.checkBatch(left);
+      // The failed run is left behind by the new one; its card's Retry would be refused.
+      if (superseded) deps.inbox.cancelForWorkstream(superseded);
       deps.scheduler.requestTick();
-      return { kind: 'workstream', workstream };
+      return started;
     },
     runNext(taskId) {
       const result = deps.state.write((ctx) => runNext(ctx, taskId));

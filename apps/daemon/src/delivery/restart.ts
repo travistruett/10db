@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
 import type { StateStore } from '../events';
+import type { InboxService } from '../inbox';
 import { retryWorkstream } from '../team';
 import type { BatchStarter } from './start';
 import type { Shipper } from './ship';
@@ -33,6 +34,7 @@ export function createFailedRestarts(deps: {
   readonly state: StateStore;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
+  readonly inbox: Pick<InboxService, 'cancelForWorkstream'>;
 }): FailedRestarts {
   const db = deps.state.db;
 
@@ -53,6 +55,8 @@ export function createFailedRestarts(deps: {
       if (!failed) return null;
       const retried = retryWorkstream(deps.state, failed.workstream.id);
       deps.starter.reopen(failed.batch.id);
+      // The run is going again: the card that offered Retry for its failure has been answered.
+      deps.inbox.cancelForWorkstream(failed.workstream.id);
       return retried;
     },
     supersede(taskId) {
@@ -62,6 +66,8 @@ export function createFailedRestarts(deps: {
       if (members.some((w) => w.taskId !== taskId)) return failed.batch.id;
       deps.starter.refuseStart(taskId, failed.batch.id);
       deps.shipper.abandon(failed.batch.id);
+      // abandon cancels only unfinished runs' cards; this run is FAILED, which is terminal.
+      deps.inbox.cancelForWorkstream(failed.workstream.id);
       return null;
     },
   };

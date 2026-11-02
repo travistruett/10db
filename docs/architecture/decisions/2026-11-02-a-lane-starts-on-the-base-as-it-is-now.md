@@ -24,7 +24,10 @@ keeps its copy, because its own changes are in it and a merge under a resumed co
 - A fetch that fails starts the lane on the copy as it is. A `base-fetch` notice (`baseNotices.fetchFailed`) is shown
   on the batch's tasks, because no gate note will say it; the next fetch that works clears it.
 - A conflict, uncommitted changes in the way, or files git does not track leave the copy as before a gate and show the
-  same notices. It does not pass `inSession`: the lane's prompt does not ask it to resolve markers, so none are left in
+  same notices. Uncommitted changes in the way (most likely a sibling task's, mid-session, in files the base changed)
+  had none before a gate, since the gate's note says it ran without the base; at launch there is no gate note, so a
+  `base-uncommitted` notice (`baseNotices.uncommitted`) names the paths and says the lane started without the base's
+  newer commits. A gate does not show it; the next merge that takes the base clears it. It does not pass `inSession`: the lane's prompt does not ask it to resolve markers, so none are left in
   its tree.
 - A batch in the builder's own checkout is never merged into, and a CI fix batch is left on the pull request's head
   (`ciFixHead`), so neither calls the base.
