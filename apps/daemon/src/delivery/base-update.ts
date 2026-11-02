@@ -67,6 +67,11 @@ export type BaseUpdate =
       readonly base: string;
       readonly paths: readonly string[];
       readonly note: string;
+      /**
+       * Set when this gate made the merge that left the markers, so no session has seen them; absent
+       * when it found markers an earlier gate's merge left. The runner words its failure by it.
+       */
+      readonly fresh?: true;
     }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
@@ -573,11 +578,13 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     base: string,
     paths: readonly string[],
     extra: string | null = null,
+    fresh = false,
   ): BaseUpdate {
     return {
       kind: 'conflicted',
       base,
       paths,
+      ...(fresh ? { fresh: true as const } : {}),
       note:
         joined(
           `10db merged origin/${batch.baseBranch} into this branch and left git's conflict markers in ${named(paths)} for a session to resolve, so no gate ran on it.`,
@@ -814,7 +821,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       tell(batch, () => {
         showNotice(ctx.state, batch.id, baseNotices.resolving(batch, marked));
       });
-      return alone(conflicted(batch, merged.from, marked, joined(unmoved, unkept)));
+      return alone(conflicted(batch, merged.from, marked, joined(unmoved, unkept), true));
     }
     ctx.logger.info(
       {

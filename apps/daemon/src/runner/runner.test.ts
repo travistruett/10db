@@ -4638,6 +4638,39 @@ describe('the base merge leaving conflict markers in a task that used its fix at
     expect(engine.adapter.prompts).toHaveLength(2);
     expect(ws(workstream.id).failureReason).toContain('README.md');
     expect(ws(workstream.id).failureReason).toContain('retry limit');
+    expect(ws(workstream.id).failureReason).toContain('still in README.md');
+  });
+
+  it('does not say the markers are still there when a new base merge made them after the merge session', async () => {
+    const workstream = await usedUp(
+      [conflicted, { ...conflicted, fresh: true }],
+      [[turn], [turn]],
+    );
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    expect(engine.adapter.prompts).toHaveLength(2);
+    const reason = ws(workstream.id).failureReason ?? '';
+    expect(reason).toContain('README.md');
+    expect(reason).toContain('retry limit');
+    expect(reason).not.toContain('still');
+    expect(reason).toMatch(/new|again/);
+  });
+
+  it('counts only the sessions the step used when it ends the merge session with uncommitted changes', async () => {
+    const workstream = await usedUp(
+      [conflicted],
+      [[turn], [write('src/api/a.txt'), turn]],
+    );
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('FAILED');
+    const limit = DEFAULT_RUNNER_LIMITS.maxFixAttempts;
+    const reason = ws(workstream.id).failureReason ?? '';
+    expect(reason).toContain('uncommitted changes');
+    // The attempt is now limit + 2, but only limit + 1 sessions (fix attempts and the merge) ran.
+    expect(reason).not.toContain(`${String(limit + 2)} times`);
+    expect(reason).toContain(`after ${String(limit + 1)} fix attempts and merge sessions`);
   });
 });
 
