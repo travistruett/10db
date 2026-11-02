@@ -1097,7 +1097,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const batch = getBatch(db, batchId);
     if (!landsItself(batch) || catchingUp.has(batchId)) return;
     catchingUp.add(batchId);
-    deps.jobs.run(jobKey(getProject(db, batch.projectId), JobQueue.Ship), async (signal) => {
+    deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
         await catchUpSteps(batchId, signal);
       } finally {
@@ -1117,7 +1117,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     lastMergeRetry.set(batchId, startedAt);
     retrying.add(batchId);
     const project = getProject(db, batch.projectId);
-    deps.jobs.run(jobKey(project, JobQueue.Ship), async (signal) => {
+    deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
         const now = getBatch(db, batchId);
         const { repo, prUrl } = now;
