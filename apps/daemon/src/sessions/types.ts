@@ -1,4 +1,11 @@
-import type { AccountRefusal, Effort, Provider, SessionId, WorkstreamId } from '@10db/contracts';
+import type {
+  AccountRefusal,
+  Effort,
+  Provider,
+  SessionId,
+  ShapeId,
+  WorkstreamId,
+} from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
@@ -61,6 +68,54 @@ export interface SessionSpec {
   preToolUse(req: { readonly toolName: string; readonly input: unknown }): GuardVerdict;
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
+}
+
+/** A tool call as a Shape session's PreToolUse hook sees it; `agentId` is set only inside a subagent. */
+export interface ShapeToolRequest {
+  readonly toolName: string;
+  readonly input: unknown;
+  readonly agentId?: string | undefined;
+  readonly agentType?: string | undefined;
+}
+
+/** A reviewer subagent, passed to Claude Code as a programmatic agent on the session's own model. */
+export interface ShapeAgentDefinition {
+  readonly description: string;
+  readonly prompt: string;
+  readonly tools: readonly string[];
+}
+
+/**
+ * A Shape conversation's SDK session (Shape spec §5.1, §5.2): it loads no settings, plugins or
+ * project MCP servers, runs in `default` mode with every unlisted call denied, and has no lane,
+ * claim, area or sandbox, since it runs no command.
+ */
+export interface ShapeSessionSpec {
+  readonly sessionId: SessionId;
+  readonly shapeId: ShapeId;
+  readonly cwd: string;
+  /** Appended to Claude Code's own system prompt. */
+  readonly systemPrompt: string;
+  /** The first message; later ones come from `send`. */
+  readonly prompt: string;
+  readonly model: string;
+  readonly effort: Effort;
+  readonly resumeProviderSessionId: string | null;
+  readonly env: Readonly<Record<string, string>>;
+  readonly account: AccountExpectation;
+  /** The built-in tools the session has; every other built-in is left out. */
+  readonly tools: readonly string[];
+  /** Calls approved without a prompt: the read tools and the Shape tools. */
+  readonly allowedTools: readonly string[];
+  readonly disallowedTools: readonly string[];
+  readonly agents: Readonly<Record<string, ShapeAgentDefinition>>;
+  readonly mcp: {
+    readonly url: string;
+    readonly token: string;
+    readonly toolTimeoutMs: number;
+  };
+  /** Runs before every tool call, the session's and its subagents'. */
+  preToolUse(req: ShapeToolRequest): GuardVerdict;
 }
 
 export const SessionEndReason = {
@@ -126,6 +181,11 @@ export interface SessionHandle {
   stop(): Promise<void>;
 }
 
+export interface ShapeSessionHandle extends SessionHandle {
+  /** Interrupts the turn that is running; the session stays open for the next message. */
+  interrupt(): Promise<void>;
+}
+
 export interface AccountProbeSpec {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -159,6 +219,8 @@ export interface SessionAdapter {
   /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
   complete(spec: CompletionSpec): Promise<string>;
   start(spec: SessionSpec): SessionHandle;
+  /** Starts a Shape conversation's session (Shape spec §5.1). */
+  startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
   /** Starts Claude Code with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
 }

@@ -72,6 +72,17 @@ export function getDecision(db: DbReader, id: DecisionId): DecisionRow {
   return row;
 }
 
+/** The decision that replaced this one and has not been withdrawn, or null when this is the head. */
+export function decisionSuccessor(db: DbReader, id: DecisionId): DecisionId | null {
+  return (
+    db
+      .select({ id: schema.decisions.id })
+      .from(schema.decisions)
+      .where(and(eq(schema.decisions.supersedesId, id), isNull(schema.decisions.withdrawnAt)))
+      .get()?.id ?? null
+  );
+}
+
 /**
  * Withdraws a decision: the row stays as a tombstone with who, when and why, and search and the
  * context pack skip it. Only the head of a supersede chain can be withdrawn, so withdrawing a link
@@ -86,14 +97,10 @@ export function withdrawDecision(
   if (reason === '') throw new InvalidError('Say why the decision is withdrawn');
   const decision = getDecision(ctx.tx, id);
   if (decision.withdrawnAt !== null) throw new ConflictError('This decision is already withdrawn');
-  const successor = ctx.tx
-    .select({ id: schema.decisions.id })
-    .from(schema.decisions)
-    .where(and(eq(schema.decisions.supersedesId, id), isNull(schema.decisions.withdrawnAt)))
-    .get();
-  if (successor)
+  const successor = decisionSuccessor(ctx.tx, id);
+  if (successor !== null)
     throw new ConflictError(
-      `A later decision (${successor.id}) supersedes this one; withdraw that one first`,
+      `A later decision (${successor}) supersedes this one; withdraw that one first`,
     );
   ctx.tx
     .update(schema.decisions)

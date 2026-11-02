@@ -18,6 +18,7 @@ export * from './permission-rules';
 export * from './projects';
 export * from './routing-rules';
 export * from './sessions';
+export * from './shape-state';
 export * from './shapes';
 export * from './store';
 export * from './team';
