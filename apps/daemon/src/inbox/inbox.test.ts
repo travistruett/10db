@@ -2109,14 +2109,81 @@ describe('permission broker in a sandboxed lane', () => {
     expect(onlyOpenCard().detail).toMatchObject({ toolName: 'Write', path: 'docs/a.md' });
   });
 
-  it('records on an edit card what the call writes, so the watcher excuses that write only', () => {
-    const ws = seedWorkstream(base);
-    void sandboxed(
-      ws,
-      false,
-    )(request('Write', { file_path: 'docs/a.md', content: 'hello' })).catch(() => undefined);
-    expect(onlyOpenCard().detail).toMatchObject({
-      expectedWrite: { sha256: createHash('sha256').update('hello').digest('hex') },
+  describe('the write an allowed edit call makes', () => {
+    const sha = (text: string): string => createHash('sha256').update(text).digest('hex');
+    const file = (): string => join(fileAccess.checkout, 'src', 'a.json');
+    const edit = (newText: string) =>
+      request('Edit', { file_path: file(), old_string: '"a":1', new_string: newText });
+
+    it('marks the card as excusing only that exact write, and records nothing before the answer', () => {
+      const ws = seedWorkstream(base);
+      writeFileSync(file(), '{"a":1}');
+      void sandboxed(ws)(edit('"a":2')).catch(() => undefined);
+      expect(onlyOpenCard().detail).toMatchObject({ exactWrite: true, path: file() });
+      expect(onlyOpenCard().detail).not.toHaveProperty('allowedWrites');
+    });
+
+    it('records for the lane the file its call leaves, read when the builder allows it', async () => {
+      const ws = seedWorkstream(base);
+      writeFileSync(file(), '{"a":1}');
+      const decision = sandboxed(ws)(edit('"a":2'));
+      const card = onlyOpenCard();
+      // Another change lands between the card and the answer: the call applies to the file as it is then.
+      writeFileSync(file(), '{"b":0,"a":1}');
+      inbox.answer(card.id, { choice: 'allow_once' });
+      expect(await decision).toEqual({ behavior: 'allow' });
+      expect(getInboxItem(state.db, card.id).detail).toMatchObject({
+        allowedWrites: { [ws.workstream.id]: sha('{"b":0,"a":2}') },
+      });
+    });
+
+    it("keeps each folded lane's own write", async () => {
+      const a = seedWorkstream(base);
+      const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+      writeFileSync(file(), '{"a":1}');
+      const first = sandboxed(a)(edit('"a":2'));
+      const second = sandboxed(b)(edit('"a":3'));
+      const card = onlyOpenCard();
+      inbox.answer(card.id, { choice: 'allow_once' });
+      await Promise.all([first, second]);
+      expect(getInboxItem(state.db, card.id).detail).toMatchObject({
+        allowedWrites: { [a.workstream.id]: sha('{"a":2}'), [b.workstream.id]: sha('{"a":3}') },
+      });
+    });
+
+    it('records nothing for a denied call', async () => {
+      const ws = seedWorkstream(base);
+      writeFileSync(file(), '{"a":1}');
+      const decision = sandboxed(ws)(edit('"a":2'));
+      const card = onlyOpenCard();
+      inbox.answer(card.id, { choice: 'deny' });
+      expect((await decision).behavior).toBe('deny');
+      expect(getInboxItem(state.db, card.id).detail).not.toHaveProperty('allowedWrites');
+    });
+
+    it('records the write of the call an allow_once answered after parking lets through', async () => {
+      const ws = seedWorkstream(base);
+      writeFileSync(file(), '{"a":1}');
+      void sandboxed(ws)(edit('"a":2')).catch(() => undefined);
+      const card = onlyOpenCard();
+      controller.abort();
+      inbox.answer(card.id, { choice: 'allow_once' });
+      const decide = createPermissionBroker(
+        { state, inbox, git: NO_GIT, logger: silentLogger },
+        {
+          projectId: ws.project.id,
+          workstreamId: ws.workstream.id,
+          sessionId: mintId('Session'),
+          signal: new AbortController().signal,
+          observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+          allowOnce: { toolName: 'Edit', summary: file(), cardId: card.id },
+          sandbox: { fileAccess, hazards: DEFAULT_HAZARDS },
+        },
+      );
+      expect(await decide(edit('"a":5'))).toEqual({ behavior: 'allow' });
+      expect(getInboxItem(state.db, card.id).detail).toMatchObject({
+        allowedWrites: { [ws.workstream.id]: sha('{"a":5}') },
+      });
     });
   });
 
@@ -2135,13 +2202,23 @@ describe('permission broker in a sandboxed lane', () => {
     const vscode = join(fileAccess.checkout, '.vscode', 'settings.json');
     const pending = decide(request('Edit', { file_path: '.vscode/settings.json' }));
     const card = onlyOpenCard();
-    expect(card.detail).toEqual({ toolName: 'Edit', summary: vscode, path: vscode });
+    expect(card.detail).toEqual({
+      toolName: 'Edit',
+      summary: vscode,
+      path: vscode,
+      exactWrite: true,
+    });
     inbox.answer(card.id, { choice: 'allow_project' });
     expect(await pending).toEqual({ behavior: 'allow' });
     expect((await decide(request('Edit', { file_path: vscode }))).behavior).toBe('allow');
     void decide(request('Edit', { file_path: '.claude/hooks/x' })).catch(() => undefined);
     const hook = join(fileAccess.checkout, '.claude', 'hooks', 'x');
-    expect(onlyOpenCard().detail).toEqual({ toolName: 'Edit', summary: hook, path: hook });
+    expect(onlyOpenCard().detail).toEqual({
+      toolName: 'Edit',
+      summary: hook,
+      path: hook,
+      exactWrite: true,
+    });
   });
 
   it('asks about every other tool as it always did', () => {

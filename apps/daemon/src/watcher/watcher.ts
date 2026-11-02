@@ -494,14 +494,17 @@ export function createWatcher(deps: {
         for (const k of keys) excusedWrites.delete(k);
         persistExcusedWrites();
       }
-      // A card that says what its call writes excuses only a file holding that: the watcher can't tell which
-      // lane wrote the file, but another lane's write to the same path is not what the builder approved, and
-      // it leaves the card unused for the write that is. A file that can't be stamped can't be told apart
-      // from it either, so it is carded.
+      // A card that records the file its lane's allowed call makes excuses only that exact file: the watcher
+      // can't tell which lane wrote it, but another lane's write to the same path is not what the builder
+      // approved, and it leaves the card unused for the write that is. A card that asks for that exact write
+      // with none recorded (a NotebookEdit, a file the broker couldn't read) excuses no settled write. A file
+      // with no stamp goes on to the fail-closed handling below, which checks the write once it settles.
       const unused = unusedCards.find(
         ({ a }) =>
           a.expected === undefined ||
-          (stamp !== null && stampMatchesExpected(root, path, stamp, a.expected)),
+          (stamp === null
+            ? a.expected !== null
+            : a.expected !== null && stampMatchesExpected(stamp, a.expected)),
       );
       const lane = unused?.a.workstreamId;
       const use = unused?.a.useKey;

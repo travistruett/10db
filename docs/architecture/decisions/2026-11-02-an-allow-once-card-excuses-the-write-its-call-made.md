@@ -5,23 +5,38 @@
 
 ## Decision
 
-The Allow Edit card the permission broker raises records what its call writes in `detail.expectedWrite`:
-the SHA-256 of the content for a Write (`{ sha256 }`), and the `new_string` texts for an Edit or MultiEdit
-(`{ contains }`). The watcher excuses an unused allow-once card's write to its path only when the file holds
-that: a Write's exact content, or every text the Edit put in. A file that holds something else, a deletion,
-or a file that can't be stamped is carded, and the card stays unused for the write it allowed.
+Every Allow Edit card the permission broker raises carries `detail.exactWrite: true`. When the broker lets
+the call through (the builder's allowing answer, or the first matching call after an `allow_once` answered
+while the lane was parked), it reads the file, applies the call as Claude Code does (a Write's content; an
+Edit's `old_string` → `new_string`, once or with `replace_all`; a MultiEdit's edits in turn) and records the
+SHA-256 of the result for that lane in `detail.allowedWrites[workstreamId]`. Claude Code writes the file
+next.
 
-A card with no expectation (a NotebookEdit, an Edit that only deletes text, one whose text is over 256 KiB,
-a card raised before this) behaves as before: it excuses the next write to its path.
+The watcher excuses an unused allow-once card's write for a lane only when the file's content hash is the one
+recorded for that lane. Another lane's write to the path, in the same watch window or not, is carded, both
+live and at that lane's step end, and the card stays unused for the write it allowed. A card that asks for
+the exact write with nothing recorded for the lane (a NotebookEdit, whose result 10db can't compute; a file
+the broker couldn't read; an edit that would fail) excuses no settled write. A file still changing when read
+is excused once per card without using it, as before, and the settled file is then checked against the hash.
+
+A card folded from several lanes' asks keeps one hash per lane, so each lane's own write is excused and
+neither lane's write is excused for the other.
+
+A card without `exactWrite` (raised before this) behaves as before: it excuses the next write to its path.
 
 ## Why
 
 In a checkout several lanes share, the watcher can't tell which lane wrote a file. It stamped whatever the
 file held when it looked, so a lane B write to the path in the same window as lane A's allowed write was
-excused by A's card and used it up. 10db does know what the builder approved: the card comes from A's tool
-call, which carries the content or the edit. Comparing the file with that call, rather than taking the file
-as the write, ties the excuse to the approved call. An Edit is checked by containment, not by the file's
-whole content, because the rest of the file is whatever it held and may have changed since the card was
-raised. Containment can still be satisfied by a lane that writes the same text, so it narrows the hole for
-an Edit, and closes it for a Write. Turned down: hashing the Edit's result at card time (a legitimate change
-elsewhere in the file between card and answer would card the allowed write).
+excused by A's card. 10db does know what the builder approved: the card comes from A's tool call. Hashing
+the file that call makes ties the excuse to it exactly; checking only that the file contains the Edit's new
+text let B's write through whenever B kept A's text, and left deletions and large edits with no check.
+
+The result is computed when the call is allowed, not when the card is raised, so a change elsewhere in the
+file while the card waits doesn't card the builder's allowed write. A write that lands between the broker's
+read and Claude Code's makes the call's own write differ from the hash, and it is carded: the race fails
+closed. Only a hash is kept, never the call's text, so no content (such as a secret in an Edit) is stored in
+the card.
+
+Turned down: recording the write from the PostToolUse tool event. It needs Claude Code's tool response shape
+and a hook path the broker doesn't own, and the watcher may see the write before the event arrives.
