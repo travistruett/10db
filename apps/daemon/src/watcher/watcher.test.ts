@@ -8,6 +8,7 @@ import {
   renameSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -28,6 +29,7 @@ import {
   claimRequestsForTask,
   copyHazardNames,
   createTestStore,
+  getAppSetting,
   insertBatch,
   insertPermissionRule,
   insertTask,
@@ -44,7 +46,7 @@ import {
   seedProject,
   transitionWorkstream,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createTempRepo,
   isolatedGitEnv,
@@ -58,9 +60,15 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
-import { ANSWERED_CARDS_READ } from './allowed-writes';
+import { ANSWERED_CARDS_READ, writeStamp } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
+
+// The real stamp, watched, so a test can tell which files the watcher read to stamp.
+vi.mock('./allowed-writes', async (importOriginal) => {
+  const real = await importOriginal<{ writeStamp: typeof writeStamp }>();
+  return { ...real, writeStamp: vi.fn(real.writeStamp) };
+});
 
 interface FakeWatch {
   readonly watch: WatchFn;
@@ -2060,6 +2068,219 @@ describe('worktree checkouts', () => {
         writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by a command');
         expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    describe('an excused write stays with the lane whose card allowed it', () => {
+      const EXCUSED_SETTING = 'watcher.excusedWrites';
+      const restart = (): void => {
+        watcher.stop();
+        watcher = createWatcher({
+          state,
+          inbox,
+          git: createGit(),
+          logger: silentLogger,
+          clock,
+          watch: fake.watch,
+          batchMs: 500,
+        });
+      };
+      const move = (lane: { workstream: WorkstreamDto }, states: WorkstreamState[]): void => {
+        state.write((ctx) => {
+          for (const to of states)
+            transitionWorkstream(ctx, lane.workstream.id, { to, fence: null });
+        });
+      };
+      /** A daemon restart as start.ts runs it: a new watcher, recovery requeues the lane, sync, and it resumes. */
+      const restartAndResume = (lane: { workstream: WorkstreamDto }): void => {
+        restart();
+        move(lane, [WorkstreamState.Recovering, WorkstreamState.Queued]);
+        watcher.sync();
+        move(lane, [WorkstreamState.Starting, WorkstreamState.Running]);
+        watcher.sync();
+      };
+
+      // A file still showing the write A's card excused is A's write, not B's: B's step end leaves it out.
+      it("does not card another lane's step end for the file still showing the excused write", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+        expect(flags()).toEqual([]);
+      });
+
+      it("does not card another lane's step end for that file after a restart", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restartAndResume(a);
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
+      });
+
+      it("cards another lane's step end once it changed the file after a restart", async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restartAndResume(a);
+        writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by lane Beta');
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
+      });
+
+      it('still excuses the lane its own write after a restart requeues and resumes it', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        restartAndResume(lane);
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      });
+
+      it('still excuses the lane its own write after it advances to its next step', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        move(lane, [WorkstreamState.Verifying, WorkstreamState.Queued]);
+        watcher.sync();
+        move(lane, [WorkstreamState.Starting, WorkstreamState.Running]);
+        watcher.sync();
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      });
+
+      it('still excuses a deletion its card allowed at the same lane’s step end', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        restartAndResume(lane);
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      });
+
+      it('does not excuse a deletion again once the file came back and went', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        writeFileSync(join(repo.path, 'README.md'), '# fixture\n');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+        rmSync(join(repo.path, 'README.md'));
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['README.md']);
+      });
+
+      it('does not excuse a deletion again once the file came back and went unseen behind a reset directory time', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        const readme = join(repo.path, 'README.md');
+        const resetDirectoryTime = (): void => {
+          utimesSync(repo.path, 1_700_000_000.5, 1_700_000_000.5);
+        };
+        rmSync(readme);
+        resetDirectoryTime();
+        emit('README.md');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        // Back and gone again with no event, and the checkout's modification time put back as it was.
+        writeFileSync(readme, '# fixture\n');
+        rmSync(readme);
+        resetDirectoryTime();
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['README.md']);
+      });
+
+      it('reads no file to stamp it when no card or excused write names it', async () => {
+        const lane = running();
+        watcher.sync();
+        const stamp = vi.mocked(writeStamp);
+        stamp.mockClear();
+        await write('notes/a.txt');
+        await write('notes/b.txt');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual(['notes/a.txt', 'notes/b.txt']);
+        expect(stamp).not.toHaveBeenCalled();
+        editCard(lane, 'notes/c.txt', 'allow_once');
+        await write('notes/c.txt');
+        expect(stamp.mock.calls.map((c) => c[1])).toEqual(['notes/c.txt']);
+      });
+
+      it('does not excuse a later deletion of a file whose deletion a card excused', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, 'README.md', 'allow_once');
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        // Back as it was, so git reports nothing, then deleted again.
+        writeFileSync(join(repo.path, 'README.md'), '# fixture\n');
+        emit('README.md');
+        await watcher.flush();
+        rmSync(join(repo.path, 'README.md'));
+        emit('README.md');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual(['README.md']);
+      });
+
+      it('forgets the excused writes of a lane when its run ends', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toHaveLength(1);
+        state.write((ctx) =>
+          transitionWorkstream(ctx, lane.workstream.id, {
+            to: WorkstreamState.Cancelled,
+            fence: null,
+          }),
+        );
+        watcher.sync();
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toEqual([]);
+      });
+
+      it('keeps the excused writes of a lane that still runs when another lane ends', async () => {
+        const a = running('Alpha', ['api']);
+        const b = running('Beta', ['ui']);
+        watcher.sync();
+        editCard(a, SENSITIVE_FILE, 'allow_once');
+        await write(SENSITIVE_FILE);
+        state.write((ctx) =>
+          transitionWorkstream(ctx, b.workstream.id, {
+            to: WorkstreamState.Cancelled,
+            fence: null,
+          }),
+        );
+        watcher.sync();
+        expect(getAppSetting(base.db, EXCUSED_SETTING)).toHaveLength(1);
+        restart();
+        expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
+      });
+
+      it('does not excuse a changed file with the same modification time and size', async () => {
+        const lane = running();
+        watcher.sync();
+        editCard(lane, SENSITIVE_FILE, 'allow_once');
+        const file = join(repo.path, SENSITIVE_FILE);
+        const pin = (text: string): void => {
+          writeFileSync(file, text);
+          utimesSync(file, 1_700_000_000.5, 1_700_000_000.5);
+        };
+        pin('x');
+        emit(SENSITIVE_FILE);
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+        pin('y');
+        expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
     });
 

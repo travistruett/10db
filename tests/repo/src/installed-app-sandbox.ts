@@ -53,6 +53,10 @@ const STUBS: Record<string, readonly string[]> = {
     "  'run list '*'--event workflow_dispatch'*)",
     '    for ((i = $(cat "$STUB_STATE/dispatched" 2>/dev/null || echo 0); i > 0; i--)); do echo $((100 + i)); done; echo 100 ;;',
     `  'workflow run '*) ${count('dispatched')} ;;`,
+    // Runs of the workflow on the ref, for telling a replaced run from one cancelled by hand: once a run
+    // has been reported cancelled, STUB_NEWER_RUNS (ids of runs created after it) show beside the cancelled ones.
+    "  'run list '*'--branch '*)",
+    '    if [ -f "$STUB_STATE/cancelled" ]; then for id in ${STUB_CANCELLED_RUNS:-} ${STUB_NEWER_RUNS:-}; do echo "$id"; done; fi ;;',
     "  'run view '*)",
     `    ${count('view')}`,
     '    if [ "$n" -le "${STUB_VIEW_FAILS:-0}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi',
