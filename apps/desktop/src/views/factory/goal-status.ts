@@ -16,6 +16,7 @@ const ORDER: readonly Status[] = [
   G.WaitingOnSomeone,
   G.Paused,
   G.Running,
+  G.Queued,
   G.Shipping,
   G.NotStarted,
 ];
@@ -47,6 +48,8 @@ export function verdictLine(digest: GoalDigestDto): string {
     case G.WaitingOnYou:
     case G.WaitingOnSomeone:
       return `${label} · ${plural(openCards(digest), 'card')} · ${progressLine(digest)}`;
+    case G.Queued:
+      return `${label} · ${progressLine(digest)} · waiting for a lane`;
     case G.Shipping:
       return `${label} · ${progressLine(digest)} · ${plural(digest.openPullRequests, 'pull request')} open`;
     case G.NotStarted:
