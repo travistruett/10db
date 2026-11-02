@@ -14,6 +14,8 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { GhError, UNREADABLE_CHECK, type CheckRollupItem, type Gh } from '../github';
+import { prCardKey } from './cards';
+import { raiseIn } from './context';
 import { createPrWatch, subscribePrWatch, type PrWatch } from './index';
 import { baseNotices } from './notices';
 
@@ -57,10 +59,18 @@ function shipped(
   title: string,
   /** A url GitHub has no pull request for; by default the batch's pull request exists. */
   missing?: string,
+  /** Whether the batch asked to be merged by itself, as batches do by default. */
+  autoMerge = true,
 ): { id: BatchId; prUrl: string } {
   const prUrl = missing ?? h.gh.openPr(`10db/${title}`);
   const id = h.state.write((ctx) =>
-    insertBatch(ctx, { projectId, title, baseBranch: 'main', worktreePath: `/tmp/wt/${title}` }),
+    insertBatch(ctx, {
+      projectId,
+      title,
+      baseBranch: 'main',
+      autoMerge,
+      worktreePath: `/tmp/wt/${title}`,
+    }),
   ).id;
   for (const to of ['OPEN', 'SHIPPING'] as const)
     h.state.write((ctx) => transitionBatch(ctx, id, { to }));
@@ -356,6 +366,105 @@ describe('the pull request watch', () => {
     await round(w);
     expect(noticeEvents(id)).toBe(written);
     expect(h.cards()).toEqual([]);
+  });
+
+  describe('a pull request 10db lands', () => {
+    /** A watch whose landing is a spy: what it was asked, in order. */
+    function landing(): { asked: string[]; watch: PrWatch } {
+      const asked: string[] = [];
+      const watch = createPrWatch({
+        ctx: h.ctx,
+        clock,
+        intervalMs: INTERVAL,
+        landing: {
+          catchUp: (id) => asked.push(`catch-up ${id}`),
+          retryMerge: (id, opts) =>
+            asked.push(opts?.catchUpCardWasOpen ? `retry ${id} after card` : `retry ${id}`),
+        },
+      });
+      watches.push(watch);
+      return { asked, watch };
+    }
+
+    it('asks for the base to be merged into it when it conflicts, and shows no notice that says to resolve it by hand', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha');
+      h.gh.setMergeable(prUrl, 'CONFLICTING');
+      h.gh.setMergeBlocked(prUrl, 'conflicts');
+      const { asked, watch } = landing();
+      watch.start();
+      await watch.idle();
+      expect(asked).toEqual([`catch-up ${id}`]);
+      expect(notices(id)).toEqual([]);
+      expect(h.cards()).toEqual([]);
+    });
+
+    it('asks for a refused merge to be retried once GitHub says it is clean, not while it conflicts', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha');
+      const { asked, watch } = landing();
+      watch.start();
+      await watch.idle();
+      expect(asked).toEqual([`retry ${id}`]);
+
+      h.gh.setMergeable(prUrl, 'UNKNOWN');
+      await round(watch);
+      expect(asked).toEqual([`retry ${id}`]);
+    });
+
+    it('asks nothing of a pull request the builder merges by hand, and keeps saying it conflicts', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha', undefined, false);
+      h.gh.setMergeable(prUrl, 'CONFLICTING');
+      const { asked, watch } = landing();
+      watch.start();
+      await watch.idle();
+      expect(asked).toEqual([]);
+      expect(notices(id)).toEqual(['base-conflict']);
+    });
+
+    it('withdraws the catch-up card once the pull request merges cleanly', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha');
+      h.gh.setMergeable(prUrl, 'CONFLICTING');
+      const { watch } = landing();
+      watch.start();
+      await watch.idle();
+      h.state.write((w) => {
+        raiseIn(w, h.project.id, {
+          title: 'Pull request conflicts',
+          body: 'x',
+          foldKey: prCardKey.catchUp(id),
+        });
+      });
+      expect(h.cards()).toHaveLength(1);
+      h.gh.setMergeable(prUrl, 'MERGEABLE');
+      await round(watch);
+      expect(h.cards()).toEqual([]);
+    });
+
+    it('says the catch-up card was open when it asks for the merge in the round that withdraws it', async () => {
+      setup();
+      const { id, prUrl } = shipped(h.project.id, 'Alpha');
+      h.gh.setMergeable(prUrl, 'CONFLICTING');
+      h.gh.setMergeBlocked(prUrl, 'conflicts');
+      const { asked, watch } = landing();
+      watch.start();
+      await watch.idle();
+      h.state.write((w) => {
+        raiseIn(w, h.project.id, {
+          title: 'Pull request conflicts',
+          body: 'x',
+          foldKey: prCardKey.catchUp(id),
+        });
+      });
+      h.gh.setMergeable(prUrl, 'MERGEABLE');
+      h.gh.setMergeBlocked(prUrl, null);
+      await round(watch);
+      await round(watch);
+      expect(asked).toEqual([`catch-up ${id}`, `retry ${id} after card`, `retry ${id}`]);
+      expect(h.cards()).toEqual([]);
+    });
   });
 
   it('withdraws the checks card when the pull request merges', async () => {

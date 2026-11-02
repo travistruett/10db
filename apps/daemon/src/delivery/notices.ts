@@ -17,6 +17,8 @@ export const NOTICE_KEY = {
   baseKept: 'base-kept',
   /** The pull request waits for the builder to merge it. */
   merge: 'pull-request-merge',
+  /** 10db merged the base into the open pull request's branch. */
+  update: 'pull-request-update',
 } as const;
 
 /** Why a base notice was written beyond the gate, and what more it found. */
@@ -116,6 +118,30 @@ export const baseNotices = {
     line: `Can't take ${batch.baseBranch}: files git doesn't track are in the way (${shortPaths(paths)})`,
     body: `${batch.baseBranch} on origin adds files where the batch's worktree ${worktree} holds files git doesn't track, most likely ignored ones such as a hand-made .env or a build directory:\n${listPaths(paths)}${migrationsHeld(batch, context, 'they are out of the way')}\n\n10db never overwrites or deletes them, so it didn't merge ${batch.baseBranch}, and the gates test the branch without its newer commits. A fix session is told to leave them. If you don't need them, move or delete them; otherwise leave the merge to the pull request. The next gate tries again, and this notice goes once the branch holds ${batch.baseBranch}.`,
   }),
+};
+
+/** What delivery shows on a shipped batch's tasks once 10db brought its base into the pull request. */
+export const updateNotices = {
+  /** `resolved` are the conflicts 10db settled in the merge, by path and how. */
+  merged: (
+    batch: BatchDto,
+    resolved: readonly { readonly path: string; readonly how: 'kept_both' | 'regenerated' }[],
+  ): Notice => {
+    const base = batch.baseBranch;
+    const files =
+      resolved.length === 0
+        ? `Git merged ${base} without a conflict left to settle.`
+        : `10db settled these conflicts itself:\n${listPaths(resolved.map((r) => `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "both sides' added lines kept"})`))}`;
+    return {
+      key: NOTICE_KEY.update,
+      tone: 'info',
+      line:
+        resolved.length === 0
+          ? `10db merged ${base} into the pull request`
+          : `10db merged ${base} into the pull request, resolving ${shortPaths(resolved.map((r) => r.path))}`,
+      body: `The pull request${batch.prUrl === null ? '' : ` (${batch.prUrl})`} conflicted with ${base}. 10db merged ${base} into the batch's branch, checked the result as it checks a batch before it ships, and pushed it onto the pull request.\n\n${files}\n\nThe merge commit lists them. The pull request merges once GitHub has checked the new head.`,
+    };
+  },
 };
 
 /** gh's own words, cut so the notice keeps room for the link and the rest of what it says. */
