@@ -817,7 +817,13 @@ export type CatchUpStop =
   /** Both sides changed these files in ways 10db can't combine. */
   | { readonly kind: 'conflict'; readonly paths: readonly string[]; readonly reasons?: string }
   /** The base merged, and the check before shipping failed on the result (nothing was pushed). */
-  | { readonly kind: 'gate'; readonly name: ShipCheckName; readonly logPath: string | null }
+  | {
+      readonly kind: 'gate';
+      readonly name: ShipCheckName;
+      readonly logPath: string | null;
+      /** The files 10db settled itself in the merge (both sides' lines kept, or regenerated). */
+      readonly settled?: readonly string[];
+    }
   /** Something else kept the base out, or the update could not finish: `why` says what. */
   | { readonly kind: 'other'; readonly why: string };
 
@@ -843,7 +849,7 @@ export const prCards = {
       case 'gate':
         return {
           title: `Pull request for "${batch.title}" not updated: the ${stop.name} failed after merging ${base}`,
-          body: `${prUrl}\n\nThe pull request conflicted with ${base}. 10db merged ${base} into the batch's branch, and the ${stop.name} failed on the result, so it pushed nothing.${stop.logPath === null ? '' : ` The log: ${stop.logPath}`}\n\n${resolveOnGitHub}`,
+          body: `${prUrl}\n\nThe pull request conflicted with ${base}. 10db merged ${base} into the batch's branch, and the ${stop.name} failed on the result, so it pushed nothing.${stop.logPath === null ? '' : ` The log: ${stop.logPath}`}${stop.settled && stop.settled.length > 0 ? `\n\n10db settled these files itself in the merge, so look there first:\n${listPaths(stop.settled)}` : ''}\n\n${resolveOnGitHub}`,
           foldKey: prCardKey.catchUp(batch.id),
           refresh: true,
           detail: prDetail(batch, prUrl),

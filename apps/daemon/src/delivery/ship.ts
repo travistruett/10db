@@ -1215,6 +1215,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             kind: 'gate',
             name: check.kind === 'precheck' ? 'pre-check' : 'gate',
             logPath: gate.logPath,
+            settled: (brought.kind === 'merged' ? (brought.resolved ?? []) : []).map((r) => r.path),
           });
           return;
         }
