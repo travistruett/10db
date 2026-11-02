@@ -46,33 +46,54 @@ const UNFOLLOWED: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Every builtin bash has, with `[[` and `select`, the keywords that set names. A command named by
- * one of these is understood only when it is in `UNDERSTOOD`; a command that is not a builtin
- * (`make`, `pnpm`, `node`) runs a program in its own process, which cannot set the shell's names.
- * The other keywords (`for`, `while`, `if` and the rest) set no name but one they name as a word.
+ * Every builtin bash has, with `[[` and `select`, the keywords that set names, and the same for
+ * zsh, the shell lanes run commands in on macOS (`login-env.ts` defaults `SHELL` to `/bin/zsh`):
+ * its own builtins, those of the modules it loads (`zsh/datetime`, `zsh/stat`, `zsh/system`,
+ * `zsh/zutil` and the rest, loaded by `zmodload`, which is itself on this list), and its keywords
+ * that run or set (`foreach`, `repeat`, `noglob`, `nocorrect`). A command named by one of these is
+ * understood only when it is in `UNDERSTOOD`; a command that is not a builtin (`make`, `pnpm`,
+ * `node`) runs a program in its own process, which cannot set the shell's names. The other
+ * keywords (`for`, `while`, `if` and the rest) set no name but one they name as a word.
  */
 const BUILTINS: ReadonlySet<string> = new Set(
+  // bash
   (
     '. : [ [[ alias bg bind break builtin caller cd command compgen complete compopt continue ' +
     'declare dirs disown echo enable eval exec exit export false fc fg getopts hash help history ' +
     'jobs kill let local logout mapfile popd printf pushd pwd read readarray readonly return select set ' +
-    'shift shopt source suspend test time times trap true type typeset ulimit umask unalias unset wait'
+    'shift shopt source suspend test time times trap true type typeset ulimit umask unalias unset wait ' +
+    // zsh builtins
+    'autoload bindkey builtin bye chdir comparguments compcall compctl compdescribe compfiles ' +
+    'compgroups compquote comptags comptry compvalues disable echotc echoti emulate float functions ' +
+    'getcap getln integer limit log noglob nocorrect print private pushln r rehash sched setcap ' +
+    'setopt stat unfunction unhash unlimit unsetopt vared whence where which zcompile zformat ' +
+    'zftp zle zmodload zparseopts zprof zpty zregexparse zsocket zstyle ztcp ' +
+    // zsh keywords that set a name or run a command
+    'foreach repeat ' +
+    // zsh module builtins and the completion builtins
+    'compadd compset strftime zstat sysread syswrite sysopen sysseek systell syserror zselect ' +
+    'zsystem zgetattr zsetattr zdelattr zlistattr pcre_compile pcre_match pcre_study ztie ' +
+    'zuntie zcurses compdef compinit'
   ).split(' '),
 );
 
 /**
  * The builtins this scan reads: each sets a name by naming it as a word (`read s`, `unset s`,
  * `let s=…`, `export s=…`), which `setsName` sees, or sets only names in `IMPLICIT`. Every other builtin (`getopts`, `mapfile -C`,
- * `enable`, `hash`, `history` and the rest) may set or run something the scan does not read, so a
- * command naming one has no safe name. `command`, `exec` and `time` run the command after them,
- * which is checked in turn. `declare`, `typeset` and `local` are read except for a nameref or a
- * flag the scan cannot read, and `printf` except for `-v`.
+ * `enable`, `hash`, `history`, `vared`, `zparseopts` and the rest) may set or run something the
+ * scan does not read, so a command naming one has no safe name. `command`, `exec` and `time` run
+ * the command after them, which is checked in turn. `declare`, `typeset`, `local` and their zsh
+ * kin `integer`, `float` and `private` are read except for a nameref or a flag the scan cannot
+ * read, `printf` except for `-v`, and `print` except for a flag cluster with `v`, which sets a
+ * name. `whence`, `where` and `which` only report. `repeat` runs the command after its count,
+ * which is read in turn like any other. `foreach` sets its variable from a word list the scan does
+ * not read, so it is not understood.
  */
 const UNDERSTOOD: ReadonlySet<string> = new Set(
   (
-    ': [ [[ break cd command continue declare echo exec exit export false jobs let local popd ' +
-    'printf pushd pwd read readonly return select set shift shopt test time true type typeset ' +
-    'unset wait'
+    ': [ [[ break cd chdir command continue declare echo exec exit export false float ' +
+    'integer jobs let local popd print printf private pushd pwd read readonly repeat return ' +
+    'select set shift shopt test time true type typeset unset wait whence where which'
   ).split(' '),
 );
 
@@ -87,12 +108,20 @@ const IMPLICIT: ReadonlyMap<string, readonly string[]> = new Map([
   ['read', ['REPLY']],
   ['select', ['REPLY']],
   ['cd', DIRECTORY_NAMES],
+  ['chdir', DIRECTORY_NAMES],
   ['pushd', DIRECTORY_NAMES],
   ['popd', DIRECTORY_NAMES],
   ['=~', ['BASH_REMATCH', 'MATCH', 'match', 'MBEGIN', 'MEND']],
 ]);
 
-const NAMEREF_BUILTINS: ReadonlySet<string> = new Set(['declare', 'typeset', 'local']);
+const NAMEREF_BUILTINS: ReadonlySet<string> = new Set([
+  'declare',
+  'typeset',
+  'local',
+  'integer',
+  'float',
+  'private',
+]);
 
 interface Assignment {
   readonly name: string;
@@ -187,7 +216,9 @@ function rebindsNames(words: readonly string[]): boolean {
     if (words.some((word) => /^[-+]/.test(word) && word.includes('n'))) return true;
     if (words.some((word) => !ASSIGNMENT.test(word) && /[$`]/.test(word))) return true;
   }
-  return heads.includes('printf') && words.some((word) => word.startsWith('-v'));
+  if (heads.includes('printf') && words.some((word) => word.startsWith('-v'))) return true;
+  // zsh `print -v name` stores the text in `name`; the flags may be a cluster (`-rv`) or carry the name.
+  return heads.includes('print') && words.some((word) => /^-[a-zA-Z]*v/.test(word));
 }
 
 /** Whether a word sets or rebinds `name` in a way other than a plain assignment before a command. */

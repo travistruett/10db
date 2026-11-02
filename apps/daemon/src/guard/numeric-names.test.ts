@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { expandsIndirectly } from './arithmetic-words';
 import { numericNames } from './numeric-names';
 
 const names = (command: string): string[] => [...numericNames(command)].sort();
@@ -68,6 +69,88 @@ describe('numericNames', () => {
     ];
     it.each(rows)('%s', (_, command) => {
       expect(names(command)).toEqual([]);
+    });
+  });
+
+  describe('zsh indirection and evaluation flags can reach a name', () => {
+    const rows: readonly (readonly [string, string])[] = [
+      ['${(P)name}', 's=1; r=s; echo ${(P)r}; echo $((s))'],
+      ['${(P)name} in quotes', 's=1; r=s; echo "${(P)r}"; echo $((s))'],
+      ['${(P@)name}', 's=1; r=s; echo ${(P@)r}; echo $((s))'],
+      ['${(kP)name}', 's=1; r=s; echo ${(kP)r}; echo $((s))'],
+      ['${(P)name} in a substitution', 's=1; echo $(echo ${(P)r}); echo $((s))'],
+      ['${(e)name} evaluates the value', 's=1; echo ${(e)r}; echo $((s))'],
+      ['${(%)name} expands the value as a prompt', 's=1; echo ${(%)r}; echo $((s))'],
+    ];
+    it.each(rows)('%s', (_, command) => {
+      expect(names(command)).toEqual([]);
+    });
+
+    it('reaches a name from a positional parameter, which no assignment in the command names', () => {
+      expect(names('s=1; echo ${(P)1}; echo $((s))')).toEqual([]);
+      expect(names('s=1; echo ${(P)${1}}; echo $((s))')).toEqual([]);
+    });
+
+    it('expandsIndirectly reads the zsh flags that look a name up or evaluate the value', () => {
+      for (const word of ['${(P)r}', '"${(P)r}"', '${(P@)r}', '${(kP)r}', '${(e)r}', '${(%)r}'])
+        expect(expandsIndirectly(word), word).toBe(true);
+      for (const word of ['${(U)r}', '${(j:,:)r}', '${r}', '${!r}x'.replace('!', '')])
+        expect(expandsIndirectly(word), word).toBe(false);
+      expect(expandsIndirectly('${!r}')).toBe(true);
+    });
+  });
+
+  describe('a zsh builtin or keyword the scan does not understand', () => {
+    const rows: readonly (readonly [string, string])[] = [
+      ['print -v', 's=1; print -v s x; echo $((s))'],
+      ['print -v joined', 's=1; print -vs x; echo $((s))'],
+      ['print -rv', 's=1; print -rv s x; echo $((s))'],
+      ['vared', 's=1; vared s; echo $((s))'],
+      ['zparseopts', 's=1; zparseopts -E -D -- a=s; echo $((s))'],
+      ['getln', 's=1; getln s; echo $((s))'],
+      ['strftime -s', 's=1; strftime -s s %Y 0; echo $((s))'],
+      ['zstat -A', 's=1; zstat -A a x; echo $((s))'],
+      ['autoload', 's=1; autoload -U f; f; echo $((s))'],
+      ['functions', 's=1; functions f=g; f; echo $((s))'],
+      ['unfunction', 's=1; unfunction f; echo $((s))'],
+      ['zmodload', 's=1; zmodload zsh/datetime; echo $((s))'],
+      ['setopt', 's=1; setopt PROMPT_SUBST; echo $((s))'],
+      ['emulate', 's=1; emulate -L sh; echo $((s))'],
+      ['sysread', 's=1; sysread -s 1 s; echo $((s))'],
+      ['zle', 's=1; zle -N w; echo $((s))'],
+      ['noglob', 's=1; noglob eval "s=x"; echo $((s))'],
+      ['nocorrect', 's=1; nocorrect eval "s=x"; echo $((s))'],
+      ['sched', 's=1; sched +1 "s=x"; echo $((s))'],
+      ['compdef', 's=1; compdef _f g; echo $((s))'],
+      ['zsh -c', 's=1; zsh -c "s=x"; echo $((s))'],
+      ['behind command', 's=1; command vared s; echo $((s))'],
+      ['behind a runner', 's=1; env -i print -v s x; echo $((s))'],
+    ];
+    it.each(rows)('%s', (_, command) => {
+      expect(names(command)).toEqual([]);
+    });
+  });
+
+  describe('a zsh builtin or keyword the scan reads', () => {
+    it('keeps the names of a command using print without -v', () => {
+      expect(names('s=1; print -r -- hello; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; print hello; whence -p node; echo $((s))')).toEqual(['s']);
+    });
+
+    it('reads integer and float like declare', () => {
+      expect(names('s=1; integer n=2; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; float f=2; echo $((s))')).toEqual(['s']);
+      expect(names('n=1; s=1; integer n; echo $((n + s))')).toEqual(['s']);
+      expect(names('s=1; integer -n r=s; r=x; echo $((s))')).toEqual([]);
+      expect(names('s=1; typeset -n r=s; echo $((s))')).toEqual([]);
+    });
+
+    it('reads repeat, which runs the command after its count, and gives up on foreach', () => {
+      // `foreach f (a b)` sets `f` from a word list the scan does not read.
+      expect(names('s=1; foreach f (a b); echo $f; end; echo $((s))')).toEqual([]);
+      expect(names('s=1; foreach s (a b); echo $s; end; echo $((s))')).toEqual([]);
+      expect(names('s=1; repeat 2 echo hi; echo $((s))')).toEqual(['s']);
+      expect(names('s=1; repeat 2 s=x; echo $((s))')).toEqual([]);
     });
   });
 
