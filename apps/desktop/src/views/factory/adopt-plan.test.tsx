@@ -4,6 +4,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
+import { projectViewDto } from '../../test/fixtures';
 import { goalDto, goalListDto, goalSummaryDto } from '../../test/goal-fixtures';
 
 afterEach(() => {
@@ -228,6 +229,32 @@ describe('Adopt a Plan…', () => {
 
     expect(await within(modal).findByText("Couldn't adopt that plan")).toBeTruthy();
     expect(within(modal).getAllByRole('listitem')).toHaveLength(REFUSAL.length);
+  });
+
+  it('closes an open refusal when the project is switched', async () => {
+    const alpha = projectViewDto({ name: 'alpha', repoPath: '/Users/x/a' });
+    const beta = projectViewDto({ name: 'beta', repoPath: '/Users/x/b' });
+    window.localStorage.clear();
+    panel(PLAN);
+    serve({ errors: REFUSAL });
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+    renderApp('/factory');
+    await adopt();
+    await screen.findByRole('dialog', { name: "This plan can't be adopted yet" });
+
+    // Mantine's modal keeps the rest of the page aria-hidden while it is open, so the
+    // switcher is reached with `hidden`. The refusal belongs to the project it came from.
+    const hidden = { hidden: true } as const;
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Project: alpha. Switch project', ...hidden }),
+    );
+    fireEvent.click(await screen.findByRole('option', { name: /beta/, ...hidden }));
+
+    await screen.findByRole('button', { name: 'Project: beta. Switch project', ...hidden });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: "This plan can't be adopted yet" })).toBeNull();
+    });
+    expect(screen.queryByText(PLAN)).toBeNull();
   });
 
   it('shows a field error for a typed path that is not absolute', async () => {
