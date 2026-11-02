@@ -53,8 +53,9 @@ const valid = (names: Set<string>): string[] =>
 /**
  * Which packages the project lets run their install scripts: `allowBuilds` entries set to true
  * (pnpm-workspace.yaml), the older `onlyBuiltDependencies` lists, and `dangerouslyAllowAllBuilds`
- * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Read as
- * data from the copy's own files, which hold the base's content at the cut; nothing in them runs.
+ * (pnpm-workspace.yaml and package.json's `pnpm` field), less the ones it never builds. Under
+ * `legacy` (pnpm 9 and earlier) only package.json's `pnpm` field is read. Read as data from the
+ * copy's own files, which hold the base's content at the cut; nothing in them runs.
  */
 export function buildPolicy(root: string, legacy = false): BuildPolicy {
   const allowed = new Set<string>();
@@ -64,12 +65,14 @@ export function buildPolicy(root: string, legacy = false): BuildPolicy {
   let limited = false;
   const manifest = readData(join(root, 'package.json'));
   const sources: Record<string, unknown>[] = [];
-  const workspace = readData(join(root, 'pnpm-workspace.yaml'));
+  // pnpm 9 and earlier read only `packages` and catalogs from pnpm-workspace.yaml; build settings
+  // there came with pnpm 10, so under legacy they are read from package.json's `pnpm` field only.
+  // (Unverified against pnpm 9's source: no pnpm 9 was available to check.)
+  const workspace = legacy ? undefined : readData(join(root, 'pnpm-workspace.yaml'));
   if (isRecord(workspace)) {
     sources.push(workspace);
     const allow = workspace['allowBuilds'];
-    // pnpm 9 and earlier don't read allowBuilds.
-    if (!legacy && isRecord(allow))
+    if (isRecord(allow))
       for (const [name, value] of Object.entries(allow))
         if (value === true) allowed.add(nameOf(name));
         else if (value === false) denied.add(nameOf(name));
