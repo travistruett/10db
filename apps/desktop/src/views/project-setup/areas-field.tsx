@@ -1,6 +1,7 @@
 import {
   ActionIcon,
   Button,
+  Checkbox,
   Group,
   Loader,
   Menu,
@@ -16,6 +17,7 @@ import {
   draftProblems,
   mergeDrafts,
   removeDraft,
+  setCatchAll,
   setGlobs,
   setName,
   type AreaDraft,
@@ -59,7 +61,8 @@ export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
         </Text>
         <Text size="sm" c="dimmed">
           Tasks that work in different areas can run at the same time. Each area lists the files it
-          holds, one glob to a line.
+          holds, one glob to a line. A file that no area holds belongs to the catch-all area, if
+          there is one.
         </Text>
         {note === null ? null : (
           <Text size="sm" c="dimmed">
@@ -143,6 +146,15 @@ export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
                   <IconTrash size={16} />
                 </ActionIcon>
               </Group>
+              <Checkbox
+                size="xs"
+                aria-label={`Area ${String(index + 1)} is the catch-all`}
+                label="Catch-all: holds every file no other area holds, such as a new package or folder. Only one area can be."
+                checked={draft.catchAll}
+                onChange={(e) => {
+                  onChange(setCatchAll(drafts, draft.key, e.currentTarget.checked));
+                }}
+              />
               {draft.reason === '' ? null : (
                 <Text size="xs" c="dimmed">
                   {draft.reason}

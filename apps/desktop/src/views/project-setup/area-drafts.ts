@@ -1,6 +1,8 @@
 import {
   AreaDef,
+  atMostOneCatchAll,
   DEFAULT_HAZARDS,
+  ONE_CATCH_ALL,
   PathPattern,
   WHOLE_REPOSITORY_GLOBS,
   type ProposedArea,
@@ -14,6 +16,8 @@ export interface AreaDraft {
   readonly globs: string;
   /** Why the area was proposed; empty for one the builder added. */
   readonly reason: string;
+  /** The project's catch-all: a file no other area holds falls in this one. At most one draft. */
+  readonly catchAll: boolean;
 }
 
 /** What setup offers when no proposal came: one area over the whole repository. */
@@ -36,6 +40,7 @@ export function draftsFromAreas(areas: readonly ProposedArea[]): AreaDraft[] {
     name: area.name,
     globs: area.globs.join('\n'),
     reason: area.reason,
+    catchAll: area.catchAll === true,
   }));
 }
 
@@ -47,7 +52,11 @@ const globLines = (text: string): string[] =>
 
 /** The areas a project is created with: exactly what the builder left in the list. */
 export function areasOf(drafts: readonly AreaDraft[]): AreaDef[] {
-  return drafts.map((d) => ({ name: d.name.trim(), globs: globLines(d.globs) }));
+  return drafts.map((d) => ({
+    name: d.name.trim(),
+    globs: globLines(d.globs),
+    ...(d.catchAll ? { catchAll: true } : {}),
+  }));
 }
 
 const change = (
@@ -62,6 +71,16 @@ export const setName = (drafts: readonly AreaDraft[], key: number, name: string)
 export const setGlobs = (drafts: readonly AreaDraft[], key: number, globs: string): AreaDraft[] =>
   change(drafts, key, { globs });
 
+/** Makes the area the catch-all, which takes it from any other, or clears it; there is at most one. */
+export const setCatchAll = (
+  drafts: readonly AreaDraft[],
+  key: number,
+  catchAll: boolean,
+): AreaDraft[] =>
+  drafts.map((d) =>
+    d.key === key ? { ...d, catchAll } : catchAll ? { ...d, catchAll: false } : d,
+  );
+
 export const removeDraft = (drafts: readonly AreaDraft[], key: number): AreaDraft[] =>
   drafts.filter((d) => d.key !== key);
 
@@ -71,11 +90,14 @@ export function mergeDrafts(drafts: readonly AreaDraft[], from: number, into: nu
   const target = drafts.find((d) => d.key === into);
   if (source === undefined || target === undefined || from === into) return [...drafts];
   const globs = [...new Set([...globLines(target.globs), ...globLines(source.globs)])].join('\n');
-  return removeDraft(change(drafts, into, { globs }), from);
+  return removeDraft(
+    change(drafts, into, { globs, catchAll: target.catchAll || source.catchAll }),
+    from,
+  );
 }
 
 export function addDraft(drafts: readonly AreaDraft[]): AreaDraft[] {
-  return [...drafts, { key: freshKey(), name: '', globs: '', reason: '' }];
+  return [...drafts, { key: freshKey(), name: '', globs: '', reason: '', catchAll: false }];
 }
 
 export interface RowProblems {
@@ -122,5 +144,13 @@ export function draftProblems(drafts: readonly AreaDraft[]): DraftProblems {
         ...(globs === undefined ? {} : { globs }),
       });
   }
-  return { rows, whole: drafts.length === 0 ? 'Keep at least one area.' : null };
+  return {
+    rows,
+    whole:
+      drafts.length === 0
+        ? 'Keep at least one area.'
+        : atMostOneCatchAll(drafts)
+          ? null
+          : ONE_CATCH_ALL,
+  };
 }
