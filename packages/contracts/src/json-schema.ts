@@ -53,6 +53,7 @@ import {
 import {
   GoalAdoptError,
   GoalAdoptInput,
+  GoalAdoptPreview,
   GoalBrief,
   GoalCriterionDto,
   GoalDigestDto,
@@ -170,6 +171,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'workstream-changes-dto': WorkstreamChangesDto,
   'goal-adopt-error': GoalAdoptError,
   'goal-adopt-input': GoalAdoptInput,
+  'goal-adopt-preview': GoalAdoptPreview,
   'goal-brief': GoalBrief,
   'goal-criterion-dto': GoalCriterionDto,
   'goal-digest-dto': GoalDigestDto,
