@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, watch as fsWatch, type Dirent } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
+import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
   ClaimKind,
@@ -54,6 +54,7 @@ import {
   stampOrReason,
   writeStamp,
 } from './allowed-writes';
+import { filesUnderBounded as filesUnder } from './dir-files';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -82,8 +83,6 @@ interface ExcusedWrite {
 }
 /** The most excused writes kept; the oldest go first. */
 const MAX_EXCUSED_WRITES = 500;
-/** The most files a sensitive directory may hold and still be read as the base's own; more cards it. */
-const MAX_DIR_FILES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
 /**
  * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
@@ -171,7 +170,10 @@ export function createWatcher(deps: {
   >();
   const pending = new Map<string, Set<string>>();
   let timer: Timer | null = null;
-  let chain: Promise<void> = Promise.resolve();
+  // Work queued per checkout (`onRoot`), keyed by the checkout's path; a checkout with nothing queued has none.
+  const queues = new Map<string, Promise<void>>();
+  // Checkouts with a batch run queued that has not started yet; it takes the checkout's `pending` when it does.
+  const waiting = new Set<string>();
   let stopped = false;
 
   /** The batch a workstream works in when that batch has its own worktree. */
@@ -452,12 +454,12 @@ export function createWatcher(deps: {
    * unchanged by the other (a deletion while the file stays gone), and a later write the live batch never
    * saw is carded at the step end.
    */
-  function allowedWrites(
+  async function allowedWrites(
     projectId: ProjectId,
     root: string,
     paths: readonly string[],
     lanes: readonly WorkstreamId[],
-  ): Set<string> {
+  ): Promise<Set<string>> {
     const allowed = new Set<string>();
     if (paths.length === 0 || lanes.length === 0) return allowed;
     forgetEndedLanes();
@@ -473,20 +475,40 @@ export function createWatcher(deps: {
       ...cards.filter(({ a }) => a.standing),
       ...named(lanes.flatMap((id) => ruleAllowances(listPermissionRules(db, projectId, id)))),
     ];
+    const keysOf = (path: string): string[] =>
+      lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
+    const unusedCardsOf = (path: string) =>
+      cards.filter(
+        ({ rel, a }) =>
+          rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
+      );
+    // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
+    // is read; any other write is carded as it is. The reads run together, each within its time budget, so
+    // a batch waits for its slowest file and no longer than that; the decisions below then run without
+    // awaiting, one path after the other.
+    const reads = new Map(
+      await Promise.all(
+        paths
+          .filter(
+            (p) =>
+              !standing.some(({ rel }) => rel === p) &&
+              (keysOf(p).length > 0 || unusedCardsOf(p).length > 0),
+          )
+          .map(async (p) => [p, await stampOrReason(root, p)] as const),
+      ),
+    );
     for (const path of paths) {
       if (standing.some(({ rel }) => rel === path)) {
         allowed.add(path);
         continue;
       }
-      const keys = lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
-      const unusedCards = cards.filter(
-        ({ rel, a }) =>
-          rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
-      );
-      // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
-      // is read; any other write is carded as it is.
+      // The decision is made against the excused writes and cards as they are now, not as they were before
+      // the reads: another checkout's batch may have used a card or excused a write meanwhile.
+      if (keysOf(path).length === 0 && unusedCardsOf(path).length === 0) continue;
+      const read = reads.get(path) ?? (await stampOrReason(root, path));
+      const keys = keysOf(path);
+      const unusedCards = unusedCardsOf(path);
       if (keys.length === 0 && unusedCards.length === 0) continue;
-      const read = stampOrReason(root, path);
       const stamp = 'stamp' in read ? read.stamp : null;
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
@@ -674,28 +696,6 @@ export function createWatcher(deps: {
   }
 
   /**
-   * The files under directory `rel`, relative to the checkout, leaving out Claude Code's bookkeeping; null
-   * when it holds anything but files and directories (a link, say) or more than `MAX_DIR_FILES` files.
-   */
-  function filesUnder(root: string, rel: string): string[] | null {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(join(root, rel), { recursive: true, withFileTypes: true });
-    } catch {
-      return null;
-    }
-    const files: string[] = [];
-    for (const entry of entries) {
-      if (entry.isDirectory()) continue;
-      const file = relative(root, join(entry.parentPath, entry.name)).split(sep).join('/');
-      if (isInsideClaudeCodeBookkeeping(file)) continue;
-      if (!entry.isFile() || files.length >= MAX_DIR_FILES) return null;
-      files.push(file);
-    }
-    return files;
-  }
-
-  /**
    * Whether a sensitive path holds only what 10db's own base merge or fast-forward brought into the copy, so
    * no lane's write is left to card. A file qualifies when git doesn't report it as changed and HEAD's blob
    * for it is the incoming base's own: a file a lane committed (through the commit tool, before its batch
@@ -765,13 +765,13 @@ export function createWatcher(deps: {
     }
     const outside = new Set([...strays, ...hidden]);
     // A write the builder allowed through its permission card needs no second card.
-    const allowed = allowedWrites(projectId, entry.root, [...outside], candidates);
+    const allowed = await allowedWrites(projectId, entry.root, [...outside], candidates);
     // A directory the allowed write created holds only that write, so it is allowed with it.
     for (const rel of outside) {
       if (allowed.has(rel) || !isRealDirectory(join(entry.root, rel))) continue;
       const files = filesUnder(entry.root, rel);
       if (files === null || files.length === 0) continue;
-      const fileAllowed = allowedWrites(projectId, entry.root, files, candidates);
+      const fileAllowed = await allowedWrites(projectId, entry.root, files, candidates);
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
     }
     raise(
@@ -789,38 +789,68 @@ export function createWatcher(deps: {
     );
   }
 
-  async function processPending(): Promise<void> {
-    const batches = [...pending.entries()].map(([id, set]) => [id, [...set].sort()] as const);
-    pending.clear();
-    for (const [root, paths] of batches) {
-      try {
-        await processBatch(root, paths);
-      } catch (error) {
-        deps.logger.warn({ root, err: String(error) }, 'watcher batch failed');
-      }
-    }
+  /**
+   * Runs `work` after what is already queued for the checkout `root`. Each checkout has a queue of its own, so
+   * a file that takes long to stamp holds up only the work behind it in its own checkout, never another
+   * checkout's batches or another project's. With at most one batch waiting per checkout (see `flush`), work
+   * queued there waits for at most the batch running and the one waiting, each bounded by the stamp budget.
+   */
+  function onRoot(root: string, work: () => Promise<void>): Promise<void> {
+    const queued = (queues.get(root) ?? Promise.resolve()).then(work);
+    queues.set(root, queued);
+    void queued.then(() => {
+      if (queues.get(root) === queued) queues.delete(root);
+    });
+    return queued;
   }
 
+  /**
+   * Queues a batch run for each checkout with pending changes, unless one is already waiting to start there.
+   * The run takes the checkout's pending changes when it starts, so events that arrive while an earlier batch
+   * is still running join the one waiting run: a checkout never holds more than one batch waiting.
+   */
   function flush(): Promise<void> {
     timer?.cancel();
     timer = null;
-    chain = chain.then(processPending);
-    return chain;
+    for (const root of pending.keys()) {
+      if (waiting.has(root)) continue;
+      waiting.add(root);
+      void onRoot(root, async () => {
+        waiting.delete(root);
+        const set = pending.get(root);
+        pending.delete(root);
+        if (set === undefined) return;
+        try {
+          await processBatch(root, [...set].sort());
+        } catch (error) {
+          deps.logger.warn({ root, err: String(error) }, 'watcher batch failed');
+        }
+      });
+    }
+    // Settles when everything queued so far has, in every checkout.
+    return Promise.all([...queues.values()]).then(() => undefined);
   }
 
-  // Queued behind any batch in progress, so a card that batch raises is checked too; outside the write
-  // that published the grant, since resolving a card is a write of its own. Only the lane granted the claim
-  // can clear cards, and only its own.
+  // Queued behind any batch in progress in the lane's checkout, so a card that batch raises is checked too;
+  // outside the write that published the grant, since resolving a card is a write of its own. Only the lane
+  // granted the claim can clear cards, and only its own.
   const unsubscribe =
     deps.bus?.subscribe((event) => {
       if (event.type !== EventType.ClaimAcquired || stopped) return;
       const lane = WorkstreamId.safeParse(event.data['workstreamId']);
       if (!lane.success) return;
-      chain = chain
-        .then(() => resolveCovered(lane.data))
-        .catch((error: unknown) => {
+      let root: string;
+      try {
+        root = checkoutOf(db, getWorkstream(db, lane.data));
+      } catch (error) {
+        deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
+        return;
+      }
+      void onRoot(root, () =>
+        resolveCovered(lane.data).catch((error: unknown) => {
           deps.logger.warn({ err: String(error) }, 'could not re-check stray cards after a claim');
-        });
+        }),
+      );
     }) ?? (() => undefined);
 
   return {
@@ -876,21 +906,29 @@ export function createWatcher(deps: {
       // A write that can change what runs is flagged even inside the workstream's own claim.
       const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
       // Not a write its permission card allowed: the builder decided about that one already.
-      const allowed = allowedWrites(ws.projectId, root, written, [workstreamId]);
+      const allowed = await allowedWrites(ws.projectId, root, written, [workstreamId]);
       // Nor a file still showing the write another running lane's card excused: a stamp that matches means
-      // nobody has written to it since, so it is that lane's write and not this lane's to answer for.
+      // nobody has written to it since, so it is that lane's write and not this lane's to answer for. Only a
+      // path another lane's excused write names is read (a huge file nobody excused costs nothing), and each
+      // read is within the stamp time budget, so this step end never waits on a file longer than that.
       const others = listWorkstreams(db, { states: WATCHED_STATES, projectId: ws.projectId })
         .map((other) => other.id)
         .filter((id) => id !== workstreamId);
-      const flagged = written.filter((rel) => {
-        if (allowed.has(rel)) return false;
-        if (others.length === 0) return true;
-        const stamp = writeStamp(root, rel);
-        return (
-          stamp === null ||
-          !others.some((id) => excusedWrites.get(excusedKey(root, rel, id))?.stamp === stamp)
-        );
-      });
+      const undecided = written.filter((rel) => !allowed.has(rel));
+      const othersExcused = (rel: string): string[] =>
+        others.flatMap((id) => {
+          const stamp = excusedWrites.get(excusedKey(root, rel, id))?.stamp;
+          return stamp === undefined ? [] : [stamp];
+        });
+      const stillOthers = new Set<string>();
+      await Promise.all(
+        undecided.map(async (rel) => {
+          if (othersExcused(rel).length === 0) return;
+          const stamp = await writeStamp(root, rel);
+          if (stamp !== null && othersExcused(rel).includes(stamp)) stillOthers.add(rel);
+        }),
+      );
+      const flagged = undecided.filter((rel) => !stillOthers.has(rel));
       raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
       return flagged;
     },

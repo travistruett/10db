@@ -61,6 +61,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { editResult } from '../permissions';
 import { ANSWERED_CARDS_READ, stampOrReason } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
@@ -2008,6 +2009,88 @@ describe('worktree checkouts', () => {
       expect(flags()).toEqual([]);
     });
 
+    it("keeps another checkout's batches moving while one path's stamp is still being read", async () => {
+      const a = inWorktree('Alpha', 'ui');
+      const b = inWorktree('Beta', 'api');
+      watcher.sync();
+      editCard(a, SENSITIVE_FILE, 'allow_once', a.path);
+      // The stamp of A's file never finishes until released: a file too big to hash quickly.
+      let release: (r: { reason: 'too-large' }) => void = () => undefined;
+      vi.mocked(stampOrReason).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      writeAt(a.path, SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      writeAt(b.path, 'docs/stray.md');
+      void watcher.flush();
+      await vi.waitFor(() => {
+        expect(flags().map((f) => f.body)).toEqual([`${b.path}: docs/stray.md`]);
+      });
+      release({ reason: 'too-large' });
+      await flushing;
+      // The path that could not be stamped fails closed: carded, and the card is left unused.
+      expect(
+        flags()
+          .map((f) => f.body)
+          .sort(),
+      ).toEqual([`${a.path}: ${SENSITIVE_FILE}`, `${b.path}: docs/stray.md`].sort());
+    });
+
+    it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
+      const a = running('Alpha', ['api']);
+      running('Beta', ['ui']);
+      watcher.sync();
+      editCard(a, SENSITIVE_FILE, 'allow_once');
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      let release: (r: { reason: 'too-large' }) => void = () => undefined;
+      stamp.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      touch(SENSITIVE_FILE);
+      emit(SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      // Lane A keeps touching its file while the first stamp is held; each flush would queue a batch.
+      for (let i = 0; i < 5; i += 1) {
+        touch(SENSITIVE_FILE);
+        emit(SENSITIVE_FILE);
+        void watcher.flush();
+      }
+      touch('docs/stray.md');
+      emit('docs/stray.md');
+      void watcher.flush();
+      release({ reason: 'too-large' });
+      await flushing;
+      await watcher.flush();
+      // One more batch took every event that arrived meanwhile: the stray is carded after it, and the file
+      // was stamped once more, not once per flush.
+      expect(flags().map((f) => f.body)).toContain('docs/stray.md');
+      expect(stamp.mock.calls.filter(([, rel]) => rel === SENSITIVE_FILE)).toHaveLength(2);
+    });
+
+    it('cards a path too large to stamp and leaves the card for the write that can be', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      vi.mocked(stampOrReason).mockResolvedValueOnce({ reason: 'too-large' });
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+      // The card was not used: the file as it settles is the allowed write.
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+    });
+
     it('does not let a card allowed in the main checkout excuse a write in a worktree copy', async () => {
       const lane = inWorktree('Alpha', 'ui');
       watcher.sync();
@@ -2208,6 +2291,24 @@ describe('worktree checkouts', () => {
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([SENSITIVE_FILE]);
       });
 
+      it("excuses Alpha's multi-line Edit of a CRLF file, and cards another lane's LF write to it", async () => {
+        const a = running('Alpha', ['ui']);
+        running('Beta', ['api']);
+        watcher.sync();
+        const before = '{\r\n  "a": 1\r\n}\r\n';
+        const call = { old_string: '  "a": 1', new_string: '  "a": 1,\n  "b": 2' };
+        // Claude Code edits the file as LF and writes it back in its CRLF endings.
+        const written = editResult('Edit', call, before) ?? '';
+        expect(written).toBe('{\r\n  "a": 1,\r\n  "b": 2\r\n}\r\n');
+        editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, written));
+        put(SENSITIVE_FILE, '{\n  "a": 1,\n  "b": 2\n}\n');
+        await watcher.flush();
+        expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        put(SENSITIVE_FILE, written);
+        await watcher.flush();
+        expect(flags()).toHaveLength(1);
+      });
+
       it('cards the write of a card that asks for an exact write but has none recorded for the lane', async () => {
         // A NotebookEdit, or a call whose file could not be read when it was allowed.
         const a = running('Alpha', ['ui']);
@@ -2223,7 +2324,7 @@ describe('worktree checkouts', () => {
         const a = running('Alpha', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
-        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+        vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
         put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -2232,7 +2333,7 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
         expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
         // The card is used: a later write is carded, settled or not.
-        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+        vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
         put(SENSITIVE_FILE, 'later');
         await watcher.flush();
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
@@ -2636,10 +2737,10 @@ describe('worktree checkouts', () => {
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           const stamp = vi.mocked(stampOrReason);
           // The file is stable on disk; the mock stands for a read that kept changing.
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
         });
@@ -2650,7 +2751,7 @@ describe('worktree checkouts', () => {
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           const stamp = vi.mocked(stampOrReason);
           stamp.mockClear();
-          stamp.mockReturnValueOnce(CHANGING);
+          stamp.mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
           expect(stamp.mock.calls.map((c) => c[1])).toEqual([SENSITIVE_FILE]);
@@ -2660,7 +2761,7 @@ describe('worktree checkouts', () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
+          vi.mocked(stampOrReason).mockResolvedValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
           await write(SENSITIVE_FILE);

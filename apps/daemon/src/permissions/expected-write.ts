@@ -62,15 +62,34 @@ export function editResult(
   current: string | null,
 ): string | undefined {
   if (toolName === 'Write') return stringIn(input, 'content') ?? undefined;
-  if (toolName === 'Edit') return applyEdit(current, input);
-  if (toolName !== 'MultiEdit' || !Array.isArray(input['edits'])) return undefined;
-  let content: string | null = current;
-  for (const edit of input['edits'] as unknown[]) {
-    const next = applyEdit(content, edit);
-    if (next === undefined) return undefined;
-    content = next;
+  if (toolName !== 'Edit' && toolName !== 'MultiEdit') return undefined;
+  // Claude Code reads the file with its line endings as LF, edits that, and writes it back in the file's own
+  // endings: CRLF when the start of the file has more CRLF than bare LF.
+  const crlf = current !== null && usesCrlf(current);
+  const lf = current === null ? null : current.replaceAll('\r\n', '\n');
+  let content: string | undefined;
+  if (toolName === 'Edit') {
+    content = applyEdit(lf, input);
+  } else {
+    if (!Array.isArray(input['edits'])) return undefined;
+    let next: string | null = lf;
+    for (const edit of input['edits'] as unknown[]) {
+      const applied = applyEdit(next, edit);
+      if (applied === undefined) return undefined;
+      next = applied;
+    }
+    content = next ?? undefined;
   }
-  return content ?? undefined;
+  if (content === undefined) return undefined;
+  return crlf ? content.replaceAll('\n', '\r\n') : content;
+}
+
+/** Claude Code's line-ending check: CRLF outnumbering bare LF in the first 4096 characters. */
+function usesCrlf(text: string): boolean {
+  const head = text.slice(0, 4096);
+  const crlf = head.split('\r\n').length - 1;
+  const lf = head.split('\n').length - 1 - crlf;
+  return crlf > lf;
 }
 
 /**
