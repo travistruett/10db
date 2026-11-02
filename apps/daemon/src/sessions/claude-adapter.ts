@@ -400,6 +400,8 @@ function startSession(
   });
   let pid: number | null = null;
   let started = false;
+  /** The permission mode the first init reported; a later init that reports another is logged. */
+  let firstInitMode: SDKSystemMessage['permissionMode'];
   let ended = false;
   let stopRequested = false;
   let promptSent = false;
@@ -690,10 +692,18 @@ function startSession(
           }
         }
         if (msg.type === 'system' && msg.subtype === 'init') {
-          if (started) continue;
+          if (started) {
+            // A later init (after a compaction or restart) is not checked again, but a mode other than the
+            // first init's is logged, so a lane that left auto mode shows up.
+            if (msg.permissionMode !== firstInitMode) {
+              log.info({ permissionMode: msg.permissionMode }, 'claude session permission mode');
+            }
+            continue;
+          }
           if (!(await preflightOk)) continue;
           checkInit(msg);
           if (failure) continue;
+          firstInitMode = msg.permissionMode;
           started = true;
         }
         // Claude Code can change mode mid-session, for example leaving auto mode after repeated classifier refusals.
