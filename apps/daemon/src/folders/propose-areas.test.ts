@@ -10,6 +10,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { createGit } from '../git';
+import { classifyPath } from '../guard';
 import { proposeAreas, type AreaNamer } from './propose-areas';
 
 const cleanups: (() => void)[] = [];
@@ -169,6 +170,19 @@ describe('proposeAreas without a model', () => {
     expect(areas).toHaveLength(3);
     const pair = areas.find((a) => a.globs.includes('one/**'));
     expect(pair?.globs).toContain('two/**');
+  });
+
+  it.each([
+    ['a stray bracket', ['a]b', 'axb', 'a[b']],
+    ['a backslash', ['a\\b', 'axb']],
+    ['expanding braces', ['k{x,y}', 'kxx,yy']],
+  ])('puts each file in one area when folder names differ only at %s', async (_, dirs) => {
+    const tracked = dirs.flatMap((dir) => ['1.ts', '2.ts', '3.ts'].map((f) => `${dir}/${f}`));
+    const repo = repoWith([['package.json', 'other/x.ts', 'other/y.ts', 'other/z.ts', ...tracked]]);
+    const { areas } = await proposal(repo.path);
+    for (const file of [...tracked, 'package.json', 'other/x.ts'])
+      expect(classifyPath(file, areas, []).areas, file).toHaveLength(1);
+    expect(new Set(areas.map((a) => a.name)).size).toBe(areas.length);
   });
 
   it('refuses a folder that is not a git repository', async () => {

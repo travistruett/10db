@@ -47,7 +47,8 @@ export async function removeBranch(
 
 /**
  * After a batch is CLOSED or ABANDONED and nothing runs in its branch's worktree: deletes the
- * branch while it is still at the commit it was cut from. An abandoned batch whose branch holds
+ * branch while it is still at the commit it was cut from; an abandoned batch's raises one card
+ * saying so. An abandoned batch whose branch holds
  * commits keeps it and raises one card offering to delete it. A closed batch's branch that moved is
  * kept without a card. Safe to repeat; a card is raised again only while the branch still holds the
  * commits and no card for it is open, so answer Keep before the batch is retired again.
@@ -64,6 +65,16 @@ export async function settleBranch(ctx: DeliveryContext, batchId: BatchId): Prom
     Promise.resolve(tip === base),
   );
   if (batch.state !== BatchState.Abandoned) return;
+  if (removal.kind === 'removed') {
+    // retireWorktree settles the branch before it clears `worktree_path`, so a set path here means
+    // the batch's worktree was just removed; a shared batch never had one.
+    raise(
+      ctx.inbox,
+      batch.projectId,
+      branchCards.abandonedBranchDeleted(batch, batch.worktreePath !== null),
+    );
+    return;
+  }
   if (removal.kind !== 'kept' && removal.kind !== 'checked_out') return;
   const commits = (await ctx.git.commitsSince(repo, base, batch.branch)).length;
   if (commits > 0) raise(ctx.inbox, batch.projectId, branchCards.abandoned(batch, commits));

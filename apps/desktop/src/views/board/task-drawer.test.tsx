@@ -455,7 +455,9 @@ describe('TaskDrawer', () => {
       );
       expect(within(d).getByRole('button', { name: 'Abandon' })).toBeTruthy();
       expect(
-        within(d).getByText('Abandon keeps the branch and cancels its unfinished task.'),
+        within(d).getByText(
+          'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its unfinished task.',
+        ),
       ).toBeTruthy();
     });
 

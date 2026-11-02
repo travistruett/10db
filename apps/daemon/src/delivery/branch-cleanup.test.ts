@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto, InboxItemDto, WorkstreamDto } from '@10db/contracts';
 import {
@@ -243,12 +243,17 @@ describe('an abandoned task whose branch holds commits', () => {
     expect(h.only(cardsAbout(batch.branch)).body).toContain(elsewhere);
   });
 
-  it('deletes the branch of an abandoned task that never moved off its base, without a card', async () => {
+  it('deletes the branch of an abandoned task that never moved off its base, and a card says so', async () => {
     const { batch } = await opened();
+    const wt = batch.worktreePath ?? '';
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(exists(batch.branch)).toBe(false);
-    expect(cardsAbout(batch.branch)).toEqual([]);
+    expect(existsSync(wt)).toBe(false);
+    const card = h.only(cardsAbout(batch.branch));
+    expect(card.title).toBe(`Batch "${batch.title}" abandoned: ${batch.branch ?? ''} deleted`);
+    expect(card.body).toContain('no commits');
+    expect(card.options).toEqual([]);
   });
 
   it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {
@@ -589,11 +594,12 @@ describe('the sweep at startup', () => {
     expect(exists(batch.branch)).toBe(true);
   });
 
-  it('deletes an abandoned branch that never moved off its base, without a card', async () => {
+  it('deletes an abandoned branch that never moved off its base, and says so once', async () => {
     const batch = await unsettled(0);
     await recover();
+    await recover();
     expect(exists(batch.branch)).toBe(false);
-    expect(h.cards()).toEqual([]);
+    expect(h.only(h.cards()).title).toContain('deleted');
   });
 
   it('leaves an abandoned batch whose branch is gone alone', async () => {
