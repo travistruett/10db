@@ -51,7 +51,7 @@ import {
   relativeIn,
   ruleAllowances,
   stampMatchesExpected,
-  unstampedReason,
+  stampOrReason,
   writeStamp,
 } from './allowed-writes';
 import {
@@ -486,7 +486,8 @@ export function createWatcher(deps: {
       // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
       // is read; any other write is carded as it is.
       if (keys.length === 0 && unusedCards.length === 0) continue;
-      const stamp = writeStamp(root, path);
+      const read = stampOrReason(root, path);
+      const stamp = 'stamp' in read ? read.stamp : null;
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
         continue;
@@ -516,7 +517,7 @@ export function createWatcher(deps: {
         // without end: a path that can't be read, or is not a regular file (a directory, a link to one), is
         // carded and leaves the card unused; a file still changing is excused once without using the card,
         // which then excuses that write when it settles, and a second time it is still unsettled it is carded.
-        if (unstampedReason(root, path) !== 'changing' || settling.has(use)) continue;
+        if (!('reason' in read) || read.reason !== 'changing' || settling.has(use)) continue;
         settling.add(use);
         allowed.add(path);
         continue;

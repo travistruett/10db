@@ -61,15 +61,18 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
-import { ANSWERED_CARDS_READ, writeStamp } from './allowed-writes';
+import { ANSWERED_CARDS_READ, stampOrReason } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
-// The real stamp, watched, so a test can tell which files the watcher read to stamp.
+// The real stamp read, watched, so a test can tell which files the watcher read to stamp, and make a read
+// give 'changing' as the real one does for a file that keeps changing while it is read.
 vi.mock('./allowed-writes', async (importOriginal) => {
-  const real = await importOriginal<{ writeStamp: typeof writeStamp }>();
-  return { ...real, writeStamp: vi.fn(real.writeStamp) };
+  const real = await importOriginal<{ stampOrReason: typeof stampOrReason }>();
+  return { ...real, stampOrReason: vi.fn(real.stampOrReason) };
 });
+
+const CHANGING = { reason: 'changing' } as const;
 
 interface FakeWatch {
   readonly watch: WatchFn;
@@ -2220,7 +2223,7 @@ describe('worktree checkouts', () => {
         const a = running('Alpha', ['ui']);
         watcher.sync();
         editCard(a, SENSITIVE_FILE, 'allow_once', repo.path, null, project, exact(a, ALLOWED));
-        vi.mocked(writeStamp).mockReturnValueOnce(null);
+        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
         put(SENSITIVE_FILE, ALLOWED);
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -2229,7 +2232,7 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
         expect(await watcher.stepEnd(a.workstream.id)).toEqual([]);
         // The card is used: a later write is carded, settled or not.
-        vi.mocked(writeStamp).mockReturnValueOnce(null);
+        vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
         put(SENSITIVE_FILE, 'later');
         await watcher.flush();
         expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
@@ -2482,7 +2485,7 @@ describe('worktree checkouts', () => {
       it('reads no file to stamp it when no card or excused write names it', async () => {
         const lane = running();
         watcher.sync();
-        const stamp = vi.mocked(writeStamp);
+        const stamp = vi.mocked(stampOrReason);
         stamp.mockClear();
         await write('notes/a.txt');
         await write('notes/b.txt');
@@ -2618,21 +2621,33 @@ describe('worktree checkouts', () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          const stamp = vi.mocked(writeStamp);
+          const stamp = vi.mocked(stampOrReason);
           // The file is stable on disk; the mock stands for a read that kept changing.
-          stamp.mockReturnValueOnce(null);
+          stamp.mockReturnValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
-          stamp.mockReturnValueOnce(null);
+          stamp.mockReturnValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+        });
+
+        it('reads a card-named path once per check, whatever the result', async () => {
+          const lane = running();
+          watcher.sync();
+          editCard(lane, SENSITIVE_FILE, 'allow_once');
+          const stamp = vi.mocked(stampOrReason);
+          stamp.mockClear();
+          stamp.mockReturnValueOnce(CHANGING);
+          await write(SENSITIVE_FILE);
+          expect(flags()).toEqual([]);
+          expect(stamp.mock.calls.map((c) => c[1])).toEqual([SENSITIVE_FILE]);
         });
 
         it('still excuses a changing file once it settles, using the card then', async () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          vi.mocked(writeStamp).mockReturnValueOnce(null);
+          vi.mocked(stampOrReason).mockReturnValueOnce(CHANGING);
           await write(SENSITIVE_FILE);
           expect(flags()).toEqual([]);
           await write(SENSITIVE_FILE);
