@@ -319,6 +319,28 @@ describe('proposal verdicts', () => {
     );
   });
 
+  it.each([
+    ['a project whose default is a separate copy', 'pull_request', 'worktree', 'worktree'],
+    ['a pull request project whose default is Your folder', 'pull_request', 'shared', 'shared'],
+    ['a project with local delivery', 'local', 'shared', 'shared'],
+  ] as const)(
+    'files an accepted new task with the placement proposed for %s, and no reason',
+    (_name, delivery, projectMode, expected) => {
+      const project = seedProject(base, {
+        delivery,
+        workspaceMode: projectMode,
+        ...(delivery === 'pull_request' ? { prTitlePrefix: 'feat(app)' } : {}),
+      });
+      const ws = seedWorkstream(base, { project });
+      const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        workspaceMode: expected,
+        placementReason: null,
+      });
+    },
+  );
+
   it('links the filed task to its proposal and the task.created event carries the link', () => {
     const ws = seedWorkstream(base);
     const { proposalId, card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
