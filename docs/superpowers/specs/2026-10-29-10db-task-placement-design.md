@@ -208,7 +208,11 @@ runs whichever pnpm the builder's PATH holds, so the cut reads the version pnpm 
 `node_modules/.modules.yaml` (`packageManager: pnpm@9.x`). Below 10 it ignores `allowBuilds` (pnpm 9 doesn't read
 it) and, with no `onlyBuiltDependencies` list, names every package in the store that has an install script or a
 `binding.gyp`, less the `neverBuiltDependencies` ones. Under pnpm 10 with no list nothing builds by default, so
-nothing is named; a `.modules.yaml` with no version also names nothing.
+nothing is named; a `.modules.yaml` with no version also names nothing. Below 10 the lists
+(`neverBuiltDependencies`, `onlyBuiltDependencies`) are read only from package.json's `pnpm` field;
+`pnpm-workspace.yaml` is ignored for build settings there (pnpm 9 reads only `packages` and catalogs from it).
+This is unverified against pnpm 9's source (`getOptionsFromRootManifest` in its config package): the source
+could not be fetched when this was written, so check it before relying on it.
 
 Nothing else is new. A copy's lane profile is today's. The shared cut and the switch back keep their git rules
 (decision 129 and `decisions/2026-10-29-shared-checkout-switch-back.md`).
