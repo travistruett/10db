@@ -24,6 +24,10 @@ export function sheetMode(
   const batch = project.currentBatch;
   if (batch === null) return { kind: 'new_batch' };
   const { title } = batch;
+  // Separate copies don't need the shared batch, so with some ticked say how to start them now.
+  const copiesHint = placements.includes(WorkspaceMode.Worktree)
+    ? ', or untick the Your folder tasks to start the separate copies now'
+    : '';
   switch (batch.state) {
     case BatchState.Open:
       return { kind: 'join', title };
@@ -33,10 +37,14 @@ export function sheetMode(
       return {
         kind: 'busy',
         title,
-        reason: `${title} is still cutting its branch; start when it is open`,
+        reason: `${title} is still cutting its branch; start when it is open${copiesHint}`,
       };
     case BatchState.Shipping:
-      return { kind: 'busy', title, reason: `${title} is shipping; start once it has shipped` };
+      return {
+        kind: 'busy',
+        title,
+        reason: `${title} is shipping; start once it has shipped${copiesHint}`,
+      };
     case BatchState.Shipped:
     case BatchState.Closed:
     case BatchState.Abandoned:
