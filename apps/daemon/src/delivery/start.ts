@@ -167,7 +167,13 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         placement: () => WorkspaceMode.Shared,
       };
     }
-    refuseCrossPlacementDependency(tasks);
+    refuseCrossPlacementDependency(tasks, (card, taskIds) => {
+      raise(
+        ctx.inbox,
+        project.id,
+        forTasks(card, taskIds, input.title ? { title: input.title } : {}),
+      );
+    });
     const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
     const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
     return {
