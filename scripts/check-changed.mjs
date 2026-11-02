@@ -11,9 +11,11 @@
 //
 // --precheck is the pre-check 10db runs in place of the gate when the pull request's base has
 // required checks on GitHub (`make precheck`): format and lint of the changed files, typecheck of the
-// changed packages and every package depending on one, and drift of the changed packages, with no
-// tests, Rust checks or e2e. Where it cannot place a file, or has no base, it runs those four steps over
-// every package instead of the gate: it never runs scripts/gate.sh. CI runs every test.
+// changed packages and every package depending on one, drift of the changed packages, knip (whole
+// repo, a few seconds) and, for a docs or agent file, the repo rule tests that read those files
+// (architecture-docs, agent-docs), with no other tests, Rust checks or e2e. Where it cannot place a
+// file, or has no base, it runs those steps over every package instead of the gate: it never runs
+// scripts/gate.sh. CI runs every test.
 //
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
@@ -48,6 +50,21 @@ const READ_BY_REPO_TESTS = [
   /^apps\/[^/]+\/(e2e|scripts)\//,
   /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
 ];
+
+/**
+ * The repo rule tests the pre-check runs for the docs and agent files they read, by changed path. CI
+ * failed on both for a decision file without its `## Decision` / `## Why` layout. The rest of
+ * tests/repo takes about 40 s and is not about a docs change, so CI runs it, not the pre-check.
+ */
+const ARCHITECTURE_DOCS_TEST = 'tests/repo/src/architecture-docs.test.ts';
+const AGENT_DOCS_TEST = 'tests/repo/src/agent-docs.test.ts';
+/** @type {[RegExp, string][]} */
+const REPO_DOC_TESTS = [
+  [/^docs\/|\.md$/, ARCHITECTURE_DOCS_TEST],
+  [/(^|\/)AGENTS\.md$|^\.claude\/|^\.codex\//, AGENT_DOCS_TEST],
+];
+/** Every repo rule test the pre-check runs, for the runs that cannot narrow. */
+const ALL_REPO_DOC_TESTS = [AGENT_DOCS_TEST, ARCHITECTURE_DOCS_TEST];
 
 /**
  * `.env*` files, which the gate and lane sandboxes deny reading. Prettier stats every path it is
@@ -152,7 +169,16 @@ function planFor(files, packages, precheck = false) {
     affected: byName(affected),
     outside,
     rust: rust && !precheck,
-    ...(precheck ? { precheck } : {}),
+    ...(precheck
+      ? {
+          precheck,
+          // knip reads the whole repo, so any change can leave an unused export.
+          knip: files.length > 0,
+          repoTests: ALL_REPO_DOC_TESTS.filter((test) =>
+            files.some((f) => REPO_DOC_TESTS.some(([re, t]) => t === test && re.test(f))),
+          ),
+        }
+      : {}),
     format: files.filter((f) => !SANDBOX_DENIED.test(f)),
     drift: packages
       .filter((p) => changed.has(p.name) && p.scripts.includes('drift'))
@@ -250,6 +276,23 @@ async function runTogether(steps) {
   return results.filter((r) => !r.ok).map((r) => r.name);
 }
 
+/** @returns {Step} the gate's knip step: whole-repo, a few seconds */
+function knipStep() {
+  return { name: 'knip', command: 'pnpm', args: ['exec', 'knip'] };
+}
+
+/**
+ * @param {string[]} tests repo-relative test files in tests/repo
+ * @returns {Step}
+ */
+function repoDocTestsStep(tests) {
+  return {
+    name: 'repo rules',
+    command: 'pnpm',
+    args: ['exec', 'vitest', 'run', ...tests],
+  };
+}
+
 /**
  * The pre-check where the diff cannot be narrowed: format, lint, typecheck and drift over every
  * package, as the gate's steps of those names run them, and never scripts/gate.sh.
@@ -263,8 +306,14 @@ async function runPrecheckEverywhere(reason) {
     command: 'pnpm',
     args: ['run', name === 'format' ? 'format:check' : name],
   });
-  // Drift regenerates files in the tree, so it runs after the three reads of the tree.
-  const failed = await runTogether([pnpmRun('format'), pnpmRun('lint'), pnpmRun('typecheck')]);
+  // Drift regenerates files in the tree, so it runs after the reads of the tree.
+  const failed = await runTogether([
+    pnpmRun('format'),
+    pnpmRun('lint'),
+    pnpmRun('typecheck'),
+    knipStep(),
+    repoDocTestsStep(ALL_REPO_DOC_TESTS),
+  ]);
   failed.push(...(await runTogether([pnpmRun('drift')])));
   finish(failed, began);
 }
@@ -356,7 +405,10 @@ async function main() {
       command: 'pnpm',
       args: ['--parallel', ...plan.typecheck.flatMap((n) => ['--filter', n]), 'run', 'typecheck'],
     });
-  // Format, lint and typecheck are independent reads of the tree, so they share the machine.
+  if (plan.knip) together.push(knipStep());
+  if (plan.repoTests?.length) together.push(repoDocTestsStep(plan.repoTests));
+  // Format, lint, typecheck, knip and the docs rule tests are independent reads of the tree, so
+  // they share the machine.
   const failed = await runTogether(together);
   // The tests run alone: the UI's wait timeouts are tuned for a machine doing nothing else, and
   // lint beside them made them flake. Drift regenerates files in the tree, and the Rust checks build.
