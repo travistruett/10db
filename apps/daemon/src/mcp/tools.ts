@@ -18,7 +18,7 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
-  countSessionToolOps,
+  countStepToolOps,
   findToolOp,
   FollowUpOrigin,
   getBatch,
@@ -320,17 +320,15 @@ export function createToolHandlers(
       if (done !== undefined) return Promise.resolve(McpToolOutputs.file_follow_up.parse(done));
       return Promise.resolve(
         deps.state.write((ctx) => {
-          // A step runs in one session, so its filings are this session's records.
-          if (
-            countSessionToolOps(ctx.tx, workstreamId, sessionId, McpToolName.FileFollowUp) >=
-            MAX_FOLLOW_UPS
-          )
+          // A step can span sessions (handoff, re-launch, recovery), so count the whole step's filings.
+          const ws = getWorkstreamRow(ctx.tx, workstreamId);
+          if (countStepToolOps(ctx.tx, ws, McpToolName.FileFollowUp) >= MAX_FOLLOW_UPS)
             throw new InvalidError(
               `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks and you have filed that many. Stop filing; put what is left in your summary or handoff, and end your turn.`,
             );
           const task = insertFollowUpTask(
             ctx,
-            getWorkstreamRow(ctx.tx, workstreamId).taskId,
+            ws.taskId,
             {
               title: input.title,
               description: input.description,

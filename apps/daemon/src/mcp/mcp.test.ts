@@ -1667,13 +1667,42 @@ describe('file_follow_up', () => {
     },
   );
 
-  it('counts filings per step: a later step in the same task starts again', async () => {
-    const s = await onStep('implement');
+  const fillCap = async (s: Pick<Awaited<ReturnType<typeof connectSession>>, 'call'>) => {
     for (let i = 0; i < MAX_FOLLOW_UPS; i += 1)
       await s.call('file_follow_up', {
         ...args,
         opId: `op-follow-step-${String(i).padStart(2, '0')}`,
       });
+  };
+
+  it('counts filings per step: a second session of the same step, after a handoff, is still refused', async () => {
+    const s = await onStep('implement');
+    await fillCap(s);
+    const next = await connectSession(s.workstream.id);
+    const result = await next.call('file_follow_up', { ...args, opId: 'op-follow-step-next' });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(`${String(MAX_FOLLOW_UPS)} follow-up tasks`);
+  });
+
+  it('counts filings per step: a session in a later step starts again', async () => {
+    const s = await seedSession();
+    state.write((ctx) => {
+      patchWorkstream(ctx, s.workstream.id, null, {
+        steps: [stepAt('implement'), stepAt('review')],
+        stepIndex: 0,
+      });
+    });
+    await fillCap(s);
+    // The runner moves to the next step with its floor at the sessions so far.
+    state.write((ctx) => {
+      patchWorkstream(ctx, s.workstream.id, null, {
+        steps: [
+          { ...stepAt('implement'), status: 'done' },
+          { ...stepAt('review'), sessionFloor: 1 },
+        ],
+        stepIndex: 1,
+      });
+    });
     const next = await connectSession(s.workstream.id);
     const result = await next.call('file_follow_up', { ...args, opId: 'op-follow-step-next' });
     expect(result.isError).toBe(false);
