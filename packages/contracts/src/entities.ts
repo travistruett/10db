@@ -172,6 +172,50 @@ export const DEFAULT_HAZARDS: readonly HazardDef[] = [
   },
 ];
 
+/**
+ * The commands each release added to the stock hazards after the first, oldest first, keyed by
+ * hazard name. A project keeps the hazard list it was added with, so 10db adds each revision it has
+ * not yet applied to the stored hazard of that name once (`addStockHazardCommands` in @10db/db);
+ * a command the builder removes after that stays removed. A command added to `DEFAULT_HAZARDS`
+ * goes in a new revision at the end, never in an old one.
+ */
+export const STOCK_HAZARD_REVISIONS: readonly Readonly<Record<string, readonly string[]>>[] = [
+  // #108, 2026-10-28.
+  {
+    deps: [
+      'pnpm uninstall',
+      'pnpm un',
+      'pnpm upgrade',
+      'npm add',
+      'npm ci',
+      'npm un',
+      'yarn add',
+      'cargo update',
+    ],
+  },
+  // #202, 2026-10-31.
+  {
+    migrations: ['npm db:migrate', 'yarn db:migrate'],
+    deps: [
+      'pnpm it',
+      'pnpm ci',
+      'pnpm install-test',
+      'pnpm clean-install',
+      'bun add',
+      'bun remove',
+      'bun install',
+      'bun i',
+      'bun update',
+      'npm install-test',
+      'npm update',
+      'yarn remove',
+      'yarn install',
+      'yarn up',
+      'yarn upgrade',
+    ],
+  },
+];
+
 /** One directory name copied into a worktree: no `/`, not `.`, `..` or `.git`, no NUL, 1-255 chars. */
 export const WorktreeSeedName = z
   .string()
