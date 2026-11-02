@@ -399,8 +399,13 @@ export function createServices(deps: {
                 areas: patch.areas ?? task.areas,
                 riskTags: patch.riskTags ?? task.riskTags,
               });
-        // A join still pending has not written yet, so the move would collide with it.
-        if (proposed?.workspaceMode === WorkspaceMode.Worktree && task.placementReason === null)
+        // A join still pending has not written yet, so a move to a copy would collide with it. A task
+        // that is already a copy only gets a reason, so the join is not in the way.
+        if (
+          proposed?.workspaceMode === WorkspaceMode.Worktree &&
+          task.placementReason === null &&
+          task.workspaceMode !== WorkspaceMode.Worktree
+        )
           deps.starter.refuseIfJoining(id);
         return patchTask(ctx, id, patch, proposed);
       });
