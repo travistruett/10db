@@ -13,6 +13,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  EventType,
   mintId,
   WorkstreamState,
   type BatchId,
@@ -1169,10 +1170,28 @@ describe('worktree checkouts', () => {
         });
       };
       let opCount = 0;
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
       /** Commits `rel` with an op trailer, as the commit tool would, and returns the commit's sha. */
       const trailerCommit = (root: string, rel: string): string => {
         git(root, 'add', rel);
+||||||| 21c8a36
+      /** Commits `rel` as the commit tool would, with its op trailer. */
+      const commit = (root: string, rel: string) => {
+        git(root, 'add', rel);
+=======
+      /**
+       * Commits `rel` in the lane's copy as the commit tool would, with its op trailer, and records the commit
+       * for the lane, or for `by`, another lane working in the same copy.
+       */
+      const commit = (
+        lane: { workstream: { id: WorkstreamId }; path: string },
+        rel: string,
+        by: { workstream: { id: WorkstreamId } } = lane,
+      ) => {
+        git(lane.path, 'add', rel);
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
         opCount += 1;
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
         git(root, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
         return git(root, 'rev-parse', 'HEAD').toString().trim();
       };
@@ -1188,6 +1207,20 @@ describe('worktree checkouts', () => {
             result: { sha, alreadyCommitted: false },
           });
         });
+||||||| 21c8a36
+        git(root, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
+=======
+        git(lane.path, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
+        const sha = git(lane.path, 'rev-parse', 'HEAD').toString().trim();
+        state.write((ctx) => {
+          ctx.emit({
+            type: EventType.CommitRecorded,
+            entityType: 'workstream',
+            entityId: by.workstream.id,
+            data: { sha, paths: [rel], alreadyCommitted: false },
+          });
+        });
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
       };
       /** Commits `rel` as the builder would, with no op trailer. */
       const builderCommit = (root: string, rel: string) => {
@@ -1209,8 +1242,9 @@ describe('worktree checkouts', () => {
               fence: null,
             });
           });
-          baseAt({ workstream: lane.workstream, path: repo.path });
-          return lane;
+          const here = { ...lane, path: repo.path };
+          baseAt(here);
+          return here;
         };
         const grantUi = (lane: { workstream: { id: WorkstreamId } }) =>
           state.write((ctx) =>
@@ -1263,7 +1297,13 @@ describe('worktree checkouts', () => {
           writeAt(repo.path, 'zzz/last.ts');
           await watcher.flush();
           expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
           commit(repo.path, 'zzz/last.ts', lane);
+||||||| 21c8a36
+          commit(repo.path, 'zzz/last.ts');
+=======
+          commit(lane, 'zzz/last.ts');
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
           writeAt(repo.path, 'docs/builder.md');
           builderCommit(repo.path, 'docs/builder.md');
           grantUi(lane);
@@ -1280,7 +1320,13 @@ describe('worktree checkouts', () => {
         writeAt(lane.path, 'zzz/last.ts');
         await watcher.flush();
         expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
         commit(lane.path, 'zzz/last.ts', lane);
+||||||| 21c8a36
+        commit(lane.path, 'zzz/last.ts');
+=======
+        commit(lane, 'zzz/last.ts');
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
         grant(lane, 'ui');
         await watcher.flush();
         expect(bulk()).toHaveLength(1);
@@ -1292,7 +1338,13 @@ describe('worktree checkouts', () => {
         watcher.sync();
         writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
         await watcher.flush();
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
         commit(lane.path, 'src/ui/file-029.ts', lane);
+||||||| 21c8a36
+        commit(lane.path, 'src/ui/file-029.ts');
+=======
+        commit(lane, 'src/ui/file-029.ts');
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
         grant(lane, 'ui');
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -1320,7 +1372,36 @@ describe('worktree checkouts', () => {
           await watcher.flush();
           expect(bulk()).toHaveLength(1);
           writeAt(lane.path, 'docs/b.md');
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
           commit(lane.path, 'docs/b.md', beta);
+||||||| 21c8a36
+          commit(lane.path, 'docs/b.md');
+=======
+          commit(lane, 'docs/b.md', beta);
+          grant(lane, 'ui');
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
+        it('resolves after the other lane has committed and finished, releasing its claims', async () => {
+          const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
+          baseAt(lane);
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
+          watcher.sync();
+          writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          // Beta commits in its own area through the commit tool, then ends and releases its claims.
+          writeAt(lane.path, 'docs/b.md');
+          commit(lane, 'docs/b.md', beta);
+          state.write((ctx) => {
+            transitionWorkstream(ctx, beta.workstream.id, {
+              to: WorkstreamState.Cancelled,
+              fence: null,
+            });
+            releaseClaims(ctx, beta.workstream.id);
+          });
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
           grant(lane, 'ui');
           await watcher.flush();
           expect(flags()).toEqual([]);
@@ -1336,8 +1417,16 @@ describe('worktree checkouts', () => {
           await watcher.flush();
           expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
           writeAt(lane.path, 'docs/b.md');
+<<<<<<< 514d9920cb874dd23ea1a38f349d9384cb0ebdd2
           commit(lane.path, 'docs/b.md', beta);
           commit(lane.path, 'zzz/last.ts', lane);
+||||||| 21c8a36
+          commit(lane.path, 'docs/b.md');
+          commit(lane.path, 'zzz/last.ts');
+=======
+          commit(lane, 'docs/b.md');
+          commit(lane, 'zzz/last.ts');
+>>>>>>> a295cd9b8e844c21ac7590c7150fe47e180e1786
           grant(lane, 'ui');
           await watcher.flush();
           expect(bulk()).toHaveLength(1);
