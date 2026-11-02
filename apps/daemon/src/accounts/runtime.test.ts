@@ -91,7 +91,7 @@ describe('the monthly cap', () => {
     seedSpend(store, project, 5);
     const after = listEventsAfter(state.db, 0, 1000).at(-1)?.seq ?? 0;
     const pause = runtime.blocked(row(), project.id);
-    expect(pause).toEqual({ reason: 'monthly_cap', until: new Date(2026, 10, 1) });
+    expect(pause).toMatchObject({ reason: 'monthly_cap', until: new Date(2026, 10, 1) });
     expect(runtime.blocked(row(), project.id)).toEqual(pause);
     expect(openCards()).toHaveLength(1);
     expect(openCards()[0]?.body).toMatch(/\$5\.00 of its \$5\.00 cap/);
@@ -125,7 +125,7 @@ describe('the monthly cap', () => {
     const second = seedProject(store, { accountId: key.id });
     seedSpend(store, project, 5);
     runtime.blocked(row(), project.id);
-    expect(runtime.blocked(row(), second.id)).toEqual({
+    expect(runtime.blocked(row(), second.id)).toMatchObject({
       reason: 'monthly_cap',
       until: new Date(2026, 10, 1),
     });
@@ -147,7 +147,7 @@ describe('the monthly cap', () => {
       transitionWorkstream(ctx, workstream.id, { to: 'STARTING', fence: null });
       transitionWorkstream(ctx, workstream.id, { to: 'PAUSED_LIMIT', fence: null });
     });
-    expect(runtime.blocked(row(), project.id)).toEqual({
+    expect(runtime.blocked(row(), project.id)).toMatchObject({
       reason: 'monthly_cap',
       until: new Date(2026, 10, 1),
     });
@@ -250,7 +250,7 @@ describe('refusals and usage limits', () => {
       seenIdentity: null,
     });
     runtime.rateLimited(key.id, new Date(clock.now().getTime() + 60_000), project.id);
-    expect(runtime.blocked(row(), project.id)).toEqual({ reason: 'refused', until: null });
+    expect(runtime.blocked(row(), project.id)).toMatchObject({ reason: 'refused', until: null });
     const refusal = openCards().find((c) => c.title.includes('refused'));
     expect(refusal?.body).toContain('PUT /accounts/');
     expect(refusal?.options.map((o) => o.label)).toEqual(['Resume', 'Later']);

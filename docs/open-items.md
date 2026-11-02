@@ -60,7 +60,6 @@
 - [ ] Worktree mode: seeding ignored files such as `.env`; `worktree_seed` names directories only.
 - [ ] Worktree mode: parallel ships behind a limit (one ship runs at a time per project now).
 - [ ] Worktree mode: updating a pull request after it ships. Before each gate a worktree batch's branch takes its base as origin has it (`decisions/2026-10-29-gate-with-base.md`); once shipped, a pull request that falls behind or conflicts is the builder's.
-- [ ] CI decides: a per-project pre-check replaces the gate on the Mac, GitHub's required checks decide, and a failed required check starts a fix pushed to the same pull request. Designed, not built: `docs/superpowers/specs/2026-10-31-10db-ci-decides-design.md`, `decisions/2026-10-31-ci-decides-when-the-base-has-required-checks.md`.
 - [ ] CI decides, left for later: rerunning a flaky required check before a fix (a decision model could choose, the spec's §9); the full job log in a fix session's copy, which sees only its last 300 lines.
 - [ ] Worktree mode: choose shared or worktree per task, decided when work is broken into tasks. The goal:
       frontend tasks on different screens run as parallel lanes in the shared checkout, where the builder watches
@@ -69,7 +68,9 @@
       and dependencies are the inputs; the planner proposes the lane count and each task's placement, and the
       builder confirms. Worktrees make rapid UI iteration across screens harder, so a project-wide switch isn't
       enough. Keep `tasks.workspace_mode` for this rather than dropping it. Designed:
-      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`; not built.
+      `docs/superpowers/specs/2026-10-29-10db-task-placement-design.md`. Built so far: the stored placement and
+      the project's `isolate` list, and the proposal rule that sets a task's placement and reason when it is made
+      (`placement/` in the daemon); not built: start by placement and the desktop controls.
 - [x] Worktree mode: removing a clean leftover worktree also removed its git-ignored files, such as a
       hand-made `.env`. Built: a finished or orphaned worktree holding ignored files outside matched
       directories and the seed is kept with a card (`decisions/2026-10-28-worktree-keeps-ignored-files.md`).

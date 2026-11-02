@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { TaskInput, TaskPatchFields } from './entities';
 import { BoardColumnId, ProjectId, TaskId } from './ids';
 import { TaskLanding } from './landing';
+import { WorkspaceMode } from './states';
 
 /**
  * The tools the builder's own MCP clients (Claude Code, Codex, Claude Desktop) see. They are not
@@ -79,6 +80,8 @@ export const BuilderToolInputs = {
     dependsOn: z.array(z.string()).default([]),
     riskTags: z.array(z.string()).default([]),
     flowId: z.string().nullable().default(null),
+    /** Honoured only for a task 10db would not already send to a separate copy; the builder overrides that on the task. */
+    workspaceMode: z.enum(WorkspaceMode).optional(),
     landing: TaskLanding.optional(),
   }),
   [BuilderToolName.EditTask]: z

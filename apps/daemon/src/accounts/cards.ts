@@ -278,7 +278,10 @@ export function refusedCard(account: AccountRow, refusal: AccountRefusal): Accou
           ]
         : []),
       { label: AccountCardChoice.Resume, description: 'I fixed it: try the account again' },
-      { label: AccountCardChoice.Later, description: 'Keep its work waiting' },
+      {
+        label: AccountCardChoice.Later,
+        description: `Keep its work waiting. Resume ${account.label} later from Settings › Accounts`,
+      },
     ],
   };
 }

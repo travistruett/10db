@@ -4,10 +4,12 @@ import {
   type BatchDto,
   type CardResolvesWhen,
   type BatchId,
+  type CiStopped,
   type FailingCheckDto,
   type InboxOption,
   type ProjectDto,
   type ProjectId,
+  type RequiredCheckJobDto,
   type TaskId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
@@ -19,6 +21,7 @@ import {
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
+import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
 import { INSTALL_SUMMARY, type DependencyRefresh } from './worktree-dependencies';
@@ -703,6 +706,8 @@ export const checkoutCards = {
 export const prCardKey = {
   checks: (batchId: BatchId): string => `pr-checks:${batchId}`,
   closed: (batchId: BatchId): string => `pr-closed:${batchId}`,
+  /** Fixing the pull request's failing required checks stopped: the root batch's id. */
+  ciStopped: (batchId: BatchId): string => `ci-stopped:${batchId}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -712,8 +717,73 @@ function prDetail(batch: BatchDto, link: string): Record<string, Json> {
   return { batchId: batch.id, prUrl: batch.prUrl, link };
 }
 
+/** The `detail` key of a stop card that offers Retry; it holds the root batch's id. */
+export const CI_RERUN_DETAIL = 'ciRerun';
+
+/** The answer of a stop card that reruns the failed jobs on GitHub. */
+export const CI_RERUN_CHOICE = 'Retry';
+
+const fixesOf = (n: number): string => `${String(n)} ${n === 1 ? 'fix' : 'fixes'}`;
+
+/** What a stop card says of why 10db stopped fixing; `note` is the cut's reason for `no_cut`. */
+const CI_STOP_REASON: Record<CiStopped, (fixes: number, note: string | null) => string> = {
+  limit: (fixes) =>
+    `10db made ${fixesOf(fixes)} for this pull request and the checks still fail. It stops at ${String(maxCiFixes)} and starts no more.`,
+  no_change: (fixes) =>
+    `The last fix changed nothing, so the cause may not be in the code (a flaky check, or the base branch). 10db ran ${fixesOf(fixes)} and starts no more.`,
+  no_log: (fixes) =>
+    `10db could not read a log for the failing check (it is not a GitHub Actions job, or GitHub no longer keeps its log), so it started ${fixes === 0 ? 'no fix' : 'no more fixes'}.`,
+  no_cut: (fixes, note) =>
+    `10db could not set up a fix session on the pull request's branch${note === null ? '' : `: ${note}`}. It ran ${fixesOf(fixes)} and starts no more.`,
+};
+
 /** What the pull request watch tells the builder about a shipped pull request. */
 export const prCards = {
+  /**
+   * Fixing stopped and the task is Blocked. Names each failing check with its link, and offers to
+   * rerun the failed jobs of each failing Actions run on GitHub. `fixes` is how many ran; `note` is
+   * the cut's reason when a fix cut was refused.
+   */
+  ciStopped: (
+    root: BatchDto,
+    reason: CiStopped,
+    failing: readonly RequiredCheckJobDto[],
+    fixes: number,
+    note: string | null = null,
+  ): Card => {
+    const prUrl = root.prUrl ?? '(no pull request)';
+    const link = failing[0]?.link ?? prUrl;
+    const rerun = failing.some((job) => job.runId !== null);
+    return {
+      title: `CI still failing on ${root.title}: ${failing.map((job) => job.name).join(', ') || 'a required check'}`,
+      body: [
+        link,
+        `Failing:\n${failing.map((c) => `- ${c.name}${c.link ? `: ${c.link}` : ' (no link)'}`).join('\n')}`,
+        CI_STOP_REASON[reason](fixes, note),
+        `Pull request: ${prUrl}`,
+        `${rerun ? 'Retry reruns the failed jobs on GitHub. ' : ''}Or push a commit to ${root.branch ?? 'the branch'}. The task is Blocked on the Board until the required checks pass or start again, or the pull request merges or closes; 10db then closes this card.`,
+      ].join('\n\n'),
+      foldKey: prCardKey.ciStopped(root.id),
+      ...(rerun
+        ? {
+            options: [
+              {
+                label: CI_RERUN_CHOICE,
+                description: 'Rerun the failed jobs on GitHub (gh run rerun --failed)',
+              },
+            ],
+          }
+        : {}),
+      detail: { ...prDetail(root, link), [CI_RERUN_DETAIL]: { batchId: root.id } },
+    };
+  },
+  /** GitHub refused the rerun the stop card's Retry asked for. */
+  rerunFailed: (root: BatchDto, error: unknown): Card => ({
+    title: `Could not rerun the failed CI jobs for ${root.title}`,
+    body: `GitHub did not rerun the failed jobs: ${detailOf(error)}\n\nPull request: ${root.prUrl ?? '(none)'}\n\nRerun them from the pull request's checks page, or push a commit to ${root.branch ?? 'the branch'}.`,
+    foldKey: `${prCardKey.ciStopped(root.id)}:rerun`,
+    detail: prDetail(root, root.prUrl ?? ''),
+  }),
   /** `failing` is never empty; the first check's link leads the body and is the card's link. */
   checksFailed: (batch: BatchDto, failing: readonly FailingCheckDto[]): Card => {
     const prUrl = batch.prUrl ?? '(no pull request)';
