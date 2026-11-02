@@ -169,6 +169,35 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('-C', kept, 'status', '--porcelain')).toBe('');
   });
 
+  it('keeps that commit on the branch when the catch-up runs again after its retry time', async () => {
+    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const kept = batch.worktreePath ?? '';
+    const branch = batch.branch ?? '';
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    const gate = [
+      'printf "by hand\\n" > by-hand.txt',
+      'git add by-hand.txt',
+      'git -c user.name=Builder -c user.email=builder@example.com commit -q -m "By hand"',
+      'false',
+    ].join(' && ');
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: gate }));
+    await catchUp(batch);
+    expect(h.git$('log', '-1', '--format=%s', `refs/heads/${branch}`)).toBe('By hand');
+
+    // GitHub still says it conflicts at the same head; the retry time passes and it runs again.
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    h.shipClock.advance(31 * 60_000);
+    await catchUp(batch);
+
+    expect(h.git$('log', '-1', '--format=%s', `refs/heads/${branch}`)).toBe('By hand');
+    expect(h.git$('-C', kept, 'log', '-1', '--format=%s')).toBe('By hand');
+    expect(existsSync(join(kept, 'by-hand.txt'))).toBe(true);
+    expect(h.git$('-C', kept, 'status', '--porcelain')).toBe('');
+    const card = h.only(h.cards().filter((c) => c.body.includes('commits 10db did not write')));
+    expect(card.body).toContain(h.git$('rev-parse', '--short=7', `refs/heads/${branch}`));
+  });
+
   it('catches up again after a failed check and the builder updating the branch on GitHub', async () => {
     const batch = await shipped();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
@@ -209,22 +238,17 @@ describe('a shipped pull request that conflicts with its base', () => {
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
     const head = onOrigin(branch);
-    // An earlier catch-up's merge, left on the local branch and never pushed.
-    const stale = h.git$(
-      '-c',
-      'user.name=10db',
-      '-c',
-      'user.email=10db@example.com',
-      'commit-tree',
-      `${head}^{tree}`,
-      '-p',
-      head,
-      '-m',
-      'Merge main',
-    );
-    h.git$('update-ref', `refs/heads/${branch}`, stale, head);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+    // An earlier catch-up's merge, left on the local branch and never pushed: its put-back failed.
+    const rewind = vi
+      .spyOn(h.git, 'rewindBranch')
+      .mockRejectedValueOnce(new Error('the branch could not be put back'));
+    await catchUp(batch);
+    rewind.mockRestore();
+    expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(head);
+    expect(h.git$('rev-parse', `refs/heads/${branch}^1`)).toBe(head);
 
+    h.shipClock.advance(31 * 60_000);
     await catchUp(batch);
 
     expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(head);

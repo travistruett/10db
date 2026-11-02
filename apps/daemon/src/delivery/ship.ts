@@ -1061,6 +1061,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /** Each pull request's last catch-up: the head it conflicted at, and when it ran. */
   const lastCatchUp = new Map<BatchId, { readonly head: string | null; readonly at: number }>();
   /**
+   * The head each pull request's last catch-up wrote and did not push. A later catch-up takes a
+   * local branch back to GitHub's head only from exactly this commit, so a commit that is not 10db's
+   * own stays. In memory: after a restart such a branch is left alone, with the card.
+   */
+  const unpushedHead = new Map<BatchId, string>();
+  /**
    * Pull requests 10db pushed to, or could not update, whose merge is asked for again once GitHub says
    * they are clean. In memory: a restart forgets it. What a restart keeps: a refused merge's notice,
    * and, once a catch-up stopped and hid that notice, its card, which the watch reports as it withdraws it.
@@ -1158,7 +1164,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
               message: `Merge the pull request's branch ${branch} from GitHub`,
             });
           else await deps.git.fastForwardBranch(main, branch, head);
-        } else if (await deps.git.isAncestor(main, head, tip))
+        } else if (await deps.git.isAncestor(main, head, tip)) {
+          if (unpushedHead.get(batchId) !== tip) {
+            // Ahead of GitHub with commits 10db did not write, such as the builder's in the kept worktree.
+            const extra = await deps.git.commitsSince(main, head, tip).catch(() => []);
+            const named = extra.map((sha) => sha.slice(0, 7)).join(', ');
+            stop({
+              kind: 'other',
+              why: `${branch} here has commits 10db did not write that the pull request's branch on GitHub lacks${named === '' ? '' : ` (${named})`}, so 10db leaves it as it is. Push them, or remove them, then retry.`,
+            });
+            return;
+          }
           // A merge of an earlier catch-up that was not pushed, nor put back: it goes, and this one starts from the head.
           await deps.git.rewindBranch(
             kept && batch.worktreePath !== null ? batch.worktreePath : main,
@@ -1166,7 +1182,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             tip,
             head,
           );
-        else {
+        } else {
           stop({
             kind: 'other',
             why: `${branch} here and the pull request's branch on GitHub each have commits the other lacks, so 10db can't tell which is current.`,
@@ -1258,7 +1274,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (made) await retire(batchId);
       // A merge that was not pushed is not kept: the next catch-up would find the branch ahead of
       // GitHub's, and, once the builder updates the pull request there, apart from it.
-      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt, wrote);
+      // A round that stopped before it started from `before` leaves the record as it was.
+      // Set in bringBaseIn, which the checker does not see.
+      const last = wrote as string | null;
+      if (before !== null) {
+        if (pushed || last === null || last === before) unpushedHead.delete(batchId);
+        else unpushedHead.set(batchId, last);
+      }
+      if (!pushed && before !== null) await rewind(batchId, main, branch, before, keptAt, last);
     }
   }
 

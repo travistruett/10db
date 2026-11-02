@@ -195,6 +195,8 @@ export interface DeliveryHarness {
   readonly starter: BatchStarter;
   /** The shipper; `restartShipper` replaces it with a new one, as a daemon restart does. */
   readonly shipper: Shipper;
+  /** The shippers' clock, shared across restarts: advance it to pass a retry time. */
+  readonly shipClock: ManualClock;
   /**
    * Builds a new shipper on the same store and makes it `shipper`: what it held in memory is gone.
    * The ship trigger, when on, still calls the first one.
@@ -321,12 +323,13 @@ export function createDeliveryHarness(
   };
   const running = new Set<WorkstreamId>();
   const shipGate = createGateRunner({ sandbox: null, logger: silentLogger });
+  const shipClock = new ManualClock();
   const makeShipper = (): Shipper =>
     createShipper({
       ...ctx,
       gate: opts.shipGate?.(shipGate) ?? shipGate,
       baseUpdates: createBaseUpdates(ctx),
-      clock: new ManualClock(),
+      clock: shipClock,
       dataDir: data.path,
       sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
       identifyProcess: (pid) => systemProcesses.identify(pid),
@@ -362,6 +365,7 @@ export function createDeliveryHarness(
       shipper = makeShipper();
       return shipper;
     },
+    shipClock,
     dataDir: data.path,
     worktreeRoot,
     running,
