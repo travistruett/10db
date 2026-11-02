@@ -55,6 +55,7 @@ import {
   autoMergeRefusedKey,
   detailOf,
   nothingToWaitFor,
+  preCheckOnlyKey,
   prCardKey,
   prCards,
   shipCards,
@@ -81,7 +82,7 @@ import {
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
-import { mergeNotices, NOTICE_KEY, updateNotices } from './notices';
+import { gateNotices, mergeNotices, NOTICE_KEY, updateNotices } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
@@ -501,14 +502,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
   /**
    * Shows on the batch's tasks why its pull request waits for the builder, or clears that with null once
    * it is set to merge (or merged). The cards an earlier build raised for it close too: the batch's
-   * refusal card always, and the project's auto-merge-is-off card once a pull request was set to merge,
-   * which shows the setting is on.
+   * refusal card and its pre-check-only card always, and the project's auto-merge-is-off card once a
+   * pull request was set to merge, which shows the setting is on.
    */
   function tellMerge(batch: BatchDto, notice: Notice | null): void {
     if (notice === null) hideNotices(deps.state, batch.id, [NOTICE_KEY.merge]);
     else showNotice(deps.state, batch.id, notice);
     withdraw(deps.state, deps.inbox, batch.projectId, [
       autoMergeRefusedKey(batch.id),
+      preCheckOnlyKey(batch.id),
       ...(notice === null ? [autoMergeOffKey(batch.projectId)] : []),
     ]);
   }
@@ -571,7 +573,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * GitHub said the pull request has nothing to wait for, and only the pre-check ran on the Mac, so
    * merging on that answer alone could land work nothing but the pre-check checked. It says the same
    * when the base has no required checks and when they already passed on this head, so read them:
-   * passing merges at once; none leaves the pull request open with a card; anything else (pending,
+   * passing merges at once; none leaves the pull request open with a notice; anything else (pending,
    * failing, a read that failed) merges nothing and raises nothing, and the pull request watch takes over.
    */
   async function mergeIfRequiredChecksPassed(
@@ -600,7 +602,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         await mergeNow(batch, repo, prUrl, signal);
         return;
       case 'none':
-        raise(deps.inbox, batch.projectId, shipCards.notMergedPreCheckOnly(batch, prUrl));
+        tellMerge(batch, mergeNotices.preCheckOnly(batch, prUrl));
         return;
       case 'pending':
       case 'failing':
@@ -720,6 +722,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (check !== null) {
         const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
         step = `the ${name}`;
+        // A notice from an earlier ship attempt's rerun says nothing of this one's gate.
+        hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun]);
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
         // Set when the base merge before the gate left git's markers in the branch: no gate runs.
@@ -820,7 +824,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             );
             return;
           }
-          raise(deps.inbox, batch.projectId, shipCards.gatePassedOnRerun(batch, steps));
+          showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
         }
       }
       // 3. Push, never forced.
@@ -1276,10 +1280,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
-      const done = members(db, batchId)
-        .filter((m) => m.state === WorkstreamState.Done)
-        .map((m) => m.taskTitle);
-      raise(deps.inbox, batch.projectId, shipCards.abandoned(abandoned, done));
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
         await afterEnd(batchId, abandoned.worktreePath);
       });
