@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, lstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import {
   InboxKind,
@@ -124,27 +124,54 @@ export function relativeIn(root: string, path: string): string | null {
   return null;
 }
 
-/** The largest file whose content is hashed for a stamp; a bigger one is never remembered as excused. */
-const MAX_STAMPED_BYTES = 16 * 1024 * 1024;
+/** The stamp of a file that is gone: a deletion. */
+export const GONE = 'gone';
+
+/** How many times a file that changes while it is read is read again before it counts as unstampable. */
+const STAMP_ATTEMPTS = 3;
+
+/** The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. */
+function hashFile(path: string): string {
+  const hash = createHash('sha256');
+  const fd = openSync(path, 'r');
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    for (let n = readSync(fd, chunk); n > 0; n = readSync(fd, chunk)) {
+      hash.update(chunk.subarray(0, n));
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return hash.digest('hex');
+}
 
 /**
  * What identifies the current write to a file: its modification time to the nanosecond, its size and a
  * hash of its content, so a file changed behind a restored modification time and size is another write.
- * Null for a file that can't be remembered as one write: one that is gone (a deletion looks the same
- * every time), a directory or other non-file, one too large to hash, or one that can't be read.
+ * `GONE` for a file that is not there. Null for one that can't be told apart from another write: a
+ * directory or other non-file, one that can't be read, or one that kept changing while it was read.
+ * It reads the whole file, so it is called only for a path a card or an excused write names.
  */
 export function writeStamp(root: string, rel: string): string | null {
+  const path = resolve(root, rel);
   try {
-    const path = resolve(root, rel);
-    const before = statSync(path, { bigint: true });
-    if (!before.isFile() || before.size > BigInt(MAX_STAMPED_BYTES)) return null;
-    const content = readFileSync(path);
-    // The file changed while it was read: the content may not be the one the time and size name.
-    const after = statSync(path, { bigint: true });
-    if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return null;
-    const hash = createHash('sha256').update(content).digest('hex');
-    return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
-  } catch {
-    return null;
+    lstatSync(path);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    return code === 'ENOENT' || code === 'ENOTDIR' ? GONE : null;
   }
+  for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
+    try {
+      const before = statSync(path, { bigint: true });
+      if (!before.isFile()) return null;
+      const hash = hashFile(path);
+      // The file changed while it was read: the content may not be the one the time and size name.
+      const after = statSync(path, { bigint: true });
+      if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) continue;
+      return `${String(before.mtimeNs)}:${String(before.size)}:${hash}`;
+    } catch {
+      return null;
+    }
+  }
+  return null;
 }

@@ -39,6 +39,7 @@ import {
   ANSWERED_STATES,
   cardAllowances,
   cardUseKeys,
+  GONE,
   relativeIn,
   ruleAllowances,
   writeStamp,
@@ -398,13 +399,36 @@ export function createWatcher(deps: {
     persistExcusedWrites();
   }
 
-  /** Forgets the excused writes of every lane whose run is over: only a lane that is still watched keeps its own. */
+  /**
+   * Forgets the excused writes of every lane whose run is over (done, failed or cancelled) or that is gone.
+   * A lane still mid-run keeps its own, in every state it passes through between sessions: QUEUED between
+   * steps and after a send-back or a restart's recovery, RECOVERING, PAUSED_LIMIT.
+   */
   function forgetEndedLanes(): void {
     if (excusedWrites.size === 0) return;
-    const running = new Set(listWorkstreams(db, { states: WATCHED_STATES }).map((ws) => ws.id));
+    const active = new Set(listWorkstreams(db, { states: ACTIVE_STATES }).map((ws) => ws.id));
     let forgot = false;
     for (const [key, write] of excusedWrites) {
-      if (running.has(write.workstreamId)) continue;
+      if (active.has(write.workstreamId)) continue;
+      excusedWrites.delete(key);
+      forgot = true;
+    }
+    if (forgot) persistExcusedWrites();
+  }
+
+  /**
+   * Forgets each excused deletion in `root` whose file is there again (of `paths` only, when given): the
+   * deletion it excused is undone, so a later one is another write its card never allowed.
+   */
+  function forgetRestored(root: string, paths?: readonly string[]): void {
+    if (excusedWrites.size === 0) return;
+    const named = paths === undefined ? null : new Set(paths);
+    let forgot = false;
+    for (const [key, write] of excusedWrites) {
+      if (write.stamp !== GONE) continue;
+      const [keyRoot = '', path = ''] = key.split('\0');
+      if (keyRoot !== root || (named !== null && !named.has(path))) continue;
+      if (!existsAsEntry(join(root, path))) continue;
       excusedWrites.delete(key);
       forgot = true;
     }
@@ -415,9 +439,10 @@ export function createWatcher(deps: {
    * The paths among `paths` that a permission card, or a rule one stored, allowed a lane among `lanes` to
    * write in `root`: the builder decided about that exact write when they answered its Allow Edit card, so
    * the stray-write card would only repeat it. An allow-once card excuses the next write to its file and
-   * is then used, and its write's stamp recorded; a later write no card allowed still cards. The live batch
-   * and the step end both go through here, so a write excused by one is excused unchanged by the other, and
-   * a later write the live batch never saw is carded at the step end.
+   * is then used, and its write's stamp recorded for the card's lane; a later write no card allowed still
+   * cards. The live batch and the step end both go through here, so a write excused by one is excused
+   * unchanged by the other (a deletion while the file stays gone), and a later write the live batch never
+   * saw is carded at the step end.
    */
   function allowedWrites(
     projectId: ProjectId,
@@ -445,27 +470,36 @@ export function createWatcher(deps: {
         allowed.add(path);
         continue;
       }
-      const once = cards.filter(({ rel, a }) => rel === path && !a.standing);
-      // A file that is gone, or that can't be told apart from another write, has no stamp: its card excuses
-      // the one write it allowed and nothing after it.
+      const keys = lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
+      const unused = cards.find(
+        ({ rel, a }) =>
+          rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
+      );
+      // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
+      // is read; any other write is carded as it is.
+      if (keys.length === 0 && unused === undefined) continue;
       const stamp = writeStamp(root, path);
-      if (
-        stamp !== null &&
-        lanes.some((l) => excusedWrites.get(excusedKey(root, path, l))?.stamp === stamp)
-      ) {
+      if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);
         continue;
       }
-      const unused = once.find(({ a }) => a.useKey !== null && !usedCards.has(a.useKey));
-      if (unused?.a.useKey == null || unused.a.workstreamId === null) continue;
-      usedCards.add(unused.a.useKey);
-      if (stamp !== null) {
-        excuse(excusedKey(root, path, unused.a.workstreamId), {
-          stamp,
-          workstreamId: unused.a.workstreamId,
-          useKey: unused.a.useKey,
-        });
+      if (stamp !== null && keys.length > 0) {
+        // The file holds another write now: the one each entry excused is gone for good.
+        for (const k of keys) excusedWrites.delete(k);
+        persistExcusedWrites();
       }
+      const lane = unused?.a.workstreamId;
+      const use = unused?.a.useKey;
+      if (lane == null || use == null) continue;
+      // A write that can't be told apart from the next one (still changing, or no file) is allowed without
+      // using the card, which then still excuses that write once it settles, and nothing after it.
+      if (stamp === null) {
+        allowed.add(path);
+        continue;
+      }
+      usedCards.add(use);
+      // A deletion is remembered as GONE, which excuses it only while the file stays gone (forgetRestored).
+      excuse(excusedKey(root, path, lane), { stamp, workstreamId: lane, useKey: use });
       allowed.add(path);
     }
     return allowed;
@@ -665,6 +699,8 @@ export function createWatcher(deps: {
       unwatch(root);
       return;
     }
+    // Before git's filter, which drops a file restored as it was: an excused deletion ends when it comes back.
+    forgetRestored(entry.root, allPaths);
     const paths = withoutBookkeeping(projectId, entry.root, allPaths);
     if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
@@ -797,6 +833,8 @@ export function createWatcher(deps: {
       const root = checkoutOf(db, ws);
       if (!existsSync(root)) return [];
       const batchId = worktreeBatchOf(ws);
+      // A file restored since its excused deletion is no longer in git's changes, so check every one here.
+      forgetRestored(root);
       const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
       const { strays, candidates } = straysIn(
         project,
