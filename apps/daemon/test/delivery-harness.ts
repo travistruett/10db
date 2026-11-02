@@ -18,6 +18,7 @@ import {
   type TaskDto,
   type TaskId,
   type TaskLanding,
+  type WorkspaceMode,
   type WorkstreamId,
   type WorkstreamState,
 } from '@10db/contracts';
@@ -213,6 +214,8 @@ export interface DeliveryHarness {
       readonly description?: string;
       readonly acceptanceCriteria?: string[];
       readonly landing?: TaskLanding;
+      /** Where the task runs; else the project's default. */
+      readonly workspaceMode?: WorkspaceMode;
     },
   ): TaskDto;
   /** Moves a workstream on from where it is, as the runner would; DONE also marks its task done. */
@@ -362,6 +365,7 @@ export function createDeliveryHarness(
           areas: opts.areas ?? ['api'],
           dependsOn: opts.dependsOn ?? [],
           ...(opts.landing === undefined ? {} : { landing: opts.landing }),
+          ...(opts.workspaceMode === undefined ? {} : { workspaceMode: opts.workspaceMode }),
         }),
       );
     },

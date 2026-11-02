@@ -14,6 +14,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  addStockHazardCommands,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -339,6 +340,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   );
   // A malformed persona file throws and the daemon doesn't start, the same policy as a failed migration.
   seedTeam(state, readDefaultPersonas(opts.harnessDir ?? HARNESS_PLUGIN_DIR));
+  // Projects keep the hazard lists they were added with; give them the stock commands added since, once.
+  state.write((ctx) => {
+    addStockHazardCommands(ctx);
+  });
   const launcher = createLauncher({
     base: opts.loginEnv ?? { PATH: DEFAULT_SESSION_PATH },
     clientApp: CLIENT_APP,
@@ -706,6 +711,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     startGate,
     runtime: accounts,
+    pauses: accountPauses,
     onSaved: () => {
       scheduler?.requestTick();
     },

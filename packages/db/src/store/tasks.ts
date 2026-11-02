@@ -23,6 +23,7 @@ import {
   Title,
   WorkstreamId,
   WorkstreamState,
+  type GoalId,
   type BoardColumnId,
   type CiStopped,
   WorkspaceMode,
@@ -145,17 +146,28 @@ function landingOf(row: {
   }
 }
 
-export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskInput): TaskDto {
+/**
+ * Where a new task works and why. The daemon proposes it (`proposePlacement`) where it builds a task;
+ * a caller that passes none gets the placement the task names, else the project's default, with no reason.
+ */
+export interface Placement {
+  readonly workspaceMode: WorkspaceMode;
+  readonly reason: string | null;
+}
+
+/** The reason stored when the builder sets a task's placement from its control. */
+const BUILDER_CHOSE_PLACEMENT = 'chosen by the builder';
+
+export function insertTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: TaskInput,
+  placement?: Placement,
+): TaskDto {
   const project = getProject(ctx.tx, projectId);
   const config = TaskInput.parse(input);
   if (config.flowId) getFlow(ctx.tx, config.flowId);
-  const known = new Set([
-    ...project.areas.map((a) => a.name),
-    ...project.hazards.map((h) => h.name),
-  ]);
-  const unknown = config.areas.filter((a) => !known.has(a));
-  if (unknown.length > 0)
-    throw new InvalidError(`Unknown areas for project ${project.name}: ${unknown.join(', ')}`);
+  refuseUnknownAreas(project, config.areas);
   if (config.dependsOn.length > 0) {
     const deps = ctx.tx
       .select({
@@ -175,8 +187,52 @@ export function insertTask(ctx: WriteContext, projectId: ProjectId, input: TaskI
   return writeTask(ctx, projectId, {
     ...config,
     landing: config.landing ?? taskLandingFor(project),
-    workspaceMode: placementFor(project, config.workspaceMode),
+    ...(placement ?? { workspaceMode: placementFor(project, config.workspaceMode), reason: null }),
     proposalId: null,
+  });
+}
+
+function refuseUnknownAreas(project: ProjectDto, areas: readonly string[]): void {
+  const known = new Set([
+    ...project.areas.map((a) => a.name),
+    ...project.hazards.map((h) => h.name),
+  ]);
+  const unknown = areas.filter((a) => !known.has(a));
+  if (unknown.length > 0)
+    throw new InvalidError(`Unknown areas for project ${project.name}: ${unknown.join(', ')}`);
+}
+
+/**
+ * Writes one of a goal's tasks, with the project's default landing. `dependsOn` names tasks the
+ * caller wrote in the same transaction; a brief's task may have no acceptance criteria of its own.
+ */
+export function insertGoalTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  goalId: GoalId,
+  input: {
+    readonly title: string;
+    readonly description: string;
+    readonly acceptanceCriteria: readonly string[];
+    readonly areas: readonly string[];
+    readonly dependsOn: readonly TaskId[];
+  },
+): TaskDto {
+  const project = getProject(ctx.tx, projectId);
+  refuseUnknownAreas(project, input.areas);
+  return writeTask(ctx, projectId, {
+    title: Title.parse(input.title),
+    description: input.description,
+    acceptanceCriteria: [...input.acceptanceCriteria],
+    areas: [...input.areas],
+    dependsOn: [...input.dependsOn],
+    riskTags: [],
+    flowId: null,
+    landing: taskLandingFor(project),
+    workspaceMode: placementFor(project, undefined),
+    reason: null,
+    proposalId: null,
+    goalId,
   });
 }
 
@@ -238,11 +294,12 @@ export function insertTaskFromProposal(
     readonly title: string;
     readonly description: string;
   },
+  placement?: Placement,
 ): TaskDto {
   const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
     landing: taskLandingFor(project),
-    workspaceMode: placementFor(project, undefined),
+    ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     title: Title.parse(input.title),
     description: input.description,
     acceptanceCriteria: [],
@@ -280,6 +337,7 @@ export function insertFollowUpTask(
   return writeTask(ctx, source.projectId, {
     landing: source.landing,
     workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    reason: null,
     title: Title.parse(fields.title),
     description: `${origin}\n\n${fields.description}`,
     acceptanceCriteria: [...(fields.acceptanceCriteria ?? [])],
@@ -321,6 +379,7 @@ export function insertRetryLimitFollowUp(
   return writeTask(ctx, source.projectId, {
     landing: source.landing,
     workspaceMode: placementFor(getProject(ctx.tx, source.projectId), undefined),
+    reason: null,
     // Cut by characters, so the title stays one line within its limit however long the source's is.
     title: Title.parse(title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX - 1)}…` : title),
     description: [
@@ -344,13 +403,14 @@ export function insertRetryLimitFollowUp(
 function writeTask(
   ctx: WriteContext,
   projectId: ProjectId,
-  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> & {
-    readonly landing: TaskLanding;
-    readonly workspaceMode: WorkspaceMode;
-    readonly proposalId: ProposalId | null;
-    /** The human column to park the task in; absent, it is planned. */
-    readonly boardColumnId?: BoardColumnId | null;
-  },
+  config: Omit<TaskConfig, 'landing' | 'workspaceMode'> &
+    Placement & {
+      readonly landing: TaskLanding;
+      readonly proposalId: ProposalId | null;
+      readonly goalId?: GoalId;
+      /** The human column to park the task in; absent, it is planned. */
+      readonly boardColumnId?: BoardColumnId | null;
+    },
 ): TaskDto {
   const order = ctx.tx
     .select({ value: max(schema.tasks.boardOrder) })
@@ -372,7 +432,8 @@ function writeTask(
     boardOrder: (order?.value ?? 0) + 1,
     boardColumnId: config.boardColumnId ?? null,
     workspaceMode: config.workspaceMode,
-    placementReason: null,
+    placementReason: config.reason,
+    goalId: config.goalId ?? null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
@@ -480,6 +541,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
         : null,
     }),
     workstreamId: latest?.id ?? null,
+    goalId: row.goalId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -709,8 +771,8 @@ export function patchTask(ctx: WriteContext, id: TaskId, patch: TaskPatch): Task
     .set({
       ...fields,
       ...(landing === undefined ? {} : landingColumns(landing)),
-      // A placement the builder chose has no proposal behind it.
-      ...(fields.workspaceMode === undefined ? {} : { placementReason: null }),
+      // The patch is the builder's placement control: the reason says so, replacing a proposed one.
+      ...(fields.workspaceMode === undefined ? {} : { placementReason: BUILDER_CHOSE_PLACEMENT }),
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))

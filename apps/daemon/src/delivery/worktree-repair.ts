@@ -195,8 +195,7 @@ export function reopenWorktreeBatch(
   reason: string,
   then?: (w: WriteContext) => void,
 ): void {
-  const project = getProject(ctx.state.db, getBatch(ctx.state.db, batchId).projectId);
-  ctx.jobs.run(jobKey(project, JobQueue.Cut), async (signal) => {
+  ctx.jobs.run(jobKey(getBatch(ctx.state.db, batchId), JobQueue.Cut), async (signal) => {
     await reopenWhenWhole(ctx, batchId, reason, signal, then);
   });
 }
