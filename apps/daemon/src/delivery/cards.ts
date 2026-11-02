@@ -965,6 +965,7 @@ export const prCards = {
 /** The fold keys of the cards about a task's local branch. */
 export const branchCardKey = {
   offer: (batchId: BatchId): string => `branch-offer:${batchId}`,
+  deleted: (batchId: BatchId): string => `branch-deleted:${batchId}`,
   /** One per project: the branches no batch names. */
   withoutBatch: 'branches-without-batch',
 } as const;
@@ -977,6 +978,13 @@ export const branchCards = {
     body: `Batch "${batch.title}" was abandoned, and its branch ${batch.branch ?? '(none)'} holds ${commitsOf(commits)} beyond ${batch.baseBranch}. 10db keeps it until you answer: Delete Branch removes it from your repository, so that work is gone; Keep leaves it.`,
     foldKey: branchCardKey.offer(batch.id),
     ...branchOffer(batch),
+  }),
+  /** 10db deleted an abandoned task's branch because it held no commits beyond its base. */
+  abandonedBranchDeleted: (batch: BatchDto): Card => ({
+    title: `Batch "${batch.title}" abandoned: ${batch.branch ?? 'its branch'} deleted`,
+    body: `The branch ${batch.branch ?? '(none)'} held no commits beyond ${batch.baseBranch}, so 10db deleted it along with the batch's worktree. Nothing was lost.`,
+    foldKey: branchCardKey.deleted(batch.id),
+    detail: { batchId: batch.id },
   }),
   /** A Delete Branch answer git can't carry out while the branch is checked out. */
   checkedOut: (batch: BatchDto, path: string): Card => ({
