@@ -543,7 +543,7 @@ describe('Retry of a FAILED worktree batch', () => {
     const card = h.only(h.cards());
     expect(card.title).toContain(`${wt} is in the way`);
     expect(card.body).toContain('git lists no worktree there');
-    expect(card.body).toContain('press Retry');
+    expect(card.body).toContain('answer Retry');
     expect(readFileSync(join(wt, 'mine.txt'), 'utf8')).toBe('the builder put this here\n');
     expect(h.gh.prCreates()).toEqual([]);
   });
