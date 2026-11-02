@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createThrowawayRepo, type ThrowawayRepo } from './fixtures';
 import { repoRoot } from './workspace';
@@ -516,6 +516,129 @@ describe('git guard in an agent worktree beside the checkout', () => {
   ])('%s still asks in the main checkout and in a worktree elsewhere', (_name, command) => {
     expect(inAgent(command, checkout.dir)).toBe('ask');
     expect(inAgent(command, elsewhere)).toBe('ask');
+  });
+});
+
+// The repository squash-merges, so a merged branch is never an ancestor of main and only `-D`
+// deletes it. A branch whose pull request merged and whose tip is that pull request's head commit
+// loses nothing, so deleting it doesn't ask. A fake `gh` on PATH answers from FAKE_GH_OUT.
+describe('git guard deleting a branch whose pull request merged', () => {
+  let repo: ThrowawayRepo;
+  let bin: string;
+  let tip: string;
+  let ahead: string;
+
+  beforeAll(() => {
+    repo = createThrowawayRepo('10db-guard-merged');
+    repo.stage('a.ts', 'x\n');
+    repo.commit('seed');
+    repo.git('branch', 'merged');
+    repo.git('branch', 'other-merged');
+    repo.git('branch', 'open');
+    repo.git('branch', 'ahead');
+    tip = repo.gitOutput('rev-parse', 'merged');
+    // `ahead` carries a commit its pull request never had.
+    repo.git('checkout', '-q', 'ahead');
+    repo.stage('b.ts', 'y\n');
+    repo.commit('added after the pull request');
+    ahead = repo.gitOutput('rev-parse', 'ahead');
+    repo.git('checkout', '-q', 'feat/x');
+    bin = mkdtempSync(join(tmpdir(), '10db-guard-gh-'));
+    writeFileSync(
+      join(bin, 'gh'),
+      '#!/bin/sh\n[ -n "$FAKE_GH_OUT" ] || exit 1\nprintf "%s" "$FAKE_GH_OUT"\n',
+      { mode: 0o755 },
+    );
+  });
+
+  afterAll(() => {
+    repo.remove();
+    rmSync(bin, { recursive: true, force: true });
+  });
+
+  const pr = (headRefName: string, headRefOid: string, state = 'MERGED') => ({
+    headRefName,
+    headRefOid,
+    state,
+    number: 1,
+  });
+
+  const outcome = (command: string, prs?: unknown[], cwd = repo.dir): Outcome =>
+    runHook(bash(command, cwd), {
+      PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+      ...(prs === undefined ? {} : { FAKE_GH_OUT: JSON.stringify(prs) }),
+    }).outcome;
+
+  it.each<[string, string, Outcome]>([
+    ['-D', 'git branch -D merged', 'allow'],
+    ['--delete --force', 'git branch --delete --force merged', 'allow'],
+    ['-D with a remote-tracking flag', 'git branch -r -D merged', 'ask'],
+    ['-D of a branch that does not exist', 'git branch -D nope', 'ask'],
+    ['-D of the checked-out branch', 'git branch -D feat/x', 'ask'],
+    ['-D with no branch', 'git branch -D', 'ask'],
+    ['-D of a revision, not a branch', 'git branch -D merged~1', 'ask'],
+    ['-D after another command', 'true && git branch -D merged', 'ask'],
+    ['-D through a wrapper', 'command git branch -D merged', 'ask'],
+    ['-D with git -C', 'git -C . branch -D merged', 'ask'],
+    ['-D with a substitution', 'git branch -D "$(echo merged)"', 'ask'],
+  ])('%s', (_name, command, expected) => {
+    expect(outcome(command, [pr('merged', tip), pr('other-merged', tip)])).toBe(expected);
+  });
+
+  it('allows deleting several branches when each one merged', () => {
+    const prs = [pr('merged', tip), pr('other-merged', tip)];
+    expect(outcome('git branch -D merged other-merged', prs)).toBe('allow');
+  });
+
+  it('asks when one of several branches did not merge', () => {
+    expect(outcome('git branch -D merged open', [pr('merged', tip)])).toBe('ask');
+  });
+
+  it('asks for a branch with commits added after its pull request head', () => {
+    expect(outcome('git branch -D ahead', [pr('ahead', tip)])).toBe('ask');
+    expect(ahead).not.toBe(tip);
+  });
+
+  it('asks when the pull request is not merged', () => {
+    expect(outcome('git branch -D open', [pr('open', tip, 'OPEN')])).toBe('ask');
+    expect(outcome('git branch -D open', [pr('open', tip, 'CLOSED')])).toBe('ask');
+  });
+
+  it('asks when the merged pull request has a different head commit', () => {
+    expect(outcome('git branch -D merged', [pr('merged', ahead)])).toBe('ask');
+  });
+
+  it('asks when the merged pull request is for another branch', () => {
+    expect(outcome('git branch -D merged', [pr('somewhere-else', tip)])).toBe('ask');
+  });
+
+  it('asks when no pull request exists', () => {
+    expect(outcome('git branch -D merged', [])).toBe('ask');
+  });
+
+  it('asks when gh fails or answers with something else', () => {
+    expect(outcome('git branch -D merged')).toBe('ask');
+    const garbage = runHook(bash('git branch -D merged', repo.dir), {
+      PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+      FAKE_GH_OUT: 'not json',
+    });
+    expect(garbage.outcome).toBe('ask');
+  });
+
+  it('asks when gh is not installed', () => {
+    const noGh = mkdtempSync(join(tmpdir(), '10db-guard-nogh-'));
+    try {
+      const result = runHook(bash('git branch -D merged', repo.dir), {
+        PATH: `${noGh}:${dirname(process.execPath)}:/usr/bin:/bin`,
+      });
+      expect(result.outcome).toBe('ask');
+    } finally {
+      rmSync(noGh, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the other irreversible rules when a deletion is allowed', () => {
+    expect(outcome('git branch -D merged && git reset --hard', [pr('merged', tip)])).toBe('ask');
   });
 });
 

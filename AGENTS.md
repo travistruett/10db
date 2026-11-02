@@ -67,6 +67,12 @@ A local macOS control plane that runs Claude Code sessions as a software factory
   (`git checkout -- <file>`, `git restore <file>`) doesn't ask. It holds only when the command's
   cwd is in that worktree; `git -C <worktree>`, a `cd` or any other way of pointing git elsewhere
   turns it off. Directories, globs, `.`, untracked paths and every `stash` still ask.
+  A second exception, in the Claude guard, anywhere: a lone `git branch -D <branch>...` doesn't ask
+  when each local branch's pull request has merged on GitHub (checked with `gh pr list`) and the
+  branch tip is that pull request's head commit, so deleting it loses nothing. PRs are
+  squash-merged, so `-d` refuses a merged branch. A branch with commits added after its pull
+  request's head, an open or closed pull request, none, or a state the guard can't confirm (no
+  network, no `gh`) still asks. Codex has no such check; its rule always prompts.
 - `.claude/hooks/git-guard.mjs` (Claude Code) and `.codex/rules/default.rules` (Codex) enforce
   these rules. The Claude guard fails open; only `TENDB_GIT_GUARD=off` in the environment
   Claude Code starts with disables it. It also asks before `gh pr merge --admin`, `gh api` writes
