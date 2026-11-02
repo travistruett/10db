@@ -14,7 +14,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createTempClone, isolatedGitEnv } from '../../test/fixtures';
 import { GhError, PrState } from '../github';
+import { silentLogger } from '../log';
+import { systemProcesses } from '../recovery';
 import { insertPlannedWorkstream, planForStart } from '../team';
+import { recoverBatches } from './recover';
 import { worktreePathFor } from './worktree-path';
 import { cutWorktree } from './worktree-cut';
 
@@ -132,6 +135,19 @@ function fixBatchOf(
   return { fix, plans };
 }
 
+/** Startup batch recovery as the daemon runs it. */
+const recover = () =>
+  recoverBatches({
+    state: h.state,
+    git: h.git,
+    inbox: h.inbox,
+    processes: systemProcesses,
+    shipper: h.shipper,
+    starter: h.starter,
+    logger: silentLogger,
+    worktrees: { ctx: h.ctx, root: h.worktreeRoot },
+  });
+
 /** Cuts a fix batch on the root's branch and returns it as it is after the cut. */
 async function cutFix(root: BatchDto, head: string): Promise<{ fix: BatchDto; ws: WorkstreamDto }> {
   const { fix, plans } = fixBatchOf(root, head);
@@ -243,6 +259,49 @@ describe('cutting a fix batch', () => {
     expect(h.cards()).toHaveLength(2);
     expect(local(branch)).toBe(head);
     expect(onOrigin(branch)).toBe(head);
+  });
+
+  it('is cut again by startup when the restart interrupted it, still a fix on the pull request branch', async () => {
+    const { root, head } = await shippedRoot();
+    const branch = branchOf(root);
+    const { fix } = fixBatchOf(root, head);
+    const [queued] = listWorkstreams(h.store.db, { batchId: fix.id });
+
+    const report = await recover();
+    await h.jobs.idle();
+
+    expect(report).toMatchObject({ recut: [fix.id], deleted: [] });
+    expect(h.cards()).toEqual([]);
+    // The same row, so there is still one fix for the pull request, and its task kept its place.
+    expect(listBatches(h.store.db, {}).filter((b) => b.ciFixOf === root.id)).toHaveLength(1);
+    expect(getBatch(h.store.db, fix.id)).toMatchObject({
+      state: 'OPEN',
+      branch,
+      baseSha: head,
+      ciFixOf: root.id,
+    });
+    expect(listWorkstreams(h.store.db, { batchId: fix.id }).map((ws) => ws.id)).toEqual([
+      queued?.id,
+    ]);
+    expect(gitIn(pathOf(getBatch(h.store.db, fix.id)), 'branch', '--show-current')).toBe(branch);
+  });
+
+  it('stops fixing, and offers no plain start of its task, when startup cannot cut it again', async () => {
+    const { root, head } = await shippedRoot();
+    const { fix } = fixBatchOf(root, head);
+    // Files at the worktree path only a person can move: the cut is not repeated.
+    mkdirSync(pathOf(fix), { recursive: true });
+    writeFileSync(join(pathOf(fix), 'notes.txt'), 'mine\n');
+
+    const report = await recover();
+
+    expect(report).toMatchObject({ recut: [], deleted: [fix.id] });
+    expect(getBatch(h.store.db, root.id).ciStopped).toBe('no_cut');
+    const retries = h
+      .cards()
+      .flatMap((card) => card.options.map((option) => option.label))
+      .filter((label) => label === 'Retry start');
+    expect(retries).toEqual([]);
   });
 });
 

@@ -30,6 +30,9 @@ import { seedDirs, seedWorktree } from './worktree-seed';
 /** What a start hands its background job: the plans resolved in the request, by task. */
 export type Plans = ReadonlyMap<TaskId, StepPlanDto>;
 
+/** The tasks a cut is for, which is all a cut reads of their plans: a repeated cut has no plans to hand. */
+export type CutTasks = ReadonlyMap<TaskId, unknown>;
+
 /** The lock reason on a batch's worktree: the marker the startup sweep looks for. */
 export const worktreeLockReason = (id: BatchId): string => `${WORKTREE_LOCK_PREFIX}${id}`;
 
@@ -38,12 +41,12 @@ export const worktreeLockReason = (id: BatchId): string => `${WORKTREE_LOCK_PREF
  * worktree on it, then the seed of ignored directories, then the install that brings the seed in line
  * with the worktree's lockfile, then OPEN. A refusal removes what this cut made, deletes the CUTTING row
  * with its workstreams cancelled, and raises a card naming the tasks. A shutdown leaves the row for
- * startup recovery. The main checkout's branch, index and files are never read or written here.
+ * startup recovery, which cuts the same row again (`recoverBatches`). The main checkout's branch, index and files are never read or written here.
  */
 export async function cutWorktree(
   ctx: DeliveryContext,
   batchId: BatchId,
-  plans: Plans,
+  plans: CutTasks,
   signal: AbortSignal,
 ): Promise<void> {
   const db = ctx.state.db;
