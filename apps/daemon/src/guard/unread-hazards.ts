@@ -1,5 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
 import { redirectionViews, shellScripts, SHELLS, withoutRedirections } from './judge';
+import { pnpmFlagKind } from './command-forms';
 import { isNumericArithmetic, numericNames } from './numeric-names';
 import { leadingWords, parseShell } from './shell-words';
 import { executableTails, FEEDERS, takesDataArguments } from './wrapped-commands';
@@ -38,21 +39,23 @@ const FIXED_SCRIPTS: ReadonlySet<string> = new Set([
   'check',
   'coverage',
 ]);
-/** pnpm flags that take the next word as their value. */
-const PNPM_VALUE_FLAGS: ReadonlySet<string> = new Set(['--filter', '-F', '--dir', '-C']);
-
 /**
  * The words a pnpm command line names in plain text before its arguments, when the program or
  * script it runs is fixed: `pnpm exec prettier`, `pnpm --filter @x/y test`, `pnpm exec node
- * script.mjs`. Null when a filled-in word could pick the program or pnpm's subcommand, or the
- * program is not one that takes its arguments as data.
+ * script.mjs`. Null when a filled-in word could pick the program or pnpm's subcommand, the program
+ * is not one that takes its arguments as data, or a flag is in neither of pnpm's flag lists (it
+ * might take the next word, so the subcommand could be a different word).
  */
-function fixedPnpmCommand(line: readonly string[]): string[] | null {
+export function fixedPnpmCommand(line: readonly string[]): string[] | null {
   let at = 1;
   while (at < line.length && (line[at] ?? '').startsWith('-')) {
     const flag = line[at] ?? '';
     if (!LITERAL.test(flag)) return null;
-    if (PNPM_VALUE_FLAGS.has(flag)) {
+    // `--filter=x` carries its value in the same word.
+    const equals = flag.indexOf('=');
+    const kind = pnpmFlagKind(equals < 0 ? flag : flag.slice(0, equals));
+    if (kind === 'unknown') return null;
+    if (kind === 'value' && equals < 0) {
       if (!LITERAL.test(line[at + 1] ?? '')) return null;
       at += 2;
     } else at += 1;
