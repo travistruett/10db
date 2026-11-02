@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  type BatchId,
   Delivery,
   InvalidError,
   type McpServerStatusDto,
@@ -232,7 +233,8 @@ export function createServices(deps: {
       }
       // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
       // the builder asked to start over: then the batch holding only that attempt ends first.
-      if (input?.fresh) restarts.supersede(taskId);
+      let left: BatchId | null = null;
+      if (input?.fresh) left = restarts.supersede(taskId);
       else {
         const retried = restarts.continueRun(taskId);
         if (retried) {
@@ -243,6 +245,8 @@ export function createServices(deps: {
       const project = getProject(db, getTask(db, taskId).projectId);
       if (project.delivery === Delivery.PullRequest) {
         const batch = deps.starter.startTask(taskId);
+        // The batch it left no longer waits on the attempt it started over from.
+        if (left) deps.shipper.checkBatch(left);
         deps.scheduler.requestTick();
         return { kind: 'batch', batch };
       }

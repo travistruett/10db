@@ -1,5 +1,5 @@
-import { ConflictError } from '@10db/contracts';
-import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
+import { ConflictError, WorkspaceMode } from '@10db/contracts';
+import { getBatch, getTask, getWorkstream, listWorkstreams, patchTask } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createFailedRestarts, type FailedRestarts } from './restart';
@@ -70,6 +70,34 @@ describe('a task whose latest run failed in an open batch', () => {
     restarts.supersede(a.taskId);
 
     expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
+  });
+
+  it('lets the batch it left ship its other work on its own once the task has started over', async () => {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    const batch = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const [a, b] = listWorkstreams(h.store.db, { batchId: batch.id });
+    if (!a || !b) throw new Error('two workstreams expected');
+    h.settle(b.id, 'DONE');
+    h.settle(a.id, 'FAILED');
+
+    // The task moved to a separate copy, so its fresh start makes a batch of its own.
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    const left = restarts.supersede(a.taskId);
+    const [fresh] = h.starter.startBatch(h.project.id, {
+      title: 'Alpha again',
+      taskIds: [alpha.id],
+    });
+    await h.jobs.idle();
+    expect(left).toBe(batch.id);
+    expect(fresh?.id).not.toBe(batch.id);
+    h.shipper.checkBatch(batch.id);
+
+    // The superseded attempt no longer holds the old batch open, and Ship anyway isn't needed.
+    expect(getBatch(h.store.db, batch.id).state).not.toBe('OPEN');
   });
 
   it('refuses to end the batch while a run in it is live', async () => {

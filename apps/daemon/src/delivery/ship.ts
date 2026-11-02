@@ -159,9 +159,17 @@ export interface Shipper {
 
 type ConflictedUpdate = Extract<BaseUpdate, { readonly kind: 'conflicted' }>;
 
-/** A batch's members: each task's latest workstream in it. */
+/**
+ * A batch's members: each task's latest workstream in it, except a failed one its task started over
+ * from: the task's current workstream is another, so nothing can retry this one and it holds nothing
+ * the batch should wait for. The batch ships the work of the rest.
+ */
 function members(db: DbReader, batchId: BatchId): WorkstreamDto[] {
-  return latestPerTask(listWorkstreams(db, { batchId }));
+  return latestPerTask(listWorkstreams(db, { batchId })).filter((m) => {
+    if (m.state !== WorkstreamState.Failed) return true;
+    const current = getTask(db, m.taskId).workstreamId;
+    return current === null || current === m.id;
+  });
 }
 
 /**
