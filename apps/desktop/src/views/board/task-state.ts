@@ -101,6 +101,17 @@ export function canRetryRun(workstream: WorkstreamDto, batch: BatchDto | undefin
 }
 
 /**
+ * Whether a failed run can be started over instead of retried: its batch is still open or failed, so
+ * Retry continues in it, and starting over cuts the task a new batch from the base branch.
+ */
+export function canStartOver(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+  return (
+    canRetry(workstream.state) &&
+    (batch?.state === BatchState.Open || batch?.state === BatchState.Failed)
+  );
+}
+
+/**
  * Whether a failed run's task can be closed. One shipped anyway is judged by its pull request, as
  * the daemon does: refused while it is open or merged, allowed once it closed without merging.
  */
