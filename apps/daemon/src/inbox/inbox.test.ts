@@ -2104,21 +2104,34 @@ describe('permission broker in a sandboxed lane', () => {
     },
   );
 
+  it('names the file an edit card is about in its detail, whether or not the lane is sandboxed', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(ws, false)(request('Write', { file_path: 'docs/a.md' })).catch(() => undefined);
+    expect(onlyOpenCard().detail).toMatchObject({ toolName: 'Write', path: 'docs/a.md' });
+  });
+
+  it('names no file on a card for a tool that is not an edit', () => {
+    const ws = seedWorkstream(base);
+    void sandboxed(
+      ws,
+      false,
+    )(request('SomeToolAddedLater', { file_path: 'a' })).catch(() => undefined);
+    expect(onlyOpenCard().detail).not.toHaveProperty('path');
+  });
+
   it('cards an edit with the real path and stores a rule for that one path', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
     const vscode = join(fileAccess.checkout, '.vscode', 'settings.json');
     const pending = decide(request('Edit', { file_path: '.vscode/settings.json' }));
     const card = onlyOpenCard();
-    expect(card.detail).toEqual({ toolName: 'Edit', summary: vscode });
+    expect(card.detail).toEqual({ toolName: 'Edit', summary: vscode, path: vscode });
     inbox.answer(card.id, { choice: 'allow_project' });
     expect(await pending).toEqual({ behavior: 'allow' });
     expect((await decide(request('Edit', { file_path: vscode }))).behavior).toBe('allow');
     void decide(request('Edit', { file_path: '.claude/hooks/x' })).catch(() => undefined);
-    expect(onlyOpenCard().detail).toEqual({
-      toolName: 'Edit',
-      summary: join(fileAccess.checkout, '.claude', 'hooks', 'x'),
-    });
+    const hook = join(fileAccess.checkout, '.claude', 'hooks', 'x');
+    expect(onlyOpenCard().detail).toEqual({ toolName: 'Edit', summary: hook, path: hook });
   });
 
   it('asks about every other tool as it always did', () => {

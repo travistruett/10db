@@ -12,6 +12,7 @@ import {
 import { dirname, join } from 'node:path';
 import {
   ClaimKind,
+  mintId,
   WorkstreamState,
   type BatchId,
   type InboxItemDto,
@@ -1374,6 +1375,167 @@ describe('worktree checkouts', () => {
       laneCommit(lane.path, '.mcp.json', '{"lane":true}');
       await watcher.flush();
       expect(bodies()).toEqual([`${lane.path}: .mcp.json`]);
+    });
+  });
+
+  describe('a write a permission card allowed', () => {
+    const SENSITIVE_FILE = '.mcp.json';
+
+    /** The Allow Edit card the broker raises for a lane's edit of `rel`, answered with `choice`. */
+    function editCard(
+      lane: { workstream: WorkstreamDto },
+      rel: string,
+      choice: string,
+      root = repo.path,
+    ): void {
+      const path = join(root, rel);
+      const { item } = inbox.ask({
+        projectId: project.id,
+        workstreamId: lane.workstream.id,
+        sessionId: mintId('Session'),
+        kind: 'permission',
+        title: 'Allow Edit?',
+        body: path,
+        options: [
+          { label: 'allow_once', description: '' },
+          { label: 'allow_workstream', description: '' },
+          { label: 'allow_project', description: '' },
+          { label: 'deny', description: '' },
+        ],
+        recommendation: null,
+        category: 'environment',
+        urgency: 'normal',
+        detail: { toolName: 'Edit', summary: path, path },
+        signal: new AbortController().signal,
+      });
+      inbox.answer(item.id, { choice });
+    }
+    const write = async (rel: string): Promise<void> => {
+      touch(rel);
+      emit(rel);
+      await watcher.flush();
+    };
+
+    it('raises no stray card for an Edit its Allow Edit card allowed once', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+    });
+
+    it('still raises the stray card for a sensitive write no card allowed', async () => {
+      running();
+      watcher.sync();
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('cards a write after an allowed one when nothing allowed it', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('lets a second allowed card excuse the second write', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+    });
+
+    it('cards a write whose permission card was denied', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'deny');
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('cards a write to another file than the one allowed', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write('.env');
+      expect(flags().map((f) => f.body)).toEqual(['.env']);
+    });
+
+    it('excuses an ordinary stray the card allowed too', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, 'docs/stray.md', 'allow_once');
+      await write('docs/stray.md');
+      expect(flags()).toEqual([]);
+    });
+
+    it('keeps excusing every later write after an allow for the workstream', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_workstream');
+      await write(SENSITIVE_FILE);
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+    });
+
+    it('does not let a card allowed for another lane excuse this one', async () => {
+      const a = running('Alpha', ['api']);
+      const b = running('Beta', ['ui']);
+      watcher.sync();
+      editCard(a, SENSITIVE_FILE, 'allow_once');
+      editCard(b, 'docs/other.md', 'allow_once');
+      await write('docs/other.md');
+      await write(SENSITIVE_FILE);
+      expect(flags()).toEqual([]);
+      await write(SENSITIVE_FILE);
+      expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it("excuses an allowed edit in a worktree, by the card's path in that copy", async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(flags()).toEqual([]);
+    });
+
+    it('does not let a card allowed in the main checkout excuse a write in a worktree copy', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', repo.path);
+      writeAt(lane.path, SENSITIVE_FILE);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+    });
+
+    it('reports no stray at the step end for an edit its card allowed', async () => {
+      const lane = running();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      touch(SENSITIVE_FILE);
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      expect(flags()).toEqual([]);
+    });
+
+    it('reports a step end sensitive write that no card allowed', async () => {
+      const lane = running();
+      touch(SENSITIVE_FILE);
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([SENSITIVE_FILE]);
+    });
+
+    it('still excuses the write at the step end after the live watcher used the card', async () => {
+      const lane = running();
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once');
+      await write(SENSITIVE_FILE);
+      expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+      expect(flags()).toEqual([]);
     });
   });
 });
