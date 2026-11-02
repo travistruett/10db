@@ -498,18 +498,11 @@ export function createWatcher(deps: {
       if (lane == null || use == null) continue;
       if (stamp === null) {
         // A write that can't be told apart from the next one fails closed, so the card never excuses writes
-        // without end: a path that can't be read is carded and leaves the card unused; a non-file (a
-        // directory, a link to one) is excused once and uses the card up; a file still changing is excused
-        // once without using the card, which then excuses that write when it settles, and a second time it
-        // is still unsettled it is carded.
-        const reason = unstampedReason(root, path);
-        if (reason === 'unreadable') continue;
-        if (reason === 'changing') {
-          if (settling.has(use)) continue;
-          settling.add(use);
-        } else {
-          usedCards.add(use);
-        }
+        // without end: a path that can't be read, or is not a regular file (a directory, a link to one), is
+        // carded and leaves the card unused; a file still changing is excused once without using the card,
+        // which then excuses that write when it settles, and a second time it is still unsettled it is carded.
+        if (unstampedReason(root, path) !== 'changing' || settling.has(use)) continue;
+        settling.add(use);
         allowed.add(path);
         continue;
       }

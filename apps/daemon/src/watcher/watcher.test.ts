@@ -2291,18 +2291,18 @@ describe('worktree checkouts', () => {
           symlinkSync(join(repo.path, dir), link);
         };
 
-        it('uses up the card for a symlink to a directory, so a second such write is carded', async () => {
+        it('cards a symlink to a directory, and leaves the card unused', async () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           linkTo('dir-a');
           emit(SENSITIVE_FILE);
           await watcher.flush();
-          expect(flags()).toEqual([]);
-          linkTo('dir-b');
-          emit(SENSITIVE_FILE);
-          await watcher.flush();
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+          rmSync(join(repo.path, SENSITIVE_FILE));
+          await write(SENSITIVE_FILE);
+          // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         });
 
         it('cards a symlink to a directory when the card is already used up', async () => {
@@ -2331,6 +2331,8 @@ describe('worktree checkouts', () => {
           rmSync(link);
           await write(SENSITIVE_FILE);
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+          // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
+          expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         });
 
         it('excuses a file still changing once per card, and cards the next such write', async () => {
@@ -2338,7 +2340,6 @@ describe('worktree checkouts', () => {
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
           const stamp = vi.mocked(writeStamp);
-          const real = stamp.getMockImplementation();
           // The file is stable on disk; the mock stands for a read that kept changing.
           stamp.mockReturnValueOnce(null);
           await write(SENSITIVE_FILE);
@@ -2346,7 +2347,6 @@ describe('worktree checkouts', () => {
           stamp.mockReturnValueOnce(null);
           await write(SENSITIVE_FILE);
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
-          if (real) stamp.mockImplementation(real);
         });
 
         it('still excuses a changing file once it settles, using the card then', async () => {
