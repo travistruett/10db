@@ -13,18 +13,16 @@ const member = (taskTitle: string, state: WorkstreamDto['state']) =>
 function panel(
   b: BatchDto,
   workstreams: WorkstreamDto[] = [],
-  extra: { workspaceMode?: 'shared' | 'worktree'; gateCommand?: string | null } = {},
+  extra: { gateCommand?: string | null } = {},
 ) {
   server.use(...baseHandlers());
   renderWithDaemon(
-    <BatchPanel
-      batch={b}
-      workstreams={workstreams}
-      workspaceMode={extra.workspaceMode ?? 'shared'}
-      gateCommand={extra.gateCommand ?? null}
-    />,
+    <BatchPanel batch={b} workstreams={workstreams} gateCommand={extra.gateCommand ?? null} />,
   );
 }
+
+const copy = (overrides: Partial<BatchDto> = {}) =>
+  batchDto({ worktreePath: '/wt/greetings', ...overrides });
 
 const buttons = () => screen.queryAllByRole('button').map((x) => x.textContent);
 
@@ -188,13 +186,20 @@ describe('BatchPanel', () => {
     expect(await screen.findByText('Batch "Greetings" is shipping')).toBeTruthy();
   });
 
-  it('offers a fix task in worktree mode, and not while the batch is shipping', async () => {
-    panel(batch, [member('Alpha', 'RUNNING')], { workspaceMode: 'worktree' });
+  it("offers a fix task on a separate copy's batch", async () => {
+    const own = copy();
+    panel(own, [{ ...member('Alpha', 'RUNNING'), batchId: own.id }]);
     expect(await screen.findByRole('button', { name: 'Add a fix task' })).toBeTruthy();
   });
 
+  it("offers no fix task on the shared batch, whatever the project's default is", async () => {
+    panel(batch, [member('Alpha', 'RUNNING')]);
+    await screen.findByText('10db/greetings-0a1b2c3d');
+    expect(within(document.body).queryByRole('button', { name: 'Add a fix task' })).toBeNull();
+  });
+
   it('offers no fix task on a batch that is shipping', async () => {
-    panel(batchDto({ state: 'SHIPPING' }), [], { workspaceMode: 'worktree' });
+    panel(copy({ state: 'SHIPPING' }), []);
     await screen.findByText('10db/greetings-0a1b2c3d');
     expect(within(document.body).queryByRole('button', { name: 'Add a fix task' })).toBeNull();
   });
