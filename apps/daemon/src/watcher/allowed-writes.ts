@@ -160,7 +160,7 @@ function deletionStamp(root: string, path: string): string | null {
 }
 
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
-const STAMP_ATTEMPTS = 3;
+export const STAMP_ATTEMPTS = 3;
 
 /** The SHA-256 of a file's content, read a chunk at a time so a large file is never held whole. */
 function hashFile(path: string): string {
@@ -186,7 +186,7 @@ function hashFile(path: string): string {
  * It reads the whole file, so it is called only for a path a card or an excused write names.
  */
 export function writeStamp(root: string, rel: string): string | null {
-  const result = readStamp(root, rel);
+  const result = stampOrReason(root, rel);
   return 'stamp' in result ? result.stamp : null;
 }
 
@@ -202,15 +202,13 @@ export function stampMatchesExpected(stamp: string, expected: string): boolean {
 export type UnstampedReason = 'not-a-file' | 'unreadable' | 'changing';
 
 /**
- * Why `writeStamp` gives null for `rel`, read again now. A path that stamps this time counts as 'changing':
- * it was moving a moment ago.
+ * The stamp of `rel` (`writeStamp`), or why it has none, from one read: at most STAMP_ATTEMPTS reads of the
+ * file, so the reason is the one that read found and never another read's.
  */
-export function unstampedReason(root: string, rel: string): UnstampedReason {
-  const result = readStamp(root, rel);
-  return 'stamp' in result ? 'changing' : result.reason;
-}
-
-function readStamp(root: string, rel: string): { stamp: string } | { reason: UnstampedReason } {
+export function stampOrReason(
+  root: string,
+  rel: string,
+): { stamp: string } | { reason: UnstampedReason } {
   const path = resolve(root, rel);
   try {
     lstatSync(path);
