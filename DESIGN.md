@@ -50,7 +50,7 @@ favors legibility and calm over decoration.
   with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
   on the card and in Factory, and is shown under the line in the drawer.
 - **Goal strip:** a goal with open tasks is one slim line above the Board's columns, in the same scroll
-  area as the batch strips: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
+  area: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
   drawer. A goal is never a card in a column: cards are tasks, and the columns stay about tasks. Each of a
   goal's task cards carries the goal's title as a small dimmed label.
 - **Goal status:** a goal says its status once, in a dot and one plain line, and the first match wins:

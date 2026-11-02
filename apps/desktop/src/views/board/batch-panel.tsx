@@ -35,10 +35,17 @@ export interface BatchPanelProps {
   readonly workstreams: readonly WorkstreamDto[];
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand: string | null;
+  /** Whether the panel shows the pull request link; the task drawer shows it beside the CI link instead. */
+  readonly pullRequestLink?: boolean;
 }
 
 /** Where a task's work ships: its branch, its pull request, why a ship failed and what the builder can do about it. */
-export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps) {
+export function BatchPanel({
+  batch,
+  workstreams,
+  gateCommand,
+  pullRequestLink = true,
+}: BatchPanelProps) {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const [fixOpen, fix] = useDisclosure(false);
@@ -71,7 +78,7 @@ export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps)
     <Stack gap="xs" aria-label="Delivery" role="group">
       <Group gap="sm" wrap="wrap">
         {batch.branch ? <Code>{batch.branch}</Code> : null}
-        {batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+        {pullRequestLink && batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
         {path ? (
           <CopyButton value={path}>
             {({ copied, copy }) => (

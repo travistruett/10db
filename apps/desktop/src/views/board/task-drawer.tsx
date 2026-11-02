@@ -18,12 +18,14 @@ import {
   Button,
   Drawer,
   Group,
+  List,
   Modal,
   MultiSelect,
   Stack,
   Text,
   Textarea,
   TextInput,
+  Title,
 } from '@mantine/core';
 import { useState } from 'react';
 import {
@@ -57,7 +59,7 @@ import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
 import { PlacementChoice } from './placement-choice';
-import { ExternalLink } from './pull-request-link';
+import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
 import { RISK_LABEL } from './risk-labels';
@@ -248,6 +250,16 @@ export function TaskDrawer({
       padding="lg"
     >
       <Stack gap="lg">
+        <Stack gap={4}>
+          <Title order={3} size="h4" fw={600}>
+            {task.headline || task.title}
+          </Title>
+          {task.why ? (
+            <Text size="sm" c="dimmed">
+              {task.why}
+            </Text>
+          ) : null}
+        </Stack>
         {workstream ? (
           <WorkstreamLine
             task={task}
@@ -277,19 +289,6 @@ export function TaskDrawer({
             {limitLine}
           </Alert>
         ) : null}
-        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
-        {batch ? (
-          <BatchPanel batch={batch} workstreams={workstreams} gateCommand={gateCommand} />
-        ) : null}
-        <TextInput
-          aria-label="Title"
-          size="md"
-          fw={600}
-          value={title}
-          onChange={(e) => {
-            setTitle(e.currentTarget.value);
-          }}
-        />
         <Group gap={6}>
           <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
             {columnName}
@@ -306,23 +305,39 @@ export function TaskDrawer({
             <Text size="xs" c="dimmed">{`Waits on ${waitsOn.join(', ')}`}</Text>
           ) : null}
         </Group>
-        {placementIsOpen && placementEditable ? (
-          <Stack gap={4}>
-            <PlacementChoice
-              task={task}
-              showReason={false}
-              pending={placementPatch.isPending}
-              onChange={(workspaceMode) => {
-                placementPatch.mutate({ taskId: task.id, patch: { workspaceMode } });
-              }}
-            />
-            {placementPatch.error ? (
-              <Text size="sm" c="red" role="alert">
-                {placementPatch.error.message}
-              </Text>
-            ) : null}
-          </Stack>
+        <Stack gap={4}>
+          <Text size="sm" fw={500}>
+            What it promises
+          </Text>
+          <Text size="sm">{task.title}</Text>
+          {task.acceptanceCriteria.length > 0 ? (
+            <List size="sm" spacing={2}>
+              {task.acceptanceCriteria.map((line, index) => (
+                <List.Item key={`${String(index)}:${line}`}>{line}</List.Item>
+              ))}
+            </List>
+          ) : null}
+        </Stack>
+        <DrawerLinks batch={batch} batches={batches} />
+        {batch ? (
+          <BatchPanel
+            batch={batch}
+            workstreams={workstreams}
+            gateCommand={gateCommand}
+            pullRequestLink={false}
+          />
         ) : null}
+        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
+        <HeadlineField value={headline} onChange={setHeadline} />
+        <WhyField value={why} onChange={setWhy} />
+        <TextInput
+          label="Title"
+          fw={600}
+          value={title}
+          onChange={(e) => {
+            setTitle(e.currentTarget.value);
+          }}
+        />
         {areasEditable ? (
           <MultiSelect
             label="Areas"
@@ -332,8 +347,6 @@ export function TaskDrawer({
             onChange={setAreas}
           />
         ) : null}
-        <HeadlineField value={headline} onChange={setHeadline} />
-        <WhyField value={why} onChange={setWhy} />
         <Textarea
           label="Description"
           autosize
@@ -390,6 +403,23 @@ export function TaskDrawer({
             <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
           </Stack>
         )}
+        {placementIsOpen && placementEditable ? (
+          <Stack gap={4}>
+            <PlacementChoice
+              task={task}
+              showReason={false}
+              pending={placementPatch.isPending}
+              onChange={(workspaceMode) => {
+                placementPatch.mutate({ taskId: task.id, patch: { workspaceMode } });
+              }}
+            />
+            {placementPatch.error ? (
+              <Text size="sm" c="red" role="alert">
+                {placementPatch.error.message}
+              </Text>
+            ) : null}
+          </Stack>
+        ) : null}
         <CopyTaskId id={task.id} />
       </Stack>
       {/* Pinned to the drawer's bottom edge, so Save never scrolls away. */}
@@ -454,8 +484,8 @@ export function TaskDrawer({
 }
 
 /**
- * Where a pull request's required checks stand (CI-decides spec §5), as the card says it, with a link
- * to the job or the checks. Nothing for a pull request with no required checks.
+ * Where a pull request's required checks stand (CI-decides spec §5), as the card says it. Nothing for
+ * a pull request with no required checks. Its link to the job or the checks is with `DrawerLinks`.
  */
 function CiStatusLine({
   batch,
@@ -467,11 +497,26 @@ function CiStatusLine({
   const ci = ciLine(batch, batches);
   if (!ci) return null;
   return (
-    <Group gap="sm" data-testid="ci-line" data-color={ci.color}>
-      <Text size="sm" c={ci.color}>
-        {ci.line}
-      </Text>
-      {ci.link ? <ExternalLink url={ci.link.url} label={ci.link.label} /> : null}
+    <Text size="sm" c={ci.color} data-testid="ci-line" data-color={ci.color}>
+      {ci.line}
+    </Text>
+  );
+}
+
+/** The batch's pull request and the CI job or checks behind its status line. Nothing when it has neither. */
+function DrawerLinks({
+  batch,
+  batches,
+}: {
+  readonly batch: BatchDto | undefined;
+  readonly batches: readonly BatchDto[];
+}) {
+  const link = ciLine(batch, batches)?.link;
+  if (!batch?.prUrl && !link) return null;
+  return (
+    <Group gap="sm" data-testid="drawer-links">
+      {batch?.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+      {link ? <ExternalLink url={link.url} label={link.label} /> : null}
     </Group>
   );
 }

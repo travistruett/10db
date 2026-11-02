@@ -246,7 +246,7 @@ describe('BoardView', () => {
     expect(screen.queryByText(/Checking: make gate/)).toBeNull();
   });
 
-  it('shows one line above the columns when several tasks share a branch', async () => {
+  it('shows no strip above the columns for a shared branch, and abandons it from the drawer', async () => {
     const batch = batchDto();
     const project = projectViewDto({
       id: batch.projectId,
@@ -279,11 +279,16 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    const above = await screen.findByTestId('board-above-columns');
-    expect(within(above).getByText('10db/greetings-0a1b2c3d')).toBeTruthy();
-    expect(within(above).getByText('2 tasks')).toBeTruthy();
-    expect(within(above).queryByText('Alpha')).toBeNull();
-    fireEvent.click(within(above).getByRole('button', { name: 'Abandon' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Alpha' }));
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    // The drawer says in text what Abandon will do, under the button.
+    expect(
+      within(drawer).getByText(
+        'Abandon deletes the branch if nothing is committed on it and keeps it otherwise, and cancels its 2 unfinished tasks.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(abandoned).toEqual([batch.id]);
     });
@@ -315,7 +320,7 @@ describe('BoardView', () => {
   it.each([
     { name: 'a project whose default is Your folder', workspaceMode: 'shared' as const },
     { name: 'a project whose default is a separate copy', workspaceMode: 'worktree' as const },
-  ])('shows the shared batch and a separate copy together: $name', async ({ workspaceMode }) => {
+  ])('shows no strip for the shared batch or a separate copy: $name', async ({ workspaceMode }) => {
     const projectId = mintId('Project');
     const shared = twoTaskBatch(projectId, 'folder');
     const copy = twoTaskBatch(projectId, 'copy', { worktreePath: '/wt/copy' });
@@ -341,13 +346,14 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    const above = await screen.findByTestId('board-above-columns');
-    expect(within(above).getByText('10db/folder-0a1b2c3d')).toBeTruthy();
-    expect(within(above).getByText('10db/copy-0a1b2c3d')).toBeTruthy();
-    expect(within(above).getAllByText('2 tasks')).toHaveLength(2);
+    await screen.findByTestId('board-columns');
+    expect(await screen.findAllByTestId('task-card')).toHaveLength(4);
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    expect(screen.queryByText('10db/folder-0a1b2c3d')).toBeNull();
+    expect(screen.queryByText('2 tasks')).toBeNull();
   });
 
-  it("shows a separate copy's batch when no shared batch is open", async () => {
+  it("shows no strip for a separate copy's batch when no shared batch is open", async () => {
     const projectId = mintId('Project');
     const copy = twoTaskBatch(projectId, 'copy', { worktreePath: '/wt/copy' });
     const project = projectViewDto({
@@ -366,9 +372,8 @@ describe('BoardView', () => {
     );
     renderApp('/board');
 
-    const above = await screen.findByTestId('board-above-columns');
-    expect(within(above).getByText('10db/copy-0a1b2c3d')).toBeTruthy();
-    expect(within(above).getByText('2 tasks')).toBeTruthy();
+    expect(await screen.findAllByTestId('task-card')).toHaveLength(2);
+    expect(screen.queryByTestId('board-above-columns')).toBeNull();
   });
 
   it('says where a task will run on its card until it starts, and in its drawer', async () => {

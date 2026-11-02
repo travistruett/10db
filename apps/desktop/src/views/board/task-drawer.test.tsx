@@ -77,6 +77,70 @@ function discardPrompt(): HTMLElement | null {
   return screen.queryByText('Discard your changes to this task?');
 }
 
+describe('TaskDrawer order', () => {
+  it('leads with the headline and why, then status, what it promises, links, the shared branch and the form', async () => {
+    serve();
+    const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
+    const ws = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
+    const second = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
+    open({
+      task: {
+        title: 'Reject FIFOs in the worktree walk',
+        headline: "Odd files can't freeze 10db",
+        why: 'A FIFO could hang every lane.',
+        acceptanceCriteria: ['A FIFO is skipped', 'A huge file is skipped'],
+      },
+      workstream: ws,
+      batch,
+      workstreams: [ws, second],
+    });
+    const d = await dialog();
+    const headline = within(d).getByRole('heading', { name: "Odd files can't freeze 10db" });
+    const why = within(d).getByText('A FIFO could hang every lane.');
+    const status = within(d).getByText('Queued');
+    const promises = within(d).getByText('What it promises');
+    const title = within(d).getByText('Reject FIFOs in the worktree walk');
+    const criteria = within(d)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+    const link = within(d).getByRole('link', { name: 'Pull request' });
+    const abandon = within(d).getByRole('button', { name: 'Abandon' });
+    const headlineField = within(d).getByLabelText('Headline');
+    const whyField = within(d).getByLabelText('Why');
+    const titleField = within(d).getByLabelText('Title');
+    expect(criteria).toEqual(['A FIFO is skipped', 'A huge file is skipped']);
+    const inOrder = [
+      headline,
+      why,
+      status,
+      promises,
+      title,
+      link,
+      abandon,
+      headlineField,
+      whyField,
+      titleField,
+    ];
+    for (let i = 1; i < inOrder.length; i += 1) {
+      const before = inOrder[i - 1];
+      const after = inOrder[i];
+      expect(
+        before && after && before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `element ${String(i)} follows element ${String(i - 1)}`,
+      ).toBeTruthy();
+    }
+    // The pull request link is shown once, with the links, not again in the shared branch.
+    expect(within(d).getAllByRole('link', { name: 'Pull request' })).toHaveLength(1);
+  });
+
+  it('falls back to the title as the headline, and shows no why line when there is none', async () => {
+    serve();
+    open({ task: { title: 'Plain title', headline: '', why: '' } });
+    const d = await dialog();
+    expect(within(d).getByRole('heading', { name: 'Plain title' })).toBeTruthy();
+  });
+});
+
 describe('TaskDrawer placement', () => {
   it('shows the badge with the reason as its tooltip, and a control, while the placement is open', async () => {
     serve();
@@ -919,7 +983,9 @@ describe('TaskDrawer', () => {
         open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
         const line = await within(await dialog()).findByTestId('ci-line');
         expect(within(line).getByText('Pull request open · CI failed: build')).toBeTruthy();
-        expect(within(line).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+        // The job link sits with the pull request link, below the status.
+        const links = within(await dialog()).getByTestId('drawer-links');
+        expect(within(links).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
           jobUrl,
         );
       });

@@ -37,7 +37,7 @@ import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
-import { BatchStrip, batchTaskCount, sharedBatches } from './batch-strip';
+import { batchTaskCount } from './batch/batch-task-count';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -75,7 +75,7 @@ const NEW_TASK_FORM_ID = 'new-task-form';
 const COLUMNS_MIN_HEIGHT = 320;
 /** The goal filter's option for no filter; a goal's ID never has this form. */
 const ALL_GOALS = 'all';
-/** The strips together take at most this share of the board's height. */
+/** The goal strips together take at most this share of the board's height. */
 const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
@@ -463,15 +463,6 @@ function BoardColumns({
   );
 }
 
-/**
- * Every unfinished batch of both kinds, in the daemon's order, newest first: a separate copy's
- * batch beside the shared one. With none open, the project's current batch stands in.
- */
-function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
-  if (project.openBatches.length > 0) return project.openBatches;
-  return project.currentBatch ? [project.currentBatch] : [];
-}
-
 export function BoardView() {
   const { projects, project, select } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
@@ -511,8 +502,6 @@ export function BoardView() {
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const batchList = batches.data ?? [];
   const batchById = new Map(batchList.map((b) => [b.id, b]));
-  // A branch gets a line above the columns only while several tasks share it.
-  const strips = project ? sharedBatches(stripBatches(project), workstreams.data ?? []) : [];
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
   // The header's Start Ready Tasks proposes from every ready task, so its count ignores the goal filter.
@@ -618,7 +607,7 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {strips.length > 0 || goalStrips.length > 0 ? (
+      {goalStrips.length > 0 ? (
         <ScrollArea.Autosize
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
@@ -635,9 +624,6 @@ export function BoardView() {
                   setOpenGoalId(summary.goal.id);
                 }}
               />
-            ))}
-            {strips.map((batch) => (
-              <BatchStrip key={batch.id} batch={batch} workstreams={workstreams.data ?? []} />
             ))}
           </Stack>
         </ScrollArea.Autosize>
