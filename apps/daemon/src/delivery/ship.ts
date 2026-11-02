@@ -240,7 +240,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   function resume(batchId: BatchId): void {
     deps.jobs.run(jobKey(getBatch(db, batchId), JobQueue.Ship), (signal) =>
-      shipSteps(batchId, signal),
+      // One operation: the checkout's git dirs are read once for the ship, not once per git call.
+      deps.git.operation(() => shipSteps(batchId, signal)),
     );
   }
 
@@ -1391,7 +1392,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     catchingUp.add(batchId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
-        await catchUpSteps(batchId, signal, cause);
+        await deps.git.operation(() => catchUpSteps(batchId, signal, cause));
       } finally {
         catchingUp.delete(batchId);
       }

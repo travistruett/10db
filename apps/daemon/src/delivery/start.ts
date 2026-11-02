@@ -390,7 +390,18 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */
-  async function cut(
+  function cut(
+    batchId: BatchId,
+    tasks: readonly TaskDto[],
+    plans: CutTasks,
+    inBatch: ReadonlySet<TaskId>,
+    signal: AbortSignal,
+  ): Promise<void> {
+    // One operation: the checkout's git dirs are read once for the cut, not once per git call.
+    return ctx.git.operation(() => cutSteps(batchId, tasks, plans, inBatch, signal));
+  }
+
+  async function cutSteps(
     batchId: BatchId,
     tasks: readonly TaskDto[],
     plans: CutTasks,
