@@ -64,6 +64,30 @@ describe('a dropped text file', () => {
     expect(second.message).not.toContain('[file]');
   });
 
+  it('reaches a resumed session after the daemon restarts between the drop and the next turn', async () => {
+    await nextTurn('Hello');
+    const resumeId = must(f.adapter.shapeSessions[0], 'a session').spec.sessionId;
+    const file = drop('brief.md', Buffer.from('# The brief'));
+    await f.restart();
+    const turn = await nextTurn('Read the doc I dropped');
+    const session = must(f.adapter.shapeSessions[1], 'a resumed session');
+    expect(session.spec.sessionId).not.toBe(resumeId);
+    expect(session.spec.resumeProviderSessionId).not.toBeNull();
+    expect(turn.message).toContain(`[file] ${file.storedPath}`);
+  });
+
+  it('is not told again after a restart once a turn has carried it', async () => {
+    await nextTurn('Hello');
+    drop('brief.md', Buffer.from('# The brief'));
+    await nextTurn('Read this');
+    await f.restart();
+    const turn = await nextTurn('And?');
+    expect(
+      must(f.adapter.shapeSessions[1], 'a resumed session').spec.resumeProviderSessionId,
+    ).not.toBeNull();
+    expect(turn.message).not.toContain('[file]');
+  });
+
   it('keeps two files of one name apart', () => {
     const a = drop('brief.md', Buffer.from('one'));
     const b = drop('brief.md', Buffer.from('two'));

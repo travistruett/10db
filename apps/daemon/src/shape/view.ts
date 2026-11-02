@@ -6,6 +6,7 @@ import {
   ShapeProposalState,
   ShapeRoundMark,
   type ShapeConvertedDto,
+  type ShapeFileDto,
   type ShapeId,
   type ShapeTurnDto,
   type ShapeViewDto,
@@ -18,12 +19,26 @@ import {
   listShapeMessages,
   listShapeProposals,
   type DbReader,
+  type ShapeFileRow,
   type ShapeLinkRow,
   type ShapeProposalRow,
 } from '@10db/db';
 
 // Shape spec §4, §6 Rows. What the Shape screen reads: the transcript, every proposal row with its
 // typed body, and what Convert made of the accepted ones.
+
+/** A dropped file as the screen sees it; whether Claude has been told of it stays in the daemon. */
+export function fileDtoOf(row: ShapeFileRow): ShapeFileDto {
+  return {
+    id: row.id,
+    shapeId: row.shapeId,
+    name: row.name,
+    mediaType: row.mediaType,
+    size: row.size,
+    storedPath: row.storedPath,
+    createdAt: row.createdAt,
+  };
+}
 
 /** The prefix of the transcript line `note_heard` writes (tools.ts), followed by the items. */
 const HEARD_LINE = /^note_heard ·\s?(.*)$/s;
@@ -102,7 +117,7 @@ export function buildShapeView(db: DbReader, shapeId: ShapeId, turn: ShapeTurnDt
       proposalOf(db, row, links, shape.round),
     ),
     heard: latestHeard(messages),
-    files: listShapeFiles(db, shapeId),
+    files: listShapeFiles(db, shapeId).map(fileDtoOf),
     turn,
   };
 }

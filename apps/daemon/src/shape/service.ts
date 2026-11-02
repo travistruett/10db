@@ -17,7 +17,6 @@ import {
   type ProjectId,
   type ShapeDto,
   type ShapeFileDto,
-  type ShapeFileId,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeMessageId,
@@ -40,7 +39,9 @@ import {
   listShapeFiles,
   listShapeMessages,
   listShapes,
+  listUntoldShapeFiles,
   markSessionStarted,
+  markShapeFilesTold,
   patchShape,
   updateSessionUsage,
   type ShapeFileRow,
@@ -79,7 +80,7 @@ import {
 } from './rounds';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
-import { buildShapeView } from './view';
+import { buildShapeView, fileDtoOf } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
 // Propose and Convert guards, the move to a fresh session when the context fills, and the idle close.
@@ -219,8 +220,6 @@ interface Runtime {
   readonly queue: Turn[];
   /** The builder's edits not yet told to Claude; they go ahead of the next turn. */
   readonly notes: string[];
-  /** Files dropped since the last turn started. */
-  readonly files: ShapeFileId[];
   current: Turn | null;
   live: Live | null;
   /** Resolves the running turn, when the session says it ended. */
@@ -254,7 +253,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       rt = {
         queue: [],
         notes: [],
-        files: [],
         current: null,
         live: null,
         waiting: null,
@@ -423,13 +421,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       }
     });
 
-  /** Takes what has gathered for the conversation's next turn. */
-  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => {
-    const dropped = new Set(rt.files.splice(0));
-    return {
-      notes: rt.notes.splice(0),
-      files: listShapeFiles(state.db, shapeId).filter((f) => dropped.has(f.id)),
-    };
+  /**
+   * Takes what has gathered for the conversation's next turn. Which files Claude has not been told
+   * about is read from the database, so a file dropped before a restart still reaches it.
+   */
+  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
+    notes: rt.notes.splice(0),
+    files: listUntoldShapeFiles(state.db, shapeId),
+  });
+
+  /** Records that the turn just sent carried these files. */
+  const told = (files: readonly ShapeFileRow[]): void => {
+    state.write((ctx) => {
+      markShapeFilesTold(
+        ctx,
+        files.map((f) => f.id),
+      );
+    });
   };
 
   /** Starts the conversation's session with `prompt` as its first message. */
@@ -526,6 +534,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       done: Promise.resolve(),
     };
     rt.live = live;
+    told(files);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -585,11 +594,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
           imagesOf(intake.files),
         );
+        told(intake.files);
       }
     } catch (error) {
-      // The turn never reached Claude, so what was to go ahead of it waits for the next one.
+      // The turn never reached Claude, so what was to go ahead of it waits for the next one; its
+      // files were never marked told.
       rt.notes.unshift(...intake.notes);
-      rt.files.unshift(...intake.files.map((f) => f.id));
       rt.waiting = null;
       log.warn({ err: error, shapeId }, 'shape session could not start');
       notice(
@@ -725,8 +735,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             storedPath,
           }),
         );
-        runtimeOf(shapeId).files.push(row.id);
-        return row;
+        return fileDtoOf(row);
       } catch (error) {
         rmSync(storedPath, { force: true });
         throw error;

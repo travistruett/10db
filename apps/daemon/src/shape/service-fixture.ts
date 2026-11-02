@@ -14,10 +14,13 @@ export interface ServiceFixture {
   readonly c: ConversationFixture;
   readonly state: StateStore;
   readonly adapter: FakeAdapter;
+  /** The service running now; `restart` replaces it. */
   readonly service: ShapeService;
   /** The root the service keeps each conversation's dropped files under. */
   readonly filesDir: string;
   readonly events: DaemonEvent[];
+  /** Closes the service and builds a new one over the same database, as quitting and reopening 10db does. */
+  restart(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -29,40 +32,48 @@ export function createServiceFixture(): ServiceFixture {
   const state = createStateStore(c.store, bus);
   const adapter = new FakeAdapter({});
   const filesDir = mkdtempSync(join(tmpdir(), 'shape-files-'));
-  const service = createShapeService({
-    state,
-    adapter,
-    clock: new ManualClock(),
-    log: silentLogger,
-    filesDir,
-    mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
-    launch: () => ({
-      cwd: '/repo',
-      model: 'opus',
-      effort: 'high',
-      env: {},
-      account: {
-        accountId: mintId('Account'),
-        label: 'Claude plan',
-        kind: 'claude_subscription',
-        identity: null,
-      },
-      access: {
-        checkout: '/repo',
-        home: '/home',
-        protectedReads: [],
-        filesDir,
-        tempRoot: '/tmp/10db',
-      },
-    }),
-  });
+  const make = (): ShapeService =>
+    createShapeService({
+      state,
+      adapter,
+      clock: new ManualClock(),
+      log: silentLogger,
+      filesDir,
+      mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
+      launch: () => ({
+        cwd: '/repo',
+        model: 'opus',
+        effort: 'high',
+        env: {},
+        account: {
+          accountId: mintId('Account'),
+          label: 'Claude plan',
+          kind: 'claude_subscription',
+          identity: null,
+        },
+        access: {
+          checkout: '/repo',
+          home: '/home',
+          protectedReads: [],
+          filesDir,
+          tempRoot: '/tmp/10db',
+        },
+      }),
+    });
+  let service = make();
   return {
     c,
     state,
     adapter,
-    service,
+    get service() {
+      return service;
+    },
     filesDir,
     events,
+    async restart() {
+      await service.close();
+      service = make();
+    },
     async close() {
       await service.close();
       c.close();

@@ -155,6 +155,29 @@ describe('editing a goal’s task', () => {
     });
   });
 
+  it('keeps a pinned task a later round leaves out of its goal, and says so', () => {
+    const m = c.say();
+    propose(goalDraft(m));
+    write((ctx) => {
+      editProposal(ctx, row('density').id, { 'tasks.cards.size': 'L' });
+    });
+
+    // Claude's next round splits `cards` into two tasks, leaving the pinned one out.
+    const next = goalDraft(m) as { goals: { tasks: Record<string, unknown>[] }[] };
+    const goal = must(next.goals[0], 'the goal');
+    goal.tasks = [
+      { key: 'cards-a', title: 'Cards, half', areas: ['api'], size: 'S' },
+      { key: 'cards-b', title: 'Cards, other half', areas: ['api'], size: 'S' },
+      { key: 'bars', title: 'Scrollbars', areas: ['api'], size: 'S' },
+    ];
+    expect(propose(next)).toMatchObject({ ok: true, kept: ['density.tasks.cards'] });
+
+    const tasks = (row('density').body as { tasks: { key: string; size: string }[] }).tasks;
+    expect(tasks.map((t) => t.key).sort()).toEqual(['bars', 'cards', 'cards-a', 'cards-b']);
+    expect(tasks.find((t) => t.key === 'cards')?.size).toBe('L');
+    expect(row('density').pinned).toEqual(['tasks.cards.size']);
+  });
+
   it('refuses a task the goal does not have, changing nothing', () => {
     const m = c.say();
     propose(goalDraft(m));

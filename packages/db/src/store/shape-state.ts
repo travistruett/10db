@@ -18,7 +18,7 @@ import {
   type ShapeState,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import { getShape } from './shapes';
@@ -225,7 +225,12 @@ export function insertShapeFile(
   },
 ): ShapeFileRow {
   const shape = getShape(ctx.tx, input.shapeId);
-  const row: ShapeFileRow = { id: mintId('ShapeFile'), ...input, createdAt: ctx.now };
+  const row: ShapeFileRow = {
+    id: mintId('ShapeFile'),
+    ...input,
+    toldAt: null,
+    createdAt: ctx.now,
+  };
   ctx.tx.insert(schema.shapeFiles).values(row).run();
   ctx.emit({
     type: EventType.ShapeChanged,
@@ -250,6 +255,26 @@ export function listShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
     .where(eq(schema.shapeFiles.shapeId, shapeId))
     .orderBy(asc(schema.shapeFiles.id))
     .all();
+}
+
+/** The conversation's files no turn has carried to Claude yet, oldest first. */
+export function listUntoldShapeFiles(db: DbReader, shapeId: ShapeId): ShapeFileRow[] {
+  return db
+    .select()
+    .from(schema.shapeFiles)
+    .where(and(eq(schema.shapeFiles.shapeId, shapeId), isNull(schema.shapeFiles.toldAt)))
+    .orderBy(asc(schema.shapeFiles.id))
+    .all();
+}
+
+/** Records that a turn carried these files to Claude; one already told keeps its first time. */
+export function markShapeFilesTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
+  if (ids.length === 0) return;
+  ctx.tx
+    .update(schema.shapeFiles)
+    .set({ toldAt: ctx.now })
+    .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.toldAt)))
+    .run();
 }
 
 export function countShapeFiles(db: DbReader, shapeId: ShapeId): number {

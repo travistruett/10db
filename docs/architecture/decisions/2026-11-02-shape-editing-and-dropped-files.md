@@ -11,7 +11,12 @@
   the round that last created, changed or moved it; a change in sources or list order does not move it. The view
   marks a row _new_ when `round == created_round == current` and _changed_ when `round == current` only.
 - **`shape_files`** (same migration) stores each dropped file's name, type, size and path under
-  `<dataDir>/shapes`, which is also the Shape session's read-allowed directory.
+  `<dataDir>/shapes`, which is also the Shape session's read-allowed directory. **`shape_files.told_at`**
+  (migration 0030, generated) is set when a turn first carries the file to Claude. The next turn takes the files
+  with no `told_at` from the database, not from memory, so a file dropped before a restart still reaches a
+  resumed session; a turn that fails to start marks nothing.
+- **A pinned task a round leaves out of its goal is kept**: the stored task is carried into the merged goal with
+  its pinned fields, and `propose_plan` answers it under `kept` as `<goal>.tasks.<task>`.
 - **Files upload as the raw request body**, name in the query and type as the content type, to
   `POST /shapes/:id/files`. Only that route has a 20 MB body limit. Type, size, count and magic bytes are checked
   in the service; a refusal names its reason.

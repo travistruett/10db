@@ -48,7 +48,10 @@ export type ProposeOutcome =
       readonly updated: readonly string[];
       /** Rows the draft left out, now under Earlier. */
       readonly superseded: readonly string[];
-      /** Rows the draft left out that were kept because a field is pinned. */
+      /**
+       * Rows the draft left out that were kept because a field is pinned, and a goal's pinned tasks
+       * the draft left out of it, named `<goal>.tasks.<task>`.
+       */
       readonly kept: readonly string[];
       /** Rows the draft restated that were converted already, which a plan never changes. */
       readonly converted: readonly string[];
@@ -148,15 +151,17 @@ function marksFor(unit: Unit, previous: Record<string, unknown> | null, before: 
 
 /**
  * Holds what the builder pinned: a pinned field keeps its stored value over the draft's, a goal's
- * task fields are pinned as `tasks.<key>.<field>`, and a row pinned as a whole is not restated.
+ * task fields are pinned as `tasks.<key>.<field>`, and a row pinned as a whole is not restated. A
+ * pinned task the draft leaves out of its goal is carried over as stored, and named in `keptTasks`.
  */
 function withPins(
   draft: Record<string, unknown>,
   stored: Record<string, unknown>,
   pinned: readonly string[],
-): Record<string, unknown> {
-  if (pinned.includes(PIN_WHOLE_ROW)) return stored;
+): { readonly body: Record<string, unknown>; readonly keptTasks: readonly string[] } {
+  if (pinned.includes(PIN_WHOLE_ROW)) return { body: stored, keptTasks: [] };
   const merged: Record<string, unknown> = { ...draft };
+  const keptTasks: string[] = [];
   for (const pin of pinned) {
     const [head, taskKey, field] = pin.split('.');
     if (head === 'tasks' && taskKey !== undefined && field !== undefined) {
@@ -164,13 +169,18 @@ function withPins(
       const storedTask = (Array.isArray(stored['tasks']) ? stored['tasks'] : [])
         .map(asRecord)
         .find((t) => t['key'] === taskKey);
-      if (storedTask !== undefined)
+      if (storedTask === undefined) continue;
+      if (draftTasks.some((t) => t['key'] === taskKey))
         merged['tasks'] = draftTasks.map((t) =>
           t['key'] === taskKey ? { ...t, [field]: storedTask[field] } : t,
         );
+      else {
+        merged['tasks'] = [...draftTasks, storedTask];
+        keptTasks.push(taskKey);
+      }
     } else if (head !== undefined && head in stored) merged[head] = stored[head];
   }
-  return merged;
+  return { body: merged, keptTasks };
 }
 
 /** A draft's body, with the source ids it left out filled in from the stored row. */
@@ -208,6 +218,7 @@ export function reconcileDraft(
   const errors: string[] = [];
   const converted: string[] = [];
   const merged: Unit[] = [];
+  const keptTasks: string[] = [];
 
   for (const unit of unitsOf(draft)) {
     const row = byKey.get(unit.key);
@@ -226,11 +237,12 @@ export function reconcileDraft(
       }
     }
     const stored = row?.state === ShapeProposalState.Rejected ? undefined : row;
-    const body = withStoredSources(
-      stored === undefined ? unit.body : withPins(unit.body, asRecord(stored.body), stored.pinned),
-      stored,
-    );
-    merged.push({ ...unit, body });
+    const pinnedBody =
+      stored === undefined
+        ? { body: unit.body, keptTasks: [] }
+        : withPins(unit.body, asRecord(stored.body), stored.pinned);
+    keptTasks.push(...pinnedBody.keptTasks.map((task) => `${unit.key}.tasks.${task}`));
+    merged.push({ ...unit, body: withStoredSources(pinnedBody.body, stored) });
   }
 
   const mergedDraft = draftOf(merged, draft);
@@ -243,7 +255,7 @@ export function reconcileDraft(
   const created: string[] = [];
   const updated: string[] = [];
   const superseded: string[] = [];
-  const kept: string[] = [];
+  const kept: string[] = [...keptTasks];
   const present = new Set(merged.map((u) => u.key));
 
   for (const unit of merged) {

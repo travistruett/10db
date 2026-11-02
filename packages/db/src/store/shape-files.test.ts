@@ -9,6 +9,8 @@ import {
   insertShapeProposal,
   listShapeFiles,
   listShapeProposals,
+  listUntoldShapeFiles,
+  markShapeFilesTold,
   seedProject,
   type Store,
 } from './index';
@@ -59,6 +61,28 @@ describe('shape files', () => {
     ).value;
     store.write((ctx) => insertShapeFile(ctx, file('a.md')));
     expect(countShapeFiles(store.db, other.id)).toBe(0);
+  });
+
+  it('is untold until marked told, and only the files named are marked', () => {
+    const a = store.write((ctx) => insertShapeFile(ctx, file('a.md'))).value;
+    const b = store.write((ctx) => insertShapeFile(ctx, file('b.md'))).value;
+    expect(a.toldAt).toBeNull();
+    expect(listUntoldShapeFiles(store.db, shapeId).map((f) => f.name)).toEqual(['a.md', 'b.md']);
+    const at = store.write((ctx) => {
+      markShapeFilesTold(ctx, [a.id]);
+      return ctx.now;
+    }).value;
+    expect(getShapeFile(store.db, a.id).toldAt).toBe(at);
+    expect(getShapeFile(store.db, b.id).toldAt).toBeNull();
+    expect(listUntoldShapeFiles(store.db, shapeId).map((f) => f.name)).toEqual(['b.md']);
+  });
+
+  it('marks nothing when no file is named', () => {
+    store.write((ctx) => insertShapeFile(ctx, file('a.md')));
+    store.write((ctx) => {
+      markShapeFilesTold(ctx, []);
+    });
+    expect(listUntoldShapeFiles(store.db, shapeId)).toHaveLength(1);
   });
 });
 

@@ -1072,6 +1072,8 @@ export const shapeFiles = sqliteTable(
     size: integer('size').notNull(),
     /** Where the daemon copied it, under the data directory. */
     storedPath: text('stored_path').notNull(),
+    /** When a turn first carried it to Claude; null until then, so a restart still tells it. */
+    toldAt: text('told_at'),
     createdAt: createdAt(),
   },
   (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
