@@ -1,5 +1,5 @@
-import { existsSync, lstatSync, readdirSync, watch as fsWatch, type Dirent } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { existsSync, lstatSync, watch as fsWatch } from 'node:fs';
+import { join, sep } from 'node:path';
 import {
   ACTIVE_STATES,
   ClaimKind,
@@ -54,6 +54,7 @@ import {
   stampOrReason,
   writeStamp,
 } from './allowed-writes';
+import { filesUnderBounded as filesUnder } from './dir-files';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -82,8 +83,6 @@ interface ExcusedWrite {
 }
 /** The most excused writes kept; the oldest go first. */
 const MAX_EXCUSED_WRITES = 500;
-/** The most files a sensitive directory may hold and still be read as the base's own; more cards it. */
-const MAX_DIR_FILES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
 /**
  * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
@@ -694,28 +693,6 @@ export function createWatcher(deps: {
     for (const base of bases)
       if ((await deps.git.blobAt(root, base, rel).catch(() => null)) === head) return true;
     return false;
-  }
-
-  /**
-   * The files under directory `rel`, relative to the checkout, leaving out Claude Code's bookkeeping; null
-   * when it holds anything but files and directories (a link, say) or more than `MAX_DIR_FILES` files.
-   */
-  function filesUnder(root: string, rel: string): string[] | null {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(join(root, rel), { recursive: true, withFileTypes: true });
-    } catch {
-      return null;
-    }
-    const files: string[] = [];
-    for (const entry of entries) {
-      if (entry.isDirectory()) continue;
-      const file = relative(root, join(entry.parentPath, entry.name)).split(sep).join('/');
-      if (isInsideClaudeCodeBookkeeping(file)) continue;
-      if (!entry.isFile() || files.length >= MAX_DIR_FILES) return null;
-      files.push(file);
-    }
-    return files;
   }
 
   /**
