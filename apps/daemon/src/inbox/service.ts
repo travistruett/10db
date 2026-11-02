@@ -26,6 +26,7 @@ import {
 import {
   findOpenByFoldKey,
   getInboxItem,
+  getProject,
   getProposal,
   insertDecision,
   insertInboxItem,
@@ -40,6 +41,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { storableRule } from '../permissions';
+import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
@@ -251,11 +253,16 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     rationale: answer.note ?? null,
   });
   if (accepted && proposal.kind === ProposalKind.NewTask) {
-    insertTaskFromProposal(ctx, {
-      proposalId: proposal.id,
-      projectId: proposal.projectId,
-      ...taskFieldsFromProposal(proposal),
-    });
+    // A proposal names no areas or risk tags, so it takes the project's default, by the same rule as any task.
+    insertTaskFromProposal(
+      ctx,
+      {
+        proposalId: proposal.id,
+        projectId: proposal.projectId,
+        ...taskFieldsFromProposal(proposal),
+      },
+      proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags: [] }),
+    );
   }
 }
 
