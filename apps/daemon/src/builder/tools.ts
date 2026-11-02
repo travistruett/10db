@@ -58,6 +58,7 @@ export function createBuilderTools(
         name: project.name,
         areas: project.areas.map((area) => ({ name: area.name, globs: area.globs })),
         hazards: project.hazards.map((hazard) => ({ name: hazard.name, globs: hazard.globs })),
+        isolate: project.isolate,
         columns: services
           .listBoardColumns(project.id)
           .map((column) => ({ id: column.id, name: column.name })),
