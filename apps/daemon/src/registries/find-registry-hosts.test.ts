@@ -549,25 +549,26 @@ const FLOOR_MS = 2;
 /**
  * How many times longer `run` takes on the crafted text at its full size than at 1/GROWTH of it, both
  * measured here, so a loaded machine slows both and the ratio holds. `prepare` builds a run's input
- * outside the timing.
+ * outside the timing. `now` is the clock, replaced only by the tests of this measure.
  */
 async function timeGrowth<T>(
   crafted: (typeof CRAFTED)[number],
   prepare: (text: string) => T,
   run: (input: T) => unknown,
   budgetMs = BUDGET_MS,
+  now: () => number = () => performance.now(),
 ): Promise<number> {
   async function timed(input: T): Promise<number> {
-    const started = performance.now();
+    const started = now();
     await run(input);
-    return performance.now() - started;
+    return now() - started;
   }
   const small = prepare(crafted.text(crafted.size / GROWTH));
   const large = prepare(crafted.text(crafted.size));
   await timed(small); // warms the code before anything counts
   let best = Infinity;
-  const deadline = performance.now() + budgetMs;
-  for (let attempt = 0; attempt < ATTEMPTS && performance.now() < deadline; attempt++) {
+  const deadline = now() + budgetMs;
+  for (let attempt = 0; attempt < ATTEMPTS && now() < deadline; attempt++) {
     const smallMs = Math.max(await timed(small), FLOOR_MS);
     best = Math.min(best, (await timed(large)) / smallMs);
     if (best < MAX_TIME_GROWTH) break; // linear growth is shown: more pairs only cost time
@@ -592,19 +593,22 @@ describe('the time-growth measure', () => {
   });
 
   it('starts no new pair once its budget is spent, and reports the growth it saw', async () => {
+    // A clock of its own, moved only by the runs, so timer lag under load cannot change the result.
+    let clock = 0;
     let runs = 0;
     const growth = await timeGrowth(
       sample,
       (text) => text,
-      async (text) => {
+      (text) => {
         runs++;
-        // Quadratic: the large text takes GROWTH ** 2 times as long as the small one.
-        await new Promise((resolve) => setTimeout(resolve, (text.length / 10) ** 2 / 40));
+        // Quadratic: the large text takes GROWTH ** 2 times as long as the small one (2.5 and 160 ms).
+        clock += (text.length / 10) ** 2 / 40;
       },
-      100,
+      100, // spent by the first pair, so no second pair starts
+      () => clock,
     );
-    expect(growth).toBeGreaterThanOrEqual(MAX_TIME_GROWTH);
-    expect(runs).toBeLessThan(1 + 2 * ATTEMPTS);
+    expect(growth).toBe(GROWTH ** 2);
+    expect(runs).toBe(3); // one warm-up run, then one small and one large
   });
 });
 
