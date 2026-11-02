@@ -458,6 +458,21 @@ describe('install-app.sh', () => {
       expect(gh().some((call) => call.startsWith('gh run download 78 '))).toBe(true);
     });
 
+    it('stops when the cancelled run had started, even with a newer run queued', () => {
+      // cancel-in-progress is false, so only the builder cancels a build that is running.
+      const result = install([], {
+        ...waiting,
+        STUB_STARTED_RUNS: '77',
+        STUB_ACTIVE_RUN_AFTER_CANCEL: '78',
+      });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('ended in cancelled');
+      expect(result.stderr).toContain('77');
+      expect(result.stdout).not.toContain('replaced by a newer run');
+      expect(gh().some((call) => call.startsWith('gh run download'))).toBe(false);
+      expectUntouched();
+    });
+
     it('gives up after three cancelled runs in a row, naming the last', () => {
       const result = install([], {
         STUB_SUCCESS_RUN: '',
