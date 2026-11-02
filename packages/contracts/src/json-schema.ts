@@ -57,6 +57,7 @@ import {
   GoalCriterionDto,
   GoalDigestDto,
   GoalDto,
+  GoalListDto,
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
@@ -174,6 +175,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'goal-criterion-dto': GoalCriterionDto,
   'goal-digest-dto': GoalDigestDto,
   'goal-dto': GoalDto,
+  'goal-list-dto': GoalListDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
 };

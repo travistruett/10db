@@ -16,6 +16,7 @@ import {
   FlowInput,
   FlowPatch,
   FolderInspectInput,
+  GoalId,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
@@ -183,6 +184,12 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/batches', (c) =>
       c.json(deps.services.listBatches(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/goals', (c) =>
+      c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/goals/:goalId/digest', (c) =>
+      c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),
     )
     .post(
       '/projects/:projectId/batches',
