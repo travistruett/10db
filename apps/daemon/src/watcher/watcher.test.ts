@@ -28,6 +28,7 @@ import {
   copyHazardNames,
   createTestStore,
   insertBatch,
+  insertToolOp,
   insertPermissionRule,
   insertTask,
   insertWorkstream,
@@ -1168,11 +1169,25 @@ describe('worktree checkouts', () => {
         });
       };
       let opCount = 0;
-      /** Commits `rel` as the commit tool would, with its op trailer. */
-      const commit = (root: string, rel: string) => {
+      /** Commits `rel` with an op trailer, as the commit tool would, and returns the commit's sha. */
+      const trailerCommit = (root: string, rel: string): string => {
         git(root, 'add', rel);
         opCount += 1;
         git(root, 'commit', '-q', '-m', `Add ${rel}\n\n10db-Op: op-watch-${String(opCount)}`);
+        return git(root, 'rev-parse', 'HEAD').toString().trim();
+      };
+      /** Commits `rel` as the commit tool would for `lane`: with its op trailer, recorded as the lane's call. */
+      const commit = (root: string, rel: string, lane: { workstream: { id: WorkstreamId } }) => {
+        const sha = trailerCommit(root, rel);
+        state.write((ctx) => {
+          insertToolOp(ctx, {
+            workstreamId: lane.workstream.id,
+            sessionId: mintId('Session'),
+            opId: `op-watch-${String(opCount)}`,
+            tool: 'commit',
+            result: { sha, alreadyCommitted: false },
+          });
+        });
       };
       /** Commits `rel` as the builder would, with no op trailer. */
       const builderCommit = (root: string, rel: string) => {
@@ -1226,6 +1241,21 @@ describe('worktree checkouts', () => {
           expect(flags()).toEqual([]);
         });
 
+        it("resolves once the lane covers its writes, although a pull brought in another lane's commit with an op trailer", async () => {
+          const lane = bareLane();
+          watcher.sync();
+          writeUi();
+          await watcher.flush();
+          expect(bulk()).toHaveLength(1);
+          // A commit another lane made elsewhere with the commit tool, fast-forwarded in: its trailer stays,
+          // but no lane here recorded it.
+          writeAt(repo.path, 'docs/pulled.md');
+          trailerCommit(repo.path, 'docs/pulled.md');
+          grantUi(lane);
+          await watcher.flush();
+          expect(flags()).toEqual([]);
+        });
+
         it('stays open when a file the lane itself committed is covered by no claim', async () => {
           const lane = bareLane();
           watcher.sync();
@@ -1233,7 +1263,7 @@ describe('worktree checkouts', () => {
           writeAt(repo.path, 'zzz/last.ts');
           await watcher.flush();
           expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
-          commit(repo.path, 'zzz/last.ts');
+          commit(repo.path, 'zzz/last.ts', lane);
           writeAt(repo.path, 'docs/builder.md');
           builderCommit(repo.path, 'docs/builder.md');
           grantUi(lane);
@@ -1250,7 +1280,7 @@ describe('worktree checkouts', () => {
         writeAt(lane.path, 'zzz/last.ts');
         await watcher.flush();
         expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
-        commit(lane.path, 'zzz/last.ts');
+        commit(lane.path, 'zzz/last.ts', lane);
         grant(lane, 'ui');
         await watcher.flush();
         expect(bulk()).toHaveLength(1);
@@ -1262,7 +1292,7 @@ describe('worktree checkouts', () => {
         watcher.sync();
         writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
         await watcher.flush();
-        commit(lane.path, 'src/ui/file-029.ts');
+        commit(lane.path, 'src/ui/file-029.ts', lane);
         grant(lane, 'ui');
         await watcher.flush();
         expect(flags()).toEqual([]);
@@ -1284,13 +1314,13 @@ describe('worktree checkouts', () => {
         it("resolves once the lane's claim covers all its writes", async () => {
           const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
           baseAt(lane);
-          launchIn(lane.batch, 'Beta', 'docs');
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
           watcher.sync();
           writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
           await watcher.flush();
           expect(bulk()).toHaveLength(1);
           writeAt(lane.path, 'docs/b.md');
-          commit(lane.path, 'docs/b.md');
+          commit(lane.path, 'docs/b.md', beta);
           grant(lane, 'ui');
           await watcher.flush();
           expect(flags()).toEqual([]);
@@ -1299,15 +1329,15 @@ describe('worktree checkouts', () => {
         it('stays open when an unlisted write, committed or not, is covered by no claim', async () => {
           const lane = inWorktree('Alpha', 'ui', WorkstreamState.Running, false);
           baseAt(lane);
-          launchIn(lane.batch, 'Beta', 'docs');
+          const beta = launchIn(lane.batch, 'Beta', 'docs');
           watcher.sync();
           writeMany(lane.path, 'src/ui', STRAY_BULK_THRESHOLD + 10);
           writeAt(lane.path, 'zzz/last.ts');
           await watcher.flush();
           expect(bulk()[0]?.detail?.['paths']).not.toContain('zzz/last.ts');
           writeAt(lane.path, 'docs/b.md');
-          commit(lane.path, 'docs/b.md');
-          commit(lane.path, 'zzz/last.ts');
+          commit(lane.path, 'docs/b.md', beta);
+          commit(lane.path, 'zzz/last.ts', lane);
           grant(lane, 'ui');
           await watcher.flush();
           expect(bulk()).toHaveLength(1);

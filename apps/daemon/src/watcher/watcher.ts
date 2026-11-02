@@ -16,6 +16,7 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
+  commitShasOf,
   copyHazardNames,
   getAppSetting,
   getBatch,
@@ -438,8 +439,9 @@ export function createWatcher(deps: {
    * sensitive and, when it lists fewer than it counts, nothing changed since the lane's base lies outside
    * every claim in the checkout (the lane's own and other watched lanes'), since the paths it leaves out
    * can't be read from the card. What counts as changed is the uncommitted changes plus the files of commits
-   * made through the commit tool (those with a 10db-Op trailer); commits without one, such as the builder's
-   * own or a pull, are left out. The listed paths need the lane's own claims.
+   * the lanes of this checkout made through the commit tool (a 10db-Op trailer and a sha a lane recorded);
+   * other commits, such as the builder's own or ones a pull brought in, are left out. The listed paths need
+   * the lane's own claims.
    */
   async function resolveCovered(lane: WorkstreamId): Promise<void> {
     if (stopped) return;
@@ -466,17 +468,26 @@ export function createWatcher(deps: {
       if (unlistedCovered !== null) return unlistedCovered;
       try {
         const base = getWorkstreamRow(db, lane).baseHead ?? 'HEAD';
+        // The commits the lanes of this checkout made through the commit tool, by the sha each call
+        // returned: a commit that other lanes made elsewhere and a pull brought in keeps its trailer too.
+        const scope = worktreeBatchOf(ws);
+        const made = commitShasOf(
+          db,
+          listWorkstreams(db, { projectId: ws.projectId })
+            .filter((w) => worktreeBatchOf(w) === scope)
+            .map((w) => w.id),
+        );
         const changed = withoutBookkeeping(
           ws.projectId,
           root,
-          await deps.git.opChangedFilesSince(root, base),
+          await deps.git.opChangedFilesSince(root, base, made),
         );
-        // Excluded: files only commits with no 10db-Op trailer changed since the base (the builder's own
-        // commits, and merges or pulls that brought commits in), so they never keep the card open. Counted:
-        // every uncommitted change in the checkout, and every file a commit made through the commit tool
-        // changed, whichever lane made it; a path another watched lane's claim covers is that lane's to
-        // answer for, so it counts as covered. A builder edit not yet committed still counts, and so does a
-        // file the builder committed with an op trailer in its message.
+        // Excluded: files only other commits changed since the base: the builder's own (with no 10db-Op
+        // trailer), merges, and commits a fast-forward or rebase-pull brought in, trailers and all, so they
+        // never keep the card open. Counted: every uncommitted change in the checkout, and every file a
+        // commit made through the commit tool by a lane of this checkout changed, whichever lane; a path
+        // another watched lane's claim covers is that lane's to answer for, so it counts as covered. A
+        // builder edit not yet committed still counts.
         unlistedCovered =
           straysIn(
             project,

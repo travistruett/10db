@@ -222,7 +222,7 @@ describe('history queries', () => {
   it('lists, among the committed files, only those of commits that carry an op trailer', async () => {
     const base = await git.head(repo.path);
     write('a.txt', 'a');
-    await git.commit({
+    const own = await git.commit({
       repo: repo.path,
       paths: ['a.txt'],
       message: 'a',
@@ -235,7 +235,34 @@ describe('history queries', () => {
     rawGit('commit', '-q', '-m', 'builder');
     write('c.txt', 'c');
     expect(await git.changedFilesSince(repo.path, base)).toEqual(['a.txt', 'builder.txt', 'c.txt']);
-    expect(await git.opChangedFilesSince(repo.path, base)).toEqual(['a.txt', 'c.txt']);
+    expect(await git.opChangedFilesSince(repo.path, base, [own.sha])).toEqual(['a.txt', 'c.txt']);
+  });
+
+  it('leaves out a commit with an op trailer that no lane here made, as a pull brings in', async () => {
+    const base = await git.head(repo.path);
+    write('a.txt', 'a');
+    const own = await git.commit({
+      repo: repo.path,
+      paths: ['a.txt'],
+      message: 'a',
+      opId: 'op-history-here',
+      branch: 'main',
+    });
+    // Another lane's commit, fast-forwarded in: it keeps its trailer but its sha is not ours.
+    write('pulled.txt', 'p');
+    const pulled = await git.commit({
+      repo: repo.path,
+      paths: ['pulled.txt'],
+      message: 'pulled',
+      opId: 'op-history-elsewhere',
+      branch: 'main',
+    });
+    expect(await git.opChangedFilesSince(repo.path, base, [own.sha])).toEqual(['a.txt']);
+    expect(await git.opChangedFilesSince(repo.path, base, [own.sha, pulled.sha])).toEqual([
+      'a.txt',
+      'pulled.txt',
+    ]);
+    expect(await git.opChangedFilesSince(repo.path, base, [])).toEqual([]);
   });
 
   it('lists the files committed between two commits, not what is uncommitted', async () => {
