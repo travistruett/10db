@@ -47,7 +47,14 @@ import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
 import type { Logger } from '../log';
-import { CLAIM_POLL_MS, CLAIM_WAIT_SLICE_MS, ClaimWaits, type ClaimResult } from './claim-wait';
+import {
+  CLAIM_POLL_MS,
+  CLAIM_WAIT_SLICE_MS,
+  ClaimWaits,
+  deadlockWaitInstruction,
+  yieldRefusal,
+  type ClaimResult,
+} from './claim-wait';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -86,7 +93,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts.',
   request_claim:
-    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means waiting would deadlock (the holder is waiting for a claim you hold), or, for the migrations hazard, that your branch could not take its base first: follow the instruction it returns.',
+    'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
@@ -131,8 +138,8 @@ export function createToolHandlers(
   };
 
   /** A claim call's settled result, recorded under its opId. */
-  const recordClaim = (opId: string, settled: ClaimResult): Out<'request_claim'> =>
-    deps.state.write((ctx) => {
+  const recordClaim = (opId: string, settled: ClaimResult): Out<'request_claim'> => {
+    const out = deps.state.write((ctx) => {
       // Two calls with the same opId can share one wait; the first records it, the second reads it.
       const recorded = findToolOp(ctx.tx, workstreamId, opId);
       if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
@@ -146,11 +153,15 @@ export function createToolHandlers(
               heldBy: settled.heldBy,
               inboxId: settled.inboxId,
               waiting: false,
-              instruction: null,
+              instruction: settled.instruction,
             },
         ctx,
       );
     });
+    // The agent now knows which claims the builder made its task give up.
+    if (!settled.granted && settled.yielded) claimWaits.yieldDelivered(workstreamId);
+    return out;
+  };
 
   /**
    * Brings the base into the task's branch before the migrations hazard just granted counts, so a
@@ -349,6 +360,9 @@ export function createToolHandlers(
           `No area or hazard named ${input.name}. Areas: ${areaNames.join(', ')}. Hazards: ${hazardNames.join(', ')}`,
         );
       }
+      // Claims the builder made this task give up are told before anything else is granted.
+      const given = claimWaits.pendingYield(workstreamId);
+      if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
       // one wait; a call answers "still waiting" before the session's tool timeout, and is not recorded,
       // so a retry with the same opId joins the wait again.
@@ -374,7 +388,15 @@ export function createToolHandlers(
       try {
         let result = await Promise.race([wait.done, slice]);
         if (result === 'slice') {
-          const { heldBy } = wait.state;
+          const { heldBy, inboxId } = wait.state;
+          if (heldBy !== null && inboxId !== null)
+            return {
+              granted: false,
+              waiting: true,
+              heldBy,
+              inboxId,
+              instruction: deadlockWaitInstruction(db, kind, input.name, heldBy),
+            };
           if (heldBy !== null)
             return {
               granted: false,
