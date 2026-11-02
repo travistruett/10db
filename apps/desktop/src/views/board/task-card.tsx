@@ -6,8 +6,9 @@ import {
   type TaskId,
   type WorkstreamDto,
 } from '@10db/contracts';
-import { Badge, Box, Group, Paper, Stack, Text } from '@mantine/core';
-import { PlacementBadge } from './placement-badge';
+import { Box, Group, Paper, Stack, Text, Tooltip } from '@mantine/core';
+import { ciResult } from './ci-line';
+import { IndicatorRow, type Indicator } from './indicator-row';
 import type { StartNote } from './start-note';
 import { reviewSentBackLine, shippedAtLimitLine, taskState, type TaskState } from './task-state';
 
@@ -23,18 +24,14 @@ export interface TaskCardProps {
   readonly gateCommand?: string | null | undefined;
   /** Titles and statuses of the project's tasks, for the dependency marker. */
   readonly peers: ReadonlyMap<TaskId, Pick<TaskDto, 'title' | 'status' | 'boardStatus'>>;
-  /** The pull request of the batch that shipped a finished task. */
-  readonly pullRequest?: string | undefined;
-  /** Where the work will land, for a project that delivers by pull request. */
-  readonly landing?: string | undefined;
   /** A Start asked for and not yet answered, or refused; it takes the place of the task's own line. */
   readonly startNote?: StartNote | null | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
   /** The title of the goal the task belongs to, shown dimmed above its title. */
   readonly goalTitle?: string | undefined;
-  /** Whether the task's placement can still change; only then does the card say where it runs. */
-  readonly placementShown?: boolean | undefined;
+  /** How many tasks share the task's batch (`batchTaskCount`); more than one shows the shared-branch indicator. */
+  readonly batchTaskCount?: number | undefined;
 }
 
 /**
@@ -72,6 +69,7 @@ export function cardSummary(
   place?: number,
   batches?: readonly BatchDto[],
   placement: string | null = null,
+  sharedWith = 1,
 ): string {
   const waits = waitsOn(task, peers);
   const criteria = task.acceptanceCriteria.length;
@@ -84,10 +82,14 @@ export function cardSummary(
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     placement ? `Runs in ${placement}.` : null,
+    sharedWith > 1
+      ? `Shares its branch with ${String(sharedWith - 1)} other ${sharedWith === 2 ? 'task' : 'tasks'}.`
+      : null,
     waits.length > 0 ? `Waits on ${waits.join(', ')}.` : null,
     landing ? `${landing}.` : null,
     task.status === TaskStatus.Cancelled ? 'Cancelled.' : null,
-    state ? `${state.line}.` : null,
+    state ? (state.line.endsWith('.') ? state.line : `${state.line}.`) : null,
+    state?.detail ? `Reason: ${state.detail.replace(/\.$/, '')}.` : null,
     sentBack ? `${sentBack}.` : null,
     atLimit ? `${atLimit}.` : null,
   ]
@@ -95,32 +97,73 @@ export function cardSummary(
     .join(' ');
 }
 
-/** A board card: title, areas, unfinished dependencies and, in one line, what the task is doing (spec §10); room for a shipped pull request's link. */
+/** The state colors whose line the card shows: waiting on the builder, failed or paused (spec §5). */
+const LINE_COLORS: ReadonlySet<string> = new Set(['yellow', 'red', 'orange']);
+
+/**
+ * The card's indicators, in the order they show (readable board spec §4). Each kind is derived from data
+ * the card already has; a later kind is one more entry here.
+ */
+function indicatorsOf(
+  task: TaskDto,
+  peers: TaskCardProps['peers'],
+  batch: BatchDto | undefined,
+  batches: readonly BatchDto[],
+  sharedWith: number,
+): Indicator[] {
+  const waits = waitsOn(task, peers);
+  const ci = ciResult(batch, batches);
+  return [
+    sharedWith > 1
+      ? {
+          kind: 'shared-branch',
+          label: 'Shared branch',
+          color: 'gray',
+          tooltip: `${String(sharedWith)} tasks share this branch`,
+        }
+      : null,
+    ci
+      ? {
+          kind: 'ci',
+          label: ci === 'passed' ? 'CI passed' : 'CI failed',
+          color: ci === 'passed' ? 'green' : 'red',
+        }
+      : null,
+    waits.length > 0
+      ? { kind: 'waits-on', label: 'Waits on', color: 'gray', tooltip: waits.join(', ') }
+      : null,
+    task.status === TaskStatus.Cancelled
+      ? { kind: 'cancelled', label: 'Cancelled', color: 'gray' }
+      : null,
+  ].filter((indicator) => indicator !== null);
+}
+
+/**
+ * A board card (readable board spec §5): the goal label, the headline (the title when there is none),
+ * the why, a status line only when the task needs the builder or has failed, then the indicator row.
+ * Everything else about the task is in its drawer; `cardSummary` still speaks it.
+ */
 export function TaskCard({
   task,
   workstream,
   batch,
-  batches,
+  batches = [],
   gateCommand = null,
   peers,
-  pullRequest,
-  landing,
   startNote = null,
   place,
   goalTitle,
-  placementShown = false,
+  batchTaskCount = 1,
 }: TaskCardProps) {
-  const waits = waitsOn(task, peers);
-  const criteria = task.acceptanceCriteria.length;
   const state = startNote
     ? noteState(startNote)
     : taskState(workstream, batch, gateCommand, place, batches);
-  const sentBack = reviewSentBackLine(workstream);
-  const atLimit = shippedAtLimitLine(workstream);
-  // Queued keeps the plain border; the other states take their DESIGN.md color as a border, thicker
-  // when the builder's turn: no fill, no stripe, no animation.
+  // The border takes the state's DESIGN.md color whatever the line says, thicker when it is the builder's
+  // turn: no fill, no stripe, no animation. Queued keeps the plain border.
   const colored = state !== null && state.color !== 'gray';
   const waiting = state?.color === 'yellow';
+  const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
+  const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount);
   return (
     <Paper
       withBorder
@@ -143,73 +186,53 @@ export function TaskCard({
             {goalTitle}
           </Text>
         ) : null}
-        {/* The card's menu sits over the top-right corner, outside this element; the title leaves room. */}
-        <Text size="sm" fw={500} pr={28}>
-          {task.title}
+        {/* The card's menu sits over the top-right corner, outside this element; the headline leaves room. */}
+        <Text size="sm" fw={500} pr={28} lineClamp={3}>
+          {task.headline || task.title}
         </Text>
-        <Group gap={6}>
-          {task.areas.map((area) => (
-            <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-              {area}
-            </Badge>
-          ))}
-          {criteria > 0 ? (
-            <Text
-              size="xs"
-              c="dimmed"
-            >{`${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}`}</Text>
-          ) : null}
-          {task.status === TaskStatus.Cancelled ? (
-            <Badge size="sm" color="gray" variant="light">
-              Cancelled
-            </Badge>
-          ) : null}
-          {placementShown ? <PlacementBadge task={task} /> : null}
-        </Group>
-        {waits.length > 0 ? (
-          <Text size="xs" c="dimmed">{`Waits on ${waits.join(', ')}`}</Text>
-        ) : null}
-        {landing ? (
-          <Text size="xs" c="dimmed" data-testid="landing-line">
-            {landing}
+        {task.why ? (
+          <Text size="xs" c="dimmed" lineClamp={2} data-testid="task-card-why">
+            {task.why}
           </Text>
         ) : null}
-        {state ? (
+        {line ? (
           <Group gap={6} wrap="nowrap" align="flex-start">
             <Box
               data-testid="state-dot"
-              data-color={state.color}
+              data-color={line.color}
               mt={5}
               w={8}
               h={8}
               style={{
                 flex: 'none',
                 borderRadius: '50%',
-                background: `var(--mantine-color-${state.color}-filled)`,
+                background: `var(--mantine-color-${line.color}-filled)`,
               }}
             />
-            {/* A refusal's reason is shown whole: it is the one thing the builder came to read. */}
-            <Text
-              size="sm"
-              fw={waiting ? 600 : 400}
-              {...(startNote?.kind === 'refused' ? {} : { lineClamp: 2 })}
+            {/* A refusal's reason and a failure's line are shown whole: each is the one thing the builder came to read. */}
+            <Tooltip
+              label={line.detail}
+              disabled={!line.detail}
+              withArrow
+              multiline
+              maw={360}
+              openDelay={300}
             >
-              {state.line}
-            </Text>
+              <Text
+                size="sm"
+                fw={waiting ? 600 : 400}
+                {...(startNote?.kind === 'refused' || line.detail !== undefined
+                  ? {}
+                  : { lineClamp: 2 })}
+              >
+                {line.line}
+              </Text>
+            </Tooltip>
           </Group>
         ) : null}
-        {sentBack ? (
-          <Text size="xs" c="dimmed">
-            {sentBack}
-          </Text>
-        ) : null}
-        {atLimit ? (
-          <Text size="xs" c="orange" lineClamp={3}>
-            {atLimit}
-          </Text>
-        ) : null}
-        {/* The pull request or Inbox link is laid over this space by the board, outside the card's button. */}
-        {pullRequest || startNote?.inbox ? <div style={{ height: 20 }} /> : null}
+        <IndicatorRow indicators={indicators} />
+        {/* The Inbox link is laid over this space by the board, outside the card's button. */}
+        {startNote?.inbox ? <div style={{ height: 20 }} /> : null}
       </Stack>
     </Paper>
   );

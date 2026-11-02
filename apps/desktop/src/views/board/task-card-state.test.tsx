@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { theme } from '../../theme';
 import { cardSummary, TaskCard } from './task-card';
+import { failureLine } from './task-state';
 
 function card(props: Partial<Parameters<typeof TaskCard>[0]>) {
   render(
@@ -15,31 +16,7 @@ function card(props: Partial<Parameters<typeof TaskCard>[0]>) {
 }
 
 describe('TaskCard placement', () => {
-  it.each([
-    { mode: 'shared', label: 'Your folder' },
-    { mode: 'worktree', label: 'Separate copy' },
-  ] as const)('shows $label for a $mode task while its placement is open', ({ mode, label }) => {
-    card({ task: taskDto({ workspaceMode: mode }), placementShown: true });
-    expect(screen.getByTestId('placement-badge').textContent).toBe(label);
-  });
-
-  it('shows no badge once the placement is past changing', () => {
-    card({ task: taskDto({ workspaceMode: 'worktree' }), placementShown: false });
-    expect(screen.queryByTestId('placement-badge')).toBeNull();
-    card({ task: taskDto({ workspaceMode: 'worktree' }) });
-    expect(screen.queryByTestId('placement-badge')).toBeNull();
-  });
-
-  it('gives the reason as the badge tooltip when there is one', async () => {
-    card({
-      task: taskDto({ workspaceMode: 'worktree', placementReason: 'touches migrations' }),
-      placementShown: true,
-    });
-    expect(screen.queryByText('touches migrations')).toBeNull();
-    fireEvent.mouseEnter(screen.getByTestId('placement-badge'));
-    expect(await screen.findByText('touches migrations')).toBeTruthy();
-  });
-
+  // The placement badge left the card face for the drawer (readable board spec §5).
   it('speaks the placement in the card summary', () => {
     expect(
       cardSummary(
@@ -67,14 +44,15 @@ describe('TaskCard state', () => {
         steps: [stepDto({ personaName: 'Implementer' }), stepDto()],
       }),
     });
-    expect(screen.getAllByText('Building · step 1 of 2')).toHaveLength(1);
+    // Blue says it by the border alone (readable board spec §5); the line is for a screen reader.
+    expect(screen.queryByText('Building · step 1 of 2')).toBeNull();
+    expect(screen.getByTestId('task-card').getAttribute('data-state-color')).toBe('blue');
     expect(screen.queryByText('Running')).toBeNull();
     expect(screen.queryByText(/Implementer/)).toBeNull();
     expect(screen.queryByText(/sonnet@/)).toBeNull();
   });
 
   it.each([
-    { state: 'RUNNING', color: 'blue' },
     { state: 'WAITING_HUMAN', color: 'yellow' },
     { state: 'PAUSED_LIMIT', color: 'orange' },
     { state: 'FAILED', color: 'red' },
@@ -141,9 +119,9 @@ describe('TaskCard state', () => {
         ],
       });
 
-    it('counts the rejections against the retry limit', () => {
+    it('leaves the card face for the drawer', () => {
       card({ workstream: reviewed(2) });
-      expect(screen.getByText('Review sent back 2 of 3')).toBeTruthy();
+      expect(screen.queryByText(/Review sent back/)).toBeNull();
     });
 
     it('says it to a screen reader too', () => {
@@ -195,9 +173,9 @@ describe('TaskCard state', () => {
     const LINE =
       'Shipped at the retry limit with open findings. Follow-up task: Resolve the open findings of "Add the badge"';
 
-    it('says so on the card and names the follow-up task', () => {
+    it('leaves the card face for the drawer', () => {
       card({ workstream: shipped() });
-      expect(screen.getByText(LINE)).toBeTruthy();
+      expect(screen.queryByText(/retry limit/)).toBeNull();
     });
 
     it('says it to a screen reader too', () => {
@@ -216,12 +194,11 @@ describe('TaskCard state', () => {
           followUpTitle: 'Resolve the open QA findings of "Add the badge"',
         },
       });
-      card({ workstream: { ...workstream, steps: [...workstream.steps, qa] } });
       expect(
-        screen.getByText(
-          'Shipped at the retry limit with open findings. Follow-up tasks: Resolve the open findings of "Add the badge"; Resolve the open QA findings of "Add the badge"',
-        ),
-      ).toBeTruthy();
+        cardSummary(taskDto(), { ...workstream, steps: [...workstream.steps, qa] }, new Map()),
+      ).toContain(
+        'Shipped at the retry limit with open findings. Follow-up tasks: Resolve the open findings of "Add the badge"; Resolve the open QA findings of "Add the badge".',
+      );
     });
 
     it('says nothing for a task that did not ship at the limit', () => {
@@ -230,8 +207,49 @@ describe('TaskCard state', () => {
     });
   });
 
-  it('names the gate command while it checks', () => {
+  describe('a failed task', () => {
+    const REASON =
+      'The review step ended without calling complete_step: its last turn ended normally.';
+    it.each([
+      'no_result',
+      'gate_failed',
+      'session_failed',
+      'retry_limit',
+      'rejected_at_limit',
+      null,
+    ] as const)(
+      'says a %s failure in plain words, with the raw reason as its tooltip',
+      async (kind) => {
+        const workstream = workstreamDto({
+          state: 'FAILED',
+          failureKind: kind,
+          failureReason: REASON,
+          steps: [stepDto({ status: 'done' }), stepDto({ role: 'review', status: 'failed' })],
+          stepIndex: 1,
+        });
+        card({ workstream });
+        const line = screen.getByText(failureLine(workstream));
+        expect(line.textContent).toMatch(/Retry /);
+        expect(screen.queryByText(REASON)).toBeNull();
+        fireEvent.mouseEnter(line);
+        expect(await screen.findByText(REASON)).toBeTruthy();
+      },
+    );
+
+    it('speaks the plain line and the raw reason to a screen reader', () => {
+      const workstream = workstreamDto({
+        state: 'FAILED',
+        failureKind: 'gate_failed',
+        failureReason: 'The gate failed 4 times (last exit 2)',
+      });
+      const summary = cardSummary(taskDto(), workstream, new Map());
+      expect(summary).toContain(`${failureLine(workstream)} `);
+      expect(summary).toContain('Reason: The gate failed 4 times (last exit 2).');
+    });
+  });
+
+  it('shows no line while it checks, but speaks the gate command', () => {
     card({ workstream: workstreamDto({ state: 'VERIFYING' }), gateCommand: 'make gate' });
-    expect(screen.getByText('Checking: make gate')).toBeTruthy();
+    expect(screen.queryByText('Checking: make gate')).toBeNull();
   });
 });

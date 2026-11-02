@@ -26,13 +26,31 @@ favors legibility and calm over decoration.
   up. A card that can't move (In progress, Blocked, Done) says why in a tooltip. The card's actions menu
   sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns;
   columns scroll horizontally on narrow windows.
-- **Card state:** a card says its task's state once, in one plain line with a dot, such as
-  "Checking: make gate" or "Failed: the gate failed". The card's border and the dot take the status color
-  (blue running, yellow waiting on you, orange paused, red failed); queued keeps the plain border. No
-  fill, no left stripe, no pulsing. A card waiting on the builder is the most prominent: a full 2 px
-  yellow border and "Waiting on you: answer in Inbox".
+  A card's face, top to bottom: the goal's title (small, dimmed, when the task is in a goal); the headline,
+  or the title when the headline is empty (weight 500, at most three lines); the why (dimmed, `xs`, at most
+  two lines, only when there is one); a status line (see Card state); and a row of indicators, only when
+  the task has one. Areas, the criteria count, the landing line, the placement badge, the pull request and
+  CI links, "Review sent back" and the shipped-at-limit line are not on the face: the task drawer holds
+  them, and the card's screen-reader summary still speaks them. The indicator row is one component that
+  takes a list of small labelled badges, so a new kind is another entry in the list: a shared branch (the
+  batch has more than one task), CI passed or failed on a shipped pull request, waits on (the titles of the
+  unfinished dependencies are its tooltip) and Cancelled.
+- **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
+  paused, red failed, green done); queued keeps the plain border. No fill, no left stripe, no pulsing. A
+  card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state
+  as a line with a dot, such as "Waiting on you: answer in Inbox", only when the color is yellow, red or
+  orange, because only then does the builder have something to do or read. A failed task's line is the
+  plain-words one below. Blue, green and gray cards show no line: the border and the column say it, and
+  the screen-reader summary still does.
+- **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
+  `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's session rows:
+  "The review session stopped without reporting a result. Retry runs the review step again." The line is
+  worded from the failure kind the daemon records, and its Retry half from the rule the daemon's retry
+  follows, so after a review's rejection at the retry limit it names the earlier step that runs again. A run
+  with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
+  on the card and in Factory, and is shown under the line in the drawer.
 - **Goal strip:** a goal with open tasks is one slim line above the Board's columns, in the same scroll
-  area as the batch strips: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
+  area: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
   drawer. A goal is never a card in a column: cards are tasks, and the columns stay about tasks. Each of a
   goal's task cards carries the goal's title as a small dimmed label.
 - **Goal status:** a goal says its status once, in a dot and one plain line, and the first match wins:
@@ -47,8 +65,10 @@ favors legibility and calm over decoration.
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
-  shipping, not started, the Ungrouped row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
-  no badge and no color.
+  shipping, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  no badge and no color. A session row names its task by headline (the title when it has none) and goes to the
+  Board with that task's drawer open and the Board filtered to the task's goal; a task not in a goal opens the
+  Board unfiltered. The row keeps its Retry button.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).

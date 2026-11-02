@@ -838,6 +838,7 @@ describe('batch routes', () => {
     projectId: batch.projectId,
     batchId: null,
     taskTitle: 'Alpha',
+    taskHeadline: '',
     state: 'QUEUED',
     nextAction: { kind: 'start' },
     attempt: 0,

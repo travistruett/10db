@@ -75,6 +75,8 @@ export const BuilderToolInputs = {
   [BuilderToolName.CreateTask]: z.object({
     projectId: ProjectId,
     title: z.string(),
+    headline: z.string().default(''),
+    why: z.string().default(''),
     description: z.string().default(''),
     acceptanceCriteria: z.array(z.string()).default([]),
     areas: z.array(z.string()).default([]),
@@ -89,6 +91,8 @@ export const BuilderToolInputs = {
     .object({
       taskId: TaskId,
       title: z.string().optional(),
+      headline: z.string().optional(),
+      why: z.string().optional(),
       description: z.string().optional(),
       acceptanceCriteria: z.array(z.string()).optional(),
       riskTags: z.array(z.string()).optional(),
@@ -129,6 +133,8 @@ export const BUILDER_INSTRUCTIONS = [
   '',
   'Drafting a task (create_task, edit_task):',
   '- The title is the outcome, in one line under 200 characters. It becomes the pull request title in pull-request delivery.',
+  '- Write a headline on every task: the plain-words what, a few words in one line of at most 80 characters ("Odd files can\'t freeze 10db"). The Board names the task by it; git never sees it.',
+  "- Write a why whenever the reason isn't obvious from the headline: one sentence, one line of at most 200 characters, on why the task matters.",
   '- Acceptance criteria are things the builder can see or measure. Never "tests pass": say what the behaviour is, and the agent writes the tests that prove it.',
   "- Areas come from list_projects, for the project the task belongs to. An area marked catchAll holds every file that no other area holds, so a task that adds a new package or folder no other area's globs cover names the catchAll area, even though its globs list only the top of the repository. A hazard (migrations, deps) is not an area an agent works in, but naming one from the project's isolate list (shown by list_projects) among a task's areas sends the task to a separate copy of the repository. Name it for a task that changes migrations or dependencies, with the riskTags migration or dependency; a task that touches neither names no hazard.",
   '- A task is about one pull request (~300 changed lines), design and docs tasks included. A large design is split into one task per decision, not written as one long document: a document that big is rejected round after round, each fix moving the target.',
@@ -139,7 +145,7 @@ export const BUILDER_INSTRUCTIONS = [
 ].join('\n');
 
 const DRAFTING =
-  'Draft it as the instructions say: the title is the outcome in one line, and criteria are seen or measured, never "tests pass".';
+  'Draft it as the instructions say: the title is the outcome in one line, a headline on every task says it in plain words (at most 80 characters), a why whenever the reason isn\'t obvious from the headline says why it matters (one sentence, at most 200 characters), and criteria are seen or measured, never "tests pass".';
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
@@ -149,7 +155,7 @@ const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListTasks]:
     "Lists a project's open tasks with their status and board position. Finished and removed tasks are left out.",
   [BuilderToolName.CreateTask]: `Creates a task in a project and returns its id. Do not ask for confirmation first. ${DRAFTING} Areas come from list_projects; naming a hazard from the project's isolate list (such as migrations or deps) among them sends the task to a separate copy, as the riskTags migration and dependency do. Add dependsOn and riskTags only when needed, and omit flowId for the project default. Omit landing too, unless the task's pull request belongs elsewhere than the project's default: {kind:'base'} merges into the base branch, {kind:'branch', branch} into another branch that is on origin, {kind:'hold'} holds the pull request for the builder. Refuses what the New Task form refuses, in the same words.`,
-  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, description, acceptanceCriteria (replaces the list), riskTags, flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
+  [BuilderToolName.EditTask]: `Changes a task that has not finished: title, headline, why, description, acceptanceCriteria (replaces the list), riskTags, flowId or areas (replaces the list, names from list_projects; only before it starts, so a task refused for having none gets them here) or landing (where its pull request goes: {kind:'base'}, {kind:'branch', branch} or {kind:'hold'}; only before it starts, and a branch must be on origin). ${DRAFTING} Send only the fields to change.`,
   [BuilderToolName.RemoveTask]:
     'Removes a task that has not started. Refuses a task that has run, and a task another open task depends on.',
   [BuilderToolName.StartTask]:

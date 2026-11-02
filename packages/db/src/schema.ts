@@ -4,6 +4,7 @@ import type {
   AccountSettings,
   AreaDef,
   BatchFailure,
+  WorkstreamFailure,
   BatchId,
   BatchState,
   CiStopped,
@@ -322,6 +323,10 @@ export const tasks = sqliteTable(
       .notNull()
       .references(() => projects.id),
     title: text('title').notNull(),
+    /** The plain-words what the desktop names the task by; empty falls back to the title. */
+    headline: text('headline').notNull().default(''),
+    /** One optional sentence on why the task matters; empty when none was given. */
+    why: text('why').notNull().default(''),
     description: text('description').notNull(),
     acceptanceCriteria: text('acceptance_criteria', { mode: 'json' }).$type<string[]>().notNull(),
     areas: text('areas', { mode: 'json' }).$type<string[]>().notNull(),
@@ -450,6 +455,8 @@ export const workstreams = sqliteTable(
     contextPct: real('context_pct'),
     pausedUntil: text('paused_until'),
     failureReason: text('failure_reason'),
+    /** The kind of failure `failureReason` describes; null on a row that failed before kinds were kept. */
+    failureKind: text('failure_kind').$type<WorkstreamFailure>(),
     lastActivityAt: text('last_activity_at'),
     /** When the builder put the queued workstream first in line; cleared once it gets a lane. */
     runNextAt: text('run_next_at'),

@@ -281,6 +281,21 @@ export const BatchFailure = {
 } as const;
 export type BatchFailure = ValueOf<typeof BatchFailure>;
 
+/** Why a workstream failed; `failureReason` holds the detail. Null on a row failed before kinds were kept. */
+export const WorkstreamFailure = {
+  /** A step's session ended without calling complete_step. */
+  NoResult: 'no_result',
+  /** The gate failed on every fix attempt. */
+  GateFailed: 'gate_failed',
+  /** The session crashed too often, could not start, or recovery gave up on it. */
+  SessionFailed: 'session_failed',
+  /** The step ran out of fix attempts: uncommitted changes, merge conflicts or the builder's send-backs. */
+  RetryLimit: 'retry_limit',
+  /** A reviewer rejected the work with no fix attempt left. */
+  RejectedAtLimit: 'rejected_at_limit',
+} as const;
+export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
+
 /** A goal's lifecycle (goals spec §6). Phase 1 writes only `draft`. */
 export const GoalState = {
   Draft: 'draft',

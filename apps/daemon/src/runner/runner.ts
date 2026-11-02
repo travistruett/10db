@@ -19,6 +19,7 @@ import {
   StepStatus,
   ToolAccess,
   Verdict,
+  WorkstreamFailure,
   WorkstreamState as S,
   AccountKind,
   AccountProblem,
@@ -433,6 +434,12 @@ async function stopLaneProcesses(
   }
 }
 
+/** A failure as the workstream records it: its kind, which the desktop words, and the detail. */
+interface Failure {
+  readonly kind: WorkstreamFailure;
+  readonly reason: string;
+}
+
 /** Why a session is asked to hand off: its context filled, or its account neared its usage limit. */
 type HandoffCause = 'context' | 'account';
 
@@ -617,13 +624,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     id: WorkstreamId,
     fence: number | null,
     row: WorkstreamRow,
-    reason: string,
+    failure: Failure,
     patch: {
       readonly nextAction?: NextAction;
       readonly stepIndex?: number;
       readonly steps?: WorkstreamStep[];
     } = {},
   ): void {
+    const reason = failure.reason;
     // A workstream waiting for the builder reaches FAILED through VERIFYING, as it reaches DONE.
     if (row.state === S.WaitingHuman)
       transitionWorkstream(ctx, id, { to: S.Verifying, fence, reason });
@@ -632,6 +640,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       fence,
       patch: {
         failureReason: reason,
+        failureKind: failure.kind,
         currentSessionId: null,
         ...(row.steps.length > 0 ? { steps: failStep(row.steps, row.stepIndex) } : {}),
         ...patch,
@@ -660,14 +669,14 @@ export function createRunner(opts: RunnerOptions): Runner {
   function fail(
     id: WorkstreamId,
     fence: number | null,
-    reason: string,
+    failure: Failure,
     review?: ReviewCardDetail,
   ): void {
     const row = getWorkstreamRow(db, id);
     opts.state.write((ctx) => {
-      failIn(ctx, id, fence, row, reason);
+      failIn(ctx, id, fence, row, failure);
     });
-    flagFailed(row, reason, review);
+    flagFailed(row, failure.reason, review);
   }
 
   /** A step entered now; its floor is the sessions this workstream has run so far. */
@@ -966,7 +975,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         fail(
           id,
           ctl.fence,
-          `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          {
+            kind: WorkstreamFailure.NoResult,
+            reason: `The ${step.role} step ended without calling complete_step: ${ending}${gave ? ' What it wrote is on the card.' : ''}`,
+          },
           gave
             ? {
                 role: step.role,
@@ -1017,7 +1029,10 @@ export function createRunner(opts: RunnerOptions): Runner {
           fail(
             id,
             ctl.fence,
-            `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+            {
+              kind: WorkstreamFailure.RejectedAtLimit,
+              reason: `The ${step.role} step rejected the work and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+            },
             result
               ? {
                   role: step.role,
@@ -1264,16 +1279,15 @@ export function createRunner(opts: RunnerOptions): Runner {
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
       case 'refused':
-        fail(id, ctl.fence, outcome.message);
+        fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
         return;
       case 'crashed': {
         const attempts = row.recoveryAttempts + 1;
         if (attempts > opts.limits.maxRecoveryAttempts) {
-          fail(
-            id,
-            ctl.fence,
-            `The session failed ${String(attempts)} times; last error: ${outcome.message}`,
-          );
+          fail(id, ctl.fence, {
+            kind: WorkstreamFailure.SessionFailed,
+            reason: `The session failed ${String(attempts)} times; last error: ${outcome.message}`,
+          });
           return;
         }
         const nextAction = nextActionAfterCrash(
@@ -2026,11 +2040,10 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): void {
     const attempt = row.attempt + 1;
     if (attempt > opts.limits.maxFixAttempts) {
-      fail(
-        id,
-        ctl.fence,
-        `The ${currentStep(row).role} step ended with uncommitted changes in its claims after ${String(row.attempt)} fix attempts and merge sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
-      );
+      fail(id, ctl.fence, {
+        kind: WorkstreamFailure.RetryLimit,
+        reason: `The ${currentStep(row).role} step ended with uncommitted changes in its claims after ${String(row.attempt)} fix attempts and merge sessions, and the retry limit (${String(opts.limits.maxFixAttempts)}) is used up`,
+      });
       return;
     }
     opts.state.write((ctx) => {
@@ -2065,14 +2078,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       const base = batch?.baseBranch ?? 'the base';
       const sessions = `${String(row.attempt)} fix and merge sessions of this step`;
       const limit = `its retry limit (${String(opts.limits.maxFixAttempts)}, and one more session for a merge) is used up`;
-      fail(
-        id,
-        ctl.fence,
+      fail(id, ctl.fence, {
+        kind: WorkstreamFailure.RetryLimit,
         // A merge this gate made just now left markers no session has seen: they are not "still" there.
-        update.fresh === true
-          ? `A new merge of ${base} left conflict markers in ${update.paths.join(', ')} that no session has seen yet, but the step has no session left to resolve them: it ran ${sessions}, and ${limit}`
-          : `The conflict markers of the merge of ${base} are still in ${update.paths.join(', ')} after ${sessions}, and ${limit}`,
-      );
+        reason:
+          update.fresh === true
+            ? `A new merge of ${base} left conflict markers in ${update.paths.join(', ')} that no session has seen yet, but the step has no session left to resolve them: it ran ${sessions}, and ${limit}`
+            : `The conflict markers of the merge of ${base} are still in ${update.paths.join(', ')} after ${sessions}, and ${limit}`,
+      });
       return;
     }
     opts.state.write((ctx) => {
@@ -2395,11 +2408,10 @@ export function createRunner(opts: RunnerOptions): Runner {
     const attempt = row.attempt + 1;
     const evidenceId = opts.state.write((ctx) => insertEvidence(ctx, evidence).id);
     if (attempt > opts.limits.maxFixAttempts) {
-      fail(
-        id,
-        ctl.fence,
-        `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})`,
-      );
+      fail(id, ctl.fence, {
+        kind: WorkstreamFailure.GateFailed,
+        reason: `The gate failed ${String(attempt)} times (last exit ${String(result.exitCode)})`,
+      });
       return;
     }
     const failedStep = currentStep(row);
@@ -2704,23 +2716,30 @@ export function createRunner(opts: RunnerOptions): Runner {
         // The failure sits on the step the work was sent back to, so a retry restarts it with the note
         // on that step's own model and effort.
         const failedTarget = targetIndex === null ? undefined : row.steps[targetIndex];
-        failIn(ctx, id, null, row, reason, {
-          nextAction: { kind: 'fix', evidenceId: evidence.id },
-          ...(targetIndex === null || !failedTarget
-            ? {}
-            : {
-                stepIndex: targetIndex,
-                model: failedTarget.model,
-                effort: failedTarget.effort,
-                steps: row.steps.map((s, i) =>
-                  i === targetIndex
-                    ? { ...s, status: StepStatus.Failed }
-                    : i === row.stepIndex
-                      ? { ...s, status: StepStatus.Pending }
-                      : s,
-                ),
-              }),
-        });
+        failIn(
+          ctx,
+          id,
+          null,
+          row,
+          { kind: WorkstreamFailure.RetryLimit, reason },
+          {
+            nextAction: { kind: 'fix', evidenceId: evidence.id },
+            ...(targetIndex === null || !failedTarget
+              ? {}
+              : {
+                  stepIndex: targetIndex,
+                  model: failedTarget.model,
+                  effort: failedTarget.effort,
+                  steps: row.steps.map((s, i) =>
+                    i === targetIndex
+                      ? { ...s, status: StepStatus.Failed }
+                      : i === row.stepIndex
+                        ? { ...s, status: StepStatus.Pending }
+                        : s,
+                  ),
+                }),
+          },
+        );
         return () => {
           flagFailed(row, reason);
           opts.onLaneFreed();

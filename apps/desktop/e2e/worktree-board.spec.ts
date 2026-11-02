@@ -284,7 +284,7 @@ test.describe('the Board with several open batches', () => {
 
       // Every row starts collapsed. The queued task is not running: only two of the three count.
       const goal = page.getByRole('button', { name: new RegExp(`^${GOAL_TITLE}`) });
-      const ungrouped = page.getByRole('button', { name: /^Ungrouped/ });
+      const ungrouped = page.getByRole('button', { name: /^Not in a goal/ });
       await expect(goal).toHaveAttribute('aria-expanded', 'false');
       await expect(ungrouped).toHaveAttribute('aria-expanded', 'false');
       await expect(goal).toContainText('Not started');
@@ -306,10 +306,10 @@ test.describe('the Board with several open batches', () => {
         await expect(goalRegion.getByText(/^Deviations/)).toBeVisible();
         await expectAccessible(page, `factory, goal open, ${scheme}`);
 
-        // One at a time: opening Ungrouped closes the goal, and the queued task is not among its sessions.
+        // One at a time: opening Not in a goal closes the goal, and the queued task is not among its sessions.
         await ungrouped.click();
         await expect(goal).toHaveAttribute('aria-expanded', 'false');
-        const sessions = page.getByRole('region', { name: 'Ungrouped' }).getByRole('table');
+        const sessions = page.getByRole('region', { name: 'Not in a goal' }).getByRole('table');
         await expect(
           sessions.getByRole('row', { name: new RegExp(OPEN_BATCHES[0].title) }),
         ).toBeVisible();

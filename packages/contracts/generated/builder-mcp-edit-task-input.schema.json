@@ -11,6 +11,14 @@
       "minLength": 1,
       "maxLength": 200
     },
+    "headline": {
+      "type": "string",
+      "maxLength": 80
+    },
+    "why": {
+      "type": "string",
+      "maxLength": 200
+    },
     "description": {
       "type": "string"
     },

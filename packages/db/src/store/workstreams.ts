@@ -18,6 +18,7 @@ import {
   type SessionId,
   type TaskId,
   type WorkstreamDto,
+  type WorkstreamFailure,
   type WorkstreamId,
   Effort,
   type WorkstreamStep,
@@ -48,6 +49,7 @@ export interface WorkstreamPatch {
   readonly contextPct?: number | null;
   readonly pausedUntil?: string | null;
   readonly failureReason?: string | null;
+  readonly failureKind?: WorkstreamFailure | null;
   readonly lastActivityAt?: string | null;
   readonly runNextAt?: string | null;
   readonly baseHead?: string;
@@ -74,7 +76,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     .where(eq(schema.sessions.workstreamId, row.id))
     .get();
   const task = db
-    .select({ title: schema.tasks.title })
+    .select({ title: schema.tasks.title, headline: schema.tasks.headline })
     .from(schema.tasks)
     .where(eq(schema.tasks.id, row.taskId))
     .get();
@@ -82,6 +84,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     id: row.id,
     taskId: row.taskId,
     taskTitle: task?.title ?? '',
+    taskHeadline: task?.headline ?? '',
     projectId: row.projectId,
     batchId: row.batchId,
     state: row.state,
@@ -97,6 +100,7 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     contextPct: row.contextPct,
     pausedUntil: row.pausedUntil,
     failureReason: row.failureReason,
+    failureKind: row.failureKind,
     lastActivityAt: row.lastActivityAt,
     runNextAt: row.runNextAt,
     notice: row.notice,
@@ -197,6 +201,7 @@ export function insertWorkstream(
     contextPct: null,
     pausedUntil: null,
     failureReason: null,
+    failureKind: null,
     lastActivityAt: null,
     runNextAt: null,
     notice: null,

@@ -12,6 +12,7 @@ import { criteriaLines } from './areas-text';
 import { LabelWithHelp } from './field-help';
 import { draftFor, landingFromDraft, type LandingDraft } from './landing-draft';
 import { LandingField } from './landing-field';
+import { HeadlineField, WhyField } from './task-words-fields';
 
 const CRITERIA_PLACEHOLDER =
   'One per line, for example:\nSearch shows results in under a second with 10,000 tasks';
@@ -36,7 +37,9 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
   const create = useCreateTask(project.id);
   const criteriaId = useId();
   const areasId = useId();
+  const [headline, setHeadline] = useState('');
   const [title, setTitle] = useState('');
+  const [why, setWhy] = useState('');
   const [description, setDescription] = useState('');
   const [criteriaText, setCriteriaText] = useState('');
   const [areas, setAreas] = useState<string[]>(() => initialAreas(project));
@@ -72,6 +75,8 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
     create.mutate(
       {
         title: title.trim(),
+        headline: headline.trim(),
+        why: why.trim(),
         description: description.trim(),
         acceptanceCriteria,
         areas,
@@ -96,6 +101,7 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
   return (
     <form id={formId} onSubmit={submit} noValidate>
       <Stack>
+        <HeadlineField value={headline} onChange={setHeadline} />
         <TextInput
           label="Title"
           value={title}
@@ -103,6 +109,7 @@ export function NewTaskForm({ formId, project, tasks, onStatus, onCreated }: New
             setTitle(e.currentTarget.value);
           }}
         />
+        <WhyField value={why} onChange={setWhy} />
         <Textarea
           label="Description"
           autosize

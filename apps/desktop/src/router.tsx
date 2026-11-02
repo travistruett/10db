@@ -1,4 +1,4 @@
-import { TaskId } from '@10db/contracts';
+import { GoalId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -72,9 +72,14 @@ const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
   // `task` opens that task's drawer, so a link from elsewhere (a recent decision) lands on the task.
-  validateSearch: (search: Record<string, unknown>): { task?: TaskId } => {
+  // `goal` sets the Board's goal filter, so a Factory row lands on the task among its goal's tasks.
+  validateSearch: (search: Record<string, unknown>): { task?: TaskId; goal?: GoalId } => {
     const task = TaskId.safeParse(search['task']);
-    return task.success ? { task: task.data } : {};
+    const goal = GoalId.safeParse(search['goal']);
+    return {
+      ...(task.success ? { task: task.data } : {}),
+      ...(goal.success ? { goal: goal.data } : {}),
+    };
   },
   component: BoardPage,
 });

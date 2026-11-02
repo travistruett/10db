@@ -1,7 +1,125 @@
-import { PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
+import { mintId, PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, workstreamDto } from '../../test/fixtures';
-import { taskNotices, taskState } from './task-state';
+import { failureLine, taskNotices, taskState } from './task-state';
+
+const AT = '2026-11-02T10:00:00.000Z';
+const SESSION = mintId('Session');
+
+/** A build step, then a review on `review`'s terms: the step the run failed on. */
+function reviewFlow(review: Parameters<typeof stepDto>[0]) {
+  return {
+    steps: [
+      stepDto({ status: 'done' }),
+      stepDto({ role: 'review', tools: 'read_only', status: 'failed', ...review }),
+    ],
+    stepIndex: 1,
+  };
+}
+
+const rejected = {
+  result: { summary: 'Missing tests.', verdict: 'reject', sessionId: SESSION, at: AT },
+} as const;
+
+describe('failureLine', () => {
+  it.each([
+    {
+      kind: 'no_result',
+      ...reviewFlow({}),
+      line: 'The review session stopped without reporting a result. Retry runs the review step again.',
+    },
+    {
+      kind: 'gate_failed',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The checks kept failing and the build step ran out of fix attempts. Retry runs the build step again with its fix attempts reset.',
+    },
+    {
+      kind: 'session_failed',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The build session kept crashing or could not start. Retry runs the build step again in a new session.',
+    },
+    {
+      kind: 'retry_limit',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The build step ran out of fix attempts. Retry runs the build step again with its fix attempts reset.',
+    },
+    {
+      kind: 'rejected_at_limit',
+      ...reviewFlow(rejected),
+      line: 'The review step rejected the work with no fix attempts left. Retry sends the work back to the build step with the review findings, and the review runs after it.',
+    },
+    {
+      // With no earlier step to do the rework, retryWorkstream reruns the review itself.
+      kind: 'rejected_at_limit',
+      steps: [
+        stepDto({ role: 'review', tools: 'read_only', status: 'failed', result: rejected.result }),
+      ],
+      stepIndex: 0,
+      line: 'The review step rejected the work with no fix attempts left. Retry runs the review step again.',
+    },
+    {
+      kind: 'rejected_at_limit',
+      steps: [
+        stepDto({ role: 'plan', status: 'done' }),
+        stepDto({ role: 'plan_review', tools: 'read_only', status: 'failed', ...rejected }),
+      ],
+      stepIndex: 1,
+      line: 'The plan review step rejected the work with no fix attempts left. Retry sends the work back to the plan step with the plan review findings, and the plan review runs after it.',
+    },
+    {
+      kind: null,
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The build step failed. Retry runs the build step again.',
+    },
+    {
+      kind: 'a_kind_from_a_newer_daemon',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The build step failed. Retry runs the build step again.',
+    },
+    {
+      kind: null,
+      steps: [],
+      stepIndex: 0,
+      line: 'The run failed. Retry runs it again.',
+    },
+    {
+      kind: 'no_result',
+      steps: [],
+      stepIndex: 0,
+      line: 'The session stopped without reporting a result. Retry runs it again.',
+    },
+  ])('says $kind on step $stepIndex in plain words', ({ kind, steps, stepIndex, line }) => {
+    expect(failureLine({ failureKind: kind, steps, stepIndex })).toBe(line);
+  });
+
+  it('is the failed card’s line, with the raw reason as its detail', () => {
+    const ws = workstreamDto({
+      state: 'FAILED',
+      failureKind: 'gate_failed',
+      failureReason: 'The gate failed 4 times (last exit 2)',
+      steps: [stepDto({ status: 'failed' })],
+    });
+    expect(taskState(ws, undefined, 'make gate')).toEqual({
+      line: failureLine(ws),
+      color: 'red',
+      detail: 'The gate failed 4 times (last exit 2)',
+    });
+  });
+
+  it('gives a run that failed before kinds were kept the generic line and no detail without a reason', () => {
+    const ws = workstreamDto({ state: 'FAILED', failureReason: null });
+    expect(taskState(ws, undefined, 'make gate')).toEqual({
+      line: 'The run failed. Retry runs it again.',
+      color: 'red',
+      detail: null,
+    });
+  });
+});
 
 describe('taskState', () => {
   it.each([
@@ -44,21 +162,6 @@ describe('taskState', () => {
       ws: workstreamDto({ state: 'PAUSED_LIMIT' }),
       line: 'Paused: usage limit',
       color: 'orange',
-    },
-    {
-      name: 'a failure with a reason',
-      ws: workstreamDto({
-        state: 'FAILED',
-        failureReason: 'The gate failed 3 times (last exit 2)',
-      }),
-      line: 'Failed: the gate failed 3 times (last exit 2)',
-      color: 'red',
-    },
-    {
-      name: 'a failure with no reason',
-      ws: workstreamDto({ state: 'FAILED', failureReason: null }),
-      line: 'Failed',
-      color: 'red',
     },
     { name: 'a queued run', ws: workstreamDto({ state: 'QUEUED' }), line: 'Queued', color: 'gray' },
     {
@@ -257,7 +360,7 @@ describe('taskState', () => {
       expect(taskState(workstreamDto({ state: 'CANCELLED' }), batch, null)).toBeNull();
       expect(
         taskState(workstreamDto({ state: 'FAILED', failureReason: null }), batch, null),
-      ).toEqual({ line: 'Failed', color: 'red' });
+      ).toEqual({ line: 'The run failed. Retry runs it again.', color: 'red', detail: null });
     });
 
     it('shows a pull request that waits for the builder beside what its checks say, until it merges or closes', () => {

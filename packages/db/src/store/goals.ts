@@ -68,6 +68,8 @@ export function insertGoal(ctx: WriteContext, projectId: ProjectId, input: GoalI
   for (const task of inDependencyOrder(brief.tasks)) {
     const written = insertGoalTask(ctx, projectId, goalId, {
       title: task.title,
+      headline: task.headline,
+      why: task.why,
       description: task.description,
       acceptanceCriteria: task.criteria,
       areas: task.areas,

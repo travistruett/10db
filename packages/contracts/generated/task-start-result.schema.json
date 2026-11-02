@@ -15,6 +15,9 @@
         "taskTitle": {
           "type": "string"
         },
+        "taskHeadline": {
+          "type": "string"
+        },
         "projectId": {
           "type": "string",
           "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
@@ -564,6 +567,24 @@
             "null"
           ]
         },
+        "failureKind": {
+          "default": null,
+          "anyOf": [
+            {
+              "type": "string",
+              "enum": [
+                "no_result",
+                "gate_failed",
+                "session_failed",
+                "retry_limit",
+                "rejected_at_limit"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "lastActivityAt": {
           "anyOf": [
             {
@@ -643,6 +664,7 @@
         "id",
         "taskId",
         "taskTitle",
+        "taskHeadline",
         "projectId",
         "batchId",
         "state",

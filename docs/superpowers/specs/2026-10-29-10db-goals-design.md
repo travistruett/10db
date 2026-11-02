@@ -207,7 +207,7 @@ task under a rule is open (§14).
 ## 8. Factory
 
 **Built:** Factory is the project's goals as described below (`apps/desktop/src/views/factory/`): the status-ordered
-list, the Ungrouped and Done (n) rows, each goal's digest, its Sessions and Pull requests, and the header's
+list, the Not in a goal and Done (n) rows, each goal's digest, its Sessions and Pull requests, and the header's
 **Adopt a Plan…** with its refusal sheet (§11). The workstream table's columns (task, state, step, context,
 sessions, last activity, Retry) live on in Sessions; a queued or held run names no step and the digest
 never counts one as running. **Cancel Run** for a running task is in its card menu and its drawer, after a
@@ -233,7 +233,7 @@ the Show finished switch and the batch history are gone from Factory.
 │ │ Cost         412k tokens · 14 sessions                                     │ │
 │ └────────────────────────────────────────────────────────────────────────────┘ │
 │ ┌ Goals engine, phase 1 ── ● Waiting on you · 1 card · 1 of 8 tasks done ──── ┐ │
-│ ┌ Ungrouped ────────────── ● 2 tasks running ────────────────────────────────┐ │
+│ ┌ Not in a goal ────────────── ● 2 tasks running ────────────────────────────────┐ │
 └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -254,26 +254,26 @@ decisions; phase 3 adds "Waiting on Mark" with the evidence sent.
   request state 10db already tracks); until then the goal is blue, "Shipping · 11 of 11 tasks done · 3 pull
   requests open". In a project without pull requests, done means every task done. From phase 2, done is
   every criterion proven (§5).
-- **Ungrouped** holds the tasks with no goal that are running or failed, under the same status rule as a goal
+- **Not in a goal** holds the tasks with no goal that are running or failed, under the same status rule as a goal
   ("2 running · 1 failed"); expanded, it shows their Sessions table with Retry and Cancel. Finished work is
   reached from each task's drawer (its latest run), not from Factory.
 
 | Surface         | Loading                              | Empty                              | Error                                                     |
 | --------------- | ------------------------------------ | ---------------------------------- | --------------------------------------------------------- |
-| Goal list       | `Loader size="sm"`, as Factory today | the guided line above, Ungrouped   | red `Alert` "Couldn't load the goals" with the message    |
+| Goal list       | `Loader size="sm"`, as Factory today | the guided line above, Not in a goal   | red `Alert` "Couldn't load the goals" with the message    |
 | A goal's digest | its rows' skeleton lines             | a row with nothing says "None"     | a red `Alert` inside the expanded goal; the row stays     |
 | Adopt a Plan    | the primary's `loading` state        | not applicable                     | the refusal sheet (§11); a daemon error beside Pick Again |
-| Ungrouped       | with the list                        | hidden when nothing runs or failed | with the list                                             |
+| Not in a goal       | with the list                        | hidden when nothing runs or failed | with the list                                             |
 
 The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; the digest's loading and
 "None" rows are the spec's call.
 
 - **Order:** failed, waiting on you, waiting on someone, paused, running, shipping, not started, then
-  Ungrouped, then done goals under
+  Not in a goal, then done goals under
   one collapsed "Done (n)" line; within a status, the most recently changed first.
 - **No goals yet:** one dimmed line under the header, "Goals are outcomes 10db pursues across many tasks. Adopt
   a plan to start one, or ask Claude Code to with the 10db-task skill.", with Adopt a Plan… as the header's
-  primary and the Ungrouped row below it when tasks are running.
+  primary and the Not in a goal row below it when tasks are running.
 - **Every goal starts collapsed** to its one-line verdict; clicking a row (or Enter on it) opens it, one at a
   time. The ASCII sketch shows one opened.
 - **The digest** opens under the selected goal. Its window is since the owner last opened this goal in Factory,
@@ -303,9 +303,9 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
   `GET /goals/:goalId/digest`, one response with the status, progress and every row from the sources above.
   Team is the steps of the goal's started workstreams. The window comes from `goal_views` (goal, person, opened
   at): the route computes Δ rows from the previous mark, then advances it, so a refresh in the same visit keeps
-  them. The same response carries the Ungrouped group (`goalId: null`).
+  them. The same response carries the Not in a goal group (`goalId: null`).
   **Built:** the daemon computes it (`packages/db/src/store/goal-digest.ts`). `GET /projects/:projectId/goals`
-  answers `GoalListDto` (each goal's digest and count of new items, plus Ungrouped) and leaves every mark
+  answers `GoalListDto` (each goal's digest and count of new items, plus Not in a goal) and leaves every mark
   alone; only `GET /goals/:goalId/digest` advances its goal's mark. A visit lasts while the goal is opened again
   within 30 minutes of its last opening, for at most 2 hours from when the visit began
   (`goal_views.visit_started_at`): `goal_views.visit_since` keeps the window the visit began with, so a
@@ -393,8 +393,11 @@ goal owns this loop.
 ## 11. Adopt a Plan
 
 **Designed (phase 1).** A goal brief is a Markdown file with YAML front matter, validated by a zod schema in
-`@10db/contracts`: title, objective, criteria (text and check kind), budget, tasks (a key, title, description,
-acceptance criteria, areas, and the keys it depends on), and optional people (proposed; the owner confirms).
+`@10db/contracts`: title, objective, criteria (text and check kind), budget, tasks (a key, title, an optional
+`headline` and `why`, description, acceptance criteria, areas, and the keys it depends on), and optional people
+(proposed; the owner confirms). A task's `headline` is the plain-words what the Board names it by (one line, at most
+80 characters) and its `why` one sentence on why it matters (one line, at most 200); adopting the goal stores both,
+and a task without them shows its title (readable board spec, `2026-11-02-10db-readable-board-design.md` §4).
 Adoption is deterministic:
 
 - **Two ways in, one route.** In the app, Adopt a Plan… opens the native panel (as the project folder is
@@ -432,6 +435,8 @@ criteria:
 tasks:
   - key: task-patch-route
     title: Patch a task's areas and dependencies
+    headline: Change a task's areas
+    why: A task's areas are fixed once it is made, so a wrong guess blocks it.
     areas: [repo]
     criteria: [PATCH /tasks/:id changes areas and dependencies, and refuses unknown areas]
   - key: drawer-editor
@@ -459,7 +464,7 @@ areas work it builds lands. Extraction from a free-form document by an LLM is ph
    `goal_criteria` (unproven), `goal_views` and `tasks.goal_id`; Adopt a Plan, in the app and in the 10db-task
    skill; the digest API; goal-scoped
    candidates; the Board's goal card, markers, filter and scoped Start Ready Tasks; Factory per goal with the
-   phase 1 digest, the Ungrouped row and the phase 1 status rule; the workstream table and batch history moved
+   phase 1 digest, the Not in a goal row and the phase 1 status rule; the workstream table and batch history moved
    to detail; Cancel in the drawer and card menu.
 2. **The engine.** States and transitions, Start Goal, the budget, criteria checks and ticking, the decisions
    schema change, the step-end path check, doors, Keep / Flip, the dependency count.

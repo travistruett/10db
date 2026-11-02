@@ -13,6 +13,7 @@ import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/da
 import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
+import { failureLine } from './task-state';
 
 const peers = new Map();
 
@@ -75,6 +76,70 @@ async function edit(label: string, value: string): Promise<void> {
 function discardPrompt(): HTMLElement | null {
   return screen.queryByText('Discard your changes to this task?');
 }
+
+describe('TaskDrawer order', () => {
+  it('leads with the headline and why, then status, what it promises, links, the shared branch and the form', async () => {
+    serve();
+    const batch = batchDto({ prUrl: 'https://github.com/acme/widgets/pull/9' });
+    const ws = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
+    const second = workstreamDto({ batchId: batch.id, state: 'QUEUED' });
+    open({
+      task: {
+        title: 'Reject FIFOs in the worktree walk',
+        headline: "Odd files can't freeze 10db",
+        why: 'A FIFO could hang every lane.',
+        acceptanceCriteria: ['A FIFO is skipped', 'A huge file is skipped'],
+      },
+      workstream: ws,
+      batch,
+      workstreams: [ws, second],
+    });
+    const d = await dialog();
+    const headline = within(d).getByRole('heading', { name: "Odd files can't freeze 10db" });
+    const why = within(d).getByText('A FIFO could hang every lane.');
+    const status = within(d).getByText('Queued');
+    const promises = within(d).getByText('What it promises');
+    const title = within(d).getByText('Reject FIFOs in the worktree walk');
+    const criteria = within(d)
+      .getAllByRole('listitem')
+      .map((li) => li.textContent);
+    const link = within(d).getByRole('link', { name: 'Pull request' });
+    const abandon = within(d).getByRole('button', { name: 'Abandon' });
+    const headlineField = within(d).getByLabelText('Headline');
+    const whyField = within(d).getByLabelText('Why');
+    const titleField = within(d).getByLabelText('Title');
+    expect(criteria).toEqual(['A FIFO is skipped', 'A huge file is skipped']);
+    const inOrder = [
+      headline,
+      why,
+      status,
+      promises,
+      title,
+      link,
+      abandon,
+      headlineField,
+      whyField,
+      titleField,
+    ];
+    for (let i = 1; i < inOrder.length; i += 1) {
+      const before = inOrder[i - 1];
+      const after = inOrder[i];
+      expect(
+        before && after && before.compareDocumentPosition(after) & Node.DOCUMENT_POSITION_FOLLOWING,
+        `element ${String(i)} follows element ${String(i - 1)}`,
+      ).toBeTruthy();
+    }
+    // The pull request link is shown once, with the links, not again in the shared branch.
+    expect(within(d).getAllByRole('link', { name: 'Pull request' })).toHaveLength(1);
+  });
+
+  it('falls back to the title as the headline, and shows no why line when there is none', async () => {
+    serve();
+    open({ task: { title: 'Plain title', headline: '', why: '' } });
+    const d = await dialog();
+    expect(within(d).getByRole('heading', { name: 'Plain title' })).toBeTruthy();
+  });
+});
 
 describe('TaskDrawer placement', () => {
   it('shows the badge with the reason as its tooltip, and a control, while the placement is open', async () => {
@@ -234,6 +299,29 @@ describe('TaskDrawer', () => {
     await waitFor(() => {
       expect(closed()).toBe(1);
     });
+  });
+
+  it('shows the headline and why, and saves them trimmed when changed', async () => {
+    const patched: TaskPatch[] = [];
+    const task = taskDto({ headline: 'Old words', why: 'It mattered.' });
+    serve(
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(task);
+      }),
+    );
+    open({ task });
+    const d = await dialog();
+    expect(within(d).getByLabelText<HTMLInputElement>('Headline').value).toBe('Old words');
+    expect(within(d).getByLabelText<HTMLInputElement>('Why').value).toBe('It mattered.');
+    await edit('Headline', " Odd files can't freeze 10db ");
+    await edit('Why', '  ');
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).toMatchObject({ headline: "Odd files can't freeze 10db", why: '' });
   });
 
   describe('areas', () => {
@@ -599,6 +687,32 @@ describe('TaskDrawer', () => {
   });
 
   describe('workstream state', () => {
+    it.each([
+      'no_result',
+      'gate_failed',
+      'session_failed',
+      'retry_limit',
+      'rejected_at_limit',
+      null,
+    ] as const)(
+      'a %s failure shows Failed, the plain line, the raw reason and Retry',
+      async (kind) => {
+        serve();
+        const workstream = workstreamDto({
+          state: 'FAILED',
+          failureKind: kind,
+          failureReason: 'The gate failed twice',
+          steps: [stepDto({ status: 'failed' })],
+        });
+        open({ workstream });
+        const d = await dialog();
+        expect(within(d).getByText('Failed')).toBeTruthy();
+        expect(within(d).getByText(failureLine(workstream))).toBeTruthy();
+        expect(within(d).getByText('The gate failed twice')).toBeTruthy();
+        expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
+      },
+    );
+
     it('a failed task shows Failed, its reason and Retry', async () => {
       serve();
       open({
@@ -606,6 +720,7 @@ describe('TaskDrawer', () => {
       });
       const d = await dialog();
       expect(within(d).getByText('Failed')).toBeTruthy();
+      expect(within(d).getByText('The run failed. Retry runs it again.')).toBeTruthy();
       expect(within(d).getByText('The gate failed twice')).toBeTruthy();
       const retry = within(d).getByRole('button', { name: 'Retry' });
       expect((retry as HTMLButtonElement).disabled).toBe(false);
@@ -868,7 +983,9 @@ describe('TaskDrawer', () => {
         open({ task, workstream: ws, batch, batches: [batch], workstreams: [ws] });
         const line = await within(await dialog()).findByTestId('ci-line');
         expect(within(line).getByText('Pull request open · CI failed: build')).toBeTruthy();
-        expect(within(line).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
+        // The job link sits with the pull request link, below the status.
+        const links = within(await dialog()).getByTestId('drawer-links');
+        expect(within(links).getByRole('link', { name: 'CI job' }).getAttribute('href')).toBe(
           jobUrl,
         );
       });

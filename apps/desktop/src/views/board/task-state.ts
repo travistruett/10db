@@ -5,8 +5,12 @@ import {
   PullRequestChecks,
   PullRequestState,
   rejectionsSentBack,
+  retryTargetAfterRejection,
+  StepRole,
+  WorkstreamFailure,
   WorkstreamState,
   type BatchDto,
+  type WorkstreamStep,
   type ShippedAtLimit,
   type Notice,
   type TaskDto,
@@ -26,12 +30,85 @@ export interface TaskState {
   readonly color: MantineColor;
   /** Where the line's CI result lives: a job's page or the pull request's checks. */
   readonly link?: CiLink | null;
+  /** A failure's raw reason, behind the plain line: the card's tooltip. */
+  readonly detail?: string | null;
 }
 
 /** "The gate failed" reads mid-sentence as "the gate failed"; an acronym keeps its capitals. */
 function lowerFirst(text: string): string {
   const [first = '', second = ''] = text;
   return second === second.toLowerCase() ? first.toLowerCase() + text.slice(1) : text;
+}
+
+/** A step as a failure line names it. */
+const STEP_NAME: Readonly<Record<StepRole, string>> = {
+  [StepRole.Plan]: 'plan',
+  [StepRole.PlanReview]: 'plan review',
+  [StepRole.Implement]: 'build',
+  [StepRole.Review]: 'review',
+  [StepRole.Qa]: 'QA',
+};
+
+/**
+ * What happened, by the failure kind the daemon recorded. `step` names the step the run failed on, or
+ * is null for a run with no step plan. A kind this build doesn't know, or none, gets the generic line.
+ */
+function whatHappened(kind: string | null, step: string | null): string {
+  switch (kind) {
+    case WorkstreamFailure.NoResult:
+      return `The ${step ? `${step} ` : ''}session stopped without reporting a result.`;
+    case WorkstreamFailure.GateFailed:
+      return `The checks kept failing and the ${step ?? 'run'}${step ? ' step' : ''} ran out of fix attempts.`;
+    case WorkstreamFailure.SessionFailed:
+      return `The ${step ? `${step} ` : ''}session kept crashing or could not start.`;
+    case WorkstreamFailure.RetryLimit:
+      return `The ${step ? `${step} step` : 'run'} ran out of fix attempts.`;
+    case WorkstreamFailure.RejectedAtLimit:
+      return `The ${step ? `${step} step` : 'review'} rejected the work with no fix attempts left.`;
+    case null:
+    default:
+      return `The ${step ? `${step} step` : 'run'} failed.`;
+  }
+}
+
+/**
+ * What Retry will do, read from the same rules `retryWorkstream` follows: after a reviewer's rejection
+ * it sends the work back to the step the rejection goes to, otherwise it restarts the failed step, and
+ * either way it starts the fix attempts over.
+ */
+function whatRetryDoes(
+  kind: string | null,
+  steps: readonly WorkstreamStep[],
+  stepIndex: number,
+  step: string | null,
+): string {
+  const target = retryTargetAfterRejection(steps, stepIndex);
+  const rework = target === null ? undefined : steps[target];
+  if (step && rework)
+    return `Retry sends the work back to the ${STEP_NAME[rework.role]} step with the ${step} findings, and the ${step} runs after it.`;
+  if (!step) return 'Retry runs it again.';
+  switch (kind) {
+    case WorkstreamFailure.GateFailed:
+    case WorkstreamFailure.RetryLimit:
+      return `Retry runs the ${step} step again with its fix attempts reset.`;
+    case WorkstreamFailure.SessionFailed:
+      return `Retry runs the ${step} step again in a new session.`;
+    case null:
+    default:
+      return `Retry runs the ${step} step again.`;
+  }
+}
+
+/**
+ * A failed run in plain words: what happened, then what Retry will do. The Board card, the task drawer
+ * and Factory's session rows all say this line; the raw `failureReason` stays beside it.
+ */
+export function failureLine(
+  workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & { readonly failureKind: string | null },
+): string {
+  const failed = workstream.steps[workstream.stepIndex];
+  const step = failed ? STEP_NAME[failed.role] : null;
+  return `${whatHappened(workstream.failureKind, step)} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step)}`;
 }
 
 function building(workstream: WorkstreamDto): string {
@@ -268,12 +345,7 @@ function stateOf(
       // A failed run the builder shipped anyway is judged by its pull request.
       if (batch?.state === BatchState.Shipped && batch.prUrl)
         return pullRequestState(batch, batches);
-      return {
-        line: workstream.failureReason
-          ? `Failed: ${lowerFirst(workstream.failureReason)}`
-          : 'Failed',
-        color: 'red',
-      };
+      return { line: failureLine(workstream), color: 'red', detail: workstream.failureReason };
     case S.Done:
       if (batch?.state === BatchState.Failed) {
         return {

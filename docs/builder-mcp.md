@@ -59,21 +59,25 @@ The bridge reads no other 10db variable.
 
 ## What the tools do
 
-| Tool            | Does                                                                                                                             |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default flow and delivery.                |
-| `list_flows`    | Flows, with ids.                                                                                                                 |
-| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                             |
-| `create_task`   | Makes a task from a title, description, criteria, areas, dependencies, risk tags, flow and landing, and returns its id.          |
-| `edit_task`     | Changes a task's title, description, criteria, risk tags, flow, areas or landing (areas and landing only before it has started). |
-| `remove_task`   | Removes a task that has not started.                                                                                             |
-| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).         |
-| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                 |
-| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                 |
-| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                        |
+| Tool            | Does                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list_projects` | Projects with their areas, hazards, isolate list, board columns (ids for `move_task`), default flow and delivery.                          |
+| `list_flows`    | Flows, with ids.                                                                                                                           |
+| `list_tasks`    | A project's **open** tasks. Finished and removed tasks are left out.                                                                       |
+| `create_task`   | Makes a task from a title, headline, why, description, criteria, areas, dependencies, risk tags, flow and landing; returns its id.         |
+| `edit_task`     | Changes a task's title, headline, why, description, criteria, risk tags, flow, areas or landing (areas and landing only before it starts). |
+| `remove_task`   | Removes a task that has not started.                                                                                                       |
+| `start_task`    | Starts a **Ready** task, resumes a held one, or with `fresh` starts a failed one over; any other is refused (see below).                   |
+| `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                           |
+| `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                           |
+| `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                  |
 
 `create_task` refuses what the New Task form refuses, with the same words ("Add at least one acceptance
 criterion", "Choose at least one area", and the API's messages for an unknown area or a title with a line break).
+The drafting guidance asks for a `headline` on every task (the plain words the Board names it by, one line of at most
+80 characters) and a `why` whenever the reason isn't obvious from the headline (one sentence, at most 200). Both are
+optional and empty by default, and either one too long or with a line break is refused in the API's words, which name
+the field. Git never sees them: the title stays the pull request's.
 `landing` (`{kind:'base'}`, `{kind:'branch', branch}` or `{kind:'hold'}`) says where the task's pull request goes;
 omitted, a new task gets the project's default. A branch origin lacks is refused in the API's words on both tools, and
 `edit_task` refuses a landing change once the task has started.

@@ -88,6 +88,8 @@ export function createBuilderTools(
         .map((task) => ({
           id: task.id,
           title: task.title,
+          headline: task.headline,
+          why: task.why,
           description: task.description,
           acceptanceCriteria: task.acceptanceCriteria,
           areas: task.areas,
@@ -102,6 +104,8 @@ export function createBuilderTools(
       const trimmed = {
         ...loose,
         title: loose.title.trim(),
+        headline: loose.headline.trim(),
+        why: loose.why.trim(),
         description: loose.description.trim(),
         acceptanceCriteria: normaliseCriteria(loose.acceptanceCriteria),
       };
@@ -113,6 +117,8 @@ export function createBuilderTools(
       const { taskId, ...changes } = BuilderToolInputs.edit_task.parse(args);
       const patch: Record<string, unknown> = { ...changes };
       if (changes.title !== undefined) patch['title'] = changes.title.trim();
+      if (changes.headline !== undefined) patch['headline'] = changes.headline.trim();
+      if (changes.why !== undefined) patch['why'] = changes.why.trim();
       if (changes.description !== undefined) patch['description'] = changes.description.trim();
       if (changes.acceptanceCriteria !== undefined) {
         const criteria = normaliseCriteria(changes.acceptanceCriteria);

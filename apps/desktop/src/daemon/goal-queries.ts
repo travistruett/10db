@@ -17,7 +17,7 @@ export const goalKeys = {
 } as const;
 
 /**
- * The project's goals with their digests and Ungrouped group. Reading it leaves every "last opened"
+ * The project's goals with their digests and Not in a goal group. Reading it leaves every "last opened"
  * mark alone, so the list can refresh on each event without closing a goal's window.
  */
 export function useGoals(projectId: ProjectId | null) {

@@ -57,7 +57,7 @@ export function verdictLine(digest: GoalDigestDto): string {
   }
 }
 
-/** The Ungrouped row's line: "2 running · 1 failed", the statuses it holds. */
+/** The Not in a goal row's line: "2 running · 1 failed", the statuses it holds. */
 export function ungroupedLine(ungrouped: UngroupedDigestDto): string {
   const parts = [
     ungrouped.running > 0 ? `${String(ungrouped.running)} running` : null,

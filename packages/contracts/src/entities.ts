@@ -30,6 +30,7 @@ import {
   TaskStatus,
   Urgency,
   WorkspaceMode,
+  WorkstreamFailure,
   WorkstreamState,
 } from './states';
 import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing';
@@ -48,6 +49,30 @@ export const Title = z
   .min(1)
   .max(200)
   .refine((t) => !CONTROL_CHARACTER.test(t), 'no control characters such as newlines or tabs');
+
+/** The longest task headline: a few plain words the desktop names the task by. */
+export const HEADLINE_MAX = 80;
+/** The longest task why: one sentence. */
+export const WHY_MAX = 200;
+
+/** One line of at most `max` characters, empty allowed; each refusal names the field. */
+function oneLine(field: string, max: number) {
+  return z
+    .string()
+    .max(max, `The ${field} is at most ${String(max)} characters`)
+    .refine(
+      (t) => !CONTROL_CHARACTER.test(t),
+      `The ${field} is one line, with no control characters such as newlines or tabs`,
+    );
+}
+
+/**
+ * A task's headline: the plain-words what ("Odd files can't freeze 10db"). Empty means none, and the
+ * desktop shows the title instead. Git never sees it; the title stays the pull request's.
+ */
+export const Headline = oneLine('headline', HEADLINE_MAX);
+/** Why a task matters, in one sentence; empty means none. */
+export const Why = oneLine('why', WHY_MAX);
 
 const GlobbedDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(1) });
 
@@ -458,6 +483,8 @@ export type ProjectPatch = z.infer<typeof ProjectPatch>;
 
 export const TaskInput = z.object({
   title: Title,
+  headline: Headline.default(''),
+  why: Why.default(''),
   description: z.string().default(''),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   areas: z.array(Name).min(1),
@@ -475,7 +502,12 @@ export type TaskConfig = z.output<typeof TaskInput>;
 export const TaskDto = z.object({
   id: TaskId,
   projectId: ProjectId,
+  /** The precise promise; the source of the batch, pull request and commit titles. */
   title: z.string(),
+  /** The plain-words what; empty when none was written, and the desktop shows the title. */
+  headline: z.string(),
+  /** One sentence on why the task matters; empty when none was written. */
+  why: z.string(),
   description: z.string(),
   acceptanceCriteria: z.array(z.string()),
   areas: z.array(z.string()),
@@ -506,6 +538,10 @@ export type TaskDto = z.infer<typeof TaskDto>;
 /** The fields of a task the builder can change; each is optional in a patch. */
 export const TaskPatchFields = z.object({
   title: Title,
+  /** An empty string clears it. */
+  headline: Headline,
+  /** An empty string clears it. */
+  why: Why,
   description: z.string(),
   acceptanceCriteria: z.array(z.string().min(1)).min(1),
   riskTags: z.array(z.enum(RiskTag)),
@@ -604,6 +640,8 @@ export const WorkstreamDto = z.object({
   id: WorkstreamId,
   taskId: TaskId,
   taskTitle: z.string(),
+  /** The task's headline; empty when it has none, and the desktop shows `taskTitle`. */
+  taskHeadline: z.string(),
   projectId: ProjectId,
   /** The batch it runs in; null in local delivery. */
   batchId: BatchId.nullable(),
@@ -620,6 +658,8 @@ export const WorkstreamDto = z.object({
   contextPct: z.number().nullable(),
   pausedUntil: Timestamp.nullable(),
   failureReason: z.string().nullable(),
+  /** What kind of failure `failureReason` describes; null when it has not failed or failed before kinds were kept. */
+  failureKind: z.enum(WorkstreamFailure).nullable().default(null),
   lastActivityAt: Timestamp.nullable(),
   /** When the builder put it first in line; null for a workstream that waits in the order it started. */
   runNextAt: Timestamp.nullable(),

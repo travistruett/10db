@@ -49,6 +49,7 @@ export function GoalDetail({ live, taskIds, opened }: GoalDetailProps) {
       <GoalDigest live={live} opened={opened} />
       <Divider />
       <GoalSessions
+        goalId={live.goalId}
         workstreams={latestPerTask(sessions.all)}
         loading={sessions.loading}
         error={sessions.error}
@@ -62,7 +63,7 @@ export function GoalDetail({ live, taskIds, opened }: GoalDetailProps) {
   );
 }
 
-/** The expanded Ungrouped row: only the sessions of tasks with no goal that are running or failed. */
+/** The expanded Not in a goal row: only the sessions of tasks with no goal that are running or failed. */
 export function UngroupedDetail({
   workstreamIds,
 }: {
@@ -70,6 +71,11 @@ export function UngroupedDetail({
 }) {
   const sessions = useSessions((ws) => workstreamIds.includes(ws.id));
   return (
-    <GoalSessions workstreams={sessions.all} loading={sessions.loading} error={sessions.error} />
+    <GoalSessions
+      goalId={null}
+      workstreams={sessions.all}
+      loading={sessions.loading}
+      error={sessions.error}
+    />
   );
 }

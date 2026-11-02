@@ -13,7 +13,7 @@
 | `apps/daemon/src/git/`                         | `currentBranch`, `remoteUrl`, `fetch`, `switchNewBranch`, `switchBack`, `push`                                                                                                             |
 | `apps/daemon/src/github/`                      | the `Gh` interface over the `gh` CLI                                                                                                                                                       |
 | `apps/daemon/src/guard/`                       | agents never push in `pull_request` projects, and run only an allowlist of read-only `gh` commands                                                                                         |
-| `apps/desktop/src/views/board/batch-strip.tsx` | the line above the board for a branch several tasks share; `batch-panel.tsx` is a task drawer's delivery section; Settings' General form and the new-project form hold the delivery fields |
+| `apps/desktop/src/views/board/batch-panel.tsx` | a task drawer's delivery section (the shared branch, with Abandon); Settings' General form and the new-project form hold the delivery fields                                               |
 
 Settings shows the base branch and the PR title prefix in either delivery, because it checks both fields whatever the delivery and an error must never be hidden; the new-project form shows them only for pull requests.
 

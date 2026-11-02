@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Title } from './entities';
+import { Headline, Title, Why } from './entities';
 import {
   DecisionId,
   DeviationId,
@@ -64,6 +64,10 @@ export type GoalBriefCriterion = z.infer<typeof GoalBriefCriterion>;
 export const GoalBriefTask = z.object({
   key: BriefKey,
   title: Title,
+  /** The plain-words what the Board shows; absent shows the title. */
+  headline: Headline.default(''),
+  /** One sentence on why the task matters. */
+  why: Why.default(''),
   description: z.string().default(''),
   /** The task's acceptance criteria (the front matter's `criteria`). */
   criteria: z.array(z.string().min(1)).default([]),

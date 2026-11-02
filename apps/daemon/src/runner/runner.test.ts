@@ -365,6 +365,26 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain('MISSING-FIXED-FILE');
   });
 
+  it('fails as gate_failed once the gate fails past the retry limit, and a retry clears the kind', async () => {
+    engine = await createTestEngine(
+      { Alpha: [[turn], [turn]] },
+      { gateCommand: 'echo STILL-FAILING; exit 2' },
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.state.write((ctx) => {
+      patchWorkstream(ctx, workstream.id, null, { attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts });
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'gate_failed' });
+    engine.retry(workstream.id);
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      failureReason: null,
+      failureKind: null,
+    });
+  });
+
   it('raises one card for a host the sandbox blocked from a failed gate, naming the host and the command', async () => {
     const blocked: GateResult = {
       exitCode: 101,
@@ -1793,6 +1813,7 @@ describe('runner', () => {
       );
     }
     expect(kinds).toEqual(['resume', 'start', 'resume', 'FAILED']);
+    expect(ws(workstream.id).failureKind).toBe('session_failed');
     expect(listInbox(engine.store.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 
@@ -1824,7 +1845,11 @@ describe('runner', () => {
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
     await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureReason: refusal });
+    expect(ws(workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureReason: refusal,
+      failureKind: 'session_failed',
+    });
     expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
     expect(transitions(workstream.id).filter((t) => t.endsWith('->RECOVERING'))).toEqual([]);
     const cards = listInbox(engine.store.db, { states: ['OPEN'] });
@@ -2833,6 +2858,7 @@ describe('flows', () => {
         state: 'FAILED',
         failureReason:
           'The review step ended without calling complete_step: its last turn ended normally.',
+        failureKind: 'no_result',
       });
       expect(listSessions(engine.store.db, workstream.id)).toHaveLength(3);
       expect(step(workstream.id, 1)?.status).toBe('failed');
@@ -3244,6 +3270,7 @@ describe('flows', () => {
       expect(ws(workstream.id)).toMatchObject({
         state: 'FAILED',
         failureReason: 'The review step rejected the work and the retry limit (3) is used up',
+        failureKind: 'rejected_at_limit',
       });
       const card = listInbox(engine.store.db, { states: ['OPEN'] }).find((i) => i.kind === 'flag');
       const detail = ReviewCardDetail.parse(card?.detail?.['reviewRejection']);
@@ -3632,6 +3659,7 @@ describe('a step that ends with changes in its claims', () => {
 
     expect(ws(workstream.id).state).toBe('FAILED');
     expect(ws(workstream.id).failureReason).toContain('uncommitted changes');
+    expect(ws(workstream.id).failureKind).toBe('retry_limit');
     expect(gateEvidence(workstream.id)).toEqual([]);
   });
 });
@@ -4639,6 +4667,7 @@ describe('the base merge leaving conflict markers in a task that used its fix at
     expect(ws(workstream.id).failureReason).toContain('README.md');
     expect(ws(workstream.id).failureReason).toContain('retry limit');
     expect(ws(workstream.id).failureReason).toContain('still in README.md');
+    expect(ws(workstream.id).failureKind).toBe('retry_limit');
   });
 
   it('does not say the markers are still there when a new base merge made them after the merge session', async () => {
@@ -5190,7 +5219,7 @@ describe('without a gate command', () => {
       answerCheck('send_back', note);
       const [evidence] = listEvidence(engine.store.db, workstream.id);
       expect(evidence).toMatchObject({ kind: 'builder', summary: note });
-      expect(ws(workstream.id)).toMatchObject({ state: 'FAILED' });
+      expect(ws(workstream.id)).toMatchObject({ state: 'FAILED', failureKind: 'retry_limit' });
       expect(ws(workstream.id).nextAction.kind).not.toBe('builder_review');
       expect(ws(workstream.id).failureReason).toContain(
         String(DEFAULT_RUNNER_LIMITS.maxFixAttempts + 1),

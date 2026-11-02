@@ -37,7 +37,7 @@ import { SettingsSectionKey } from '../settings/sections';
 import { abandonNote } from './batch/abandon-note';
 import { BatchSheet } from './batch/batch-sheet';
 import { closeNote } from './batch/close-note';
-import { BatchStrip, sharedBatches } from './batch-strip';
+import { batchTaskCount } from './batch/batch-task-count';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
@@ -49,8 +49,7 @@ import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './dr
 import { landingLine } from './landing-draft';
 import { NewTaskForm } from './new-task-form';
 import { InboxLink } from './inbox-link';
-import { ciLine, withFixTaskTitles } from './ci-line';
-import { ExternalLink, PullRequestLink } from './pull-request-link';
+import { withFixTaskTitles } from './ci-line';
 import { placementLabel, placementOpen } from './placement';
 import { queuePlaces } from './queue-place';
 import { canRunNext } from './run-next';
@@ -76,7 +75,7 @@ const NEW_TASK_FORM_ID = 'new-task-form';
 const COLUMNS_MIN_HEIGHT = 320;
 /** The goal filter's option for no filter; a goal's ID never has this form. */
 const ALL_GOALS = 'all';
-/** The strips together take at most this share of the board's height. */
+/** The goal strips together take at most this share of the board's height. */
 const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
@@ -128,19 +127,6 @@ function parkedDependencyOf(
     if (peer?.status === TaskStatus.Open && peer.boardColumnId !== null) return peer.title;
   }
   return null;
-}
-
-/** A finished task's pull request: the one its batch opened, once that batch has shipped. */
-function shippedPullRequest(
-  task: TaskDto,
-  workstream: WorkstreamDto | undefined,
-  batchById: ReadonlyMap<BatchId, BatchDto>,
-): string | undefined {
-  if (!workstream?.batchId) return undefined;
-  // A failed run the builder shipped anyway has a pull request too.
-  if (task.status !== TaskStatus.Done && workstream.state !== WorkstreamState.Failed)
-    return undefined;
-  return batchById.get(workstream.batchId)?.prUrl ?? undefined;
 }
 
 const isDone = (column: LayoutColumn) =>
@@ -323,32 +309,15 @@ function BoardColumns({
                 batch={batch}
                 batches={allBatches}
                 gateCommand={stepCheck}
-                pullRequest={shippedPullRequest(task, ws, batchById)}
-                landing={landingOf(task, batch)}
+                batchTaskCount={batch ? batchTaskCount(batch, workstreams) : 1}
                 startNote={noteOf(task)}
                 place={ws ? places.get(ws.id) : undefined}
-                placementShown={placementOpen(task, ws?.state)}
                 peers={peers}
                 goalTitle={task.goalId ? goalTitles.get(task.goalId) : undefined}
               />
             );
           }}
-          renderLink={(task) => {
-            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            const url = shippedPullRequest(task, ws, batchById);
-            if (url) {
-              const ci = ciLine(batchOf(ws), allBatches);
-              return (
-                <Group gap="sm" wrap="nowrap">
-                  <PullRequestLink url={url} />
-                  {ci?.link && ci.link.url !== url ? (
-                    <ExternalLink url={ci.link.url} label={ci.link.label} />
-                  ) : null}
-                </Group>
-              );
-            }
-            return noteOf(task)?.inbox ? <InboxLink /> : null;
-          }}
+          renderLink={(task) => (noteOf(task)?.inbox ? <InboxLink /> : null)}
           summary={(task) => {
             const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
             const batch = batchOf(ws);
@@ -363,6 +332,7 @@ function BoardColumns({
               ws ? places.get(ws.id) : undefined,
               allBatches,
               placementOpen(task, ws?.state) ? placementLabel(task.workspaceMode) : null,
+              batch ? batchTaskCount(batch, workstreams) : 1,
             );
           }}
           renderMenu={(task) => {
@@ -493,15 +463,6 @@ function BoardColumns({
   );
 }
 
-/**
- * Every unfinished batch of both kinds, in the daemon's order, newest first: a separate copy's
- * batch beside the shared one. With none open, the project's current batch stands in.
- */
-function stripBatches(project: ProjectViewDto): readonly BatchDto[] {
-  if (project.openBatches.length > 0) return project.openBatches;
-  return project.currentBatch ? [project.currentBatch] : [];
-}
-
 export function BoardView() {
   const { projects, project, select } = useSelectedProject();
   const tasks = useTasks(project?.id ?? null);
@@ -509,7 +470,7 @@ export function BoardView() {
   const workstreams = useWorkstreams({ active: false });
   const batches = useBatches(project?.id ?? null);
   const navigate = useNavigate();
-  const { task } = useSearch({ from: '/board' });
+  const { task, goal: linkedGoalId } = useSearch({ from: '/board' });
   const linked = useLinkedTask(task, projects.data ?? [], project?.id ?? null, select);
   const [taskOpen, taskModal] = useDisclosure(false);
   const [taskStatus, setTaskStatus] = useState<{ pending: boolean; error: string | null }>({
@@ -520,7 +481,14 @@ export function BoardView() {
   const goals = useGoals(project?.id ?? null);
   // The goal whose drawer is open and the goal the filter shows, by ID so they follow the refetched list.
   const [openGoalId, setOpenGoalId] = useState<GoalId | null>(null);
-  const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(null);
+  // A link's `goal` starts the filter (a Factory row opens the task among its goal's tasks); the
+  // Select clears or changes it as usual, and a new link replaces it.
+  const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(linkedGoalId ?? null);
+  const [filterLinkedFor, setFilterLinkedFor] = useState(linkedGoalId);
+  if (filterLinkedFor !== linkedGoalId) {
+    setFilterLinkedFor(linkedGoalId);
+    setFilterGoalId(linkedGoalId ?? null);
+  }
   // The goal whose ready tasks the batch sheet is proposing.
   const [sheetGoalId, setSheetGoalId] = useState<GoalId | null>(null);
 
@@ -541,8 +509,6 @@ export function BoardView() {
   const workstreamById = new Map((workstreams.data ?? []).map((ws) => [ws.id, ws]));
   const batchList = batches.data ?? [];
   const batchById = new Map(batchList.map((b) => [b.id, b]));
-  // A branch gets a line above the columns only while several tasks share it.
-  const strips = project ? sharedBatches(stripBatches(project), workstreams.data ?? []) : [];
   const peers = new Map(taskList.map((t) => [t.id, t]));
   const started = startedDependents(taskList, workstreamById);
   // The header's Start Ready Tasks proposes from every ready task, so its count ignores the goal filter.
@@ -648,7 +614,7 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {strips.length > 0 || goalStrips.length > 0 ? (
+      {goalStrips.length > 0 ? (
         <ScrollArea.Autosize
           mah={ABOVE_COLUMNS_MAX_HEIGHT}
           type="auto"
@@ -665,9 +631,6 @@ export function BoardView() {
                   setOpenGoalId(summary.goal.id);
                 }}
               />
-            ))}
-            {strips.map((batch) => (
-              <BatchStrip key={batch.id} batch={batch} workstreams={workstreams.data ?? []} />
             ))}
           </Stack>
         </ScrollArea.Autosize>

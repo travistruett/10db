@@ -253,6 +253,53 @@ describe('the builder MCP endpoint', () => {
       });
     });
 
+    it('stores a trimmed headline and why, as the REST API does', async () => {
+      const project = await seedProject();
+      const words = { headline: "Odd files can't freeze 10db", why: 'A FIFO hung every lane.' };
+      const created = z.object({ id: z.string() }).parse(
+        await callJson('create_task', {
+          projectId: project.id,
+          title: 'Stamping a file never blocks on a FIFO',
+          headline: `  ${words.headline} `,
+          why: ` ${words.why}  `,
+          acceptanceCriteria: ['one'],
+          areas: ['src'],
+        }),
+      );
+      const viaRest = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Rest',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+        ...words,
+      });
+      expect(viaRest).toMatchObject(words);
+      expect((await tasksOf(project.id)).find((t) => t.id === created.id)).toMatchObject({
+        title: 'Stamping a file never blocks on a FIFO',
+        ...words,
+      });
+    });
+
+    it.each([
+      ['headline', 'x'.repeat(81)],
+      ['why', 'x'.repeat(201)],
+      ['headline', 'two\nlines'],
+    ])('refuses a bad %s in the REST API’s words, naming the field', async (field, value) => {
+      const project = await seedProject();
+      const input = {
+        projectId: project.id,
+        title: 't',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+        [field]: value,
+      };
+      const rest = await restRefusal(`/projects/${project.id}/tasks`, input);
+      expect(rest.status).toBe(400);
+      expect(restText(rest.body)).toContain(`The ${field} is`);
+      const result = await call('create_task', input);
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(`The ${field} is`);
+    });
+
     it('lands in the project default unless the call names a landing', async () => {
       const project = await seedProject();
       await api().patch(`/projects/${project.id}`, ProjectDto, { landing: 'hold' });
@@ -351,6 +398,22 @@ describe('the builder MCP endpoint', () => {
         text,
       });
       expect((await tasksOf(project.id))[0]?.acceptanceCriteria).toEqual(['x']);
+    });
+
+    it('sets a headline and why, keeps the title, and clears the why with an empty string', async () => {
+      const project = await seedProject();
+      const task = await seedTask(project.id, 'The precise promise');
+      await callJson('edit_task', { taskId: task.id, headline: ' Plain words ', why: 'Because.' });
+      expect((await tasksOf(project.id))[0]).toMatchObject({
+        title: 'The precise promise',
+        headline: 'Plain words',
+        why: 'Because.',
+      });
+      await callJson('edit_task', { taskId: task.id, why: '' });
+      expect((await tasksOf(project.id))[0]).toMatchObject({ headline: 'Plain words', why: '' });
+      const refused = await call('edit_task', { taskId: task.id, why: 'w'.repeat(201) });
+      expect(refused.isError).toBe(true);
+      expect(refused.text).toContain('The why is at most 200 characters');
     });
 
     it('refuses an unknown task', async () => {

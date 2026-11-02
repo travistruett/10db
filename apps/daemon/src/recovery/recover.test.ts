@@ -525,7 +525,10 @@ describe('recoverOnStartup', () => {
     });
     const report = await recover();
     expect(report.failed).toEqual([ws.workstream.id]);
-    expect(getWorkstream(state.db, ws.workstream.id).state).toBe('FAILED');
+    expect(getWorkstream(state.db, ws.workstream.id)).toMatchObject({
+      state: 'FAILED',
+      failureKind: 'session_failed',
+    });
     expect(listInbox(state.db, { states: ['OPEN'] }).map((i) => i.kind)).toEqual(['flag']);
   });
 

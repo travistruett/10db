@@ -70,6 +70,45 @@ describe('NewTaskForm', () => {
     expect(posted[0]).toMatchObject({ areas: ['repo'] });
   });
 
+  it('puts Headline above Title and sends the headline and why, trimmed', async () => {
+    const posted: unknown[] = [];
+    await open(projectDto({ areas: [{ name: 'repo', globs: ['**'] }] }), posted);
+
+    const headline = screen.getByLabelText('Headline');
+    expect(
+      headline.compareDocumentPosition(screen.getByLabelText('Title')) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    fireEvent.change(headline, { target: { value: " Odd files can't freeze 10db " } });
+    fireEvent.change(screen.getByLabelText('Title'), {
+      target: { value: 'Stamping never blocks' },
+    });
+    fireEvent.change(screen.getByLabelText('Why'), { target: { value: ' A FIFO hung. ' } });
+    fireEvent.change(screen.getByLabelText('Acceptance criteria'), { target: { value: 'Works' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({
+      headline: "Odd files can't freeze 10db",
+      title: 'Stamping never blocks',
+      why: 'A FIFO hung.',
+    });
+  });
+
+  it('sends an empty headline and why when they are left blank', async () => {
+    const posted: unknown[] = [];
+    await open(projectDto({ areas: [{ name: 'repo', globs: ['**'] }] }), posted);
+    fireEvent.change(screen.getByLabelText('Title'), { target: { value: 'Beta' } });
+    fireEvent.change(screen.getByLabelText('Acceptance criteria'), { target: { value: 'Works' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create Task' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+    expect(posted[0]).toMatchObject({ headline: '', why: '' });
+  });
+
   describe('where the work lands', () => {
     const pr: Partial<ProjectDto> = {
       delivery: 'pull_request',
