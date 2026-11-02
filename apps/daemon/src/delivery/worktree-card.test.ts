@@ -8,13 +8,7 @@ import { comparablePath, samePath } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
-import {
-  checkoutCards,
-  CheckoutChoice,
-  startCards,
-  WorktreeChoice,
-  worktreeCards,
-} from './cards';
+import { checkoutCards, CheckoutChoice, startCards, WorktreeChoice, worktreeCards } from './cards';
 import { createWorktreeCardAnswers, recoverBatches } from './index';
 import { raise } from './context';
 
