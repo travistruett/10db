@@ -4642,10 +4642,7 @@ describe('the base merge leaving conflict markers in a task that used its fix at
   });
 
   it('does not say the markers are still there when a new base merge made them after the merge session', async () => {
-    const workstream = await usedUp(
-      [conflicted, { ...conflicted, fresh: true }],
-      [[turn], [turn]],
-    );
+    const workstream = await usedUp([conflicted, { ...conflicted, fresh: true }], [[turn], [turn]]);
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('FAILED');
@@ -4658,10 +4655,7 @@ describe('the base merge leaving conflict markers in a task that used its fix at
   });
 
   it('counts only the sessions the step used when it ends the merge session with uncommitted changes', async () => {
-    const workstream = await usedUp(
-      [conflicted],
-      [[turn], [write('src/api/a.txt'), turn]],
-    );
+    const workstream = await usedUp([conflicted], [[turn], [write('src/api/a.txt'), turn]]);
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('FAILED');
