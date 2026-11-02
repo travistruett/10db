@@ -370,6 +370,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
    * there on top of the merge; what the branch had there that the base lacks must come back out of
    * them. The worktree must be clean first: the generators read its sources, and 10db commits only
    * what they make. A failed run's files are removed again.
+   *
+   * `wrote.head` is the head the merge step answered with, read before the install: the merge
+   * commit, or the session's last commit resolving its markers. A head that has moved past it since
+   * holds a commit the builder made in the worktree meanwhile, and nothing is committed on top of it:
+   * the answer stays the head 10db wrote, so a failed catch-up's rewind leaves the branch alone.
+   * `wrote.head` becomes the generators' commit once it is made, for a caller whose run then throws.
    */
   async function generate(
     batch: BatchDto,
@@ -377,17 +383,27 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     branch: string,
     path: string,
     merged: SettledMerge,
+    wrote: { head: string },
     signal: AbortSignal,
   ): Promise<Regenerated> {
     const regenerating = merged.regenerate ?? [];
     const dirs = regenerating.map((r) => r.dir);
-    // Not the merge commit's: a session's commits resolving its markers come after it.
-    const current = await ctx.git.head(path);
+    const current = wrote.head;
     const unchanged = (problem: Unregenerated): Regenerated => ({
       kind: 'done',
       head: current,
       problem,
     });
+    /** The problem when HEAD is no longer the head 10db wrote; null while it is. */
+    const moved = async (): Promise<string | null> => {
+      const now = await ctx.git.head(path);
+      return now === current
+        ? null
+        : `the branch moved to ${now.slice(0, 12)} while 10db ran, a commit 10db did not make, so it didn't commit the generators' output on top of it`;
+    };
+    const movedBefore = await moved();
+    if (movedBefore !== null)
+      return unchanged({ why: movedBefore, logPath: null, restored: false });
     const dirty = await ctx.git.changedPaths(path);
     if (dirty.length > 0)
       return unchanged({
@@ -410,19 +426,27 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         restored,
       });
     }
+    const movedDuring = await moved();
+    if (movedDuring !== null) {
+      // What the run wrote is removed: it is not the builder's, and it would be in the next merge's
+      // way. The card's "as the merge left them" would not hold, since the builder's commit is on top.
+      await ctx.git.restoreDirs(path, dirs);
+      return unchanged({ why: movedDuring, logPath: generated.logPath, restored: false });
+    }
     const changed = (await ctx.git.changedPaths(path)).filter((file) =>
       dirs.some((dir) => file.startsWith(dir)),
     );
     let head = current;
     if (changed.length > 0) {
-      await ctx.git.commit({
+      const { sha } = await ctx.git.commit({
         repo: path,
         paths: changed,
         message: `Regenerate ${dirs.join(', ')} after merging origin/${batch.baseBranch}`,
         opId: `regenerate-${merged.head}`,
         branch,
       });
-      head = await ctx.git.head(path);
+      head = sha;
+      wrote.head = sha;
     }
     const done = (problem: Unregenerated | null): Regenerated => ({ kind: 'done', head, problem });
     // Each directory conflicted, so the branch's version of it differs from the base's, which the
@@ -458,8 +482,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   /**
    * Regenerates the generated directories a merge took from the base, after the install the merged
    * lockfile needs: run before it, an older generator would write the files, or the run would fail.
-   * What kept them from it is one card. Never throws. Resolves with the branch's head and the note to
-   * add, or with a stop.
+   * What kept them from it is one card. Never throws. Resolves with the head 10db wrote (`start`, the
+   * head the merge step answered with, or the generators' commit on it; never one read back from the
+   * worktree, where the builder may have committed meanwhile) and the note to add, or with a stop.
    */
   async function regenerate(
     batch: BatchDto,
@@ -467,6 +492,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     branch: string,
     path: string,
     merged: SettledMerge,
+    start: string,
     installed: boolean,
     signal: AbortSignal,
   ): Promise<
@@ -474,13 +500,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     | { readonly kind: 'aborted' }
   > {
     const dirs = (merged.regenerate ?? []).map((r) => r.dir);
+    const wrote = { head: start };
     let outcome: Regenerated;
     try {
       outcome = installed
-        ? await generate(batch, project, branch, path, merged, signal)
+        ? await generate(batch, project, branch, path, merged, wrote, signal)
         : {
             kind: 'done',
-            head: merged.head,
+            head: start,
             problem: {
               why: "the install the merged lockfile needs failed, so 10db didn't run the generators",
               logPath: null,
@@ -496,7 +523,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         ? { kind: 'aborted' }
         : {
             kind: 'done',
-            head: await ctx.git.head(path).catch(() => merged.head),
+            head: wrote.head,
             problem: {
               why: `10db couldn't run the generators (${why(error)})`,
               logPath: null,
@@ -999,6 +1026,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           batch.branch,
           path,
           pending,
+          // Read by the merge step, before the install: the head 10db's merge (or the session) left.
+          merged.head,
           installed.ok,
           signal,
         );

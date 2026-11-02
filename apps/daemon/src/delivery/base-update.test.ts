@@ -579,6 +579,76 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.cards()).toEqual([]);
     });
 
+    describe('when the builder commits in the worktree while it runs', () => {
+      const regenerated = {
+        [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+        [`${DB}/0002_mine.sql`]: MINE,
+      };
+
+      /** The branch's commits from its tip down, by subject. */
+      const subjects = (path: string, n: number): string[] =>
+        gitIn(path, 'log', `-${String(n)}`, '--format=%s').split('\n');
+
+      it("answers with its merge, not the builder's commit made during the install, and commits nothing on top of it", async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const run = { ran: 0 };
+        // The install reads the lockfile at HEAD after the merge: the builder commits in that window.
+        const read = h.git.blobAt.bind(h.git);
+        let committed = false;
+        vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+          if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+            committed = true;
+            await commitOnBatch(batch, 'src/builder.ts');
+          }
+          return read(repo, rev, file);
+        });
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating(regenerated, run),
+        }).beforeGate(batch.id, signal);
+        expect(committed).toBe(true);
+        expect(update.kind).toBe('merged');
+        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(subjects(path, 2)).toEqual([
+          'Add src/builder.ts',
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        ]);
+        expect(run.ran).toBe(0);
+        expect(state(path).status).toBe('');
+        const card = h.only(h.cards());
+        expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
+        expect(card.body).toContain('a commit 10db did not make');
+      });
+
+      it("answers with its merge, not the builder's commit made while the generators ran, and commits nothing on top of it", async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const generator = generating(regenerated);
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: {
+            regenerate: async (input) => {
+              await commitOnBatch(batch, 'src/builder.ts');
+              return generator.regenerate(input);
+            },
+          },
+        }).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('merged');
+        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(subjects(path, 2)).toEqual([
+          'Add src/builder.ts',
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        ]);
+        // What the run wrote is removed: the builder regenerates on top of their own commit.
+        expect(state(path).status).toBe('');
+        const card = h.only(h.cards());
+        expect(card.body).toContain('a commit 10db did not make');
+      });
+    });
+
     it('raises one card, naming the directory and why, when the generator fails; the merge stands and what the run wrote is removed', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();

@@ -359,6 +359,80 @@ describe('a shipped pull request that conflicts with its base', () => {
     },
   );
 
+  describe('when the merge takes the base copy of a generated directory, to regenerate', () => {
+    const DB = 'packages/db/drizzle';
+
+    /** A batch whose migration and main's both took number 0001; shipped, then main moved. */
+    async function migrationsCollide(): Promise<BatchDto> {
+      h.commit(
+        'packages/db/package.json',
+        `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+      );
+      h.commit(`${DB}/meta/_journal.json`, '["0000"]\n');
+      h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
+      h.git$('push', '-q', 'origin', 'main');
+      const batch = await shipped(`${DB}/meta/_journal.json`, '["0000","0001_mine"]\n', {
+        keepWorktree: true,
+      });
+      h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
+      h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+      conflicts(batch);
+      h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+      return batch;
+    }
+
+    /** A generator that writes what the merged sources would generate, and counts its runs. */
+    function generating(run: { ran: number }, first?: () => Promise<void>): void {
+      vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(async ({ path }) => {
+        run.ran += 1;
+        await first?.();
+        writeFileSync(join(path, DB, 'meta/_journal.json'), '["0000","0001_theirs","0002_mine"]\n');
+        return { kind: 'done', logPath: join(path, 'generate.log') };
+      });
+    }
+
+    /** The branch's tip holds the builder's commit, which nothing pushed. */
+    function builderKept(branch: string): void {
+      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
+      expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
+      expect(h.origin$('log', '-1', '--format=%s', onOrigin(branch))).not.toBe(
+        'Add src/builder.ts',
+      );
+    }
+
+    it("keeps a builder's commit made while the install runs, when the check then fails", async () => {
+      const batch = await migrationsCollide();
+      const run = { ran: 0 };
+      generating(run);
+      const read = h.git.blobAt.bind(h.git);
+      let committed = false;
+      vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+        if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+          committed = true;
+          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+        }
+        return read(repo, rev, file);
+      });
+
+      await catchUp(batch);
+
+      expect(committed).toBe(true);
+      builderKept(batch.branch ?? '');
+    });
+
+    it("keeps a builder's commit made while the generators run, when the check then fails", async () => {
+      const batch = await migrationsCollide();
+      const run = { ran: 0 };
+      generating(run, () => commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts'));
+
+      await catchUp(batch);
+
+      expect(run.ran).toBe(1);
+      builderKept(batch.branch ?? '');
+    });
+  });
+
   it("keeps a builder's commit made in the kept worktree while the check runs, when it then fails", async () => {
     const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
