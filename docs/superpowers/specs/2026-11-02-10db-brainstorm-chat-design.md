@@ -118,7 +118,7 @@ The card side of annotations (an indicator per kind on a task card) is the reada
   conversation; a dropped `.md` brief starts one too. Adopt a Plan… leaves the UI (its modal and hook,
   `apps/desktop/src/views/factory/adopt-plan.tsx` and `use-adopt-plan.ts`, are removed); the adopt route stays for
   briefs made elsewhere (the builder's choice, 2026-11-02).
-- **Left, about 45%: the conversation.** Plain text blocks, not bubbles; the builder's in bright text. Tool use
+- **Left, about 45%: the conversation.** Plain text blocks, not bubbles; the builder's in bright text; the list is virtualized, so a long conversation renders only what is on screen (the eng review's call). Tool use
   collapses to one dimmed line ("Read apps/desktop/src/views/board/ (12 files)", "propose_plan · 2 changes ·
   passed"). The input autosizes, takes dropped files and pasted images (§5.4), and holds the group's one filled
   primary, **Propose** (§6). Jev's chips (§9) sit above the input. The header shows the conversation's title and
@@ -167,7 +167,12 @@ message. **(spec's call: 10 minutes)**
 **Accounts, limits and recovery (spec's call).** A Shape session is a `sessions` row like a lane's, so it uses the
 project's account selection, counts toward that account's usage and moves to the fallback account with the rest:
 `sessions.workstream_id` becomes nullable and `sessions.shape_id` is added, exactly one of the two set (a check
-constraint). A rate-limit pause or a cap shows as a notice line in the conversation and queues new turns until the
+constraint). Every query that joins `sessions` to `workstreams` is audited (per-project usage joins them today,
+`packages/db/src/store/usage.ts`, and would drop a Shape session) and resolves the project through the workstream or
+the shape; a test proves per-project usage counts a Shape session's tokens. Making the column nullable is a SQLite
+table rebuild of `sessions` (which `handoffs.session_id` references); the generated migration is proven by the
+repo's migration and recovery tests on a seeded database, with handoffs intact (the eng review's D2, 2026-11-02;
+there is no installed data yet to protect). A rate-limit pause or a cap shows as a notice line in the conversation and queues new turns until the
 account resumes; no Inbox card. After a daemon crash, a turn that was running is marked interrupted in the
 transcript and is not re-run; the next message resumes the session (§5.3).
 
@@ -358,12 +363,14 @@ drawer-editr"):
   Dropping a removal bars removing that task until the builder asks for it in chat.
 
 **Rows.** **Built:** `proposals` and `sources`, written today by agents' `propose` tool
-(`packages/db/src/store/knowledge.ts`), with `ProposalKind` `new_task | change_task | principle | note`.
-**Designed:** `ProposalKind` gains `goal`, `task` (loose, or an addition with `goalId`), `remove_task`, `decision`,
-`question` and `landing`; `SourceKind` gains `shape`. A Shape proposal carries its key, round, pin set, typed body
-(JSON, parsed with its zod schema on read) and, **per task key** (a loose task's or addition's own key, and each
-task key inside a goal), a content hash and the list of fields its last round changed, in new nullable columns, so
-existing proposals are unchanged. Reconciling writes the hashes and changed fields; a builder edit updates the hash
+(`packages/db/src/store/knowledge.ts`), with `ProposalKind` `new_task | change_task | principle | note` and three
+statuses; the Inbox reads them. **Designed (the eng review's D1, 2026-11-02):** Shape's proposals live in their own
+table, `shape_proposals`, owned by `apps/daemon/src/shape/`, so one module owns all their state and `proposals`,
+`ProposalKind` and `knowledge.ts` stay unchanged. A row has its shape, key, kind (`goal | task | change_task |
+remove_task | decision | principle | question | landing`; a `task` with `goalId` is an addition), state (`pending |
+superseded | rejected | accepted`), round, pin set, typed body (JSON, parsed with its zod schema on read) and,
+**per task key** (a loose task's or addition's own key, and each task key inside a goal), a content hash and the
+list of fields its last round changed. Changes are announced as `shape.changed`, not `proposal.*`. Reconciling writes the hashes and changed fields; a builder edit updates the hash
 of the task it touched. Round marks, rehearsal and the Convert modal all work per task key, so editing one task of
 a goal never marks or re-rehearses its siblings.
 
@@ -449,6 +456,9 @@ attachment on the goal.
   workstream's session spans plus its recorded gate spans. Tasks finished before the gate events have lane time
   from sessions only, marked "sessions only", and still count. A task whose sessions can't be read gets none and is
   left out of bases, medians and the measure.
+- **Stored once (the eng review's call).** A workstream's lane time is computed when it finishes and stored in
+  `task_lane_times` (task, workstream, lane minutes, sessions-only flag), backfilled once by the migration, so
+  `similar_tasks`, bucket medians, the preview and the Sizing line read a row instead of rebuilding spans per call.
 - **Buckets:** S under 1 h, M 1–3 h, L 3–8 h, XL over 8 h of lane time. **(spec's call)**
 - **One source per field.** Claude writes a task's `basis` (finished task ids from `similar_tasks`); the daemon
   computes hours (the basis's median lane time) and the bucket. With an empty basis, Claude writes `size`; hours are
@@ -624,24 +634,25 @@ Convert has no undo of its own beyond these.
 (`packages/db/AGENTS.md`); the FTS5 index over finished tasks' titles and descriptions for `similar_tasks` is a
 hand-written `--custom` migration. Changes to existing tables: `sessions.workstream_id` nullable and
 `sessions.shape_id` added, with a check that exactly one is set (§5.1); `tasks.landing_group_id` (§10.4);
-`decisions.withdrawn_at`, `withdrawn_by` and `withdrawn_reason` (§11); the `proposals` columns of §6; the project setting `oneWayPaths` (§7). New
-tables:
+`decisions.withdrawn_at`, `withdrawn_by` and `withdrawn_reason` (§11); the project setting `oneWayPaths` (§7).
+`proposals` is unchanged. New tables:
 
 | Table               | Holds                                                                                                                                                                  |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `shapes`            | id, project, title, state (`listening \| proposed \| converted`), origin (`app \| claude_code`), SDK session id, propose unlocked, round, created, updated             |
 | `shape_messages`    | §5.3                                                                                                                                                                   |
+| `shape_proposals`   | §6 Rows                                                                                                                                                                |
 | `shape_files`       | a dropped file's name, type, size and stored path                                                                                                                      |
 | `shape_findings`    | §7: effort or task, reviewer (`scope \| engineering \| rehearsal`), kind (`finding \| question`), severity, text, state, how resolved, the round and task hash it read |
 | `shape_rehearsals`  | task key, the hash it read, round, questions found (zero included)                                                                                                     |
 | `shape_attachments` | kind (`mermaid \| chart \| mockup \| spec \| eval`), body, target (proposal key, or created goal or task)                                                              |
 | `shape_questions`   | text, for, source messages, the goal or task it belongs to                                                                                                             |
 | `shape_links`       | shape, proposal, created goal, task or decision                                                                                                                        |
+| `task_lane_times`   | §8: task, workstream, lane minutes, sessions-only flag                                                                                                                 |
 | `landing_groups`    | id, project, title, the shape that proposed it                                                                                                                         |
 
 Contracts: `ShapeDto`, `ShapeMessageDto`, `PlanDraft`, the proposal bodies and the MCP tool inputs, in
-`@10db/contracts`. Events: `shape.changed`, `shape.message`, `proposal.created` and `proposal.resolved` (existing),
-`gate.started`, `gate.finished`.
+`@10db/contracts`. Events: `shape.changed`, `shape.message`, `gate.started`, `gate.finished`.
 
 ## 14. Slices
 
@@ -682,7 +693,10 @@ Table-driven and red first (`.claude/rules/testing.md`), with the fake Claude ad
   decision missing from search and the context pack (read back through search, `.claude/rules/testing.md`);
 - landings: two unrelated tasks of one landing starting into one batch, a late task joining the open batch, a
   late task after the batch shipped making a new one, a landing with mixed placements refused;
-- accounts: a Shape session's usage counted on the project's account, a rate-limit pause queueing turns;
+- accounts: a Shape session's usage counted on the project's account and in per-project usage, a rate-limit pause
+  queueing turns; the `sessions` migration on a seeded database (handoffs intact, recovery tests green);
+- regression (the eng review's D3): `insertGoal` with no outside keys and `groupByDependency` with no landing groups
+  return exactly what they do today (rows added to their table-driven tests), and the adopt route answers as before;
 - rehearsal: a question finding resolved by a `propose_plan` that changes the task, a task re-read after it
   changes, Convert warning on an open question;
 - memory: `find_records` finding a recorded decision with its date, never returning another project's; a record
