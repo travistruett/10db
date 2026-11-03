@@ -18,6 +18,13 @@
   first install of a copy did. The base update's install (`base-update.ts` `install`) runs at every gate, not only
   when the lockfile changed, for a copy that was installed (it has a `node_modules`, or an install passed and was
   recorded), and installs again, with `seeded: false` so a copy whose `node_modules` is gone is rebuilt too.
+- **Another store starts over too.** `refresh` also removes `node_modules` when its `.modules.yaml` names a store
+  other than the one the install is given (`madeFromAnotherStore`). A sandboxed install gets a store of its own in
+  its run's temp dir, so a seed from the main checkout, or an earlier run's install, always names another store,
+  and pnpm then tries to remove `.pnpm` even when every dependency resolves. A `node_modules` with no record, or a
+  record that names no store, is kept. Until the lockfile check could read a pnpm 12 lockfile (#462), every copy
+  read as broken and started over, which hid this; once the check read seeds as whole, every new copy's first
+  install failed with `ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR`.
 - **Report.** When the install does not leave a copy that resolves, `beforeGate` answers `install_broken` with a note
   that names the unresolved dependencies. The gate does not start. The runner fails the task with the new failure
   kind `install_broken` and its card, **without counting a fix attempt** (`attempt` is not raised): a fix session

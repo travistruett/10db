@@ -187,16 +187,20 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
   });
 
-  it('leaves a node_modules whose packages all resolve for pnpm to bring in line', async () => {
+  it('installs from nothing over a node_modules whose packages all resolve, since it names another store', async () => {
     fakePnpm();
     writeFileSync(
       join(worktree, 'pnpm-lock.yaml'),
       'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
     );
     mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
-    writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
+    writeFileSync(
+      join(worktree, 'node_modules/.modules.yaml'),
+      'packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-earlier/cache/pnpm-store/v11\n',
+    );
     expect((await refresh(dependencies())).kind).toBe('installed');
-    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(true);
+    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(false);
+    expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
   });
 
   it('installs from the worktree’s own lockfile with scripts and the pnpmfile off', async () => {
