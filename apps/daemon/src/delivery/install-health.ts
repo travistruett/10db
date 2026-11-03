@@ -1,9 +1,33 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
-import { parseAllDocuments } from 'yaml';
+import { parse, parseAllDocuments } from 'yaml';
+import { z } from 'zod';
 
 /** The lockfile that says a project's packages are pnpm's. */
 export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
+
+/** What pnpm records about an install in `node_modules/.modules.yaml`; only the store is read. */
+const ModulesState = z.looseObject({ storeDir: z.string().optional() });
+
+/**
+ * Whether the copy's `node_modules` was installed from a store other than `store`, as its
+ * `.modules.yaml` records it. A `node_modules` with no record, or a record naming no store, is not
+ * another store's; a record that can't be read counts as one, so the install starts over.
+ */
+export function madeFromAnotherStore(path: string, store: string | undefined): boolean {
+  const record = join(path, 'node_modules', '.modules.yaml');
+  if (!existsSync(record)) return false;
+  let parsed: unknown;
+  try {
+    parsed = parse(readFileSync(record, 'utf8'));
+  } catch {
+    return true;
+  }
+  const state = ModulesState.safeParse(parsed);
+  if (!state.success) return true;
+  const recorded = state.data.storeDir;
+  return recorded !== undefined && recorded !== store;
+}
 
 /** What a copy's installed packages look like against its pnpm lockfile. */
 export type InstallHealth =
