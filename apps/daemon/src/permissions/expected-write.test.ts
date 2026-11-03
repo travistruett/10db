@@ -88,6 +88,21 @@ describe('editResult', () => {
     ).toBe('a x c');
   });
 
+  it('keeps the trailing whitespace of an Edit that creates its file, as Claude Code does', () => {
+    const create = { file_path: '/p/new.ts', old_string: '', new_string: 'x  \ny\t\n' };
+    expect(editResult('Edit', create, null)).toBe('x  \ny\t\n');
+    // A file that exists, even an empty one, is stripped.
+    expect(editResult('Edit', create, '')).toBe('x\ny\n');
+    // Whether the file exists is settled once for the call, so every edit of a MultiEdit that creates it keeps
+    // its whitespace; one on a file that exists loses it in each edit.
+    const edits = [
+      { old_string: '', new_string: 'a  \n' },
+      { old_string: 'a', new_string: 'b  ' },
+    ];
+    expect(editResult('MultiEdit', { file_path: '/p/new.ts', edits }, null)).toBe('b    \n');
+    expect(editResult('MultiEdit', { file_path: '/p/new.ts', edits }, '')).toBe('b\n');
+  });
+
   it('counts matches without overlap, as Claude Code does', () => {
     // '==' in 'a === b' is one match to Claude Code (split), not two overlapping ones.
     expect(editResult('Edit', { old_string: '==', new_string: 'X' }, 'a === b')).toBe('a X= b');
