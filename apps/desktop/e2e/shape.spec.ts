@@ -128,9 +128,10 @@ for (const scheme of ['dark', 'light'] as const) {
     await expectAccessible(page, `proposed, ${scheme}`);
 
     // ↑/↓ move between rows; Enter opens one, read-only.
-    const rows = sidebar.getByRole('list', { name: 'Proposed rows' }).getByRole('button', {
-      expanded: false,
-    });
+    // Only the rows themselves: each row's Actions menu button is also collapsed.
+    const rows = sidebar
+      .getByRole('list', { name: 'Proposed rows' })
+      .locator('button[data-shape-row][aria-expanded="false"]');
     await rows.first().focus();
     await page.keyboard.press('ArrowDown');
     await expect(rows.nth(1)).toBeFocused();
