@@ -298,7 +298,7 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
 | Cost           | tokens over all the goal's sessions; dollars where `cost_usd` is set |                                           |
 
 - **Progress** counts the goal's tasks with status `done` (their pull request may still be open) over its
-  tasks that aren't cancelled; cancelled ones are listed in the goal's drawer.
+  tasks that aren't cancelled; cancelled ones are listed in the goal's detail in Factory.
 - **The digest API.** The daemon computes the digest: `GoalDigestDto` in `@10db/contracts` and
   `GET /goals/:goalId/digest`, one response with the status, progress and every row from the sources above.
   Team is the steps of the goal's started workstreams. The window comes from `goal_views` (goal, person, opened
@@ -339,15 +339,15 @@ The list and Adopt rows restate Factory's and DESIGN.md's existing conventions; 
 
 ## 9. Board and Inbox
 
-**Built:** the Board's task cards, drawer and Start Ready Tasks…; the Inbox's cards with an assignee field; the Board's goal strips, goal drawer, goal label on cards, goal filter and goal-scoped Start Ready Tasks (phase 1).
+**Built:** the Board's task cards, drawer and Start Ready Tasks…; the Inbox's cards with an assignee field; the Board's goal label on cards, goal filter with its one-line goal summary, and goal-scoped Start Ready Tasks (phase 1).
 
 **Designed.**
 
-- **Board (phase 1):** a goal is a slim **goal strip** above the columns, like `BatchStrip` and in the same scroll
-  area: title, "6 of 11 tasks", the status dot. Clicking it opens the goal drawer (objective, criteria
-  read-only, tasks, blockers). A goal isn't a card in a column; the columns stay about tasks. Each of its task
-  cards carries the goal's title as a small dimmed label, and a goal filter (a `Select` in the Board header)
-  shows one goal's tasks. The drawer's **Start Ready Tasks**
+- **Board (phase 1):** a goal isn't a card in a column, and the Board has no goal strip or goal drawer; the
+  goal's detail lives in Factory (§8). Each task card carries the goal's title as a small dimmed label, and a
+  goal filter (a `Select` in the Board header) shows one goal's tasks. With a goal chosen, one compact line
+  beside the select says where it stands (`● Idle · 4 in review · 1 ready`) and offers **Start Ready…** and
+  **Open in Factory ›** (Factory with that goal's row open); with All goals nothing shows. **Start Ready…**
   opens the existing sheet scoped to the goal: `GET /projects/:projectId/candidates` and `proposeCandidates`
   take an optional `goalId` that limits the Ready pool before picking, so "Most tasks at once" fills with the
   goal's tasks. Phase 2 replaces it with **Start Goal**.

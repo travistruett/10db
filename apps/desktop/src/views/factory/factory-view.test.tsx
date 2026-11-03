@@ -171,6 +171,41 @@ describe('FactoryView goal list', () => {
     expect(rowOf('Finished').getAttribute('aria-expanded')).toBe('false');
   });
 
+  it('opens the goal a link names, reading its digest once', async () => {
+    const linked = goal('Linked', 'running');
+    const other = goal('Other', 'running');
+    const opened: string[] = [];
+    serve(goals(goalListDto(linked, other)), digests(opened, linked.digest, other.digest));
+    renderApp(`/factory?goal=${linked.goal.id}`);
+
+    const row = await screen.findByRole('button', { name: /^Linked/ });
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+    expect(rowOf('Other').getAttribute('aria-expanded')).toBe('false');
+    expect(await screen.findByRole('region', { name: 'Linked' })).toBeTruthy();
+    await waitFor(() => {
+      expect(opened).toEqual([linked.goal.id]);
+    });
+  });
+
+  it('opens the Done group for a linked goal that is done', async () => {
+    const finished = goal('Finished', 'done');
+    serve(goals(goalListDto(finished, goal('Busy', 'running'))), digests([], finished.digest));
+    renderApp(`/factory?goal=${finished.goal.id}`);
+
+    const row = await screen.findByRole('button', { name: /^Finished/ });
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('opens nothing for a link to a goal the project does not have', async () => {
+    const opened: string[] = [];
+    serve(goals(goalListDto(goal('Busy', 'running'))), digests(opened));
+    renderApp(`/factory?goal=${goal('Elsewhere', 'running').goal.id}`);
+
+    await screen.findByRole('button', { name: /^Busy/ });
+    expect(screen.queryAllByRole('button', { expanded: true })).toEqual([]);
+    expect(opened).toEqual([]);
+  });
+
   it('puts the most recently changed goal first within a status', async () => {
     serve(
       goals(

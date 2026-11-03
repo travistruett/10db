@@ -61,6 +61,11 @@ const indexRoute = createRoute({
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
+  // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
+  validateSearch: (search: Record<string, unknown>): { goal?: GoalId } => {
+    const goal = GoalId.safeParse(search['goal']);
+    return goal.success ? { goal: goal.data } : {};
+  },
   component: FactoryPage,
 });
 const inboxRoute = createRoute({

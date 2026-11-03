@@ -1,4 +1,5 @@
 import { Alert, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { useSearch } from '@tanstack/react-router';
 import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AdoptPlanButton, AdoptProblem, RefusalModal, TypedPathModal } from './adopt-plan';
@@ -17,6 +18,7 @@ function Factory() {
   const { project } = useSelectedProject();
   const goals = useGoals(project?.id ?? null);
   const adoption = useAdoptPlan(project?.id ?? null);
+  const { goal: linkedGoalId } = useSearch({ from: '/factory' });
 
   return (
     <Stack>
@@ -46,7 +48,7 @@ function Factory() {
           Claude Code to with the 10db-task skill.
         </Text>
       ) : null}
-      {goals.isSuccess ? <GoalList list={goals.data} /> : null}
+      {goals.isSuccess ? <GoalList list={goals.data} linkedGoalId={linkedGoalId} /> : null}
 
       <RefusalModal adoption={adoption} />
       <TypedPathModal adoption={adoption} />

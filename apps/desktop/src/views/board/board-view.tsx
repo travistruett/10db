@@ -14,18 +14,7 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import {
-  Alert,
-  Button,
-  Group,
-  Loader,
-  Menu,
-  ScrollArea,
-  Select,
-  Stack,
-  Text,
-  Title,
-} from '@mantine/core';
+import { Alert, Button, Group, Loader, Menu, Select, Stack, Text, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -53,8 +42,7 @@ import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
 import { isCollapsible, isRail, useCollapsedColumns } from './column-rail';
-import { GoalDrawer } from './goal-drawer';
-import { GoalStrip, goalsWithOpenTasks } from './goal-strip';
+import { GoalLine, readyCountOf } from './goal-line';
 import { BoardDnd } from './board-dnd';
 import { boardLayout, DONE_LIMIT, type LayoutColumn } from './board-layout';
 import { menuMoves, resolveDrop, startedDependents, type DropTarget } from './drop-rules';
@@ -83,14 +71,12 @@ import { useLinkedTask } from './use-linked-task';
 
 const NEW_TASK_FORM_ID = 'new-task-form';
 
-/** The columns never shrink below this, however many strips sit above them. */
+/** The columns never shrink below this, however many alerts sit above them. */
 const COLUMNS_MIN_HEIGHT = 320;
 /** The goal filter's option for no filter; a goal's ID never has this form. */
 const ALL_GOALS = 'all';
 /** Cards show no goal badge while the Goal filter selects a goal: every card would repeat it. */
 const NO_GOAL_TITLES: ReadonlyMap<GoalId, string> = new Map();
-/** The goal strips together take at most this share of the board's height. */
-const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
 /** A finished workstream isn't repeated on its card; the task's column already says so. */
 const SHOWN_STATES: readonly WorkstreamState[] = Object.values(WorkstreamState).filter(
@@ -502,10 +488,9 @@ export function BoardView() {
   });
   const [sheetOpen, sheet] = useDisclosure(false);
   const goals = useGoals(project?.id ?? null);
-  // The goal whose drawer is open and the goal the filter shows, by ID so they follow the refetched list.
-  const [openGoalId, setOpenGoalId] = useState<GoalId | null>(null);
-  // A link's `goal` starts the filter (a Factory row opens the task among its goal's tasks); the
-  // Select clears or changes it as usual, and a new link replaces it.
+  // The goal the filter shows, by ID so it follows the refetched list. A link's `goal` starts the
+  // filter (a Factory row opens the task among its goal's tasks); the Select clears or changes it
+  // as usual, and a new link replaces it.
   const [filterGoalId, setFilterGoalId] = useState<GoalId | null>(linkedGoalId ?? null);
   const [filterLinkedFor, setFilterLinkedFor] = useState(linkedGoalId);
   if (filterLinkedFor !== linkedGoalId) {
@@ -517,8 +502,6 @@ export function BoardView() {
 
   const taskList = tasks.data ?? [];
   const goalList = goals.data?.goals ?? [];
-  const goalStrips = goalsWithOpenTasks(goalList, taskList);
-  const openGoal = goalList.find((g) => g.goal.id === openGoalId);
   const sheetGoal = goalList.find((g) => g.goal.id === sheetGoalId);
   // A filter on a goal that is gone (another project's, or deleted) shows everything.
   const filterGoal = goalList.find((g) => g.goal.id === filterGoalId);
@@ -554,6 +537,18 @@ export function BoardView() {
               value={filterGoal?.goal.id ?? ALL_GOALS}
               onChange={(id) => {
                 setFilterGoalId(goalList.find((g) => g.goal.id === id)?.goal.id ?? null);
+              }}
+            />
+          ) : null}
+          {filterGoal ? (
+            <GoalLine
+              summary={filterGoal}
+              ready={readyCountOf(filterGoal.goal.id, taskList)}
+              onStartReady={() => {
+                setSheetGoalId(filterGoal.goal.id);
+              }}
+              onOpenFactory={() => {
+                void navigate({ to: '/factory', search: { goal: filterGoal.goal.id } });
               }}
             />
           ) : null}
@@ -640,28 +635,6 @@ export function BoardView() {
         </Alert>
       ) : null}
       {projects.isPending ? <Loader size="sm" aria-label="Loading projects" /> : null}
-      {goalStrips.length > 0 ? (
-        <ScrollArea.Autosize
-          mah={ABOVE_COLUMNS_MAX_HEIGHT}
-          type="auto"
-          offsetScrollbars="present"
-          style={{ flexShrink: 0 }}
-          data-testid="board-above-columns"
-        >
-          <Stack gap="xs">
-            {goalStrips.map((summary) => (
-              <GoalStrip
-                key={summary.goal.id}
-                summary={summary}
-                onOpen={() => {
-                  setOpenGoalId(summary.goal.id);
-                }}
-              />
-            ))}
-          </Stack>
-        </ScrollArea.Autosize>
-      ) : null}
-
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
           key={project.id}
@@ -679,23 +652,14 @@ export function BoardView() {
         />
       ) : null}
 
-      {openGoal ? (
-        <GoalDrawer
-          key={openGoal.goal.id}
-          summary={openGoal}
-          tasks={taskList.filter((t) => t.goalId === openGoal.goal.id)}
-          onStartReady={() => {
-            setSheetGoalId(openGoal.goal.id);
-            setOpenGoalId(null);
-          }}
-          onClose={() => {
-            setOpenGoalId(null);
-          }}
-        />
-      ) : null}
-
       {project ? (
-        <BatchSheet key={project.id} project={project} opened={sheetOpen} onClose={sheet.close} />
+        // A key of its own: BoardColumns, a sibling, is keyed by the same project ID.
+        <BatchSheet
+          key={`batch-${project.id}`}
+          project={project}
+          opened={sheetOpen}
+          onClose={sheet.close}
+        />
       ) : null}
       {project && sheetGoal ? (
         <BatchSheet

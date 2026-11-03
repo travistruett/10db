@@ -59,7 +59,7 @@ without calling complete_step" next to a bare Retry. The builder couldn't tell w
   request and squash-commit title (`apps/daemon/src/delivery/start.ts`, `pr-text.ts`). The drawer calls it
   "What it promises".
 - **Headline**: new. The plain-words what, a few words long ("Odd files can't freeze 10db"). The desktop names a
-  task by its headline everywhere it names one: the card, the drawer, Factory's session rows, the goal drawer's
+  task by its headline everywhere it names one: the card, the drawer, Factory's session rows, Factory's
   task lists and Inbox cards that name a task. It falls back to the title when the headline is empty. Git never
   sees it: pull requests, commits and branches keep the title. `WorkstreamDto` gets `taskHeadline` beside
   `taskTitle` so Factory rows can show it.
@@ -157,8 +157,9 @@ principles, agent feedback). This design adds no empty sections for them.
   as its own task (`tsk_01a19d9f-870f`).
 - **Batch strip:** `BatchStrip` and its place above the columns go (`board-view.tsx`, `batch-strip.tsx`).
   - `abandonNote` stays, used by the drawer.
-  - The goal strip stays.
-  - `DESIGN.md` loses the batch strip and keeps the goal strip's own wording.
+  - The goal strip went later, with the goal drawer: a chosen goal shows one line beside the Goal select, and
+    its detail is Factory's (`goal-line.tsx`).
+  - `DESIGN.md` loses the batch strip and words the goal line in its place.
 
 ## 8. Factory
 

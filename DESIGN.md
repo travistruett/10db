@@ -55,10 +55,11 @@ favors legibility and calm over decoration.
   follows, so after a review's rejection at the retry limit it names the earlier step that runs again. A run
   with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
   on the card and in Factory, and is shown under the line in the drawer.
-- **Goal strip:** a goal with open tasks is one slim line above the Board's columns, in the same scroll
-  area: the goal's title, "6 of 11 tasks" and the status dot. Clicking it opens the goal's
-  drawer. A goal is never a card in a column: cards are tasks, and the columns stay about tasks. Each of a
-  goal's task cards carries the goal's title as a small dimmed label.
+- **Goal line:** the Board has no goal strips and no goal drawer; a goal's detail lives in Factory. Choosing a
+  goal in the header's Goal select shows one compact line beside it: the status dot, "Idle · 4 in review ·
+  1 ready", **Start Ready…** and **Open in Factory ›**. With All goals selected nothing shows. A goal is never a
+  card in a column: cards are tasks, and the columns stay about tasks. Each of a goal's task cards carries the
+  goal's title as a small dimmed label, except while the Goal select shows that goal.
 - **Goal status:** a goal says its status once, in a dot and one plain line, and the first match wins:
   failed (red: a goal task failed and isn't retried), waiting on you (yellow: an open Inbox card on one of its
   tasks), waiting on someone (yellow: a card owned by another person; from phase 3), paused (orange), running

@@ -1,10 +1,10 @@
-import { mintId, PickerProposalDto, type GoalId, type TaskDto } from '@10db/contracts';
+import { PickerProposalDto, type GoalId, type TaskDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { candidate, projectViewDto, taskDto } from '../../test/fixtures';
-import { goalCriterionDto, goalListDto, goalSummaryDto } from '../../test/goal-fixtures';
+import { goalDigestDto, goalListDto, goalSummaryDto } from '../../test/goal-fixtures';
 
 const project = projectViewDto({ gateCommand: null, maxLanes: 2 });
 const inProject = { projectId: project.id } as const;
@@ -34,7 +34,7 @@ const greetings = goalSummaryDto(
     objective: 'Every visitor is greeted by name.',
     taskIds: [hello.id, named.id, shipped.id],
   },
-  { status: 'running', progress: { merged: 1, inReview: 0, total: 3, cancelled: [] } },
+  { status: 'running', progress: { merged: 1, inReview: 1, total: 3, cancelled: [] } },
 );
 const farewells = goalSummaryDto(
   { ...inProject, title: 'Say farewell', taskIds: [bye.id] },
@@ -69,42 +69,30 @@ function serve(...overrides: RequestHandler[]): void {
   );
 }
 
-async function openBoard() {
-  renderApp('/board');
-  return screen.findByTestId('board-above-columns');
+async function chooseGoal(name: string) {
+  // The label also names the option list, so take the field itself.
+  const input = (await screen.findAllByLabelText('Goal')).find((el) => el.tagName === 'INPUT');
+  if (!input) throw new Error('no goal filter');
+  fireEvent.click(input);
+  const id = input.getAttribute('aria-controls');
+  const list = await waitFor(() => {
+    const el = id === null ? null : document.getElementById(id);
+    expect(el).not.toBeNull();
+    return el ?? document.body;
+  });
+  fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
 }
 
 describe('the Board with goals', () => {
-  it('shows each goal with open tasks as one strip above the columns, and no goal as a card', async () => {
+  it('has no goal strip rows and no goal drawer, and no goal sits among the cards', async () => {
     serve();
-    const above = await openBoard();
-    const strips = within(above).getAllByRole('button');
-    expect(strips.map((s) => s.getAttribute('aria-label'))).toEqual([
-      'Greet the visitor',
-      'Say farewell',
-    ]);
-    // A strip says where the goal stands: "1 of 3 tasks" and the status dot's color and word.
-    const strip = within(above).getByRole('button', { name: 'Greet the visitor' });
-    expect(within(strip).getByText('1 of 3 tasks')).toBeTruthy();
-    expect(within(strip).getByTestId('goal-dot').getAttribute('data-color')).toBe('blue');
-    expect(
-      within(within(above).getByRole('button', { name: 'Say farewell' }))
-        .getByTestId('goal-dot')
-        .getAttribute('data-color'),
-    ).toBe('gray');
-    // The finished goal has no open task, so no strip; and no goal sits among the task cards.
-    expect(within(above).queryByText('Tidy up')).toBeNull();
-    const columns = screen.getByTestId('board-columns');
-    expect(within(columns).queryByRole('button', { name: 'Greet the visitor' })).toBeNull();
-  });
-
-  it('shows no strip area for a project with no goals', async () => {
-    serve(
-      http.get(daemonUrl('/projects/:projectId/goals'), () => HttpResponse.json(goalListDto())),
-    );
     renderApp('/board');
     await screen.findByRole('button', { name: 'Fix a typo' });
     expect(screen.queryByTestId('board-above-columns')).toBeNull();
+    expect(screen.queryByTestId('goal-strip')).toBeNull();
+    expect(screen.queryByRole('dialog', { name: 'Goal' })).toBeNull();
+    const columns = screen.getByTestId('board-columns');
+    expect(within(columns).queryByRole('button', { name: 'Greet the visitor' })).toBeNull();
   });
 
   it('puts the goal title in a badge on its tasks’ cards and leaves a task with no goal bare', async () => {
@@ -130,124 +118,7 @@ describe('the Board with goals', () => {
     expect(screen.queryByTestId('indicator-goal')).toBeNull();
   });
 
-  describe('the goal drawer', () => {
-    const criterion = goalCriterionDto(greetings.goal.id, {
-      text: 'The greeting names the visitor',
-    });
-    const detailed = {
-      ...greetings,
-      goal: { ...greetings.goal, criteria: [criterion] },
-      digest: {
-        ...greetings.digest,
-        waitingOn: {
-          recent: [
-            {
-              inboxItemId: mintId('InboxItem'),
-              taskId: named.id,
-              title: 'Which name format?',
-              assigneeId: null,
-              assigneeName: 'You',
-              at: '2026-10-31T12:00:00.000Z',
-            },
-          ],
-          earlier: [],
-        },
-      },
-    };
-
-    it('opens on a click with the objective, criteria, tasks and what blocks it', async () => {
-      serve(
-        http.get(daemonUrl('/projects/:projectId/goals'), () =>
-          HttpResponse.json(goalListDto(detailed, farewells)),
-        ),
-      );
-      const above = await openBoard();
-      fireEvent.click(within(above).getByRole('button', { name: 'Greet the visitor' }));
-      const drawer = await screen.findByRole('dialog', { name: 'Goal' });
-      expect(within(drawer).getByText('Greet the visitor')).toBeTruthy();
-      expect(within(drawer).getByText('Every visitor is greeted by name.')).toBeTruthy();
-      // Criteria are read-only text, not inputs.
-      expect(within(drawer).getByText('The greeting names the visitor')).toBeTruthy();
-      expect(within(drawer).queryAllByRole('checkbox')).toEqual([]);
-      for (const title of ['Say hello', 'Name the visitor', 'Pick a greeting']) {
-        expect(within(drawer).getByText(title)).toBeTruthy();
-      }
-      expect(within(drawer).queryByText('Say goodbye')).toBeNull();
-      expect(within(drawer).getByText('Which name format?')).toBeTruthy();
-    });
-
-    it('says nothing blocks a goal with no card and no failed task', async () => {
-      serve();
-      const above = await openBoard();
-      fireEvent.click(within(above).getByRole('button', { name: 'Greet the visitor' }));
-      const drawer = await screen.findByRole('dialog', { name: 'Goal' });
-      expect(within(drawer).getByText('Nothing is blocking this goal.')).toBeTruthy();
-    });
-
-    it('starts only that goal’s ready tasks from Start Ready Tasks', async () => {
-      const asked: (string | null)[] = [];
-      serve(
-        http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
-          const url = new URL(request.url);
-          asked.push(url.searchParams.get('goalId'));
-          return HttpResponse.json(
-            PickerProposalDto.parse({
-              projectId: project.id,
-              size: Number(url.searchParams.get('size')),
-              candidates: [candidate(withGoal(hello, greetings.goal.id))],
-            }),
-          );
-        }),
-      );
-      const above = await openBoard();
-      fireEvent.click(within(above).getByRole('button', { name: 'Greet the visitor' }));
-      const drawer = await screen.findByRole('dialog', { name: 'Goal' });
-      fireEvent.click(within(drawer).getByRole('button', { name: 'Start Ready Tasks…' }));
-      const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
-      expect(await within(sheet).findByRole('checkbox', { name: 'Say hello' })).toBeTruthy();
-      expect(within(sheet).getByText(/Greet the visitor/)).toBeTruthy();
-      expect(asked).toEqual([greetings.goal.id]);
-    });
-
-    it('offers no Start Ready Tasks when none of the goal’s tasks is ready', async () => {
-      serve(
-        http.get(daemonUrl('/projects/:projectId/tasks'), () =>
-          HttpResponse.json(
-            tasks.map((t) =>
-              t.id === hello.id
-                ? { ...t, boardStatus: 'backlog' }
-                : t.id === named.id
-                  ? { ...t, boardStatus: 'in_progress' }
-                  : t,
-            ),
-          ),
-        ),
-      );
-      const above = await openBoard();
-      fireEvent.click(within(above).getByRole('button', { name: 'Greet the visitor' }));
-      const drawer = await screen.findByRole('dialog', { name: 'Goal' });
-      expect(within(drawer).getByRole('button', { name: 'Start Ready Tasks…' })).toHaveProperty(
-        'disabled',
-        true,
-      );
-    });
-  });
-
   describe('the goal filter', () => {
-    async function chooseGoal(name: string) {
-      // The label also names the option list, so take the field itself.
-      const input = (await screen.findAllByLabelText('Goal')).find((el) => el.tagName === 'INPUT');
-      if (!input) throw new Error('no goal filter');
-      fireEvent.click(input);
-      const id = input.getAttribute('aria-controls');
-      const list = await waitFor(() => {
-        const el = id === null ? null : document.getElementById(id);
-        expect(el).not.toBeNull();
-        return el ?? document.body;
-      });
-      fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
-    }
-
     it('shows only the chosen goal’s tasks, and every task again once cleared', async () => {
       serve();
       renderApp('/board');
@@ -272,6 +143,112 @@ describe('the Board with goals', () => {
       renderApp('/board');
       await screen.findByRole('button', { name: 'Fix a typo' });
       expect(screen.queryByLabelText('Goal')).toBeNull();
+    });
+  });
+
+  describe('the chosen goal’s line', () => {
+    it('shows nothing while All goals is selected', async () => {
+      serve();
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Fix a typo' });
+      expect(screen.queryByTestId('goal-line')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Start Ready…' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Open in Factory/ })).toBeNull();
+    });
+
+    it('says the goal’s status and counts once one is chosen, and drops away when cleared', async () => {
+      serve();
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Fix a typo' });
+      await chooseGoal('Greet the visitor');
+      const line = await screen.findByTestId('goal-line');
+      // Running, one task in review (the digest) and two in Ready (the board's tasks).
+      expect(line.textContent).toContain('Running · 1 in review · 2 ready');
+      expect(within(line).getByTestId('goal-dot').getAttribute('data-color')).toBe('blue');
+      expect(within(line).getByRole('button', { name: 'Start Ready…' })).toBeTruthy();
+      expect(within(line).getByRole('button', { name: /^Open in Factory/ })).toBeTruthy();
+
+      await chooseGoal('All goals');
+      await waitFor(() => {
+        expect(screen.queryByTestId('goal-line')).toBeNull();
+      });
+    });
+
+    it('also shows for a goal chosen by a link', async () => {
+      serve();
+      renderApp(`/board?goal=${farewells.goal.id}`);
+      const line = await screen.findByTestId('goal-line');
+      expect(line.textContent).toContain('Not started · 1 ready');
+      expect(line.textContent).not.toContain('in review');
+    });
+
+    it('starts only that goal’s ready tasks from Start Ready…', async () => {
+      const asked: (string | null)[] = [];
+      serve(
+        http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
+          const url = new URL(request.url);
+          asked.push(url.searchParams.get('goalId'));
+          return HttpResponse.json(
+            PickerProposalDto.parse({
+              projectId: project.id,
+              size: Number(url.searchParams.get('size')),
+              candidates: [candidate(withGoal(hello, greetings.goal.id))],
+            }),
+          );
+        }),
+      );
+      renderApp(`/board?goal=${greetings.goal.id}`);
+      const line = await screen.findByTestId('goal-line');
+      fireEvent.click(within(line).getByRole('button', { name: 'Start Ready…' }));
+      const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
+      expect(await within(sheet).findByRole('checkbox', { name: 'Say hello' })).toBeTruthy();
+      expect(within(sheet).getByText(/Greet the visitor/)).toBeTruthy();
+      expect(asked).toEqual([greetings.goal.id]);
+    });
+
+    it('disables Start Ready… when none of the goal’s tasks is ready', async () => {
+      serve(
+        http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+          HttpResponse.json(
+            tasks.map((t) =>
+              t.id === hello.id
+                ? { ...t, boardStatus: 'backlog' }
+                : t.id === named.id
+                  ? { ...t, boardStatus: 'in_progress' }
+                  : t,
+            ),
+          ),
+        ),
+      );
+      renderApp(`/board?goal=${greetings.goal.id}`);
+      const line = await screen.findByTestId('goal-line');
+      expect(line.textContent).not.toContain('ready');
+      expect(within(line).getByRole('button', { name: 'Start Ready…' })).toHaveProperty(
+        'disabled',
+        true,
+      );
+    });
+
+    it('opens Factory with that goal expanded from Open in Factory', async () => {
+      const opened: string[] = [];
+      serve(
+        http.get(daemonUrl('/goals/:goalId/digest'), ({ params }) => {
+          opened.push(String(params['goalId']));
+          return HttpResponse.json(goalDigestDto(farewells.goal.id, farewells.digest));
+        }),
+      );
+      renderApp('/board');
+      await screen.findByRole('button', { name: 'Fix a typo' });
+      await chooseGoal('Say farewell');
+      const line = await screen.findByTestId('goal-line');
+      fireEvent.click(within(line).getByRole('button', { name: /^Open in Factory/ }));
+      const row = await screen.findByRole('button', { name: /^Say farewell/ });
+      await waitFor(() => {
+        expect(row.getAttribute('aria-expanded')).toBe('true');
+      });
+      expect(await screen.findByRole('region', { name: 'Say farewell' })).toBeTruthy();
+      expect(screen.getByRole('heading', { name: 'Factory' })).toBeTruthy();
+      expect(opened).toEqual([farewells.goal.id]);
     });
   });
 });
