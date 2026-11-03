@@ -422,11 +422,12 @@ test.describe('the Board with three goals', () => {
       for (const title of GOAL_TITLES) {
         // The goal's title shows in the columns only as the badge in the indicator row of its two
         // tasks' cards (these titles are short enough to show whole).
-        const inColumns = page.getByTestId('board-columns').getByText(title, { exact: true });
-        await expect(inColumns.and(page.getByTestId('indicator-goal'))).toHaveCount(2);
+        // A Mantine badge puts its text in an inner span, so the test id sits on the span's parent.
+        const columns = page.getByTestId('board-columns');
         await expect(
-          inColumns.and(page.locator(':not([data-testid="indicator-goal"])')),
-        ).toHaveCount(0);
+          columns.getByTestId('indicator-goal').filter({ hasText: new RegExp(`^${title}$`) }),
+        ).toHaveCount(2);
+        await expect(columns.getByText(title, { exact: true })).toHaveCount(2);
       }
 
       // The columns keep their minimum height; where the window is short the page scrolls.

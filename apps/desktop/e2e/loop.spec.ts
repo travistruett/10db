@@ -267,7 +267,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   ).toBeVisible();
 
   await open(page, 'Board');
-  await expect(page.getByRole('list', { name: 'Exploring tasks' })).toBeAttached();
+  // The new column is empty, so the Board folds it to a rail.
+  await expect(page.getByRole('group', { name: 'Exploring, collapsed' })).toBeVisible();
 
   // Light mode must be just as usable.
   await page.getByRole('button', { name: 'Switch to light mode' }).click();
