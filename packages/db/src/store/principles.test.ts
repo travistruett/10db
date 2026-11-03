@@ -1,5 +1,7 @@
-import type { KnowledgeTarget, ProjectId } from '@10db/contracts';
+import type { KnowledgeTarget, PrincipleId, ProjectId } from '@10db/contracts';
+import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as schema from '../schema';
 import { findOpenProposalCard, insertInboxItem, updateInboxItem } from './inbox';
 import { getProposalDto, insertProposal, insertSource, listProposals } from './knowledge';
 import { checkKnowledgeIndex, searchPrincipleIds, searchPrinciples } from './knowledge-search';
@@ -42,6 +44,9 @@ const principle = (target: KnowledgeTarget, overrides: Partial<NewPrinciple> = {
 const project = (id: ProjectId) => ({ scope: 'project' as const, projectId: id });
 const found = (projectId: ProjectId, query: string) =>
   searchPrinciples(store.db, projectId, query, 10).map((p) => p.statement);
+/** The stored row, for the columns a PrincipleDto does not carry (who retired or withdrew it). */
+const row = (id: PrincipleId) =>
+  store.db.select().from(schema.principles).where(eq(schema.principles.id, id)).get();
 
 describe('principles', () => {
   it('reads a confirmed principle back through search, with its key and quote searchable', () => {
@@ -118,6 +123,68 @@ describe('principles', () => {
     },
   );
 
+  it.each([
+    { name: 'the same key and target', proposedAt: 'project', confirmAt: 'project', edit: false },
+    { name: 'a target chosen at confirm', proposedAt: 'area', confirmAt: 'project', edit: false },
+    { name: 'a key edited at confirm', proposedAt: 'project', confirmAt: 'project', edit: true },
+  ] as const)(
+    'confirming a proposal supersedes the current principle with $name',
+    ({ proposedAt, confirmAt, edit }) => {
+      const p = seedProject(store);
+      const targets = {
+        project: project(p.id),
+        area: { scope: 'area' as const, projectId: p.id, area: 'api' },
+      };
+      const old = principle(project(p.id));
+      const proposal = principle(targets[proposedAt], {
+        status: 'proposed',
+        confirmedBy: null,
+        statement: 'Never sleep, even in e2e',
+        ...(edit ? { topicKey: 'testing.drafted' } : {}),
+      });
+      const next = store.write((ctx) =>
+        confirmPrinciple(ctx, proposal.id, {
+          target: targets[confirmAt],
+          confirmedBy: 'me',
+          ...(edit ? { topicKey: old.topicKey } : {}),
+        }),
+      ).value;
+      expect(next).toMatchObject({ state: 'current', supersedesId: old.id });
+      expect(getPrinciple(store.db, old.id)).toMatchObject({
+        state: 'superseded',
+        supersededById: next.id,
+      });
+      expect(found(p.id, 'sleep')).toEqual(['Never sleep, even in e2e']);
+    },
+  );
+
+  it.each([
+    { name: 'the same key at another target', edit: false },
+    { name: 'a key edited at confirm onto no current principle', edit: true },
+  ])('confirming a proposal leaves both current with $name', ({ edit }) => {
+    const p = seedProject(store);
+    const area = { scope: 'area' as const, projectId: p.id, area: 'api' };
+    const old = principle(project(p.id));
+    const proposal = principle(project(p.id), {
+      status: 'proposed',
+      confirmedBy: null,
+      statement: 'Never sleep, even in e2e',
+    });
+    const next = store.write((ctx) =>
+      confirmPrinciple(ctx, proposal.id, {
+        target: edit ? project(p.id) : area,
+        confirmedBy: 'me',
+        ...(edit ? { topicKey: 'testing.e2e' } : {}),
+      }),
+    ).value;
+    expect(next).toMatchObject({ state: 'current', supersedesId: null });
+    expect(getPrinciple(store.db, old.id).state).toBe('current');
+    expect(found(p.id, 'sleep').toSorted()).toEqual([
+      'Never sleep in tests',
+      'Never sleep, even in e2e',
+    ]);
+  });
+
   it('retires a current principle out of search, and refuses to retire a superseded one', () => {
     const p = seedProject(store);
     const old = principle(project(p.id));
@@ -129,6 +196,11 @@ describe('principles', () => {
       retirePrinciple(ctx, next.id, 'me', 'we use fake timers now'),
     ).value;
     expect(retired).toMatchObject({ state: 'retired', retiredReason: 'we use fake timers now' });
+    expect(row(next.id)).toMatchObject({
+      retiredBy: 'me',
+      retiredReason: 'we use fake timers now',
+    });
+    expect(row(next.id)?.retiredAt).toBeTruthy();
     expect(found(p.id, 'sleep')).toEqual([]);
     expect(
       listPrinciples(store.db, { projectId: p.id, history: true }).map((x) => x.state),
@@ -165,6 +237,8 @@ describe('principles', () => {
     const withdrawn = store.write((ctx) => withdrawPrinciple(ctx, one.id, 'me', 'typo')).value;
     expect(withdrawn).toMatchObject({ state: 'withdrawn', withdrawnReason: 'typo' });
     expect(withdrawn.withdrawnAt).not.toBeNull();
+    expect(row(one.id)).toMatchObject({ withdrawnBy: 'me', withdrawnReason: 'typo' });
+    expect(row(one.id)?.withdrawnAt).toBeTruthy();
     expect(found(p.id, 'sleep')).toEqual([]);
   });
 
@@ -182,17 +256,41 @@ describe('principles', () => {
     expect(found(p.id, 'sleep')).toEqual(['Never sleep in unit tests']);
   });
 
-  it.each(['b', 'a'] as const)('refuses to withdraw the superseded link %s of a chain', (which) => {
+  it.each([
+    { which: 'b', successor: 'c' },
+    { which: 'a', successor: 'b' },
+  ] as const)(
+    'refuses to withdraw the superseded link $which of a chain, naming $successor',
+    ({ which, successor }) => {
+      const p = seedProject(store);
+      const links = {
+        a: principle(project(p.id), { statement: 'Never sleep in tests' }),
+        b: principle(project(p.id), { statement: 'Never sleep in unit tests' }),
+        c: principle(project(p.id), { statement: 'Never sleep in any test' }),
+      };
+      expect(() =>
+        store.write((ctx) => withdrawPrinciple(ctx, links[which].id, 'me', 'no longer true')),
+      ).toThrow(new RegExp(links[successor].id));
+      expect(found(p.id, 'sleep')).toEqual(['Never sleep in any test']);
+    },
+  );
+
+  it('refuses to withdraw a link whose successor was retired, naming it, without asking to withdraw it', () => {
     const p = seedProject(store);
-    const links = {
-      a: principle(project(p.id), { statement: 'Never sleep in tests' }),
-      b: principle(project(p.id), { statement: 'Never sleep in unit tests' }),
-      c: principle(project(p.id), { statement: 'Never sleep in any test' }),
-    };
-    expect(() =>
-      store.write((ctx) => withdrawPrinciple(ctx, links[which].id, 'me', 'no longer true')),
-    ).toThrow(/only a current or proposed principle can be withdrawn/);
-    expect(found(p.id, 'sleep')).toEqual(['Never sleep in any test']);
+    const old = principle(project(p.id));
+    const next = principle(project(p.id), { statement: 'Never sleep, ever' });
+    store.write((ctx) => retirePrinciple(ctx, next.id, 'me', 'fake timers now'));
+    const refusal = (() => {
+      try {
+        store.write((ctx) => withdrawPrinciple(ctx, old.id, 'me', 'no longer true'));
+      } catch (error) {
+        return String(error);
+      }
+      return '';
+    })();
+    expect(refusal).toContain(next.id);
+    expect(refusal).not.toMatch(/withdraw (that|it)/i);
+    expect(found(p.id, 'sleep')).toEqual([]);
   });
 
   it('filters the list by scope, area and kind', () => {
@@ -301,22 +399,33 @@ describe('supersedePrinciple', () => {
   });
 
   it.each([
-    { name: 'kind', input: { kind: 'belief' as const }, expected: { kind: 'belief' } },
     {
-      name: 'topic key',
-      input: { topicKey: 'testing.fake-timers' },
-      expected: { topicKey: 'testing.fake-timers' },
+      name: 'kind',
+      input: () => ({ kind: 'belief' as const }),
+      expected: () => ({ kind: 'belief' }),
     },
     {
-      name: 'scope',
-      input: { target: { scope: 'you' as const } },
-      expected: { scope: 'you', projectId: null, area: null },
+      name: 'topic key',
+      input: () => ({ topicKey: 'testing.fake-timers' }),
+      expected: () => ({ topicKey: 'testing.fake-timers' }),
+    },
+    {
+      name: 'scope to you',
+      input: () => ({ target: { scope: 'you' as const } }),
+      expected: () => ({ scope: 'you', projectId: null, area: null }),
+    },
+    {
+      name: 'scope to an area',
+      input: (projectId: ProjectId) => ({
+        target: { scope: 'area' as const, projectId, area: 'api' },
+      }),
+      expected: (projectId: ProjectId) => ({ scope: 'area', projectId, area: 'api' }),
     },
   ])('changes the $name on the successor', ({ input, expected }) => {
     const p = seedProject(store);
     const old = principle(project(p.id));
-    const next = supersede(old.id, input);
-    expect(next).toMatchObject({ state: 'current', supersedesId: old.id, ...expected });
+    const next = supersede(old.id, input(p.id));
+    expect(next).toMatchObject({ state: 'current', supersedesId: old.id, ...expected(p.id) });
     expect(getPrinciple(store.db, old.id).state).toBe('superseded');
     expect(listPrinciples(store.db, { projectId: p.id }).map((x) => x.id)).toEqual([next.id]);
     expect(found(p.id, 'sleep')).toEqual(['Never sleep in tests']);
@@ -335,6 +444,57 @@ describe('supersedePrinciple', () => {
     expect(getPrinciple(store.db, old.id).state).toBe('current');
     expect(getPrinciple(store.db, other.id).state).toBe('current');
     expect(found(p.id, 'sleep')).toEqual(['Never sleep in tests']);
+  });
+
+  it('refuses a successor moved to a scope where its key is already current, naming that principle', () => {
+    const p = seedProject(store);
+    const old = principle(project(p.id));
+    const mine = principle({ scope: 'you' }, { statement: 'I never sleep in tests' });
+    expect(() => supersede(old.id, { target: { scope: 'you' } })).toThrow(new RegExp(mine.id));
+    expect(getPrinciple(store.db, old.id).state).toBe('current');
+    expect(getPrinciple(store.db, mine.id).state).toBe('current');
+    expect(found(p.id, 'sleep').toSorted()).toEqual([
+      'I never sleep in tests',
+      'Never sleep in tests',
+    ]);
+  });
+
+  describe('withdrawing a successor that moved its key or scope', () => {
+    const moves = [
+      { name: 'key', move: () => ({ topicKey: 'testing.moved' }) },
+      { name: 'scope', move: () => ({ target: { scope: 'you' as const } }) },
+    ];
+
+    it.each(moves)(
+      'refuses when the old $name has a new current principle, naming it',
+      ({ move }) => {
+        const p = seedProject(store);
+        const a = principle(project(p.id));
+        const b = supersede(a.id, { ...move(), statement: 'Sleep nowhere' });
+        const c = principle(project(p.id), { statement: 'Do not sleep here' });
+        expect(c.supersedesId).toBeNull();
+        expect(() => store.write((ctx) => withdrawPrinciple(ctx, b.id, 'me', 'reverted'))).toThrow(
+          new RegExp(c.id),
+        );
+        expect([a, b, c].map((x) => getPrinciple(store.db, x.id).state)).toEqual([
+          'superseded',
+          'current',
+          'current',
+        ]);
+        expect(found(p.id, 'sleep').toSorted()).toEqual(['Do not sleep here', 'Sleep nowhere']);
+      },
+    );
+
+    it.each(moves)('allows it once the old $name is free again', ({ move }) => {
+      const p = seedProject(store);
+      const a = principle(project(p.id));
+      const b = supersede(a.id, { ...move(), statement: 'Sleep nowhere' });
+      const c = principle(project(p.id), { statement: 'Do not sleep here' });
+      store.write((ctx) => retirePrinciple(ctx, c.id, 'me', 'replaced by the other rule'));
+      store.write((ctx) => withdrawPrinciple(ctx, b.id, 'me', 'reverted'));
+      expect(getPrinciple(store.db, a.id).state).toBe('current');
+      expect(found(p.id, 'sleep')).toEqual(['Never sleep in tests']);
+    });
   });
 
   it('allows a new key that is current only at another scope', () => {

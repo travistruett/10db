@@ -208,7 +208,8 @@ export interface SupersedePrinciple {
 /**
  * Replaces a current principle by an explicit link: the successor names it in `supersedes_id` and may
  * change the statement, kind, topic key or target (spec §4). A successor whose key already has another
- * current principle at its target is refused, so a key never has two current principles at one target.
+ * current principle at its target is refused; with the same check in `withdrawPrinciple`, a key never
+ * has two current principles at one target.
  */
 export function supersedePrinciple(
   ctx: WriteContext,
@@ -274,10 +275,23 @@ export function retirePrinciple(
   return getPrinciple(ctx.tx, id);
 }
 
+/** Refuses to bring `p`'s predecessor back as current if its key and target now belong to another. */
+function refuseRevivingClash(db: DbReader, p: PrincipleDto): void {
+  if (p.state !== KnowledgeState.Current || p.supersedesId === null) return;
+  const predecessor = getPrinciple(db, p.supersedesId);
+  const clash = currentPrincipleFor(db, predecessor.topicKey, targetOf(predecessor));
+  if (clash && clash.id !== p.id)
+    throw new ConflictError(
+      `Principle ${clash.id} now holds the key ${predecessor.topicKey} at the scope of ${predecessor.id}, which withdrawing ${p.id} would make current again; retire ${clash.id} first`,
+    );
+}
+
 /**
  * Withdraws a current principle, or a proposed one when its proposal is rejected: the row stays as a
  * tombstone with who and why (spec §9). Only the head of a chain can go; withdrawing a superseded link
- * would make its predecessor current beside its successor, two current principles under one key.
+ * would make its predecessor current beside its successor, two current principles under one key. The
+ * head is refused too if its predecessor's key and target have since gone to another principle, which
+ * an explicit supersede that moved the key or target allows.
  */
 export function withdrawPrinciple(
   ctx: WriteContext,
@@ -287,10 +301,15 @@ export function withdrawPrinciple(
 ): PrincipleDto {
   const why = requireReason(reason, 'withdrawn');
   const current = getPrinciple(ctx.tx, id);
+  if (current.supersededById !== null)
+    throw new ConflictError(
+      `A later principle (${current.supersededById}) supersedes principle ${id}; only the head of a chain can be withdrawn`,
+    );
   if (current.state !== KnowledgeState.Current && current.state !== KnowledgeState.Proposed)
     throw new ConflictError(
       `Principle ${id} is ${current.state}; only a current or proposed principle can be withdrawn`,
     );
+  refuseRevivingClash(ctx.tx, current);
   ctx.tx
     .update(schema.principles)
     .set({ withdrawnAt: ctx.now, withdrawnBy: by, withdrawnReason: why, updatedAt: ctx.now })
