@@ -638,8 +638,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         return verdict;
       },
     };
+    let handle: ShapeSessionHandle;
+    try {
+      handle = adapter.startShape(spec);
+    } catch (error) {
+      // The row was written with its token hash before the adapter ran; end it so no live row
+      // keeps a token that getLiveSessionByTokenHash would accept.
+      state.write((ctx) => {
+        endSession(ctx, row.id, 'start_failed');
+      });
+      throw error;
+    }
     const live: Live = {
-      handle: adapter.startShape(spec),
+      handle,
       sessionId: row.id,
       endReason: null,
       done: Promise.resolve(),
