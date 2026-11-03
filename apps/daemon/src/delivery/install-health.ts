@@ -127,6 +127,43 @@ export function describeBroken(
 }
 
 /**
+ * Whether the copy's `node_modules/.modules.yaml` says another pnpm or another store made the
+ * install than the one about to run it: such an install is one pnpm decides to remove
+ * (`node_modules/.pnpm`), which the gate's sandbox stops part way. Returns what differs, or null
+ * when nothing does or the file says nothing to compare. `version` is the daemon's pnpm version
+ * (null when unknown) and `storeDir` its store directory (undefined when none is set); pnpm names
+ * the store as a version directory beneath it, so a store under `storeDir` is the same store.
+ * Reads one file; no program from the repository runs.
+ */
+export function foreignInstall(
+  path: string,
+  expected: { readonly version: string | null; readonly storeDir: string | undefined },
+): string | null {
+  let parsed: unknown;
+  try {
+    parsed = parseAllDocuments(readFileSync(join(path, 'node_modules', '.modules.yaml'), 'utf8'))
+      .at(0)
+      ?.toJS();
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return null;
+  const { packageManager, storeDir } = parsed as Record<string, unknown>;
+  if (
+    expected.version !== null &&
+    typeof packageManager === 'string' &&
+    packageManager !== `pnpm@${expected.version}`
+  )
+    return `made by ${packageManager}, not pnpm@${expected.version}`;
+  if (expected.storeDir !== undefined && typeof storeDir === 'string') {
+    const base = expected.storeDir.replace(/\/+$/, '');
+    if (storeDir !== base && !storeDir.startsWith(`${base}/`))
+      return `made with the store ${storeDir}, not ${expected.storeDir}`;
+  }
+  return null;
+}
+
+/**
  * Removes the copy's root `node_modules`, so the install that follows starts as the first one of a
  * copy did, which worked. A link is removed, never followed. The workspace packages' own
  * `node_modules` hold only links into the root one, which the install makes again.

@@ -77,6 +77,7 @@ function dependencies(
   env: Record<string, string> = {},
   timeoutMs = 20_000,
   onRequest: () => void = () => undefined,
+  pnpmVersion?: () => Promise<string | null>,
 ) {
   const real = createGateRunner({ sandbox: null, logger: silentLogger });
   const gate: GateRunner = {
@@ -96,10 +97,23 @@ function dependencies(
       ...env,
     }),
     resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
+    ...(pnpmVersion === undefined ? {} : { pnpmVersion }),
     rules: () => [{ toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' }],
     checkouts: () => [join(tmp.path, 'main')],
     timeoutMs,
   });
+}
+
+const LEFT_PAD_LOCKFILE =
+  'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n';
+
+/** A copy whose `left-pad` resolves, with a stale marker in `.pnpm` and the given `.modules.yaml`. */
+function installedCopy(modulesYaml: string): void {
+  writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+  mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
+  mkdirSync(join(worktree, 'node_modules/.pnpm'), { recursive: true });
+  writeFileSync(join(worktree, 'node_modules/.pnpm/stale'), '');
+  writeFileSync(join(worktree, 'node_modules/.modules.yaml'), modulesYaml);
 }
 
 function refresh(deps: ReturnType<typeof dependencies>) {
@@ -197,6 +211,111 @@ describe('refreshing a worktree’s dependencies', () => {
     writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
     expect((await refresh(dependencies())).kind).toBe('installed');
     expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(true);
+  });
+
+  describe('a node_modules another pnpm or store made', () => {
+    const stale = () => existsSync(join(worktree, 'node_modules/.pnpm/stale'));
+
+    it('is removed, and installed from scratch, when .modules.yaml names another pnpm', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.15.0\n');
+      const result = await refresh(
+        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
+      );
+      expect(result.kind).toBe('installed');
+      expect(stale()).toBe(false);
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
+    });
+
+    it('is removed when .modules.yaml names a store outside the daemon’s', async () => {
+      fakePnpm();
+      installedCopy(
+        `packageManager: pnpm@12.9.1\nstoreDir: ${join(tmp.path, 'other-store/v10')}\n`,
+      );
+      const result = await refresh(
+        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
+      );
+      expect(result.kind).toBe('installed');
+      expect(stale()).toBe(false);
+    });
+
+    it('is left for pnpm to bring in line when pnpm and store are the daemon’s', async () => {
+      fakePnpm();
+      installedCopy(`packageManager: pnpm@12.9.1\nstoreDir: ${join(tmp.path, 'store/v10')}\n`);
+      const result = await refresh(
+        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
+      );
+      expect(result.kind).toBe('installed');
+      expect(stale()).toBe(true);
+    });
+
+    it('is left alone when the daemon’s pnpm version cannot be read and the store matches', async () => {
+      fakePnpm();
+      installedCopy(`packageManager: pnpm@12.15.0\nstoreDir: ${join(tmp.path, 'store/v10')}\n`);
+      const result = await refresh(
+        dependencies({}, 20_000, undefined, () => Promise.resolve(null)),
+      );
+      expect(result.kind).toBe('installed');
+      expect(stale()).toBe(true);
+    });
+  });
+
+  describe('an install that fails part way', () => {
+    /** Fails the first time, pruning `left-pad` as pnpm's half-removed install does; works the second. */
+    function pnpmThatBreaksOnce(): void {
+      const script = join(bin, 'pnpm');
+      writeFileSync(
+        script,
+        [
+          '#!/bin/sh',
+          `printf '%s | %s\\n' "$PWD" "$*" >> '${calls}'`,
+          `if [ "$(wc -l < '${calls}')" -le 1 ]; then`,
+          '  rm -rf node_modules/left-pad node_modules/.pnpm/stale',
+          '  echo "ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR: Operation not permitted"',
+          '  exit 1',
+          'fi',
+          'mkdir -p node_modules/left-pad',
+          'echo installed',
+          '',
+        ].join('\n'),
+      );
+      chmodSync(script, 0o755);
+    }
+
+    it('starts over with a fresh install in the same refresh when packages are left missing', async () => {
+      pnpmThatBreaksOnce();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      // A marker only a leftover of the broken install would keep.
+      writeFileSync(join(worktree, 'node_modules/.pnpm/leftover'), '');
+      const result = await refresh(dependencies());
+      expect(result.kind).toBe('installed');
+      expect(requests).toHaveLength(2);
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
+      expect(existsSync(join(worktree, 'node_modules/left-pad'))).toBe(true);
+      expect(existsSync(join(worktree, 'node_modules/.pnpm/leftover'))).toBe(false);
+    });
+
+    it('reports the second failure when the fresh install fails too', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      // Always fails, and always leaves left-pad missing.
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nrm -rf node_modules/left-pad\nexit 1\n`,
+      );
+      const result = await refresh(dependencies());
+      expect(result).toMatchObject({ kind: 'failed', exitCode: 1 });
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
+    });
+
+    it('does not start over when the failed install left every package in place', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      const result = await refresh(dependencies({ FAKE_PNPM_EXIT: '7' }));
+      expect(result).toMatchObject({ kind: 'failed', exitCode: 7 });
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
+      expect(existsSync(join(worktree, 'node_modules/.pnpm/stale'))).toBe(true);
+    });
   });
 
   it('installs from the worktree’s own lockfile with scripts and the pnpmfile off', async () => {
