@@ -8,7 +8,14 @@ import type {
 import { MAX_STEP_SUMMARY } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
-import type { SessionEvent, SessionMcpServer, ShapeImage, ToolDecision, TurnResult } from './types';
+import type {
+  SessionEvent,
+  SessionMcpServer,
+  ShapeImage,
+  ShapeVerdict,
+  ToolDecision,
+  TurnResult,
+} from './types';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -177,6 +184,18 @@ export function toHookOutput(verdict: GuardVerdict): HookJSONOutput {
       hookEventName: 'PreToolUse',
       permissionDecision: verdict.decision,
       permissionDecisionReason: verdict.reason,
+    },
+  };
+}
+
+/** A Shape session's hook answer: an allowed call may run with 10db's input in place of the model's. */
+export function toShapeHookOutput(verdict: ShapeVerdict): HookJSONOutput {
+  if (verdict.decision !== 'allow' || !('updatedInput' in verdict)) return toHookOutput(verdict);
+  return {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      updatedInput: verdict.updatedInput,
     },
   };
 }

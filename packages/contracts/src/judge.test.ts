@@ -15,9 +15,23 @@ describe('judge config', () => {
       enabled: true,
       decisions: {
         review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        shape_ready: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        shape_record: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+        shape_elsewhere: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
       },
     });
     expect(JudgeConfig.parse(DEFAULT_JUDGE_CONFIG)).toEqual(DEFAULT_JUDGE_CONFIG);
+  });
+
+  it('reads a config stored before the Shape decisions with their defaults, keeping its own', () => {
+    const stored = {
+      enabled: false,
+      decisions: { review_size: { enabled: false, model: 'm', floor: 0.5 } },
+    };
+    const config = JudgeConfig.parse(stored);
+    expect(config.enabled).toBe(false);
+    expect(config.decisions.review_size).toEqual({ enabled: false, model: 'm', floor: 0.5 });
+    expect(config.decisions.shape_record).toEqual(DEFAULT_JUDGE_CONFIG.decisions.shape_record);
   });
 
   it.each([

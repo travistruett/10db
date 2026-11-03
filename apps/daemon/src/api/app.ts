@@ -43,14 +43,20 @@ import {
   RetryInput,
   RoutingRulesInput,
   SHAPE_FILE_MAX_BYTES,
+  OneWayPathsDto,
   ShapeConvertInput,
+  ShapeDismissInput,
   ShapeEditInput,
+  ShapeFindingId,
   ShapeId,
   ShapeInput,
   ShapeMessageInput,
   ShapeProposalId,
+  ShapeRehearseInput,
+  ShapeResumeInput,
   ShapeUnpinInput,
   ShapeWithdrawInput,
+  ShapeJevSettingDto,
   StartTaskInput,
   SystemCheckDto,
   TaskId,
@@ -242,6 +248,32 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
+    .get('/projects/:projectId/shape-jev', (c) =>
+      c.json(deps.services.getShapeJev(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/shape-jev',
+      validator('json', (value): ShapeJevSettingDto => ShapeJevSettingDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setShapeJev(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/projects/:projectId/one-way-paths', (c) =>
+      c.json(deps.services.getOneWayPaths(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/one-way-paths',
+      validator('json', (value): OneWayPathsDto => OneWayPathsDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setOneWayPaths(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/shape-measures', (c) => c.json(deps.services.shapeMeasures()))
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
     )
@@ -260,6 +292,27 @@ export function createApp(deps: ApiDeps) {
     .post('/shapes/:shapeId/propose', (c) =>
       c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
     )
+    .post(
+      '/shapes/:shapeId/rehearse',
+      validator('json', (value): ShapeRehearseInput => ShapeRehearseInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.rehearseShape(ShapeId.parse(c.req.param('shapeId')), c.req.valid('json')),
+          202,
+        ),
+    )
+    .post(
+      '/shapes/:shapeId/findings/:findingId/dismiss',
+      validator('json', (value): ShapeDismissInput => ShapeDismissInput.parse(value)),
+      (c) => {
+        deps.services.dismissShapeFinding(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeFindingId.parse(c.req.param('findingId')),
+          c.req.valid('json'),
+        );
+        return c.body(null, 204);
+      },
+    )
     .post('/shapes/:shapeId/stop', async (c) => {
       await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));
       return c.body(null, 204);
@@ -275,6 +328,23 @@ export function createApp(deps: ApiDeps) {
         if (outcome.kind === 'converted') return c.json(outcome.result, 200);
         return c.json({ errors: outcome.errors } satisfies ShapeConvertError, 400);
       },
+    )
+    .post(
+      '/shapes/:shapeId/resume',
+      validator('json', (value): ShapeResumeInput => ShapeResumeInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.resumeShape(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json').event,
+          ),
+        ),
+    )
+    .get('/goals/:goalId/shape', (c) =>
+      c.json(deps.services.getGoalShape(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/tasks/:taskId/shape', (c) =>
+      c.json(deps.services.getTaskShape(TaskId.parse(c.req.param('taskId')))),
     )
     .post('/goals/:goalId/remove-draft', (c) => {
       deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));

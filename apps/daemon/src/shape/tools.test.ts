@@ -108,7 +108,25 @@ describe('note_heard', () => {
 });
 
 describe('the tool set', () => {
-  it('offers note_heard and propose_plan in this slice', () => {
-    expect(Object.keys(tools()).sort()).toEqual(['note_heard', 'propose_plan']);
+  it('offers every Shape tool: the planning tools, attach and the review tools', () => {
+    expect(Object.keys(tools()).sort()).toEqual([
+      'attach',
+      'find_records',
+      'note_heard',
+      'propose_plan',
+      'report_finding',
+      'resolve_finding',
+      'similar_tasks',
+      'write_spec',
+    ]);
+  });
+
+  it('answers similar_tasks with nothing when no finished task is alike, and says so', async () => {
+    const handler = tools().similar_tasks;
+    if (!handler) throw new Error('no similar_tasks');
+    expect(await handler(ShapeToolInputs.similar_tasks.parse({ query: 'board' }))).toEqual({
+      tasks: [],
+    });
+    expect(transcript().map((m) => m.body)).toEqual(['similar_tasks · 0 tasks']);
   });
 });

@@ -63,6 +63,17 @@ export function baseHandlers(
     ),
     // The nav lists the project's conversations on every screen.
     http.get(daemonUrl('/projects/:projectId/shapes', base), () => HttpResponse.json([])),
+    // Settings › General reads the project's Jev opt-in (Shape spec §9); off, as for every project.
+    http.get(daemonUrl('/projects/:projectId/shape-jev', base), () =>
+      HttpResponse.json({ enabled: false }),
+    ),
+    // and the one-way paths that force a spec (§7); none set.
+    http.get(daemonUrl('/projects/:projectId/one-way-paths', base), () =>
+      HttpResponse.json({ paths: [] }),
+    ),
+    // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
+    http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>

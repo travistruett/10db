@@ -1,6 +1,15 @@
 import { z } from 'zod';
-import { DecisionId, GoalId, ShapeMessageId, ShapeProposalId, TaskId } from './ids';
 import {
+  DecisionId,
+  GoalId,
+  ShapeAttachmentId,
+  ShapeId,
+  ShapeMessageId,
+  ShapeProposalId,
+  TaskId,
+} from './ids';
+import {
+  ShapeAttachment,
   ShapeDto,
   ShapeMessageDto,
   ShapeProposalBody,
@@ -8,6 +17,9 @@ import {
   ShapeProposalState,
 } from './shape';
 import { ShapeFileDto } from './shape-files';
+import { ShapeTaskSizeDto } from './shape-measures';
+import { ShapePreviewDto } from './shape-preview';
+import { ShapeCeremonyDto, ShapeFindingDto, ShapeRehearsalDto } from './shape-review';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §4, §6 Rows, §11.
 // What the Shape routes answer and accept: the view the screen renders, and the builder's actions.
@@ -100,8 +112,23 @@ export const ShapeTurnDto = z.object({
   queued: z.int().min(0),
   /** A Propose turn is queued or running; pressing Propose again would be ignored. */
   proposing: z.boolean(),
+  /** A rehearsal turn is queued or running (§7): the Convert modal says "Rehearsing n tasks…". */
+  rehearsing: z.boolean(),
 });
 export type ShapeTurnDto = z.infer<typeof ShapeTurnDto>;
+
+/**
+ * A diagram, chart or mockup the session attached (§10.3): to a proposal by `key`, or to a goal or task
+ * the conversation converted (its id, and `key` holds the same id). The screen renders each inert.
+ */
+export const ShapeAttachmentDto = z.object({
+  id: ShapeAttachmentId,
+  key: z.string(),
+  goalId: GoalId.nullable(),
+  taskId: TaskId.nullable(),
+  attachment: ShapeAttachment,
+});
+export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;
 
 /** Everything the Shape screen renders for one conversation. */
 export const ShapeViewDto = z.object({
@@ -115,6 +142,18 @@ export const ShapeViewDto = z.object({
   /** The files dropped into the conversation, oldest first (§5.4). */
   files: z.array(ShapeFileDto),
   turn: ShapeTurnDto,
+  /** Each proposed task's derived size and hours, and its actual once converted and finished (§8). */
+  sizes: z.array(ShapeTaskSizeDto),
+  /** Each pending effort's ceremony: what the rule forces and what applies (§7). */
+  ceremony: z.array(ShapeCeremonyDto),
+  /** Reviewers' findings and the rehearsal's questions, oldest first, resolved and dismissed included. */
+  findings: z.array(ShapeFindingDto),
+  /** Whether each pending task has been rehearsed at the content it has now (§7). */
+  rehearsals: z.array(ShapeRehearsalDto),
+  /** How the project's lanes would run the pending tasks, with the work already there holding lanes first (§10.2). */
+  preview: ShapePreviewDto,
+  /** The diagrams, charts and mockups attached so far, oldest first; specs and evals are not here. */
+  attachments: z.array(ShapeAttachmentDto),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 
@@ -178,6 +217,17 @@ export type ShapeEditInput = z.infer<typeof ShapeEditInput>;
 /** Unpin one field, or with none the whole row (a restored row is pinned as a whole). */
 export const ShapeUnpinInput = z.object({ field: z.string().min(1).optional() });
 export type ShapeUnpinInput = z.infer<typeof ShapeUnpinInput>;
+
+/**
+ * Reopens a conversation with an event injected as a note (§12). The event is what happened, in a
+ * sentence: the engine's cards (an exhausted task, Flip) word it when they offer Re-plan in Shape.
+ */
+export const ShapeResumeInput = z.object({ event: z.string().min(1).max(2000) });
+export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
+
+/** The conversation that made a goal or a task, for its drawer's Open conversation; null when none did. */
+export const ShapeOfDto = z.object({ shapeId: ShapeId.nullable() });
+export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 
 /** Withdraw Decision…: the builder's reason is required. */
 export const ShapeWithdrawInput = z.object({ reason: z.string().min(1).max(2000) });

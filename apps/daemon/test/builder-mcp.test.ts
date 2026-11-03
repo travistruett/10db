@@ -816,7 +816,12 @@ describe('the builder MCP endpoint', () => {
       ]);
       expect(shown.files.map((f) => f.name)).toEqual(['notes.md']);
       expect(readFileSync(shown.files[0]?.storedPath ?? '', 'utf8')).toBe('# Notes');
-      expect(shown.turn).toEqual({ running: false, queued: 0, proposing: false });
+      expect(shown.turn).toEqual({
+        running: false,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+      });
     });
 
     it.each([

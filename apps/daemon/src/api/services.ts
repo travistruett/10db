@@ -66,15 +66,23 @@ import type {
   ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
+  OneWayPathsDto,
   ShapeConvertInput,
   ShapeConvertResult,
+  ShapeDismissInput,
   ShapeDto,
   ShapeFileDto,
+  ShapeFindingId,
+  ShapeJevSettingDto,
+  ShapeMeasuresDto,
   ShapeId,
   ShapeInput,
   ShapeMessageDto,
+  ShapeOfDto,
   ShapeProposalId,
   ShapeProposeResult,
+  ShapeRehearseInput,
+  ShapeRehearseResult,
   ShapeViewDto,
   StartShapeInput,
   StepPlanDto,
@@ -218,6 +226,14 @@ export interface ApiServices {
    * makes its proposal pending again. Throws InvalidError for any other goal.
    */
   removeDraftGoal(goalId: GoalId): void;
+  /**
+   * Open conversation and Re-plan in Shape: records the event as a note the session may cite and
+   * tells it where each converted row stands; starts no turn. Throws NotFoundError for an unknown conversation.
+   */
+  resumeShape(id: ShapeId, event: string): ShapeMessageDto;
+  /** The conversation that made a goal or a task, for its drawer's Open conversation; none for work filed by hand. */
+  getGoalShape(goalId: GoalId): ShapeOfDto;
+  getTaskShape(taskId: TaskId): ShapeOfDto;
   /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
@@ -241,6 +257,18 @@ export interface ApiServices {
   ): ShapeFileDto;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
+  /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */
+  shapeMeasures(): ShapeMeasuresDto;
+  /** A project's "Send brainstorm messages to fast models"; throws NotFoundError for an unknown project. */
+  getShapeJev(projectId: ProjectId): ShapeJevSettingDto;
+  setShapeJev(projectId: ProjectId, input: ShapeJevSettingDto): ShapeJevSettingDto;
+  /** Settings › General: the paths a task in needs a spec (Shape §7); the 10db defaults until the builder sets them. */
+  getOneWayPaths(projectId: ProjectId): OneWayPathsDto;
+  setOneWayPaths(projectId: ProjectId, input: OneWayPathsDto): OneWayPathsDto;
+  /** Rehearse, and opening the Convert modal with an unrehearsed task (spec §7). */
+  rehearseShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
+  /** The builder dismisses a finding or a rehearsal question. */
+  dismissShapeFinding(shapeId: ShapeId, findingId: ShapeFindingId, input: ShapeDismissInput): void;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;

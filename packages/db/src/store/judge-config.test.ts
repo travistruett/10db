@@ -39,7 +39,10 @@ describe('judge config', () => {
     store.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));
     expect(getJudgeConfig(store.db)).toEqual({
       enabled: false,
-      decisions: { review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.9 } },
+      decisions: {
+        ...DEFAULT_JUDGE_CONFIG.decisions,
+        review_size: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.9 },
+      },
     });
   });
 

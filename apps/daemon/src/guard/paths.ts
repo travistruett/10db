@@ -186,7 +186,7 @@ const isGitPath = (path: string): boolean => path.split(/[\\/]/).includes('.git'
  * private-use character: `**` then covers `.gitignore` and `.github/**` while `.github` stays literal.
  * A path with a `.git` part is in no area, so a claim never reaches git internals (hooks, config).
  */
-function areaMatches(path: string, glob: string): boolean {
+export function areaMatches(path: string, glob: string): boolean {
   if (isGitPath(path)) return false;
   if (path.includes(DOT) || glob.includes(DOT)) return matchesGlob(path, glob);
   return matchesGlob(path.replaceAll('.', DOT), glob.replaceAll('.', DOT));

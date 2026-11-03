@@ -577,6 +577,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     }),
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,
+    landingGroupId: row.landingGroupId,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

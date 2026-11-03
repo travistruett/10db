@@ -203,7 +203,12 @@ describe('start_shape', () => {
     f.events.length = 0;
     const shape = f.service.startFromTerminal(input());
     expect(f.adapter.shapeSessions).toHaveLength(0);
-    expect(f.service.view(shape.id).turn).toEqual({ running: false, queued: 0, proposing: false });
+    expect(f.service.view(shape.id).turn).toEqual({
+      running: false,
+      queued: 0,
+      proposing: false,
+      rehearsing: false,
+    });
     expect(f.service.list(f.c.project.id).map((s) => s.id)).toContain(shape.id);
     expect(f.events.some((e) => e.type === EventType.ShapeChanged && e.entityId === shape.id)).toBe(
       true,

@@ -89,6 +89,7 @@
               "text",
               "tool",
               "propose",
+              "rehearse",
               "edit",
               "digest",
               "event",
@@ -1915,13 +1916,537 @@
         },
         "proposing": {
           "type": "boolean"
+        },
+        "rehearsing": {
+          "type": "boolean"
         }
       },
       "required": [
         "running",
         "queued",
-        "proposing"
+        "proposing",
+        "rehearsing"
       ]
+    },
+    "sizes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "pattern": "^spp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "key": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "hours": {
+            "type": "number",
+            "minimum": 0
+          },
+          "from": {
+            "type": "string",
+            "enum": [
+              "basis",
+              "size",
+              "pinned"
+            ]
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualHours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missized": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposalId",
+          "key",
+          "size",
+          "hours",
+          "from",
+          "taskId",
+          "actualHours",
+          "missized"
+        ]
+      }
+    },
+    "ceremony": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "pattern": "^spp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "key": {
+            "type": "string"
+          },
+          "ceremony": {
+            "type": "string",
+            "enum": [
+              "direct",
+              "spec"
+            ]
+          },
+          "reasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "loose_l",
+                "goal_xl",
+                "many_tasks",
+                "one_way_path"
+              ]
+            }
+          },
+          "skippedByYou": {
+            "type": "boolean"
+          },
+          "specWritten": {
+            "type": "boolean"
+          },
+          "spec": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "proposalId",
+          "key",
+          "ceremony",
+          "reasons",
+          "skippedByYou",
+          "specWritten",
+          "spec"
+        ]
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^shf_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "shapeId": {
+            "type": "string",
+            "pattern": "^shp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "effortKey": {
+            "type": "string"
+          },
+          "taskKey": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reviewer": {
+            "type": "string",
+            "enum": [
+              "scope",
+              "engineering",
+              "rehearsal"
+            ]
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "finding",
+              "question"
+            ]
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "medium",
+                  "high"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "how": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "round": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "taskHash": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "shapeId",
+          "effortKey",
+          "taskKey",
+          "reviewer",
+          "kind",
+          "severity",
+          "text",
+          "state",
+          "how",
+          "round",
+          "taskHash",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "rehearsals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "pattern": "^spp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "key": {
+            "type": "string"
+          },
+          "hash": {
+            "type": "string"
+          },
+          "rehearsed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposalId",
+          "key",
+          "hash",
+          "rehearsed"
+        ]
+      }
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "lanes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "startHours": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "endHours": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "existing": {
+                      "type": "boolean"
+                    },
+                    "critical": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "title",
+                    "startHours",
+                    "endHours",
+                    "existing",
+                    "critical"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "items"
+            ]
+          }
+        },
+        "criticalPath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "clashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "area": {
+                "type": "string"
+              },
+              "titles": {
+                "minItems": 2,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "area",
+              "titles",
+              "text"
+            ]
+          }
+        },
+        "tasks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "totalLaneHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scheduleHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "nonLaneHoursPerTask": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endEstimateHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "landings": {
+          "type": "object",
+          "properties": {
+            "pullRequests": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "pullRequestsAlone": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ciRuns": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ciRunsAlone": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "pullRequests",
+            "pullRequestsAlone",
+            "ciRuns",
+            "ciRunsAlone"
+          ]
+        }
+      },
+      "required": [
+        "lanes",
+        "criticalPath",
+        "clashes",
+        "tasks",
+        "totalLaneHours",
+        "scheduleHours",
+        "nonLaneHoursPerTask",
+        "endEstimateHours",
+        "landings"
+      ]
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^sat_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "key": {
+            "type": "string"
+          },
+          "goalId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^gol_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "attachment": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mermaid"
+                  },
+                  "source": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "source"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "chart"
+                  },
+                  "spec": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  }
+                },
+                "required": [
+                  "kind",
+                  "spec"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "const": "mockup"
+                  },
+                  "html": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "kind",
+                  "html"
+                ]
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "key",
+          "goalId",
+          "taskId",
+          "attachment"
+        ]
+      }
     }
   },
   "required": [
@@ -1930,7 +2455,13 @@
     "proposals",
     "heard",
     "files",
-    "turn"
+    "turn",
+    "sizes",
+    "ceremony",
+    "findings",
+    "rehearsals",
+    "preview",
+    "attachments"
   ],
   "$defs": {
     "__schema0": {
@@ -1960,6 +2491,37 @@
           },
           "additionalProperties": {
             "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    },
+    "__schema1": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema1"
           }
         }
       ]

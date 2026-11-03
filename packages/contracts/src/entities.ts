@@ -11,6 +11,7 @@ import {
   GoalId,
   HandoffId,
   InboxItemId,
+  LandingGroupId,
   PermissionRuleId,
   ProjectId,
   SessionId,
@@ -530,6 +531,11 @@ export const TaskDto = z.object({
   workstreamId: WorkstreamId.nullable(),
   /** The goal the task belongs to; absent or null for a task on its own. */
   goalId: GoalId.nullable().optional(),
+  /**
+   * The landing the task belongs to (Shape spec §10.4): tasks that share one start into one batch,
+   * so one pull request. Absent or null for a task that lands alone.
+   */
+  landingGroupId: LandingGroupId.nullable().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

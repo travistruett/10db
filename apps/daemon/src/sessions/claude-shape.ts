@@ -16,7 +16,13 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
-import { contextEvent, mapSdkMessage, toHookOutput, userMessage } from './claude-mapping';
+import {
+  contextEvent,
+  mapSdkMessage,
+  toHookOutput,
+  toShapeHookOutput,
+  userMessage,
+} from './claude-mapping';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
 import {
@@ -92,7 +98,7 @@ function shapeOptions(
               if (!(await gate.verified) || gate.refused())
                 return toHookOutput({ decision: 'deny', reason: UNVERIFIED });
               try {
-                return toHookOutput(
+                return toShapeHookOutput(
                   spec.preToolUse({
                     toolName: hookInput.tool_name,
                     input: hookInput.tool_input,

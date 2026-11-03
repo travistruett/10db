@@ -33,6 +33,7 @@ import {
   insertJudgeCall,
   listJudgeCalls,
   patchJudgeConfig,
+  laneTimesOf,
   listEventsAfter,
   listBoardColumns,
   listEvidence,
@@ -309,6 +310,26 @@ describe('runner', () => {
       await engine.runner.idle();
 
       expect(ws(workstream.id).state).toBe('DONE');
+    });
+  });
+
+  it('records gate.started and gate.finished, and stores the lane time when the task finishes', async () => {
+    engine = await createTestEngine({
+      Alpha: [[write('src/api/a.txt'), commit('op-alpha-lane-1', ['src/api/a.txt']), turn]],
+    });
+    const { task, workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const gateEvents = listEventsAfter(engine.store.db, 0, 1000).filter(
+      (e) => e.entityId === workstream.id && e.type.startsWith('gate.'),
+    );
+    expect(gateEvents.map((e) => [e.type, e.data['exitCode'] ?? null])).toEqual([
+      ['gate.started', null],
+      ['gate.finished', 0],
+    ]);
+    expect(laneTimesOf(engine.store.db, [task.id]).get(task.id)).toMatchObject({
+      sessionsOnly: false,
     });
   });
 

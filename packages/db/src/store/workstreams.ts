@@ -26,6 +26,7 @@ import {
 import { and, asc, count, desc, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
+import { recordLaneTime } from './lane-times';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask, mergedDespiteFailure } from './tasks';
@@ -274,6 +275,8 @@ export function transitionWorkstream(
     entityId: id,
     data: { from: row.state, to: opts.to, reason: opts.reason ?? null },
   });
+  // Lane time is stored once, as the workstream finishes (Shape spec §8).
+  if (opts.to === WorkstreamState.Done) recordLaneTime(ctx, id);
   return getWorkstream(ctx.tx, id);
 }
 

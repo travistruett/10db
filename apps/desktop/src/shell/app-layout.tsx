@@ -3,8 +3,8 @@ import {
   IconBuildingFactory2,
   IconInbox,
   IconLayoutKanban,
+  IconRoute,
   IconSettings,
-  IconSparkles,
 } from '@tabler/icons-react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
@@ -25,7 +25,7 @@ import { SystemAlert } from './system-alert';
 const NAV = [
   { to: '/board', label: 'Board', icon: IconLayoutKanban },
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
-  { to: '/shape', label: 'Shape', icon: IconSparkles },
+  { to: '/shape', label: 'Plan', icon: IconRoute },
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
   { to: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;

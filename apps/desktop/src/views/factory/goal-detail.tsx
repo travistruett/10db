@@ -1,7 +1,9 @@
 import type { GoalSummaryDto, WorkstreamDto, WorkstreamId } from '@10db/contracts';
 import { Button, Divider, Group, Stack } from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
+import { OpenConversation } from '../shape/open-conversation';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BatchSheet } from '../board/batch/batch-sheet';
 import {
@@ -41,6 +43,7 @@ export function GoalDetail({ summary, opened }: GoalDetailProps) {
   const { goal, digest } = summary;
   const { project } = useSelectedProject();
   const [starting, setStarting] = useState(false);
+  const navigate = useNavigate();
   const tasks = useTasks(project?.id ?? null);
   const sessions = useSessions((ws) => goal.taskIds.includes(ws.taskId));
   const batches = useBatches(project?.id ?? null);
@@ -84,6 +87,12 @@ export function GoalDetail({ summary, opened }: GoalDetailProps) {
       <Stack gap="xs">
         <SinceYouLooked opened={opened} />
         <AboutGoal goal={goal} />
+        <OpenConversation
+          target={{ goalId: goal.id }}
+          onOpen={(shapeId) => {
+            void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+          }}
+        />
       </Stack>
       <GoalFooter digest={digest} />
       {starting && project ? (

@@ -5,6 +5,7 @@ import {
   KnowledgeHit,
   mintId,
   NotFoundError,
+  RecordHit,
   type DecisionId,
   type DeviationId,
   type ProjectId,
@@ -235,6 +236,34 @@ export function searchDecisions(
     LIMIT ${limit}
   `);
   return KnowledgeHit.array().parse(rows);
+}
+
+/**
+ * Shape's `find_records` (spec §5.5): the current decisions that apply to the project (its own and
+ * the builder-wide `you` ones) matching the query, each with its scope and the date it was made, so
+ * the conversation can cite it ("Decided 2026-10-30: …"). Withdrawn and superseded ones are left out.
+ */
+export function findRecords(
+  db: DbReader,
+  projectId: ProjectId,
+  query: string,
+  limit: number,
+): RecordHit[] {
+  const match = ftsQuery(query);
+  if (match === null) return [];
+  const rows = db.all(sql`
+    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice,
+      d.rationale AS rationale, d.scope AS scope, d.created_at AS createdAt
+    FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
+    WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
+      AND d.withdrawn_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM decisions s WHERE s.supersedes_id = d.id AND s.withdrawn_at IS NULL
+      )
+    ORDER BY bm25(decisions_fts), d.id
+    LIMIT ${limit}
+  `);
+  return RecordHit.array().parse(rows);
 }
 
 export function listRecentDecisions(

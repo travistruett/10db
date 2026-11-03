@@ -185,6 +185,11 @@ test('under 1100 px the sidebar is a drawer, and the summary line stays on scree
       'Nothing is proposed until you press Propose. Nothing starts until you Convert.',
     ),
   ).toBeVisible();
+  // The nav says Plan and lists no conversations; the earlier run's conversation is under the composer.
+  await expect(page.getByRole('navigation').getByRole('link', { name: 'Plan' })).toBeVisible();
+  await expect(page.getByRole('navigation').getByText('No conversations yet')).toHaveCount(0);
+  await expect(page.getByRole('list', { name: 'Recent conversations' })).toBeVisible();
+  await expectAccessible(page, 'new conversation with recent conversations');
   await input.fill(MESSAGE);
   await expect(input).toHaveValue(MESSAGE);
   await page.keyboard.press('ControlOrMeta+Enter');

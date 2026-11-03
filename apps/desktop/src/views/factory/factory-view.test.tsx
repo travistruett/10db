@@ -92,17 +92,17 @@ describe('FactoryView goal list', () => {
 
     expect(
       await screen.findByText(
-        'Goals are outcomes 10db pursues across many tasks. Shape Work… to start one, or ask Claude Code to with the 10db-task skill.',
+        'Goals are outcomes 10db pursues across many tasks. Plan Work… to start one, or ask Claude Code to with the 10db-task skill.',
       ),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Not in a goal/ })).toBeNull();
   });
 
-  it('has Shape Work… as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
+  it('has Plan Work… as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
     serve(goals(goalListDto()));
     const { router } = renderApp('/factory');
 
-    const shape = await screen.findByRole('link', { name: 'Shape Work…' });
+    const shape = await screen.findByRole('link', { name: 'Plan Work…' });
     expect(screen.queryByText('Adopt a Plan…')).toBeNull();
     fireEvent.click(shape);
     await waitFor(() => {

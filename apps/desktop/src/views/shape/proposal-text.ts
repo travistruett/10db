@@ -61,6 +61,7 @@ export function destination(row: ShapeProposalDto): string {
     case 'principle':
       return 'to Knowledge';
     case 'landing':
+      return 'its tasks share one pull request';
     case 'question':
       return 'stays here for now';
   }
@@ -68,7 +69,7 @@ export function destination(row: ShapeProposalDto): string {
 
 const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
 
-/** Whether Convert writes this kind today; landings and questions stay in the list. */
+/** Whether Convert writes this kind today; principles and questions stay in the list. */
 export function isConvertible(row: ShapeProposalDto): boolean {
   switch (row.kind) {
     case 'goal':
@@ -76,9 +77,9 @@ export function isConvertible(row: ShapeProposalDto): boolean {
     case 'change_task':
     case 'remove_task':
     case 'decision':
+    case 'landing':
       return true;
     case 'principle':
-    case 'landing':
     case 'question':
       return false;
   }
@@ -115,7 +116,7 @@ export function rowMeta(row: ShapeProposalDto): string {
     case 'task':
       return [row.body.size ?? 'sized by history', row.body.areas.join(', ')].join(' · ');
     case 'landing':
-      return taskCount(row.body.keys.length);
+      return `${taskCount(row.body.keys.length)} · 1 pull request`;
     case 'question':
       return `for ${row.body.for}`;
     case 'decision':

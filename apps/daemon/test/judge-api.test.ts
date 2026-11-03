@@ -139,6 +139,7 @@ describe('PATCH /judge', () => {
     expect(status.config).toEqual({
       enabled: false,
       decisions: {
+        ...DEFAULT_JUDGE_CONFIG.decisions,
         review_size: { enabled: true, model: 'anthropic/claude-haiku-5.5', floor: 0.95 },
       },
     });

@@ -176,6 +176,7 @@ function BoardColumns({
   const abandon = useAbandonBatch();
   const closeTask = useCloseTask();
   const reopenTask = useReopenTask();
+  const navigate = useNavigate();
   // The run the builder is being asked to confirm cancelling, from a card's menu or the drawer.
   const [cancelling, setCancelling] = useState<WorkstreamDto | null>(null);
   // What checks a step, as the daemon picks it: the changed-packages check where the project has one.
@@ -457,6 +458,9 @@ function BoardColumns({
             actions.apply({ kind: 'start', taskId: openTask.id }, openTask);
           }}
           onCancelRun={setCancelling}
+          onOpenConversation={(shapeId) => {
+            void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+          }}
           onClose={() => {
             setOpenId(null);
           }}

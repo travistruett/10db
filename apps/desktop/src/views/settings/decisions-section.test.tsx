@@ -2,7 +2,12 @@ import { mintId } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { renderApp } from '../../test/daemon';
-import { judgeCallDto, judgeStatusDto, serveJudge } from '../../test/judge-fixtures';
+import {
+  judgeCallDto,
+  judgeStatusDto,
+  serveJudge,
+  shapeMeasuresDto,
+} from '../../test/judge-fixtures';
 
 const PASTED = 'sk-or-pasted-value-never-echoed';
 
@@ -186,5 +191,82 @@ describe('Settings › Decisions', () => {
   it('says when there are no decisions yet', async () => {
     open();
     expect(await screen.findByText('No decisions yet.')).toBeTruthy();
+  });
+});
+
+describe('Settings › Decisions › Shape (spec §8, §9)', () => {
+  it('shows the Sizing hit rate with n, per bucket, and overrides beside it', async () => {
+    open({
+      measures: shapeMeasuresDto({
+        sizing: {
+          n: 5,
+          within: 4,
+          buckets: {
+            S: { n: 2, within: 2 },
+            M: { n: 3, within: 2 },
+            L: { n: 0, within: 0 },
+            XL: { n: 0, within: 0 },
+          },
+          overrides: 1,
+        },
+      }),
+    });
+    const sizing = await screen.findByRole('group', { name: 'Sizing' });
+    expect(sizing.textContent).toContain('80% within one bucket (4 of 5)');
+    expect(sizing.textContent).toContain('S 2 of 2');
+    expect(sizing.textContent).toContain('M 2 of 3');
+    expect(sizing.textContent).toContain('1 set by you, not counted');
+  });
+
+  it('says Sizing has nothing to measure until a converted task finishes', async () => {
+    open();
+    const sizing = await screen.findByRole('group', { name: 'Sizing' });
+    expect(sizing.textContent).toContain('No converted task has finished yet');
+  });
+
+  it("shows Inbox question cards per converted task against the project's other tasks (spec §7)", async () => {
+    open({
+      measures: shapeMeasuresDto({
+        questions: { converted: { tasks: 4, cards: 2 }, other: { tasks: 10, cards: 9 } },
+      }),
+    });
+    const questions = await screen.findByRole('group', { name: 'Questions' });
+    expect(questions.textContent).toContain('0.5 question cards per task (4 tasks) converted');
+    expect(questions.textContent).toContain(
+      "0.9 question cards per task (10 tasks) for the project's other tasks",
+    );
+  });
+
+  it('says Questions has nothing to measure until a converted task starts', async () => {
+    open();
+    const questions = await screen.findByRole('group', { name: 'Questions' });
+    expect(questions.textContent).toContain('No converted task has started yet');
+  });
+
+  it("shows each Shape decision's shadow agreement, and sends its switch", async () => {
+    const { sent } = open({
+      measures: shapeMeasuresDto({
+        shadow: [
+          { decision: 'shape_ready', answered: 3, scored: 2, agreed: 1, canShow: false },
+          { decision: 'shape_record', answered: 25, scored: 20, agreed: 18, canShow: true },
+          { decision: 'shape_elsewhere', answered: 0, scored: 0, agreed: 0, canShow: false },
+        ],
+      }),
+    });
+    const record = await screen.findByRole('group', { name: 'Record as a decision?' });
+    expect(record.textContent).toContain('In shadow: 18 of 20 scored answers agreed (90%)');
+    expect(record.textContent).toContain('Ready to show');
+    const ready = screen.getByRole('group', { name: 'Enough to propose' });
+    expect(ready.textContent).toContain('1 of 2 scored answers agreed (50%)');
+    const elsewhere = screen.getByRole('group', { name: 'Question for someone else?' });
+    expect(elsewhere.textContent).toContain('No scored answers yet');
+    fireEvent.click(within(record).getByRole('switch'));
+    await waitFor(() => {
+      expect(sent).toContainEqual({
+        method: 'PATCH',
+        path: '/judge',
+        body: { decisions: { shape_record: { enabled: false } } },
+      });
+    });
   });
 });

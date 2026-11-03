@@ -1,4 +1,4 @@
-import { ShapeMessageAuthor, type ShapeId } from '@10db/contracts';
+import { ShapeMessageAuthor, ShapeMessageKind, type ShapeId } from '@10db/contracts';
 import {
   lastShapeMessages,
   listShapeLinks,
@@ -6,6 +6,7 @@ import {
   type DbReader,
   type ShapeProposalRow,
 } from '@10db/db';
+import { convertedStateLines } from './converted-state';
 
 /** How many of the latest transcript rows the digest repeats verbatim (Shape spec §5.3). */
 export const DIGEST_MESSAGES = 40;
@@ -38,7 +39,9 @@ export function buildDigest(db: DbReader, shapeId: ShapeId): string {
     `The last ${String(messages.length)} messages, as they were said:`,
   ];
   for (const m of messages) {
-    const speaker = m.author === ShapeMessageAuthor.Builder ? `[m:${m.id}]` : `(${m.author})`;
+    // A proposal may cite a builder message or an engine event, so both keep their ids.
+    const citable = m.author === ShapeMessageAuthor.Builder || m.kind === ShapeMessageKind.Event;
+    const speaker = citable ? `[m:${m.id}]` : `(${m.author})`;
     lines.push(`${speaker} ${m.body}`);
   }
   lines.push('', 'The proposals:');
@@ -47,17 +50,7 @@ export function buildDigest(db: DbReader, shapeId: ShapeId): string {
     lines.push(
       `- ${row.key} (${row.kind}, ${row.state}, round ${String(row.round)}; sources ${row.sourceMessageIds.join(', ') || 'none'}): ${titleOf(row)}`,
     );
-  if (links.length > 0) {
-    lines.push('', 'What Convert made:');
-    for (const link of links) {
-      const target =
-        link.goalId !== null
-          ? `goal ${link.goalId}`
-          : link.taskId !== null
-            ? `task ${link.taskId}`
-            : `decision ${link.decisionId ?? ''}`;
-      lines.push(`- ${link.key} → ${target}`);
-    }
-  }
+  if (links.length > 0)
+    lines.push('', 'What Convert made, as it stands now:', ...convertedStateLines(db, shapeId));
   return lines.join('\n');
 }

@@ -38,6 +38,7 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  LandingGroupId,
   JudgeDecision,
   JudgeOutcome,
   McpVerdict,
@@ -77,9 +78,15 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  ShapeAttachmentId,
   ShapeFileId,
+  ShapeFindingId,
+  ShapeFindingKind,
+  ShapeFindingSeverity,
+  ShapeFindingState,
   ShapeId,
   ShapeLinkId,
+  ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
   ShapeMessageKind,
@@ -373,10 +380,41 @@ export const tasks = sqliteTable(
     goalId: text('goal_id')
       .$type<GoalId>()
       .references((): AnySQLiteColumn => goals.id),
+    /** The landing the task shares a pull request with (Shape spec §10.4); null lands alone. */
+    landingGroupId: text('landing_group_id')
+      .$type<LandingGroupId>()
+      .references((): AnySQLiteColumn => landingGroups.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('tasks_project_idx').on(t.projectId), index('tasks_goal_idx').on(t.goalId)],
+  (t) => [
+    index('tasks_project_idx').on(t.projectId),
+    index('tasks_goal_idx').on(t.goalId),
+    index('tasks_landing_group_idx').on(t.landingGroupId),
+  ],
+);
+
+/**
+ * Tasks that land in one pull request (Shape spec §10.4): starting them together puts them in one
+ * batch, and one started later joins that batch while it is open. Written by Shape's Convert.
+ */
+export const landingGroups = sqliteTable(
+  'landing_groups',
+  {
+    id: text('id').$type<LandingGroupId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    /** The conversation that proposed it; null for a group made another way. */
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .references((): AnySQLiteColumn => shapes.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('landing_groups_project_idx').on(t.projectId)],
 );
 
 export const taskDeps = sqliteTable(
@@ -1115,4 +1153,133 @@ export const shapeLinks = sqliteTable(
       sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) = 1`,
     ),
   ],
+);
+
+/**
+ * A reviewer's finding, or a question the rehearsal's implementer would have to ask (Shape spec §7).
+ * `task_key` names the task a rehearsal read; `task_hash` is the content hash the daemon stamped.
+ */
+export const shapeFindings = sqliteTable(
+  'shape_findings',
+  {
+    id: text('id').$type<ShapeFindingId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    effortKey: text('effort_key').notNull(),
+    taskKey: text('task_key'),
+    reviewer: text('reviewer').$type<ShapeReviewer>().notNull(),
+    kind: text('kind').$type<ShapeFindingKind>().notNull(),
+    severity: text('severity').$type<ShapeFindingSeverity>(),
+    text: text('text').notNull(),
+    state: text('state').$type<ShapeFindingState>().notNull(),
+    how: text('how'),
+    round: integer('round').notNull(),
+    taskHash: text('task_hash'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('shape_findings_shape_idx').on(t.shapeId, t.id)],
+);
+
+/**
+ * The rehearsal read this task at this content hash and reported (Shape spec §7), zero questions
+ * included. Written only on the reviewer's closing report; a task edited since has a new hash and no mark.
+ */
+export const shapeRehearsals = sqliteTable(
+  'shape_rehearsals',
+  {
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    taskKey: text('task_key').notNull(),
+    hash: text('hash').notNull(),
+    round: integer('round').notNull(),
+    questions: integer('questions').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.shapeId, t.taskKey, t.hash] })],
+);
+
+/**
+ * What a conversation attaches to an effort: its spec (Shape spec §7), and later diagrams, charts,
+ * mockups and an eval. `key` is the proposal's key; Convert sets `goal_id` or `task_id`.
+ */
+export const shapeAttachments = sqliteTable(
+  'shape_attachments',
+  {
+    id: text('id').$type<ShapeAttachmentId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    kind: text('kind').$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval'>().notNull(),
+    key: text('key').notNull(),
+    body: text('body').notNull(),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('shape_attachments_shape_idx').on(t.shapeId, t.key),
+    uniqueIndex('shape_attachments_one_spec')
+      .on(t.shapeId, t.key, t.kind)
+      .where(sql`${t.kind} IN ('spec', 'eval')`),
+  ],
+);
+
+/**
+ * A finished workstream's lane time (Shape spec §8): its session spans plus its gate spans, not time
+ * queued for a lane or a gate slot. Written once when the workstream finishes; migration 0032
+ * backfilled the workstreams finished before it, from sessions only.
+ */
+export const taskLaneTimes = sqliteTable(
+  'task_lane_times',
+  {
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .primaryKey()
+      .references(() => workstreams.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    laneMinutes: real('lane_minutes').notNull(),
+    /** No gate span was recorded for a workstream whose gate ran: it finished before `gate.started`. */
+    sessionsOnly: integer('sessions_only', { mode: 'boolean' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_lane_times_task_idx').on(t.taskId)],
+);
+
+/**
+ * A Shape decision's shadow answer about one builder message (spec §9): logged, never shown, and
+ * scored against what happened once that is known. Append-only; one per message and decision.
+ */
+export const shapeShadowAnswers = sqliteTable(
+  'shape_shadow_answers',
+  {
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    messageId: text('message_id')
+      .$type<ShapeMessageId>()
+      .notNull()
+      .references(() => shapeMessages.id),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    /** `yes` or `no`. */
+    answer: text('answer').$type<'yes' | 'no'>().notNull(),
+    confidence: real('confidence').notNull(),
+    judgeCallId: text('judge_call_id').$type<JudgeCallId>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.decision] })],
 );

@@ -117,7 +117,7 @@ import {
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredProfiles, roleDefault } from '../routing';
-import { createShapeService } from '../shape';
+import { createShapeJev, createShapeService } from '../shape';
 import { createShapeServices } from './shape-services';
 import {
   applyCheckAnswer,
@@ -787,6 +787,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
+    jev: createShapeJev({
+      state,
+      judge,
+      log: logger.child({ component: 'shape-jev' }),
+      now: () => clock.now(),
+    }),
     mcp: {
       get url() {
         return mcpUrl;
@@ -989,7 +995,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       judge,
       off: opts.judgeOff === true,
     }),
-    shape: createShapeServices({ shape }),
+    shape: createShapeServices({ shape, state, clock }),
     starter,
     shipper,
     accounts: accountService,

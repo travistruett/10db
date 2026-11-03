@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { ShapeToolName } from '@10db/contracts';
 import { isOverLongPath, OVER_LONG_PATH_REFUSAL, stringField, type GuardVerdict } from '../guard';
 import { readAccess, readPathsOf, type FileAccessContext } from '../sandbox';
+import type { ShapeVerdict } from '../sessions';
 
 // Shape spec §5.2. A Shape session reads the project's checkout and its conversation's dropped
 // files, and nothing else. It runs no command, so there is no sandbox to hold one; this judge is the
@@ -87,20 +88,30 @@ function judgeAgent(call: ShapeCall): GuardVerdict {
     : deny(`A Shape session launches only its reviewers (${SHAPE_REVIEWERS.join(', ')}).`);
 }
 
-function judgeShapeTool(call: ShapeCall): GuardVerdict {
+function judgeShapeTool(call: ShapeCall): ShapeVerdict {
   const name = call.toolName.slice(MCP_PREFIX.length);
   if (!SHAPE_TOOLS.has(name)) return deny(`${call.toolName} is not a Shape tool.`);
   const isReviewer = call.agentId !== undefined;
-  if (name === REVIEWER_TOOL)
-    return isReviewer ? ALLOW : deny('Only a reviewer reports a finding; the main session cannot.');
-  return isReviewer ? deny(`A reviewer cannot call ${name}; it reports findings only.`) : ALLOW;
+  if (name !== REVIEWER_TOOL)
+    return isReviewer ? deny(`A reviewer cannot call ${name}; it reports findings only.`) : ALLOW;
+  if (!isReviewer) return deny('Only a reviewer reports a finding; the main session cannot.');
+  const reviewer = call.agentType;
+  if (reviewer === undefined || !(SHAPE_REVIEWERS as readonly string[]).includes(reviewer))
+    return deny(`Only a ${SHAPE_REVIEWERS.join(', ')} reviewer reports a finding.`);
+  // The finding's reviewer is the subagent's type, set here over whatever the model wrote: the MCP
+  // handler can't tell a reviewer from the session, since they share a connection.
+  const input =
+    typeof call.toolInput === 'object' && call.toolInput !== null
+      ? (call.toolInput as Record<string, unknown>)
+      : {};
+  return { decision: 'allow', updatedInput: { ...input, reviewer } };
 }
 
 /**
  * The PreToolUse answer for a Shape session's tool call, or its subagent's: `allow` or `deny`, never
  * `ask`. Anything not listed is refused, so a tool a later Claude Code adds is too.
  */
-export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): GuardVerdict {
+export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdict {
   if (READ_TOOLS.has(call.toolName)) return judgeRead(call, access);
   if (call.toolName === 'Agent') return judgeAgent(call);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);

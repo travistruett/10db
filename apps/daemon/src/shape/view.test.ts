@@ -163,10 +163,20 @@ describe('the view', () => {
     await tick();
     service.send(shapeId, 'second');
     service.propose(shapeId);
-    expect(service.view(shapeId).turn).toEqual({ running: true, queued: 2, proposing: true });
+    expect(service.view(shapeId).turn).toEqual({
+      running: true,
+      queued: 2,
+      proposing: true,
+      rehearsing: false,
+    });
     release();
     await service.settled(shapeId);
-    expect(service.view(shapeId).turn).toEqual({ running: false, queued: 0, proposing: false });
+    expect(service.view(shapeId).turn).toEqual({
+      running: false,
+      queued: 0,
+      proposing: false,
+      rehearsing: false,
+    });
   });
 
   it('types each proposal’s body, and says what a converted one became', async () => {

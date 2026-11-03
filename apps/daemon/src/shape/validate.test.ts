@@ -10,6 +10,9 @@ const unfinished: TaskId = mintId('Task');
 const converted: TaskId = mintId('Task');
 const started: TaskId = mintId('Task');
 const foreign: TaskId = mintId('Task');
+const inFolder: TaskId = mintId('Task');
+const held: TaskId = mintId('Task');
+const landed: TaskId = mintId('Task');
 const headDecision = mintId('Decision');
 const supersededDecision = mintId('Decision');
 const foreignDecision = mintId('Decision');
@@ -22,6 +25,9 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
   convertedTasks: new Map([
     ['earlier-task', converted],
     ['started-task', started],
+    ['folder-task', inFolder],
+    ['held-task', held],
+    ['landed-task', landed],
   ]),
   convertedGoals: new Set([convertedGoal]),
   basisProblem: (id) => (id === finished ? null : `${id} is not a finished task of this project`),
@@ -38,6 +44,25 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
         ? `${id} has started`
         : `${id} was not created by this conversation`,
   storedSources: new Set(),
+  draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
+  placeOf: (id) =>
+    id === converted
+      ? { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null }
+      : id === inFolder
+        ? { place: 'shared', lands: 'merges into main when checks pass', landingGroup: null }
+        : id === held
+          ? {
+              place: 'worktree',
+              lands: 'is held for your review (pull request against main)',
+              landingGroup: null,
+            }
+          : id === landed
+            ? {
+                place: 'worktree',
+                lands: 'merges into main when checks pass',
+                landingGroup: mintId('LandingGroup'),
+              }
+            : null,
   ...over,
 });
 
@@ -227,6 +252,36 @@ const REFUSED: readonly (readonly [string, Record<string, unknown>, RegExp])[] =
       ],
     },
     /Landing 2, keys: a is already in landing l1/,
+  ],
+  [
+    'a landing of tasks that work in different places',
+    {
+      looseTasks: [loose('a')],
+      landings: [
+        { key: 'l1', title: 'One', keys: ['a', 'folder-task'], sourceMessageIds: [message] },
+      ],
+    },
+    /Landing 1, keys: a works in a separate copy, but folder-task works in your folder/,
+  ],
+  [
+    'a landing of tasks that land differently',
+    {
+      looseTasks: [loose('a')],
+      landings: [
+        { key: 'l1', title: 'One', keys: ['a', 'held-task'], sourceMessageIds: [message] },
+      ],
+    },
+    /Landing 1, keys: a merges into main when checks pass, but held-task is held for your review/,
+  ],
+  [
+    'a landing taking a task that is already in a landing',
+    {
+      looseTasks: [loose('a')],
+      landings: [
+        { key: 'l1', title: 'One', keys: ['a', 'landed-task'], sourceMessageIds: [message] },
+      ],
+    },
+    /Landing 1, keys: landed-task is already in a landing/,
   ],
   [
     'a landing naming a key nobody has',

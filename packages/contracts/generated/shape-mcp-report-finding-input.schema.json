@@ -14,6 +14,17 @@
       "type": "string",
       "minLength": 1
     },
+    "final": {
+      "type": "boolean"
+    },
+    "reviewer": {
+      "type": "string",
+      "enum": [
+        "scope",
+        "engineering",
+        "rehearsal"
+      ]
+    },
     "finding": {
       "oneOf": [
         {
