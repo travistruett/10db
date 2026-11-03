@@ -556,6 +556,25 @@ describe('buildSessionPrompt for flow steps', () => {
     );
   });
 
+  it.each([
+    ['an implement step', { ...base, action: { kind: 'start' as const } }],
+    [
+      'a read-only step',
+      {
+        ...base,
+        step: { ...base.step, role: 'review' as const, tools: 'read_only' as const },
+        action: { kind: 'start' as const },
+      },
+    ],
+  ])(
+    'tells %s that a background command does not wake it, and to wait in the foreground',
+    (_name, input) => {
+      const prompt = buildSessionPrompt(input);
+      expect(prompt).toContain('A command moved to the background will not wake you by itself');
+      expect(prompt).toContain('ending your turn ends the step');
+    },
+  );
+
   it('names the files a step ended with uncommitted, and asks for their commit', () => {
     const prompt = buildSessionPrompt({
       ...base,

@@ -155,6 +155,50 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(existsSync(calls)).toBe(false);
   });
 
+  it('updates the lockfile instead of freezing it when asked for a dependency change', async () => {
+    fakePnpm();
+    withLockfileAndModules();
+    const result = await dependencies().refresh({
+      batch,
+      project,
+      path: worktree,
+      signal,
+      mode: 'update',
+    });
+    expect(result.kind).toBe('installed');
+    const call = readFileSync(calls, 'utf8');
+    expect(call).toContain('install --no-frozen-lockfile --ignore-scripts --ignore-pnpmfile');
+    expect(call).not.toContain(' --frozen-lockfile');
+    expect(requests[0]?.command).toBe(installCommand(join(bin, 'pnpm'), 'update'));
+  });
+
+  it('installs a worktree whose node_modules is missing the packages its lockfile names from nothing', async () => {
+    fakePnpm();
+    // A pruned install: node_modules exists, the lockfile's dependency does not resolve.
+    writeFileSync(
+      join(worktree, 'pnpm-lock.yaml'),
+      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
+    );
+    mkdirSync(join(worktree, 'node_modules/.pnpm/stale'), { recursive: true });
+    writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
+    const result = await refresh(dependencies());
+    expect(result.kind).toBe('installed');
+    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(false);
+    expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
+  });
+
+  it('leaves a node_modules whose packages all resolve for pnpm to bring in line', async () => {
+    fakePnpm();
+    writeFileSync(
+      join(worktree, 'pnpm-lock.yaml'),
+      'importers:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n',
+    );
+    mkdirSync(join(worktree, 'node_modules/left-pad'), { recursive: true });
+    writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
+    expect((await refresh(dependencies())).kind).toBe('installed');
+    expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(true);
+  });
+
   it('installs from the worktree’s own lockfile with scripts and the pnpmfile off', async () => {
     fakePnpm();
     withLockfileAndModules();

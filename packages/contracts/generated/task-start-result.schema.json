@@ -577,7 +577,8 @@
                 "gate_failed",
                 "session_failed",
                 "retry_limit",
-                "rejected_at_limit"
+                "rejected_at_limit",
+                "install_broken"
               ]
             },
             {
@@ -1048,6 +1049,7 @@
                 "gate_failed",
                 "gate_timed_out",
                 "base_conflict",
+                "install_broken",
                 "push_rejected",
                 "gh_unavailable",
                 "network"

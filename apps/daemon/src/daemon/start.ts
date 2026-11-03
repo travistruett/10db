@@ -63,6 +63,7 @@ import { systemClock, type Clock } from '../clock';
 import {
   allCheckouts,
   createBaseUpdates,
+  createDependencyChanges,
   createMigrationsBase,
   createBatchCardAnswers,
   createBranchCardAnswers,
@@ -624,6 +625,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const baseUpdates = createBaseUpdates(delivery);
   // Before a task gets the migrations hazard, from request_claim or at its start.
   const migrationsBase = createMigrationsBase(delivery, baseUpdates);
+  // A lane's dependency change, installed in the batch's turn by the daemon (install_dependencies).
+  const dependencyChanges = createDependencyChanges(delivery, baseUpdates);
   const shipper = createShipper({
     ...delivery,
     gate,
@@ -1038,6 +1041,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       claimWaits,
       migrationsBase,
+      dependencyChanges,
       shapeTools: shape.toolsFor,
     }),
   });

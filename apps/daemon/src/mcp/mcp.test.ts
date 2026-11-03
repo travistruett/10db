@@ -35,6 +35,7 @@ import {
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   parseFindings,
+  type BatchId,
   type ProjectDto,
   type WorkstreamId,
   type WorkstreamStep,
@@ -42,7 +43,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../test/fixtures';
-import type { MigrationsBase, MigrationsBaseTake } from '../delivery';
+import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import { protectedPaths } from '../guard';
@@ -91,6 +92,10 @@ let cancelled: WorkstreamId[] = [];
 let takeMigrationsBase: MigrationsBase['take'];
 /** The workstreams the base was brought in for, in order. */
 let migrationsBaseTaken: WorkstreamId[] = [];
+/** What installing a lane's dependency change answers; a test replaces it. */
+let installDependencies: DependencyChanges['install'];
+/** The batches a dependency change was installed for, in order. */
+let dependencyInstalls: BatchId[] = [];
 /** How many times a wait started and asked the scheduler to look again. */
 let waitsStarted = 0;
 
@@ -148,6 +153,8 @@ beforeEach(async () => {
   waitsStarted = 0;
   migrationsBaseTaken = [];
   takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
+  dependencyInstalls = [];
+  installDependencies = () => Promise.resolve({ kind: 'installed', changed: [], logPath: 'x.log' });
   claimWaits = new ClaimWaits({
     onWait: () => {
       waitsStarted += 1;
@@ -174,6 +181,12 @@ beforeEach(async () => {
       take: (id, signal) => {
         migrationsBaseTaken.push(id);
         return takeMigrationsBase(id, signal);
+      },
+    },
+    dependencyChanges: {
+      install: (batchId, signal) => {
+        dependencyInstalls.push(batchId);
+        return installDependencies(batchId, signal);
       },
     },
   });
@@ -464,7 +477,7 @@ describe('MCP tools in a worktree batch', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the twelve tools', async () => {
+  it('lists exactly the thirteen tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -474,6 +487,7 @@ describe('MCP tools', () => {
       'file_follow_up',
       'find_knowledge',
       'get_context',
+      'install_dependencies',
       'propose',
       'record_decision',
       'record_evidence',
@@ -481,6 +495,61 @@ describe('MCP tools', () => {
       'request_claim',
       'write_handoff',
     ]);
+  });
+
+  describe('install_dependencies', () => {
+    it('installs for the task’s batch and tells the lane what to commit', async () => {
+      const s = await seedSession(['api'], { path: repo.path, branch: 'batch/one' });
+      installDependencies = () =>
+        Promise.resolve({
+          kind: 'installed',
+          changed: ['package.json', 'pnpm-lock.yaml'],
+          logPath: 'install.log',
+        });
+      const { json } = await s.call('install_dependencies', { opId: 'op-deps-0001' });
+      expect(json).toMatchObject({
+        installed: true,
+        changed: ['package.json', 'pnpm-lock.yaml'],
+        logPath: 'install.log',
+      });
+      expect(JSON.stringify(json)).toContain('commit');
+      expect(dependencyInstalls).toEqual([getWorkstream(state.db, s.workstream.id).batchId]);
+      // The same opId replays the answer without installing again.
+      await s.call('install_dependencies', { opId: 'op-deps-0001' });
+      expect(dependencyInstalls).toHaveLength(1);
+    });
+
+    it('relays a refusal as the instruction, with nothing installed', async () => {
+      const s = await seedSession(['api'], { path: repo.path, branch: 'batch/one' });
+      installDependencies = () =>
+        Promise.resolve({ kind: 'refused', reason: 'Dependencies are pinned exactly.' });
+      const { json } = await s.call('install_dependencies', { opId: 'op-deps-0002' });
+      expect(json).toMatchObject({
+        installed: false,
+        instruction: 'Dependencies are pinned exactly.',
+      });
+    });
+
+    it('relays a failed install with its log and says never to run pnpm', async () => {
+      const s = await seedSession(['api'], { path: repo.path, branch: 'batch/one' });
+      installDependencies = () =>
+        Promise.resolve({
+          kind: 'failed',
+          summary: 'The install failed (exit 1): ERR_PNPM_NO_MATCHING_VERSION',
+          logPath: 'install.log',
+        });
+      const { json } = await s.call('install_dependencies', { opId: 'op-deps-0003' });
+      expect(json).toMatchObject({ installed: false, logPath: 'install.log' });
+      expect(JSON.stringify(json)).toContain('ERR_PNPM_NO_MATCHING_VERSION');
+      expect(JSON.stringify(json)).toContain('Do not run pnpm yourself');
+    });
+
+    it('is refused for a task with no batch of its own', async () => {
+      const s = await seedSession();
+      const { text } = await s.call('install_dependencies', { opId: 'op-deps-0004' });
+      expect(text).toContain('no copy of its own');
+      expect(dependencyInstalls).toEqual([]);
+    });
   });
 
   it('returns the context pack for the calling session', async () => {

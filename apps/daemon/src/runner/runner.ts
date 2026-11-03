@@ -84,6 +84,8 @@ import {
   type WriteContext,
 } from '@10db/db';
 import {
+  BACKGROUND_DONE_NUDGE,
+  BACKGROUND_DONE_NUDGE_READ_ONLY,
   briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
@@ -200,6 +202,11 @@ export interface RunnerLimits {
   readonly maxRecoveryAttempts: number;
   readonly maxFixAttempts: number;
   readonly gateTimeoutMs: number;
+  /**
+   * How long a session that ended its turn may leave a command running in the background before the
+   * step fails naming the command (a hung test would otherwise hold the lane for ever).
+   */
+  readonly backgroundMs: number;
   /** Gates running at once across the whole daemon. */
   readonly gateSlots: number;
 }
@@ -208,6 +215,7 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   maxRecoveryAttempts: 3,
   maxFixAttempts: FIX_ATTEMPT_LIMIT,
   gateTimeoutMs: 30 * 60_000,
+  backgroundMs: 15 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
 };
@@ -344,6 +352,12 @@ type Outcome =
   | {
       /** A billing check refused the session; a retry would be refused the same way. */
       readonly kind: 'refused';
+      readonly message: string;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** The session ended its turn with a command running in the background that never finished. */
+      readonly kind: 'background_hung';
       readonly message: string;
       readonly providerSessionId: string | null;
     }
@@ -507,6 +521,15 @@ interface SessionState {
    */
   waitingOn: Map<InboxItemId, number>;
   waitTimer: Timer | null;
+  /** The commands the session started in the background that still run, as the adapter last reported. */
+  backgroundTasks: readonly { readonly id: string; readonly description: string }[];
+  /**
+   * Set when a turn ended with commands still running in the background: the step is held open, not
+   * done. Cleared when the session works again, or when the commands finish and it is told so.
+   */
+  heldForBackground: boolean;
+  /** Fails the step when the held session's commands have not finished in time. */
+  backgroundTimer: Timer | null;
   /** Set by the `started` event; a session that never started has no conversation to resume. */
   started: boolean;
   outcome: Outcome | null;
@@ -1279,6 +1302,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
       case 'refused':
+      case 'background_hung':
+        // A retry would hang the same way, and the work it left is for the builder to see.
         fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
         return;
       case 'crashed': {
@@ -1552,6 +1577,9 @@ export function createRunner(opts: RunnerOptions): Runner {
       parkedFor: null,
       waitingOn: new Map(),
       waitTimer: null,
+      backgroundTasks: [],
+      heldForBackground: false,
+      backgroundTimer: null,
       started: false,
       outcome: null,
     };
@@ -1571,6 +1599,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       abort.abort();
     };
     ctl.endWaits = endWaits;
+    const stopWaitingOnBackground = (): void => {
+      st.heldForBackground = false;
+      st.backgroundTimer?.cancel();
+      st.backgroundTimer = null;
+    };
 
     const observer: WaitObserver = {
       onWaitStart(item) {
@@ -1732,7 +1765,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           }
+          case 'background_tasks': {
+            st.backgroundTasks = event.tasks;
+            if (event.tasks.length > 0 || !st.heldForBackground) break;
+            // The commands the turn ended on have finished. A session that ended its turn is not woken
+            // by that on its own, so it is told, and goes on to commit (or, read-only, to record its result).
+            stopWaitingOnBackground();
+            handle.send(readOnly ? BACKGROUND_DONE_NUDGE_READ_ONLY : BACKGROUND_DONE_NUDGE);
+            break;
+          }
           case 'activity':
+            // The session is working again (Claude Code woke it, or an answer did): it is not idle.
+            stopWaitingOnBackground();
             opts.state.write((ctx) => {
               patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
               ctx.emit({
@@ -1838,6 +1882,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
             const recorded = handoffForSession(db, session.id);
+            const resultRecorded = () =>
+              currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
             if (recorded) {
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
               await handle.stop();
@@ -1845,10 +1891,31 @@ export function createRunner(opts: RunnerOptions): Runner {
               st.firmSent = true;
               handle.send(NUDGES[st.handoffCause].firm);
             } else if (
-              readOnly &&
-              currentStep(getWorkstreamRow(db, id)).result?.sessionId !== session.id &&
-              !st.resultNudged
+              st.backgroundTasks.length > 0 &&
+              !(readOnly
+                ? resultRecorded()
+                : (await claimedChanges(getWorkstreamRow(db, id))).length === 0)
             ) {
+              // Ending the turn is not finishing the step while a command it started still runs and the
+              // step's work is still outstanding: the command's result is what the session meant to act
+              // on. The session stays open and is told when the command finishes; one that never does
+              // fails the step, naming the command. A step that has recorded its result, or has nothing
+              // left uncommitted, is done whatever it left running (a dev server, a watcher).
+              st.heldForBackground = true;
+              st.backgroundTimer?.cancel();
+              const commands = st.backgroundTasks.map((t) => t.description);
+              log.info({ workstreamId: id, commands }, 'step held open for background commands');
+              st.backgroundTimer = opts.clock.setTimeout(() => {
+                st.backgroundTimer = null;
+                if (st.outcome) return;
+                st.outcome = {
+                  kind: 'background_hung',
+                  message: `The ${step.role} step ended its turn with a command it started in the background still running, and it was still running ${String(Math.round(opts.limits.backgroundMs / 60_000))} minutes later, so the step was stopped. A test or command that never finishes is the likely cause: ${commands.map((c) => `"${c}"`).join(', ')}`,
+                  providerSessionId: st.providerSessionId,
+                };
+                void handle.stop();
+              }, opts.limits.backgroundMs);
+            } else if (readOnly && !resultRecorded() && !st.resultNudged) {
               st.resultNudged = true;
               handle.send(RESULT_NUDGE);
             } else {
@@ -1947,6 +2014,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     } finally {
       // Ending the waits on every exit, before any stop, leaves no inbox waiter on a dead session.
       endWaits();
+      stopWaitingOnBackground();
       releaseStart();
       // Leaving the loop without `ended` (a stale fence, a failed write) must not leave the process running.
       if (!sawEnded) await handle.stop().catch(() => undefined);
@@ -1996,6 +2064,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ended.kind === 'held' ||
         ended.kind === 'crashed' ||
         ended.kind === 'refused' ||
+        ended.kind === 'background_hung' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
     const outcome: Outcome =
       parkedAfterWait && st.parkedFor
@@ -2241,7 +2310,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               before.update = update;
               // Markers left in the branch fail any gate; a session resolves them first.
-              return update.kind !== 'aborted' && update.kind !== 'conflicted';
+              // A broken install fails any gate before it starts: its tools are not there.
+              return (
+                update.kind !== 'aborted' &&
+                update.kind !== 'conflicted' &&
+                update.kind !== 'install_broken'
+              );
             },
           }),
       project: projectAtCheckout(project, checkout),
@@ -2322,6 +2396,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The base merge left conflict markers: no gate ran, and a session resolves them.
     if (before.update?.kind === 'conflicted' && ctl.stopReason !== 'shutdown') {
       sendToMerge(id, ctl, row, before.update);
+      return;
+    }
+    // The copy's packages do not resolve what its lockfile names: no gate ran, and the task's code did
+    // not fail. The task stops with a card that says the install is broken, and no attempt is counted
+    // (a fix session could not repair it: 10db installs, and already did).
+    if (before.update?.kind === 'install_broken' && ctl.stopReason !== 'shutdown') {
+      fail(id, ctl.fence, {
+        kind: WorkstreamFailure.InstallBroken,
+        reason: before.update.note,
+      });
       return;
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.

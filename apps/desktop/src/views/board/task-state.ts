@@ -65,6 +65,8 @@ function whatHappened(kind: string | null, step: string | null): string {
       return `The ${step ? `${step} step` : 'run'} ran out of fix attempts.`;
     case WorkstreamFailure.RejectedAtLimit:
       return `The ${step ? `${step} step` : 'review'} rejected the work with no fix attempts left.`;
+    case WorkstreamFailure.InstallBroken:
+      return 'The copy’s installed packages are broken, so the checks could not start. Nothing in the task’s code was at fault.';
     case null:
     default:
       return `The ${step ? `${step} step` : 'run'} failed.`;
@@ -93,6 +95,8 @@ function whatRetryDoes(
       return `Retry runs the ${step} step again with its fix attempts reset.`;
     case WorkstreamFailure.SessionFailed:
       return `Retry runs the ${step} step again in a new session.`;
+    case WorkstreamFailure.InstallBroken:
+      return `Retry installs the packages again, then runs the ${step} step again.`;
     case null:
     default:
       return `Retry runs the ${step} step again.`;

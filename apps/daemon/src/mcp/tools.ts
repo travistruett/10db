@@ -44,7 +44,12 @@ import {
 } from '@10db/db';
 import type { z } from 'zod';
 import { buildContextPack } from '../briefing';
-import { checkoutOf, MIGRATIONS_HAZARD, type MigrationsBase } from '../delivery';
+import {
+  checkoutOf,
+  MIGRATIONS_HAZARD,
+  type DependencyChanges,
+  type MigrationsBase,
+} from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
@@ -76,6 +81,8 @@ export interface McpDeps {
   readonly claimWaitSliceMs?: number;
   /** Brings a task's base into its branch before it gets the migrations hazard; absent, it isn't. */
   readonly migrationsBase?: MigrationsBase;
+  /** Installs a lane's dependency change in its copy; absent, `install_dependencies` is refused. */
+  readonly dependencyChanges?: DependencyChanges;
   /** The tools of a Shape conversation's session; absent, such a session is refused. */
   readonly shapeTools?: ShapeToolsFor;
 }
@@ -100,6 +107,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS); after that the call is refused.',
   request_claim:
     'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
+  install_dependencies:
+    "Install the dependency change you made in your copy's package.json files. Edit the manifests first, with each new or changed dependency pinned to an exact version (no ^, ~ or range), then call this: 10db resolves them, writes pnpm-lock.yaml and installs, outside your sandbox, so every workspace package still resolves its dependencies. Never run pnpm add or pnpm install yourself: your sandbox cannot, and it can leave the copy's node_modules broken. Commit the changed package.json files and pnpm-lock.yaml with the commit tool afterwards. If it answers installed: false, follow its instruction and call again with a new opId.",
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
@@ -435,6 +444,44 @@ export function createToolHandlers(
       } finally {
         clearTimeout(timer);
       }
+    },
+
+    install_dependencies: async (input) => {
+      const done = prior(input.opId, McpToolName.InstallDependencies);
+      if (done !== undefined) return McpToolOutputs.install_dependencies.parse(done);
+      if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
+        throw new InvalidError(
+          'This step is read-only; only an implement step changes dependencies.',
+        );
+      const row = getWorkstreamRow(db, workstreamId);
+      const changes = deps.dependencyChanges;
+      if (changes === undefined || row.batchId === null)
+        throw new InvalidError(
+          'This task has no copy of its own to install into. Ask the builder with ask_human to add the dependency.',
+        );
+      const outcome = await changes.install(
+        row.batchId,
+        deps.sessionSignal(sessionId) ?? new AbortController().signal,
+      );
+      if (outcome.kind === 'aborted')
+        throw new InvalidError('The install was stopped because your session is ending.');
+      const result: Out<'install_dependencies'> =
+        outcome.kind === 'installed'
+          ? {
+              installed: true,
+              changed: [...outcome.changed],
+              logPath: outcome.logPath,
+              instruction: `Installed. Commit the changed package.json files and pnpm-lock.yaml with the commit tool (changed in your copy: ${outcome.changed.join(', ') || 'nothing'}). Do not run pnpm yourself.`,
+            }
+          : outcome.kind === 'refused'
+            ? { installed: false, changed: [], logPath: null, instruction: outcome.reason }
+            : {
+                installed: false,
+                changed: [],
+                logPath: outcome.logPath,
+                instruction: `${outcome.summary} Fix what it names (a version that does not exist, a registry 10db may not reach) and call install_dependencies again with a new opId; if the project's registry host is blocked, a card already asks the builder to allow it. Do not run pnpm yourself.`,
+              };
+      return deps.state.write((ctx) => record('install_dependencies', input.opId, result, ctx));
     },
 
     commit: async (input) => {

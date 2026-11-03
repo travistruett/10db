@@ -12,6 +12,7 @@ export {
   type MigrationsBase,
   type MigrationsBaseTake,
 } from './migrations-base';
+export { createDependencyChanges, type DependencyChanges } from './dependency-change';
 export { retireWorktree } from './worktree-cleanup';
 export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';

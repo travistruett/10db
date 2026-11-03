@@ -80,6 +80,15 @@ export function mapSdkMessage(
       return [{ type: 'started', providerSessionId: msg.session_id, pid: ctx.pid }];
     if (msg.subtype === 'compact_boundary')
       return [{ type: 'compacted', trigger: msg.compact_metadata.trigger }];
+    if (msg.subtype === 'background_tasks_changed')
+      return [
+        {
+          type: 'background_tasks',
+          tasks: msg.tasks
+            .filter((t) => t.ambient !== true)
+            .map((t) => ({ id: t.task_id, description: t.description })),
+        },
+      ];
     return [];
   }
   if (msg.type === 'assistant') {

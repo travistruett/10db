@@ -218,6 +218,36 @@ describe('shipping', () => {
     expect(card.body).toMatch(/^origin\/main has 1 commit this branch doesn't\./);
   });
 
+  it('runs no gate on a broken install and fails the batch with a card that names the install, not the gate', async () => {
+    h = createDeliveryHarness(
+      // Run in the checkout, a gate would leave this file there.
+      { gateCommand: 'touch gate-ran' },
+      {
+        shipBaseUpdates: (real) => ({
+          ...real,
+          beforeGate: () =>
+            Promise.resolve({
+              kind: 'install_broken',
+              note: 'The install in this copy is broken: 614 of 787 dependencies do not resolve (.: tsx).',
+            }),
+        }),
+      },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(existsSync(join(h.repo, 'gate-ran'))).toBe(false);
+    expect(failed).toMatchObject({ state: 'FAILED', failure: 'install_broken' });
+    expect(onOrigin(batch.branch)).toBeNull();
+    const card = h.only(h.cards());
+    expect(card.title).toContain('the install in its copy is broken');
+    expect(card.title).not.toContain('the gate failed');
+    expect(card.body).toContain('.: tsx');
+    expect(card.body).toContain('Retry');
+  });
+
   it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {
     // The sandbox's runner reports the hosts its proxy refused; this one reports them for any failure.
     h = createDeliveryHarness(

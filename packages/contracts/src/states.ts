@@ -275,6 +275,11 @@ export const BatchFailure = {
   GateTimedOut: 'gate_timed_out',
   /** The base merge left conflicts and no task could take them to a session. */
   BaseConflict: 'base_conflict',
+  /**
+   * The copy's packages do not resolve what its lockfile names, even after 10db installed again: the
+   * shipping gate did not run, and nothing the batch's code did is counted against it.
+   */
+  InstallBroken: 'install_broken',
   PushRejected: 'push_rejected',
   GhUnavailable: 'gh_unavailable',
   Network: 'network',
@@ -293,6 +298,11 @@ export const WorkstreamFailure = {
   RetryLimit: 'retry_limit',
   /** A reviewer rejected the work with no fix attempt left. */
   RejectedAtLimit: 'rejected_at_limit',
+  /**
+   * The copy's packages do not resolve what its lockfile names, even after 10db installed again: no
+   * gate ran, and no attempt of the task's code was counted.
+   */
+  InstallBroken: 'install_broken',
 } as const;
 export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
 

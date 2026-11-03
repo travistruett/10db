@@ -52,6 +52,8 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  BACKGROUND_DONE_NUDGE,
+  BACKGROUND_DONE_NUDGE_READ_ONLY,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -182,6 +184,133 @@ describe('runner', () => {
       aborted: false,
     });
     expect(typeof finished?.['durationMs']).toBe('number');
+  });
+
+  describe('a session that ends its turn while a command it started runs in the background', () => {
+    const rehearsal = 'pnpm exec vitest run src/shape/rehearsal.test.ts';
+
+    it('is not counted as a finished step: it is told when the command finishes and goes on to commit', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            write('src/api/a.txt'),
+            { do: 'background', tasks: [rehearsal] },
+            turn,
+            // The command finishes: the session is woken by 10db, then commits what it meant to.
+            { do: 'background', tasks: [] },
+            { do: 'await_message', contains: BACKGROUND_DONE_NUDGE },
+            commit('op-bg-001', ['src/api/a.txt']),
+            turn,
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE' });
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+      ]);
+      expect(engine.adapter.sent.map((m) => m.text)).toContain(BACKGROUND_DONE_NUDGE);
+      expect(BACKGROUND_DONE_NUDGE).toContain('mcp__10db__commit');
+      expect(engine.adapter.sent.map((m) => m.text)).not.toContain(BACKGROUND_DONE_NUDGE_READ_ONLY);
+    });
+
+    it('ends an implement step that committed everything as done, without waiting on the command', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            write('src/api/a.txt'),
+            commit('op-bg-004', ['src/api/a.txt']),
+            { do: 'background', tasks: ['pnpm dev'] },
+            turn,
+            { do: 'hang' },
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE' });
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+      ]);
+      expect(engine.adapter.sent.map((m) => m.text)).not.toContain(BACKGROUND_DONE_NUDGE);
+    });
+
+    it('fails the step naming the command when it never finishes, instead of sending the step back for uncommitted changes', async () => {
+      const logs = captureLogs();
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            [
+              write('src/api/a.txt'),
+              { do: 'background', tasks: [rehearsal] },
+              turn,
+              { do: 'hang' },
+            ],
+          ],
+        },
+        {},
+        { logger: logs.logger },
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      // The turn has ended and the runner is waiting on the command.
+      await waitFor(() =>
+        logs.lines().some((line) => line['msg'] === 'step held open for background commands'),
+      );
+      expect(ws(workstream.id).state).toBe('RUNNING');
+
+      engine.clock.advance(DEFAULT_RUNNER_LIMITS.backgroundMs);
+      await engine.runner.idle();
+
+      const failed = ws(workstream.id);
+      expect(failed).toMatchObject({ state: 'FAILED', failureKind: 'session_failed' });
+      expect(failed.failureReason).toContain(rehearsal);
+      expect(failed.failureReason).toContain('still running');
+      expect(failed.failureReason).not.toContain('uncommitted');
+      // No retry was spent on it.
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    });
+
+    it('does not fail a session that is working again, even with the command still running', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            write('src/api/a.txt'),
+            { do: 'background', tasks: [rehearsal] },
+            turn,
+            { do: 'await_message', contains: 'go on' },
+            { do: 'activity', summary: 'back at work' },
+            { do: 'await_message', contains: 'finish' },
+            { do: 'background', tasks: [] },
+            commit('op-bg-003', ['src/api/a.txt']),
+            turn,
+          ],
+        ],
+      });
+      const start = vi.spyOn(engine.adapter, 'start');
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
+      const session = start.mock.results[0]?.value as { send(text: string): void } | undefined;
+      if (!session) throw new Error('no session started');
+      session.send('go on');
+      await waitFor(() =>
+        listEventsAfter(engine.store.db, 0, 1000).some(
+          (e) => e.type === 'session.activity' && e.data['summary'] === 'back at work',
+        ),
+      );
+
+      engine.clock.advance(DEFAULT_RUNNER_LIMITS.backgroundMs + 1);
+      session.send('finish');
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
   });
 
   it('records gate.started and gate.finished, and stores the lane time when the task finishes', async () => {
@@ -2732,6 +2861,55 @@ describe('flows', () => {
     ).toHaveLength(1);
   });
 
+  describe('a review that ends its turn with a command still running in the background', () => {
+    it('ends as done when it has recorded its verdict, rather than failing after the wait', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-bg01'),
+          [
+            approve('op-flow-bg02'),
+            { do: 'background', tasks: ['pnpm dev'] },
+            turn,
+            { do: 'hang' },
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+        'step_done',
+      ]);
+    });
+
+    it('is told to call complete_step, not to commit, when the command finishes before it has', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-bg03'),
+          [
+            { do: 'background', tasks: ['pnpm exec vitest run'] },
+            turn,
+            { do: 'background', tasks: [] },
+            { do: 'await_message', contains: BACKGROUND_DONE_NUDGE_READ_ONLY },
+            approve('op-flow-bg04'),
+            turn,
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sent = engine.adapter.sent.map((m) => m.text);
+      expect(sent).toContain(BACKGROUND_DONE_NUDGE_READ_ONLY);
+      expect(sent).not.toContain(BACKGROUND_DONE_NUDGE);
+      expect(BACKGROUND_DONE_NUDGE_READ_ONLY).toContain('mcp__10db__complete_step');
+      expect(BACKGROUND_DONE_NUDGE_READ_ONLY).not.toContain('commit');
+    });
+  });
+
   it('sends a rejection back to the implement step, one profile up, with the notes', async () => {
     engine = await createTestEngine({
       Alpha: [
@@ -4567,6 +4745,27 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           nextAction: { kind: 'verify' },
         });
         expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+      });
+
+      it('stops a broken install with a card that says so, runs no gate and counts no attempt of the task’s code', async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
+        const note =
+          'The install in this copy is broken: 3 of 9 dependencies do not resolve (.: tsx)';
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-6', ['src/api/a.txt']), turn]],
+          { baseUpdates: recordingBaseUpdates({ kind: 'install_broken', note }, order) },
+        ).finally(restore);
+        expect(order).not.toContain('gate spawned');
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'FAILED',
+          failureKind: 'install_broken',
+          attempt: 0,
+        });
+        expect(ws(workstream.id).failureReason).toContain(note);
+        expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+        const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+        expect(cards.map((card) => card.body)).toEqual([expect.stringContaining('(.: tsx)')]);
       });
 
       it('sends the work back to a session that resolves the conflict markers the base merge left, running no gate and raising no card, then gates the merged branch', async () => {

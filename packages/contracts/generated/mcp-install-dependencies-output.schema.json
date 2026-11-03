@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "installed": {
+      "type": "boolean"
+    },
+    "changed": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "logPath": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "instruction": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "installed",
+    "instruction"
+  ]
+}
