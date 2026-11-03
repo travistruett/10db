@@ -255,6 +255,37 @@ describe('Convert Anyway', () => {
     expect(listRehearsals(f.c.store.db, shapeId())).toEqual([]);
     expect(view().proposals.every((p) => p.state === 'accepted')).toBe(true);
   });
+
+  it('drops a rehearsal queued behind a message turn, so none runs after the convert', async () => {
+    await plan();
+    const seen: string[] = [];
+    f.adapter.shapeBehaviour = (turn) => {
+      seen.push(turn.message);
+      return new Promise((_resolve, reject) => {
+        turn.signal.addEventListener('abort', () => {
+          reject(new Error('interrupted'));
+        });
+      });
+    };
+    f.service.send(shapeId(), 'one more thing');
+    await tick();
+    expect(f.service.rehearse(shapeId())).toEqual({ status: 'started', tasks: 3 });
+    expect(view().turn).toMatchObject({ running: true, rehearsing: true, queued: 1 });
+    const ids = view()
+      .proposals.filter((p) => p.state === 'pending')
+      .map((p) => p.id);
+    const outcome = await f.service.convert(shapeId(), ids, { interrupt: true });
+    expect(outcome).toMatchObject({ ok: true, createdNow: 2 });
+    await f.service.settled(shapeId());
+    await tick();
+    expect(seen).toHaveLength(1);
+    expect(seen.some((m) => m.includes('Rehearse:'))).toBe(false);
+    expect(view().turn).toMatchObject({ running: false, rehearsing: false, queued: 0 });
+    const notices = listShapeMessages(f.c.store.db, shapeId())
+      .filter((m) => m.kind === ShapeMessageKind.Notice)
+      .map((m) => m.body);
+    expect(notices.some((b) => b.includes('Not rehearsed'))).toBe(false);
+  });
 });
 
 describe('a builder’s edit', () => {

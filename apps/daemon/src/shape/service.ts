@@ -730,7 +730,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   const pump = (shapeId: ShapeId, rt: Runtime): void => {
     if (rt.pump !== null) return;
-    rt.pump = (async () => {
+    // With nothing to run the body below finishes synchronously, and its `finally` would clear
+    // rt.pump before the assignment stores a settled promise there for good: settled() would spin.
+    const progress = { done: false };
+    let run: Promise<void> | null = null;
+    run = (async () => {
       try {
         while (rt.queue.length > 0 && !rt.held) {
           const turn = rt.queue.shift();
@@ -748,9 +752,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           }
         }
       } finally {
-        rt.pump = null;
+        progress.done = true;
+        if (rt.pump === run) rt.pump = null;
       }
     })();
+    if (!progress.done) rt.pump = run;
   };
 
   const interrupt = async (rt: Runtime): Promise<void> => {
@@ -1002,6 +1008,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     async convert(shapeId, proposalIds, options) {
       const rt = runtimeOf(shapeId);
+      if (options?.interrupt === true) {
+        // Convert Anyway stops the rehearsal (spec §7), queued as well as running: one left in the
+        // queue would read proposals that are no longer pending once the hold is released.
+        for (let i = rt.queue.length - 1; i >= 0; i -= 1)
+          if (rt.queue[i]?.kind === 'rehearse') rt.queue.splice(i, 1);
+      }
       if (rt.current !== null) {
         if (options?.interrupt !== true)
           throw new ConflictError('Claude is still answering; Stop or wait');
