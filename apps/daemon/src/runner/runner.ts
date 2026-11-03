@@ -85,6 +85,7 @@ import {
 } from '@10db/db';
 import {
   BACKGROUND_DONE_NUDGE,
+  BACKGROUND_DONE_NUDGE_READ_ONLY,
   briefedFromHandoff,
   buildContextPack,
   buildSessionPrompt,
@@ -1768,9 +1769,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             st.backgroundTasks = event.tasks;
             if (event.tasks.length > 0 || !st.heldForBackground) break;
             // The commands the turn ended on have finished. A session that ended its turn is not woken
-            // by that on its own, so it is told, and goes on to commit.
+            // by that on its own, so it is told, and goes on to commit (or, read-only, to record its result).
             stopWaitingOnBackground();
-            handle.send(BACKGROUND_DONE_NUDGE);
+            handle.send(readOnly ? BACKGROUND_DONE_NUDGE_READ_ONLY : BACKGROUND_DONE_NUDGE);
             break;
           }
           case 'activity':
@@ -1881,19 +1882,29 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
             const recorded = handoffForSession(db, session.id);
+            const resultRecorded = () =>
+              currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
             if (recorded) {
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
               handle.send(NUDGES[st.handoffCause].firm);
-            } else if (st.backgroundTasks.length > 0) {
-              // Ending the turn is not finishing the step while a command it started still runs: its
-              // result is what the session meant to act on. The session stays open and is told when the
-              // command finishes; one that never does fails the step, naming the command.
+            } else if (
+              st.backgroundTasks.length > 0 &&
+              !(readOnly
+                ? resultRecorded()
+                : (await claimedChanges(getWorkstreamRow(db, id))).length === 0)
+            ) {
+              // Ending the turn is not finishing the step while a command it started still runs and the
+              // step's work is still outstanding: the command's result is what the session meant to act
+              // on. The session stays open and is told when the command finishes; one that never does
+              // fails the step, naming the command. A step that has recorded its result, or has nothing
+              // left uncommitted, is done whatever it left running (a dev server, a watcher).
               st.heldForBackground = true;
               st.backgroundTimer?.cancel();
               const commands = st.backgroundTasks.map((t) => t.description);
+              log.info({ workstreamId: id, commands }, 'step held open for background commands');
               st.backgroundTimer = opts.clock.setTimeout(() => {
                 st.backgroundTimer = null;
                 if (st.outcome) return;
@@ -1904,11 +1915,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                 };
                 void handle.stop();
               }, opts.limits.backgroundMs);
-            } else if (
-              readOnly &&
-              currentStep(getWorkstreamRow(db, id)).result?.sessionId !== session.id &&
-              !st.resultNudged
-            ) {
+            } else if (readOnly && !resultRecorded() && !st.resultNudged) {
               st.resultNudged = true;
               handle.send(RESULT_NUDGE);
             } else {

@@ -52,6 +52,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BACKGROUND_DONE_NUDGE,
+  BACKGROUND_DONE_NUDGE_READ_ONLY,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -211,18 +212,55 @@ describe('runner', () => {
         'step_done',
       ]);
       expect(engine.adapter.sent.map((m) => m.text)).toContain(BACKGROUND_DONE_NUDGE);
+      expect(BACKGROUND_DONE_NUDGE).toContain('mcp__10db__commit');
+      expect(engine.adapter.sent.map((m) => m.text)).not.toContain(BACKGROUND_DONE_NUDGE_READ_ONLY);
     });
 
-    it('fails the step naming the command when it never finishes, instead of sending the step back for uncommitted changes', async () => {
+    it('ends an implement step that committed everything as done, without waiting on the command', async () => {
       engine = await createTestEngine({
         Alpha: [
-          [write('src/api/a.txt'), { do: 'background', tasks: [rehearsal] }, turn, { do: 'hang' }],
+          [
+            write('src/api/a.txt'),
+            commit('op-bg-004', ['src/api/a.txt']),
+            { do: 'background', tasks: ['pnpm dev'] },
+            turn,
+            { do: 'hang' },
+          ],
         ],
       });
       const { workstream } = engine.addTask('Alpha');
       engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE' });
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+      ]);
+      expect(engine.adapter.sent.map((m) => m.text)).not.toContain(BACKGROUND_DONE_NUDGE);
+    });
+
+    it('fails the step naming the command when it never finishes, instead of sending the step back for uncommitted changes', async () => {
+      const logs = captureLogs();
+      engine = await createTestEngine(
+        {
+          Alpha: [
+            [
+              write('src/api/a.txt'),
+              { do: 'background', tasks: [rehearsal] },
+              turn,
+              { do: 'hang' },
+            ],
+          ],
+        },
+        {},
+        { logger: logs.logger },
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
       // The turn has ended and the runner is waiting on the command.
-      await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
+      await waitFor(() =>
+        logs.lines().some((line) => line['msg'] === 'step held open for background commands'),
+      );
       expect(ws(workstream.id).state).toBe('RUNNING');
 
       engine.clock.advance(DEFAULT_RUNNER_LIMITS.backgroundMs);
@@ -2800,6 +2838,55 @@ describe('flows', () => {
     expect(
       listEvidence(engine.store.db, workstream.id).filter((e) => e.kind === 'gate'),
     ).toHaveLength(1);
+  });
+
+  describe('a review that ends its turn with a command still running in the background', () => {
+    it('ends as done when it has recorded its verdict, rather than failing after the wait', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-bg01'),
+          [
+            approve('op-flow-bg02'),
+            { do: 'background', tasks: ['pnpm dev'] },
+            turn,
+            { do: 'hang' },
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+        'step_done',
+      ]);
+    });
+
+    it('is told to call complete_step, not to commit, when the command finishes before it has', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          implement('op-flow-bg03'),
+          [
+            { do: 'background', tasks: ['pnpm exec vitest run'] },
+            turn,
+            { do: 'background', tasks: [] },
+            { do: 'await_message', contains: BACKGROUND_DONE_NUDGE_READ_ONLY },
+            approve('op-flow-bg04'),
+            turn,
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+      await until(workstream.id, (s) => s === 'DONE' || s === 'FAILED');
+
+      expect(ws(workstream.id).state).toBe('DONE');
+      const sent = engine.adapter.sent.map((m) => m.text);
+      expect(sent).toContain(BACKGROUND_DONE_NUDGE_READ_ONLY);
+      expect(sent).not.toContain(BACKGROUND_DONE_NUDGE);
+      expect(BACKGROUND_DONE_NUDGE_READ_ONLY).toContain('mcp__10db__complete_step');
+      expect(BACKGROUND_DONE_NUDGE_READ_ONLY).not.toContain('commit');
+    });
   });
 
   it('sends a rejection back to the implement step, one profile up, with the notes', async () => {
