@@ -29,7 +29,7 @@ describe('what a render token may do', () => {
     expect(renderMayRead('GET', '/goals/gol_1/digest')).toBe(false);
   });
 
-  it('never reads what runs a command or probes the machine', () => {
+  it('never reads what probes the machine, an account’s login or a lane’s copy', () => {
     for (const path of [
       '/system',
       '/accounts/acc_1/identity',

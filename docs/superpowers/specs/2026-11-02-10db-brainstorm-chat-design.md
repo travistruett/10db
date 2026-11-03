@@ -350,7 +350,7 @@ not by the token.
   design review's refused read), the event stream, `/mcp`, or a GET that probes the machine or runs a command
   against an account or a lane (`/system`, an account's `identity`, a lane's `changes`). One allowed read runs a
   command: `GET /shapes/:id`, the Plan screen's own view, lists the checkout's tracked files with `git ls-files`,
-  which reads and writes nothing. Every GET the daemon serves is named there, allowed or refused with a reason,
+  which reads the checkout and writes nothing. Every GET the daemon serves is named there, allowed or refused with a reason,
   and a test fails for one that is in neither. A kept picture is refused too, so a Plan screen draws a line in each
   screenshot's place, not the picture. The frame's own client sends reads only, and it draws the screen alone
   (no shell, no stream, no write of the builder's remembered project). **Tests, red first:** with the token, every
@@ -370,14 +370,16 @@ not by the token.
   the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
   (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
   not carried over.
-- **Open.** `e2e/see-screen.spec.ts` runs the real capture through the real host in Playwright WebKit (Board and
-  Plan: the picture in the conversation has the width asked for and many colours), which is the nearest thing to
-  WKWebView a script reaches. It asserts neither that a picture is faithful nor that the installed app's CSP lets
-  it work, so the Tauri window itself is still checked by hand. That Claude Code hands the image block to the model
-  is `test/shape-session.live.test.ts` under `TENDB_LIVE_CLAUDE=1`, which a lane can't run. So is the refusal of a
-  hidden window on a real one: the host's test fakes `visibilityState`. Until those have been seen, treat
-  `see_screen` as built and unproven live. Task `tsk_01a18a08-e391` (a task's copy previewed live) can point the
-  same frame and broker at its dev server.
+- **Open.** `e2e/see-screen.spec.ts` is written to run the real capture through the real host in Playwright WebKit
+  (Board and Plan: the picture in the conversation has the width asked for and many colours), the nearest thing to
+  WKWebView a script reaches. **It has not run yet.** A lane's sandbox can't launch WebKit, and a gate 10db runs
+  skips e2e (`TENDB_SANDBOX=1`), so a lane's GATE PASS says nothing about it. Its first run will be the `gate` job
+  in `.github/workflows/ci.yml`, on Linux WebKit in the Playwright image, not on macOS. Even then it asserts neither
+  that a picture is faithful nor that the installed app's CSP lets it work, so the Tauri window itself is still
+  checked by hand. That Claude Code hands the image block to the model is `test/shape-session.live.test.ts` under
+  `TENDB_LIVE_CLAUDE=1`, which a lane can't run. So is the refusal of a hidden window on a real one: the host's test
+  fakes `visibilityState`. Until those have been seen, treat `see_screen` as built and unproven live. Task
+  `tsk_01a18a08-e391` (a task's copy previewed live) can point the same frame and broker at its dev server.
 
 **Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
 touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You

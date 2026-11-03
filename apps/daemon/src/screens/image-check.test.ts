@@ -41,7 +41,9 @@ describe('readImageHeader', () => {
   });
 
   it('does not read past a JPEG that ends before its frame', () => {
-    expect(readImageHeader(jpeg(800, 600).subarray(0, 24))).toBeNull();
+    // It keeps its EOI, so the only thing wrong with it is the frame header cut off after four bytes.
+    const cut = Buffer.concat([jpeg(800, 600).subarray(0, 24), Buffer.from([0xff, 0xd9])]);
+    expect(readImageHeader(cut)).toBeNull();
   });
 
   it('knows a picture that was cut short for what it is: a PNG with no IEND, a JPEG with no EOI', () => {

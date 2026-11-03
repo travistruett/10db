@@ -112,15 +112,18 @@ conversation. The session gets no browser, no click and no command.
 The broker, the token rule, the image checks, the tool, the MCP image result, the hook's refusals, the frame's
 parameters, sandbox and read-only client, the host's answers and the transcript image are tested, and a started
 daemon drives a conversation's `see_screen` through a window played over HTTP with the database dump above, on a
-real PNG. Every one of those fakes a seam of the drawing, so `e2e/see-screen.spec.ts` runs it with nothing faked: a
-session on the fake adapter asks, the real host draws in Playwright WebKit, and the picture in the conversation
-must have the width asked for and many colours, for the Board and for a Plan screen that already holds a
-screenshot.
+real PNG. Every one of those fakes a seam of the drawing, so `e2e/see-screen.spec.ts` is written to run it with
+nothing faked: a session on the fake adapter asks, the real host draws in Playwright WebKit, and the picture in the
+conversation must have the width asked for and many colours, for the Board and for a Plan screen that already holds
+a screenshot.
 
 **Not proven here, and what would prove it:**
 
-- That spec needs WebKit, which a lane's sandbox can't launch, so its first run is the gate's. It also says
-  nothing of fidelity (fonts, Mantine's CSS variables) and it runs without the Tauri CSP.
+- That spec has not run yet. It needs WebKit, which a lane's sandbox can't launch, and a gate 10db runs has
+  `TENDB_SANDBOX=1`, so `scripts/gate.sh` reports "e2e skipped (sandboxed)": a lane's GATE PASS says nothing about
+  it. Its first run will be the `gate` job in `.github/workflows/ci.yml`, on Linux WebKit in the Playwright image,
+  not on macOS. Even then it says nothing of fidelity (fonts, Mantine's CSS variables), and it runs without the
+  Tauri CSP.
 - Claude Code handing the image block to the model is `test/shape-session.live.test.ts` under
   `TENDB_LIVE_CLAUDE=1`: only the model can say what colours the picture holds. It type-checks; a lane can't run it.
 - That a hidden WKWebView really reports `hidden` and stops its animation frames, and whether a fully covered
@@ -128,6 +131,6 @@ screenshot.
 - That the transcript's `content-visibility` blocks would have come out blank is reasoned, not seen; the frame
   turns `content-visibility` off so it can't happen either way.
 
-Until the installed app has been checked by hand and the live test has passed, treat `see_screen` as built but
-unproven live. `tsk_01a18a08-e391` (preview a task's copy live with its own dev server) can reuse
-the broker and the `capture` seam, pointing the frame at its dev server's origin.
+Until the spec has passed on CI, the installed app has been checked by hand and the live test has passed, treat
+`see_screen` as built but unproven live. `tsk_01a18a08-e391` (preview a task's copy live with its own dev server)
+can reuse the broker and the `capture` seam, pointing the frame at its dev server's origin.

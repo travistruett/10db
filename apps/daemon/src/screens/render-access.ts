@@ -1,8 +1,9 @@
 // Shape spec §5.5. A screen is drawn by the app's own window under a render token, and the daemon
 // holds that token to reading what the screen shows. The 2026-11-02 design review ran the UI through
 // a proxy that allowed only GET and refused GET /goals/:id/digest, because that read moves a goal's
-// last-opened mark. This is that proxy as a rule inside the daemon, with the other GETs that are not
-// plain reads found and refused too.
+// last-opened mark. This is that proxy as a rule inside the daemon. The rule is that a screen changes
+// nothing, not that no read may touch git: of the other GETs that are not plain reads, one is allowed
+// because it writes nothing and Plan's screen needs it (see RENDER_READS), and the rest are refused.
 //
 // Every GET the daemon serves is named below, allowed or refused, and a test fails for one that is
 // in neither, so a new route has to be decided before a screen can reach it.
@@ -38,7 +39,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/system':
     'A system check probes the machine and runs commands; ?recheck=1 runs them again on every read.',
   '/workstreams/:id/changes':
-    "A lane's changes are read by running git in its checkout; a screen runs no command.",
+    "A lane's changes are read by running git in its copy, and a screen draws without them.",
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
