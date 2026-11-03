@@ -15,6 +15,10 @@ import { E2E_DIR, E2E_TOKEN } from './paths';
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 const Created = z.looseObject({ id: z.string() });
 const Tasks = z.array(z.looseObject({ id: z.string(), title: z.string() }));
+const LongView = z.looseObject({
+  messages: z.array(z.looseObject({ id: z.string() })),
+  proposals: z.array(z.looseObject({})),
+});
 
 const MESSAGE = 'Make the cards denser. Thin out the scrollbars';
 
@@ -205,4 +209,141 @@ test('under 1100 px the sidebar is a drawer, and the summary line stays on scree
   await expect(page.getByRole('region', { name: 'Proposed' })).toBeVisible();
   await expect(page.getByRole('group', { name: 'Summary' })).toBeVisible();
   await expectAccessible(page, 'drawer open');
+});
+
+const FRAMES = 240;
+const SCROLL_PER_FRAME = 300;
+const SLOWEST_MEDIAN_FRAME_MS = 100;
+/** A window of blocks at 900 px, overscan included; the conversation has 2,000. */
+const NEAR_THE_VIEWPORT = 60;
+
+/** Each third reply is long, so measured heights differ from the estimate. */
+const longBody = (i: number): string =>
+  i % 3 === 0
+    ? `Message ${String(i)}. ${'A long reply that wraps. '.repeat(30)}`
+    : `Message ${String(i)}`;
+
+test('a 2,000-message conversation mounts only the blocks near the viewport as WebKit scrolls', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const projectId = projects.get('dark');
+  if (projectId === undefined) throw new Error('The dark run makes the project this test opens');
+  await openShape(page, projectId, 'dark');
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await expect(input).toBeFocused();
+  await expect(
+    page.getByText(
+      'Nothing is proposed until you press Propose. Nothing starts until you Convert.',
+    ),
+  ).toBeVisible();
+  await input.fill(MESSAGE);
+  await expect(input).toHaveValue(MESSAGE);
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(page).toHaveURL(/\/shape\/shp_/);
+  await page.getByRole('button', { name: 'Propose', exact: true }).click();
+  await expect(page.getByRole('group', { name: 'Summary' })).toHaveText(
+    '1 goal · 2 loose · 1 to record',
+  );
+
+  // The daemon's real view, with 2,000 messages in it and a row that came from one far down.
+  const shapeId = new URL(page.url()).pathname.split('/').pop() ?? '';
+  const WHY_TARGET = 1500;
+  await page.route(`${daemonUrl}/shapes/${shapeId}`, async (route) => {
+    const response = await route.fetch();
+    const view = LongView.parse(await response.json());
+    const template = view.messages[0];
+    if (template === undefined) throw new Error('The conversation has its first message');
+    const messages = Array.from({ length: 2000 }, (_, i) => ({
+      ...template,
+      // Still a UUID v7, which the schema asks for: only its last digits differ.
+      id: `${template.id.slice(0, -4)}${i.toString(16).padStart(4, '0')}`,
+      author: i % 2 === 0 ? 'builder' : 'claude',
+      kind: 'text',
+      body: longBody(i),
+    }));
+    const proposals = view.proposals.map((p) => ({
+      ...p,
+      sourceMessageIds: [messages[WHY_TARGET]?.id],
+    }));
+    await route.fulfill({ response, json: { ...view, messages, proposals } });
+  });
+  await page.reload();
+
+  const transcript = page.getByRole('group', { name: 'Messages' });
+  const blocks = transcript.locator('[data-message-id]');
+  await expect(transcript.getByText('Message 0.', { exact: false })).toBeVisible();
+  expect(await blocks.count()).toBeLessThan(NEAR_THE_VIEWPORT);
+
+  // A block wraps to the pane: the list's absolute positioning must not widen it.
+  const widths = await transcript.evaluate((el) => {
+    const block = el.querySelector('[data-message-id]');
+    return {
+      pane: el.clientWidth,
+      block: block?.getBoundingClientRect().width ?? 0,
+      scroll: el.scrollWidth,
+    };
+  });
+  expect(widths.block).toBeLessThan(widths.pane);
+  expect(widths.scroll).toBe(widths.pane);
+
+  // Down the conversation a step a frame, and back up through blocks that were measured and let go.
+  const run = await transcript.evaluate(
+    (el, { frames, step }) =>
+      new Promise<{ mostMounted: number; gaps: number; frameMs: number[] }>((resolve) => {
+        let frame = 0;
+        let mostMounted = 0;
+        let gaps = 0;
+        let last = performance.now();
+        const frameMs: number[] = [];
+        const tick = (now: number): void => {
+          frameMs.push(now - last);
+          last = now;
+          const mounted = el.querySelectorAll('[data-message-id]');
+          mostMounted = Math.max(mostMounted, mounted.length);
+          const pane = el.getBoundingClientRect();
+          const covered = [...mounted].some((block) => {
+            const box = block.getBoundingClientRect();
+            return (
+              box.bottom > pane.top + pane.height / 2 - 40 &&
+              box.top < pane.top + pane.height / 2 + 40
+            );
+          });
+          if (!covered) gaps += 1;
+          if (frame === frames) {
+            resolve({ mostMounted, gaps, frameMs: frameMs.slice(1) });
+            return;
+          }
+          el.scrollTop += frame < frames / 2 ? step : -step;
+          frame += 1;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+    { frames: FRAMES, step: SCROLL_PER_FRAME },
+  );
+  expect(run.mostMounted).toBeLessThan(NEAR_THE_VIEWPORT);
+  expect(run.gaps).toBe(0);
+  const sorted = run.frameMs.toSorted((a, b) => a - b);
+  const medianMs = sorted[Math.floor(sorted.length / 2)] ?? Infinity;
+  await testInfo.attach('scroll frames', {
+    contentType: 'application/json',
+    body: JSON.stringify({
+      frames: sorted.length,
+      medianMs,
+      p95Ms: sorted[Math.floor(sorted.length * 0.95)],
+      worstMs: sorted.at(-1),
+      mostMounted: run.mostMounted,
+    }),
+  });
+  // A wide bound, for a loaded CI machine: it catches a scroll that drags, not a dropped frame.
+  expect(medianMs).toBeLessThan(SLOWEST_MEDIAN_FRAME_MS);
+
+  // Why? reaches a block that is not mounted, past blocks whose real heights are not known yet.
+  await page.getByRole('button', { name: 'Actions for Thin scrollbars' }).click();
+  await page.getByRole('menuitem', { name: 'Why?' }).click();
+  const target = transcript.locator('[data-highlighted]');
+  await expect(target).toContainText(`Message ${String(WHY_TARGET)}`);
+  await expect(target).toBeInViewport();
+  expect(await blocks.count()).toBeLessThan(NEAR_THE_VIEWPORT);
 });

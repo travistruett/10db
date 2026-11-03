@@ -23,10 +23,12 @@
   drawer and menu do not call `remove-draft` yet.
 - **Model text is plain text.** No markdown renderer is a dependency, so chat and row text show as text with
   line breaks and are never markup.
-- **No virtualization library.** A new dependency waits on the builder, so each transcript block and row takes
-  `content-visibility: auto`, which keeps off-screen blocks from being laid out, and each block is memoized so a
-  new message re-renders only itself. A real virtual list is a follow-up if a long conversation still drags in
-  WebKit (the 2,000-message check is by hand: the jsdom test only proves every block carries the containment).
+- **The transcript is a virtual list.** `@tanstack/react-virtual` (the builder's choice, pinned at 3.14.25, the
+  newest `minimumReleaseAge` allows) mounts only the blocks near the viewport, measuring each as it mounts. Why?
+  and stick-to-bottom go through the virtualizer, since their block may not be mounted. The cost is that ⌘F and a
+  drag-select reach mounted text only. Blocks are not memoized: about twenty mount at a time, and a new message
+  rebuilds every block object anyway. `content-visibility: auto` stays on the Proposed rows, which are few.
+  `e2e/shape.spec.ts` checks 2,000 messages in WebKit; a sandboxed gate skips e2e, so CI is what runs it.
 - **The header shows the conversation's tokens** ("88k tokens", through the factory's `formatTokens`), from
   `ShapeViewDto.tokens`: the input and output tokens summed over the conversation's `sessions` rows
   (`shapeTokens`), the rows per-project usage reads. Cached tokens are a subset of input, so they are not added.
