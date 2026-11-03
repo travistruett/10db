@@ -10,6 +10,7 @@ import {
   ShapeMessageId,
   TaskId,
 } from './ids';
+import { KnowledgeScope } from './states';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
 // Contracts only; the daemon module that runs a conversation comes in later tasks.
@@ -80,8 +81,9 @@ export type Ceremony = ValueOf<typeof Ceremony>;
 export const TaskSize = { S: 'S', M: 'M', L: 'L', XL: 'XL' } as const;
 export type TaskSize = ValueOf<typeof TaskSize>;
 
-export const RecordScope = { You: 'you', Project: 'project', Area: 'area' } as const;
-export type RecordScope = ValueOf<typeof RecordScope>;
+/** The same vocabulary as the knowledge scope, kept in one place (`states.ts`). */
+export const RecordScope = KnowledgeScope;
+export type RecordScope = KnowledgeScope;
 
 // --- PlanDraft (§6) -----------------------------------------------------------------------------
 

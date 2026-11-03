@@ -62,6 +62,18 @@ import {
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
+import {
+  DecisionDto,
+  DecisionInput,
+  PrincipleDraft,
+  PrincipleDto,
+  PrincipleInput,
+  ProposalAccept,
+  ProposalDto,
+  ProposalReject,
+  ProvenanceDto,
+  ReasonInput,
+} from './knowledge';
 import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
@@ -189,6 +201,16 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
+  'decision-input': DecisionInput,
+  'decision-dto': DecisionDto,
+  'principle-draft': PrincipleDraft,
+  'principle-input': PrincipleInput,
+  'principle-dto': PrincipleDto,
+  'reason-input': ReasonInput,
+  'proposal-dto': ProposalDto,
+  'proposal-accept': ProposalAccept,
+  'proposal-reject': ProposalReject,
+  'provenance-dto': ProvenanceDto,
   'person-dto': PersonDto,
   'person-input': PersonInput,
   'persona-dto': PersonaDto,
