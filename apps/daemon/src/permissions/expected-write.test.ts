@@ -60,6 +60,56 @@ describe('editResult', () => {
     );
   });
 
+  it('strips trailing whitespace from new_string on any file but markdown, as Claude Code does', () => {
+    const edit = (file_path: string, new_string: string) => ({
+      file_path,
+      old_string: 'b',
+      new_string,
+    });
+    expect(editResult('Edit', edit('/p/a.ts', 'x \t\ny  \n  \nz  '), 'a\nb\nc')).toBe(
+      'a\nx\ny\n\nz\nc',
+    );
+    // Each line's end goes, whatever the line separator: a CRLF in new_string keeps its CR.
+    expect(editResult('Edit', edit('/p/a.ts', 'x  \r\ny '), 'a b c')).toBe('a x\r\ny c');
+    expect(editResult('Edit', edit('/p/a.txt', 'x '), 'a b c')).toBe('a x c');
+    // Markdown (and MDX), whatever the case of the extension, keeps them: two spaces are a line break.
+    expect(editResult('Edit', edit('/p/a.md', 'x  \ny '), 'a b c')).toBe('a x  \ny  c');
+    expect(editResult('Edit', edit('/p/A.MDX', 'x  '), 'a b c')).toBe('a x   c');
+    // The match itself is not touched: old_string finds the file's own trailing spaces.
+    expect(
+      editResult('Edit', { file_path: '/p/a.ts', old_string: 'a  ', new_string: 'z  ' }, 'a  b'),
+    ).toBe('zb');
+    expect(
+      editResult(
+        'MultiEdit',
+        { file_path: '/p/a.ts', edits: [{ old_string: 'b', new_string: 'x  ' }] },
+        'a b c',
+      ),
+    ).toBe('a x c');
+  });
+
+  it('keeps the trailing whitespace of an Edit that creates its file, as Claude Code does', () => {
+    const create = { file_path: '/p/new.ts', old_string: '', new_string: 'x  \ny\t\n' };
+    expect(editResult('Edit', create, null)).toBe('x  \ny\t\n');
+    // A file that exists, even an empty one, is stripped.
+    expect(editResult('Edit', create, '')).toBe('x\ny\n');
+    // Whether the file exists is settled once for the call, so every edit of a MultiEdit that creates it keeps
+    // its whitespace; one on a file that exists loses it in each edit.
+    const edits = [
+      { old_string: '', new_string: 'a  \n' },
+      { old_string: 'a', new_string: 'b  ' },
+    ];
+    expect(editResult('MultiEdit', { file_path: '/p/new.ts', edits }, null)).toBe('b    \n');
+    expect(editResult('MultiEdit', { file_path: '/p/new.ts', edits }, '')).toBe('b\n');
+  });
+
+  it('counts matches without overlap, as Claude Code does', () => {
+    // '==' in 'a === b' is one match to Claude Code (split), not two overlapping ones.
+    expect(editResult('Edit', { old_string: '==', new_string: 'X' }, 'a === b')).toBe('a X= b');
+    // Two separate matches are still refused.
+    expect(editResult('Edit', { old_string: '==', new_string: 'X' }, 'a == b ==')).toBeUndefined();
+  });
+
   it('applies a MultiEdit one edit after another', () => {
     expect(
       editResult(
