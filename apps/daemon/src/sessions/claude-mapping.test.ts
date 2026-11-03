@@ -14,6 +14,7 @@ import {
 } from './claude-mapping';
 import {
   assistantMessage,
+  backgroundTasksChanged,
   compactBoundary,
   initMessage,
   PROVIDER_SESSION,
@@ -176,6 +177,25 @@ describe('mapSdkMessage', () => {
   it('maps a compact boundary to compacted', () => {
     expect(mapSdkMessage(compactBoundary('auto'), ctx)).toEqual([
       { type: 'compacted', trigger: 'auto' },
+    ]);
+  });
+
+  it('maps the live background tasks to the commands the lane is waiting on, leaving out ambient ones', () => {
+    const msg = backgroundTasksChanged([
+      { task_id: 'b1', task_type: 'local_bash', description: 'pnpm exec vitest run a.test.ts' },
+      { task_id: 'w1', task_type: 'watcher', description: 'a live-update watcher', ambient: true },
+    ]);
+    expect(mapSdkMessage(msg, ctx)).toEqual([
+      {
+        type: 'background_tasks',
+        tasks: [{ id: 'b1', description: 'pnpm exec vitest run a.test.ts' }],
+      },
+    ]);
+  });
+
+  it('maps an empty set of background tasks, which is how the lane learns they finished', () => {
+    expect(mapSdkMessage(backgroundTasksChanged([]), ctx)).toEqual([
+      { type: 'background_tasks', tasks: [] },
     ]);
   });
 });

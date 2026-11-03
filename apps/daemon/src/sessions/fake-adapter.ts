@@ -99,6 +99,8 @@ export const FakeStep = z.discriminatedUnion('do', [
     limitType: z.string().optional(),
   }),
   z.object({ do: z.literal('compact') }),
+  /** The commands running in the background now (none: they all finished). */
+  z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),
   z.object({ do: z.literal('crash'), message: z.string() }),
   z.object({ do: z.literal('billing_refused'), message: z.string() }),
   z.object({
@@ -451,6 +453,15 @@ export class FakeAdapter implements SessionAdapter {
           return 'continue';
         case 'compact':
           channel.push({ type: 'compacted', trigger: 'auto' });
+          return 'continue';
+        case 'background':
+          channel.push({
+            type: 'background_tasks',
+            tasks: step.tasks.map((description, i) => ({
+              id: `fake-task-${String(i)}`,
+              description,
+            })),
+          });
           return 'continue';
         case 'crash':
           end('error', step.message);

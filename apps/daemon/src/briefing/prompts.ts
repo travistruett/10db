@@ -111,8 +111,23 @@ export const HANDOFF_FIRM_NUDGE_ACCOUNT =
 export const RESULT_NUDGE =
   '10db: this step is not finished until you call mcp__10db__complete_step with your result (and, for a review, a verdict). Call it now, then end your turn.';
 
+/**
+ * Sent when the commands a session left running in the background have finished after it ended its
+ * turn: the session does not learn of that by itself, and 10db has held the step open for it.
+ */
+export const BACKGROUND_DONE_NUDGE =
+  '10db: the command you started in the background has finished. Read its output, finish the step and commit every change in your claims through mcp__10db__commit, then end your turn.';
+
 const PLAIN_COMMANDS =
   'Run project commands in their plain form: `pnpm exec <tool> …` or the project\'s own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: `pnpm exec prettier --write path/a.ts path/b.ts`, then `pnpm exec eslint path/a.ts path/b.ts`. Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
+
+/**
+ * Ending the turn ends the step, and a background command (the Bash tool moves a long one there)
+ * does not wake a session that has ended its turn. A lane once ended its turn "to wait" for a test
+ * run and was failed for the changes it had not committed.
+ */
+const BACKGROUND_COMMANDS =
+  'Run a test or any other command in the foreground and wait for its result. A command moved to the background will not wake you by itself, and ending your turn ends the step: whatever you have not committed by then is left uncommitted. Do not end your turn to wait for one. If a background command is still running when you end your turn, 10db keeps the session open and tells you when it finishes, and fails the step naming the command if it never does.';
 
 /** Beside the plain-commands line in a sandboxed session. */
 const SANDBOX_RULES = [
@@ -130,6 +145,7 @@ const RULES = [
   'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
   'If you depart from the plan or a principle, call report_deviation with your reason.',
   PLAIN_COMMANDS,
+  BACKGROUND_COMMANDS,
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
   'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.',
   "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
@@ -152,6 +168,7 @@ function readOnlyRules(role: StepRole): string[] {
         ]
       : []),
     PLAIN_COMMANDS,
+    BACKGROUND_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
 }

@@ -1,5 +1,6 @@
 export { buildContextPack } from './context-pack';
 export {
+  BACKGROUND_DONE_NUDGE,
   briefedFromHandoff,
   buildSessionPrompt,
   compactionReinjection,

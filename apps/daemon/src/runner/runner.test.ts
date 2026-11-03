@@ -51,6 +51,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  BACKGROUND_DONE_NUDGE,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -181,6 +182,96 @@ describe('runner', () => {
       aborted: false,
     });
     expect(typeof finished?.['durationMs']).toBe('number');
+  });
+
+  describe('a session that ends its turn while a command it started runs in the background', () => {
+    const rehearsal = 'pnpm exec vitest run src/shape/rehearsal.test.ts';
+
+    it('is not counted as a finished step: it is told when the command finishes and goes on to commit', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            write('src/api/a.txt'),
+            { do: 'background', tasks: [rehearsal] },
+            turn,
+            // The command finishes: the session is woken by 10db, then commits what it meant to.
+            { do: 'background', tasks: [] },
+            { do: 'await_message', contains: BACKGROUND_DONE_NUDGE },
+            commit('op-bg-001', ['src/api/a.txt']),
+            turn,
+          ],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE' });
+      expect(listSessions(engine.store.db, workstream.id).map((s) => s.exitReason)).toEqual([
+        'step_done',
+      ]);
+      expect(engine.adapter.sent.map((m) => m.text)).toContain(BACKGROUND_DONE_NUDGE);
+    });
+
+    it('fails the step naming the command when it never finishes, instead of sending the step back for uncommitted changes', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [write('src/api/a.txt'), { do: 'background', tasks: [rehearsal] }, turn, { do: 'hang' }],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      // The turn has ended and the runner is waiting on the command.
+      await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
+      expect(ws(workstream.id).state).toBe('RUNNING');
+
+      engine.clock.advance(DEFAULT_RUNNER_LIMITS.backgroundMs);
+      await engine.runner.idle();
+
+      const failed = ws(workstream.id);
+      expect(failed).toMatchObject({ state: 'FAILED', failureKind: 'session_failed' });
+      expect(failed.failureReason).toContain(rehearsal);
+      expect(failed.failureReason).toContain('still running');
+      expect(failed.failureReason).not.toContain('uncommitted');
+      // No retry was spent on it.
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    });
+
+    it('does not fail a session that is working again, even with the command still running', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [
+            write('src/api/a.txt'),
+            { do: 'background', tasks: [rehearsal] },
+            turn,
+            { do: 'await_message', contains: 'go on' },
+            { do: 'activity', summary: 'back at work' },
+            { do: 'await_message', contains: 'finish' },
+            { do: 'background', tasks: [] },
+            commit('op-bg-003', ['src/api/a.txt']),
+            turn,
+          ],
+        ],
+      });
+      const start = vi.spyOn(engine.adapter, 'start');
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => listSessions(engine.store.db, workstream.id)[0]?.inputTokens === 1000);
+      const session = start.mock.results[0]?.value as { send(text: string): void } | undefined;
+      if (!session) throw new Error('no session started');
+      session.send('go on');
+      await waitFor(() =>
+        listEventsAfter(engine.store.db, 0, 1000).some(
+          (e) => e.type === 'session.activity' && e.data['summary'] === 'back at work',
+        ),
+      );
+
+      engine.clock.advance(DEFAULT_RUNNER_LIMITS.backgroundMs + 1);
+      session.send('finish');
+      await engine.runner.idle();
+
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
   });
 
   it('runs a task to DONE with gate evidence, and the guard blocks an out-of-claim write', async () => {

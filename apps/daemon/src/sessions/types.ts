@@ -168,6 +168,14 @@ export type SessionEvent =
     }
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
   | {
+      /**
+       * The commands the session started in the background that are still running, replacing the
+       * last report (an empty list: none is). A watcher the session did not start is left out.
+       */
+      readonly type: 'background_tasks';
+      readonly tasks: readonly { readonly id: string; readonly description: string }[];
+    }
+  | {
       readonly type: 'ended';
       readonly reason: SessionEndReason;
       readonly message: string | null;

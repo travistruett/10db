@@ -3,6 +3,7 @@ import type {
   ApiKeySource,
   NonNullableUsage,
   SDKAssistantMessage,
+  SDKBackgroundTasksChangedMessage,
   SDKCompactBoundaryMessage,
   SDKRateLimitEvent,
   SDKRateLimitInfo,
@@ -144,6 +145,18 @@ export function rateLimitEvent(info: SDKRateLimitInfo): SDKRateLimitEvent {
   return {
     type: 'rate_limit_event',
     rate_limit_info: info,
+    uuid: randomUUID(),
+    session_id: PROVIDER_SESSION,
+  };
+}
+
+export function backgroundTasksChanged(
+  tasks: SDKBackgroundTasksChangedMessage['tasks'],
+): SDKBackgroundTasksChangedMessage {
+  return {
+    type: 'system',
+    subtype: 'background_tasks_changed',
+    tasks,
     uuid: randomUUID(),
     session_id: PROVIDER_SESSION,
   };
