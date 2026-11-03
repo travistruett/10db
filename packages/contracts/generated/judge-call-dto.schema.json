@@ -9,7 +9,10 @@
     "decision": {
       "type": "string",
       "enum": [
-        "review_size"
+        "review_size",
+        "shape_ready",
+        "shape_record",
+        "shape_elsewhere"
       ]
     },
     "model": {
@@ -39,7 +42,8 @@
         "fallback_no_key",
         "fallback_timeout",
         "fallback_error",
-        "stopped"
+        "stopped",
+        "shadow"
       ]
     },
     "latencyMs": {

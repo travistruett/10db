@@ -51,6 +51,7 @@ import {
   ShapeProposalId,
   ShapeUnpinInput,
   ShapeWithdrawInput,
+  ShapeJevSettingDto,
   StartTaskInput,
   SystemCheckDto,
   TaskId,
@@ -242,6 +243,18 @@ export function createApp(deps: ApiDeps) {
           201,
         ),
     )
+    .get('/projects/:projectId/shape-jev', (c) =>
+      c.json(deps.services.getShapeJev(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/shape-jev',
+      validator('json', (value): ShapeJevSettingDto => ShapeJevSettingDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setShapeJev(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/shape-measures', (c) => c.json(deps.services.shapeMeasures()))
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
     )

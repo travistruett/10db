@@ -1922,6 +1922,77 @@
         "queued",
         "proposing"
       ]
+    },
+    "sizes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "pattern": "^spp_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "key": {
+            "type": "string"
+          },
+          "size": {
+            "type": "string",
+            "enum": [
+              "S",
+              "M",
+              "L",
+              "XL"
+            ]
+          },
+          "hours": {
+            "type": "number",
+            "minimum": 0
+          },
+          "from": {
+            "type": "string",
+            "enum": [
+              "basis",
+              "size",
+              "pinned"
+            ]
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "actualHours": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "missized": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "proposalId",
+          "key",
+          "size",
+          "hours",
+          "from",
+          "taskId",
+          "actualHours",
+          "missized"
+        ]
+      }
     }
   },
   "required": [
@@ -1930,7 +2001,8 @@
     "proposals",
     "heard",
     "files",
-    "turn"
+    "turn",
+    "sizes"
   ],
   "$defs": {
     "__schema0": {

@@ -111,6 +111,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     dropShapeProposal: track('dropShapeProposal'),
     addShapeFile: track('addShapeFile'),
     startShape: track('startShape'),
+    shapeMeasures: track('shapeMeasures'),
+    getShapeJev: track('getShapeJev'),
+    setShapeJev: track('setShapeJev'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -1043,6 +1046,27 @@ describe('shape routes', () => {
     ).toBe(400);
   });
 
+  it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {
+    const set: unknown[] = [];
+    const services = stubServices({
+      getShapeJev: () => ({ enabled: false }),
+      setShapeJev: (_id, input) => {
+        set.push(input);
+        return input;
+      },
+    });
+    const read = await app(services).request(`/projects/${projectId}/shape-jev`, auth);
+    expect(await read.json()).toEqual({ enabled: false });
+    const put = (body: unknown) =>
+      app(services).request(`/projects/${projectId}/shape-jev`, {
+        ...post(body),
+        method: 'PUT',
+      });
+    expect((await put({ enabled: true })).status).toBe(200);
+    expect((await put({ enabled: 'yes' })).status).toBe(400);
+    expect(set).toEqual([{ enabled: true }]);
+  });
+
   it('answers a conversation’s view, 404 for an unknown one', async () => {
     const view = {
       shape,
@@ -1051,6 +1075,7 @@ describe('shape routes', () => {
       heard: [],
       files: [],
       turn: { running: false, queued: 0, proposing: false },
+      sizes: [],
     };
     const services = stubServices({
       getShapeView: (id) => {

@@ -126,6 +126,30 @@ describe('gate runner', () => {
     expect(readFileSync(ran, 'utf8')).toBe('gate\n');
   });
 
+  it('says it started once beforeStart lets it, and never for a gate that did not start', async () => {
+    const order: string[] = [];
+    await runner.run(
+      request({
+        command: 'true',
+        beforeStart: () => {
+          order.push('beforeStart');
+          return Promise.resolve(true);
+        },
+        onStarted: () => order.push('started'),
+      }),
+    );
+    expect(order).toEqual(['beforeStart', 'started']);
+    const none: string[] = [];
+    await runner.run(
+      request({
+        command: 'true',
+        beforeStart: () => Promise.resolve(false),
+        onStarted: () => none.push('started'),
+      }),
+    );
+    expect(none).toEqual([]);
+  });
+
   it('records the exit code of a failing gate and stderr', async () => {
     const result = await run('echo broken >&2; exit 3');
     expect(result.exitCode).toBe(3);

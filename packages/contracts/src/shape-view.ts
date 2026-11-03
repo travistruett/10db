@@ -8,6 +8,7 @@ import {
   ShapeProposalState,
 } from './shape';
 import { ShapeFileDto } from './shape-files';
+import { ShapeTaskSizeDto } from './shape-measures';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §4, §6 Rows, §11.
 // What the Shape routes answer and accept: the view the screen renders, and the builder's actions.
@@ -115,6 +116,8 @@ export const ShapeViewDto = z.object({
   /** The files dropped into the conversation, oldest first (§5.4). */
   files: z.array(ShapeFileDto),
   turn: ShapeTurnDto,
+  /** Each proposed task's derived size and hours, and its actual once converted and finished (§8). */
+  sizes: z.array(ShapeTaskSizeDto),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 

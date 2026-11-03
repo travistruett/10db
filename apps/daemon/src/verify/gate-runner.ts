@@ -59,6 +59,11 @@ export interface GateRequest {
    * answer starts nothing, and the gate reports itself aborted.
    */
   readonly beforeStart?: () => Promise<boolean>;
+  /**
+   * Called once the gate holds its slot and `beforeStart` let it go, just before its sandbox and
+   * command: lane time counts the gate from here, not from when it began waiting (Shape spec §8).
+   */
+  readonly onStarted?: () => void;
 }
 
 export interface GateRunner {
@@ -251,6 +256,7 @@ export function createGateRunner(options: GateRunnerOptions): GateRunner {
           blockedHosts: [],
           aborted: true,
         };
+      request.onStarted?.();
       if (options.sandbox === null) return runGroup(unsandboxed(request), request, null);
       let sandboxed: GateRun;
       try {

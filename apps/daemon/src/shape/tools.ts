@@ -5,13 +5,13 @@ import {
   type PlanDraft,
   type ShapeId,
 } from '@10db/contracts';
-import { getShape, insertShapeMessage } from '@10db/db';
+import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import { reconcileDraft } from './rounds';
 
-// Shape spec §5.5. The tools a conversation's session calls through the `10db` MCP server. This
-// slice serves note_heard and propose_plan; the others come with the slices that use them.
+// Shape spec §5.5. The tools a conversation's session calls through the `10db` MCP server: note_heard,
+// propose_plan, similar_tasks and find_records; the others come with the slices that use them.
 
 export interface ShapeToolDeps {
   readonly state: StateStore;
@@ -20,6 +20,10 @@ export interface ShapeToolDeps {
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}`;
+const round = (n: number): number => Math.round(n * 100) / 100;
+
+const SIMILAR_LIMIT = 10;
+const RECORDS_LIMIT = 10;
 
 /** The draft's size in the words the transcript's dimmed line uses: "1 goal, 3 loose". */
 function describeDraft(draft: PlanDraft): string {
@@ -58,6 +62,34 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
     note_heard: (input) => {
       line(`note_heard · ${input.items.join(' · ')}`);
       return Promise.resolve({ heard: input.items.length });
+    },
+    similar_tasks: (input) => {
+      const shape = getShape(deps.state.db, shapeId);
+      const tasks = similarTasks(deps.state.db, shape.projectId, input.query, SIMILAR_LIMIT).map(
+        (t) => ({
+          taskId: t.taskId,
+          title: t.title,
+          laneHours: round(t.laneMinutes / 60),
+          ...(t.sessionsOnly ? { sessionsOnly: true } : {}),
+          wallHours: round(t.wallMinutes / 60),
+          tokens: t.tokens,
+        }),
+      );
+      line(`similar_tasks · ${plural(tasks.length, tasks.length === 1 ? 'task' : 'tasks')}`);
+      return Promise.resolve({ tasks });
+    },
+    find_records: (input) => {
+      const shape = getShape(deps.state.db, shapeId);
+      const records = findRecords(deps.state.db, shape.projectId, input.query, RECORDS_LIMIT);
+      // Each hit is cited as a dimmed line with its date, so a contradiction is on record (§5.5).
+      line(
+        records.length === 0
+          ? 'find_records · nothing recorded'
+          : `find_records · ${records
+              .map((r) => `Decided ${r.createdAt.slice(0, 10)}: ${r.question} ${r.choice}`)
+              .join(' · ')}`,
+      );
+      return Promise.resolve({ records });
     },
     propose_plan: (input) => {
       if (!getShape(deps.state.db, shapeId).proposeUnlocked) {

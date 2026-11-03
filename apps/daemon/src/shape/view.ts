@@ -23,6 +23,7 @@ import {
   type ShapeLinkRow,
   type ShapeProposalRow,
 } from '@10db/db';
+import { buildSizes } from './sizing';
 
 // Shape spec §4, §6 Rows. What the Shape screen reads: the transcript, every proposal row with its
 // typed body, and what Convert made of the accepted ones.
@@ -119,5 +120,6 @@ export function buildShapeView(db: DbReader, shapeId: ShapeId, turn: ShapeTurnDt
     heard: latestHeard(messages),
     files: listShapeFiles(db, shapeId).map(fileDtoOf),
     turn,
+    sizes: buildSizes(db, shapeId),
   };
 }

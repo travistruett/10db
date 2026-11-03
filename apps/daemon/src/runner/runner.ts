@@ -2226,6 +2226,8 @@ export function createRunner(opts: RunnerOptions): Runner {
     const before: { update: BaseUpdate | null } = { update: null };
     const batchId = row.batchId;
     let recording: Promise<void> = Promise.resolve();
+    // Set once the gate holds its slot and starts; only a started gate records gate.finished.
+    let gateStarted = false;
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
     const request: GateRequest = {
@@ -2258,6 +2260,17 @@ export function createRunner(opts: RunnerOptions): Runner {
           'verify gate is waiting for another gate to finish',
         );
       },
+      onStarted: () => {
+        gateStarted = true;
+        opts.state.write((ctx) => {
+          ctx.emit({
+            type: EventType.GateStarted,
+            entityType: 'workstream',
+            entityId: id,
+            data: { run },
+          });
+        });
+      },
       onSpawn: (pid) => {
         recording = identify(pid).then((gatePidStart) => {
           if (gatePidStart !== null)
@@ -2289,6 +2302,18 @@ export function createRunner(opts: RunnerOptions): Runner {
     await recording.catch(() => undefined);
     opts.state.write((ctx) => {
       patchWorkstream(ctx, id, ctl.fence, { gatePid: null, gatePidStart: null });
+      if (gateStarted)
+        ctx.emit({
+          type: EventType.GateFinished,
+          entityType: 'workstream',
+          entityId: id,
+          data: {
+            run,
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            aborted: result.aborted,
+          },
+        });
     });
     if (ctl.stopReason === 'cancelled') {
       cancelNow(id, ctl.fence);

@@ -19,7 +19,12 @@ export const SHAPE_DISALLOWED_TOOLS = [
 ] as const;
 
 /** The Shape tools this slice serves; the others come with the slices that use them. */
-export const SHAPE_OFFERED_TOOLS = [ShapeToolName.NoteHeard, ShapeToolName.ProposePlan] as const;
+export const SHAPE_OFFERED_TOOLS = [
+  ShapeToolName.NoteHeard,
+  ShapeToolName.ProposePlan,
+  ShapeToolName.SimilarTasks,
+  ShapeToolName.FindRecords,
+] as const;
 
 /** Approved without a prompt; the PreToolUse hook still judges each call. */
 export const SHAPE_ALLOWED_TOOLS: readonly string[] = [
@@ -39,7 +44,9 @@ Before the builder presses Propose:
 - Echo what you have heard with note_heard (up to 12 short items). It replaces the previous echo and proposes nothing.
 - Make no proposals. propose_plan is refused until the builder presses Propose.
 
-When the builder presses Propose (a note says so), call propose_plan with the whole plan: goals with their tasks, loose tasks, and records for decisions the builder made. Every call states everything; a row you leave out moves to Earlier. Give each task acceptance criteria that a person could check, the areas it touches, and a size (S, M or L; split anything larger). If propose_plan returns errors, they are all of them: fix them all and call it again. A Propose Again asks you to re-split and re-size everything the builder has not pinned; keep what is pinned as it is.
+When the builder presses Propose (a note says so), call propose_plan with the whole plan: goals with their tasks, loose tasks, and records for decisions the builder made. Every call states everything; a row you leave out moves to Earlier. Give each task acceptance criteria that a person could check, the areas it touches, and how big it is: call similar_tasks first and give a basis (the ids of finished tasks like it; 10db derives its hours from their lane time), or, when none is alike, a size (S, M or L; split anything larger). If propose_plan returns errors, they are all of them: fix them all and call it again. A Propose Again asks you to re-split and re-size everything the builder has not pinned; keep what is pinned as it is.
+
+Remembering: call find_records before you propose a record, and whenever the builder's words touch something that may already be decided. When what he says or what you propose contradicts a recorded decision, say so in the chat with its date ("You decided the opposite on Oct 30; still true?"). It never blocks: if he reverses it, propose a record whose supersedes names the old decision.
 
 After a plan is accepted you may call propose_plan on your own after a message, when the builder's talk changes it.
 

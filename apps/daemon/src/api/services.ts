@@ -70,6 +70,8 @@ import type {
   ShapeConvertResult,
   ShapeDto,
   ShapeFileDto,
+  ShapeJevSettingDto,
+  ShapeMeasuresDto,
   ShapeId,
   ShapeInput,
   ShapeMessageDto,
@@ -241,6 +243,11 @@ export interface ApiServices {
   ): ShapeFileDto;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
+  /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */
+  shapeMeasures(): ShapeMeasuresDto;
+  /** A project's "Send brainstorm messages to fast models"; throws NotFoundError for an unknown project. */
+  getShapeJev(projectId: ProjectId): ShapeJevSettingDto;
+  setShapeJev(projectId: ProjectId, input: ShapeJevSettingDto): ShapeJevSettingDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;

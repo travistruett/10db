@@ -51,8 +51,26 @@ describe('the tool lists of a Shape session', () => {
 
   it('offers none of the tools whose slice is not built', () => {
     expect([...SHAPE_OFFERED_TOOLS].sort()).toEqual(
-      [ShapeToolName.NoteHeard, ShapeToolName.ProposePlan].sort(),
+      [
+        ShapeToolName.NoteHeard,
+        ShapeToolName.ProposePlan,
+        ShapeToolName.SimilarTasks,
+        ShapeToolName.FindRecords,
+      ].sort(),
     );
+  });
+});
+
+describe('remembering and sizing (§5.5, §8)', () => {
+  it('tells the session to check records before proposing one and to say when it contradicts one', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/find_records/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/contradicts/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/supersedes/);
+  });
+
+  it('tells the session to size from similar finished tasks as a basis', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/similar_tasks/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/basis/);
   });
 });
 

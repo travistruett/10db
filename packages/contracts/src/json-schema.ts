@@ -77,6 +77,7 @@ import {
   ShapeViewDto,
   ShapeWithdrawInput,
 } from './shape-view';
+import { ShapeJevSettingDto, ShapeMeasuresDto } from './shape-measures';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
 import {
@@ -207,6 +208,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-convert-result': ShapeConvertResult,
   'shape-convert-error': ShapeConvertError,
   'shape-withdraw-input': ShapeWithdrawInput,
+  'shape-measures-dto': ShapeMeasuresDto,
+  'shape-jev-setting-dto': ShapeJevSettingDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

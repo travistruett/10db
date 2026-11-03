@@ -9,4 +9,6 @@ export {
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_SYSTEM_PROMPT,
 } from './policy';
+export { createShapeJev, shadowAgreement, type ShapeJev } from './jev';
 export { createShapeService, DEFAULT_SHAPE_TITLE, type ShapeService } from './service';
+export { sizingMeasure } from './sizing';

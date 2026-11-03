@@ -149,8 +149,21 @@ describe('ShapeViewDto', () => {
         },
       ],
       turn: { running: false, queued: 0, proposing: false },
+      sizes: [
+        {
+          proposalId: mintId('ShapeProposal'),
+          key: 'scrollbars',
+          size: 'M',
+          hours: 2,
+          from: 'basis',
+          taskId: null,
+          actualHours: null,
+          missized: false,
+        },
+      ],
     });
     expect(view.proposals).toHaveLength(1);
+    expect(view.sizes[0]?.size).toBe('M');
     expect(view.heard).toEqual(['Thinner scrollbars']);
     expect(view.files[0]?.name).toBe('brief.md');
   });

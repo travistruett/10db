@@ -1116,3 +1116,52 @@ export const shapeLinks = sqliteTable(
     ),
   ],
 );
+
+/**
+ * A finished workstream's lane time (Shape spec §8): its session spans plus its gate spans, not time
+ * queued for a lane or a gate slot. Written once when the workstream finishes; migration 0032
+ * backfilled the workstreams finished before it, from sessions only.
+ */
+export const taskLaneTimes = sqliteTable(
+  'task_lane_times',
+  {
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .primaryKey()
+      .references(() => workstreams.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    laneMinutes: real('lane_minutes').notNull(),
+    /** No gate span was recorded for a workstream whose gate ran: it finished before `gate.started`. */
+    sessionsOnly: integer('sessions_only', { mode: 'boolean' }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_lane_times_task_idx').on(t.taskId)],
+);
+
+/**
+ * A Shape decision's shadow answer about one builder message (spec §9): logged, never shown, and
+ * scored against what happened once that is known. Append-only; one per message and decision.
+ */
+export const shapeShadowAnswers = sqliteTable(
+  'shape_shadow_answers',
+  {
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    messageId: text('message_id')
+      .$type<ShapeMessageId>()
+      .notNull()
+      .references(() => shapeMessages.id),
+    decision: text('decision').$type<JudgeDecision>().notNull(),
+    /** `yes` or `no`. */
+    answer: text('answer').$type<'yes' | 'no'>().notNull(),
+    confidence: real('confidence').notNull(),
+    judgeCallId: text('judge_call_id').$type<JudgeCallId>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.messageId, t.decision] })],
+);

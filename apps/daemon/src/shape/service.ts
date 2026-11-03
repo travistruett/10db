@@ -78,6 +78,7 @@ import {
   restoreProposal as restoreRow,
   unpinProposal as unpinRow,
 } from './rounds';
+import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
 import { buildShapeView, fileDtoOf } from './view';
@@ -109,6 +110,8 @@ export interface ShapeServiceDeps {
   readonly idleMs?: number;
   /** The share of the context window past which a conversation moves to a fresh session; 70. */
   readonly contextLimitPct?: number;
+  /** Jev's shadow decisions, told of each builder message (§9); it asks only for a project that opted in. */
+  readonly jev?: ShapeJev;
 }
 
 /** A file as the input hands it over: the name and type the browser reported, and its bytes. */
@@ -785,6 +788,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         messageId: message.id,
       });
       pump(shapeId, rt);
+      // Shadow only: nothing waits on it, and it never throws.
+      void deps.jev?.heard(shapeId, message.id);
       return message;
     },
 

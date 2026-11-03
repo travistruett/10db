@@ -3,7 +3,15 @@ import { SECRET_CHARACTERS } from './accounts';
 import { JudgeCallId, TaskId, WorkstreamId } from './ids';
 
 /** A routine decision the daemon can ask a fast model to make. */
-export const JudgeDecision = { ReviewSize: 'review_size' } as const;
+export const JudgeDecision = {
+  ReviewSize: 'review_size',
+  /** Shape (spec §9): has the builder said enough to propose? */
+  ShapeReady: 'shape_ready',
+  /** Shape: does this message state a decision or principle worth recording? */
+  ShapeRecord: 'shape_record',
+  /** Shape: is this a question only someone else can answer? */
+  ShapeElsewhere: 'shape_elsewhere',
+} as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
 /** What came of a judge call: the decision's own outcomes, and the fallback that made today's rule apply. */
@@ -16,6 +24,8 @@ export const JudgeOutcome = {
   FallbackError: 'fallback_error',
   /** A cancel or a shutdown cut the call short: there is no answer, and the call did not fail. */
   Stopped: 'stopped',
+  /** A Shape decision in shadow (spec §9): the answer was logged to be scored, and nothing was shown. */
+  Shadow: 'shadow',
 } as const;
 export type JudgeOutcome = (typeof JudgeOutcome)[keyof typeof JudgeOutcome];
 
@@ -28,16 +38,34 @@ export const JudgeDecisionConfig = z.object({
 });
 export type JudgeDecisionConfig = z.infer<typeof JudgeDecisionConfig>;
 
+const DEFAULT_DECISION: JudgeDecisionConfig = {
+  enabled: true,
+  model: 'typesafe/jev-1.13',
+  floor: 0.8,
+};
+
+/** Shape's decisions came later: a config stored before them reads with their defaults. */
+const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
+  JudgeDecisionConfig.default({ ...DEFAULT_DECISION });
+
 export const JudgeConfig = z.object({
   enabled: z.boolean(),
-  decisions: z.object({ [JudgeDecision.ReviewSize]: JudgeDecisionConfig }),
+  decisions: z.object({
+    [JudgeDecision.ReviewSize]: JudgeDecisionConfig,
+    [JudgeDecision.ShapeReady]: shapeDecision(),
+    [JudgeDecision.ShapeRecord]: shapeDecision(),
+    [JudgeDecision.ShapeElsewhere]: shapeDecision(),
+  }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
 
 export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
   enabled: true,
   decisions: {
-    [JudgeDecision.ReviewSize]: { enabled: true, model: 'typesafe/jev-1.13', floor: 0.8 },
+    [JudgeDecision.ReviewSize]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -57,7 +85,12 @@ export const JudgeConfigPatch = z
   .object({
     enabled: z.boolean(),
     decisions: z
-      .object({ [JudgeDecision.ReviewSize]: JudgeDecisionConfigPatch })
+      .object({
+        [JudgeDecision.ReviewSize]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,
+      })
       .partial()
       .strict(),
   })
