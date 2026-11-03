@@ -2054,6 +2054,36 @@ describe('worktree checkouts', () => {
       ).toEqual([`${a.path}: ${SENSITIVE_FILE}`, `${b.path}: docs/stray.md`].sort());
     });
 
+    it("does not excuse a write for a card whose lane ended while the file's stamp was being read", async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      let release: (r: { stamp: string }) => void = () => undefined;
+      stamp.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      writeAt(lane.path, SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      state.write((ctx) =>
+        transitionWorkstream(ctx, lane.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      release({ stamp: 'a-stamp' });
+      await flushing;
+      // The lane is over, so its card excuses nothing: the write is carded, not used up and remembered.
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+    });
+
     it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
       const a = running('Alpha', ['api']);
       running('Beta', ['ui']);
