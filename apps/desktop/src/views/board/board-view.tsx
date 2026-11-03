@@ -14,7 +14,18 @@ import {
   type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
-import { Alert, Button, Group, Loader, Menu, ScrollArea, Select, Stack, Text } from '@mantine/core';
+import {
+  Alert,
+  Button,
+  Group,
+  Loader,
+  Menu,
+  ScrollArea,
+  Select,
+  Stack,
+  Text,
+  Title,
+} from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconColumns, IconPlayerPlay, IconPlus } from '@tabler/icons-react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -76,6 +87,8 @@ const NEW_TASK_FORM_ID = 'new-task-form';
 const COLUMNS_MIN_HEIGHT = 320;
 /** The goal filter's option for no filter; a goal's ID never has this form. */
 const ALL_GOALS = 'all';
+/** Cards show no goal badge while the Goal filter selects a goal: every card would repeat it. */
+const NO_GOAL_TITLES: ReadonlyMap<GoalId, string> = new Map();
 /** The goal strips together take at most this share of the board's height. */
 const ABOVE_COLUMNS_MAX_HEIGHT = '33%';
 
@@ -526,11 +539,12 @@ export function BoardView() {
 
   return (
     <Stack flex="1 1 0px">
-      <Group justify="flex-end" align="flex-end">
-        <Group align="flex-end">
+      <Group justify="space-between" align="center">
+        <Group gap="md" align="center">
+          <Title order={2}>Board</Title>
           {goalList.length > 0 ? (
             <Select
-              label="Goal"
+              aria-label="Goal"
               w={220}
               allowDeselect={false}
               data={[
@@ -543,6 +557,8 @@ export function BoardView() {
               }}
             />
           ) : null}
+        </Group>
+        <Group>
           {project ? (
             <SplitButton
               leftSection={<IconPlus size={16} stroke={1.5} />}
@@ -659,7 +675,7 @@ export function BoardView() {
           started={started}
           onAddTask={taskModal.open}
           linkedId={task ?? null}
-          goalTitles={goalTitles}
+          goalTitles={filterGoal ? NO_GOAL_TITLES : goalTitles}
         />
       ) : null}
 

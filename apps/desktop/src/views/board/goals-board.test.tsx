@@ -107,19 +107,27 @@ describe('the Board with goals', () => {
     expect(screen.queryByTestId('board-above-columns')).toBeNull();
   });
 
-  it('puts the goal title on its tasks’ cards and leaves a task with no goal bare', async () => {
+  it('puts the goal title in a badge on its tasks’ cards and leaves a task with no goal bare', async () => {
     serve();
     renderApp('/board');
     await screen.findByRole('button', { name: 'Fix a typo' });
-    // Five of the six cards belong to a goal; the sixth ("Fix a typo") has none, so it has no label.
+    // Five of the six cards belong to a goal; the sixth ("Fix a typo") has none, so it has no badge.
     expect(screen.getAllByTestId('task-card')).toHaveLength(6);
-    expect(screen.getAllByTestId('task-card-goal').map((n) => n.textContent)).toEqual([
+    expect(screen.getAllByTestId('indicator-goal').map((n) => n.textContent)).toEqual([
       'Greet the visitor',
       'Greet the visitor',
       'Say farewell',
       'Greet the visitor',
       'Tidy up',
     ]);
+  });
+
+  it('shows no goal badge while the Goal filter selects a goal', async () => {
+    serve();
+    renderApp(`/board?goal=${greetings.goal.id}`);
+    await screen.findByRole('button', { name: 'Say hello' });
+    expect(screen.queryByRole('button', { name: 'Say farewell' })).toBeNull();
+    expect(screen.queryByTestId('indicator-goal')).toBeNull();
   });
 
   describe('the goal drawer', () => {

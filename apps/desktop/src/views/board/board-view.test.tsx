@@ -1594,7 +1594,7 @@ describe('BoardView', () => {
     });
   });
 
-  it('has no page title or metadata line', async () => {
+  it('has a Board title and no metadata line', async () => {
     const project = projectDto({ gateCommand: 'make gate-marker' });
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
@@ -1602,8 +1602,26 @@ describe('BoardView', () => {
     );
     renderApp('/board');
     expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Board' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
     expect(screen.queryByText(/make gate-marker/)).toBeNull();
+  });
+
+  it('puts the Goal select inline with an aria-label and no stacked label', async () => {
+    const project = projectViewDto({ gateCommand: null });
+    const summary = goalSummaryDto({ projectId: project.id, title: 'Real areas' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/goals'), () =>
+        HttpResponse.json(goalListDto(summary)),
+      ),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+    );
+    const { container } = renderApp('/board');
+    const select = await screen.findByLabelText('Goal');
+    expect(select.getAttribute('aria-label')).toBe('Goal');
+    expect((select as HTMLInputElement).value).toBe('All goals');
+    expect(container.querySelector('label')).toBeNull();
   });
 
   it('redirects /tasks to the board', async () => {
