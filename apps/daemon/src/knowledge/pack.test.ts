@@ -149,6 +149,33 @@ describe('packKnowledge', () => {
     expect(pack.decisions.map((d) => d.question)).toEqual(['Q0', 'Q1', 'Q2', 'Q3', 'Q4']);
   });
 
+  it('keeps the newest decisions in the fallback when an area decision also applies', () => {
+    const newer = Array.from({ length: 7 }, (_, i) => decided(`Q${String(i)}`));
+    const mine = decided('Mine', 'you');
+    const pack = packKnowledge(
+      input({ decisions: [mine, ...newer, decided('Which router?', 'area', 'api')] }),
+    );
+    expect(pack.decisions.map((d) => d.question)).toEqual([
+      'Which router?',
+      'Mine',
+      'Q0',
+      'Q1',
+      'Q2',
+      'Q3',
+    ]);
+    expect(pack.dropped.decisions).toBe(0);
+  });
+
+  it('counts as nothing matching when the only hits do not apply to the task', () => {
+    const uiHit = decided('Which icons?', 'area', 'ui');
+    const areaOther = decided('Which validator?', 'area', 'api');
+    const newest = decided('Which queue?');
+    const pack = packKnowledge(
+      input({ decisions: [newest, uiHit, areaOther], ranked: [uiHit.id] }),
+    );
+    expect(pack.decisions.map((d) => d.question)).toEqual(['Which validator?', 'Which queue?']);
+  });
+
   it.each([
     {
       name: 'a policy longer than the budget is skipped and the next one still fits',

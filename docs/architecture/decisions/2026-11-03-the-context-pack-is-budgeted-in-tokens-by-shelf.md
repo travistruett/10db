@@ -20,11 +20,12 @@ what each shelf dropped.
 - **One topic key at several scopes** (open decision 4): only the most specific enters (area, then project, then
   `you`); all of them stay listed in the Knowledge view.
 - **Relevant decisions** are, in order: area-matched search hits, other hits by rank, area-matched decisions with no
-  hit, newest first. When there are none, the newest current decisions in scope stand in (`PACK_RECENT_LIMIT` = 5).
+  hit, newest first. When no hit applies, the area-matched decisions come first and the newest other current
+  decisions in scope follow (`PACK_RECENT_LIMIT` = 5), so an area decision never crowds out the newest ones.
 - **A broken decision index never stops a briefing.** `buildContextPack` catches the full-text error itself, with
   no flag and no card (the startup check has already logged and flagged it), and packs the policies, the
-  heuristics and the newest decisions. Only current records are listed, so a superseded, retired, withdrawn or
-  proposed record cannot appear.
+  heuristics, any area-matched decisions and the newest decisions. Only current records are listed, so a
+  superseded, retired, withdrawn or proposed record cannot appear.
 
 **How it reads.** `renderRules` and `renderDecisions` in `apps/daemon/src/knowledge/render.ts` turn the pack into
 one bullet per record: `- [topic.key] statement {pri_…, scope}` for a policy or heuristic and

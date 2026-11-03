@@ -8,7 +8,7 @@ export const CONTEXT_PACK_BUDGET_TOKENS = 1500;
 export const CHARS_PER_TOKEN = 4;
 /** How many search hits for the task are considered. */
 export const PACK_SEARCH_LIMIT = 20;
-/** How many recent decisions stand in when nothing matches the task. */
+/** How many recent decisions, beyond the area decisions, stand in when nothing matches the task. */
 export const PACK_RECENT_LIMIT = 5;
 
 export interface PackPrinciple {
@@ -69,21 +69,28 @@ const byPrecedence = (a: PackPrinciple, b: PackPrinciple): number =>
   compareText(a.topicKey, b.topicKey) ||
   compareText(a.id, b.id);
 
-/** Area-matched hits, other hits by rank, then area decisions without a hit; else the newest that apply. */
+/**
+ * Area-matched hits, other hits by rank, then area decisions without a hit. With no hit that applies
+ * (nothing matched, or the index is broken): the area decisions, then the newest others.
+ */
 function relevantDecisions(input: PackInput): PackDecision[] {
   const applying = input.decisions.filter((d) => appliesTo(d, input.areas));
+  const isArea = (d: PackDecision): boolean => d.scope === KnowledgeScope.Area;
   const byId = new Map(applying.map((d) => [d.id, d]));
   const hits = input.ranked.flatMap((id) => {
     const d = byId.get(id);
     return d ? [d] : [];
   });
+  if (hits.length === 0) {
+    const others = applying.filter((d) => !isArea(d));
+    return [...applying.filter(isArea), ...others.slice(0, PACK_RECENT_LIMIT)];
+  }
   const hitIds = new Set(hits.map((d) => d.id));
-  const ordered = [
-    ...hits.filter((d) => d.scope === KnowledgeScope.Area),
-    ...hits.filter((d) => d.scope !== KnowledgeScope.Area),
-    ...applying.filter((d) => d.scope === KnowledgeScope.Area && !hitIds.has(d.id)),
+  return [
+    ...hits.filter(isArea),
+    ...hits.filter((d) => !isArea(d)),
+    ...applying.filter((d) => isArea(d) && !hitIds.has(d.id)),
   ];
-  return ordered.length > 0 ? ordered : applying.slice(0, PACK_RECENT_LIMIT);
 }
 
 /** Keeps each item that still fits, in order, skipping one that doesn't (the next may be smaller). */

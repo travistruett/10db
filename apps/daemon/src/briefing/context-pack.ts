@@ -30,8 +30,8 @@ import {
 
 /**
  * The task's search hits among the decisions, best first. A decision index the startup check could
- * not rebuild throws here; the pack falls back to the newest decisions instead of failing the
- * session's briefing, so no caller needs to know the index is broken.
+ * not rebuild throws here; with no hits the pack falls back to the area and newest decisions instead
+ * of failing the session's briefing, so no caller needs to know the index is broken.
  */
 function rankedForTask(db: DbReader, projectId: ProjectId, query: string): DecisionId[] {
   try {

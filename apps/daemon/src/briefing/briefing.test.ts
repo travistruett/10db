@@ -624,8 +624,16 @@ describe('buildContextPack', () => {
   });
 
   it('still briefs from policies and the newest decisions when the decision search index is broken', () => {
-    const { project, workstream } = seedWorkstream(store, { title: 'Alpha queue' });
+    const { project, workstream } = seedWorkstream(store, {
+      title: 'Alpha queue',
+      areas: ['api'],
+    });
     rule({ scope: 'project', projectId: project.id }, 'p');
+    recordDecision(project.id, 'Which router?', {
+      choice: 'hono',
+      scope: 'area',
+      area: 'api',
+    });
     recordDecision(project.id, 'Which queue?', { choice: 'pg-boss' });
     // Defensive mode keeps FTS5 shadow tables read-only; unsafe mode lets the test corrupt one, as an
     // index the startup check could not rebuild would be. Its MATCH now throws SQLITE_CORRUPT_VTAB.
@@ -634,7 +642,7 @@ describe('buildContextPack', () => {
     store.db.$client.unsafeMode(false);
     const pack = buildContextPack(store.db, workstream);
     expect(pack.knowledge.policies.map((p) => p.topicKey)).toEqual(['p']);
-    expect(pack.knowledge.decisions.map((d) => d.choice)).toEqual(['pg-boss']);
+    expect(pack.knowledge.decisions.map((d) => d.choice)).toEqual(['hono', 'pg-boss']);
   });
 });
 
