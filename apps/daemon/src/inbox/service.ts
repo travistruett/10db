@@ -3,7 +3,6 @@ import {
   CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
-  DECISION_CATEGORIES,
   InboxAnswer,
   InboxAnswerRefused,
   InboxKind,
@@ -31,6 +30,7 @@ import {
   getInboxItem,
   getProject,
   getProposal,
+  getProposalDto,
   getTask,
   getWorkstreamRow,
   insertDecision,
@@ -46,6 +46,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
+import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
@@ -276,6 +277,12 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
 function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
   const proposalId = ProposalId.safeParse(item.detail?.['proposalId']);
   if (!proposalId.success) return;
+  // A principle proposal's choices are verdicts on its principle, which the knowledge module applies.
+  const withPrinciple = getProposalDto(ctx.tx, proposalId.data);
+  if (withPrinciple.principle) {
+    applyPrincipleCard(ctx, withPrinciple, answer);
+    return;
+  }
   const proposal = getProposal(ctx.tx, proposalId.data);
   if (proposal.status !== 'pending') {
     throw new ConflictError(`Proposal ${proposal.id} is already ${proposal.status}`);
@@ -475,22 +482,10 @@ export function createInboxService(deps: {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
           answer,
         });
-        if (
-          !parks &&
-          item.kind === InboxKind.Question &&
-          DECISION_CATEGORIES.includes(item.category)
-        ) {
-          const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: id });
-          insertDecision(ctx, {
-            projectId: item.projectId,
-            question: item.title,
-            choice: answer.choice,
-            rationale: answer.note ?? 'Answered in the inbox',
-            decidedBy: 'me',
-            scope: 'project',
-            area: null,
-            sourceId,
-          });
+        if (!parks && item.kind === InboxKind.Question) {
+          // Inside this transaction: an area the project lacks refuses the answer and the card stays open.
+          recordAnswerDecision(ctx, updated, answer, getProject(ctx.tx, item.projectId));
+          proposeStandingRules(ctx, updated, answer);
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);

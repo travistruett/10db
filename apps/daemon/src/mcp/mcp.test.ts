@@ -9,13 +9,18 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   acquireClaims,
   activeClaims,
+  confirmPrinciple,
   createTestStore,
   endSession,
   getInboxItem,
+  getPrinciple,
   getWorkstream,
   insertBatch,
+  insertDecision,
+  insertPrinciple,
   insertSession,
   insertShape,
+  insertSource,
   insertTask,
   insertWorkstream,
   listBoardColumns,
@@ -24,6 +29,7 @@ import {
   patchWorkstream,
   releaseClaims,
   schema,
+  searchPrinciples,
   seedProject,
   setWorkstreamNotice,
   transitionBatch,
@@ -35,6 +41,7 @@ import {
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   parseFindings,
+  PrincipleId,
   type BatchId,
   type ProjectDto,
   type WorkstreamId,
@@ -577,6 +584,7 @@ describe('MCP tools', () => {
   it.each([
     { name: 'area scope without an area', scope: 'area', area: undefined, error: 'area' },
     { name: 'project scope with an area', scope: 'project', area: 'api', error: 'area' },
+    { name: 'an area the project lacks', scope: 'area', area: 'billing', error: 'billing' },
   ])('rejects record_decision with $name', async ({ scope, area, error }) => {
     const s = await seedSession();
     const result = await s.call('record_decision', {
@@ -2058,6 +2066,255 @@ describe('complete_step', () => {
       (await s.call('complete_step', { opId: 'op-step-0003', summary: '1. Do it.', verdict: null }))
         .isError,
     ).toBe(false);
+  });
+});
+
+describe('principle proposals', () => {
+  const draft = {
+    statement: 'Never sleep in tests',
+    kind: 'policy',
+    topicKey: 'testing.no-sleeps',
+    quote: 'sleeping made the suite flaky',
+  };
+
+  it('proposes a principle as a proposed record with a scope-choice card, unseen by find_knowledge until confirmed', async () => {
+    const s = await seedSession();
+    const { json } = await s.call('propose', {
+      opId: 'op-propose-p1',
+      kind: 'principle',
+      title: 'No sleeps in tests',
+      body: 'Two flaky runs this week came from sleeps.',
+      principle: draft,
+    });
+    const principleId = PrincipleId.parse(json?.['principleId']);
+    expect(getPrinciple(base.db, principleId)).toMatchObject({
+      state: 'proposed',
+      scope: 'project',
+      speaker: `agent:${s.session.id}`,
+      sourceQuote: 'sleeping made the suite flaky',
+    });
+    const cards = listInbox(base.db, { states: ['OPEN'] }).filter((c) => c.kind === 'proposal');
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.options.map((o) => o.label)).toEqual([
+      'accept_project',
+      'accept_you',
+      'reject',
+    ]);
+    expect(cards[0]?.recommendation).toBe('accept_project');
+    expect(cards[0]?.body).toContain('Never sleep in tests');
+    expect((await s.call('find_knowledge', { query: 'sleep' })).json).toMatchObject({
+      principles: [],
+      empty: true,
+    });
+
+    state.write((ctx) =>
+      confirmPrinciple(ctx, principleId, {
+        target: { scope: 'project', projectId: s.project.id },
+        confirmedBy: 'me',
+      }),
+    );
+    const found = await s.call('find_knowledge', { query: 'sleep', kind: 'principle' });
+    expect(found.json).toMatchObject({
+      results: [],
+      principles: [
+        {
+          kind: 'principle',
+          principleKind: 'policy',
+          topicKey: 'testing.no-sleeps',
+          scope: 'project',
+          area: null,
+        },
+      ],
+      empty: false,
+    });
+  });
+
+  it('offers the area verdict only for a draft that names an area', async () => {
+    const s = await seedSession();
+    await s.call('propose', {
+      opId: 'op-propose-p2',
+      kind: 'principle',
+      title: 'Validate at the edge',
+      body: 'b',
+      principle: { statement: 'Validate every request body with zod', scope: 'area', area: 'api' },
+    });
+    const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
+    expect(card?.options.map((o) => o.label)).toEqual([
+      'accept_project',
+      'accept_you',
+      'accept_area',
+      'reject',
+    ]);
+    expect(card?.recommendation).toBe('accept_area');
+  });
+
+  it('uses the body as the statement when a principle proposal has no draft, and records it once per opId', async () => {
+    const s = await seedSession();
+    const args = {
+      opId: 'op-propose-p3',
+      kind: 'principle',
+      title: 'Small PRs',
+      body: 'Prefer small pull requests',
+    };
+    const first = await s.call('propose', args);
+    const again = await s.call('propose', args);
+    expect(again.json).toEqual(first.json);
+    expect(
+      listInbox(base.db, { states: ['OPEN'] }).filter((c) => c.kind === 'proposal'),
+    ).toHaveLength(1);
+    const principle = getPrinciple(base.db, PrincipleId.parse(first.json?.['principleId']));
+    expect(principle).toMatchObject({
+      statement: 'Prefer small pull requests',
+      kind: 'heuristic',
+      topicKey: 'prefer-small-pull-requests',
+    });
+    expect(searchPrinciples(base.db, s.project.id, 'pull', 5)).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a principle draft on a task proposal',
+      args: { kind: 'new_task', principle: { statement: 'x' } },
+      error: 'principle',
+    },
+    {
+      name: 'an area the project lacks',
+      args: { kind: 'principle', principle: { statement: 'x', scope: 'area', area: 'billing' } },
+      error: 'billing',
+    },
+    {
+      name: 'a body too long to be a statement',
+      args: { kind: 'principle', body: 'x'.repeat(501) },
+      error: 'principle field',
+    },
+  ])('refuses $name', async ({ args, error }) => {
+    const s = await seedSession();
+    const result = await s.call('propose', {
+      opId: 'op-propose-bad',
+      title: 't',
+      body: 'b',
+      ...args,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(error);
+    expect(listInbox(base.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('keeps answering a task proposal with a null principleId', async () => {
+    const s = await seedSession();
+    const { json } = await s.call('propose', {
+      opId: 'op-propose-t1',
+      kind: 'new_task',
+      title: 'Cache',
+      body: 'b',
+    });
+    expect(json).toMatchObject({ principleId: null });
+  });
+});
+
+describe('find_knowledge', () => {
+  function seedRecords(projectId: ProjectDto['id']) {
+    state.write((ctx) => {
+      for (const n of ['one', 'two', 'three']) {
+        insertDecision(ctx, {
+          projectId,
+          question: `Which queue for job ${n}?`,
+          choice: n,
+          rationale: 'r',
+          decidedBy: 'me',
+          scope: 'project',
+          area: null,
+          sourceId: insertSource(ctx, 'builder', {}),
+        });
+        insertPrinciple(ctx, {
+          target: { scope: 'project', projectId },
+          statement: `Keep queue ${n} idempotent`,
+          kind: 'policy',
+          topicKey: `queue.${n}`,
+          status: 'confirmed',
+          sourceId: insertSource(ctx, 'builder', {}),
+          sourceQuote: null,
+          speaker: 'me',
+          confirmedBy: 'me',
+        });
+      }
+    });
+  }
+
+  it('applies the limit to each shelf: up to that many decisions and that many principles', async () => {
+    const s = await seedSession();
+    seedRecords(s.project.id);
+    const { json } = await s.call('find_knowledge', { query: 'queue', limit: 2 });
+    expect(json?.['results']).toHaveLength(2);
+    expect(json?.['principles']).toHaveLength(2);
+  });
+
+  it.each([
+    { kind: 'decision', decisions: 3, principles: 0 },
+    { kind: 'principle', decisions: 0, principles: 3 },
+    { kind: 'any', decisions: 3, principles: 3 },
+  ])('limits the search to $kind', async ({ kind, decisions, principles }) => {
+    const s = await seedSession();
+    seedRecords(s.project.id);
+    const { json } = await s.call('find_knowledge', { query: 'queue', kind });
+    expect(json?.['results']).toHaveLength(decisions);
+    expect(json?.['principles']).toHaveLength(principles);
+  });
+
+  it('labels each hit with its scope and area, including the builder’s own principles', async () => {
+    const s = await seedSession();
+    state.write((ctx) => {
+      insertPrinciple(ctx, {
+        target: { scope: 'you' },
+        statement: 'Name every queue',
+        kind: 'heuristic',
+        topicKey: 'queue.names',
+        status: 'confirmed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote: null,
+        speaker: 'me',
+        confirmedBy: 'me',
+      });
+      insertDecision(ctx, {
+        projectId: s.project.id,
+        question: 'Which queue for the api?',
+        choice: 'pg-boss',
+        rationale: 'r',
+        decidedBy: 'me',
+        scope: 'area',
+        area: 'ui',
+        sourceId: insertSource(ctx, 'builder', {}),
+      });
+    });
+    const { json } = await s.call('find_knowledge', { query: 'queue' });
+    expect(json).toMatchObject({
+      results: [{ kind: 'decision', scope: 'area', area: 'ui' }],
+      principles: [{ kind: 'principle', scope: 'you', area: null }],
+    });
+  });
+
+  it('reads an answer recorded in the inbox back, at the scope the builder chose', async () => {
+    const s = await seedSession();
+    const { item } = inbox.ask({
+      projectId: s.project.id,
+      workstreamId: s.workstream.id,
+      sessionId: s.session.id,
+      kind: 'question',
+      title: 'Which cache layer?',
+      body: '',
+      options: [
+        { label: 'redis', description: '' },
+        { label: 'memory', description: '' },
+      ],
+      recommendation: null,
+      category: 'other',
+      urgency: 'normal',
+      detail: null,
+      signal: new AbortController().signal,
+    });
+    inbox.answer(item.id, { choice: 'memory', record: { scope: 'area', area: 'api' } });
+    const { json } = await s.call('find_knowledge', { query: 'cache layer' });
+    expect(json).toMatchObject({ results: [{ choice: 'memory', scope: 'area', area: 'api' }] });
   });
 });
 

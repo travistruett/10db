@@ -50,6 +50,60 @@
         ]
       }
     },
+    "principles": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "const": "principle"
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "statement": {
+            "type": "string"
+          },
+          "principleKind": {
+            "type": "string",
+            "enum": [
+              "policy",
+              "heuristic",
+              "belief"
+            ]
+          },
+          "topicKey": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "you",
+              "project",
+              "area"
+            ]
+          },
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "statement",
+          "principleKind",
+          "topicKey",
+          "scope",
+          "area"
+        ]
+      }
+    },
     "empty": {
       "type": "boolean"
     }
