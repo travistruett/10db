@@ -98,8 +98,8 @@ describe('CI workflow', () => {
   });
 
   it('runs on pull requests into main only, and re-runs every job when a PR title is edited', () => {
-    // Tasks land in the integration branch `next` without CI; the one pull request from `next`
-    // into main runs it (decisions/2026-10-30-integration-branch.md).
+    // Each task's pull request goes to main and runs CI there, with no integration branch in
+    // between (decisions/2026-11-02-merge-queue.md).
     const parsed = readWorkflow(CI);
     expect(parsed.on['pull_request']).toEqual({
       branches: ['main'],
