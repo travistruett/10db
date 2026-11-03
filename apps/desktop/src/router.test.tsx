@@ -5,7 +5,10 @@ import * as shapeQueries from './daemon/shape-queries';
 import { baseHandlers, eventStream, renderApp, server } from './test/daemon';
 
 beforeEach(() => {
-  server.use(...baseHandlers(), eventStream.addEventListener('connection', () => undefined));
+  server.use(
+    ...baseHandlers(),
+    eventStream.addEventListener('connection', () => undefined),
+  );
   // The crash is the point: the view's own behaviour is tested elsewhere. The test setup has
   // already loaded the router and the view, so a module mock would not reach them; a spy does.
   vi.spyOn(shapeQueries, 'useShapeView').mockImplementation(() => {
