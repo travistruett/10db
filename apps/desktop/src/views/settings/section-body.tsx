@@ -12,6 +12,7 @@ import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
 import { sectionByKey, SettingsSectionKey } from './sections';
+import { SelfUpdateSection } from './self-update-section';
 import { ShapeJevSetting } from './shape-jev-setting';
 
 function NoProject() {
@@ -76,6 +77,13 @@ export function SectionBody({
         <>
           {heading}
           <KeepAwakeSection />
+        </>
+      );
+    case SettingsSectionKey.Updates:
+      return (
+        <>
+          {heading}
+          <SelfUpdateSection />
         </>
       );
     case SettingsSectionKey.LanePermissions:
