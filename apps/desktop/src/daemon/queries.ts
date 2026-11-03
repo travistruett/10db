@@ -41,6 +41,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { z } from 'zod';
+import { useRenderMode } from '../screens/render-context';
 import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 
@@ -185,7 +186,13 @@ export function useWorkstreamChanges(id: WorkstreamId | undefined, head: string 
 
 export function useInbox() {
   const { client } = useDaemon();
-  return useQuery(inboxQueryOptions(client));
+  // The Inbox is every project's; a frame drawn for a session shows only that session's project (§5.5).
+  const projectId = useRenderMode()?.projectId;
+  return useQuery({
+    ...inboxQueryOptions(client),
+    select: (items) =>
+      projectId === undefined ? items : items.filter((item) => item.projectId === projectId),
+  });
 }
 
 /** How many resolved cards the Inbox fetches and shows, the most recent: the list only grows. */

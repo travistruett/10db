@@ -3,7 +3,7 @@ import { frameUrl } from './render-params';
 
 // Shape spec §5.5. The window draws a screen for a session in a hidden frame of itself, and either has
 // a picture or says why it has none. The frame runs the app under a render token; it is boxed in:
-// sandboxed to scripts of its own origin, out of sight, out of focus and out of reach of the pointer.
+// sandboxed to scripts of its own origin, unseen, out of focus and out of reach of the pointer.
 
 /** What the capture makes of the frame. */
 export interface DrawnScreen {
@@ -43,6 +43,13 @@ export const SCREEN_LABEL: Readonly<Record<ScreenName, string>> = {
   [ScreenName.Plan]: 'Plan',
 };
 
+/**
+ * Why nothing is drawn while the window is out of sight. Closing it only hides it (spec §3), and a hidden
+ * WebKit page runs no animation frame, which a capture waits on.
+ */
+export const WINDOW_HIDDEN =
+  "10db's window is hidden, closed or minimised, so it can't draw a screen. Ask the builder to bring 10db forward and try again.";
+
 /** What the frame's app posts to its parent when it has drawn, or cannot. */
 export type FrameMessage =
   | { readonly source: 'tendb-screen'; readonly kind: 'ready' }
@@ -73,10 +80,13 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
   frame.setAttribute('inert', '');
   frame.tabIndex = -1;
   frame.title = 'A screen being drawn for Plan';
+  // Inside the window's viewport, behind everything and fully transparent: WebKit throttles the timers
+  // and animation frames of a frame outside the viewport, which would hold a drawer's transition back.
   Object.assign(frame.style, {
     position: 'fixed',
-    left: '-100000px',
+    left: '0',
     top: '0',
+    zIndex: '-1',
     width: `${String(size.width)}px`,
     height: `${String(size.height)}px`,
     border: '0',
@@ -120,7 +130,10 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
     const timer = setTimeout(() => {
       finish({
         ok: false,
-        reason: `${label} did not finish loading in ${seconds(options.timeoutMs)} s, so it was not drawn.`,
+        reason:
+          doc.visibilityState === 'visible'
+            ? `${label} did not finish loading in ${seconds(options.timeoutMs)} s, so it was not drawn.`
+            : WINDOW_HIDDEN,
       });
     }, options.timeoutMs);
     win?.addEventListener('message', onMessage);

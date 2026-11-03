@@ -65,6 +65,12 @@ function Reporter() {
   return null;
 }
 
+/**
+ * The drawing copies each element's computed style into an SVG image, which never lays out what
+ * `content-visibility: auto` skips, so a transcript's blocks would come out blank.
+ */
+const DRAW_EVERYTHING = '* { content-visibility: visible !important; }';
+
 /** The frame's root route: the screen, with the padding the app's own shell gives a view. */
 export function RenderLayout() {
   return (
@@ -73,6 +79,7 @@ export function RenderLayout() {
       style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}
       bg="var(--mantine-color-body)"
     >
+      <style>{DRAW_EVERYTHING}</style>
       <Reporter />
       <Outlet />
     </Box>

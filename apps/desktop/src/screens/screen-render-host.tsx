@@ -3,11 +3,12 @@ import { useEffect } from 'react';
 import { readJson, type DaemonClient } from '../daemon/client';
 import { useDaemon } from '../daemon/provider';
 import { captureFrame } from './capture-frame';
-import { drawScreen, type DrawResult } from './draw-screen';
+import { drawScreen, WINDOW_HIDDEN, type DrawResult } from './draw-screen';
 
 // Shape spec §5.5. The window's side of `see_screen`: it asks the daemon for a screen to draw (a long
 // poll that answers empty when there is none), draws it in a hidden frame and answers with the picture
-// or the reason there is none. It renders nothing itself.
+// or the reason there is none. A window out of sight keeps asking, so the daemon can't tell: it is the
+// window that refuses, at once. It renders nothing itself.
 
 /** How long a frame has to load its screen: the daemon gives up on the window a little after. */
 const DRAW_TIMEOUT_MS = 15_000;
@@ -67,7 +68,11 @@ export function ScreenRenderHost({ draw: drawOne = draw }: ScreenRenderHostProps
           // No screen was wanted this time: ask again.
           if (res.status === 204) continue;
           const request = await readJson(res, ScreenRenderRequest);
-          await answer(client, request, await drawOne(request, daemon));
+          const result: DrawResult =
+            document.visibilityState === 'visible'
+              ? await drawOne(request, daemon)
+              : { ok: false, reason: WINDOW_HIDDEN };
+          await answer(client, request, result);
         } catch {
           // The daemon is gone, or is a version without screens: ask again later.
           await wait(RETRY_MS, stop.signal);

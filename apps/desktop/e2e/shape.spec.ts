@@ -1,66 +1,17 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
-import { E2E_DIR, E2E_TOKEN } from './paths';
+import { auth, createProject } from './shape-project';
 
 // Runs after loop.spec.ts (files run in name order with one worker); it adds its own project, on its
 // own repository, and selects it. The daemon answers Shape sessions from the fake adapter: it echoes
 // what it heard, and on Propose it proposes a goal, two loose tasks and a decision.
 
-const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
-const Created = z.looseObject({ id: z.string() });
 const Tasks = z.array(z.looseObject({ id: z.string(), title: z.string() }));
 
 const MESSAGE = 'Make the cards denser. Thin out the scrollbars';
-
-/** A disposable repository for the project; git config comes from nowhere but this repo. */
-function createRepository(repo: string): void {
-  mkdirSync(repo, { recursive: true });
-  const globalConfig = join(E2E_DIR, 'shape-gitconfig');
-  writeFileSync(globalConfig, '');
-  const env = {
-    ...Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('GIT_'))),
-    GIT_CONFIG_NOSYSTEM: '1',
-    GIT_CONFIG_GLOBAL: globalConfig,
-  };
-  const git = (...args: string[]): void => {
-    execFileSync('git', args, { cwd: repo, env, stdio: 'ignore' });
-  };
-  git('init', '-b', 'main');
-  git('config', 'maintenance.auto', 'false');
-  git('config', 'gc.auto', '0');
-  git('config', 'user.email', 'e2e@10db.invalid');
-  git('config', 'user.name', '10db e2e');
-  git('config', 'commit.gpgsign', 'false');
-  writeFileSync(join(repo, 'README.md'), '# shape e2e\n');
-  git('add', 'README.md');
-  git('commit', '-m', 'Initial commit');
-}
-
-/** A project on its own repository, so one scheme's converted tasks never meet the other's. */
-async function createProject(request: APIRequestContext, name: string): Promise<string> {
-  const repo = join(E2E_DIR, `${name}-repo`);
-  createRepository(repo);
-  const created = await request.post(`${daemonUrl}/projects`, {
-    headers: auth,
-    data: {
-      name,
-      repoPath: repo,
-      gateCommand: 'true',
-      areas: [{ name: 'repo', globs: ['**'] }],
-      handoffPct: 40,
-      nudgePct: 50,
-      delivery: 'local',
-    },
-  });
-  expect(created.ok()).toBe(true);
-  return Created.parse(await created.json()).id;
-}
 
 async function taskTitles(request: APIRequestContext, projectId: string): Promise<string[]> {
   const listed = await request.get(`${daemonUrl}/projects/${projectId}/tasks`, { headers: auth });

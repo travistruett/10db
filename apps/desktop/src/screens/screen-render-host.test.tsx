@@ -3,7 +3,7 @@ import { waitFor } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../test/daemon';
-import type { DrawResult } from './draw-screen';
+import { WINDOW_HIDDEN, type DrawResult } from './draw-screen';
 import { ScreenRenderHost } from './screen-render-host';
 
 // Shape spec §5.5: the window asks the daemon for screens to draw, draws each and answers.
@@ -65,6 +65,25 @@ describe('the window’s screen host', () => {
     await waitFor(() => {
       expect(answers.refuse).toEqual({ id: 'req-1', body: { reason: 'The Board failed to load' } });
     });
+  });
+
+  it('refuses at once, drawing no frame, when the window is hidden, which pauses what a frame needs', async () => {
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      const answers: { refuse?: unknown } = {};
+      daemon(answers);
+      const draw = vi.fn((): Promise<DrawResult> => Promise.resolve({ ok: true, image: picture }));
+      const started = Date.now();
+      renderWithDaemon(<ScreenRenderHost draw={draw} />);
+      await waitFor(() => {
+        expect(answers.refuse).toEqual({ id: 'req-1', body: { reason: WINDOW_HIDDEN } });
+      });
+      expect(Date.now() - started).toBeLessThan(2_000);
+      expect(draw).not.toHaveBeenCalled();
+      expect(WINDOW_HIDDEN).toMatch(/bring 10db forward/i);
+    } finally {
+      hidden.mockRestore();
+    }
   });
 
   it('asks again after an answer, so the next screen is drawn', async () => {

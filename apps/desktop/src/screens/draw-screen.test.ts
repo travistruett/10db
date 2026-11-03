@@ -1,6 +1,6 @@
 import { mintId, type ScreenRenderRequest } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { drawScreen, type DrawnScreen } from './draw-screen';
+import { drawScreen, WINDOW_HIDDEN, type DrawnScreen } from './draw-screen';
 
 // Shape spec §5.5: the window draws a screen in a hidden frame of itself and either has a picture or
 // says why not. The frame is the one thing that runs the app for a session, so it is boxed in.
@@ -58,6 +58,15 @@ describe('the frame', () => {
     expect(f.style.width).toBe('900px');
     expect(f.style.height).toBe('700px');
     expect(f.style.pointerEvents).toBe('none');
+  });
+
+  it('sits behind the window, unseen, not outside it, where WebKit would throttle a frame', () => {
+    void draw();
+    const f = frame();
+    expect(f.style.left).toBe('0px');
+    expect(f.style.top).toBe('0px');
+    expect(f.style.zIndex).toBe('-1');
+    expect(f.style.opacity).toBe('0');
   });
 
   it('runs scripts of its own origin and nothing more: no form, popup or top navigation', () => {
@@ -118,6 +127,18 @@ describe('drawing a screen', () => {
       reason: 'The Board did not finish loading in 15 s, so it was not drawn.',
     });
     expect(frames()).toEqual([]);
+  });
+
+  it('says the window was hidden, not that the screen was slow, when it was hidden while drawing', async () => {
+    const drawing = draw(() => new Promise(() => undefined));
+    say(ready);
+    const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
+    try {
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(await drawing).toEqual({ ok: false, reason: WINDOW_HIDDEN });
+    } finally {
+      hidden.mockRestore();
+    }
   });
 
   it('refuses, with why, when the capture fails', async () => {
