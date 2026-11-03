@@ -1,19 +1,22 @@
 import {
+  mintId,
   SystemCheckDto,
   type BenchmarkSyncWarning,
   type GoalDigestDto,
   type GoalListDto,
   type GoalSummaryDto,
+  type TaskDto,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { batchDto, projectViewDto, stepDto, workstreamDto } from '../../test/fixtures';
+import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import {
   digestDeviation,
   digestWaitingOn,
+  goalCriterionDto,
   goalDigestDto,
   goalDto,
   goalListDto,
@@ -51,6 +54,11 @@ function digests(opened: string[], ...answers: GoalDigestDto[]): RequestHandler 
 /** Answers GET /workstreams: every workstream, whatever the `active` parameter says. */
 function workstreams(...all: WorkstreamDto[]): RequestHandler {
   return http.get(daemonUrl('/workstreams'), () => HttpResponse.json(all));
+}
+
+/** Answers GET /projects/:id/tasks with the tasks given. */
+function tasksOf(...all: TaskDto[]): RequestHandler {
+  return http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(all));
 }
 
 function goal(
@@ -276,12 +284,15 @@ describe('FactoryView goal detail', () => {
     return { a, b, wsA: withBatch, wsB, batch, project, summaryA, summaryB };
   }
 
-  it('opens one goal at a time, showing its digest, Sessions and Pull requests', async () => {
+  it('opens one goal at a time, showing its task list with the pull request on its row', async () => {
     const { summaryA, summaryB, wsA, wsB, batch, project } = fixtures();
     const opened: string[] = [];
+    const taskA = taskDto({ id: wsA.taskId, title: 'Patch route', goalId: summaryA.goal.id });
+    const taskB = taskDto({ id: wsB.taskId, title: 'Other task', goalId: summaryB.goal.id });
     serve(
       goals(goalListDto(summaryA, summaryB)),
       workstreams(wsA, wsB),
+      tasksOf(taskA, taskB),
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
       digests(opened, summaryA.digest, summaryB.digest),
@@ -293,9 +304,9 @@ describe('FactoryView goal detail', () => {
     const region = await screen.findByRole('region', { name: 'Real areas' });
     expect(rowA.getAttribute('aria-expanded')).toBe('true');
     expect(rowA.getAttribute('aria-controls')).toBe(region.id);
-    expect(within(region).getByRole('heading', { name: 'Sessions' })).toBeTruthy();
-    expect(within(region).getByRole('heading', { name: 'Pull requests' })).toBeTruthy();
-    // Only the goal's own workstreams are its sessions, and its batch is its pull request.
+    expect(within(region).queryByRole('heading', { name: 'Sessions' })).toBeNull();
+    expect(within(region).queryByRole('heading', { name: 'Pull requests' })).toBeNull();
+    // Only the goal's own tasks are listed, and its batch's pull request is on the row.
     expect(await within(region).findByText('Patch route')).toBeTruthy();
     expect(within(region).queryByText('Other task')).toBeNull();
     expect(
@@ -334,63 +345,186 @@ describe('FactoryView goal detail', () => {
     });
   });
 
-  it('shows the digest rows, Δ rows labelled since the last visit, with Show Earlier for the rest', async () => {
+  it('orders the zones: bar, Needs you, tasks, collapsed history and brief, then one footer', async () => {
     const { summaryA, wsA } = fixtures();
     const since = hoursAgo(3);
+    const card = digestWaitingOn('Approve the plan', hoursAgo(1));
     const digest = goalDigestDto(summaryA.goal.id, {
-      status: 'running',
+      status: 'waiting_on_you',
       since,
-      progress: progress(6, 11),
-      workingNow: [
-        {
-          workstreamId: wsA.id,
-          taskId: wsA.taskId,
-          taskTitle: 'Patch route',
-          persona: 'Implementer',
-          model: 'sonnet-5.5',
-          effort: 'high',
-          stepNumber: 2,
-          stepCount: 3,
-        },
+      progress: progress(6, 11, 2),
+      waitingOn: { recent: [card], earlier: [] },
+      team: [
+        { persona: 'Implementer', model: 'opus', effort: 'high' },
+        { persona: 'Implementer', model: 'sonnet', effort: 'medium' },
+        { persona: 'Reviewer', model: 'opus', effort: 'medium' },
       ],
-      team: [{ persona: 'Reviewer', model: 'opus-5.5', effort: 'high' }],
-      next: {
-        taskId: wsA.taskId,
-        title: 'Edit areas in the drawer',
-        headline: '',
-        waitsOn: [{ taskId: wsA.taskId, title: 'Patch route' }],
-      },
       deviations: {
         recent: [digestDeviation('Split the task in two', hoursAgo(1))],
         earlier: [digestDeviation('Old split', hoursAgo(30))],
       },
       cost: { tokens: 412_000, dollars: 3.5, sessions: 14 },
     });
+    const task = taskDto({ id: wsA.taskId, title: 'Patch route', goalId: summaryA.goal.id });
+    serve(
+      goals(goalListDto({ ...summaryA, digest })),
+      workstreams(wsA),
+      tasksOf(task),
+      digests([], digest),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    expect(await within(region).findByText('Patch route')).toBeTruthy();
+    expect(
+      within(region).getByText('6 merged · 2 in review · 1 in progress · 2 not started'),
+    ).toBeTruthy();
+    expect(within(region).getByText('Approve the plan')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Inbox ›' })).toBeTruthy();
+
+    // The order the builder acts in: bar, Needs you, Tasks, Since you last looked, About, footer.
+    const text = region.textContent;
+    const at = (needle: string) => text.indexOf(needle);
+    expect(at('6 merged')).toBeLessThan(at('Needs you'));
+    expect(at('Needs you')).toBeLessThan(at('Patch route'));
+    expect(at('Patch route')).toBeLessThan(at('Since you last looked'));
+    expect(at('Since you last looked')).toBeLessThan(at('About this goal'));
+    expect(at('About this goal')).toBeLessThan(at('Implementer opus@high'));
+
+    // Each persona once, with its profiles; then the cost, in one dimmed line.
+    expect(
+      within(region).getByText(
+        'Implementer opus@high, sonnet@medium · Reviewer opus@medium · 412k tokens · 14 sessions · $3.50',
+      ),
+    ).toBeTruthy();
+    // The old rows are gone.
+    for (const label of ['Working now', 'Team', 'Next', 'Cost', 'Waiting on']) {
+      expect(within(region).queryByText(label)).toBeNull();
+    }
+  });
+
+  it('draws no Needs you block when nothing needs the builder', async () => {
+    const { summaryA, wsA } = fixtures();
+    serve(goals(goalListDto(summaryA)), workstreams(wsA), digests([], summaryA.digest));
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    await within(region).findByRole('button', { name: /^Since you last looked/ });
+    expect(within(region).queryByText('Needs you')).toBeNull();
+  });
+
+  it('keeps deviations and decisions behind a collapsed Since you last looked, one clamped line each', async () => {
+    const { summaryA, wsA } = fixtures();
+    const since = hoursAgo(3);
+    const sessionId = 'ses_01abcdef';
+    const digest = goalDigestDto(summaryA.goal.id, {
+      status: 'running',
+      since,
+      deviations: {
+        recent: [digestDeviation(`Split the task in two (${sessionId})`, hoursAgo(1))],
+        earlier: [digestDeviation('Old split', hoursAgo(30))],
+      },
+      decisions: {
+        recent: [
+          {
+            id: mintId('Decision'),
+            question: 'Which name reads best?',
+            choice: 'Call it Greeter',
+            at: hoursAgo(1),
+          },
+        ],
+        earlier: [],
+      },
+    });
     serve(goals(goalListDto({ ...summaryA, digest })), workstreams(wsA), digests([], digest));
     renderApp('/factory');
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    expect(await within(region).findByText('6 of 11 tasks merged')).toBeTruthy();
-    expect(within(region).getByRole('progressbar', { name: 'Tasks merged' })).toBeTruthy();
-    expect(within(region).getByText(/Implementer · sonnet-5\.5@high/)).toBeTruthy();
-    expect(within(region).getByText(/Patch route · step 2 of 3/)).toBeTruthy();
-    expect(within(region).getByText(/Reviewer opus-5\.5/)).toBeTruthy();
-    expect(
-      within(region).getByText(/Edit areas in the drawer when Patch route is done/),
-    ).toBeTruthy();
-    expect(within(region).getByText('412k tokens · 14 sessions · $3.50')).toBeTruthy();
+    const toggle = await within(region).findByRole('button', {
+      name: 'Since you last looked (3h) 1 deviation · 1 decision',
+    });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(region).queryByText(/Split the task in two/)).toBeNull();
 
-    expect(await within(region).findByText('Deviations · since 3h ago')).toBeTruthy();
-    expect(within(region).getByText(/Split the task in two/)).toBeTruthy();
+    fireEvent.click(toggle);
+    const line = within(region).getByText('Split the task in two');
+    expect(region.textContent).not.toContain(sessionId);
+    expect(within(region).getByText('Call it Greeter')).toBeTruthy();
     expect(within(region).queryByText(/Old split/)).toBeNull();
-    // A row with nothing in it says "None": Waiting on, Decisions and Pull requests here.
-    const decisions = within(region).getByText('Decisions · since 3h ago').closest('div');
-    expect(decisions && within(decisions).getByText('None')).toBeTruthy();
-    expect(within(region).getAllByText('None')).toHaveLength(3);
+    // The session id is in the tooltip only.
+    fireEvent.mouseEnter(line);
+    expect(await screen.findByText(`Split the task in two (${sessionId})`)).toBeTruthy();
 
     fireEvent.click(within(region).getByRole('button', { name: 'Show Earlier' }));
     expect(within(region).getByText(/Old split/)).toBeTruthy();
+  });
+
+  it('keeps the objective and criteria behind a collapsed About this goal', async () => {
+    const { summaryA, wsA } = fixtures();
+    const about = goalSummaryDto(
+      {
+        ...summaryA.goal,
+        objective: 'Importing a CSV works end to end.',
+        criteria: [goalCriterionDto(summaryA.goal.id, { text: 'Bad rows are reported' })],
+      },
+      { status: 'running' },
+    );
+    serve(goals(goalListDto(about)), workstreams(wsA), digests([], about.digest));
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    expect(within(region).queryByText('Importing a CSV works end to end.')).toBeNull();
+    fireEvent.click(await within(region).findByRole('button', { name: /^About this goal/ }));
+    expect(within(region).getByText('Importing a CSV works end to end.')).toBeTruthy();
+    expect(within(region).getByText('Bad rows are reported')).toBeTruthy();
+  });
+
+  it('opens the batch sheet for the goal from Start Ready Tasks…', async () => {
+    const { a, wsA } = fixtures();
+    const ready = taskDto({ goalId: a.id, boardStatus: 'ready' });
+    const summaryA = goalSummaryDto({ ...a, taskIds: [wsA.taskId, ready.id] }, { status: 'idle' });
+    const asked: (string | null)[] = [];
+    serve(
+      goals(goalListDto(summaryA)),
+      workstreams(wsA),
+      tasksOf(ready),
+      digests([], summaryA.digest),
+      http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
+        asked.push(new URL(request.url).searchParams.get('goalId'));
+        return HttpResponse.json(
+          { error: 'unavailable', message: 'not in this test' },
+          { status: 500 },
+        );
+      }),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    await waitFor(() => {
+      expect(start.hasAttribute('disabled')).toBe(false);
+    });
+    fireEvent.click(start);
+    expect(await screen.findByText('Only tasks of the goal Real areas.')).toBeTruthy();
+    await waitFor(() => {
+      expect(asked).toEqual([summaryA.goal.id]);
+    });
+  });
+
+  it('disables Start Ready Tasks… when no task of the goal is ready', async () => {
+    const { summaryA, wsA } = fixtures();
+    serve(goals(goalListDto(summaryA)), workstreams(wsA), digests([], summaryA.digest));
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    expect(start.hasAttribute('disabled')).toBe(true);
   });
 
   it('shows skeleton lines while the digest loads, then an error inside the goal when it fails', async () => {
@@ -411,7 +545,7 @@ describe('FactoryView goal detail', () => {
     expect(within(alert).getByText('The digest broke')).toBeTruthy();
     // The row stays, and the rest of the detail still shows.
     expect(row.getAttribute('aria-expanded')).toBe('true');
-    expect(within(region).getByRole('heading', { name: 'Sessions' })).toBeTruthy();
+    expect(await within(region).findByText('This goal has no tasks yet.')).toBeTruthy();
   });
 
   it('never shows a queued task as running: no step, no running badge, no running count', async () => {
@@ -420,44 +554,70 @@ describe('FactoryView goal detail', () => {
       state: 'QUEUED',
       steps: [stepDto(), stepDto()],
       stepIndex: 0,
-      contextPct: null,
+      contextPct: 12,
     });
+    const task = taskDto({ id: queued.taskId, title: 'Waiting task', boardStatus: 'in_progress' });
     const summary = goalSummaryDto(
       { title: 'Real areas', taskIds: [queued.taskId] },
-      { status: 'not_started' },
+      { status: 'queued' },
     );
-    serve(goals(goalListDto(summary)), workstreams(queued), digests([], summary.digest));
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(queued),
+      tasksOf({ ...task, goalId: summary.goal.id }),
+      digests([], summary.digest),
+    );
     renderApp('/factory');
 
     const row = await screen.findByRole('button', { name: /^Real areas/ });
     expect(row.textContent).not.toMatch(/Running/);
     fireEvent.click(row);
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const sessions = await within(region).findByRole('table', { name: 'Sessions' });
-    const line = within(sessions).getByText('Waiting task').closest('tr');
-    if (!line) throw new Error('Waiting task is not in a table row');
+    const line = (await within(region).findByText('Waiting task')).closest('[role="listitem"]');
+    if (!(line instanceof HTMLElement)) throw new Error('Waiting task is not in a list row');
     expect(within(line).getByText('Queued')).toBeTruthy();
     expect(within(line).queryByText(/Running/)).toBeNull();
     expect(within(line).queryByText(/1\/2/)).toBeNull();
-    expect(within(line).getByText('Waiting for a free lane')).toBeTruthy();
+    expect(within(line).queryByRole('progressbar')).toBeNull();
   });
 });
 
-describe('FactoryView sessions', () => {
-  function open(ws: WorkstreamDto, over: (RequestHandler | WebSocketHandler)[] = []) {
+describe('FactoryView task list', () => {
+  /** Opens a goal holding one task with the run given; the task is named for the run's title. */
+  function open(
+    ws: WorkstreamDto,
+    over: (RequestHandler | WebSocketHandler)[] = [],
+    task: Partial<TaskDto> = {},
+  ) {
     const summary = goalSummaryDto(
       { title: 'Real areas', taskIds: [ws.taskId] },
       { status: 'failed' },
     );
-    serve(goals(goalListDto(summary)), workstreams(ws), digests([], summary.digest), ...over);
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(ws),
+      tasksOf(
+        taskDto({
+          id: ws.taskId,
+          title: ws.taskTitle,
+          headline: ws.taskHeadline,
+          goalId: summary.goal.id,
+          boardStatus: 'in_progress',
+          ...task,
+        }),
+      ),
+      digests([], summary.digest),
+      ...over,
+    );
     renderApp('/factory');
   }
 
+  /** The row of the task in the open goal. */
   async function sessionRow(title: string): Promise<HTMLElement> {
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const row = (await within(region).findByText(title)).closest('tr');
-    if (!row) throw new Error(`${title} is not in a table row`);
+    const row = (await within(region).findByText(title)).closest('[role="listitem"]');
+    if (!(row instanceof HTMLElement)) throw new Error(`${title} is not in a list row`);
     return row;
   }
 
@@ -481,14 +641,17 @@ describe('FactoryView sessions', () => {
       });
       open(failed);
       const row = await sessionRow('Broken');
-      const line = within(row).getByText(failureLine(failed));
+      // The row says it failed; the plain line and Retry are in Needs you.
+      expect(within(row).getByText('Failed')).toBeTruthy();
+      const region = screen.getByRole('region', { name: 'Real areas' });
+      const line = within(region).getByText(`Failed: Broken. ${failureLine(failed)}`);
       expect(screen.queryByText('The gate failed 4 times (last exit 2)')).toBeNull();
       fireEvent.mouseEnter(line);
       expect(await screen.findByText('The gate failed 4 times (last exit 2)')).toBeTruthy();
     },
   );
 
-  it('offers Retry only on a failed session, and shows why it failed', async () => {
+  it('offers Retry in Needs you only for a failed run, and shows why it failed', async () => {
     const failed = workstreamDto({
       taskTitle: 'Broken',
       state: 'FAILED',
@@ -504,13 +667,15 @@ describe('FactoryView sessions', () => {
     ]);
 
     const row = await sessionRow('Broken');
+    const region = screen.getByRole('region', { name: 'Real areas' });
     expect(
-      within(row).getByText(
-        'The checks kept failing and the run ran out of fix attempts. Retry runs it again.',
+      within(region).getByText(
+        'Failed: Broken. The checks kept failing and the run ran out of fix attempts. Retry runs it again.',
       ),
     ).toBeTruthy();
-    expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
-    fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
+    expect(within(row).queryByRole('button')).toBeNull();
+    expect(within(region).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    fireEvent.click(within(region).getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
       expect(retried).toEqual([failed.id]);
     });
@@ -529,6 +694,20 @@ describe('FactoryView sessions', () => {
     serve(
       goals(goalListDto(summary)),
       workstreams(withHeadline, without),
+      tasksOf(
+        taskDto({
+          id: withHeadline.taskId,
+          goalId: summary.goal.id,
+          title: withHeadline.taskTitle,
+          headline: 'Greet the visitor by name',
+        }),
+        taskDto({
+          id: without.taskId,
+          goalId: summary.goal.id,
+          title: 'Plain title only',
+          headline: '',
+        }),
+      ),
       digests([], summary.digest),
     );
     renderApp('/factory');
@@ -546,7 +725,12 @@ describe('FactoryView sessions', () => {
       { title: 'Real areas', taskIds: [ws.taskId] },
       { status: 'running' },
     );
-    serve(goals(goalListDto(summary)), workstreams(ws), digests([], summary.digest));
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(ws),
+      tasksOf(taskDto({ id: ws.taskId, title: 'Alpha', goalId: summary.goal.id })),
+      digests([], summary.digest),
+    );
     renderApp('/factory');
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
@@ -591,7 +775,8 @@ describe('FactoryView sessions', () => {
       }),
     ]);
     const row = await sessionRow('Broken');
-    fireEvent.click(within(row).getByRole('button', { name: 'Retry' }));
+    const region = screen.getByRole('region', { name: 'Real areas' });
+    fireEvent.click(within(region).getByRole('button', { name: 'Retry' }));
     await waitFor(() => {
       expect(retried).toEqual([failed.id]);
     });
@@ -603,19 +788,21 @@ describe('FactoryView sessions', () => {
     });
   });
 
-  it('shows a refused retry beside the sessions', async () => {
+  it('shows a refused retry beside the Retry button', async () => {
     const failed = workstreamDto({ taskTitle: 'Broken', state: 'FAILED' });
     open(failed, [
       http.post(daemonUrl('/workstreams/:id/retry'), () =>
         HttpResponse.json({ error: 'conflict', message: 'not retryable now' }, { status: 409 }),
       ),
     ]);
-    fireEvent.click(within(await sessionRow('Broken')).getByRole('button', { name: 'Retry' }));
+    await sessionRow('Broken');
+    const region = screen.getByRole('region', { name: 'Real areas' });
+    fireEvent.click(within(region).getByRole('button', { name: 'Retry' }));
     expect(await screen.findByText('not retryable now')).toBeTruthy();
   });
 
   it.each(['WAITING_HUMAN', 'RUNNING', 'QUEUED'] as const)(
-    'puts no Cancel on a %s session: a run is cancelled from its card or drawer',
+    'puts no Cancel on a %s task: a run is cancelled from its card or drawer',
     async (state) => {
       open(workstreamDto({ taskTitle: 'Alpha', state }));
 
@@ -625,6 +812,102 @@ describe('FactoryView sessions', () => {
     },
   );
 
+  it('shows step, model and context on a running row only', async () => {
+    const running = workstreamDto({
+      taskTitle: 'Alpha',
+      state: 'RUNNING',
+      steps: [stepDto({ role: 'implement', model: 'sonnet' }), stepDto({ role: 'review' })],
+      stepIndex: 0,
+      contextPct: 34,
+    });
+    open(running);
+    const row = await sessionRow('Alpha');
+    expect(within(row).getByText('Implement 1/2 · sonnet')).toBeTruthy();
+    expect(within(row).getByText('34%')).toBeTruthy();
+  });
+
+  it('shows a task’s state, its pull request once for a shared branch, and its last activity', async () => {
+    const batch = batchDto({
+      state: 'SHIPPED',
+      title: 'Greetings',
+      prUrl: 'https://github.com/acme/widgets/pull/9',
+    });
+    const a = workstreamDto({
+      taskTitle: 'First',
+      state: 'DONE',
+      batchId: batch.id,
+      lastActivityAt: hoursAgo(2),
+    });
+    const b = workstreamDto({ taskTitle: 'Second', state: 'DONE', batchId: batch.id });
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [a.taskId, b.taskId] },
+      { status: 'idle' },
+    );
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(a, b),
+      tasksOf(
+        taskDto({
+          id: a.taskId,
+          title: 'First',
+          goalId: summary.goal.id,
+          boardStatus: 'in_review',
+        }),
+        taskDto({
+          id: b.taskId,
+          title: 'Second',
+          goalId: summary.goal.id,
+          boardStatus: 'in_review',
+        }),
+      ),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      digests([], summary.digest),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    const links = await within(region).findAllByRole('link', { name: 'Pull request' });
+    expect(links).toHaveLength(1);
+    expect(links[0]?.getAttribute('href')).toBe('https://github.com/acme/widgets/pull/9');
+    expect(within(region).getAllByText('Shared branch')).toHaveLength(2);
+    const first = (await within(region).findByText('First')).closest('[role="listitem"]');
+    if (!(first instanceof HTMLElement)) throw new Error('First is not in a list row');
+    expect(within(first).getByText(/^In review/)).toBeTruthy();
+    expect(within(first).getByText('2 hours ago')).toBeTruthy();
+  });
+
+  it('tags the digest’s next task and counts what a waiting task waits on', async () => {
+    const first = taskDto({ title: 'Ready one', boardStatus: 'ready' });
+    const second = taskDto({
+      title: 'Later one',
+      boardStatus: 'backlog',
+      dependsOn: [first.id],
+    });
+    const summary = goalSummaryDto(
+      { title: 'Real areas', taskIds: [first.id, second.id] },
+      {
+        status: 'not_started',
+        next: { taskId: first.id, title: 'Ready one', headline: 'Do the ready one', waitsOn: [] },
+      },
+    );
+    serve(
+      goals(goalListDto(summary)),
+      tasksOf(
+        { ...first, goalId: summary.goal.id, headline: 'Do the ready one' },
+        { ...second, goalId: summary.goal.id },
+      ),
+      digests([], summary.digest),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    expect(await within(region).findByText('Ready · next')).toBeTruthy();
+    expect(within(region).getByText('Do the ready one')).toBeTruthy();
+    expect(within(region).getByText('Waits on 1')).toBeTruthy();
+  });
+
   it('lists a finished session without Cancel or Retry', async () => {
     const done = workstreamDto({
       taskTitle: 'Shipped',
@@ -632,11 +915,13 @@ describe('FactoryView sessions', () => {
       contextPct: null,
       lastActivityAt: null,
     });
-    open(done);
+    open(done, [], { boardStatus: 'done', status: 'done' });
     const row = await sessionRow('Shipped');
     expect(within(row).getByText('Done')).toBeTruthy();
     expect(within(row).queryByRole('button')).toBeNull();
-    expect(within(row).getAllByText('—')).toHaveLength(2);
+    // A finished task shows no step and no context gauge.
+    expect(within(row).queryByRole('progressbar')).toBeNull();
+    expect(within(row).queryByText(/\d\/\d/)).toBeNull();
   });
 });
 

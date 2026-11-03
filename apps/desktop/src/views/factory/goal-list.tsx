@@ -57,8 +57,7 @@ export function GoalList({ list }: { readonly list: GoalListDto }) {
         }}
       >
         <GoalDetail
-          live={summary.digest}
-          taskIds={summary.goal.taskIds}
+          summary={summary}
           opened={{
             data: open.data?.goalId === id ? open.data : undefined,
             error: open.isError && open.variables === id ? open.error.message : null,

@@ -43,7 +43,7 @@ favors legibility and calm over decoration.
   plain-words one below. Blue, green and gray cards show no line: the border and the column say it, and
   the screen-reader summary still does.
 - **A failure in plain words:** a failed task says what happened and what Retry will do, in one line from
-  `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's session rows:
+  `failureLine` (`task-state.ts`), the same on the card, in the task drawer and in Factory's Needs you block:
   "The review session stopped without reporting a result. Retry runs the review step again." The line is
   worded from the failure kind the daemon records, and its Retry half from the rule the daemon's retry
   follows, so after a review's rejection at the retry limit it names the earlier step that runs again. A run
@@ -70,9 +70,23 @@ favors legibility and calm over decoration.
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
   shipping, idle, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
-  no badge and no color. A session row names its task by headline (the title when it has none) and goes to the
-  Board with that task's drawer open and the Board filtered to the task's goal; a task not in a goal opens the
-  Board unfiltered. The row keeps its Retry button.
+  no badge and no color.
+- **An open goal has four zones, ordered by what the builder acts on:** a bar split by state with its counts
+  ("0 merged · 4 in review · 1 ready · 3 not started"; green only for merged) and Start Ready Tasks…; a
+  Needs you block, drawn only when an Inbox card waits on a goal task or a run failed (a failure is said in
+  `failureLine`'s words with its Retry); one Tasks list; then two collapsed lines, "Since you last looked (3h)"
+  and "About this goal", and one dimmed `xs` footer line with the team and the cost. There are no label/value
+  rows. The team names each persona once with its distinct `model@effort` ("Implementer opus@high,
+  sonnet@medium · Reviewer opus@medium").
+- **A task row** is a state dot, the headline (the title when it has none), its state, a pull request link
+  and the last activity. Only a running row adds its step ("Implement 2/4 · sonnet") and context gauge; a
+  failed row says "Failed" and Retry is in Needs you; the first ready task the digest names as next says
+  "Ready · next", and a task that waits says "Waits on 2". Tasks that share a branch each carry a "Shared
+  branch" tag and the pull request link shows once, on the first. A row goes to the Board with that task's
+  drawer open and the Board filtered to the task's goal; a task not in a goal opens the Board unfiltered
+  (the Not in a goal row still lists sessions).
+- **"Since you last looked"** holds the window's deviations and decisions, one clamped line each: session ids
+  are dropped from the line and kept in its tooltip, and Show Earlier adds the rest.
 - **Radius:** `md` everywhere.
 - **Motion:** short eases, 150–200 ms, of opacity, color or shadow, for what appears as a side effect
   (an edge fade, a hint, a scroll shadow) and for drag feedback (the column a card would land in).

@@ -1,11 +1,28 @@
-import type { GoalDigestDto } from '@10db/contracts';
-import { Alert, Box, Button, Group, Progress, Skeleton, Stack, Text } from '@mantine/core';
-import { useState, type ReactNode } from 'react';
+import type { GoalDigestDto, GoalDto } from '@10db/contracts';
+import {
+  Alert,
+  Anchor,
+  Box,
+  Button,
+  Group,
+  List,
+  Progress,
+  Skeleton,
+  Stack,
+  Text,
+  Tooltip,
+  UnstyledButton,
+} from '@mantine/core';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
+import { useId, useState, type ReactNode } from 'react';
+import { useRetryWorkstream } from '../../daemon/queries';
 import { useNow } from '../../shell/relative';
+import { failureLine } from '../board/task-state';
 import { formatTokens } from './format-tokens';
-import { progressLine } from './goal-status';
 import { shortAgo } from './short-ago';
 import { StatusDot } from './status-dot';
+import { barCounts, teamLine, type TaskRow } from './task-rows';
 
 /** Where the window of changes stands: the daemon's answer to opening the goal. */
 export interface OpenedDigest {
@@ -13,26 +30,188 @@ export interface OpenedDigest {
   readonly error: string | null;
 }
 
-const LABEL_WIDTH = '9rem';
+const plural = (n: number, one: string, many = `${one}s`): string =>
+  `${String(n)} ${n === 1 ? one : many}`;
 
-function Row({ label, children }: { readonly label: ReactNode; readonly children: ReactNode }) {
+/** A section of the open goal: a small dimmed title over its content. */
+function Zone({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   return (
-    <Box style={{ display: 'flex', gap: 'var(--mantine-spacing-md)', alignItems: 'baseline' }}>
-      <Text component="dt" size="sm" c="dimmed" style={{ flex: `0 0 ${LABEL_WIDTH}` }}>
-        {label}
+    <Stack gap={4}>
+      <Text size="xs" c="dimmed" fw={600} tt="uppercase">
+        {title}
       </Text>
-      <Box component="dd" m={0} style={{ flex: 1, minWidth: 0 }}>
-        {children}
+      {children}
+    </Stack>
+  );
+}
+
+/** A line that opens and closes the section under it; closed until the builder opens it. */
+function Disclosure({
+  title,
+  summary,
+  children,
+}: {
+  readonly title: string;
+  readonly summary?: string;
+  readonly children: ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  const regionId = useId();
+  const Chevron = open ? IconChevronDown : IconChevronRight;
+  return (
+    <Box>
+      <UnstyledButton
+        aria-expanded={open}
+        aria-controls={regionId}
+        onClick={() => {
+          setOpen(!open);
+        }}
+      >
+        <Group gap={6} wrap="nowrap" align="center">
+          <Chevron size={14} stroke={1.5} aria-hidden style={{ flex: 'none' }} />
+          <Text size="sm" fw={500}>
+            {title}
+          </Text>
+          {summary ? (
+            <Text size="sm" c="dimmed">
+              {summary}
+            </Text>
+          ) : null}
+        </Group>
+      </UnstyledButton>
+      <Box id={regionId} hidden={!open} pl={20} pt={open ? 6 : 0}>
+        {open ? children : null}
       </Box>
     </Box>
   );
 }
 
-function None() {
+/** The bar's segments, in the colors the Board gives their states: green only for what has merged. */
+const SEGMENTS = [
+  { key: 'merged', color: 'green', label: 'merged' },
+  { key: 'inReview', color: 'blue', label: 'in review' },
+  { key: 'inProgress', color: 'cyan', label: 'in progress' },
+  { key: 'ready', color: 'gray', label: 'ready' },
+  { key: 'notStarted', color: 'dark', label: 'not started' },
+] as const;
+
+/** The goal's tasks as a bar split by state, with the counts beside it. */
+export function GoalBar({
+  digest,
+  rows,
+}: {
+  readonly digest: GoalDigestDto;
+  readonly rows: readonly TaskRow[];
+}) {
+  const counts = barCounts(digest.progress, rows);
+  const shown = SEGMENTS.filter((s) => counts[s.key] > 0);
+  const line = shown.map((s) => `${String(counts[s.key])} ${s.label}`).join(' · ');
   return (
-    <Text size="sm" c="dimmed">
-      None
-    </Text>
+    <Group gap="sm" wrap="nowrap">
+      <Progress.Root w={200} size="sm" style={{ flex: 'none' }}>
+        {counts.total === 0
+          ? null
+          : shown.map((s) => (
+              <Progress.Section
+                key={s.key}
+                value={(counts[s.key] / counts.total) * 100}
+                color={s.color}
+                aria-label={`${String(counts[s.key])} ${s.label}`}
+              />
+            ))}
+      </Progress.Root>
+      <Text size="sm">{counts.total === 0 ? 'No tasks yet' : line}</Text>
+    </Group>
+  );
+}
+
+/**
+ * What needs the builder: the open Inbox cards on the goal's tasks, and each task whose run failed
+ * with its Retry. Draws nothing when neither exists.
+ */
+export function NeedsYou({
+  digest,
+  rows,
+}: {
+  readonly digest: GoalDigestDto;
+  readonly rows: readonly TaskRow[];
+}) {
+  const retry = useRetryWorkstream();
+  const cards = [...digest.waitingOn.recent, ...digest.waitingOn.earlier];
+  const failed = rows.flatMap((row) => (row.failed ? [{ row, ws: row.failed }] : []));
+  if (cards.length === 0 && failed.length === 0) return null;
+  return (
+    <Zone title="Needs you">
+      <Stack gap={4}>
+        {cards.map((card) => (
+          <Group key={card.inboxItemId} gap="xs" wrap="nowrap" justify="space-between">
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+              <StatusDot color="yellow" />
+              <Text size="sm" lineClamp={1}>
+                {card.title}
+              </Text>
+            </Group>
+            <Anchor component={Link} to="/inbox" size="sm" style={{ flex: 'none' }}>
+              Inbox ›
+            </Anchor>
+          </Group>
+        ))}
+        {failed.map(({ row, ws }) => (
+          <Group key={ws.id} gap="xs" wrap="nowrap" justify="space-between">
+            <Group gap={8} wrap="nowrap" style={{ minWidth: 0 }}>
+              <StatusDot color="red" />
+              <Tooltip
+                label={ws.failureReason}
+                disabled={!ws.failureReason}
+                withArrow
+                multiline
+                maw={360}
+                openDelay={300}
+              >
+                <Text size="sm" lineClamp={2}>
+                  {`Failed: ${row.label}. ${failureLine(ws)}`}
+                </Text>
+              </Tooltip>
+            </Group>
+            <Button
+              size="compact-xs"
+              variant="light"
+              loading={retry.isPending && retry.variables.id === ws.id}
+              onClick={() => {
+                retry.mutate({ id: ws.id });
+              }}
+            >
+              Retry
+            </Button>
+          </Group>
+        ))}
+        {retry.error ? (
+          <Alert color="red" title="The daemon refused that">
+            {retry.error.message}
+          </Alert>
+        ) : null}
+      </Stack>
+    </Zone>
+  );
+}
+
+/** Agent prose names the sessions it came from; the line keeps the words and the tooltip the ids. */
+export function withoutSessionIds(text: string): string {
+  return text
+    .replace(/\s*\(\s*ses_\w+(?:\s*,\s*ses_\w+)*\s*\)/g, '')
+    .replace(/\bses_\w+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/** One item of the window: a single clamped line, whole in its tooltip. */
+function OneLine({ text, full }: { readonly text: string; readonly full: string }) {
+  return (
+    <Tooltip label={full} withArrow multiline maw={420} openDelay={300}>
+      <Text size="sm" lineClamp={1}>
+        {text}
+      </Text>
+    </Tooltip>
   );
 }
 
@@ -41,171 +220,141 @@ interface Delta<T> {
   readonly earlier: readonly T[];
 }
 
-/**
- * A row of what changed: the items in the window, and the rest behind Show Earlier. A row with
- * nothing in either says "None"; while the window is still loading it shows skeleton lines.
- */
-function DeltaRow<T>({
+function DeltaLines<T>({
   label,
-  since,
   row,
-  item,
+  line,
 }: {
   readonly label: string;
-  readonly since: string | null;
-  /** Undefined until the window answers. */
-  readonly row: Delta<T> | undefined;
-  readonly item: (value: T) => ReactNode;
+  readonly row: Delta<T>;
+  readonly line: (value: T) => ReactNode;
 }) {
-  const now = useNow();
   const [showEarlier, setShowEarlier] = useState(false);
-  const heading = since === null ? label : `${label} · since ${shortAgo(since, now)}`;
-  if (row === undefined) {
-    return (
-      <Row label={heading}>
-        <Skeleton height={12} width="50%" role="presentation" />
-      </Row>
-    );
-  }
   const shown = showEarlier ? [...row.recent, ...row.earlier] : row.recent;
   return (
-    <Row label={heading}>
-      <Stack gap={2}>
-        {shown.length === 0 ? <None /> : null}
-        {shown.map((value, index) => (
-          <Group key={index} gap={6} wrap="nowrap" align="baseline">
-            {item(value)}
-          </Group>
-        ))}
-        {row.earlier.length > 0 ? (
-          <Box>
-            <Button
-              size="compact-xs"
-              variant="subtle"
-              onClick={() => {
-                setShowEarlier(!showEarlier);
-              }}
-            >
-              {showEarlier ? 'Hide Earlier' : 'Show Earlier'}
-            </Button>
-          </Box>
-        ) : null}
+    <Stack gap={2}>
+      <Text size="xs" c="dimmed">
+        {label}
+      </Text>
+      {shown.length === 0 ? (
+        <Text size="sm" c="dimmed">
+          None
+        </Text>
+      ) : null}
+      {shown.map((value, index) => (
+        <Box key={index}>{line(value)}</Box>
+      ))}
+      {row.earlier.length > 0 ? (
+        <Box>
+          <Button
+            size="compact-xs"
+            variant="subtle"
+            onClick={() => {
+              setShowEarlier(!showEarlier);
+            }}
+          >
+            {showEarlier ? 'Hide Earlier' : 'Show Earlier'}
+          </Button>
+        </Box>
+      ) : null}
+    </Stack>
+  );
+}
+
+/** The collapsed "Since you last looked" section: the deviations and decisions of the window. */
+export function SinceYouLooked({ opened }: { readonly opened: OpenedDigest }) {
+  const now = useNow();
+  const { data: window, error } = opened;
+  const since = window?.since ?? null;
+  const counts = window
+    ? [
+        window.deviations.recent.length > 0
+          ? plural(window.deviations.recent.length, 'deviation')
+          : null,
+        window.decisions.recent.length > 0
+          ? plural(window.decisions.recent.length, 'decision')
+          : null,
+      ].filter((part) => part !== null)
+    : [];
+  const title =
+    since === null
+      ? 'Since you last looked'
+      : `Since you last looked (${shortAgo(since, now).replace(' ago', '')})`;
+  const summary = window ? (counts.length === 0 ? 'nothing new' : counts.join(' · ')) : undefined;
+  return (
+    <Stack gap="xs">
+      {error ? (
+        <Alert color="red" title="Couldn't load what changed">
+          {error}
+        </Alert>
+      ) : (
+        <Disclosure title={title} {...(summary ? { summary } : {})}>
+          {window === undefined ? (
+            <Skeleton height={12} width="50%" role="presentation" />
+          ) : (
+            <Stack gap="xs">
+              <DeltaLines
+                label="Deviations"
+                row={window.deviations}
+                line={(d) => <OneLine text={withoutSessionIds(d.summary)} full={d.summary} />}
+              />
+              <DeltaLines
+                label="Decisions"
+                row={window.decisions}
+                line={(d) => <OneLine text={d.choice} full={`${d.question}\n${d.choice}`} />}
+              />
+            </Stack>
+          )}
+        </Disclosure>
+      )}
+    </Stack>
+  );
+}
+
+/** The collapsed "About this goal" section: the objective and the criteria, read-only. */
+export function AboutGoal({ goal }: { readonly goal: GoalDto }) {
+  return (
+    <Disclosure title="About this goal" summary="objective, criteria">
+      <Stack gap="xs">
+        <Zone title="Objective">
+          <Text size="sm">{goal.objective}</Text>
+          {goal.caresMost ? (
+            <Text size="sm" c="dimmed">{`Cares most about: ${goal.caresMost}`}</Text>
+          ) : null}
+        </Zone>
+        <Zone title="Criteria">
+          {goal.criteria.length === 0 ? (
+            <Text size="sm" c="dimmed">
+              None yet.
+            </Text>
+          ) : (
+            <List size="sm" spacing={4}>
+              {goal.criteria.map((c) => (
+                <List.Item key={c.id}>{c.text}</List.Item>
+              ))}
+            </List>
+          )}
+        </Zone>
       </Stack>
-    </Row>
+    </Disclosure>
   );
 }
 
 function costLine(cost: GoalDigestDto['cost']): string {
   const parts = [
     `${formatTokens(cost.tokens)} tokens`,
-    `${String(cost.sessions)} ${cost.sessions === 1 ? 'session' : 'sessions'}`,
+    plural(cost.sessions, 'session'),
     cost.dollars === null ? null : `$${cost.dollars.toFixed(2)}`,
   ];
   return parts.filter((part) => part !== null).join(' · ');
 }
 
-function nextLine(next: NonNullable<GoalDigestDto['next']>): string {
-  if (next.waitsOn.length === 0) return next.title;
-  const waits = next.waitsOn.map((t) => t.title).join(' and ');
-  return `${next.title} when ${waits} ${next.waitsOn.length === 1 ? 'is' : 'are'} done`;
-}
-
-export interface GoalDigestProps {
-  /** The goal's current state, from the list: every row but the Δ ones is read from it. */
-  readonly live: GoalDigestDto;
-  /** The window of changes since the last visit, which the Δ rows are read from. */
-  readonly opened: OpenedDigest;
-}
-
-/** The digest of one goal (§8): progress, who is working, what is next, and what changed since the last visit. */
-export function GoalDigest({ live, opened }: GoalDigestProps) {
-  const now = useNow();
-  const { data: window } = opened;
-  const since = window?.since ?? null;
-  const total = live.progress.total;
-  const pct = total === 0 ? 0 : (live.progress.merged / total) * 100;
-  // A failed load leaves the Δ rows out rather than showing skeleton lines for ever.
-  const failed = opened.error !== null;
-
+/** The one dimmed line that ends the goal: who works on it and what it has cost. */
+export function GoalFooter({ digest }: { readonly digest: GoalDigestDto }) {
+  const team = teamLine(digest.team);
   return (
-    <Stack gap="xs">
-      {opened.error ? (
-        <Alert color="red" title="Couldn't load what changed">
-          {opened.error}
-        </Alert>
-      ) : null}
-      <Box component="dl" m={0} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <Row label="Progress">
-          <Group gap="sm" wrap="nowrap">
-            <Progress.Root w={160} size="sm">
-              <Progress.Section value={pct} aria-label="Tasks merged" />
-            </Progress.Root>
-            <Text size="sm">{progressLine(live)}</Text>
-          </Group>
-        </Row>
-        <Row label="Working now">
-          <Stack gap={2}>
-            {live.workingNow.length === 0 ? <None /> : null}
-            {live.workingNow.map((w) => (
-              <Group key={w.workstreamId} gap={6} wrap="nowrap" align="baseline">
-                <StatusDot color="blue" />
-                <Text size="sm">
-                  {`${w.persona} · ${w.model}@${w.effort} · ${w.taskTitle} · step ${String(w.stepNumber)} of ${String(w.stepCount)}`}
-                </Text>
-              </Group>
-            ))}
-          </Stack>
-        </Row>
-        <Row label="Team">
-          {live.team.length === 0 ? (
-            <None />
-          ) : (
-            <Text size="sm">{live.team.map((m) => `${m.persona} ${m.model}`).join(' · ')}</Text>
-          )}
-        </Row>
-        {failed ? null : (
-          <DeltaRow
-            label="Waiting on"
-            since={since}
-            row={window?.waitingOn}
-            item={(w) => (
-              <>
-                <StatusDot color="yellow" />
-                <Text size="sm">{`${w.assigneeName} · ${w.title} · Inbox · ${shortAgo(w.at, now)}`}</Text>
-              </>
-            )}
-          />
-        )}
-        <Row label="Next">
-          {live.next ? <Text size="sm">{nextLine(live.next)}</Text> : <None />}
-        </Row>
-        {failed ? null : (
-          <>
-            <DeltaRow
-              label="Deviations"
-              since={since}
-              row={window?.deviations}
-              item={(d) => <Text size="sm">{d.summary}</Text>}
-            />
-            <DeltaRow
-              label="Decisions"
-              since={since}
-              row={window?.decisions}
-              item={(d) => (
-                <>
-                  <Text size="sm">{d.choice}</Text>
-                  <Text size="xs" c="dimmed">
-                    {d.question}
-                  </Text>
-                </>
-              )}
-            />
-          </>
-        )}
-        <Row label="Cost">
-          <Text size="sm">{costLine(live.cost)}</Text>
-        </Row>
-      </Box>
-    </Stack>
+    <Text size="xs" c="dimmed">
+      {team === '' ? costLine(digest.cost) : `${team} · ${costLine(digest.cost)}`}
+    </Text>
   );
 }

@@ -300,10 +300,12 @@ test.describe('the Board with several open batches', () => {
 
         await goal.click();
         const goalRegion = page.getByRole('region', { name: GOAL_TITLE });
-        await expect(goalRegion.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-        await expect(goalRegion.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
-        // The window's rows have loaded once the Δ row labels are there.
-        await expect(goalRegion.getByText(/^Deviations/)).toBeVisible();
+        await expect(goalRegion.getByText('Tasks', { exact: true })).toBeVisible();
+        await expect(goalRegion.getByRole('button', { name: 'Start Ready Tasks…' })).toBeVisible();
+        // The window has loaded once its summary is on the Since you last looked line.
+        await expect(
+          goalRegion.getByRole('button', { name: /^Since you last looked.+/ }),
+        ).toBeVisible();
         await expectAccessible(page, `factory, goal open, ${scheme}`);
 
         // One at a time: opening Not in a goal closes the goal, and the queued task is not among its sessions.
