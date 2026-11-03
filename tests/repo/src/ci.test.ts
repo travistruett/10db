@@ -112,9 +112,10 @@ describe('CI workflow', () => {
   });
 
   it('runs on merge queue entries, where every required check must report', () => {
-    // main merges through a GitHub merge queue (decisions/2026-11-02-merge-queue.md). The queue
-    // tests each pull request combined with those ahead of it, and waits for the required checks
-    // on a gh-readonly-queue/main/... branch: a check that doesn't run on merge_group never reports
+    // main has no merge queue (decisions/2026-11-02-main-has-no-merge-queue.md), so this trigger is
+    // inert today. It is kept on purpose, for when a queue returns: a queue tests each pull request
+    // combined with those ahead of it, and waits for the required checks on a
+    // gh-readonly-queue/main/... branch, so a check that doesn't run on merge_group never reports
     // and the entry times out.
     const parsed = readWorkflow(CI);
     expect(parsed.on['merge_group']).toEqual({ types: ['checks_requested'] });
