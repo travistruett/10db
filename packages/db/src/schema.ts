@@ -454,6 +454,10 @@ export const proposals = sqliteTable('proposals', {
   body: text('body').notNull(),
   status: text('status').$type<'pending' | 'accepted' | 'rejected'>().notNull(),
   rationale: text('rationale'),
+  /** The proposed principle, for a principle proposal. */
+  principleId: text('principle_id')
+    .$type<PrincipleId>()
+    .references((): AnySQLiteColumn => principles.id),
   sourceId: text('source_id')
     .$type<SourceId>()
     .notNull()

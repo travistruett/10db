@@ -109,7 +109,7 @@ describe('the Shape tables', () => {
     expect(columns(table)).toEqual(expect.arrayContaining(expected));
   });
 
-  it('leaves proposals and ProposalKind as they were', () => {
+  it('adds no Shape column to proposals and no Shape value to ProposalKind', () => {
     expect(columns('proposals')).toEqual([
       'id',
       'project_id',
@@ -121,6 +121,8 @@ describe('the Shape tables', () => {
       'source_id',
       'created_at',
       'updated_at',
+      // M3 knowledge's link to a proposed principle, not Shape's (migration 0037).
+      'principle_id',
     ]);
     expect(Object.values(ProposalKind)).toEqual(['new_task', 'change_task', 'principle', 'note']);
   });

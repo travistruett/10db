@@ -212,6 +212,7 @@ describe('schema', () => {
         'withdrawn_reason',
       ]),
     );
+    expect(columnNames('proposals')).toContain('principle_id');
   });
 
   it.each([

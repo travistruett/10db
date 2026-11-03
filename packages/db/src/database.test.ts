@@ -749,6 +749,12 @@ describe('migrating to principles (M3 knowledge)', () => {
       AT,
       AT,
     );
+    run(
+      `INSERT INTO proposals (id, project_id, kind, title, body, status, source_id, created_at, updated_at)
+       VALUES ('prp_a', 'prj_a', 'note', 'A title', 'A body', 'pending', 'src_a', ?, ?)`,
+      AT,
+      AT,
+    );
     migrateDatabase(db);
   });
 
@@ -797,6 +803,13 @@ describe('migrating to principles (M3 knowledge)', () => {
       .run();
     expect(principleHits('sleep')).toEqual([]);
     expect(principleHits('poll')).toEqual(['pri_a']);
+  });
+
+  it('keeps an existing proposal, linked to no principle', () => {
+    expect(db.$client.prepare('SELECT id, title, principle_id FROM proposals').all()).toEqual([
+      { id: 'prp_a', title: 'A title', principle_id: null },
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 
   it('indexes the decisions successor lookup', () => {
