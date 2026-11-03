@@ -29,7 +29,7 @@ export function OneWayPathsSetting({ project }: { readonly project: ProjectDto }
     <SettingsCard>
       <SettingRow
         label={ONE_WAY_PATHS_LABEL}
-        description="A task that touches a file matching one of these globs, one per line, makes Shape write a spec with scope and engineering review before Convert. You can still pin a task to direct."
+        description="A task that touches a file matching one of these globs, one per line, makes Plan write a spec with scope and engineering review before Convert. You can still pin a task to direct."
         stacked
       >
         <Stack gap="xs">

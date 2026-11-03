@@ -29,9 +29,9 @@ function Factory() {
             Goals 10db is pursuing in this project
           </Text>
         </Stack>
-        {/* Shape Work… opens a new conversation (Shape spec §4); a brief made elsewhere is still adopted by the route. */}
+        {/* Plan Work… opens a new conversation (Shape spec §4); a brief made elsewhere is still adopted by the route. */}
         <Button component={Link} to="/shape">
-          Shape Work…
+          Plan Work…
         </Button>
       </Group>
       {goals.isError ? (
@@ -42,7 +42,7 @@ function Factory() {
       {goals.isLoading ? <Loader size="sm" aria-label="Loading goals" /> : null}
       {goals.isSuccess && goals.data.goals.length === 0 ? (
         <Text size="sm" c="dimmed">
-          Goals are outcomes 10db pursues across many tasks. Shape Work… to start one, or ask Claude
+          Goals are outcomes 10db pursues across many tasks. Plan Work… to start one, or ask Claude
           Code to with the 10db-task skill.
         </Text>
       ) : null}

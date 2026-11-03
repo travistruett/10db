@@ -16,7 +16,7 @@ export function ShapeJevSetting({ project }: { readonly project: ProjectDto }) {
     <SettingsCard>
       <SettingRow
         label={SHAPE_JEV_LABEL}
-        description="Shape sends your brainstorm messages, not code, to OpenRouter and the model's provider, so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else. A brainstorm can hold a client's details; leave this off if that matters."
+        description="Plan sends your brainstorm messages, not code, to OpenRouter and the model's provider, so a fast model can notice when you are ready to propose, state a decision, or ask a question for someone else. A brainstorm can hold a client's details; leave this off if that matters."
       >
         <Switch
           aria-label={SHAPE_JEV_LABEL}

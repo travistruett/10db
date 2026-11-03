@@ -85,20 +85,13 @@ describe('Shape: the first run', () => {
     expect(screen.getByText(/Press Propose when you've said enough/)).toBeTruthy();
   });
 
-  it('says there are no conversations in the nav, with Shape Work… to start one', async () => {
+  it('titles the view Plan and shows nothing under the composer when there are no conversations', async () => {
     serve(...conversations());
     renderApp('/shape');
-    const nav = await screen.findByRole('navigation');
-    expect(await within(nav).findByText(/No conversations yet/)).toBeTruthy();
-  });
-
-  it('underlines the nav link inside its sentence, so color is not the only cue (axe link-in-text-block)', async () => {
-    serve(...conversations());
-    renderApp('/shape');
-    const nav = await screen.findByRole('navigation');
-    await within(nav).findByText(/No conversations yet/);
-    const link = within(nav).getByRole('link', { name: 'Shape Work…' });
-    expect(link.getAttribute('data-underline')).toBe('always');
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(screen.getByRole('heading', { name: 'Plan' })).toBeTruthy();
+    expect(screen.queryByRole('list', { name: 'Recent conversations' })).toBeNull();
+    expect(screen.queryByText(/No conversations yet/)).toBeNull();
   });
 
   it('creates the conversation on the first send, posts the message and opens it', async () => {
@@ -116,8 +109,8 @@ describe('Shape: the first run', () => {
     );
     const { router } = renderApp('/shape');
     const input = await screen.findByRole('textbox', { name: 'Message' });
-    // The project has loaded once the nav has asked for its conversations.
-    await screen.findByText(/No conversations yet|Board polish/);
+    // The project has loaded once the view has asked for its conversations: the list of them appears.
+    await screen.findByRole('list', { name: 'Recent conversations' });
     fireEvent.change(input, { target: { value: 'Move density ahead of the scrollbars.' } });
     fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
     await waitFor(() => {
@@ -362,13 +355,81 @@ describe('Shape: the Proposed sidebar', () => {
   });
 });
 
-describe('Shape: the nav list', () => {
-  it('lists the conversations with their state and age', async () => {
+describe('Plan: the nav item', () => {
+  it('reads Plan, lists no conversations and has no empty-state line', async () => {
     const view = proposed([looseTaskProposal('density')]);
     serve(...conversations(view));
     open(view);
     const nav = await screen.findByRole('navigation');
-    expect(await within(nav).findByRole('link', { name: /Board polish/ })).toBeTruthy();
+    expect(within(nav).getByRole('link', { name: 'Plan' }).getAttribute('href')).toBe('/shape');
+    expect(within(nav).queryByRole('link', { name: 'Shape' })).toBeNull();
+    // Give the list read time to land; the nav still shows nothing of it.
+    await screen.findByRole('button', { name: 'History' });
+    expect(within(nav).queryByRole('link', { name: /Board polish/ })).toBeNull();
+    expect(within(nav).queryByRole('group', { name: 'Conversations' })).toBeNull();
+    expect(within(nav).queryByText(/No conversations yet/)).toBeNull();
+  });
+
+  it('shows no empty-state line in the nav when the project has no conversations', async () => {
+    serve(...conversations());
+    renderApp('/shape');
+    const nav = await screen.findByRole('navigation');
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(within(nav).queryByText(/No conversations yet/)).toBeNull();
+    expect(within(nav).queryByRole('link', { name: 'Plan Work…' })).toBeNull();
+  });
+});
+
+describe('Plan: past conversations under the composer', () => {
+  it('lists the recent conversations with their last activity and what each produced, and opens one', async () => {
+    const goalId = mintId('Goal');
+    const converted = shapeViewDto({
+      shape: shapeDto({
+        ...inProject,
+        title: 'Brainstorm chat',
+        state: 'converted',
+        updatedAt: '2026-11-02T12:00:00.000Z',
+      }),
+      proposals: [
+        goalProposal('chat', ['a', 'b'], {
+          state: 'accepted',
+          converted: { goalId, taskIds: [mintId('Task'), mintId('Task')], decisionId: null },
+        }),
+        looseTaskProposal('density', {
+          state: 'accepted',
+          converted: { goalId: null, taskIds: [mintId('Task')], decisionId: null },
+        }),
+      ],
+    });
+    const listening = shapeViewDto({
+      shape: shapeDto({
+        ...inProject,
+        title: 'Scrollbars',
+        updatedAt: '2026-11-01T12:00:00.000Z',
+      }),
+    });
+    serve(...conversations(converted, listening));
+    const { router } = renderApp('/shape');
+    const list = await screen.findByRole('list', { name: 'Recent conversations' });
+    expect(within(list).getAllByRole('listitem')).toHaveLength(2);
+    const made = within(list).getByRole('link', { name: /Brainstorm chat/ });
+    expect(await within(made).findByText('1 goal · 3 tasks')).toBeTruthy();
+    expect(within(made).getByText(/ago$|just now$/)).toBeTruthy();
+    const idle = within(list).getByRole('link', { name: /Scrollbars/ });
+    expect(await within(idle).findByText('Nothing converted yet')).toBeTruthy();
+
+    fireEvent.click(within(list).getByRole('link', { name: /Scrollbars/ }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${listening.shape.id}`);
+    });
+  });
+
+  it('shows past conversations beneath the composer only on the new-conversation screen', async () => {
+    const view = proposed([], { round: 0 });
+    serve(...conversations(view));
+    open(view);
+    await screen.findByRole('button', { name: 'History' });
+    expect(screen.queryByRole('list', { name: 'Recent conversations' })).toBeNull();
   });
 
   it('says it could not load the conversations', async () => {
@@ -379,6 +440,52 @@ describe('Shape: the nav list', () => {
     );
     renderApp('/shape');
     expect(await screen.findByText("Couldn't load conversations")).toBeTruthy();
+  });
+});
+
+describe('Plan: New and History inside a conversation', () => {
+  it('New opens the new-conversation screen', async () => {
+    const view = proposed([looseTaskProposal('density')]);
+    serve(...conversations(view));
+    const { router } = open(view);
+    fireEvent.click(await screen.findByRole('link', { name: 'New' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/shape');
+    });
+  });
+
+  it('History opens a searchable list of the conversations and opens the one picked', async () => {
+    const current = proposed([looseTaskProposal('density')]);
+    const other = shapeViewDto({ shape: shapeDto({ ...inProject, title: 'Scrollbars' }) });
+    serve(...conversations(current, other));
+    const { router } = open(current);
+    fireEvent.click(await screen.findByRole('button', { name: 'History' }));
+    const search = await screen.findByRole('searchbox', { name: 'Search conversations' });
+    const list = await screen.findByRole('list', { name: 'Conversations' });
+    expect(await within(list).findAllByRole('link')).toHaveLength(2);
+
+    fireEvent.change(search, { target: { value: 'scroll' } });
+    await waitFor(() => {
+      expect(within(list).getAllByRole('link')).toHaveLength(1);
+    });
+    fireEvent.change(search, { target: { value: 'nothing like it' } });
+    expect(await screen.findByText('No conversations match')).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: 'scroll' } });
+    // The no-match message replaced the list, so ask for the list again.
+    const filtered = await screen.findByRole('list', { name: 'Conversations' });
+    fireEvent.click(within(filtered).getByRole('link', { name: /Scrollbars/ }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${other.shape.id}`);
+    });
+  });
+
+  it('the new-conversation screen has no New or History buttons', async () => {
+    serve(...conversations());
+    renderApp('/shape');
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(screen.queryByRole('link', { name: 'New' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'History' })).toBeNull();
   });
 });
 

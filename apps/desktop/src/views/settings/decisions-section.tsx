@@ -81,7 +81,7 @@ function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
   return (
     <SettingRow
       label="Sizing"
-      description="Finished tasks Shape converted, whose size was within one bucket of the lane time they took."
+      description="Finished tasks Plan converted, whose size was within one bucket of the lane time they took."
     >
       <Stack gap={2} role="group" aria-label="Sizing">
         {sizing.n === 0 ? (
@@ -120,7 +120,7 @@ function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto })
   return (
     <SettingRow
       label="Questions"
-      description="Inbox question cards on tasks Shape converted, against the project's other tasks. Only tasks that started count."
+      description="Inbox question cards on tasks Plan converted, against the project's other tasks. Only tasks that started count."
     >
       <Stack gap={2} role="group" aria-label="Questions">
         {converted.tasks === 0 ? (
@@ -213,7 +213,7 @@ function ShapeMeasures({
         />
       ))}
       <Text size="xs" c="dimmed">
-        Shape asks these only for a project with “Send brainstorm messages to fast models” on in its
+        Plan asks these only for a project with “Send brainstorm messages to fast models” on in its
         settings, and only logs the answers until each has 20 scored answers with 75% agreeing.
       </Text>
     </SettingsCard>
