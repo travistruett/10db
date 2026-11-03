@@ -8,7 +8,12 @@ import { raiseGateHostCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
-import { checkInstall, PNPM_LOCKFILE, removeBrokenInstall } from './install-health';
+import {
+  checkInstall,
+  madeFromAnotherStore,
+  PNPM_LOCKFILE,
+  removeBrokenInstall,
+} from './install-health';
 
 export { PNPM_LOCKFILE };
 
@@ -138,18 +143,24 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
       if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
-      // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
-      // pnpm and store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and the
-      // copy is left holding a fifth of its packages. A copy whose dependencies do not resolve starts
-      // over, as the first install of a copy does, which works. Sources are not touched.
-      if (checkInstall(path).kind === 'broken') removeBrokenInstall(path);
+      const env = deps.sessionEnv(project);
+      // pnpm repairs an install that is out of date, but not one that is pruned or was made from
+      // another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and
+      // the copy is left holding a fraction of its packages. A sandboxed install is given a store of
+      // its own in its run's temp dir, so a seed from the main checkout, or an earlier run's install,
+      // names another store even when every dependency resolves. Either starts over, as the first
+      // install of a copy does, which works. Sources are not touched.
+      if (
+        checkInstall(path).kind === 'broken' ||
+        madeFromAnotherStore(path, env['pnpm_config_store_dir'])
+      )
+        removeBrokenInstall(path);
       const logPath = join(
         deps.dataDir,
         'logs',
         'install',
         `batch-${batch.id}-${String(deps.clock.now().getTime())}.log`,
       );
-      const env = deps.sessionEnv(project);
       const checkouts = [...new Set([...deps.checkouts(), path])];
       const pnpm = await deps.resolvePnpm(env, checkouts);
       if (pnpm === null) {
