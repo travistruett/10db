@@ -96,6 +96,30 @@ describe('Shape: the factory preview', () => {
     ).toBeTruthy();
   });
 
+  it('counts the pull requests and CI runs the landings save, against one each', async () => {
+    open(
+      proposedWith({
+        ...previewDto(),
+        landings: { pullRequests: 4, pullRequestsAlone: 9, ciRuns: 4, ciRunsAlone: 9 },
+      }),
+    );
+    const panel = await screen.findByRole('region', { name: 'Factory preview' });
+    expect(
+      within(panel).getByText('4 pull requests instead of 9 · 4 CI runs instead of 9'),
+    ).toBeTruthy();
+  });
+
+  it('counts the pull requests plainly when no landing saves any', async () => {
+    open(
+      proposedWith({
+        ...previewDto(),
+        landings: { pullRequests: 1, pullRequestsAlone: 1, ciRuns: 1, ciRunsAlone: 1 },
+      }),
+    );
+    const panel = await screen.findByRole('region', { name: 'Factory preview' });
+    expect(within(panel).getByText('1 pull request · 1 CI run')).toBeTruthy();
+  });
+
   it('shows an opened row its mockup, in the sandboxed frame', async () => {
     const view = proposedWith(EMPTY_PREVIEW);
     open({

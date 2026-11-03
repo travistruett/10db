@@ -96,6 +96,12 @@ describe('the reviewers (§7)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/resolve_finding/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "rehearsal"/);
   });
+
+  it('the session is told to plan landings, one per goal by default, and that tasks in one share a pull request', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/landings/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/one per goal/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/same place and land the same way/);
+  });
 });
 
 describe('the rehearsal turn', () => {

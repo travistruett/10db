@@ -252,3 +252,97 @@ describe('the factory preview', () => {
     expect(events()).toEqual(before);
   });
 });
+
+describe('the pull requests and CI runs a preview counts (§10.4)', () => {
+  function proposeLandings(
+    tasks: Record<string, unknown>[],
+    landings: { key: string; keys: string[] }[],
+    goalTasks: { key: string; depends_on?: string[] }[] = [],
+  ): void {
+    const m = c.say();
+    const out = write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          goals:
+            goalTasks.length === 0
+              ? []
+              : [
+                  {
+                    key: 'g',
+                    title: 'Goal',
+                    objective: 'Do it.',
+                    ceremony: 'direct',
+                    sourceMessageIds: [m],
+                    tasks: goalTasks.map((t) => ({
+                      title: `Task ${t.key}`,
+                      areas: ['ui'],
+                      size: 'S',
+                      ...t,
+                    })),
+                  },
+                ],
+          looseTasks: tasks.map((t) => ({ ...t, sourceMessageIds: [m] })),
+          landings: landings.map((l) => ({
+            ...l,
+            title: `Landing ${l.key}`,
+            sourceMessageIds: [m],
+          })),
+        }),
+      ),
+    );
+    if (!out.ok) throw new Error(out.errors.join('; '));
+  }
+
+  it('counts one pull request and one CI run per task when nothing lands together', () => {
+    proposeLandings([loose('a'), loose('b'), loose('c')], []);
+    expect(previewAt().landings).toEqual({
+      pullRequests: 3,
+      pullRequestsAlone: 3,
+      ciRuns: 3,
+      ciRunsAlone: 3,
+    });
+  });
+
+  it('counts a goal in one landing as one pull request, against one each', () => {
+    proposeLandings(
+      [loose('solo')],
+      [{ key: 'l1', keys: ['r1', 'r2', 'r3'] }],
+      [{ key: 'r1' }, { key: 'r2' }, { key: 'r3' }],
+    );
+    expect(previewAt().landings).toEqual({
+      pullRequests: 2,
+      pullRequestsAlone: 4,
+      ciRuns: 2,
+      ciRunsAlone: 4,
+    });
+  });
+
+  it('counts tasks that wait on each other as one pull request even with no landing', () => {
+    proposeLandings([], [], [{ key: 'r1' }, { key: 'r2', depends_on: ['r1'] }]);
+    expect(previewAt().landings).toMatchObject({ pullRequests: 1, pullRequestsAlone: 1 });
+  });
+
+  it('joins a landing and a chain that share a task into one pull request', () => {
+    proposeLandings(
+      [loose('a'), loose('b', { dependsOn: ['a'] }), loose('c')],
+      [{ key: 'l1', keys: ['b', 'c'] }],
+    );
+    expect(previewAt().landings).toMatchObject({ pullRequests: 1, pullRequestsAlone: 2 });
+  });
+
+  it('ignores a landing key that names a task already converted', () => {
+    proposeLandings([loose('a'), loose('b')], []);
+    write((ctx) =>
+      convertProposals(ctx, c.shape.id, [
+        must(
+          listShapeProposals(ctx.tx, c.shape.id).find((r) => r.key === 'a'),
+          'row',
+        ).id,
+      ]),
+    );
+    proposeLandings([loose('b'), loose('d')], [{ key: 'l1', keys: ['a', 'b', 'd'] }]);
+    expect(previewAt().landings).toMatchObject({ pullRequests: 1, pullRequestsAlone: 2 });
+  });
+});

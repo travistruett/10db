@@ -214,6 +214,7 @@ describe('ShapeViewDto', () => {
         scheduleHours: 2,
         nonLaneHoursPerTask: null,
         endEstimateHours: 2,
+        landings: { pullRequests: 1, pullRequestsAlone: 1, ciRuns: 1, ciRunsAlone: 1 },
       },
       attachments: [
         {

@@ -2,7 +2,7 @@ import type { ShapePreviewDto, ShapePreviewItem } from '@10db/contracts';
 import { Box, Group, Stack, Text } from '@mantine/core';
 import { IconArrowsSplit } from '@tabler/icons-react';
 import { useId } from 'react';
-import { previewSummary, hoursText } from './preview-text';
+import { landingsLine, previewSummary, hoursText } from './preview-text';
 
 // Shape spec §10.2: how the project's lanes would run the draft. Work already running or queued holds
 // its lane first; the critical path is blue; a clash is a dimmed line with a Tabler arrows-split icon
@@ -53,6 +53,7 @@ export function PreviewPanel({ preview }: { readonly preview: ShapePreviewDto })
           Factory preview
         </Text>
         <Text size="xs">{previewSummary(preview)}</Text>
+        <Text size="xs">{landingsLine(preview.landings)}</Text>
         {preview.lanes.map((lane, index) => (
           <Box key={lane.items[0]?.key ?? index}>
             <Text size="xs" c="dimmed" id={`${headingId}-lane-${String(index)}`}>

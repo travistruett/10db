@@ -38,6 +38,7 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  LandingGroupId,
   JudgeDecision,
   JudgeOutcome,
   McpVerdict,
@@ -379,10 +380,41 @@ export const tasks = sqliteTable(
     goalId: text('goal_id')
       .$type<GoalId>()
       .references((): AnySQLiteColumn => goals.id),
+    /** The landing the task shares a pull request with (Shape spec §10.4); null lands alone. */
+    landingGroupId: text('landing_group_id')
+      .$type<LandingGroupId>()
+      .references((): AnySQLiteColumn => landingGroups.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('tasks_project_idx').on(t.projectId), index('tasks_goal_idx').on(t.goalId)],
+  (t) => [
+    index('tasks_project_idx').on(t.projectId),
+    index('tasks_goal_idx').on(t.goalId),
+    index('tasks_landing_group_idx').on(t.landingGroupId),
+  ],
+);
+
+/**
+ * Tasks that land in one pull request (Shape spec §10.4): starting them together puts them in one
+ * batch, and one started later joins that batch while it is open. Written by Shape's Convert.
+ */
+export const landingGroups = sqliteTable(
+  'landing_groups',
+  {
+    id: text('id').$type<LandingGroupId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    /** The conversation that proposed it; null for a group made another way. */
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .references((): AnySQLiteColumn => shapes.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('landing_groups_project_idx').on(t.projectId)],
 );
 
 export const taskDeps = sqliteTable(

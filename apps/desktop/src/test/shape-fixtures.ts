@@ -183,6 +183,7 @@ export const EMPTY_PREVIEW: ShapePreviewDto = {
   scheduleHours: 0,
   nonLaneHoursPerTask: null,
   endEstimateHours: 0,
+  landings: { pullRequests: 0, pullRequestsAlone: 0, ciRuns: 0, ciRunsAlone: 0 },
 };
 
 /**
@@ -246,6 +247,7 @@ export function previewDto(): ShapePreviewDto {
     scheduleHours: 5,
     nonLaneHoursPerTask: 2,
     endEstimateHours: 9,
+    landings: { pullRequests: 3, pullRequestsAlone: 3, ciRuns: 3, ciRunsAlone: 3 },
   });
 }
 

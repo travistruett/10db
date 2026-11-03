@@ -44,6 +44,7 @@ const ID_SCHEMAS = {
   ShapeFinding: idSchema('shf', 'ShapeFindingId'),
   ShapeFile: idSchema('sfl', 'ShapeFileId'),
   ShapeAttachment: idSchema('sat', 'ShapeAttachmentId'),
+  LandingGroup: idSchema('lgp', 'LandingGroupId'),
 } as const;
 
 const ID_PREFIX = {
@@ -79,6 +80,7 @@ const ID_PREFIX = {
   ShapeFinding: 'shf',
   ShapeFile: 'sfl',
   ShapeAttachment: 'sat',
+  LandingGroup: 'lgp',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -155,5 +157,7 @@ export const ShapeFileId = ID_SCHEMAS.ShapeFile;
 export type ShapeFileId = IdOf<'ShapeFile'>;
 export const ShapeAttachmentId = ID_SCHEMAS.ShapeAttachment;
 export type ShapeAttachmentId = IdOf<'ShapeAttachment'>;
+export const LandingGroupId = ID_SCHEMAS.LandingGroup;
+export type LandingGroupId = IdOf<'LandingGroup'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

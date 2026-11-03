@@ -727,6 +727,12 @@ All in scope; this is build order. Each slice ships something usable.
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
    `groupByDependency` joining a landing's tasks and a late task joining its group's open batch; pull request and CI
    counts in the preview.
+   *Built. Migration 0034 adds `landing_groups` and `tasks.landing_group_id`; Convert writes a selected landing as
+   a group; a landing's tasks start into one batch titled after the landing, a late task joins the landing's OPEN
+   batch, and once that batch has shipped it makes a new one with a `landing-shipped` notice. A landing whose batch
+   is cutting, shipping or failed refuses the start by name. The preview's `landings` counts pull requests and CI
+   runs with and without them (one CI run per pull request). Not built: removing a group with its last unstarted
+   task, and ungrouping from the task's drawer (§11 Undo). See `decisions/2026-11-02-landings-share-a-batch.md`.*
 
 ## 15. Testing
 

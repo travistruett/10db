@@ -26,6 +26,23 @@ export const ShapePreviewClash = z.object({
 });
 export type ShapePreviewClash = z.infer<typeof ShapePreviewClash>;
 
+/**
+ * What the draft's landings save (§10.4): the pull requests its tasks make, against the ones they
+ * would make if every task landed on its own. A pull request is one batch, and the project has no
+ * merge queue, so its required checks run once on the pull request's head: a CI run per pull request.
+ */
+export const ShapePreviewLandings = z.object({
+  /** Pull requests with the draft's landings (tasks that depend on each other still share one). */
+  pullRequests: z.int().min(0),
+  /** Pull requests with no landings: one per group of tasks that depend on each other. */
+  pullRequestsAlone: z.int().min(0),
+  /** CI runs with the landings, one per pull request. */
+  ciRuns: z.int().min(0),
+  /** CI runs with no landings. */
+  ciRunsAlone: z.int().min(0),
+});
+export type ShapePreviewLandings = z.infer<typeof ShapePreviewLandings>;
+
 export const ShapePreviewDto = z.object({
   /** One entry per lane, its bars in time order. */
   lanes: z.array(z.object({ items: z.array(ShapePreviewItem) })),
@@ -42,5 +59,7 @@ export const ShapePreviewDto = z.object({
   nonLaneHoursPerTask: z.number().min(0).nullable(),
   /** The schedule plus the non-lane time of each task on the critical path; marked "estimate" on screen. */
   endEstimateHours: z.number().min(0),
+  /** Pull requests and CI runs, with the landings and without. */
+  landings: ShapePreviewLandings,
 });
 export type ShapePreviewDto = z.infer<typeof ShapePreviewDto>;

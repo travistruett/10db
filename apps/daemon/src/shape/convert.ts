@@ -20,6 +20,7 @@ import {
   insertDecision,
   insertGoal,
   insertGoalTask,
+  insertLandingGroup,
   insertShapeLink,
   insertSource,
   insertTask,
@@ -57,10 +58,11 @@ export type ConvertOutcome =
     }
   | { readonly ok: false; readonly errors: readonly string[] };
 
-/** The kinds Convert writes today; landings, principles and questions come with their tables. */
+/** The kinds Convert writes today; principles and questions come with their tables. */
 const WRITTEN: ReadonlySet<ShapeProposalKind> = new Set([
   'goal',
   'task',
+  'landing',
   'decision',
   'change_task',
   'remove_task',
@@ -182,6 +184,24 @@ export function convertProposals(
     }
   }
 
+  // Landings: every task must be one Convert made or one it makes now, and not in a landing yet.
+  for (const row of pending.filter((r) => r.kind === 'landing')) {
+    const landing = ShapeProposalBody.landing.parse(row.body);
+    for (const key of landing.keys) {
+      const converted = world.convertedTasks.get(key);
+      if (converted !== undefined) {
+        if (world.placeOf(converted)?.landingGroup)
+          errors.push(`${landing.title} includes ${key}, which is already in a landing`);
+        continue;
+      }
+      const owner = owners.get(key);
+      if (owner === undefined)
+        errors.push(`${landing.title} includes ${key}, and no proposal has that key`);
+      else if (!selectedIds.has(owner.row.id))
+        errors.push(`${landing.title} includes ${owner.title}, which isn't selected`);
+    }
+  }
+
   // Records, changes and removals are judged again as they stand now.
   for (const row of pending) {
     if (row.kind === 'decision') {
@@ -267,6 +287,19 @@ export function convertProposals(
       made.set(row.id, { taskIds: [written.id] });
       linkShapeAttachments(ctx, shapeId, row.key, { taskId: written.id });
     }
+  }
+
+  // Each kept landing becomes a group its tasks belong to (§10.4), once the tasks exist.
+  for (const row of pending.filter((r) => r.kind === 'landing')) {
+    const landing = ShapeProposalBody.landing.parse(row.body);
+    const members = landing.keys.flatMap((key) => taskIds.get(key) ?? []);
+    insertLandingGroup(ctx, {
+      projectId: project.id,
+      title: landing.title,
+      taskIds: members,
+      shapeId,
+    });
+    made.set(row.id, { taskIds: members });
   }
 
   for (const row of pending.filter((r) => r.kind === 'decision')) {

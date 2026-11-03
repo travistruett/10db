@@ -13,6 +13,7 @@ export * from './handoffs';
 export * from './holds';
 export * from './inbox';
 export * from './knowledge';
+export * from './landing-groups';
 export * from './lane-times';
 export * from './shape-review';
 export * from './shape-shadow';

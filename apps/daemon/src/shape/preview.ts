@@ -9,6 +9,7 @@ import {
   type ProjectId,
   type ShapeId,
   type ShapePreviewDto,
+  type ShapePreviewLandings,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -128,6 +129,45 @@ function existingItems(
   return items;
 }
 
+/**
+ * The pull requests the draft's tasks would make: a pull request is a batch, which tasks that wait
+ * on each other share, and so do the tasks of a landing. The same without the landings is what each
+ * task would make landing alone. Each pull request has one CI run (the project has no merge queue).
+ */
+function countLandings(
+  db: DbReader,
+  shapeId: ShapeId,
+  draft: readonly ScheduleItem[],
+): ShapePreviewLandings {
+  const parent = new Map<string, string>(draft.map((i) => [i.key, i.key]));
+  const rootOf = (key: string): string => {
+    let root = key;
+    for (let up = parent.get(root); up !== undefined && up !== root; up = parent.get(root))
+      root = up;
+    return root;
+  };
+  const link = (a: string, b: string): void => {
+    if (!parent.has(a) || !parent.has(b)) return;
+    const x = rootOf(a);
+    const y = rootOf(b);
+    if (x !== y) parent.set(x, y);
+  };
+  const components = (): number => new Set(draft.map((i) => rootOf(i.key))).size;
+  for (const item of draft) for (const dep of item.dependsOn) link(item.key, dep);
+  const alone = components();
+  for (const row of listShapeProposals(db, shapeId)) {
+    if (row.state !== ShapeProposalState.Pending || row.kind !== ShapeProposalKind.Landing)
+      continue;
+    // A key of a task already converted is not in the draft; the rest of the landing still is.
+    const [first, ...rest] = ShapeProposalBody.landing
+      .parse(row.body)
+      .keys.filter((k) => parent.has(k));
+    if (first !== undefined) for (const key of rest) link(first, key);
+  }
+  const together = components();
+  return { pullRequests: together, pullRequestsAlone: alone, ciRuns: together, ciRunsAlone: alone };
+}
+
 export function buildPreview(db: DbReader, shapeId: ShapeId, now: Date): ShapePreviewDto {
   const projectId = getShape(db, shapeId).projectId;
   const project = getProject(db, projectId);
@@ -151,5 +191,6 @@ export function buildPreview(db: DbReader, shapeId: ShapeId, now: Date): ShapePr
     scheduleHours: schedule.scheduleHours,
     nonLaneHoursPerTask,
     endEstimateHours: schedule.scheduleHours + (nonLaneHoursPerTask ?? 0) * pathTasks,
+    landings: countLandings(db, shapeId, draft),
   };
 }

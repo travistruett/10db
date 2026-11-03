@@ -1190,6 +1190,7 @@ describe('shape routes', () => {
         scheduleHours: 0,
         nonLaneHoursPerTask: null,
         endEstimateHours: 0,
+        landings: { pullRequests: 0, pullRequestsAlone: 0, ciRuns: 0, ciRunsAlone: 0 },
       },
       attachments: [],
     };

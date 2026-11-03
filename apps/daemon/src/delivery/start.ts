@@ -12,6 +12,7 @@ import {
   WorkspaceMode,
   type BatchDto,
   type BatchId,
+  type LandingGroupId,
   type ProjectDto,
   type ProjectId,
   type StepPlanDto,
@@ -30,6 +31,7 @@ import {
   listWorkstreams,
   patchBatch,
   patchTask,
+  setBatchNotice,
   transitionBatch,
   type WriteContext,
 } from '@10db/db';
@@ -42,6 +44,7 @@ import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
+import { planLandings, shippedLandingNotice } from './landing-join';
 import { refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
@@ -201,18 +204,29 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         forTasks(card, taskIds, input.title ? { title: input.title } : {}),
       );
     });
-    const inFolder = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
-    const inCopies = tasks.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
+    // A task of a landing whose batch is open joins it (Shape spec §10.4), where that batch works.
+    const landings = planLandings(db, tasks);
+    const joinedMode = new Map<TaskId, WorkspaceMode>();
+    const joinSteps = landings.joins.map(({ batch, tasks: joining }): StartStep => {
+      const mode = batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
+      for (const task of joining) joinedMode.set(task.id, mode);
+      return mode === WorkspaceMode.Worktree
+        ? prepareJoinWorktree(project, batch, joining)
+        : prepareShared(project, batch.title, batch.id, joining, ending);
+    });
+    const inFolder = landings.rest.filter((task) => task.workspaceMode === WorkspaceMode.Shared);
+    const inCopies = landings.rest.filter((task) => task.workspaceMode === WorkspaceMode.Worktree);
     // Everything this request makes, so no batch of it counts another's tasks as use of its branch.
     const sameStart: SameStart = { tasks: new Set(tasks.map((t) => t.id)), batches: new Set() };
     return {
       steps: [
+        ...joinSteps,
         ...(inFolder.length > 0
           ? [prepareShared(project, input.title, undefined, inFolder, ending, sameStart)]
           : []),
-        ...prepareWorktrees(project, inCopies, sameStart),
+        ...prepareWorktrees(project, inCopies, sameStart, landings.titles),
       ],
-      placement: (task) => task.workspaceMode,
+      placement: (task) => joinedMode.get(task.id) ?? task.workspaceMode,
     };
   }
 
@@ -264,6 +278,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     // Refused here, with the request, so nothing is cut for tasks that can't share a pull request.
     if (existing) joinsLanding(project, existing, tasks);
     const target = existing ? null : sharedLanding(project, tasks, 'branch');
+    const shipped = existing ? null : shippedLandingNotice(db, tasks);
     const plans: Plans = new Map(tasks.map((t) => [t.id, planForStart(db, t.id)]));
     const inBatch = new Set<TaskId>([
       ...tasks.map((t) => t.id),
@@ -292,6 +307,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           ...(target ?? { baseBranch: project.baseBranch, autoMerge: true }),
         });
         for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, inserted.id);
+        if (shipped) setBatchNotice(w, inserted.id, shipped);
         sameStart?.batches.add(inserted.id);
         return inserted;
       },
@@ -310,9 +326,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     project: ProjectDto,
     tasks: readonly TaskDto[],
     sameStart: SameStart,
+    landingTitles: ReadonlyMap<LandingGroupId, string>,
   ): StartStep[] {
     if (tasks.length === 0) return [];
-    const groups = groupByDependency(tasks);
+    const groups = groupByDependency(tasks, landingTitles);
     // Tasks that share a worktree share a pull request, so they must land alike; checked for every
     // group before any batch is made.
     const targets = groups.map((group) => sharedLanding(project, group.tasks, 'worktree'));
@@ -332,6 +349,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     return groups.map((group, i): StartStep => {
       const groupPlans = plans[i] ?? new Map<TaskId, StepPlanDto>();
       const target = targets[i] ?? { baseBranch: project.baseBranch, autoMerge: true };
+      const shipped = shippedLandingNotice(db, group.tasks);
       return {
         write: (w) => {
           const id = mintId('Batch');
@@ -343,6 +361,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
             worktreePath: worktreePathFor(root, project, batchBranchName(group.title, id)),
           });
           for (const [taskId, plan] of groupPlans) insertPlannedWorkstream(w, taskId, plan, id);
+          if (shipped) setBatchNotice(w, id, shipped);
           sameStart.batches.add(id);
           return inserted;
         },
