@@ -82,7 +82,7 @@ function adopt(projectId = project.id): { goal: GoalDto; a: TaskId; b: TaskId; c
         ],
       },
     }),
-  ).value;
+  ).value.goal;
   const [a, b, c] = goal.taskIds;
   if (!a || !b || !c) throw new Error('the brief makes three tasks');
   return { goal, a, b, c };
@@ -581,7 +581,7 @@ describe('the rows', () => {
           ],
         },
       }),
-    ).value;
+    ).value.goal;
     for (const [i, id] of free.taskIds.entries()) {
       setClock(9 + i);
       run(id, WorkstreamState.Queued);
@@ -655,7 +655,7 @@ describe('the rows', () => {
             ],
           },
         }),
-      ).value;
+      ).value.goal;
       const [a, b] = goal.taskIds;
       if (!a || !b) throw new Error('the brief makes two tasks');
       setClock(9);

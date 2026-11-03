@@ -15,6 +15,7 @@ import {
   getWorkstream,
   insertBatch,
   insertSession,
+  insertShape,
   insertTask,
   insertWorkstream,
   listBoardColumns,
@@ -313,6 +314,30 @@ describe('MCP auth', () => {
       body: '{}',
     });
     expect(after.status).toBe(401);
+  });
+
+  it("refuses a Shape session's token: it has no lane, so no lane tools", async () => {
+    const project = seedProject(base, { repoPath: repo.path });
+    const shape = state.write((ctx) =>
+      insertShape(ctx, project.id, { title: 'Density', origin: 'app' }),
+    );
+    const { token, hash } = mintSessionToken();
+    state.write((ctx) =>
+      insertSession(ctx, {
+        shapeId: shape.id,
+        provider: 'claude',
+        model: 'opus',
+        effort: 'high',
+        mode: 'managed',
+        mcpTokenHash: hash,
+      }),
+    );
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(401);
   });
 });
 

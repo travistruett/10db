@@ -42,8 +42,16 @@ export function accountUsage(db: DbReader, id: AccountId, window: UsageWindow): 
       costUsd: sql<number | null>`sum(${schema.sessions.costUsd})`,
     })
     .from(schema.sessions)
-    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
-    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    // A session works for a project through its workstream (a lane) or its conversation (Shape).
+    .leftJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+    .leftJoin(schema.shapes, eq(schema.shapes.id, schema.sessions.shapeId))
+    .innerJoin(
+      schema.projects,
+      eq(
+        schema.projects.id,
+        sql`coalesce(${schema.workstreams.projectId}, ${schema.shapes.projectId})`,
+      ),
+    )
     .where(inWindow(id, window))
     .groupBy(schema.projects.id)
     .orderBy(asc(schema.projects.name))

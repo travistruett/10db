@@ -37,9 +37,9 @@ function goal() {
       },
     }),
   );
-  const [taskId] = made.taskIds;
+  const taskId = made.taskIds.get('a');
   if (!taskId) throw new Error('the brief makes one task');
-  return { id: made.id, taskId };
+  return { id: made.goal.id, taskId };
 }
 
 /** A decision the goal's task recorded: its source names the task's run. */

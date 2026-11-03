@@ -58,6 +58,7 @@ import {
   yieldRefusal,
   type ClaimResult,
 } from './claim-wait';
+import type { ShapeToolsFor } from './shape-tools';
 
 export interface McpDeps {
   readonly protectedPaths: readonly ProtectedPath[];
@@ -75,6 +76,8 @@ export interface McpDeps {
   readonly claimWaitSliceMs?: number;
   /** Brings a task's base into its branch before it gets the migrations hazard; absent, it isn't. */
   readonly migrationsBase?: MigrationsBase;
+  /** The tools of a Shape conversation's session; absent, such a session is refused. */
+  readonly shapeTools?: ShapeToolsFor;
 }
 
 type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;

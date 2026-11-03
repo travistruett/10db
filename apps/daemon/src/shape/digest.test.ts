@@ -1,0 +1,59 @@
+import { PlanDraft, ShapeMessageAuthor, ShapeMessageKind } from '@10db/contracts';
+import { insertShapeMessage, listShapeProposals } from '@10db/db';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { seedConversation, looseDraft, type ConversationFixture } from './conversation-fixture';
+import { buildDigest, DIGEST_MESSAGES } from './digest';
+import { convertProposals } from './convert';
+import { reconcileDraft } from './rounds';
+
+// Shape spec §5.3: a deterministic digest seeds a new SDK session: the last 40 messages verbatim,
+// the current proposals and the conversation's links, each row with its source ids.
+
+let c: ConversationFixture;
+beforeEach(() => {
+  c = seedConversation();
+});
+afterEach(() => {
+  c.close();
+});
+
+describe('buildDigest', () => {
+  it('holds the last messages verbatim, builder messages under their ids, and no earlier ones', () => {
+    const ids = Array.from({ length: DIGEST_MESSAGES + 5 }, (_, i) =>
+      c.say(`message ${String(i)}`),
+    );
+    c.store.write((ctx) =>
+      insertShapeMessage(ctx, c.shape.id, {
+        author: ShapeMessageAuthor.Claude,
+        kind: ShapeMessageKind.Text,
+        body: 'Claude’s last answer',
+      }),
+    );
+    const digest = buildDigest(c.store.db, c.shape.id);
+    expect(digest).toContain('Claude’s last answer');
+    expect(digest).toContain(`[m:${ids.at(-1) ?? ''}] message ${String(DIGEST_MESSAGES + 4)}`);
+    // 40 messages are kept: Claude's answer and the 39 builder messages before it.
+    expect(digest).not.toContain('message 5\n');
+    expect(digest).toContain('message 6');
+    expect(digest.match(/\[m:/g)).toHaveLength(DIGEST_MESSAGES - 1);
+  });
+
+  it('lists each proposal with its state and sources, and what Convert made', () => {
+    const m = c.say('Do the thing.');
+    c.store.write((ctx) =>
+      reconcileDraft(ctx, c.shape.id, PlanDraft.parse(looseDraft(m, 'a', 'b'))),
+    );
+    const rows = listShapeProposals(c.store.db, c.shape.id);
+    const a = rows.find((r) => r.key === 'a');
+    c.store.write((ctx) => convertProposals(ctx, c.shape.id, a === undefined ? [] : [a.id]));
+    const digest = buildDigest(c.store.db, c.shape.id);
+    expect(digest).toContain(`- a (task, accepted, round 1; sources ${m}): Task a`);
+    expect(digest).toContain(`- b (task, pending, round 1; sources ${m}): Task b`);
+    expect(digest).toMatch(/a → task tsk_/);
+  });
+
+  it('says so when nothing has been proposed yet', () => {
+    c.say('Hello');
+    expect(buildDigest(c.store.db, c.shape.id)).toContain('Nothing is proposed yet.');
+  });
+});

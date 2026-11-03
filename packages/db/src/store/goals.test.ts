@@ -84,7 +84,10 @@ const counts = () => ({
 
 describe('insertGoal', () => {
   it('writes a draft goal owned by the builder, its unproven criteria, tasks and dependencies', () => {
-    const { value: goal, events } = store.write((ctx) =>
+    const {
+      value: { goal },
+      events,
+    } = store.write((ctx) =>
       insertGoal(ctx, project.id, { brief: brief(), description: 'Notes.' }),
     );
     expect(goal).toMatchObject({
@@ -146,7 +149,7 @@ describe('insertGoal', () => {
         }),
         ownerId: mark.id,
       }),
-    ).value;
+    ).value.goal;
     expect(goal).toMatchObject({
       ownerId: mark.id,
       budget: null,
@@ -218,7 +221,7 @@ describe('insertGoal', () => {
         insertGoal(ctx, project.id, {
           brief: brief({ criteria: [{ text: 'x', check: CriterionCheck.Accept, person }] }),
         }),
-      ).value;
+      ).value.goal;
 
     it('is refused as ambiguous when two people share the name', () => {
       store.write((ctx) => insertPerson(ctx, { handle: 'sam-a', name: 'Sam' }));
@@ -263,9 +266,140 @@ describe('insertGoal', () => {
   });
 });
 
+describe('insertGoal for Shape (Shape spec §6, §11)', () => {
+  /** Every row a goal write leaves, without the ids and times it mints, in a stable order. */
+  const written = () => {
+    const tasks = store.db.select().from(schema.tasks).all();
+    const keyOf = new Map(tasks.map((t) => [t.id, t.title]));
+    const minted = new Set(['id', 'goalId', 'taskId', 'createdAt', 'updatedAt', 'boardOrder']);
+    const without = (row: object) =>
+      Object.fromEntries(Object.entries(row).filter(([column]) => !minted.has(column)));
+    return {
+      goals: store.db.select().from(schema.goals).all().map(without),
+      tasks: tasks.sort((a, b) => a.title.localeCompare(b.title)).map(without),
+      deps: store.db
+        .select()
+        .from(schema.taskDeps)
+        .all()
+        .map((d) => `${keyOf.get(d.taskId) ?? ''} -> ${keyOf.get(d.dependsOnId) ?? ''}`)
+        .sort(),
+      criteria: store.db
+        .select()
+        .from(schema.goalCriteria)
+        .all()
+        .map((c) => ({
+          ...without(c),
+          task: c.taskId === null ? null : keyOf.get(c.taskId),
+        })),
+    };
+  };
+
+  it('answers the task it made for each brief key', () => {
+    const { goal, taskIds } = store.write((ctx) =>
+      insertGoal(ctx, project.id, { brief: brief() }),
+    ).value;
+    expect([...taskIds.keys()]).toEqual(['patch', 'drawer', 'propose']);
+    expect([...taskIds.values()].sort()).toEqual([...goal.taskIds].sort());
+    expect(getTask(store.db, taskIds.get('drawer') ?? mintId('Task')).title).toBe(
+      'Edit in the drawer',
+    );
+  });
+
+  it.each([
+    ['no outside keys at all', {}],
+    ['an empty map of outside keys', { outsideKeys: new Map(), dependsOnOutside: {} }],
+  ] satisfies [string, Partial<GoalInsert>][])(
+    'writes exactly what it wrote before, given %s',
+    (_, outside) => {
+      store.write((ctx) => insertGoal(ctx, project.id, { brief: brief(), description: 'N' }));
+      const before = written();
+      // Write the same brief again into the emptied tables, this time with the outside arguments.
+      store.db.delete(schema.goalCriteria).run();
+      store.db.delete(schema.taskDeps).run();
+      store.db.delete(schema.tasks).run();
+      store.db.delete(schema.goals).run();
+      store.write((ctx) =>
+        insertGoal(ctx, project.id, { brief: brief(), description: 'N', ...outside }),
+      );
+      expect(written()).toEqual(before);
+    },
+  );
+
+  it('makes a goal task depend on a task outside the goal, by its outside key', () => {
+    const loose = store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Thin scrollbars',
+        acceptanceCriteria: ['a'],
+        areas: ['ui'],
+      }),
+    ).value;
+    const { taskIds } = store.write((ctx) =>
+      insertGoal(ctx, project.id, {
+        brief: brief(),
+        outsideKeys: new Map([['thin-scrollbars', loose.id]]),
+        dependsOnOutside: { drawer: ['thin-scrollbars'] },
+      }),
+    ).value;
+    const drawer = getTask(store.db, taskIds.get('drawer') ?? mintId('Task'));
+    expect(new Set(drawer.dependsOn)).toEqual(new Set([taskIds.get('patch'), loose.id]));
+    expect(taskIds.has('thin-scrollbars')).toBe(false);
+  });
+
+  it.each([
+    [
+      'an outside key no map entry has',
+      { outsideKeys: new Map(), dependsOnOutside: { drawer: ['thin-scrollbars'] } },
+    ],
+    [
+      'outside dependencies for a key no task of the brief has',
+      { outsideKeys: new Map([['thin', 'OUTSIDE']]), dependsOnOutside: { nope: ['thin'] } },
+    ],
+    [
+      'an outside key that is also a key of the brief',
+      { outsideKeys: new Map([['patch', 'OUTSIDE']]), dependsOnOutside: { drawer: ['patch'] } },
+    ],
+    [
+      'an outside key naming a task that does not exist',
+      { outsideKeys: new Map([['thin', mintId('Task')]]), dependsOnOutside: { drawer: ['thin'] } },
+    ],
+    [
+      'an outside key naming another project’s task',
+      { outsideKeys: new Map([['thin', 'FOREIGN']]), dependsOnOutside: { drawer: ['thin'] } },
+    ],
+  ])('writes nothing when given %s', (_, outside) => {
+    const loose = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'Loose', acceptanceCriteria: ['a'], areas: ['ui'] }),
+    ).value;
+    const foreignProject = seedProject(store, { name: 'other' });
+    const foreign = store.write((ctx) =>
+      insertTask(ctx, foreignProject.id, {
+        title: 'Foreign',
+        acceptanceCriteria: ['a'],
+        areas: ['ui'],
+      }),
+    ).value;
+    const resolve = (id: string) =>
+      id === 'OUTSIDE' ? loose.id : id === 'FOREIGN' ? foreign.id : (id as typeof loose.id);
+    const outsideKeys = new Map(
+      [...outside.outsideKeys.entries()].map(([k, v]: [string, string]) => [k, resolve(v)]),
+    );
+    const before = counts();
+    expect(() =>
+      store.write((ctx) =>
+        insertGoal(ctx, project.id, {
+          brief: brief(),
+          outsideKeys,
+          dependsOnOutside: outside.dependsOnOutside,
+        }),
+      ),
+    ).toThrow(InvalidError);
+    expect(counts()).toEqual(before);
+  });
+});
+
 describe('reading goals', () => {
   it("lists a project's goals oldest first, and a goal's tasks in board order", () => {
-    const first = store.write((ctx) => insertGoal(ctx, project.id, { brief: brief() })).value;
+    const first = store.write((ctx) => insertGoal(ctx, project.id, { brief: brief() })).value.goal;
     clock = new Date('2026-11-01T11:00:00.000Z');
     const second = store.write((ctx) =>
       insertGoal(ctx, project.id, {
@@ -275,7 +409,7 @@ describe('reading goals', () => {
           tasks: [{ key: 'x', title: 'X', areas: ['ui'] }],
         }),
       }),
-    ).value;
+    ).value.goal;
     store.write((ctx) =>
       insertTask(ctx, project.id, { title: 'Alone', acceptanceCriteria: ['a'], areas: ['api'] }),
     );
@@ -293,7 +427,7 @@ describe('reading goals', () => {
 
 describe('markGoalViewed', () => {
   it('returns the previous mark for that person and goal, then advances it', () => {
-    const goal = store.write((ctx) => insertGoal(ctx, project.id, { brief: brief() })).value;
+    const goal = store.write((ctx) => insertGoal(ctx, project.id, { brief: brief() })).value.goal;
     expect(lastGoalView(store.db, goal.id, builder.id)).toBeNull();
     expect(store.write((ctx) => markGoalViewed(ctx, goal.id, builder.id)).value).toBeNull();
     expect(lastGoalView(store.db, goal.id, builder.id)).toBe('2026-11-01T10:00:00.000Z');

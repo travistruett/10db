@@ -35,8 +35,10 @@ import {
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
+import { startShapeSession } from './claude-shape';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
+import { settleWithin } from './settle-within';
 import {
   AccountProbeError,
   CompletionError,
@@ -328,25 +330,6 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     abortController: deps.abortController,
     spawnClaudeCodeProcess: (options) => spawnClaude(options, deps),
   };
-}
-
-/** Resolves with the value, or undefined after `ms` or on rejection. Never rejects. */
-function settleWithin<T>(clock: Clock, promise: Promise<T>, ms: number): Promise<T | undefined> {
-  return new Promise((resolve) => {
-    const timer = clock.setTimeout(() => {
-      resolve(undefined);
-    }, ms);
-    promise.then(
-      (value) => {
-        timer.cancel();
-        resolve(value);
-      },
-      () => {
-        timer.cancel();
-        resolve(undefined);
-      },
-    );
-  });
 }
 
 /** A line for the prompt naming repo servers that didn't connect, so the agent doesn't hunt for their tools. */
@@ -983,6 +966,14 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)
         : startWithRetry(spec, opts, runQuery),
+    startShape: (spec) =>
+      startShapeSession(spec, {
+        claudePath: opts.claudePath,
+        logger: opts.logger,
+        query: runQuery,
+        ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
+        ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+      }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
     complete: (ask) => complete(ask, opts, runQuery),
   };

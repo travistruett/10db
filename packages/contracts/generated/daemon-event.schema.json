@@ -31,6 +31,7 @@
         "evidence.recorded",
         "commit.recorded",
         "decision.recorded",
+        "decision.withdrawn",
         "deviation.recorded",
         "proposal.created",
         "proposal.resolved",
@@ -50,7 +51,8 @@
         "board_column.deleted",
         "network_hosts.changed",
         "goal.created",
-        "goal.changed"
+        "goal.changed",
+        "shape.changed"
       ]
     },
     "entityType": {

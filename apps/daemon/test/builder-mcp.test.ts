@@ -10,6 +10,7 @@ import {
   NEW_TASK_NO_CRITERIA,
   ProjectDto,
   QuestionCategory,
+  ShapeViewDto,
   TaskDto,
   Urgency,
   WorkstreamState,
@@ -22,6 +23,7 @@ import {
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
+import { readFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -784,6 +786,78 @@ describe('the builder MCP endpoint', () => {
           createdAt: open.createdAt,
         },
       ]);
+    });
+  });
+
+  describe('start_shape', () => {
+    const view = async (id: string) => {
+      const res = await fetch(`${daemon.url}/shapes/${id}`, {
+        headers: { Authorization: `Bearer ${daemon.token}` },
+      });
+      return ShapeViewDto.parse(await res.json());
+    };
+
+    it('creates a conversation from the summary and the text files, and starts no turn', async () => {
+      const project = await seedProject();
+      const made = z.object({ id: z.string(), title: z.string() }).parse(
+        await callJson('start_shape', {
+          projectId: project.id,
+          title: 'Board polish',
+          summary: 'We settled on denser cards.',
+          files: [{ name: 'notes.md', content: '# Notes' }],
+        }),
+      );
+      expect(made.title).toBe('Board polish');
+      const shown = await view(made.id);
+      expect(shown.shape).toMatchObject({ origin: 'claude_code', round: 0 });
+      expect(shown.messages.map((m) => [m.author, m.body])).toEqual([
+        ['note', 'From a Claude Code session'],
+        ['builder', 'We settled on denser cards.'],
+      ]);
+      expect(shown.files.map((f) => f.name)).toEqual(['notes.md']);
+      expect(readFileSync(shown.files[0]?.storedPath ?? '', 'utf8')).toBe('# Notes');
+      expect(shown.turn).toEqual({ running: false, queued: 0, proposing: false });
+    });
+
+    it.each([
+      {
+        name: 'a path',
+        file: { name: '/Users/me/.ssh/config', content: 'x' },
+        says: /never a path/,
+      },
+      {
+        name: 'an image',
+        file: { name: 'shot.png', content: 'x' },
+        says: /Markdown or plain text/,
+      },
+      {
+        name: 'more than 256 KB',
+        file: { name: 'big.md', content: 'x'.repeat(256 * 1024 + 1) },
+        says: /256 KB/,
+      },
+    ])('refuses $name, creating nothing', async ({ file, says }) => {
+      const project = await seedProject();
+      const result = await call('start_shape', {
+        projectId: project.id,
+        title: 'Board polish',
+        summary: 'Summary',
+        files: [file],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(says);
+      const listed = await fetch(`${daemon.url}/projects/${project.id}/shapes`, {
+        headers: { Authorization: `Bearer ${daemon.token}` },
+      });
+      expect(await listed.json()).toEqual([]);
+    });
+
+    it('refuses a project that does not exist', async () => {
+      const result = await call('start_shape', {
+        projectId: mintId('Project'),
+        title: 'T',
+        summary: 'S',
+      });
+      expect(result.isError).toBe(true);
     });
   });
 

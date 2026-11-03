@@ -31,6 +31,7 @@ import {
   createUnavailableAdapter,
   FakeAdapter,
   loadFakeScriptBook,
+  scriptedShapeBehaviour,
   type SessionAdapter,
 } from './sessions';
 
@@ -86,7 +87,12 @@ const check = (resolved: ResolvedTools, ghLogin: GhLoginProbe): Promise<SystemCh
   systemCheck(login, resolved, { ghLogin });
 
 function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) {
-  if (env.TENDB_FAKE_SCRIPTS) return new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
+  if (env.TENDB_FAKE_SCRIPTS) {
+    const fake = new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
+    // A Shape conversation on the fake answers deterministically, so the e2e can drive it.
+    fake.shapeBehaviour = scriptedShapeBehaviour();
+    return fake;
+  }
   const claudePath = env.TENDB_CLAUDE_PATH ?? findClaude();
   if (!claudePath) return createUnavailableAdapter(CLAUDE_MISSING);
   // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.

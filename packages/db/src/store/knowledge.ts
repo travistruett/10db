@@ -1,5 +1,7 @@
 import {
+  ConflictError,
   EventType,
+  InvalidError,
   KnowledgeHit,
   mintId,
   NotFoundError,
@@ -13,7 +15,7 @@ import {
   type SourceKind,
   type WorkstreamId,
 } from '@10db/contracts';
-import { desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import type { DbReader, WriteContext } from './store';
@@ -37,13 +39,21 @@ export interface NewDecision {
   readonly scope: 'you' | 'project' | 'area';
   readonly area: string | null;
   readonly sourceId: SourceId;
+  /** The decision this one replaces; absent or null for a new chain. */
+  readonly supersedesId?: DecisionId | null;
 }
 
 export function insertDecision(ctx: WriteContext, input: NewDecision): DecisionId {
   const id = mintId('Decision');
   ctx.tx
     .insert(schema.decisions)
-    .values({ id, ...input, supersedesId: null, createdAt: ctx.now, updatedAt: ctx.now })
+    .values({
+      id,
+      ...input,
+      supersedesId: input.supersedesId ?? null,
+      createdAt: ctx.now,
+      updatedAt: ctx.now,
+    })
     .run();
   ctx.emit({
     type: EventType.DecisionRecorded,
@@ -52,6 +62,62 @@ export function insertDecision(ctx: WriteContext, input: NewDecision): DecisionI
     data: { projectId: input.projectId, question: input.question },
   });
   return id;
+}
+
+export type DecisionRow = typeof schema.decisions.$inferSelect;
+
+export function getDecision(db: DbReader, id: DecisionId): DecisionRow {
+  const row = db.select().from(schema.decisions).where(eq(schema.decisions.id, id)).get();
+  if (!row) throw new NotFoundError('decision', id);
+  return row;
+}
+
+/** The decision that replaced this one and has not been withdrawn, or null when this is the head. */
+export function decisionSuccessor(db: DbReader, id: DecisionId): DecisionId | null {
+  return (
+    db
+      .select({ id: schema.decisions.id })
+      .from(schema.decisions)
+      .where(and(eq(schema.decisions.supersedesId, id), isNull(schema.decisions.withdrawnAt)))
+      .get()?.id ?? null
+  );
+}
+
+/**
+ * Withdraws a decision: the row stays as a tombstone with who, when and why, and search and the
+ * context pack skip it. Only the head of a supersede chain can be withdrawn, so withdrawing a link
+ * never makes its predecessor current beside its successor (M3 plan K1, K3; Shape spec §11).
+ */
+export function withdrawDecision(
+  ctx: WriteContext,
+  id: DecisionId,
+  input: { readonly by: string; readonly reason: string },
+): void {
+  const reason = input.reason.trim();
+  if (reason === '') throw new InvalidError('Say why the decision is withdrawn');
+  const decision = getDecision(ctx.tx, id);
+  if (decision.withdrawnAt !== null) throw new ConflictError('This decision is already withdrawn');
+  const successor = decisionSuccessor(ctx.tx, id);
+  if (successor !== null)
+    throw new ConflictError(
+      `A later decision (${successor}) supersedes this one; withdraw that one first`,
+    );
+  ctx.tx
+    .update(schema.decisions)
+    .set({
+      withdrawnAt: ctx.now,
+      withdrawnBy: input.by,
+      withdrawnReason: reason,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.decisions.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.DecisionWithdrawn,
+    entityType: 'decision',
+    entityId: id,
+    data: { projectId: decision.projectId, reason },
+  });
 }
 
 export function insertDeviation(
@@ -161,6 +227,10 @@ export function searchDecisions(
     SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice, d.rationale AS rationale
     FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
     WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
+      AND d.withdrawn_at IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM decisions s WHERE s.supersedes_id = d.id AND s.withdrawn_at IS NULL
+      )
     ORDER BY bm25(decisions_fts), d.id
     LIMIT ${limit}
   `);
@@ -180,7 +250,16 @@ export function listRecentDecisions(
       rationale: schema.decisions.rationale,
     })
     .from(schema.decisions)
-    .where(or(eq(schema.decisions.projectId, projectId), isNull(schema.decisions.projectId)))
+    .where(
+      and(
+        or(eq(schema.decisions.projectId, projectId), isNull(schema.decisions.projectId)),
+        isNull(schema.decisions.withdrawnAt),
+        // A decision a later one replaced is history, not context.
+        sql`NOT EXISTS (
+          SELECT 1 FROM decisions s WHERE s.supersedes_id = ${schema.decisions.id} AND s.withdrawn_at IS NULL
+        )`,
+      ),
+    )
     .orderBy(desc(schema.decisions.id))
     .limit(limit)
     .all()

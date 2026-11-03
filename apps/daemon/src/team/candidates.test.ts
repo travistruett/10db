@@ -98,7 +98,7 @@ describe('proposeCandidates for a goal', () => {
           tasks: areas.map((area) => ({ key: area, title: `goal ${area}`, areas: [area] })),
         },
       }),
-    );
+    ).goal;
 
   it('limits the pool to the goal and fills the count with its tasks', () => {
     const own = wide();

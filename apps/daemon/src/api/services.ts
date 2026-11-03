@@ -51,6 +51,7 @@ import type {
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
+  DecisionId,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -65,6 +66,17 @@ import type {
   ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
+  ShapeConvertInput,
+  ShapeConvertResult,
+  ShapeDto,
+  ShapeFileDto,
+  ShapeId,
+  ShapeInput,
+  ShapeMessageDto,
+  ShapeProposalId,
+  ShapeProposeResult,
+  ShapeViewDto,
+  StartShapeInput,
   StepPlanDto,
   StartTaskInput,
   SystemCheckDto,
@@ -91,6 +103,11 @@ export type GoalAdoptResult =
   | { readonly kind: 'adopted'; readonly goal: GoalDto }
   | { readonly kind: 'previewed'; readonly preview: GoalAdoptPreview }
   | { readonly kind: 'refused'; readonly errors: GoalAdoptIssue[] };
+
+/** What Convert came to: what it created, or every reason it was refused (nothing written). */
+export type ShapeConvertOutcome =
+  | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
+  | { readonly kind: 'refused'; readonly errors: string[] };
 
 /** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
@@ -178,6 +195,52 @@ export interface ApiServices {
    * advances to now. Throws NotFoundError for an unknown goal.
    */
   openGoalDigest(goalId: GoalId): GoalDigestDto;
+  /** The project's Shape conversations, the one touched last first. Throws NotFoundError for an unknown project. */
+  listShapes(projectId: ProjectId): ShapeDto[];
+  /** Opens a conversation; with no title it is named by its first message. */
+  createShape(projectId: ProjectId, input: ShapeInput): ShapeDto;
+  /** Everything the Shape screen renders for the conversation. Throws NotFoundError for an unknown one. */
+  getShapeView(id: ShapeId): ShapeViewDto;
+  /** Records a builder message and queues Claude's turn on it. */
+  sendShapeMessage(id: ShapeId, text: string): ShapeMessageDto;
+  /** Queues a Propose turn, or ignores the press while one is queued or running. */
+  proposeShape(id: ShapeId): ShapeProposeResult;
+  /** Interrupts the turn that is running; answering when nothing runs is a no-op. */
+  stopShape(id: ShapeId): Promise<void>;
+  /**
+   * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
+   * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
+   * caller asks to interrupt it.
+   */
+  convertShape(id: ShapeId, input: ShapeConvertInput): Promise<ShapeConvertOutcome>;
+  /**
+   * Remove Draft Goal: removes a goal a conversation made while none of its tasks has started, and
+   * makes its proposal pending again. Throws InvalidError for any other goal.
+   */
+  removeDraftGoal(goalId: GoalId): void;
+  /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
+  withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
+  /**
+   * The builder's actions on a proposal row: edit sets fields and pins them, unpin lets a field (or the
+   * whole row) go, restore brings a row back from Earlier pinned, drop tombstones its key. Throws
+   * NotFoundError for a row of another conversation, ConflictError for a converted or dropped one and
+   * InvalidError for an edit that does not fit.
+   */
+  editShapeProposal(
+    shapeId: ShapeId,
+    id: ShapeProposalId,
+    fields: Readonly<Record<string, unknown>>,
+  ): void;
+  unpinShapeProposal(shapeId: ShapeId, id: ShapeProposalId, field?: string): void;
+  restoreShapeProposal(shapeId: ShapeId, id: ShapeProposalId): void;
+  dropShapeProposal(shapeId: ShapeId, id: ShapeProposalId): void;
+  /** Keeps a dropped file; throws InvalidError naming the file and the reason when it is refused. */
+  addShapeFile(
+    shapeId: ShapeId,
+    file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
+  ): ShapeFileDto;
+  /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
+  startShape(input: StartShapeInput): ShapeDto;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;
