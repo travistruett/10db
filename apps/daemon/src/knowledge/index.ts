@@ -1,7 +1,7 @@
 export { workstreamAreas } from './areas';
 export { proposeStandingRules, recordAnswerDecision } from './capture';
 export { decisionHit, principleHit } from './hits';
-export { repairKnowledgeIndex, type KnowledgeIndexRepair } from './index-health';
+export { repairKnowledgeIndex } from './index-health';
 export { decisionItem, draftOf, principleItem } from './items';
 export { CONTEXT_PACK_BUDGET_TOKENS, PACK_SEARCH_LIMIT, packKnowledge } from './pack';
 export {
