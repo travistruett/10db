@@ -1,12 +1,4 @@
-import {
-  ActionIcon,
-  Group,
-  Paper,
-  ScrollArea,
-  Stack,
-  Text,
-  VisuallyHidden,
-} from '@mantine/core';
+import { ActionIcon, Group, Paper, ScrollArea, Stack, Text, VisuallyHidden } from '@mantine/core';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
 
