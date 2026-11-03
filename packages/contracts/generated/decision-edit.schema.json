@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "description": "Needed only to move a \"you\" record into a project.",
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "you",
+        "project",
+        "area"
+      ]
+    },
+    "area": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "choice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "via": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The tool that wrote it, such as claude_code."
+        },
+        "sessionId": {
+          "description": "The tool's own session id.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "quote": {
+          "description": "The builder's own words.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "via"
+      ],
+      "additionalProperties": false
+    },
+    "dryRun": {
+      "description": "Write nothing; answer what would be written.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

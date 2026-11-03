@@ -100,6 +100,23 @@ import type {
   WorkstreamChangesDto,
   WorkstreamDto,
   WorkstreamId,
+  DecisionEdit,
+  DecisionItem,
+  DecisionWrite,
+  KnowledgeDryRunDto,
+  KnowledgeListDto,
+  KnowledgeListQuery,
+  KnowledgeReason,
+  PrincipleEdit,
+  PrincipleId,
+  PrincipleItem,
+  PrincipleWrite,
+  ProposalDto,
+  ProposalId,
+  ProposalListQuery,
+  ProposalVerdictAccept,
+  ProposalVerdictReject,
+  ProvenanceDto,
 } from '@10db/contracts';
 
 /** What starting a task made: its workstream in local delivery, the batch it runs in for pull requests. */
@@ -391,4 +408,26 @@ export interface ApiServices {
   listAccountPauses(): AccountPauseDto[];
   /** Lifts a refused or monthly-cap pause and answers the pauses still in force; a usage-limit pause is a conflict. */
   resumeAccount(id: AccountId): AccountPauseDto[];
+  /**
+   * A project's decisions and principles together, builder-wide ones included. With `q` and a broken
+   * search index the list is empty and `search.available` is false. Throws NotFoundError for an unknown
+   * project and InvalidError for an area it lacks.
+   */
+  listKnowledge(projectId: ProjectId, query: KnowledgeListQuery): KnowledgeListDto;
+  /** Records a decision; with `dryRun` writes nothing and says what would be written. */
+  recordDecision(projectId: ProjectId, body: DecisionWrite): DecisionItem | KnowledgeDryRunDto;
+  /** Replaces a current decision; a decision that isn't current is a ConflictError naming the one that is. */
+  supersedeDecision(id: DecisionId, body: DecisionEdit): DecisionItem | KnowledgeDryRunDto;
+  withdrawDecision(id: DecisionId, body: KnowledgeReason): DecisionItem;
+  decisionProvenance(id: DecisionId): ProvenanceDto;
+  createPrinciple(projectId: ProjectId, body: PrincipleWrite): PrincipleItem | KnowledgeDryRunDto;
+  supersedePrinciple(id: PrincipleId, body: PrincipleEdit): PrincipleItem | KnowledgeDryRunDto;
+  retirePrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem;
+  withdrawPrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem;
+  principleProvenance(id: PrincipleId): ProvenanceDto;
+  /** A project's principle proposals in one status, oldest first. */
+  listProposals(projectId: ProjectId, query: ProposalListQuery): ProposalDto[];
+  /** Confirms a proposed principle and closes its card; a decided proposal is a ConflictError. */
+  acceptProposal(id: ProposalId, body: ProposalVerdictAccept): ProposalDto | KnowledgeDryRunDto;
+  rejectProposal(id: ProposalId, body: ProposalVerdictReject): ProposalDto;
 }

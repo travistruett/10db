@@ -98,6 +98,20 @@ export function decisionSuccessor(db: DbReader, id: DecisionId): DecisionId | nu
   );
 }
 
+/** The current decision of the chain `id` belongs to: `id` itself when nothing live replaced it. */
+export function decisionHead(db: DbReader, id: DecisionId): DecisionId {
+  let head = id;
+  for (let next = decisionSuccessor(db, head); next !== null; next = decisionSuccessor(db, head))
+    head = next;
+  return head;
+}
+
+/** Where a script is told which decision to use instead, when the one it named is not current. */
+function currentOne(db: DbReader, id: DecisionId): string {
+  const head = decisionHead(db, id);
+  return head === id ? '' : ` (the current one is ${head})`;
+}
+
 export interface DecisionFilter {
   readonly projectId: ProjectId;
   readonly scope?: KnowledgeScope;
@@ -143,7 +157,7 @@ export function supersedeDecision(
   const old = getDecisionDto(ctx.tx, id);
   if (old.state !== KnowledgeState.Current)
     throw new ConflictError(
-      `Decision ${id} is ${old.state}; only a current decision can be superseded`,
+      `Decision ${id} is ${old.state}; only a current decision can be superseded${currentOne(ctx.tx, id)}`,
     );
   return insertDecision(ctx, { ...input, supersedesId: id });
 }
@@ -163,10 +177,12 @@ export function withdrawDecision(
   const decision = getDecision(ctx.tx, id);
   if (decision.withdrawnAt !== null) throw new ConflictError('This decision is already withdrawn');
   const successor = decisionSuccessor(ctx.tx, id);
-  if (successor !== null)
+  if (successor !== null) {
+    const head = decisionHead(ctx.tx, id);
     throw new ConflictError(
-      `A later decision (${successor}) supersedes this one; withdraw that one first`,
+      `A later decision (${successor}) supersedes this one; withdraw that one first${head === successor ? '' : ` (the current one is ${head})`}`,
     );
+  }
   ctx.tx
     .update(schema.decisions)
     .set({

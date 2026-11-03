@@ -10,8 +10,19 @@ import {
   BoardColumnInput,
   BoardColumnPatch,
   AreaProposalInput,
+  DecisionEdit,
   DecisionId,
+  DecisionWrite,
   DomainError,
+  KnowledgeListQuery,
+  KnowledgeReason,
+  PrincipleEdit,
+  PrincipleId,
+  PrincipleWrite,
+  ProposalId,
+  ProposalListQuery,
+  ProposalVerdictAccept,
+  ProposalVerdictReject,
   EventsHead,
   FlowId,
   FlowInput,
@@ -277,6 +288,122 @@ export function createApp(deps: ApiDeps) {
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),
+        ),
+    )
+    // The builder's knowledge (docs/knowledge-api.md): one list, writes with dry runs, provenance.
+    .get(
+      '/projects/:projectId/knowledge',
+      validator('query', (value): KnowledgeListQuery => KnowledgeListQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.listKnowledge(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query'),
+          ),
+        ),
+    )
+    .post(
+      '/projects/:projectId/decisions',
+      validator('json', (value): DecisionWrite => DecisionWrite.parse(value)),
+      (c) => {
+        const out = deps.services.recordDecision(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        return 'dryRun' in out ? c.json(out, 200) : c.json(out, 201);
+      },
+    )
+    .post(
+      '/decisions/:id/supersede',
+      validator('json', (value): DecisionEdit => DecisionEdit.parse(value)),
+      (c) => {
+        const out = deps.services.supersedeDecision(
+          DecisionId.parse(c.req.param('id')),
+          c.req.valid('json'),
+        );
+        return 'dryRun' in out ? c.json(out, 200) : c.json(out, 201);
+      },
+    )
+    .post(
+      '/decisions/:id/withdraw',
+      validator('json', (value): KnowledgeReason => KnowledgeReason.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.withdrawDecision(DecisionId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .get('/decisions/:id/provenance', (c) =>
+      c.json(deps.services.decisionProvenance(DecisionId.parse(c.req.param('id')))),
+    )
+    .post(
+      '/projects/:projectId/principles',
+      validator('json', (value): PrincipleWrite => PrincipleWrite.parse(value)),
+      (c) => {
+        const out = deps.services.createPrinciple(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.valid('json'),
+        );
+        return 'dryRun' in out ? c.json(out, 200) : c.json(out, 201);
+      },
+    )
+    .post(
+      '/principles/:id/supersede',
+      validator('json', (value): PrincipleEdit => PrincipleEdit.parse(value)),
+      (c) => {
+        const out = deps.services.supersedePrinciple(
+          PrincipleId.parse(c.req.param('id')),
+          c.req.valid('json'),
+        );
+        return 'dryRun' in out ? c.json(out, 200) : c.json(out, 201);
+      },
+    )
+    .post(
+      '/principles/:id/retire',
+      validator('json', (value): KnowledgeReason => KnowledgeReason.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.retirePrinciple(PrincipleId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .post(
+      '/principles/:id/withdraw',
+      validator('json', (value): KnowledgeReason => KnowledgeReason.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.withdrawPrinciple(
+            PrincipleId.parse(c.req.param('id')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/principles/:id/provenance', (c) =>
+      c.json(deps.services.principleProvenance(PrincipleId.parse(c.req.param('id')))),
+    )
+    .get(
+      '/projects/:projectId/proposals',
+      validator('query', (value): ProposalListQuery => ProposalListQuery.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.listProposals(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('query'),
+          ),
+        ),
+    )
+    .post(
+      '/proposals/:id/accept',
+      validator('json', (value): ProposalVerdictAccept => ProposalVerdictAccept.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.acceptProposal(ProposalId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .post(
+      '/proposals/:id/reject',
+      validator('json', (value): ProposalVerdictReject => ProposalVerdictReject.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.rejectProposal(ProposalId.parse(c.req.param('id')), c.req.valid('json')),
         ),
     )
     .get('/shape-measures', (c) => c.json(deps.services.shapeMeasures()))

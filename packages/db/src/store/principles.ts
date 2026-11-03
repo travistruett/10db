@@ -65,6 +65,34 @@ export function getPrinciple(db: DbReader, id: PrincipleId): PrincipleDto {
   return row;
 }
 
+/** The stored row, for the columns a `PrincipleDto` leaves out: who retired or withdrew it. */
+export function getPrincipleRow(
+  db: DbReader,
+  id: PrincipleId,
+): typeof schema.principles.$inferSelect {
+  const row = db.select().from(schema.principles).where(eq(schema.principles.id, id)).get();
+  if (!row) throw new NotFoundError('principle', id);
+  return row;
+}
+
+/** The principle that replaced the chain `id` belongs to, or `id` itself when it is the head. */
+export function principleHead(db: DbReader, id: PrincipleId): PrincipleId {
+  let head = id;
+  for (
+    let next = getPrinciple(db, head).supersededById;
+    next !== null;
+    next = getPrinciple(db, head).supersededById
+  )
+    head = next;
+  return head;
+}
+
+/** What a 409 adds when the principle named is superseded: the one to use instead. */
+function currentOne(db: DbReader, p: PrincipleDto): string {
+  if (p.state !== KnowledgeState.Superseded) return '';
+  return ` (the current one is ${principleHead(db, p.id)})`;
+}
+
 /** The target a stored principle applies to. */
 function targetOf(p: PrincipleDto): KnowledgeTarget {
   switch (p.scope) {
@@ -219,7 +247,7 @@ export function supersedePrinciple(
   const old = getPrinciple(ctx.tx, id);
   if (old.state !== KnowledgeState.Current)
     throw new ConflictError(
-      `Principle ${id} is ${old.state}; only a current principle can be superseded`,
+      `Principle ${id} is ${old.state}; only a current principle can be superseded${currentOne(ctx.tx, old)}`,
     );
   const target = input.target ?? targetOf(old);
   const topicKey = input.topicKey ?? old.topicKey;
@@ -258,7 +286,7 @@ export function retirePrinciple(
   const current = getPrinciple(ctx.tx, id);
   if (current.state !== KnowledgeState.Current)
     throw new ConflictError(
-      `Principle ${id} is ${current.state}; only a current principle can be retired`,
+      `Principle ${id} is ${current.state}; only a current principle can be retired${currentOne(ctx.tx, current)}`,
     );
   ctx.tx
     .update(schema.principles)
@@ -301,10 +329,12 @@ export function withdrawPrinciple(
 ): PrincipleDto {
   const why = requireReason(reason, 'withdrawn');
   const current = getPrinciple(ctx.tx, id);
-  if (current.supersededById !== null)
+  if (current.supersededById !== null) {
+    const head = principleHead(ctx.tx, id);
     throw new ConflictError(
-      `A later principle (${current.supersededById}) supersedes principle ${id}; only the head of a chain can be withdrawn`,
+      `A later principle (${current.supersededById}) supersedes principle ${id}; only the head of a chain can be withdrawn${head === current.supersededById ? '' : ` (the current one is ${head})`}`,
     );
+  }
   if (current.state !== KnowledgeState.Current && current.state !== KnowledgeState.Proposed)
     throw new ConflictError(
       `Principle ${id} is ${current.state}; only a current or proposed principle can be withdrawn`,

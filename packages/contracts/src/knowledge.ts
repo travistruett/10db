@@ -223,10 +223,31 @@ export const ProposalReject = z.object({ note: z.string().max(4000).optional() }
 export type ProposalReject = z.infer<typeof ProposalReject>;
 
 /** Where a record came from, resolved from its `sources` row (spec §9 provenance). */
+const Actor = z.object({ at: Timestamp, by: z.string().nullable(), reason: z.string().nullable() });
+
 export const ProvenanceDto = z.object({
+  /** The record this answers for. */
+  id: z.union([DecisionId, PrincipleId]),
+  kind: z.enum(['decision', 'principle']),
+  state: z.enum(KnowledgeState),
   sourceKind: z.enum(SourceKind),
+  /** The `sources` row's own JSON, as stored. */
+  sourceRef: z.record(z.string(), z.json()),
+  /** For a source written through the builder API: the tool, its session and its working directory. */
+  origin: z
+    .object({
+      via: z.string(),
+      sessionId: z.string().nullable(),
+      cwd: z.string().nullable(),
+    })
+    .nullable(),
   recordedAt: Timestamp,
   by: z.string(),
+  /** The record this one replaced, and the one that replaced it. */
+  supersedes: z.union([DecisionId, PrincipleId]).nullable(),
+  supersededBy: z.union([DecisionId, PrincipleId]).nullable(),
+  retired: Actor.nullable(),
+  withdrawn: Actor.nullable(),
   inbox: z
     .object({
       id: InboxItemId,

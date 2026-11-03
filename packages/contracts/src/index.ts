@@ -19,6 +19,7 @@ export { HealthResponse } from './health';
 export * from './ids';
 export * from './judge';
 export * from './knowledge';
+export * from './knowledge-api';
 export { CONTRACT_SCHEMAS, renderJsonSchemas } from './json-schema';
 export * from './landing';
 export * from './mcp-tools';

@@ -1,6 +1,7 @@
 import {
   ConflictError,
   InboxKind,
+  InboxState,
   InvalidError,
   KnowledgeScope,
   PrincipleStatus,
@@ -25,11 +26,13 @@ import {
 import {
   BUILDER_HANDLE,
   confirmPrinciple,
+  findOpenProposalCard,
   getProposalDto,
   insertInboxItem,
   insertPrinciple,
   insertProposal,
   resolveProposal,
+  updateInboxItem,
   withdrawPrinciple,
   type WriteContext,
 } from '@10db/db';
@@ -227,7 +230,7 @@ export function acceptProposal(
  * Rejects a proposal; a proposed principle is withdrawn with the note as its reason, or `noNoteReason`
  * when the builder wrote none (spec §9 tombstones).
  */
-function rejectProposal(
+export function rejectProposal(
   ctx: WriteContext,
   id: ProposalId,
   note: string | null,
@@ -241,6 +244,29 @@ function rejectProposal(
   }
   resolveProposal(ctx, id, { status: ProposalStatus.Rejected, rationale: note });
   return getProposalDto(ctx.tx, id);
+}
+
+/**
+ * Closes a proposal's open card after the builder decided the proposal some other way (the knowledge
+ * routes), with the verdict the card would have taken. A decided proposal's card must not stay open
+ * asking the same question.
+ */
+export function closeProposalCard(ctx: WriteContext, proposal: ProposalDto, note?: string): void {
+  const card = findOpenProposalCard(ctx.tx, proposal.id);
+  if (!card) return;
+  const { principle } = proposal;
+  const choice =
+    proposal.status === ProposalStatus.Accepted && principle
+      ? {
+          [KnowledgeScope.You]: PrincipleVerdict.AcceptYou,
+          [KnowledgeScope.Project]: PrincipleVerdict.AcceptProject,
+          [KnowledgeScope.Area]: PrincipleVerdict.AcceptArea,
+        }[principle.scope]
+      : PrincipleVerdict.Reject;
+  updateInboxItem(ctx, card.id, {
+    state: InboxState.Resolved,
+    answer: note === undefined || note === '' ? { choice } : { choice, note },
+  });
 }
 
 /**

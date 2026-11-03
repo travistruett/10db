@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "description": "Default: the proposal's own.",
+      "type": "string",
+      "enum": [
+        "you",
+        "project",
+        "area"
+      ]
+    },
+    "area": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "policy",
+        "heuristic",
+        "belief"
+      ]
+    },
+    "topicKey": {
+      "type": "string",
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "note": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "dryRun": {
+      "description": "Write nothing; answer what would be written.",
+      "type": "boolean"
+    }
+  },
+  "additionalProperties": false
+}

@@ -6,5 +6,5 @@ export function checkTarget(db: DbReader, target: KnowledgeTarget): void {
   if (target.scope === KnowledgeScope.You) return;
   const project = getProject(db, target.projectId);
   if (target.scope === KnowledgeScope.Area && !project.areas.some((a) => a.name === target.area))
-    throw new InvalidError(`${project.name} has no area named ${target.area}`);
+    throw new InvalidError(`area: ${project.name} has no area named ${target.area}`);
 }

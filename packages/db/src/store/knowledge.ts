@@ -30,6 +30,15 @@ export function insertSource(
   return id;
 }
 
+export type SourceRow = typeof schema.sources.$inferSelect;
+
+/** The `sources` row a record points at, for its provenance. */
+export function getSource(db: DbReader, id: SourceId): SourceRow {
+  const row = db.select().from(schema.sources).where(eq(schema.sources.id, id)).get();
+  if (!row) throw new NotFoundError('source', id);
+  return row;
+}
+
 export function insertDeviation(
   ctx: WriteContext,
   input: {
