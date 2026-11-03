@@ -116,10 +116,15 @@ export function UngroupedDetail({
   readonly workstreamIds: readonly WorkstreamId[];
 }) {
   const sessions = useSessions((ws) => workstreamIds.includes(ws.id));
+  const { project } = useSelectedProject();
+  const tasks = useTasks(project?.id ?? null);
+  const batches = useBatches(project?.id ?? null);
   return (
     <GoalSessions
       goalId={null}
       workstreams={sessions.all}
+      tasks={tasks.data ?? []}
+      batches={batches.data ?? []}
       loading={sessions.loading}
       error={sessions.error}
     />

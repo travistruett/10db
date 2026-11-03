@@ -128,7 +128,14 @@ describe('FactoryView goal list', () => {
         state: ws.state,
       })),
     });
-    serve(goals({ ...goalListDto(), ungrouped }), workstreams(running, failed));
+    serve(
+      goals({ ...goalListDto(), ungrouped }),
+      workstreams(running, failed),
+      tasksOf(
+        taskDto({ id: running.taskId, workstreamId: running.id }),
+        taskDto({ id: failed.taskId, workstreamId: failed.id }),
+      ),
+    );
     renderApp('/factory');
 
     const row = await screen.findByRole('button', { name: /^Not in a goal/ });
@@ -140,9 +147,56 @@ describe('FactoryView goal list', () => {
     const region = await screen.findByRole('region', { name: 'Not in a goal' });
     expect(await within(region).findByText('Loose run')).toBeTruthy();
     expect(within(region).getByText('Loose break')).toBeTruthy();
-    expect(within(region).getByText('The run failed. Retry runs it again.')).toBeTruthy();
+    expect(await within(region).findByText('The run failed. Retry runs it again.')).toBeTruthy();
     expect(within(region).queryByRole('heading', { name: 'Pull requests' })).toBeNull();
   });
+
+  it.each([
+    { name: 'parked', task: { boardColumnId: mintId('BoardColumn') }, batch: undefined },
+    {
+      name: 'replaced by a newer run',
+      task: { workstreamId: mintId('Workstream') },
+      batch: undefined,
+    },
+    { name: 'in a batch that shipped without a pull request', task: {}, batch: 'shipped' },
+  ])(
+    'says only what happened, with no Retry, on a Not in a goal row whose task is $name',
+    async ({ task, batch }) => {
+      const shipped = batchDto({ state: 'SHIPPED', prUrl: null });
+      const failed = workstreamDto({
+        taskTitle: 'Loose break',
+        state: 'FAILED',
+        batchId: batch ? shipped.id : null,
+      });
+      const ungrouped = ungroupedDto({
+        status: 'failed',
+        failed: 1,
+        workstreams: [
+          {
+            workstreamId: failed.id,
+            taskId: failed.taskId,
+            taskTitle: failed.taskTitle,
+            state: failed.state,
+          },
+        ],
+      });
+      serve(
+        goals({ ...goalListDto(), ungrouped }),
+        workstreams(failed),
+        tasksOf(taskDto({ id: failed.taskId, workstreamId: failed.id, ...task })),
+        http.get(daemonUrl('/projects/:projectId/batches'), () =>
+          HttpResponse.json(batch ? [shipped] : []),
+        ),
+      );
+      renderApp('/factory');
+
+      fireEvent.click(await screen.findByRole('button', { name: /^Not in a goal/ }));
+      const region = await screen.findByRole('region', { name: 'Not in a goal' });
+      expect(await within(region).findByText('The run failed.')).toBeTruthy();
+      expect(within(region).queryByText(/Retry/)).toBeNull();
+      expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
+    },
+  );
 
   it('orders goals failed, waiting on you, running, not started, Not in a goal, then Done, all collapsed', async () => {
     const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
@@ -683,6 +737,7 @@ describe('FactoryView task list', () => {
           headline: ws.taskHeadline,
           goalId: summary.goal.id,
           boardStatus: 'in_progress',
+          workstreamId: ws.id,
           ...task,
         }),
       ),
@@ -724,7 +779,7 @@ describe('FactoryView task list', () => {
       // The row says it failed; the plain line and Retry are in Needs you.
       expect(within(row).getByText('Failed')).toBeTruthy();
       const region = screen.getByRole('region', { name: 'Real areas' });
-      const line = within(region).getByText(`Failed: Broken. ${failureLine(failed)}`);
+      const line = within(region).getByText(`Failed: Broken. ${failureLine(failed, true)}`);
       expect(screen.queryByText('The gate failed 4 times (last exit 2)')).toBeNull();
       fireEvent.mouseEnter(line);
       expect(await screen.findByText('The gate failed 4 times (last exit 2)')).toBeTruthy();
@@ -759,6 +814,52 @@ describe('FactoryView task list', () => {
     await waitFor(() => {
       expect(retried).toEqual([failed.id]);
     });
+  });
+
+  it.each([
+    { name: 'parked', task: { boardColumnId: mintId('BoardColumn') } },
+    { name: 'replaced by a newer run', task: { workstreamId: mintId('Workstream') } },
+  ])(
+    'says only what happened, with no Retry, when the task is $name and the daemon would refuse',
+    async ({ task }) => {
+      const failed = workstreamDto({
+        taskTitle: 'Broken',
+        state: 'FAILED',
+        failureKind: 'gate_failed',
+      });
+      open(failed, [], task);
+
+      await sessionRow('Broken');
+      const region = screen.getByRole('region', { name: 'Real areas' });
+      expect(
+        within(region).getByText(
+          'Failed: Broken. The checks kept failing and the run ran out of fix attempts.',
+        ),
+      ).toBeTruthy();
+      expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
+    },
+  );
+
+  it('says only what happened, with no Retry, when the failed run’s batch shipped without a pull request', async () => {
+    const batch = batchDto({ state: 'SHIPPED', prUrl: null });
+    const failed = workstreamDto({
+      taskTitle: 'Broken',
+      state: 'FAILED',
+      failureKind: 'gate_failed',
+      batchId: batch.id,
+    });
+    open(failed, [
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+    ]);
+
+    await sessionRow('Broken');
+    const region = screen.getByRole('region', { name: 'Real areas' });
+    expect(
+      await within(region).findByText(
+        'Failed: Broken. The checks kept failing and the run ran out of fix attempts.',
+      ),
+    ).toBeTruthy();
+    expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('names a task by its headline, and by its title when it has none', async () => {
