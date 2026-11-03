@@ -76,7 +76,7 @@ import {
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
-import { asImage, checkDroppedFile, storeFile } from './dropped-files';
+import { asImage, checkDroppedFile, shapeFilesDir, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import {
   proposeNote,
@@ -115,7 +115,8 @@ export interface ShapeLaunch {
   readonly effort: Effort;
   readonly env: Readonly<Record<string, string>>;
   readonly account: AccountExpectation;
-  readonly access: ShapeAccess;
+  /** Where the session may read; the service adds the conversation's own files directory. */
+  readonly access: Omit<ShapeAccess, 'filesDir'>;
 }
 
 export interface ShapeServiceDeps {
@@ -533,6 +534,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const start = (shapeId: ShapeId, rt: Runtime, turn: Turn, intake: Intake): void => {
     const shape = getShape(state.db, shapeId);
     const launch = deps.launch(shape.projectId);
+    // Only this conversation's files: another conversation's, in the same project or not, stay unread.
+    const access: ShapeAccess = {
+      ...launch.access,
+      filesDir: shapeFilesDir(deps.filesDir, shapeId),
+    };
     const resumeId = getShapeSdkSessionId(state.db, shapeId);
     const transcript = listShapeMessages(state.db, shapeId);
     const parts: string[] = [];
@@ -604,7 +610,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             agentId: req.agentId,
             agentType: req.agentType,
           },
-          launch.access,
+          access,
         );
         if (verdict.decision === 'deny')
           say(

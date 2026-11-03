@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EventType,
@@ -44,6 +44,23 @@ async function nextTurn(text = 'Here you go', id = shapeId()): Promise<FakeShape
   await f.service.settled(id);
   return must(seen.turn, 'a turn');
 }
+
+describe('what a session may read of the dropped files', () => {
+  it('is its own conversation’s files directory, and no other conversation’s', async () => {
+    const own = drop('brief.md', Buffer.from('# The brief'));
+    const other = join(f.filesDir, 'shp_other', 'files', 'secret.md');
+    mkdirSync(join(f.filesDir, 'shp_other', 'files'), { recursive: true });
+    writeFileSync(other, 'another project’s document');
+    await nextTurn('Read this');
+    const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+    const read = (file_path: string) => spec.preToolUse({ toolName: 'Read', input: { file_path } });
+    expect(read(own.storedPath)).toEqual({ decision: 'allow' });
+    expect(read(other)).toMatchObject({ decision: 'deny' });
+    expect(
+      spec.preToolUse({ toolName: 'Glob', input: { pattern: '*', path: f.filesDir } }),
+    ).toMatchObject({ decision: 'deny' });
+  });
+});
 
 describe('a dropped text file', () => {
   it('is copied under the conversation’s files directory and listed', () => {

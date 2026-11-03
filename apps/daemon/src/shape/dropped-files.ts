@@ -73,6 +73,10 @@ export function asImage(kind: ShapeFileKind, bytes: Uint8Array): ShapeImage | nu
   return { mediaType: kind, data: Buffer.from(bytes).toString('base64') };
 }
 
+/** Where a conversation's dropped files are kept, and the only place its session may read them. */
+export const shapeFilesDir = (filesRoot: string, shapeId: ShapeId): string =>
+  join(filesRoot, shapeId, 'files');
+
 /** Writes the file under the conversation's files directory, never over another, and answers its path. */
 export function storeFile(
   filesRoot: string,
@@ -80,7 +84,7 @@ export function storeFile(
   name: string,
   bytes: Uint8Array,
 ): string {
-  const dir = join(filesRoot, shapeId, 'files');
+  const dir = shapeFilesDir(filesRoot, shapeId);
   mkdirSync(dir, { recursive: true });
   const ext = extname(name);
   const stem = name.slice(0, name.length - ext.length);

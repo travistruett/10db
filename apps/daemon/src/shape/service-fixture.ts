@@ -58,7 +58,6 @@ export function createServiceFixture(opts: { trackedFiles?: TrackedFiles } = {})
           checkout: '/repo',
           home: '/home',
           protectedReads: [],
-          filesDir,
           tempRoot: '/tmp/10db',
         },
       }),
