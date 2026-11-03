@@ -2015,8 +2015,10 @@ describe('worktree checkouts', () => {
       watcher.sync();
       editCard(a, SENSITIVE_FILE, 'allow_once', a.path);
       // The stamp of A's file never finishes until released: a file too big to hash quickly.
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
       let release: (r: { reason: 'too-large' }) => void = () => undefined;
-      vi.mocked(stampOrReason).mockImplementationOnce(
+      stamp.mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             release = resolve;
@@ -2024,6 +2026,11 @@ describe('worktree checkouts', () => {
       );
       writeAt(a.path, SENSITIVE_FILE);
       const flushing = watcher.flush();
+      // B's write comes only once A's stamp is held; otherwise release() could run before the stamp
+      // starts, be a no-op, and leave the stamp (and the test) waiting forever on a slow machine.
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
       writeAt(b.path, 'docs/stray.md');
       void watcher.flush();
       await vi.waitFor(() => {
