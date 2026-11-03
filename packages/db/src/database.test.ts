@@ -709,3 +709,104 @@ describe('migrating to lane time (Shape spec §8)', () => {
     expect(db.$client.pragma('foreign_key_check')).toEqual([]);
   });
 });
+
+describe('migrating to principles (M3 knowledge)', () => {
+  const AT = '2026-11-03T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before the principles table.
+    migrateDatabase(db, migrationsThrough('0034_blue_blindfold'));
+    const run = (sql: string, ...args: (string | number | null)[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(`INSERT INTO sources (id, kind, ref, created_at) VALUES ('src_a', 'builder', '{}', ?)`, AT);
+    run(
+      `INSERT INTO decisions (id, project_id, question, choice, rationale, decided_by, scope, source_id,
+         created_at, updated_at)
+       VALUES ('dec_a', 'prj_a', 'Which queue library?', 'BullMQ', 'Redis', 'me', 'project', 'src_a', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO decisions (id, project_id, question, choice, rationale, decided_by, scope, source_id,
+         withdrawn_at, withdrawn_by, withdrawn_reason, created_at, updated_at)
+       VALUES ('dec_w', 'prj_a', 'Which cache?', 'Memcached', 'Old', 'me', 'project', 'src_a',
+         ?, 'me', 'wrong', ?, ?)`,
+      AT,
+      AT,
+      AT,
+    );
+    migrateDatabase(db);
+  });
+
+  const principleHits = (term: string): unknown[] =>
+    db.$client
+      .prepare(
+        `SELECT p.id FROM principles_fts f JOIN principles p ON p.rowid = f.rowid
+         WHERE principles_fts MATCH ?`,
+      )
+      .pluck()
+      .all(term);
+
+  it('keeps every decision and its search results', () => {
+    expect(db.$client.prepare('SELECT id, choice FROM decisions ORDER BY id').all()).toEqual([
+      { id: 'dec_a', choice: 'BullMQ' },
+      { id: 'dec_w', choice: 'Memcached' },
+    ]);
+    expect(
+      db.$client
+        .prepare(
+          `SELECT d.id FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
+           WHERE decisions_fts MATCH 'queue'`,
+        )
+        .pluck()
+        .all(),
+    ).toEqual(['dec_a']);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('gains an empty principles table with a working full-text index', () => {
+    expect(db.$client.prepare('SELECT count(*) FROM principles').pluck().get()).toBe(0);
+    db.$client
+      .prepare(
+        `INSERT INTO principles (id, project_id, scope, statement, kind, topic_key, status, source_id,
+           source_quote, created_at, updated_at)
+         VALUES ('pri_a', 'prj_a', 'project', 'Never sleep in tests', 'policy', 'testing.no-sleeps',
+           'confirmed', 'src_a', 'wait on a condition', ?, ?)`,
+      )
+      .run(AT, AT);
+    expect(principleHits('sleep')).toEqual(['pri_a']);
+    expect(principleHits('testing')).toEqual(['pri_a']);
+    expect(principleHits('condition')).toEqual(['pri_a']);
+
+    db.$client
+      .prepare("UPDATE principles SET statement = 'Never poll in tests' WHERE id = 'pri_a'")
+      .run();
+    expect(principleHits('sleep')).toEqual([]);
+    expect(principleHits('poll')).toEqual(['pri_a']);
+  });
+
+  it('indexes the decisions successor lookup', () => {
+    expect(
+      db.$client
+        .prepare(
+          "SELECT name FROM pragma_index_list('decisions') WHERE name = 'decisions_supersedes_idx'",
+        )
+        .pluck()
+        .all(),
+    ).toEqual(['decisions_supersedes_idx']);
+  });
+});

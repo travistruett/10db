@@ -38,6 +38,7 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  KnowledgeScope,
   LandingGroupId,
   JudgeDecision,
   JudgeOutcome,
@@ -49,6 +50,9 @@ import type {
   PermissionRuleId,
   PersonaId,
   PersonId,
+  PrincipleId,
+  PrincipleKind,
+  PrincipleStatus,
   ProfileSource,
   ProjectId,
   ProjectLanding,
@@ -708,33 +712,84 @@ export const evidence = sqliteTable('evidence', {
   createdAt: createdAt(),
 });
 
-export const decisions = sqliteTable('decisions', {
-  id: text('id').$type<DecisionId>().primaryKey(),
-  projectId: text('project_id')
-    .$type<ProjectId>()
-    .references(() => projects.id),
-  question: text('question').notNull(),
-  choice: text('choice').notNull(),
-  rationale: text('rationale').notNull(),
-  decidedBy: text('decided_by').notNull(),
-  scope: text('scope').$type<'you' | 'project' | 'area'>().notNull(),
-  area: text('area'),
-  supersedesId: text('supersedes_id').$type<DecisionId>(),
-  sourceId: text('source_id')
-    .$type<SourceId>()
-    .notNull()
-    .references(() => sources.id),
-  /**
-   * A withdrawn decision is a tombstone: the row stays, search and the context pack skip it.
-   * `withdrawDecision` writes all three together and refuses an empty reason; no CHECK enforces it,
-   * since adding one rebuilds the table and drops its full-text triggers.
-   */
-  withdrawnAt: text('withdrawn_at'),
-  withdrawnBy: text('withdrawn_by'),
-  withdrawnReason: text('withdrawn_reason'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const decisions = sqliteTable(
+  'decisions',
+  {
+    id: text('id').$type<DecisionId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    question: text('question').notNull(),
+    choice: text('choice').notNull(),
+    rationale: text('rationale').notNull(),
+    decidedBy: text('decided_by').notNull(),
+    scope: text('scope').$type<KnowledgeScope>().notNull(),
+    area: text('area'),
+    supersedesId: text('supersedes_id').$type<DecisionId>(),
+    sourceId: text('source_id')
+      .$type<SourceId>()
+      .notNull()
+      .references(() => sources.id),
+    /**
+     * A withdrawn decision is a tombstone: the row stays, search and the context pack skip it.
+     * `withdrawDecision` writes all three together and refuses an empty reason; no CHECK enforces it,
+     * since adding one rebuilds the table and drops its full-text triggers.
+     */
+    withdrawnAt: text('withdrawn_at'),
+    withdrawnBy: text('withdrawn_by'),
+    withdrawnReason: text('withdrawn_reason'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // Every read derives state by looking up a successor through supersedes_id.
+  (t) => [index('decisions_supersedes_idx').on(t.supersedesId)],
+);
+
+/**
+ * Spec §4 `principles`. A row's state (current, superseded, …) is derived on read, never stored.
+ * Like `decisions`, the withdrawn columns carry no CHECK: adding one rebuilds the table and drops
+ * its full-text triggers, so the code that writes them enforces the reason.
+ */
+export const principles = sqliteTable(
+  'principles',
+  {
+    id: text('id').$type<PrincipleId>().primaryKey(),
+    /** Null for a `you` principle, which applies in every project. */
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    scope: text('scope').$type<KnowledgeScope>().notNull(),
+    area: text('area'),
+    statement: text('statement').notNull(),
+    /** Why the rule holds; shown beside the statement, not searched. */
+    rationale: text('rationale'),
+    kind: text('kind').$type<PrincipleKind>().notNull(),
+    topicKey: text('topic_key').notNull(),
+    status: text('status').$type<PrincipleStatus>().notNull(),
+    supersedesId: text('supersedes_id').$type<PrincipleId>(),
+    sourceId: text('source_id')
+      .$type<SourceId>()
+      .notNull()
+      .references(() => sources.id),
+    sourceQuote: text('source_quote'),
+    speaker: text('speaker'),
+    confirmedBy: text('confirmed_by'),
+    confirmedAt: text('confirmed_at'),
+    retiredAt: text('retired_at'),
+    retiredBy: text('retired_by'),
+    retiredReason: text('retired_reason'),
+    withdrawnAt: text('withdrawn_at'),
+    withdrawnBy: text('withdrawn_by'),
+    withdrawnReason: text('withdrawn_reason'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('principles_topic_idx').on(t.topicKey, t.scope, t.projectId, t.area),
+    // Every read derives state by looking up a successor through supersedes_id.
+    index('principles_supersedes_idx').on(t.supersedesId),
+  ],
+);
 
 export const deviations = sqliteTable('deviations', {
   id: text('id').$type<DeviationId>().primaryKey(),
