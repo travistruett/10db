@@ -193,6 +193,102 @@ describe('resuming a conversation', () => {
   });
 });
 
+describe('telling a reopened conversation which tasks mis-sized', () => {
+  const HEADING = 'Finished outside their size';
+  const lineOf = (taskId: TaskId) =>
+    `task ${taskId} "Task a" — sized S (~0.5 h), took 5 h of lane time`;
+  const times = (text: string, part: string) => text.split(part).length - 1;
+  const storeSdkSession = () => {
+    write((ctx) => {
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+  };
+  const send = async (text: string) => {
+    f.service.send(shapeId(), text);
+    await f.service.settled(shapeId());
+  };
+
+  it('tells a resumed session on the next message, once, with no resume call', async () => {
+    const off = must(convertTasks('a')[0], 'task');
+    finishTask(off, 300);
+    storeSdkSession();
+
+    await send('What should change?');
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.spec.resumeProviderSessionId).toBe('sdk-1');
+    expect(session.spec.prompt).toContain(HEADING);
+    expect(session.spec.prompt).toContain(lineOf(off));
+
+    await send('And now?');
+    expect(session.sent).toHaveLength(1);
+    expect(session.sent[0]).not.toContain(HEADING);
+  });
+
+  it('tells a live session about a task that finished between its turns', async () => {
+    const off = must(convertTasks('a')[0], 'task');
+    await send('First.');
+    finishTask(off, 300);
+    await send('Second.');
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.sent[0]).toContain(lineOf(off));
+  });
+
+  it('says nothing to a session when no finished task is outside one bucket', async () => {
+    finishTask(must(convertTasks('a')[0], 'task'), 40);
+    storeSdkSession();
+    await send('What should change?');
+    expect(must(prompts()[0], 'prompt')).not.toContain(HEADING);
+  });
+
+  it('keeps the note through a failed start and a restart, then never repeats it', async () => {
+    const off = must(convertTasks('a')[0], 'task');
+    finishTask(off, 300);
+    storeSdkSession();
+    const startShape = f.adapter.startShape.bind(f.adapter);
+    f.adapter.startShape = (): never => {
+      throw new Error('Claude is not available');
+    };
+    await send('First.');
+    f.adapter.startShape = startShape;
+
+    await f.restart();
+    await send('Second.');
+    expect(must(prompts()[0], 'prompt')).toContain(lineOf(off));
+
+    await f.restart();
+    await send('Third.');
+    expect(must(prompts()[1], 'prompt')).not.toContain(HEADING);
+  });
+
+  it('tells a session from the digest alone, and not again afterwards', async () => {
+    const off = must(convertTasks('a')[0], 'task');
+    finishTask(off, 300);
+    write((ctx) =>
+      insertShapeMessage(ctx, shapeId(), {
+        author: ShapeMessageAuthor.Claude,
+        kind: ShapeMessageKind.Text,
+        body: 'Converted.',
+      }),
+    );
+    await send('What should change?');
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.spec.prompt).toContain('fresh session');
+    expect(times(session.spec.prompt, lineOf(off))).toBe(1);
+
+    await send('And now?');
+    expect(session.sent[0]).not.toContain(HEADING);
+  });
+
+  it('says it once when an engine event reopens the conversation too', async () => {
+    const off = must(convertTasks('a')[0], 'task');
+    finishTask(off, 300);
+    storeSdkSession();
+    f.service.resume(shapeId(), 'Task a is done.');
+    await send('What should change?');
+    expect(times(must(prompts()[0], 'prompt'), lineOf(off))).toBe(1);
+  });
+});
+
 describe('re-planning a reopened conversation', () => {
   const cite = (): ShapeMessageId => f.service.resume(shapeId(), 'Reopened to re-plan.').id;
 

@@ -47,6 +47,7 @@ import {
   listUntoldShapeFiles,
   markSessionStarted,
   markShapeFilesTold,
+  markShapeLinksSizeTold,
   patchShape,
   setOneWayPaths as setOneWayPathsRow,
   settleOpenQuestionsOfTask,
@@ -110,7 +111,7 @@ import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
 import { convertedStateLines } from './converted-state';
-import { missizedLines } from './sizing';
+import { untoldMissized, type UntoldMissized } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
@@ -265,6 +266,8 @@ interface Turn {
 interface Intake {
   readonly notes: readonly string[];
   readonly files: readonly ShapeFileRow[];
+  /** Finished tasks outside their size that Claude has not heard about. */
+  readonly missized: UntoldMissized;
 }
 
 type TurnEnd =
@@ -499,12 +502,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   // --- Starting a session -----------------------------------------------------------------------
 
-  /** The lines that tell Claude what the builder did since it last heard: edits, then files. */
-  const intakeText = (intake: Intake, shown: readonly ShapeFileRow[] = intake.files): string => {
+  /** The lines that tell Claude what changed since it last heard: edits, mis-sized tasks, files. */
+  const intakeText = (
+    intake: Intake,
+    shown: readonly ShapeFileRow[] = intake.files,
+    sizes: readonly string[] = intake.missized.lines,
+  ): string => {
     // An image too large to send as a block is named as a path, with the way to read it.
     const byPath = pathImageIds(shown, intake.files);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
+      ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
       ...shown.map(
         (file) =>
           `[file] ${file.storedPath} (${file.name})${byPath.has(file.id) ? ' — too large to show inline; Read it' : ''}`,
@@ -530,20 +538,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   /**
    * Takes what has gathered for the conversation's next turn. Which files Claude has not been told
-   * about is read from the database, so a file dropped before a restart still reaches it.
+   * and which mis-sized tasks is read from the database, so what waited through a restart still
+   * reaches it.
    */
   const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
     notes: rt.notes.splice(0),
     files: listUntoldShapeFiles(state.db, shapeId),
+    missized: untoldMissized(state.db, shapeId),
   });
 
-  /** Records that the turn just sent carried these files. */
-  const told = (files: readonly ShapeFileRow[]): void => {
+  /** Records that the turn just sent carried these files and these mis-sized tasks. */
+  const told = (files: readonly ShapeFileRow[], missized: UntoldMissized): void => {
     state.write((ctx) => {
       markShapeFilesTold(
         ctx,
         files.map((f) => f.id),
       );
+      markShapeLinksSizeTold(ctx, missized.linkIds);
     });
   };
 
@@ -564,7 +575,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const spoken = transcript.some(
       (m) => m.author === ShapeMessageAuthor.Claude && m.kind === ShapeMessageKind.Text,
     );
-    if (resumeId === null && spoken) {
+    const digested = resumeId === null && spoken;
+    if (digested) {
       const digest = buildDigest(state.db, shapeId);
       say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Digest, digest);
       parts.push(digest);
@@ -586,7 +598,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       files = listShapeFiles(state.db, shapeId);
     }
-    const lines = intakeText(intake, files);
+    // The digest already names every mis-sized task.
+    const lines = intakeText(intake, files, digested ? [] : intake.missized.lines);
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
@@ -657,7 +670,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       done: Promise.resolve(),
     };
     rt.live = live;
-    told(files);
+    told(files, intake.missized);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -717,11 +730,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
           imagesOf(intake.files),
         );
-        told(intake.files);
+        told(intake.files, intake.missized);
       }
     } catch (error) {
       // The turn never reached Claude, so what was to go ahead of it waits for the next one; its
-      // files were never marked told.
+      // files and mis-sized tasks were never marked told.
       rt.notes.unshift(...intake.notes);
       rt.waiting = null;
       log.warn({ err: error, shapeId }, 'shape session could not start');
@@ -990,7 +1003,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             : [
                 'Converted so far, read-only (propose a change or removal only for a task marked "not started"):',
                 ...lines,
-                ...missizedLines(state.db, shapeId),
               ]),
         ].join('\n'),
       );

@@ -1143,6 +1143,8 @@ export const shapeLinks = sqliteTable(
     decisionId: text('decision_id')
       .$type<DecisionId>()
       .references(() => decisions.id),
+    /** When a turn told Claude this task finished outside its size; null until then. */
+    sizeToldAt: text('size_told_at'),
     createdAt: createdAt(),
   },
   (t) => [

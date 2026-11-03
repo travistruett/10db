@@ -1,0 +1,1 @@
+ALTER TABLE `shape_links` ADD `size_told_at` text;

@@ -3,6 +3,8 @@ import {
   mintId,
   ProposalKind,
   ShapeOrigin,
+  ShapeProposalKind,
+  ShapeProposalState,
   ShapeState,
   type ProjectDto,
 } from '@10db/contracts';
@@ -15,9 +17,13 @@ import {
   getSession,
   insertSession,
   insertShape,
+  insertShapeLink,
+  insertShapeProposal,
   insertTask,
   insertWorkstream,
+  listShapeLinks,
   listShapes,
+  markShapeLinksSizeTold,
   seedProject,
   shapeTokens,
   updateSessionUsage,
@@ -196,6 +202,50 @@ describe('the Shape tables', () => {
         .run();
     expect(() => link({})).toThrow(/CHECK/);
     expect(() => link({ taskId: task.id })).not.toThrow();
+  });
+
+  it('marks a link told once, keeping its first time, and leaves the others alone', () => {
+    const shape = newShape().value;
+    const taskInput = { acceptanceCriteria: ['x'], areas: ['api'] };
+    const links = store.write((ctx) => {
+      const row = insertShapeProposal(ctx, {
+        shapeId: shape.id,
+        key: 'a',
+        kind: ShapeProposalKind.Task,
+        state: ShapeProposalState.Accepted,
+        round: 1,
+        createdRound: 1,
+        pinned: [],
+        body: {},
+        taskHashes: {},
+        sourceMessageIds: [],
+      });
+      return ['a', 'b'].map((key) =>
+        insertShapeLink(ctx, {
+          shapeId: shape.id,
+          proposalId: row.id,
+          key,
+          taskId: insertTask(ctx, project.id, { ...taskInput, title: key }).id,
+        }),
+      );
+    }).value;
+    const told = () => listShapeLinks(store.db, shape.id).map((l) => l.sizeToldAt);
+    const first = links[0]?.id;
+    if (first === undefined) throw new Error('no link');
+    expect(told()).toEqual([null, null]);
+
+    store.write((ctx) => {
+      markShapeLinksSizeTold(ctx, []);
+      markShapeLinksSizeTold(ctx, [first]);
+    });
+    const at = now.toISOString();
+    expect(told()).toEqual([at, null]);
+
+    now = new Date(now.getTime() + 60_000);
+    store.write((ctx) => {
+      markShapeLinksSizeTold(ctx, [first]);
+    });
+    expect(told()).toEqual([at, null]);
   });
 });
 
