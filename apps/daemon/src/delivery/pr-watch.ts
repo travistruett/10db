@@ -191,8 +191,11 @@ interface CancelledRun {
   /** 10db ran the cancelled check(s) again, and when. */
   asked: boolean;
   askedAt: number;
-  /** The Actions runs GitHub took a rerun of for this head: a refusal of another run never repeats them. */
-  readonly rerun: Set<string>;
+  /**
+   * The Actions runs GitHub took a rerun of for this head, each with the checks it reran: a refusal
+   * of another run never repeats them, and the stored record names only these checks.
+   */
+  readonly rerun: Map<string, readonly { readonly name: string }[]>;
   /** A read after the rerun listed no cancelled check: the rerun took, so a cancellation now is a second one. */
   active: boolean;
   /** The notice is shown. */
@@ -631,7 +634,7 @@ export function createPrWatch(input: {
         asked: true,
         // The time of the rerun isn't stored: the minutes a run gets to start count from this read.
         askedAt: clock.now().getTime(),
-        rerun: new Set(),
+        rerun: new Map(),
         active: false,
         notified: storedNotices.some((n) => n.key === NOTICE_KEY.checksCancelled),
       };
@@ -662,7 +665,7 @@ export function createPrWatch(input: {
         streak: 0,
         asked: restarted,
         askedAt: 0,
-        rerun: new Set(),
+        rerun: new Map(),
         active: false,
         notified: restarted,
       };
@@ -690,13 +693,14 @@ export function createPrWatch(input: {
       noticeCancelled(root, cancelled, { kind: 'no_run' });
       return;
     }
-    // Stored right after a rerun, even when a later run's is refused: a restart before any notice
-    // must not run this head a second time.
+    // Stored as soon as GitHub takes each run, before the next call: a daemon killed between two
+    // reruns must not run this head a second time. It names only the checks GitHub took, over every
+    // round, since a check it took stops being listed as cancelled once it runs.
     const storeRerun = (): void => {
       if (read.headSha === null) return;
       const headSha = read.headSha;
       ctx.state.write((write) => {
-        setBatchNotice(write, root.id, rerunNotices.ran(headSha, cancelled));
+        setBatchNotice(write, root.id, rerunNotices.ran(headSha, [...track.rerun.values()].flat()));
       });
     };
     // A run GitHub took earlier this head is never run again, whichever run it refused after it.
@@ -704,7 +708,6 @@ export function createPrWatch(input: {
       try {
         await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
       } catch (error) {
-        if (track.rerun.size > 0) storeRerun();
         if (controller.signal.aborted || ghDown(error)) throw error;
         // The run is still going (a job gh doesn't list as required, say): ask again next round.
         if (RUN_STILL_RUNNING.test(detailOf(error))) return;
@@ -713,15 +716,21 @@ export function createPrWatch(input: {
           'could not run a cancelled check again',
         );
         track.notified = true;
-        noticeCancelled(root, cancelled, { kind: 'refused', detail: detailOf(error) });
+        const notTaken = cancelled.filter(
+          (job) => job.runId === null || !track.rerun.has(job.runId),
+        );
+        noticeCancelled(root, notTaken, { kind: 'refused', detail: detailOf(error) });
         return;
       }
-      track.rerun.add(runId);
+      track.rerun.set(
+        runId,
+        cancelled.filter((job) => job.runId === runId),
+      );
+      storeRerun();
     }
     track.asked = true;
     track.askedAt = at;
     track.active = false;
-    storeRerun();
   }
 
   async function round(signal: AbortSignal): Promise<void> {
