@@ -11,7 +11,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SANDBOXED, tempDir, type TempDir } from '../../test/fixtures';
-import { resolvePnpm } from './pnpm-binary';
+import { readPnpmVersion, resolvePnpm } from './pnpm-binary';
 
 let tmp: TempDir;
 beforeEach(() => {
@@ -35,6 +35,26 @@ const program = (path: string): void => {
   copyFileSync('/bin/ls', path);
   chmodSync(path, 0o755);
 };
+
+describe('reading the version of the pnpm a worktree install runs', () => {
+  it('returns what the program prints, run with version switching off', async () => {
+    const pnpm = join(dir('bin'), 'pnpm');
+    script(
+      pnpm,
+      'test "$pnpm_config_manage_package_manager_versions" = false || exit 3\necho 12.9.1',
+    );
+    expect(await readPnpmVersion(pnpm, { PATH: '/usr/bin:/bin' })).toBe('12.9.1');
+  });
+
+  it.each([
+    ['prints something else', 'echo not a version'],
+    ['fails', 'exit 1'],
+  ])('returns null when the program %s', async (_name, body) => {
+    const pnpm = join(dir('bin'), 'pnpm');
+    script(pnpm, body);
+    expect(await readPnpmVersion(pnpm, { PATH: '/usr/bin:/bin' })).toBeNull();
+  });
+});
 
 describe('resolving the pnpm a worktree install runs', () => {
   it('returns a real pnpm program outside the checkouts', async () => {

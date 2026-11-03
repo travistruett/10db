@@ -660,8 +660,9 @@ function StatusLine({
   const startOver = useStartTaskOver();
   const remove = useRemoveTask();
   const failed = workstream !== undefined && canRetry(workstream.state);
-  // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
-  const retryable = workstream !== undefined && canRetryRun(workstream, batch);
+  // A run the daemon would refuse to retry (shipped anyway, closed, parked, replaced) offers no Retry;
+  // once its pull request closed, the panel below closes it.
+  const retryable = workstream !== undefined && canRetryRun(task, workstream, batch);
   const startableOver = workstream !== undefined && canStartOver(task, workstream, batch);
   const closable =
     workstream !== undefined && canCloseRun(workstream, batch) && !pullRequestClosed(batch);
@@ -839,8 +840,8 @@ function StatusLine({
           {refusal}
         </Text>
       ) : null}
-      {/* A run shipped anyway offers no Retry, so it is not told what Retry would do. */}
-      {retryable ? <Text size="sm">{failureLine(workstream)}</Text> : null}
+      {/* A run that offers no Retry is told what happened, not what Retry would do. */}
+      {failed ? <Text size="sm">{failureLine(workstream, retryable)}</Text> : null}
       {failed && workstream.failureReason !== null ? (
         <Text size="xs" c="dimmed">
           {workstream.failureReason}

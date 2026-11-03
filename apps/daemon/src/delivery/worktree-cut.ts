@@ -25,13 +25,12 @@ import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
-import { recordInstall } from './installed-lockfile';
+import { noticeUnbuilt, recordInstall } from './installed-lockfile';
 import { landingWarnings, missingLandingBranch, type SameStart } from './landing';
 import { seedNotices } from './notices';
 import { forgetStartSiblings } from './start-siblings';
 import { resolveStartCards } from './stale-cards';
 import { raiseInstallHostCards } from './worktree-dependencies';
-import { unbuiltAllowedPackages } from './worktree-scripts';
 import { seedDirs, seedWorktree } from './worktree-seed';
 
 /** What a start hands its background job: the plans resolved in the request, by task. */
@@ -297,22 +296,11 @@ export async function cutWorktree(
         }
       }
     }
-    if (!seed && installed.kind === 'installed') {
-      // The install ran no install script, and no seed carried built output: a package the project
-      // allows to build (a native addon, a generated client) is installed but not built.
-      const unbuilt = unbuiltAllowedPackages(path);
-      if (unbuilt.names.length > 0) {
-        try {
-          showNotice(
-            ctx.state,
-            batchId,
-            seedNotices.scriptsSkipped(unbuilt.names, unbuilt.legacyPnpmMajor),
-          );
-        } catch (error) {
-          ctx.logger.warn({ batchId, err: error }, 'install scripts notice not written');
-        }
-      }
-    }
+    // The install ran no install script, and no seed carried built output: a package the project
+    // allows to build (a native addon, a generated client) is installed but not built. An install
+    // that started over has told the builder already, recordInstall above.
+    if (!seed && installed.kind === 'installed' && !installed.startedOver)
+      noticeUnbuilt(ctx, batchId, path, 'seed_skipped');
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });

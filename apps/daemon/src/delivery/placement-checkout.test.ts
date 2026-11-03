@@ -331,6 +331,42 @@ describe('seeding a new copy', () => {
       expect(batch.notices).toEqual([]);
     });
 
+    describe('when the seed was installed by another pnpm', () => {
+      beforeEach(() => {
+        h.close();
+        h = createDeliveryHarness({}, { trigger: false, pnpmVersion: '12.9.1' });
+      });
+
+      function seededBy(version: string): void {
+        allowing('allowBuilds:\n  prisma: true\n');
+        writeFileSync(
+          join(h.repo, 'node_modules/.modules.yaml'),
+          `packageManager: pnpm@${version}\n`,
+        );
+        h.pnpm.makes(installed('prisma', '6.0.0', { postinstall: 'node build.js' }));
+      }
+
+      it('says the built output went when the seed is removed', async () => {
+        seededBy('12.15.0');
+        const batch = await startedOne(copy('Copied'));
+        expect(batch.state).toBe('OPEN');
+        expect(cloned(batch)).toBe(false);
+        const notice = h.only(batch.notices);
+        expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+        expect(notice.line).toContain('prisma');
+        expect(notice.body).toContain('removed it');
+        expect(notice.body).toContain('pnpm rebuild prisma');
+        expect(notice.body).not.toContain('unfinished');
+      });
+
+      it('says nothing when the seed is the daemon’s pnpm’s and stays', async () => {
+        seededBy('12.9.1');
+        const batch = await startedOne(copy('Copied'));
+        expect(cloned(batch)).toBe(true);
+        expect(batch.notices).toEqual([]);
+      });
+    });
+
     it('reads the older onlyBuiltDependencies list too', async () => {
       allowing('onlyBuiltDependencies:\n  - puppeteer\n');
       h.pnpm.makes(installed('puppeteer', '22.0.0', { postinstall: 'node install.js' }));

@@ -4,8 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
-    # Only pull requests into main: tasks land in the integration branch `next` without CI, and the
-    # one pull request from `next` into main runs it (decisions/2026-10-30-integration-branch.md).
+    # Only pull requests into main: each task's pull request goes to main and runs CI there, with no
+    # integration branch in between (decisions/2026-11-02-merge-queue.md).
     branches: [main]
     # edited re-runs the checks when the title changes: squash merge makes the title the commit on
     # main, so policy must lint the current one. Every job runs on every event. A job skipped on

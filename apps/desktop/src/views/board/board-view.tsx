@@ -385,7 +385,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && canRetryRun(ws, batch)
+                {...(ws && canRetryRun(task, ws, batch)
                   ? {
                       onRetry: () => {
                         abandon.reset();

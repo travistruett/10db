@@ -151,6 +151,28 @@ export function describeBroken(
 }
 
 /**
+ * Whether the copy's `node_modules/.modules.yaml` names a pnpm other than `version`, the one about
+ * to run (null when unknown): such an install is one pnpm decides to remove (`node_modules/.pnpm`),
+ * which the gate's sandbox stops part way. The file's `storeDir` is not compared: each sandboxed run
+ * has its own store under its temp dir, so even a copy the daemon made names a store that is gone.
+ * Reads one file; no program from the repository runs.
+ */
+export function madeByAnotherPnpm(path: string, version: string | null): boolean {
+  if (version === null) return false;
+  let parsed: unknown;
+  try {
+    parsed = parseAllDocuments(readFileSync(join(path, 'node_modules', '.modules.yaml'), 'utf8'))
+      .at(0)
+      ?.toJS();
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== 'object' || parsed === null) return false;
+  const { packageManager } = parsed as Record<string, unknown>;
+  return typeof packageManager === 'string' && packageManager !== `pnpm@${version}`;
+}
+
+/**
  * Removes the copy's root `node_modules`, so the install that follows starts as the first one of a
  * copy did, which worked. A link is removed, never followed. The workspace packages' own
  * `node_modules` hold only links into the root one, which the install makes again.
