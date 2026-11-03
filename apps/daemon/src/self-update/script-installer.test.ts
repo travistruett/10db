@@ -114,6 +114,19 @@ describe('stage', () => {
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
   });
 
+  it('asks the script to skip the build the builder rolled back from, and keeps no folder when it does', async () => {
+    fakeScript(
+      `echo '{"ok":true,"mode":"stage","step":"skipped","message":"","commit":"${COMMIT}"}' > "$status"`,
+    );
+    expect(await installer.stage(TARGET, RUNNING, COMMIT)).toEqual({
+      ok: true,
+      current: true,
+      commit: COMMIT,
+    });
+    expect(invocations()[0]).toContain(` --running ${RUNNING} --skip ${COMMIT} main`);
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
+  });
+
   it('hands the data directory to the script, so it backs up the daemon’s own database', async () => {
     fakeScript(stagedOk());
     await installer.stage(TARGET, RUNNING);

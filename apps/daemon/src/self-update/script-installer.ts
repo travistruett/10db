@@ -64,7 +64,8 @@ export interface ScriptInstallerOptions {
 }
 
 export interface ScriptInstaller {
-  stage(target: UpdateTarget, running: string): Promise<StageResult>;
+  /** Stages main's newest finished build unless it is the build of `running`, or of `skip` when given. */
+  stage(target: UpdateTarget, running: string, skip?: string | null): Promise<StageResult>;
   apply(staged: StagedBuild): Promise<ApplyResult>;
   /**
    * For shutdown: kills a stage under way, with the gh it started, removes its folders, and starts no
@@ -150,7 +151,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     }
   };
 
-  function runStage(target: UpdateTarget, running: string): StageRun {
+  function runStage(target: UpdateTarget, running: string, skip: string | null): StageRun {
     const timeout = options.stageTimeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
     let killGroup = (): void => undefined;
     /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
@@ -168,6 +169,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
             stageStatus,
             '--running',
             running,
+            ...(skip === null ? [] : ['--skip', skip]),
             BRANCH,
           ],
           {
@@ -207,7 +209,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
       const finish = (result: StageResult): void => {
         deadline.cancel();
         killGroup();
-        // Only a staged build keeps its folder; "current" fetched nothing.
+        // Only a staged build keeps its folder; "current" and "skipped" fetched nothing.
         tidy(result.ok && !result.current);
         resolve(result);
       };
@@ -232,7 +234,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
         const status = timedOut ? null : readStatus(stageStatus);
         if (status?.ok) {
           finish(
-            status.step === 'current'
+            status.step === 'current' || status.step === 'skipped'
               ? { ok: true, current: true, commit: status.commit }
               : { ok: true, current: false, dir: stageDir, commit: status.commit },
           );
@@ -282,7 +284,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
   const rollbackMarker = join(options.workDir, ROLLBACK_MARKER);
 
   return {
-    stage(target, running) {
+    stage(target, running, skip = null) {
       if (stopped) {
         return Promise.resolve({
           ok: false,
@@ -301,7 +303,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           message: `Could not make a place for the build in ${options.workDir}: ${messageOf(error)}`,
         });
       }
-      const run = runStage(target, running);
+      const run = runStage(target, running, skip);
       current = run;
       void run.ended.then(() => {
         if (current === run) current = null;

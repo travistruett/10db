@@ -37,6 +37,8 @@ interface World {
   /** The repositories and running commits stage was asked about. */
   stagedFrom: string[];
   stagedFor: string[];
+  /** The commit each stage was told not to fetch: the one the builder rolled back from. */
+  stagedSkipping: (string | null)[];
   stage: () => Promise<StageResult>;
   /** Stops a stage under way, as the installer kills the script's process group. */
   stopStage: () => Promise<void>;
@@ -91,10 +93,11 @@ function make(
       }
       return Promise.resolve(world.stagedAhead);
     },
-    stage: (target, running) => {
+    stage: (target, running, skip) => {
       world.calls.push('stage');
       world.stagedFrom.push(target.repo);
       world.stagedFor.push(running);
+      world.stagedSkipping.push(skip);
       return world.stage();
     },
     stopStage: () => {
@@ -155,6 +158,7 @@ beforeEach(() => {
     stagedAhead: true,
     stagedFrom: [],
     stagedFor: [],
+    stagedSkipping: [],
     pause: () => Promise.resolve(),
     stage: () => Promise.resolve(STAGED_OK),
     stopStage: () => Promise.resolve(),
@@ -190,6 +194,7 @@ describe('tick', () => {
     await make().tick();
     expect(world.stagedFrom).toEqual(['o/10db']);
     expect(world.stagedFor).toEqual([RUNNING]);
+    expect(world.stagedSkipping).toEqual([null]);
   });
 
   it('does nothing when main is not ahead of the running commit: a build from another branch stays', async () => {
@@ -732,13 +737,37 @@ describe('after make rollback-app', () => {
     expect(await next.tick()).toBe('rolled-back');
   });
 
-  it('does not install the rolled-back build when it is still the newest finished one, and fetches it once', async () => {
+  it('tells the stage not to fetch the rolled-back build, and looks again next time', async () => {
     world.head = NEWER;
+    // The newest finished build of main is still the one rolled back from: nothing was fetched.
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
     const update = rolledBack();
     expect(await update.tick()).toBe('rolled-back');
     expect(await update.tick()).toBe('rolled-back');
-    expect(world.calls.filter((call) => call === 'stage')).toHaveLength(1);
+    expect(world.stagedSkipping).toEqual([NEW, NEW]);
     expect(world.calls).not.toContain('apply');
+  });
+
+  it('installs the head’s build once it finishes, after a stage that found only the rolled-back one', async () => {
+    world.head = NEWER;
+    // A stage that fetched the rolled-back build anyway is dropped, so the next check looks again.
+    world.stage = () => Promise.resolve(STAGED_OK);
+    const update = rolledBack();
+    expect(await update.tick()).toBe('rolled-back');
+    expect(world.calls).not.toContain('apply');
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
+  });
+
+  it('installs the head’s build once it finishes, after a stage that skipped the rolled-back one', async () => {
+    world.head = NEWER;
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
+    const update = rolledBack();
+    expect(await update.tick()).toBe('rolled-back');
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
   });
 
   it('installs a newer build of main once one finishes', async () => {

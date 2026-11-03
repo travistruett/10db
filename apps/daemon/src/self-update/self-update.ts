@@ -29,7 +29,10 @@ export interface StagedBuild {
 
 export type StageResult =
   | ({ readonly ok: true; readonly current: false } & StagedBuild)
-  /** The newest finished build of main is the one the app already runs: nothing was fetched. */
+  /**
+   * The newest finished build of main is the one the app already runs, or the one it was told to
+   * skip: nothing was fetched.
+   */
   | { readonly ok: true; readonly current: true; readonly commit: string }
   | { readonly ok: false; readonly step: string; readonly message: string };
 
@@ -81,9 +84,9 @@ export interface SelfUpdateDeps {
   isAhead(repo: string, base: string, head: string): Promise<boolean>;
   /**
    * Fetches and checks the newest finished build of main while the app goes on running, unless that
-   * is the build of `running`.
+   * is the build of `running` or of `skip` (the commit the builder rolled back from).
    */
-  stage(target: UpdateTarget, running: string): Promise<StageResult>;
+  stage(target: UpdateTarget, running: string, skip: string | null): Promise<StageResult>;
   /**
    * Kills a stage under way, with everything it started, and removes its files; settles once it is
    * gone. Leaves an install under way alone.
@@ -298,7 +301,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
 
     if (staged?.head !== head) {
       staged = null;
-      const result = await deps.stage(target, runningCommit);
+      // The build the builder rolled back from is not fetched again, so a check while main's head
+      // is still building costs a look at GitHub, not a download.
+      const skip = rolledBackFrom();
+      const result = await deps.stage(target, runningCommit, skip);
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
       // Turned off while the build was fetched: a stage it killed is no failure, and nothing installs.
@@ -308,8 +314,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         return TickResult.Failed;
       }
       // The newest finished build is not the head's when the head's is still building. It is the
-      // build the app runs until a newer one finishes, and then there is nothing to install.
-      if (result.current) return TickResult.NoNewerBuild;
+      // build the app runs until a newer one finishes, and then there is nothing to install. Nor
+      // when it is the build the builder rolled back from; the next check looks again.
+      if (result.current) {
+        return skip !== null && result.commit === skip
+          ? TickResult.RolledBack
+          : TickResult.NoNewerBuild;
+      }
       // Never an older build: the one that was fetched must be ahead of the running commit too.
       let newer: boolean;
       try {
@@ -330,9 +341,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       staged = { dir: result.dir, commit: result.commit, head };
     }
 
-    // Main's head has no newer finished build than the one the builder rolled back from. The
-    // staged copy is kept, so the next check fetches nothing until main moves on.
-    if (staged.commit === rolledBackFrom()) return TickResult.RolledBack;
+    // Main's head has no newer finished build than the one the builder rolled back from. The copy
+    // is dropped, so the next check looks again for the head's build instead of keeping this one.
+    if (staged.commit === rolledBackFrom()) {
+      staged = null;
+      return TickResult.RolledBack;
+    }
     if (!deps.enabled()) return TickResult.Off;
     if (deps.midSession() > 0) return TickResult.Busy;
     return install(runningCommit, { head, commit: staged.commit }, staged);

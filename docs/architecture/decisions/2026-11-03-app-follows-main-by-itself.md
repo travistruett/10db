@@ -24,7 +24,7 @@ says `ahead`). A head that is the running commit, or a running commit main is no
 branch, or one nobody pushed), is not an update, so a branch build is never replaced by an older main.
 
 **What it installs: the install path of today, not another.** The daemon stages with
-`install-app.sh --stage <data dir>/self-update/stage --running <running commit> main`: the same choice as
+`install-app.sh --stage <data dir>/self-update/stage --running <running commit> [--skip <rolled-back commit>] main`: the same choice as
 `make install-app` (decisions/2026-11-02-install-takes-the-newest-finished-build.md). It takes the newest of
 main's last 100 commits that has a finished successful `release-dry-run` build with a live artifact, **not
 necessarily the head**, and never an older one: it waits for or starts the head's build only when none of the 100
@@ -75,8 +75,10 @@ first check and installs the build the builder just rolled back from. `rollback-
 replaced bundle's `Contents/Resources/daemon/build-info.json` and, once the swap has finished, writes it to
 `<data dir>/self-update/rolled-back-from` (it still never touches the database). At startup the daemon moves that
 commit into `app_settings` key `self_update.rolled_back_from` and removes the file. While main's head is that
-commit, a check stops there; when main has moved on but its newest finished build is still that commit, the build
-is fetched once, kept staged and not installed. The first newer finished build of main is installed as usual.
+commit, a check stops there. When main has moved on, the stage is run with `--skip <that commit>`: when the newest
+finished build is still that commit (main's head is still building), the script fetches nothing and reports step
+`skipped`, and nothing is kept staged, so every later check looks again for the head's build. A staged build that
+turns out to be that commit is dropped the same way. The first newer finished build of main is installed as usual.
 Touching the switch (off, or on) clears the record, as it clears `self_update.failed_commit`.
 
 **The switch and the commit.** One app-wide setting, `app_settings` key `self_update.enabled`: true, false, or

@@ -17,11 +17,13 @@
 # the last message says where it is. Exit 2: bad argument.
 #
 # 10db runs it in two halves to update itself (apps/daemon/src/self-update), each with absolute paths:
-#   install-app.sh --stage <dir> [--running <sha>] [ref]
+#   install-app.sh --stage <dir> [--running <sha>] [--skip <sha>] [ref]
 #                                        choose, fetch and check the build exactly as above, leave it in
 #                                        <dir> with a copy of these scripts, and install nothing; 10db may
 #                                        be running. With --running, a build of that very commit is not
-#                                        fetched: the status says step "current".
+#                                        fetched: the status says step "current". With --skip (the commit
+#                                        make rollback-app replaced), nor is a build of that one: the
+#                                        status says step "skipped".
 #   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first] [--relaunch]
 #                                        install that build. --quit-first asks the running 10db to
 #                                        quit instead of refusing; --relaunch opens the app again,
@@ -49,7 +51,7 @@ gh() {
 usage() {
   echo "usage: install-app.sh [branch-or-tag] (default main)" >&2
   echo "  A name of 7 to 40 hex characters is taken for a commit SHA and refused: GitHub builds only a branch or tag." >&2
-  echo "  10db's own update: --stage <dir> [--running <sha>] [ref], or --apply <dir> [--quit-first] [--relaunch]; --status-file <file>; absolute paths." >&2
+  echo "  10db's own update: --stage <dir> [--running <sha>] [--skip <sha>] [ref], or --apply <dir> [--quit-first] [--relaunch]; --status-file <file>; absolute paths." >&2
   exit 2
 }
 
@@ -67,6 +69,7 @@ stage_dir=""
 apply_dir=""
 status_file=""
 running_commit=""
+skip_commit=""
 quit_first=0
 relaunch=0
 while [ "$#" -gt 0 ]; do
@@ -75,6 +78,7 @@ while [ "$#" -gt 0 ]; do
     --apply) [ "$#" -ge 2 ] || usage; apply_dir="$2"; shift 2 ;;
     --status-file) [ "$#" -ge 2 ] || usage; status_file="$2"; shift 2 ;;
     --running) [ "$#" -ge 2 ] || usage; running_commit="$2"; shift 2 ;;
+    --skip) [ "$#" -ge 2 ] || usage; skip_commit="$2"; shift 2 ;;
     --quit-first) quit_first=1; shift ;;
     --relaunch) relaunch=1; shift ;;
     *) break ;;
@@ -95,6 +99,9 @@ done
 if [ "$mode" != apply ] && { [ "$quit_first" -eq 1 ] || [ "$relaunch" -eq 1 ]; }; then usage; fi
 if [ -n "$running_commit" ]; then
   [ "$mode" = stage ] && [[ "$running_commit" =~ ^[0-9a-f]{40}$ ]] || usage
+fi
+if [ -n "$skip_commit" ]; then
+  [ "$mode" = stage ] && [[ "$skip_commit" =~ ^[0-9a-f]{40}$ ]] || usage
 fi
 
 workflow=release-dry-run.yml
@@ -357,6 +364,12 @@ if [ "$mode" != apply ]; then
     # Nothing newer has finished: the app already runs the newest finished build.
     step=current
     echo "The newest finished build of $ref, ${head:0:12}, is the one the app runs; nothing was fetched."
+    exit 0
+  fi
+  if [ -n "$skip_commit" ] && [ "$head" = "$skip_commit" ]; then
+    # The builder rolled back from this build: 10db waits for a newer one rather than fetch it again.
+    step=skipped
+    echo "The newest finished build of $ref, ${head:0:12}, is the one make rollback-app replaced; nothing was fetched."
     exit 0
   fi
 
