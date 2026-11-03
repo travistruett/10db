@@ -363,18 +363,12 @@ export function createPermissionBroker(
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
-<<<<<<< b9130168195bc041fde3857f1d0577243fc31bc6
-      detail: { toolName: asked.toolName, summary, ...editDetail(req, ask) },
-||||||| a793f19
-      detail: { toolName: req.toolName, summary, ...editDetail(req, ask) },
-=======
       detail: {
-        toolName: req.toolName,
+        toolName: asked.toolName,
         summary,
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
       },
->>>>>>> 4fe372c97987cd9eb8e64f85bd388a6bfa008657
       signal: ctx.signal,
       // An edit's result depends on the file it lands on. Folded with another lane's, both lanes would read the
       // file on the one answer, before either writes, and the second write would match neither record.
