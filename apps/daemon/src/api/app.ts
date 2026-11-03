@@ -42,6 +42,7 @@ import {
   PROTOCOL_VERSION,
   RetryInput,
   RoutingRulesInput,
+  SelfUpdateInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
   ShapeConvertInput,
@@ -77,7 +78,7 @@ import { validator } from 'hono/validator';
 import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
-import type { TaskRemovalServices } from './services';
+import type { SelfUpdateServices, TaskRemovalServices } from './services';
 import { streamEvents } from './stream';
 
 export interface ApiDeps {
@@ -89,6 +90,10 @@ export interface ApiDeps {
   readonly services: ApiServices;
   /** Removes tasks that haven't started; the route answers 501 without it. */
   readonly taskRemoval?: TaskRemovalServices;
+  /** The commit the app was built from, for `/health`; null or absent for a run from source. */
+  readonly commit?: string | null;
+  /** The self-update setting; its routes answer 501 without it. */
+  readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
   /** The MCP endpoint; it authenticates sessions itself. */
   mcp(req: Request): Promise<Response>;
@@ -196,6 +201,7 @@ export function createApp(deps: ApiDeps) {
           status: 'ok',
           protocolVersion: PROTOCOL_VERSION,
           startedAt: deps.startedAt.toISOString(),
+          commit: deps.commit ?? null,
         }),
       ),
     )
@@ -814,6 +820,18 @@ export function createApp(deps: ApiDeps) {
             await deps.services.systemCheck({ recheck: c.req.valid('query').recheck === '1' }),
           ),
         ),
+    )
+    .get('/settings/self-update', (c) => {
+      if (!deps.selfUpdate) return c.json({ error: 'not_implemented' }, 501);
+      return c.json(deps.selfUpdate.selfUpdateStatus());
+    })
+    .put(
+      '/settings/self-update',
+      validator('json', (value): SelfUpdateInput => SelfUpdateInput.parse(value)),
+      (c) => {
+        if (!deps.selfUpdate) return c.json({ error: 'not_implemented' }, 501);
+        return c.json(deps.selfUpdate.setSelfUpdate(c.req.valid('json').enabled));
+      },
     )
     .get('/settings/keep-awake', (c) => c.json(deps.services.keepAwake()))
     .put(
