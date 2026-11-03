@@ -1793,6 +1793,30 @@ describe('a required check GitHub cancelled', () => {
     expect(noticeOf(id)).toBeUndefined();
   });
 
+  it('runs the one run again only once when GitHub refuses the other, which is still running', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    // Run 77 was run again; run 88 was refused, so nothing is stored and 10db asks again.
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+    await round(w);
+    await round(w);
+    // Run 77 is not run a second time; run 88 is accepted once.
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
   it('gives a new head its own rerun', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
