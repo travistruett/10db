@@ -148,7 +148,12 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <ProposedList groups={groups} actionsFor={actionsFor} handlers={handlers} />
+            <ProposedList
+              groups={groups}
+              sizes={view.sizes}
+              actionsFor={actionsFor}
+              handlers={handlers}
+            />
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
           )}

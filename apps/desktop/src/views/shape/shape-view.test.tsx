@@ -494,6 +494,34 @@ describe('Shape: converted rows and their undo', () => {
       },
     ]);
 
+  it('shows a finished converted task its size and the lane time it took, flagged when mis-sized (§8)', async () => {
+    const taskId = mintId('Task');
+    const row = {
+      ...looseTaskProposal('density', { state: 'accepted', title: 'Compact density' }),
+      converted: { goalId: null, taskIds: [taskId], decisionId: null },
+    };
+    const view = proposed([row], {
+      sizes: [
+        {
+          proposalId: row.id,
+          key: 'density',
+          size: 'M',
+          hours: 2,
+          from: 'basis',
+          taskId,
+          actualHours: 10,
+          missized: true,
+        },
+      ],
+    });
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText(/Sized M \(~2 h\) · took 10 h of lane time/)).toBeTruthy();
+    expect(
+      screen.getByRole('img', { name: 'Outside its size by more than one bucket' }),
+    ).toBeTruthy();
+  });
+
   it('dims a converted row and says where it went', async () => {
     const view = converted();
     serve(...conversations(view));

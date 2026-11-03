@@ -698,6 +698,14 @@ All in scope; this is build order. Each slice ships something usable.
 3. **Intelligence.** `gate.started`/`finished` and lane-time reconstruction; `similar_tasks`, bases, derived sizes;
    calibration shown back (§8); `find_records` (§5.5); the three Jev decisions in shadow, their scoring and Settings
    rows; records with principles (§10.1); questions.
+   *Built: the gate events and `task_lane_times` with its backfill (migrations 0031, 0032); `similar_tasks`, derived
+   sizes and hours (a builder-pinned `size` is the override), the actual on a finished converted row and Settings ›
+   Decisions › Sizing; `find_records` with dated hits cited in the chat, and supersede through Convert; the
+   per-project opt-in (Settings › General), the three decisions in shadow (`shape_shadow_answers`, judge outcome
+   `shadow`), their scoring and agreement rows. `similar_tasks` ranks by shared words, not an FTS5 index (finished
+   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. Not built yet, and
+   filed as follow-ups: the `principles` table and converting principles and questions (`shape_questions`); the
+   actual in the task drawer; telling a reopened conversation which of its tasks mis-sized.*
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.

@@ -1,11 +1,12 @@
-import { ShapeProposalState, type ShapeProposalDto } from '@10db/contracts';
+import { ShapeProposalState, type ShapeProposalDto, type ShapeTaskSizeDto } from '@10db/contracts';
 import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
+import { IconClockExclamation, IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../daemon/shape-queries';
 import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
+import { goalHoursLine, sizeLine } from './size-line';
 import { editableFields } from './row-editing';
 
 /** Marks a row's button, so ↑/↓ finds its siblings. */
@@ -44,9 +45,55 @@ export interface ProposalRowProps {
   readonly section: string;
   /** The one row the Tab key reaches; the arrows move between the rest. */
   readonly tabbable: boolean;
+  /** The row's tasks' derived sizes: one for a loose task, one per sized task of a goal. */
+  readonly sizes: readonly ShapeTaskSizeDto[];
   /** Extra menu items, such as the undos of a converted row. */
   readonly actions: readonly RowAction[];
   readonly handlers: RowHandlers;
+}
+
+/** "Sized M (~2 h) · took 5 h of lane time" under a task row, or a goal's summed hours (§8). */
+function SizeLines({
+  row,
+  sizes,
+}: {
+  readonly row: ShapeProposalDto;
+  readonly sizes: readonly ShapeTaskSizeDto[];
+}) {
+  if (row.kind === 'goal') {
+    const total = goalHoursLine(sizes);
+    const off = sizes.filter((s) => s.missized).length;
+    return total === null ? null : (
+      <Text size="xs" c="dimmed">
+        {total}
+        {off > 0 ? ` · ${String(off)} mis-sized` : ''}
+      </Text>
+    );
+  }
+  return (
+    <>
+      {sizes.map((s) => {
+        const line = sizeLine(s);
+        return (
+          <Text key={s.key} size="xs" c="dimmed">
+            {line.text}
+            {line.flagged ? (
+              <>
+                {' '}
+                <IconClockExclamation
+                  size={14}
+                  stroke={1.5}
+                  role="img"
+                  aria-label="Outside its size by more than one bucket"
+                  style={{ verticalAlign: '-2px' }}
+                />
+              </>
+            ) : null}
+          </Text>
+        );
+      })}
+    </>
+  );
 }
 
 /**
@@ -60,6 +107,7 @@ export function ProposalRow({
   note,
   section,
   tabbable,
+  sizes,
   actions,
   handlers,
 }: ProposalRowProps) {
@@ -200,6 +248,7 @@ export function ProposalRow({
                   {meta}
                 </Text>
               )}
+              <SizeLines row={row} sizes={sizes} />
               {converted === null ? null : (
                 <Text size="xs" c="dimmed">
                   {converted}

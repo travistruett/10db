@@ -11,6 +11,7 @@ import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
 import { sectionByKey, SettingsSectionKey } from './sections';
+import { ShapeJevSetting } from './shape-jev-setting';
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -30,7 +31,14 @@ export function SectionBody({
       return (
         <>
           {heading}
-          {project ? <ProjectGeneralForm key={project.id} project={project} /> : <NoProject />}
+          {project ? (
+            <>
+              <ProjectGeneralForm key={project.id} project={project} />
+              <ShapeJevSetting key={`jev-${project.id}`} project={project} />
+            </>
+          ) : (
+            <NoProject />
+          )}
         </>
       );
     case SettingsSectionKey.BoardColumns:

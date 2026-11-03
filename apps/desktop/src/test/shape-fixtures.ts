@@ -161,6 +161,7 @@ export function shapeViewDto(
     heard: [],
     files: [],
     turn: { running: false, queued: 0, proposing: false },
+    sizes: [],
     ...rest,
   });
 }

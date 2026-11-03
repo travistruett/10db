@@ -62,6 +62,10 @@ export function baseHandlers(
     ),
     // The nav lists the project's conversations on every screen.
     http.get(daemonUrl('/projects/:projectId/shapes', base), () => HttpResponse.json([])),
+    // Settings › General reads the project's Jev opt-in (Shape spec §9); off, as for every project.
+    http.get(daemonUrl('/projects/:projectId/shape-jev', base), () =>
+      HttpResponse.json({ enabled: false }),
+    ),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>
