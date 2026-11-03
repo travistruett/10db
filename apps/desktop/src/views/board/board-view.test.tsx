@@ -981,9 +981,13 @@ describe('BoardView', () => {
       'Backlog tasks',
       'Ready tasks',
       'In progress tasks',
-      'In review tasks',
-      'Blocked tasks',
-      'Done tasks',
+    ]);
+    // The empty system columns after them fold to rails, in board order.
+    const rails = screen.getAllByRole('group', { name: /, collapsed$/ });
+    expect(rails.map((r) => r.getAttribute('aria-label'))).toEqual([
+      'In review, collapsed',
+      'Blocked, collapsed',
+      'Done, collapsed',
     ]);
     const inProgress = screen.getByRole('list', { name: 'In progress tasks' });
     // A running card has a blue edge and no line.
@@ -2038,9 +2042,9 @@ describe('BoardView', () => {
         // Where a card has no line of its own, the summary speaks it; the link left for the drawer.
         expect(within(card).getAllByText(line, { exact: false }).length).toBeGreaterThan(0);
         expect(within(card).queryByRole('link')).toBeNull();
-        expect(
-          within(screen.getByRole('list', { name: 'Done tasks' })).queryByText('Alpha'),
-        ).toBeNull();
+        // Done holds nothing, so it is a rail with no cards.
+        expect(screen.getByRole('group', { name: 'Done, collapsed' })).toBeTruthy();
+        expect(screen.queryByRole('list', { name: 'Done tasks' })).toBeNull();
       },
     );
 
