@@ -2,6 +2,7 @@ import { mintId } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { WorkstreamList } from '../../daemon/queries';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { theme } from '../../theme';
 import { cardSummary, TaskCard } from './task-card';
@@ -235,6 +236,23 @@ describe('TaskCard state', () => {
         expect(await screen.findByText(REASON)).toBeTruthy();
       },
     );
+
+    it('parses a list with a kind this build does not know and shows the generic line', () => {
+      // A newer daemon's kind, as it arrives over the wire.
+      const wire: unknown = JSON.parse(
+        JSON.stringify([
+          {
+            ...workstreamDto({ state: 'FAILED', failureReason: REASON }),
+            failureKind: 'a_kind_from_a_newer_daemon',
+          },
+        ]),
+      );
+      const [workstream] = WorkstreamList.parse(wire);
+      if (!workstream) throw new Error('the list lost its workstream');
+      expect(workstream.failureKind).toBe('a_kind_from_a_newer_daemon');
+      card({ workstream });
+      expect(screen.getByText(/^The run failed\. Retry runs it again\.$/)).toBeTruthy();
+    });
 
     it('speaks the plain line and the raw reason to a screen reader', () => {
       const workstream = workstreamDto({
