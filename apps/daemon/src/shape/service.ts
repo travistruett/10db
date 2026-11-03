@@ -76,7 +76,14 @@ import {
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
-import { asImage, checkDroppedFile, shapeFilesDir, storeFile } from './dropped-files';
+import {
+  asImage,
+  checkDroppedFile,
+  inlineImageIds,
+  pathImageIds,
+  shapeFilesDir,
+  storeFile,
+} from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import {
   proposeNote,
@@ -492,15 +499,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   // --- Starting a session -----------------------------------------------------------------------
 
   /** The lines that tell Claude what the builder did since it last heard: edits, then files. */
-  const intakeText = (intake: Intake): string =>
-    [
+  const intakeText = (intake: Intake, shown: readonly ShapeFileRow[] = intake.files): string => {
+    // An image too large to send as a block is named as a path, with the way to read it.
+    const byPath = pathImageIds(shown, intake.files);
+    return [
       ...intake.notes.map((note) => `[note] ${note}`),
-      ...intake.files.map((file) => `[file] ${file.storedPath} (${file.name})`),
+      ...shown.map(
+        (file) =>
+          `[file] ${file.storedPath} (${file.name})${byPath.has(file.id) ? ' — too large to show inline; Read it' : ''}`,
+      ),
     ].join('\n');
+  };
 
-  /** The dropped images among the files, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[]): ShapeImage[] =>
-    files.flatMap((file) => {
+  /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
+  const imagesOf = (files: readonly ShapeFileRow[]): ShapeImage[] => {
+    const inline = inlineImageIds(files);
+    return files.flatMap((file) => {
+      if (!inline.has(file.id)) return [];
       try {
         const kind = shapeFileKind(file.name);
         const image = kind === null ? null : asImage(kind, readFileSync(file.storedPath));
@@ -510,6 +525,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         return [];
       }
     });
+  };
 
   /**
    * Takes what has gathered for the conversation's next turn. Which files Claude has not been told
@@ -569,7 +585,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       files = listShapeFiles(state.db, shapeId);
     }
-    const lines = intakeText({ notes: intake.notes, files });
+    const lines = intakeText(intake, files);
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');

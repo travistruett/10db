@@ -67,6 +67,57 @@ export function checkDroppedFile(file: {
   return { name, mediaType: kind };
 }
 
+// The API refuses an image over about 5 MB (base64) and a request over 32 MB, and a resumed session
+// resends every earlier image with each request, so one oversize image would end every later turn.
+// An image over either cap goes as a path, which `Read` takes in and resizes itself.
+const MIB = 1024 * 1024;
+interface FileSize {
+  readonly id: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+/** The largest image sent as a content block: 2 MiB is under 3 MB as base64. */
+export const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
+/** The most image bytes one message carries as content blocks. */
+export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
+
+/**
+ * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
+ * cap, and together within the per-message cap. Every other image goes as a path.
+ */
+export function inlineImageIds(files: readonly FileSize[]): Set<string> {
+  const ids = new Set<string>();
+  let total = 0;
+  for (const file of files) {
+    const kind = shapeFileKind(file.name);
+    if (kind === null || !isShapeImage(kind)) continue;
+    if (file.size > INLINE_IMAGE_MAX_BYTES || total + file.size > INLINE_IMAGES_MAX_BYTES) continue;
+    total += file.size;
+    ids.add(file.id);
+  }
+  return ids;
+}
+
+/**
+ * The ids of the images among `shown` (the files a message names) that reach Claude as a path alone
+ * when `sent` (the files whose images the message carries) go as `inlineImageIds` says: an image over the
+ * per-image cap, or one of `sent` the total left out. A shown image outside `sent` was sent earlier.
+ */
+export function pathImageIds(shown: readonly FileSize[], sent: readonly FileSize[]): Set<string> {
+  const inline = inlineImageIds(sent);
+  const sentIds = new Set(sent.map((file) => file.id));
+  return new Set(
+    shown
+      .filter((file) => {
+        const kind = shapeFileKind(file.name);
+        if (kind === null || !isShapeImage(kind)) return false;
+        return file.size > INLINE_IMAGE_MAX_BYTES || (sentIds.has(file.id) && !inline.has(file.id));
+      })
+      .map((file) => file.id),
+  );
+}
+
 /** The file as Claude takes it in a message: an image block, for the kinds that are images. */
 export function asImage(kind: ShapeFileKind, bytes: Uint8Array): ShapeImage | null {
   if (!isShapeImage(kind)) return null;

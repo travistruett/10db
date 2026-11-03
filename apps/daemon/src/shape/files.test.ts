@@ -154,6 +154,56 @@ describe('a dropped image', () => {
   });
 });
 
+// The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every
+// earlier image, so a large image goes as a path to Read (which resizes) rather than as a block.
+describe('a large dropped image', () => {
+  const MB = 1024 * 1024;
+  const sized = (head: Buffer, bytes: number): Buffer =>
+    Buffer.concat([head, Buffer.alloc(bytes - head.length)]);
+
+  it('goes as a path to Read, not an image block, so the turn can end', async () => {
+    const stored = drop('big.png', sized(PNG, 12 * MB));
+    const turn = await nextTurn('What is this?');
+    expect(turn.images).toEqual([]);
+    expect(turn.message).toContain(`[file] ${stored.storedPath} (big.png)`);
+    expect(turn.message).toMatch(/too large to show.*Read/);
+  });
+
+  it('does the same for a 20 MB image, whatever its type', async () => {
+    drop('huge.jpg', sized(JPEG, 20 * MB));
+    drop('huge.webp', sized(WEBP, 20 * MB));
+    const turn = await nextTurn('Look');
+    expect(turn.images).toEqual([]);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+  });
+
+  it('is not marked on a small image beside it, which is still sent inline', async () => {
+    drop('big.png', sized(PNG, 6 * MB));
+    drop('small.png', PNG);
+    const turn = await nextTurn('Both');
+    expect(turn.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(1);
+  });
+
+  it('keeps one turn’s inline images under a total, the rest going as paths', async () => {
+    for (let i = 0; i < 4; i += 1) drop(`shot${String(i)}.png`, sized(PNG, 2 * MB));
+    const turn = await nextTurn('Four');
+    expect(turn.images).toHaveLength(3);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(1);
+    expect(turn.message).toMatch(/shot3\.png\) .*too large to show/);
+  });
+
+  it('is sent as a path to a session that has not started, and not as an image', async () => {
+    drop('big.png', sized(PNG, 8 * MB));
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok' });
+    f.service.send(shapeId(), 'Look');
+    await f.service.settled(shapeId());
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.spec.images ?? []).toEqual([]);
+    expect(session.spec.prompt).toMatch(/too large to show.*Read/);
+  });
+});
+
 describe('refusals', () => {
   const stored = (): string[] => {
     const dir = join(f.filesDir, shapeId(), 'files');
