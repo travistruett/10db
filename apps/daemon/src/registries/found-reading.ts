@@ -3,8 +3,8 @@ import { getAppSetting, getProject } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { Logger } from '../log';
-import { writeFoundHostsIfNone } from '../permissions';
-import { findRegistryHostsAt } from './find-registry-hosts';
+import { startWebHosts, webHostsStarted, writeFoundHostsIfNone } from '../permissions';
+import { findDocsHostsAt, findRegistryHostsAt } from './find-registry-hosts';
 
 const key = (projectId: ProjectId): string => `network-hosts-found:${projectId}`;
 
@@ -55,4 +55,34 @@ export async function takeFoundHostsReading(
       );
     }
   }
+}
+
+/**
+ * Gives a project that was added before read lists existed its read list's start, from the manifests
+ * committed where no lane can move them (see `trustedRevs`). A branch git can't read costs only the
+ * found hosts: the list still starts, with github.com, and Look Again names the rest.
+ */
+export async function takeWebHostsStart(
+  deps: {
+    readonly state: StateStore;
+    readonly git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>;
+    readonly logger: Logger;
+  },
+  projectId: ProjectId,
+): Promise<void> {
+  if (webHostsStarted(deps.state.db, projectId)) return;
+  const project = getProject(deps.state.db, projectId);
+  let found: Awaited<ReturnType<typeof findDocsHostsAt>> = [];
+  for (const rev of trustedRevs(project)) {
+    try {
+      found = await findDocsHostsAt(deps.git, project.repoPath, rev);
+      break;
+    } catch (error) {
+      deps.logger.debug(
+        { projectId, rev, err: error instanceof Error ? error.message : String(error) },
+        'documentation hosts not read from the default branch',
+      );
+    }
+  }
+  startWebHosts(deps.state, projectId, found);
 }

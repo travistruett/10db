@@ -3,6 +3,7 @@ export const SettingsSectionKey = {
   BoardColumns: 'board-columns',
   Areas: 'areas',
   NetworkHosts: 'network-hosts',
+  WebAccess: 'web-access',
   Billing: 'billing',
   Team: 'team',
   RoutingRules: 'routing-rules',
@@ -53,6 +54,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.NetworkHosts,
     group: SettingsGroup.Project,
     label: 'Network hosts',
+    planned: null,
+  },
+  {
+    key: SettingsSectionKey.WebAccess,
+    group: SettingsGroup.Project,
+    label: 'Web access',
     planned: null,
   },
   {

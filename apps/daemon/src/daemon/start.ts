@@ -1007,6 +1007,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
 
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
   const services = createServices({
+    logger,
     state,
     bus,
     runner: createdRunner,

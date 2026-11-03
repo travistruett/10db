@@ -88,13 +88,9 @@ describe('hosts found when a project is added', () => {
     ]);
     // The same project-wide rules a card's Allow for the project stores, so lanes and gates read them.
     expect(
-      listPermissionRules(daemon.state.db, project.id, null).map((r) => [
-        r.toolName,
-        r.pattern,
-        r.workstreamId,
-        r.sourceInboxId,
-        r.foundIn,
-      ]),
+      listPermissionRules(daemon.state.db, project.id, null)
+        .filter((r) => r.toolName === 'SandboxNetworkAccess')
+        .map((r) => [r.toolName, r.pattern, r.workstreamId, r.sourceInboxId, r.foundIn]),
     ).toEqual([
       ['SandboxNetworkAccess', 'npm.corp.example.com', null, null, '.npmrc'],
       ['SandboxNetworkAccess', 'index.crates.io', null, null, 'Cargo.lock'],

@@ -46,7 +46,10 @@ import {
   allowFoundHosts,
   foundHostFile,
   listNetworkHosts,
+  listWebHosts,
   removeNetworkHost,
+  removeWebHost,
+  setWebSearch,
   storableRule,
 } from '../permissions';
 import { protectedReads, type FileAccessContext } from '../sandbox';
@@ -2267,12 +2270,270 @@ describe('permission broker in a sandboxed lane', () => {
     });
   });
 
+  // WebFetch used to be this test's example; it now has a card of its own, tested below.
   it('asks about every other tool as it always did', () => {
     const ws = seedWorkstream(base);
-    void sandboxed(ws)(request('WebFetch', { url: 'https://example.com' })).catch(() => undefined);
+    void sandboxed(ws)(request('mcp__repo__lookup', { id: 7 })).catch(() => undefined);
     expect(onlyOpenCard()).toMatchObject({
-      title: 'Allow WebFetch?',
-      body: '{"url":"https://example.com"}',
+      title: 'Allow mcp__repo__lookup?',
+      body: '{"id":7}',
+    });
+  });
+
+  describe('a web search', () => {
+    it('runs without a card, and with the project switch off raises one per call', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const search = request('WebSearch', { query: 'gh pr view error' });
+      expect(await decide(search)).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+
+      state.write((ctx) => {
+        setWebSearch(ctx, ws.project.id, false);
+      });
+      const pending = decide(search);
+      await settle();
+      expect(onlyOpenCard()).toMatchObject({ title: 'Allow WebSearch?' });
+      expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+      expect(await pending).toEqual({ behavior: 'allow' });
+      void decide(search).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+    });
+
+    it('takes the switch at each call, so turning it on needs no new session', async () => {
+      const ws = seedWorkstream(base);
+      state.write((ctx) => {
+        setWebSearch(ctx, ws.project.id, false);
+      });
+      const decide = sandboxed(ws);
+      state.write((ctx) => {
+        setWebSearch(ctx, ws.project.id, true);
+      });
+      expect(await decide(request('WebSearch', { query: 'x' }))).toEqual({ behavior: 'allow' });
+    });
+
+    it('never lets an old project-wide Always allow stand in for the switch', async () => {
+      const ws = seedWorkstream(base);
+      state.write((ctx) => {
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName: 'WebSearch',
+          pattern: null,
+          sourceInboxId: null,
+        });
+        setWebSearch(ctx, ws.project.id, false);
+      });
+      void sandboxed(ws)(request('WebSearch', { query: 'x' })).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebSearch?');
+    });
+
+    it('raises a card for a query the classifier escalated or that runs long', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      void decide(request('WebSearch', { query: 'x' }, true)).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebSearch?');
+      inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+      void decide(request('WebSearch', { query: 'x'.repeat(301) })).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebSearch?');
+    });
+  });
+
+  describe('a web page', () => {
+    const fetch = (url: string) => request('WebFetch', { url, prompt: 'Summarise it' });
+
+    it('of a host on the read list runs without a card', async () => {
+      const ws = seedWorkstream(base);
+      const decision = await sandboxed(ws)(fetch('https://github.com/cli/cli/issues/1'));
+      expect(decision).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+    });
+
+    it('of any other host raises a card that offers to add it, and the answer lists it', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const pending = decide(fetch('https://example.net/a?q=1'));
+      await settle();
+      const card = onlyOpenCard();
+      expect(card).toMatchObject({
+        title: 'Allow WebFetch of example.net?',
+        detail: { toolName: 'WebFetchHost', summary: 'example.net' },
+      });
+      expect(card.body).toContain('https://example.net/a?q=1');
+      expect(card.body).toContain('Summarise it');
+      expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'allow_project', 'deny']);
+      expect(card.options[1]?.description).toContain("example.net to this project's read list");
+      inbox.answer(card.id, { choice: 'allow_project' });
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(listWebHosts(state.db, ws.project.id).map((h) => h.host)).toContain('example.net');
+      expect(await decide(fetch('https://example.net/other'))).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+      // Adding a host to the read list opens no host for commands: the sandbox's list is apart.
+      expect(listNetworkHosts(state.db, ws.project.id)).toEqual([]);
+    });
+
+    it('a project-wide answer opens that host only', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const pending = decide(fetch('https://example.net/'));
+      await settle();
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+      await pending;
+      void decide(fetch('https://example.org/')).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebFetch of example.org?');
+    });
+
+    it('raises one card for two calls to the host at once in one session', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const first = decide(fetch('https://example.net/a'));
+      const second = decide(fetch('https://example.net/b'));
+      await settle();
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+      expect(await Promise.all([first, second])).toEqual([
+        { behavior: 'allow' },
+        { behavior: 'allow' },
+      ]);
+      expect(openCards()).toEqual([]);
+    });
+
+    it('raises one card for two lanes at the host at once, with different pages', async () => {
+      const ws = seedWorkstream(base);
+      const other = seedWorkstream(base, { project: ws.project });
+      const first = sandboxed(ws)(fetch('https://example.net/a'));
+      const second = sandboxed(other)(fetch('https://example.net/b'));
+      await settle();
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_project' });
+      expect(await Promise.all([first, second])).toEqual([
+        { behavior: 'allow' },
+        { behavior: 'allow' },
+      ]);
+    });
+
+    it('a denied host denies the call that was waiting on the same card', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const first = decide(fetch('https://example.net/a'));
+      const second = decide(fetch('https://example.net/b'));
+      await settle();
+      inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+      const [one, two] = await Promise.all([first, second]);
+      expect(one.behavior).toBe('deny');
+      expect(two.behavior).toBe('deny');
+      expect(openCards()).toEqual([]);
+    });
+
+    it('allowed once covers the one call: the next one asks again', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      const pending = decide(fetch('https://example.net/a'));
+      await settle();
+      inbox.answer(onlyOpenCard().id, { choice: 'allow_once' });
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(listWebHosts(state.db, ws.project.id).map((h) => h.host)).toEqual(['github.com']);
+      void decide(fetch('https://example.net/a')).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebFetch of example.net?');
+    });
+
+    it('takes an allow-once answered while parked in the next session', async () => {
+      const ws = seedWorkstream(base);
+      const decide = createPermissionBroker(
+        { state, inbox, git: NO_GIT, logger: silentLogger },
+        {
+          projectId: ws.project.id,
+          workstreamId: ws.workstream.id,
+          sessionId: mintId('Session'),
+          observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+          signal: controller.signal,
+          allowOnce: { toolName: 'WebFetchHost', summary: 'example.net' },
+          sandbox: { fileAccess, hazards: DEFAULT_HAZARDS },
+        },
+      );
+      expect(await decide(fetch('https://example.net/a'))).toEqual({ behavior: 'allow' });
+      expect(openCards()).toEqual([]);
+    });
+
+    it.each([
+      ['a host that only begins like a listed one', 'https://github.com.example.net/'],
+      ['a listed host with a login in front of the real one', 'https://github.com@example.net/'],
+      ['a listed host as the login', 'https://github.com:x@example.net/'],
+      ['a login on a listed host', 'https://x@github.com/'],
+      ['a listed name inside the path', 'https://example.net/github.com'],
+      ['a subdomain of a listed host', 'https://gist.github.com/'],
+      ['another port', 'https://github.com:8443/'],
+      ['plain http', 'http://github.com/'],
+      ['a trailing dot', 'https://github.com./'],
+      ['a backslash', 'https://example.net\\@github.com/'],
+      ['a tab inside the host', 'https://git\thub.com/'],
+      ['an address', 'https://140.82.112.4/'],
+      ['this machine', 'https://localhost:4141/'],
+      ['a local name', 'https://printer.local/'],
+      ['no URL', 'github.com'],
+    ])('%s raises a card', async (_name, url) => {
+      const ws = seedWorkstream(base);
+      void sandboxed(ws)(fetch(url)).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().kind).toBe('permission');
+    });
+
+    it.each([
+      ['a login', 'https://github.com@example.net/'],
+      ['an address', 'https://140.82.112.4/'],
+      ['this machine', 'https://localhost/'],
+      ['plain http', 'http://example.net/'],
+      ['a very long address', `https://github.com/${'x'.repeat(2001)}`],
+    ])('%s can only be allowed once, and no answer lists anything', async (_name, url) => {
+      const ws = seedWorkstream(base);
+      const pending = sandboxed(ws)(fetch(url));
+      await settle();
+      const card = onlyOpenCard();
+      expect(card.title).toBe('Allow WebFetch?');
+      expect(card.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+      inbox.answer(card.id, { choice: 'allow_once' });
+      expect(await pending).toEqual({ behavior: 'allow' });
+      expect(listWebHosts(state.db, ws.project.id)).toEqual([]);
+    });
+
+    it('never takes an old project-wide WebFetch rule for a listed host', async () => {
+      const ws = seedWorkstream(base);
+      state.write((ctx) => {
+        insertPermissionRule(ctx, {
+          projectId: ws.project.id,
+          workstreamId: null,
+          toolName: 'WebFetch',
+          pattern: null,
+          sourceInboxId: null,
+        });
+      });
+      void sandboxed(ws)(fetch('https://example.net/')).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebFetch of example.net?');
+    });
+
+    it('raises a card when the classifier escalated a listed host', async () => {
+      const ws = seedWorkstream(base);
+      void sandboxed(ws)(
+        request('WebFetch', { url: 'https://github.com/x', prompt: 'y' }, true),
+      ).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebFetch of github.com?');
+    });
+
+    it('follows a host taken off the read list at the next call', async () => {
+      const ws = seedWorkstream(base);
+      const decide = sandboxed(ws);
+      expect(await decide(fetch('https://github.com/'))).toEqual({ behavior: 'allow' });
+      removeWebHost(state, ws.project.id, 'github.com');
+      void decide(fetch('https://github.com/')).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().title).toBe('Allow WebFetch of github.com?');
     });
   });
 

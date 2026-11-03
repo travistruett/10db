@@ -46,6 +46,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/shape-jev': 'No screen draws a setting.',
   '/projects/:projectId/one-way-paths': 'No screen draws a setting.',
   '/projects/:projectId/network-hosts': 'No screen draws a setting.',
+  '/projects/:projectId/web-hosts': 'No screen draws a setting.',
+  '/projects/:projectId/web-search': 'No screen draws a setting.',
   '/projects/:projectId/team': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
@@ -62,6 +64,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/benchmarks/models': 'No screen draws a benchmark.',
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/lane-permissions': 'No screen draws a setting.',
+  '/settings/self-update': 'No screen draws a setting.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

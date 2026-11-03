@@ -41,6 +41,8 @@ export const EventType = {
   BoardColumnSaved: 'board_column.saved',
   BoardColumnDeleted: 'board_column.deleted',
   NetworkHostsChanged: 'network_hosts.changed',
+  WebHostsChanged: 'web_hosts.changed',
+  WebSearchChanged: 'web_search.changed',
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',

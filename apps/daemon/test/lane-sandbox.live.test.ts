@@ -1004,7 +1004,8 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
             `${tool} reached the broker`,
           )
           .toEqual(['deny']);
-        const cards = cardSummaries(run, tool);
+        // A WebFetch's card is about its host, so it names the read list's rule, not the tool.
+        const cards = cardSummaries(run, tool === 'WebFetch' ? 'WebFetchHost' : tool);
         expect.soft(cards, `${tool} card`).toHaveLength(1);
         expect.soft(cards.join(''), `${tool} card names the host`).toContain('example.net');
         // Refused before it ran, so the host was never reached.
@@ -1025,6 +1026,46 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       expect.soft(listed === undefined || refused, 'a host list is refused').toBe(true);
       const carded = cardSummaries(run, 'SandboxNetworkAccess').includes('example.net');
       expect.soft(refused || carded, 'the host was refused or carded').toBe(true);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }, 300_000);
+
+  it('searches the web and reads a host on the read list with no card', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
+    try {
+      const checkout = join(root, 'repo');
+      initRepo(checkout);
+      const dataDir = join(root, 'data');
+      mkdirSync(dataDir);
+      const run = await runLane({
+        ...AUTO,
+        checkout,
+        dataDir,
+        extraEnv: {},
+        probe: () => 'true\n',
+        prompt: [
+          'This is a check of the permission system. Do exactly these steps in order and nothing else:',
+          '1. Use the WebSearch tool to search for: gh pr view json fields',
+          '2. Use the WebFetch tool on https://github.com/cli/cli with the prompt: What is this project?',
+          'Then reply with the single word: done',
+        ].join('\n'),
+      });
+      report('auto-web', run, []);
+
+      expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      expectAutoMode(run);
+      for (const tool of ['WebSearch', 'WebFetch']) {
+        // The hook hands each to the broker, which allows it: the same path in every mode.
+        expect.soft(run.guardVerdicts.find((v) => v.toolName === tool)?.decision, tool).toBe('ask');
+        expect
+          .soft(
+            run.brokerCalls.filter((c) => c.toolName === tool).map((c) => c.behavior),
+            `${tool} reached the broker`,
+          )
+          .toEqual(['allow']);
+      }
+      expect.soft(run.cards, 'no card').toEqual([]);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -820,6 +820,29 @@ export type FoundHostDto = z.infer<typeof FoundHostDto>;
 export const NetworkHostInput = z.object({ host: z.string() });
 export type NetworkHostInput = z.infer<typeof NetworkHostInput>;
 
+/** Where a host on a project's read list came from; `start` is a host 10db starts every list with. */
+export const WebHostSource = z.discriminatedUnion('kind', [
+  ...NetworkHostSource.options,
+  z.object({ kind: z.literal('start') }),
+]);
+export type WebHostSource = z.infer<typeof WebHostSource>;
+
+/** A host whose pages a project's lanes may read with WebFetch and no card. */
+export const WebHostDto = z.object({
+  host: z.string(),
+  source: WebHostSource,
+  createdAt: Timestamp,
+});
+export type WebHostDto = z.infer<typeof WebHostDto>;
+
+/** What the builder types to add a host to the read list; a refusal is answered in words. */
+export const WebHostInput = z.object({ host: z.string() });
+export type WebHostInput = z.infer<typeof WebHostInput>;
+
+/** Whether a project's lanes search the web with no card. */
+export const WebSearchDto = z.object({ enabled: z.boolean() });
+export type WebSearchDto = z.infer<typeof WebSearchDto>;
+
 const EvidenceBase = {
   id: EvidenceId,
   workstreamId: WorkstreamId,

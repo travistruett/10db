@@ -50,6 +50,8 @@
         "board_column.saved",
         "board_column.deleted",
         "network_hosts.changed",
+        "web_hosts.changed",
+        "web_search.changed",
         "goal.created",
         "goal.changed",
         "shape.changed",

@@ -14,6 +14,7 @@ import { ProjectGeneralForm } from './project-general-form';
 import { sectionByKey, SettingsSectionKey } from './sections';
 import { SelfUpdateSection } from './self-update-section';
 import { ShapeJevSetting } from './shape-jev-setting';
+import { WebAccessSection } from './web-access-section';
 
 function NoProject() {
   return <Text c="dimmed">Create a project on the board first.</Text>;
@@ -63,6 +64,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <NetworkHostsSection key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.WebAccess:
+      return (
+        <>
+          {heading}
+          {project ? <WebAccessSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
     case SettingsSectionKey.Billing:

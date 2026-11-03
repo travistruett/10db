@@ -44,6 +44,12 @@ export function baseAllowedTools(
 
 /** The sandbox's ask to reach a host; a stored rule for it names the host. */
 const NETWORK_TOOL = 'SandboxNetworkAccess';
+/**
+ * The read list: a stored rule under this name lets lanes read a host's pages with WebFetch. It is
+ * no tool Claude Code has, so a rule for `WebFetch`, which names no host and so covers every one, is
+ * never taken for it, and the sandbox's list of hosts for commands never holds it.
+ */
+export const WEB_HOST_TOOL = 'WebFetchHost';
 /** Tools that write a file; a stored rule for one names the real path it may write. */
 const WRITE_TOOLS: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -277,6 +283,14 @@ export function matchPermissionRule(
       const host = stringField(req.input, 'host');
       return host !== null && hostMatches(host.toLowerCase(), pattern);
     }
+    if (req.toolName === WEB_HOST_TOOL) {
+      // Compared whole: a read list holds names, never a wildcard, and no rule covers every host.
+      return (
+        rule.toolName === req.toolName &&
+        pattern !== null &&
+        stringField(req.input, 'host') === pattern
+      );
+    }
     if (pattern !== null && READ_TOOLS.has(req.toolName)) {
       const real = paths?.realPaths ?? [];
       return (
@@ -343,6 +357,10 @@ export function storableRule(toolName: string, summary: string): StorableRule | 
     // sandbox shows) stores no pattern, as it always has.
     const host = summary.toLowerCase();
     return { toolName, pattern: isSandboxDomain(host) || isLiteralHost(host) ? host : null };
+  }
+  if (toolName === WEB_HOST_TOOL) {
+    // Only ever one host's name: with no pattern the rule would read as every host.
+    return isLiteralHost(summary) ? { toolName, pattern: summary } : undefined;
   }
   const reads = READ_TOOLS.has(toolName);
   // An absolute path is a sandboxed lane's summary; any other summary is the unscoped form a lane
