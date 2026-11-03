@@ -60,9 +60,8 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   expect(created.ok()).toBe(true);
   await page.goto('/board');
 
-  // A new project starts with an Icebox column for parked work.
-  // An empty list has no height, so it is attached rather than visible.
-  await expect(page.getByRole('list', { name: 'Icebox tasks' })).toBeAttached();
+  // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
+  await expect(page.getByRole('group', { name: 'Icebox, collapsed' })).toBeVisible();
 
   // Create two tasks; the only area is preselected. The first never runs.
   for (const title of [OTHER, TASK]) {

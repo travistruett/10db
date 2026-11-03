@@ -420,11 +420,12 @@ test.describe('the Board with three goals', () => {
       await expect(page.getByTestId('goal-strip')).toHaveCount(0);
       await expect(page.getByTestId('goal-line')).toHaveCount(0);
       for (const title of GOAL_TITLES) {
-        // The goal's title shows in the columns only as the dimmed label on its two tasks' cards.
+        // The goal's title shows in the columns only as the badge in the indicator row of its two
+        // tasks' cards (these titles are short enough to show whole).
         const inColumns = page.getByTestId('board-columns').getByText(title, { exact: true });
-        await expect(inColumns.and(page.getByTestId('task-card-goal'))).toHaveCount(2);
+        await expect(inColumns.and(page.getByTestId('indicator-goal'))).toHaveCount(2);
         await expect(
-          inColumns.and(page.locator(':not([data-testid="task-card-goal"])')),
+          inColumns.and(page.locator(':not([data-testid="indicator-goal"])')),
         ).toHaveCount(0);
       }
 
