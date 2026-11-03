@@ -9,7 +9,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
+import { delay, http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
@@ -197,6 +197,78 @@ describe('FactoryView goal list', () => {
       expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
     },
   );
+
+  describe('a Not in a goal row while what decides a retry is unknown', () => {
+    const free = workstreamDto({ taskTitle: 'Free break', state: 'FAILED' });
+    const batched = workstreamDto({
+      taskTitle: 'Batched break',
+      state: 'FAILED',
+      batchId: mintId('Batch'),
+    });
+    const ungrouped = ungroupedDto({
+      status: 'failed',
+      failed: 2,
+      workstreams: [free, batched].map((ws) => ({
+        workstreamId: ws.id,
+        taskId: ws.taskId,
+        taskTitle: ws.taskTitle,
+        state: ws.state,
+      })),
+    });
+    const refused = () =>
+      HttpResponse.json({ error: 'internal', message: 'The list broke' }, { status: 500 });
+
+    async function openRegion(...over: RequestHandler[]): Promise<HTMLElement> {
+      serve(goals({ ...goalListDto(), ungrouped }), workstreams(free, batched), ...over);
+      renderApp('/factory');
+      fireEvent.click(await screen.findByRole('button', { name: /^Not in a goal/ }));
+      return screen.findByRole('region', { name: 'Not in a goal' });
+    }
+
+    const tasks = tasksOf(
+      taskDto({ id: free.taskId, workstreamId: free.id }),
+      taskDto({ id: batched.taskId, workstreamId: batched.id }),
+    );
+
+    function rowOf(region: HTMLElement, title: string): HTMLElement {
+      const row = within(region).getByText(title).closest('tr');
+      if (!row) throw new Error(`${title} is not in a table row`);
+      return row;
+    }
+
+    it.each([
+      { name: 'still loading', answer: () => delay('infinite') },
+      { name: 'refused', answer: refused },
+    ])('promises nothing for a run in a batch while batches are $name', async ({ answer }) => {
+      const region = await openRegion(
+        tasks,
+        http.get(daemonUrl('/projects/:projectId/batches'), answer),
+      );
+
+      // The run with no batch gets its Retry, so the tasks have loaded and only the batch is unknown.
+      await within(region).findByRole('button', { name: 'Retry' });
+      const row = rowOf(region, 'Batched break');
+      expect(within(row).getByText('The run failed.')).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Retry' })).toBeNull();
+    });
+
+    it('says why when the batches request fails', async () => {
+      const region = await openRegion(
+        tasks,
+        http.get(daemonUrl('/projects/:projectId/batches'), refused),
+      );
+      expect(await within(region).findByText('The list broke')).toBeTruthy();
+    });
+
+    it('says why Retry is gone when the tasks request fails', async () => {
+      const region = await openRegion(
+        http.get(daemonUrl('/projects/:projectId/tasks'), refused),
+        http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([])),
+      );
+      expect(await within(region).findByText('The list broke')).toBeTruthy();
+      expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
+    });
+  });
 
   it('orders goals failed, waiting on you, running, not started, Not in a goal, then Done, all collapsed', async () => {
     const loose = workstreamDto({ taskTitle: 'Loose run', state: 'RUNNING' });
@@ -856,6 +928,25 @@ describe('FactoryView task list', () => {
     const region = screen.getByRole('region', { name: 'Real areas' });
     expect(
       await within(region).findByText(
+        'Failed: Broken. The checks kept failing and the run ran out of fix attempts.',
+      ),
+    ).toBeTruthy();
+    expect(within(region).queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('says only what happened, with no Retry, while the failed run’s batch has not loaded', async () => {
+    const failed = workstreamDto({
+      taskTitle: 'Broken',
+      state: 'FAILED',
+      failureKind: 'gate_failed',
+      batchId: mintId('Batch'),
+    });
+    open(failed, [http.get(daemonUrl('/projects/:projectId/batches'), () => delay('infinite'))]);
+
+    await sessionRow('Broken');
+    const region = screen.getByRole('region', { name: 'Real areas' });
+    expect(
+      within(region).getByText(
         'Failed: Broken. The checks kept failing and the run ran out of fix attempts.',
       ),
     ).toBeTruthy();

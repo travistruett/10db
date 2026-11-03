@@ -53,7 +53,7 @@ export function GoalSessions({
   const retry = useRetryWorkstream();
   const navigate = useNavigate();
 
-  // A task that has not loaded yet is not known to be retryable, so it promises nothing.
+  // A task or batch that has not loaded yet is not known to be retryable, so it promises nothing.
   function retryable(ws: WorkstreamDto): boolean {
     const task = tasks.find((t) => t.id === ws.taskId);
     return (

@@ -184,11 +184,13 @@ export function pullRequestClosed(batch: BatchDto | undefined): boolean {
 /** The task fields `retryWorkstream` reads before it accepts a retry. */
 export type RetryTask = Pick<TaskDto, 'status' | 'boardColumnId' | 'workstreamId'>;
 
-/** Whether the batch lets a retry through: only an open or failed one reopens; a run with no batch has none to refuse. */
-function batchAllowsRetry(batch: BatchDto | undefined): boolean {
-  return (
-    batch === undefined || batch.state === BatchState.Open || batch.state === BatchState.Failed
-  );
+/**
+ * Whether the batch lets a retry through: only an open or failed one reopens, and a run with no batch
+ * has none to refuse. A run with a batch that is not loaded yet, or failed to, is not known to pass.
+ */
+function batchAllowsRetry(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+  if (!batch) return workstream.batchId === null;
+  return batch.state === BatchState.Open || batch.state === BatchState.Failed;
 }
 
 /**
@@ -207,7 +209,7 @@ export function canRetryRun(
     task.status !== TaskStatus.Cancelled &&
     task.boardColumnId === null &&
     task.workstreamId === workstream.id &&
-    batchAllowsRetry(batch)
+    batchAllowsRetry(workstream, batch)
   );
 }
 
@@ -384,7 +386,7 @@ function stateOf(
       return {
         line: failureLine(
           workstream,
-          task ? canRetryRun(task, workstream, batch) : batchAllowsRetry(batch),
+          task ? canRetryRun(task, workstream, batch) : batchAllowsRetry(workstream, batch),
         ),
         color: 'red',
         detail: workstream.failureReason,

@@ -148,6 +148,19 @@ describe('failureLine', () => {
     expect(line).not.toContain('Retry');
   });
 
+  it('says only what happened on the card while the run’s batch is not known', () => {
+    const ws = workstreamDto({
+      state: 'FAILED',
+      failureKind: 'gate_failed',
+      batchId: mintId('Batch'),
+    });
+    const task = taskDto({ workstreamId: ws.id });
+    expect(taskState(ws, undefined, null)?.line).toBe(failureLine(ws, false));
+    expect(taskState(ws, undefined, null, undefined, undefined, task)?.line).toBe(
+      failureLine(ws, false),
+    );
+  });
+
   it('keeps promising Retry on the card when the task is retryable', () => {
     const ws = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
     const task = taskDto({ workstreamId: ws.id });
@@ -181,6 +194,14 @@ describe('canRetryRun', () => {
       expect(canRetryRun(own, failed, batchDto({ state }))).toBe(false);
     },
   );
+
+  it('does not promise a retry of a run whose batch is not known, which may refuse it', () => {
+    const open = batchDto({ state: 'OPEN' });
+    const batched = workstreamDto({ state: 'FAILED', batchId: open.id });
+    const task = taskDto({ workstreamId: batched.id });
+    expect(canRetryRun(task, batched, undefined)).toBe(false);
+    expect(canRetryRun(task, batched, open)).toBe(true);
+  });
 
   it('refuses a run that is not failed, and a task that is closed, parked or has a newer run', () => {
     expect(canRetryRun(own, workstreamDto({ id: failed.id, state: 'RUNNING' }), undefined)).toBe(
