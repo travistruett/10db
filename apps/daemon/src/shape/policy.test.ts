@@ -68,6 +68,7 @@ describe('the tool lists of a Shape session', () => {
         ShapeToolName.FindRecords,
         ShapeToolName.WriteSpec,
         ShapeToolName.ResolveFinding,
+        ShapeToolName.SeeScreen,
       ].sort(),
     );
     expect(SHAPE_OFFERED_TOOLS).not.toContain(ShapeToolName.ReportFinding);
@@ -163,6 +164,22 @@ describe('the rehearsal turn', () => {
     expect(instruction).toContain('effortKey density · taskKey cards · taskHash abc123');
     expect(instruction).toContain('  Title: Cards\n  Areas: ui');
     expect(instruction).toMatch(/one Agent call per task/);
+  });
+});
+
+describe('seeing the app (§5.2, §5.5)', () => {
+  it('gives the session no browser, no click and no command: its tools are the lists above and see_screen', () => {
+    const everything = [...SHAPE_BUILT_IN_TOOLS, ...SHAPE_ALLOWED_TOOLS, ...SHAPE_OFFERED_TOOLS];
+    expect(
+      everything.filter((t) => /playwright|browser|puppeteer|click|type|screenshot/i.test(t)),
+    ).toEqual([]);
+    expect(SHAPE_OFFERED_TOOLS).toContain('see_screen');
+  });
+
+  it('tells the session what see_screen is: a picture of one screen, with the real data, that it cannot act on', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/see_screen/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/cannot click/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/12/);
   });
 });
 

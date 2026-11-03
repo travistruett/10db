@@ -200,6 +200,21 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     () => call('mcp__10db__propose_plan', {}, { agentId: 'a', agentType: 'researcher' }),
   ],
   [
+    'see_screen from the researcher',
+    () =>
+      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'see_screen from a reviewer',
+    () =>
+      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'rehearsal' }),
+  ],
+  [
+    'a browser tool of any kind',
+    () => call('mcp__playwright__browser_navigate', { url: 'http://127.0.0.1:1420' }),
+  ],
+  ['a click or a key into a screen', () => call('mcp__10db__click', { selector: 'button' })],
+  [
     'find_records from the researcher',
     () =>
       call('mcp__10db__find_records', { query: 'x' }, { agentId: 'a', agentType: 'researcher' }),
@@ -277,6 +292,7 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
   ['propose_plan', () => call('mcp__10db__propose_plan', {})],
   ['similar_tasks', () => call('mcp__10db__similar_tasks', { query: 'x' })],
   ['find_records', () => call('mcp__10db__find_records', { query: 'x' })],
+  ['see_screen', () => call('mcp__10db__see_screen', { screen: 'board' })],
   [
     'a reviewer’s Read inside the checkout',
     () =>
