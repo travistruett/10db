@@ -7,6 +7,7 @@ import {
 import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
+import { useRef } from 'react';
 import {
   useCreateShape,
   useProposeShape,
@@ -49,6 +50,15 @@ export function ConversationPane({
   const propose = useProposeShape();
   const stop = useStopShape();
   const upload = useUploadShapeFile();
+
+  // The conversation a first send or drop made. The screen opens it only once that succeeds, so a
+  // retry after a failure reuses it instead of leaving another empty conversation behind.
+  const created = useRef<ShapeId | null>(null);
+  const ensureId = async (): Promise<ShapeId> => {
+    if (shapeId !== null) return shapeId;
+    created.current ??= (await create.mutateAsync()).id;
+    return created.current;
+  };
 
   const answering = view?.turn.running ?? false;
   const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
@@ -125,10 +135,10 @@ export function ConversationPane({
         files={(view?.files ?? []).map((f) => f.name)}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
-          const made: { id: ShapeId | null } = { id: shapeId };
+          const made: { id: ShapeId | null } = { id: shapeId ?? created.current };
           const problems = await addFiles(dropped, view?.files.length ?? 0, {
             ensureConversation: async () => {
-              made.id ??= (await create.mutateAsync()).id;
+              made.id ??= await ensureId();
             },
             upload: (file) => {
               if (made.id === null) return Promise.reject(new Error('No conversation to add to.'));
@@ -139,7 +149,7 @@ export function ConversationPane({
           return problems;
         }}
         onSend={async (text) => {
-          const id = shapeId ?? (await create.mutateAsync()).id;
+          const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
           if (shapeId === null) onOpened(id);
         }}

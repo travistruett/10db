@@ -120,6 +120,45 @@ describe('Shape: the first run', () => {
       expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
     });
   });
+
+  it('keeps one conversation when the first send fails and posts the retry to it', async () => {
+    const view = proposed([], { round: 0 });
+    let created = 0;
+    const posted: { shapeId: string; body: unknown }[] = [];
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/projects/:projectId/shapes'), () => {
+        created += 1;
+        return HttpResponse.json(view.shape, { status: 201 });
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), async ({ params, request }) => {
+        posted.push({ shapeId: String(params['shapeId']), body: await request.json() });
+        if (posted.length === 1) {
+          return HttpResponse.json(
+            { error: 'unavailable', message: 'Claude is away' },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+      }),
+    );
+    const { router } = renderApp('/shape');
+    const input = await screen.findByRole('textbox', { name: 'Message' });
+    await screen.findByRole('list', { name: 'Recent conversations' });
+    fireEvent.change(input, { target: { value: 'Move density ahead of the scrollbars.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(await screen.findByText('Claude is away')).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/shape');
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(posted).toHaveLength(2);
+    });
+    expect(created).toBe(1);
+    expect(posted.map((p) => p.shapeId)).toEqual([view.shape.id, view.shape.id]);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+    });
+  });
 });
 
 describe('Shape: the conversation', () => {
