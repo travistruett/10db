@@ -1,9 +1,9 @@
-import {
+import type {
   CeremonyReason,
-  type ShapeCeremonyDto,
-  type ShapeFindingDto,
-  type ShapeProposalDto,
-  type ShapeViewDto,
+  ShapeCeremonyDto,
+  ShapeFindingDto,
+  ShapeProposalDto,
+  ShapeViewDto,
 } from '@10db/contracts';
 
 // Shape spec §7. What the sidebar and the Convert modal say about a row's ceremony, the reviewers'

@@ -25,6 +25,7 @@ export function shapeMeasuresDto(overrides: Partial<ShapeMeasuresDto> = {}): Sha
   const none = { n: 0, within: 0 };
   return ShapeMeasuresDto.parse({
     sizing: { ...none, buckets: { S: none, M: none, L: none, XL: none }, overrides: 0 },
+    questions: { converted: { tasks: 0, cards: 0 }, other: { tasks: 0, cards: 0 } },
     shadow: SHAPE_JUDGE_DECISIONS.map((decision) => ({
       decision,
       answered: 0,

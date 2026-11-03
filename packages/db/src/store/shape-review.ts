@@ -241,9 +241,7 @@ const oneWayKey = (projectId: ProjectId): string => `shape.oneWayPaths.${project
 /** The globs the builder set for a project, or null while none were set (the defaults apply). */
 export function getOneWayPaths(db: DbReader, projectId: ProjectId): string[] | null {
   const value = getAppSetting(db, oneWayKey(projectId));
-  return Array.isArray(value) && value.every((v) => typeof v === 'string')
-    ? (value as string[])
-    : null;
+  return Array.isArray(value) && value.every((v) => typeof v === 'string') ? value : null;
 }
 
 export function setOneWayPaths(

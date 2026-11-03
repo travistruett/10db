@@ -224,6 +224,25 @@ describe('Settings › Decisions › Shape (spec §8, §9)', () => {
     expect(sizing.textContent).toContain('No converted task has finished yet');
   });
 
+  it("shows Inbox question cards per converted task against the project's other tasks (spec §7)", async () => {
+    open({
+      measures: shapeMeasuresDto({
+        questions: { converted: { tasks: 4, cards: 2 }, other: { tasks: 10, cards: 9 } },
+      }),
+    });
+    const questions = await screen.findByRole('group', { name: 'Questions' });
+    expect(questions.textContent).toContain('0.5 question cards per task (4 tasks) converted');
+    expect(questions.textContent).toContain(
+      "0.9 question cards per task (10 tasks) for the project's other tasks",
+    );
+  });
+
+  it('says Questions has nothing to measure until a converted task starts', async () => {
+    open();
+    const questions = await screen.findByRole('group', { name: 'Questions' });
+    expect(questions.textContent).toContain('No converted task has started yet');
+  });
+
   it("shows each Shape decision's shadow agreement, and sends its switch", async () => {
     const { sent } = open({
       measures: shapeMeasuresDto({

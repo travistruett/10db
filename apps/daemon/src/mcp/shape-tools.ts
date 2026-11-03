@@ -26,11 +26,12 @@ export const SHAPE_TOOL_DESCRIPTIONS: Record<ShapeToolName, string> = {
   propose_plan:
     'State the whole plan: goals, loose tasks, landings, records, questions and, once something is converted, additions, changes and removals. Every call restates everything; rows you leave out move to Earlier. Refused until the builder has pressed Propose. Every error comes back at once; fix them all and call again.',
   attach: 'Attach a Mermaid diagram, a chart or an HTML mockup to a proposed task or goal.',
-  write_spec: "Write an effort's spec.",
+  write_spec:
+    "Write an effort's spec (the goal's or loose task's key, and the spec in Markdown). Required before Convert for an effort that needs one; propose_plan answers needSpec when it does.",
   report_finding:
-    'Reviewers only: report a finding, or a question the implementer would have to ask, under an effort or one of its tasks.',
+    'Reviewers only, from the scope, engineering or rehearsal subagent; 10db stamps which one and refuses the call from anyone else. Report a finding, or a question the implementer would have to ask, under an effort or one of its tasks. The rehearsal sets final on its closing call (a none, or the last question) to mark the task read. Answers the findingId.',
   resolve_finding:
-    'Mark a finding resolved once a propose_plan call has answered it, with a one-line how.',
+    'Mark a finding resolved once a propose_plan call has answered it, with a one-line how. The builder dismisses the ones you leave.',
   find_records:
     'Search the decisions that apply to this project and its earlier conversations. Cite what you find, with its date.',
 };

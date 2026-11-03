@@ -66,6 +66,10 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/shape-jev', base), () =>
       HttpResponse.json({ enabled: false }),
     ),
+    // and the one-way paths that force a spec (§7); none set.
+    http.get(daemonUrl('/projects/:projectId/one-way-paths', base), () =>
+      HttpResponse.json({ paths: [] }),
+    ),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>

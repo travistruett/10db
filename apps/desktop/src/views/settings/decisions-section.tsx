@@ -6,6 +6,7 @@ import {
   type JudgeCallDto,
   type JudgeConfig,
   type JudgeDecisionConfig,
+  type QuestionMeasureDto,
   type ShadowAgreementDto,
   type ShapeJudgeDecision,
   type SizingMeasureDto,
@@ -108,6 +109,37 @@ function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
   );
 }
 
+const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
+
+const perTask = (rate: QuestionMeasureDto['converted']): string =>
+  `${String(Math.round((rate.cards / rate.tasks) * 100) / 100)} question cards per task (${taskCount(rate.tasks)})`;
+
+/** Settings › Decisions › Questions (spec §7 Measure): Inbox question cards, converted against other tasks. */
+function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto }) {
+  const { converted, other } = questions;
+  return (
+    <SettingRow
+      label="Questions"
+      description="Inbox question cards on tasks Shape converted, against the project's other tasks. Only tasks that started count."
+    >
+      <Stack gap={2} role="group" aria-label="Questions">
+        {converted.tasks === 0 ? (
+          <Text size="sm" c="dimmed">
+            No converted task has started yet
+          </Text>
+        ) : (
+          <Text size="sm">{perTask(converted)} converted</Text>
+        )}
+        {other.tasks === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            {perTask(other)} for the project&apos;s other tasks
+          </Text>
+        )}
+      </Stack>
+    </SettingRow>
+  );
+}
+
 function agreementText(a: ShadowAgreementDto): string {
   if (a.scored === 0) return 'In shadow: No scored answers yet';
   return `In shadow: ${String(a.agreed)} of ${String(a.scored)} scored answers agreed (${percent(a.agreed, a.scored)})`;
@@ -167,6 +199,7 @@ function ShapeMeasures({
   return (
     <SettingsCard>
       <SizingRow sizing={measures.data.sizing} />
+      <QuestionsRow questions={measures.data.questions} />
       {SHAPE_JUDGE_DECISIONS.map((decision) => (
         <ShapeDecisionRow
           key={decision}

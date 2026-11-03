@@ -709,6 +709,13 @@ All in scope; this is build order. Each slice ships something usable.
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.
+   *Built, except the proposed eval's screen (only the eval a session states is stored as an attachment at Convert).
+   `oneWayPaths` is an app setting (`shape.oneWayPaths.<projectId>`, Settings › General), as `shape.jev` is.
+   `report_finding` takes a `final` flag: the rehearsal's mark for a task is written only by a closing report, so an
+   interrupted rehearsal leaves none. The reviewer is stamped by the PreToolUse hook (`updatedInput`) from the
+   subagent's `agent_type`. The Rehearse note has its own message kind (`rehearse`). A task's content hash ignores
+   `ceremony`. The question-card measure counts started, non-cancelled tasks of projects that have a converted task.
+   Migration 0033. See `decisions/2026-11-02-shape-ceremony-review-and-rehearsal.md`.*
 5. **Preview, attachments, reopen.** The factory preview; Mermaid, charts and mockups with §10.3's tests; Open
    conversation, the resume route, re-plan additions, changes and removals.
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
