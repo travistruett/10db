@@ -35,7 +35,8 @@ export function ShapeNav({ pathname }: { readonly pathname: string }) {
         {shapes.isSuccess && shapes.data.length === 0 ? (
           <Text size="xs" c="dimmed">
             No conversations yet ·{' '}
-            <Anchor component={Link} to="/shape" size="xs">
+            {/* Underlined always: a link inside a sentence can't rely on color alone (axe link-in-text-block). */}
+            <Anchor component={Link} to="/shape" size="xs" underline="always">
               Shape Work…
             </Anchor>
           </Text>

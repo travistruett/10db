@@ -92,6 +92,15 @@ describe('Shape: the first run', () => {
     expect(await within(nav).findByText(/No conversations yet/)).toBeTruthy();
   });
 
+  it('underlines the nav link inside its sentence, so color is not the only cue (axe link-in-text-block)', async () => {
+    serve(...conversations());
+    renderApp('/shape');
+    const nav = await screen.findByRole('navigation');
+    await within(nav).findByText(/No conversations yet/);
+    const link = within(nav).getByRole('link', { name: 'Shape Work…' });
+    expect(link.getAttribute('data-underline')).toBe('always');
+  });
+
   it('creates the conversation on the first send, posts the message and opens it', async () => {
     const view = proposed([], { round: 0 });
     const posted: unknown[] = [];
