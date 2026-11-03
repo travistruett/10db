@@ -1617,11 +1617,12 @@ describe('BoardView', () => {
       ),
       http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
     );
-    const { container } = renderApp('/board');
-    const select = await screen.findByLabelText('Goal');
+    renderApp('/board');
+    const select = await screen.findByRole('combobox', { name: 'Goal' });
     expect(select.getAttribute('aria-label')).toBe('Goal');
     expect((select as HTMLInputElement).value).toBe('All goals');
-    expect(container.querySelector('label')).toBeNull();
+    expect(document.querySelector(`label[for="${select.id}"]`)).toBeNull();
+    expect(screen.queryByText('Goal', { selector: 'label' })).toBeNull();
   });
 
   it('redirects /tasks to the board', async () => {
