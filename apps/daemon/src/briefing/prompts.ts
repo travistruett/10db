@@ -112,7 +112,7 @@ export const RESULT_NUDGE =
   '10db: this step is not finished until you call mcp__10db__complete_step with your result (and, for a review, a verdict). Call it now, then end your turn.';
 
 const PLAIN_COMMANDS =
-  "Run project commands in their plain form: `pnpm exec <tool> …` or the project's own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail.";
+  'Run project commands in their plain form: `pnpm exec <tool> …` or the project\'s own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: `pnpm exec prettier --write path/a.ts path/b.ts`, then `pnpm exec eslint path/a.ts path/b.ts`. Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
 
 /** Beside the plain-commands line in a sandboxed session. */
 const SANDBOX_RULES = [
