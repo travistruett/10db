@@ -1,5 +1,5 @@
 import { mintId, type ShapeViewDto } from '@10db/contracts';
-import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
@@ -188,6 +188,23 @@ describe('Shape: the conversation', () => {
     const sidebar = screen.getByRole('region', { name: 'Proposed' });
     expect(await within(sidebar).findByText('Heard so far')).toBeTruthy();
     expect(within(sidebar).getByText('Thin scrollbars')).toBeTruthy();
+  });
+
+  it('says the conversation’s tokens so far in its header, and says nothing before the first turn', async () => {
+    const used = shapeViewDto({
+      shape: shapeDto({ ...inProject, title: 'Board polish' }),
+      tokens: 88_412,
+    });
+    const fresh = shapeViewDto({ shape: shapeDto({ ...inProject, title: 'Fresh' }), tokens: 0 });
+    serve(...conversations(used, fresh));
+    open(used);
+    const conversation = await screen.findByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('88k tokens')).toBeTruthy();
+    cleanup();
+    open(fresh);
+    const next = await screen.findByRole('region', { name: 'Conversation' });
+    await within(next).findByText('Fresh');
+    expect(within(next).queryByText(/tokens/)).toBeNull();
   });
 
   it('presses Propose, and reads Propose Again once a round has passed', async () => {

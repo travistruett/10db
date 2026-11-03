@@ -1194,6 +1194,7 @@ describe('shape routes', () => {
         landings: { pullRequests: 0, pullRequestsAlone: 0, ciRuns: 0, ciRunsAlone: 0 },
       },
       attachments: [],
+      tokens: 0,
     };
     const services = stubServices({
       getShapeView: (id) => {

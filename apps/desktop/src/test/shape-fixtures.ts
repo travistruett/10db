@@ -169,6 +169,7 @@ export function shapeViewDto(
     rehearsals: [],
     preview: EMPTY_PREVIEW,
     attachments: [],
+    tokens: 0,
     ...rest,
   });
 }

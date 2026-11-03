@@ -24,9 +24,14 @@
 - **Model text is plain text.** No markdown renderer is a dependency, so chat and row text show as text with
   line breaks and are never markup.
 - **No virtualization library.** A new dependency waits on the builder, so each transcript block and row takes
-  `content-visibility: auto`, which keeps off-screen blocks from being laid out. A real virtual list is a
-  follow-up if a long conversation still drags.
-- **The header shows no token count**, because the view carries none; the spec's "88k tokens" waits on a field.
+  `content-visibility: auto`, which keeps off-screen blocks from being laid out, and each block is memoized so a
+  new message re-renders only itself. A real virtual list is a follow-up if a long conversation still drags in
+  WebKit (the 2,000-message check is by hand: the jsdom test only proves every block carries the containment).
+- **The header shows the conversation's tokens** ("88k tokens", through the factory's `formatTokens`), from
+  `ShapeViewDto.tokens`: the input and output tokens summed over the conversation's `sessions` rows
+  (`shapeTokens`), the rows per-project usage reads. Cached tokens are a subset of input, so they are not added.
+  It is read with the rest of the view, and a turn's end announces `shape.changed` after its usage is written, so
+  the header updates as turns finish. Nothing shows before the first turn.
 - **The Proposed summary counts what is pending**, with converted rows counted apart; the pull-request count is
   the number of landings, and hours and open findings come with their slices.
 

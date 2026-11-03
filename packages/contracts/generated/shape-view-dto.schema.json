@@ -2447,6 +2447,11 @@
           "attachment"
         ]
       }
+    },
+    "tokens": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
     }
   },
   "required": [
@@ -2461,7 +2466,8 @@
     "findings",
     "rehearsals",
     "preview",
-    "attachments"
+    "attachments",
+    "tokens"
   ],
   "$defs": {
     "__schema0": {

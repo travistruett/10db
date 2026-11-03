@@ -131,6 +131,23 @@ describe('the view', () => {
     });
   });
 
+  it('counts the tokens the conversation has used, growing as each turn finishes', async () => {
+    expect(service.view(shapeId).tokens).toBe(0);
+    adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok' });
+    service.send(shapeId, 'hello');
+    await service.settled(shapeId);
+    // The fake session reports its running totals: 100 in and 10 out after its first turn, 200 and 20
+    // after its second.
+    expect(service.view(shapeId).tokens).toBe(110);
+    // A turn with no reply text still counts, and the screen is told when it ends.
+    adapter.shapeBehaviour = () => Promise.resolve({});
+    events.length = 0;
+    service.send(shapeId, 'again');
+    await service.settled(shapeId);
+    expect(service.view(shapeId).tokens).toBe(220);
+    expect(events.at(-1)).toMatchObject({ type: EventType.ShapeChanged, entityId: shapeId });
+  });
+
   it('shows the transcript and the latest note_heard echo as items', async () => {
     const heard: FakeShapeBehaviour = async (turn) => {
       const echo = must(

@@ -154,6 +154,8 @@ export const ShapeViewDto = z.object({
   preview: ShapePreviewDto,
   /** The diagrams, charts and mockups attached so far, oldest first; specs and evals are not here. */
   attachments: z.array(ShapeAttachmentDto),
+  /** The tokens (input and output) the conversation's sessions have used so far; the header says "88k tokens" (§4). */
+  tokens: z.int().min(0),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 

@@ -15,6 +15,7 @@ import {
   useStopShape,
   useUploadShapeFile,
 } from '../../daemon/shape-queries';
+import { formatTokens } from '../factory/format-tokens';
 import { Composer } from './composer';
 import { addFiles } from './dropped-files';
 import { HistoryButton } from './history-button';
@@ -114,6 +115,11 @@ export function ConversationPane({
               {view?.shape.title}
             </Text>
           )}
+          {shapeId !== null && (view?.tokens ?? 0) > 0 ? (
+            <Text size="xs" c="dimmed" style={{ flex: 'none', whiteSpace: 'nowrap' }}>
+              {formatTokens(view?.tokens ?? 0)} tokens
+            </Text>
+          ) : null}
           {loading && shapeId !== null ? (
             <Loader size="xs" aria-label="Loading the conversation" />
           ) : null}

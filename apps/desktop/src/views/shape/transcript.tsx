@@ -1,7 +1,7 @@
 import type { ShapeMessageDto } from '@10db/contracts';
 import { Box, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
-import { useEffect, useRef } from 'react';
+import { memo, useEffect, useMemo, useRef } from 'react';
 
 /** Marks a transcript block with its message id, so Why? can find the messages a row came from. */
 const MESSAGE_ATTRIBUTE = 'data-message-id';
@@ -60,7 +60,7 @@ export function blocksOf(messages: readonly ShapeMessageDto[]): Block[] {
  */
 export function Transcript({ messages, why }: TranscriptProps) {
   const viewport = useRef<HTMLDivElement>(null);
-  const blocks = blocksOf(messages);
+  const blocks = useMemo(() => blocksOf(messages), [messages]);
   const marked = new Set(why?.ids ?? []);
 
   // Why? on a row scrolls to the first message it came from, whatever the builder was reading.
@@ -89,67 +89,98 @@ export function Transcript({ messages, why }: TranscriptProps) {
       viewportProps={{ tabIndex: 0, role: 'group', 'aria-label': 'Messages' }}
     >
       <Stack gap="md" px="md" py="md">
-        {blocks.map((block, index) => (
-          <Box
-            key={block.id}
-            {...{ [MESSAGE_ATTRIBUTE]: block.id }}
-            {...(marked.has(block.id) ? { 'data-highlighted': true } : {})}
-            style={{
-              contentVisibility: 'auto',
-              containIntrinsicSize: 'auto 40px',
-              ...(marked.has(block.id)
-                ? {
-                    background: 'var(--mantine-color-default-hover)',
-                    borderRadius: 'var(--mantine-radius-sm)',
-                    margin: '0 calc(var(--mantine-spacing-xs) * -1)',
-                    padding: '0 var(--mantine-spacing-xs)',
-                  }
-                : {}),
-            }}
-          >
-            {block.kind === 'text' ? (
-              <>
-                {blocks[index - 1]?.kind === 'text' &&
-                (blocks[index - 1] as { who?: string }).who === block.who ? null : (
-                  <Text size="xs" c="dimmed" mb={2}>
-                    {block.who}
-                  </Text>
-                )}
-                <Text
-                  size="sm"
-                  {...(block.who === 'You' ? { c: 'bright' } : {})}
-                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
-                >
-                  {block.body}
-                </Text>
-              </>
-            ) : block.kind === 'tool' ? (
-              <Text
-                size="xs"
-                c="dimmed"
-                ff="monospace"
-                pl="xs"
-                style={{
-                  borderLeft: '2px solid var(--mantine-color-default-border)',
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {block.body}
-              </Text>
-            ) : (
-              <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
-                <IconInfoCircle
-                  size={14}
-                  stroke={1.5}
-                  aria-hidden="true"
-                  style={{ verticalAlign: '-2px' }}
-                />{' '}
-                {block.body}
-              </Text>
-            )}
-          </Box>
-        ))}
+        {blocks.map((block, index) => {
+          const before = blocks[index - 1];
+          return (
+            <TranscriptBlock
+              key={block.id}
+              block={block}
+              showWho={
+                !(before?.kind === 'text' && block.kind === 'text' && before.who === block.who)
+              }
+              highlighted={marked.has(block.id)}
+            />
+          );
+        })}
       </Stack>
     </ScrollArea>
   );
 }
+
+interface TranscriptBlockProps {
+  readonly block: Block;
+  /** Names the speaker above a text block, unless the block before it is the same speaker's. */
+  readonly showWho: boolean;
+  readonly highlighted: boolean;
+}
+
+/**
+ * One block. Memoized, so a new message or a Why? highlight re-renders only the blocks it touches,
+ * not all of a 2,000-message conversation; `content-visibility: auto` lets the browser skip the
+ * layout and paint of the blocks that are off screen, and `contain-intrinsic-size` keeps the
+ * scrollbar steady while it does.
+ */
+const TranscriptBlock = memo(function TranscriptBlock({
+  block,
+  showWho,
+  highlighted,
+}: TranscriptBlockProps) {
+  return (
+    <Box
+      {...{ [MESSAGE_ATTRIBUTE]: block.id }}
+      {...(highlighted ? { 'data-highlighted': true } : {})}
+      style={{
+        contentVisibility: 'auto',
+        containIntrinsicSize: 'auto 40px',
+        ...(highlighted
+          ? {
+              background: 'var(--mantine-color-default-hover)',
+              borderRadius: 'var(--mantine-radius-sm)',
+              margin: '0 calc(var(--mantine-spacing-xs) * -1)',
+              padding: '0 var(--mantine-spacing-xs)',
+            }
+          : {}),
+      }}
+    >
+      {block.kind === 'text' ? (
+        <>
+          {showWho ? (
+            <Text size="xs" c="dimmed" mb={2}>
+              {block.who}
+            </Text>
+          ) : null}
+          <Text
+            size="sm"
+            {...(block.who === 'You' ? { c: 'bright' } : {})}
+            style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+          >
+            {block.body}
+          </Text>
+        </>
+      ) : block.kind === 'tool' ? (
+        <Text
+          size="xs"
+          c="dimmed"
+          ff="monospace"
+          pl="xs"
+          style={{
+            borderLeft: '2px solid var(--mantine-color-default-border)',
+            overflowWrap: 'anywhere',
+          }}
+        >
+          {block.body}
+        </Text>
+      ) : (
+        <Text size="xs" c="dimmed" style={{ overflowWrap: 'anywhere' }}>
+          <IconInfoCircle
+            size={14}
+            stroke={1.5}
+            aria-hidden="true"
+            style={{ verticalAlign: '-2px' }}
+          />{' '}
+          {block.body}
+        </Text>
+      )}
+    </Box>
+  );
+});

@@ -19,6 +19,7 @@ import {
   insertWorkstream,
   listShapes,
   seedProject,
+  shapeTokens,
   updateSessionUsage,
   type Store,
 } from './index';
@@ -236,6 +237,26 @@ describe('a Shape session', () => {
       }),
     ]);
     expect(usage.total.tokensIn).toBe(140);
+  });
+
+  it('adds up the input and output tokens of every session of its conversation, and no other', () => {
+    const lane = laneSession();
+    const shape = newShape().value;
+    const other = newShape().value;
+    expect(shapeTokens(store.db, shape.id)).toBe(0);
+    store.write((ctx) => {
+      const session = (shapeId: typeof shape.id, hash: string) =>
+        insertSession(ctx, { ...sessionInput, shapeId, mcpTokenHash: hash });
+      const first = session(shape.id, 'hash-tokens-1');
+      const second = session(shape.id, 'hash-tokens-2');
+      const elsewhere = session(other.id, 'hash-tokens-3');
+      updateSessionUsage(ctx, lane.id, { inputTokens: 1000, outputTokens: 100 });
+      updateSessionUsage(ctx, first.id, { inputTokens: 40, outputTokens: 4, cachedTokens: 9 });
+      updateSessionUsage(ctx, second.id, { inputTokens: 60, outputTokens: 6 });
+      updateSessionUsage(ctx, elsewhere.id, { inputTokens: 7, outputTokens: 7 });
+    });
+    expect(shapeTokens(store.db, shape.id)).toBe(110);
+    expect(shapeTokens(store.db, other.id)).toBe(14);
   });
 
   it.each([
