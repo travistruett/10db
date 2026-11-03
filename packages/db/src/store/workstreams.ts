@@ -1,5 +1,6 @@
 import {
   ACTIVE_STATES,
+  BatchState,
   canTransition,
   ConflictError,
   EventType,
@@ -459,4 +460,33 @@ export function countLanes(db: DbReader): LaneCounts {
     byAccount.set(r.accountId, (byAccount.get(r.accountId) ?? 0) + 1);
   }
   return { global: rows.length, byProject, byAccount };
+}
+
+/**
+ * How many things a restart would cut off: workstreams that hold a lane (as `countLanes` counts
+ * them) or run a gate process, and batches being cut or shipped. Work that is queued, paused or
+ * waiting for the builder is not counted: recovery keeps its place across a restart.
+ */
+export function countMidSession(db: DbReader): number {
+  const rows = db
+    .select({
+      state: schema.workstreams.state,
+      gatePid: schema.workstreams.gatePid,
+      currentSessionId: schema.workstreams.currentSessionId,
+    })
+    .from(schema.workstreams)
+    .where(inArray(schema.workstreams.state, [...ACTIVE_STATES]))
+    .all();
+  const live = rows.filter(
+    (r) =>
+      LANE_STATES.includes(r.state) ||
+      r.gatePid !== null ||
+      (r.state === WorkstreamState.WaitingHuman && r.currentSessionId !== null),
+  );
+  const batches = db
+    .select({ n: count() })
+    .from(schema.batches)
+    .where(inArray(schema.batches.state, [BatchState.Cutting, BatchState.Shipping]))
+    .get();
+  return live.length + (batches?.n ?? 0);
 }
