@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   ConflictError,
   mintId,
@@ -10,6 +11,7 @@ import {
   type ShapeMessageDto,
 } from '@10db/contracts';
 import {
+  getLiveSessionByTokenHash,
   getSession,
   getShape,
   getShapeSdkSessionId,
@@ -20,7 +22,12 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vit
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
-import { FakeAdapter, type FakeShapeBehaviour, type FakeShapeTurn } from '../sessions';
+import {
+  FakeAdapter,
+  type FakeShapeBehaviour,
+  type FakeShapeTurn,
+  type ShapeSessionSpec,
+} from '../sessions';
 import {
   looseDraft,
   must,
@@ -66,7 +73,6 @@ beforeEach(() => {
         checkout: '/repo',
         home: '/home',
         protectedReads: [],
-        filesDir: '/files',
         tempRoot: '/tmp/10db',
       },
     }),
@@ -141,6 +147,27 @@ describe('a message', () => {
     expect(claude.map((m) => m.body)).toEqual(['The board has a grid.']);
     expect(getShapeSdkSessionId(c.store.db, shapeId)).toBe('fake-shape-1');
     expect(getSession(c.store.db, session.spec.sessionId).inputTokens).toBeGreaterThan(0);
+  });
+
+  it('ends the session row, so its token no longer works, when the adapter fails to start', async () => {
+    let spec: ShapeSessionSpec | null = null;
+    adapter.startShape = (s: ShapeSessionSpec): never => {
+      spec = s;
+      throw new Error('Claude is not available');
+    };
+    service.send(shapeId, 'Make the board denser.');
+    await service.settled(shapeId);
+    const started = must(spec as ShapeSessionSpec | null, 'the spec startShape was given');
+    const row = getSession(c.store.db, started.sessionId);
+    expect(row.endedAt).not.toBeNull();
+    expect(row.exitReason).toBe('start_failed');
+    expect(
+      getLiveSessionByTokenHash(
+        c.store.db,
+        createHash('sha256').update(started.mcp.token).digest('hex'),
+      ),
+    ).toBeUndefined();
+    expect(notices()).toEqual(['Claude could not start: Claude is not available']);
   });
 
   it('goes to the same session, one turn at a time, in the order sent', async () => {

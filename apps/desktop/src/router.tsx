@@ -50,7 +50,7 @@ function SettingsPage() {
 
 function NewShapePage() {
   return (
-    <ViewBoundary name="Shape">
+    <ViewBoundary name="Plan">
       <ShapeView shapeId={null} />
     </ViewBoundary>
   );
@@ -60,7 +60,7 @@ function ShapePage() {
   const { shapeId } = shapeRoute.useParams();
   const id = ShapeId.safeParse(shapeId);
   return (
-    <ViewBoundary name="Shape">
+    <ViewBoundary name="Plan">
       <ShapeView shapeId={id.success ? id.data : null} />
     </ViewBoundary>
   );

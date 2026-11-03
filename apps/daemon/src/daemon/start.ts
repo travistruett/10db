@@ -824,7 +824,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           checkout: project.repoPath,
           home: homedir(),
           protectedReads: guarded.map((p) => p.path),
-          filesDir: join(opts.dataDir, 'shapes'),
           tempRoot: sandboxTempRoot ?? LANE_TEMP_ROOT,
         },
       };
