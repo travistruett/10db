@@ -2,6 +2,7 @@ import { rmSync } from 'node:fs';
 import type { AccountId, BatchId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
   countLanes,
+  countMidSession,
   createTestStore,
   listBoardColumns,
   listInbox,
@@ -24,7 +25,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { seedSpend, tempDir, type TempDir } from '../../test/fixtures';
+import { seedSpend, tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import {
   createAccountPauses,
   createAccountRuntime,
@@ -37,6 +38,7 @@ import { createGit, GitTrustError } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
+import { createSelfUpdate } from '../self-update';
 import { createScheduler } from './index';
 
 let store: Store;
@@ -52,6 +54,8 @@ let branchOf: Map<string, string | null>;
 /** Checkouts whose git the daemon refuses; their refusal raised its own card. */
 let refusedRepos: Set<string>;
 let branchReads: string[];
+/** While set, a branch read waits for it: a tick stays inside `branchSnapshot`. */
+let branchGate: Promise<void> | null;
 let prepared: { accountId: AccountId; projectId: ProjectId }[];
 let wrongBranch: { batchId: string; current: string | null }[];
 let wrongBranchAt: string[];
@@ -78,6 +82,7 @@ beforeEach(() => {
   branchOf = new Map();
   refusedRepos = new Set();
   branchReads = [];
+  branchGate = null;
   wrongBranch = [];
   wrongBranchAt = [];
   missing = [];
@@ -135,7 +140,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
               },
             }),
           );
-        return Promise.resolve(branchOf.get(repo) ?? null);
+        return (branchGate ?? Promise.resolve()).then(() => branchOf.get(repo) ?? null);
       },
     },
     onWrongBranch: (batch, current, checkout) => {
@@ -610,6 +615,91 @@ describe('pull-request delivery', () => {
     const s = scheduler();
     const [first, second] = await Promise.all([s.tick(), s.tick()]);
     expect([first, second]).toEqual([1, 0]);
+  });
+
+  describe('stopped while a tick reads the branches', () => {
+    /** A tick that is inside `branchSnapshot`, held there until `open` is called. */
+    async function tickInTheBranchRead() {
+      const q = inBatch(['OPEN']);
+      branchOf.set(q.project.repoPath, BRANCH);
+      let open: () => void = () => undefined;
+      branchGate = new Promise<void>((resolve) => {
+        open = resolve;
+      });
+      const s = scheduler();
+      s.start();
+      s.requestTick();
+      await waitFor(() => branchReads.length > 0);
+      return { s, q, open };
+    }
+
+    it('launches nothing once stop() was called, however late the read answers', async () => {
+      const { s, open } = await tickInTheBranchRead();
+      s.stop();
+      open();
+      await s.idle();
+      expect(launched).toEqual([]);
+    });
+
+    it('launches again after start(), as before', async () => {
+      const { s, q, open } = await tickInTheBranchRead();
+      s.stop();
+      open();
+      await s.idle();
+      s.start();
+      s.requestTick();
+      await s.idle();
+      expect(launched.map((l) => l.id)).toEqual([q.workstream.id]);
+      s.stop();
+    });
+
+    it('starts no lane between the self-update’s last check and the quit', async () => {
+      const { s, open } = await tickInTheBranchRead();
+      const applied: string[] = [];
+      let held = false;
+      const update = createSelfUpdate({
+        state,
+        inbox,
+        clock,
+        logger: silentLogger,
+        runningCommit: 'a'.repeat(40),
+        intervalMs: 60_000,
+        repository: 'o/10db',
+        enabled: () => true,
+        cardProject: () => null,
+        headOf: () => Promise.resolve('b'.repeat(40)),
+        isAhead: () => Promise.resolve(true),
+        stage: () =>
+          Promise.resolve({ ok: true, current: false, dir: '/stage', commit: 'b'.repeat(40) }),
+        stopStage: () => Promise.resolve(),
+        cancelStage: () => Promise.resolve(),
+        rollback: { read: () => null, clear: () => undefined },
+        apply: (build) => {
+          applied.push(build.commit);
+          return Promise.resolve({ ok: true, ended: new Promise<void>(() => undefined) });
+        },
+        // The daemon's own wiring: the real count of lanes, and the real scheduler.
+        midSession: () => countMidSession(store.db),
+        pause: async () => {
+          held = true;
+          s.stop();
+          await s.idle();
+        },
+        resume: () => {
+          s.start();
+          s.requestTick();
+        },
+        outcome: { read: () => null, clear: () => undefined },
+      });
+      const check = update.tick();
+      // The scheduler's tick is in the branch read when the update holds new work back.
+      await waitFor(() => held);
+      open();
+      expect(await check).toBe('applying');
+      expect(applied).toEqual(['b'.repeat(40)]);
+      expect(launched).toEqual([]);
+      expect(countMidSession(store.db)).toBe(0);
+    });
   });
 });
 

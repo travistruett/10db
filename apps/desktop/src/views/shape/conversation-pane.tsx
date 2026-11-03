@@ -7,6 +7,7 @@ import {
 import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
+import { useRef } from 'react';
 import {
   useCreateShape,
   useProposeShape,
@@ -50,16 +51,42 @@ export function ConversationPane({
   const stop = useStopShape();
   const upload = useUploadShapeFile();
 
+  // The conversation a first send or drop made. The screen opens it only once that succeeds, so a
+  // retry after a failure reuses it instead of leaving another empty conversation behind. It is
+  // remembered with its project: switching project stays on this screen, and a send there must
+  // start that project's conversation, not post into the old one.
+  const created = useRef<{ readonly projectId: ProjectId | null; readonly id: ShapeId } | null>(
+    null,
+  );
+  const createdHere = (): ShapeId | null =>
+    created.current?.projectId === projectId ? created.current.id : null;
+  const ensureId = async (): Promise<ShapeId> => {
+    if (shapeId !== null) return shapeId;
+    const remembered = createdHere();
+    if (remembered !== null) return remembered;
+    const id = (await create.mutateAsync()).id;
+    created.current = { projectId, id };
+    return id;
+  };
+
   const answering = view?.turn.running ?? false;
   const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
   const canPropose = shapeId !== null && heardBuilder;
 
   const doPropose = (): void => {
-    if (canPropose && !(view?.turn.proposing ?? false)) propose.mutate(shapeId);
+    if (canPropose && !(view?.turn.proposing ?? false)) {
+      stop.reset();
+      propose.mutate(shapeId);
+    }
   };
   const doStop = (): void => {
-    if (shapeId !== null) stop.mutate(shapeId);
+    if (shapeId !== null) {
+      propose.reset();
+      stop.mutate(shapeId);
+    }
   };
+  // A refused Propose or Stop is the daemon's words in the same alert as a load failure.
+  const shownError = propose.error?.message ?? stop.error?.message ?? error;
   useShapeKeys({ onPropose: doPropose, onStop: doStop, answering });
 
   return (
@@ -113,14 +140,14 @@ export function ConversationPane({
         proposing={(view?.turn.proposing ?? false) || propose.isPending}
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
-        error={error}
+        error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
-          const made: { id: ShapeId | null } = { id: shapeId };
+          const made: { id: ShapeId | null } = { id: shapeId ?? createdHere() };
           const problems = await addFiles(dropped, view?.files.length ?? 0, {
             ensureConversation: async () => {
-              made.id ??= (await create.mutateAsync()).id;
+              made.id ??= await ensureId();
             },
             upload: (file) => {
               if (made.id === null) return Promise.reject(new Error('No conversation to add to.'));
@@ -131,7 +158,7 @@ export function ConversationPane({
           return problems;
         }}
         onSend={async (text) => {
-          const id = shapeId ?? (await create.mutateAsync()).id;
+          const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
           if (shapeId === null) onOpened(id);
         }}

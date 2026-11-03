@@ -2,7 +2,7 @@ import type { ShapeId } from '@10db/contracts';
 import { Button, Group } from '@mantine/core';
 import { IconLayoutSidebarRight } from '@tabler/icons-react';
 import { useNavigate } from '@tanstack/react-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useShapeView } from '../../daemon/shape-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ConversationPane } from './conversation-pane';
@@ -30,6 +30,20 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [why, setWhy] = useState<TranscriptProps['why']>(null);
   const error = query.isError ? query.error.message : null;
+
+  // A conversation belongs to its project: when the selected project changes while another
+  // project's conversation is open, leave it for the new project's /shape. A link that opens
+  // a conversation of an unselected project at load is not a change, so it stays.
+  const projectId = project?.id ?? null;
+  const seenProjectId = useRef(projectId);
+  const viewProjectId = view?.shape.projectId ?? null;
+  useEffect(() => {
+    if (seenProjectId.current === projectId) return;
+    seenProjectId.current = projectId;
+    if (shapeId !== null && viewProjectId !== null && viewProjectId !== projectId) {
+      void navigate({ to: '/shape' });
+    }
+  }, [projectId, shapeId, viewProjectId, navigate]);
 
   // Esc lets go of the highlight Why? left in the conversation.
   const highlighted = why !== null;

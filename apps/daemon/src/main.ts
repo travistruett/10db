@@ -26,6 +26,7 @@ import {
   resolveMigrationsDir,
   resolveSqliteBinding,
 } from './paths';
+import { readBuildInfo } from './self-update';
 import {
   createClaudeAdapter,
   createUnavailableAdapter,
@@ -106,7 +107,10 @@ function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) 
 
 try {
   const sqliteBinding = resolveSqliteBinding(env);
+  // Only a bundle has build-info.json (scripts/build.ts); a run from source shows no commit.
+  const build = readBuildInfo(import.meta.dirname);
   const daemon = await startDaemon({
+    ...(build ? { build } : {}),
     ...daemonOptionsFromEnv(env),
     dataDir,
     adapter: chooseAdapter(),

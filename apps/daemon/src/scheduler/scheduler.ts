@@ -88,6 +88,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   let timer: Timer | null = null;
   let pending = false;
   let started = false;
+  /** Set by `stop()`, cleared by `start()`: a tick that was reading branches launches nothing. */
+  let halted = false;
   // Batches whose work is waiting for its branch and already reported, so a tick doesn't repeat the card.
   const warned = new Set<BatchId>();
   // Batches whose work is waiting for a missing worktree and already reported.
@@ -256,7 +258,11 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const run = chain.then(async () => {
       requeueExpiredPauses();
       pruneWarned();
-      return launchQueued(await branchSnapshot());
+      const snapshot = await branchSnapshot();
+      // Stopped while the branches were read: whoever stopped it (a shutdown, the self-update before
+      // it quits the app) counts on no lane starting afterwards.
+      if (halted) return 0;
+      return launchQueued(snapshot);
     });
     chain = run.catch(() => undefined);
     return run;
@@ -314,10 +320,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     },
     start() {
       started = true;
+      halted = false;
       timer ??= opts.clock.setTimeout(loop, opts.tickMs);
     },
     stop() {
       started = false;
+      halted = true;
       timer?.cancel();
       timer = null;
     },

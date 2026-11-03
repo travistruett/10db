@@ -24,6 +24,11 @@ export interface DeliveryJobs {
   run(key: string, job: (signal: AbortSignal) => Promise<void>): void;
   /** Settles once no job is queued or running. */
   idle(): Promise<void>;
+  /**
+   * How many jobs are queued or running now. A queued ship, checkout return or cleanup is a job
+   * before it is anything in the database, so the self-update counts them as mid-session.
+   */
+  pending(): number;
   /** Aborts the running jobs' signal, waits for every job to settle and takes no new ones. */
   stop(): Promise<void>;
 }
@@ -58,6 +63,7 @@ export function createDeliveryJobs(logger: Logger): DeliveryJobs {
       });
     },
     idle,
+    pending: () => pending.size,
     async stop() {
       controller.abort();
       await idle();

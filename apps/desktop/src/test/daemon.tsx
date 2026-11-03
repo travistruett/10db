@@ -3,6 +3,7 @@ import {
   KeepAwakeStatus,
   LanePermissionsDto,
   PROTOCOL_VERSION,
+  SelfUpdateStatusDto,
   SystemCheckDto,
 } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
@@ -76,6 +77,16 @@ export function baseHandlers(
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/settings/self-update', base), () =>
+      HttpResponse.json(
+        SelfUpdateStatusDto.parse({
+          enabled: false,
+          isDefault: true,
+          runningCommit: null,
+          availableCommit: null,
+        }),
+      ),
+    ),
     http.get(daemonUrl('/settings/keep-awake', base), () =>
       HttpResponse.json(KeepAwakeStatus.parse({ mode: 'while_running', active: false })),
     ),

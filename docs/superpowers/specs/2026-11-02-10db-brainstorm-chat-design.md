@@ -269,6 +269,12 @@ else is refused on the input with the reason. Files are copied into the conversa
 data directory and kept as long as the conversation. Images reach the session as image content blocks; other
 files as a line naming the path, which the session reads with `Read`. **(spec's call: the limits)**
 
+The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
+image, so one oversize block would end every later turn. An image over 2 MiB, or past 6 MiB of images in one
+message, therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes itself.
+The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
+that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
+
 ### 5.5 Shape MCP tools
 
 **Designed.** Contracts in `@10db/contracts`. The tools are served by the existing `10db` MCP server, so the guard

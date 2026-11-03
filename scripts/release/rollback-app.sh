@@ -3,7 +3,9 @@
 # 10db-previous/10db-<stamp>.zip beside the data directory, into /Applications/10db.app. The app it
 # replaces becomes the kept zip in turn, so a second run toggles back. It registers the restored
 # app with Launch Services. It never touches the database; it prints the commands that back up the
-# current one and restore the backup taken with that install. It refuses while 10db runs.
+# current one and restore the backup taken with that install. It writes the commit of the app it
+# replaced to <data dir>/self-update/rolled-back-from, so the restored app does not update itself
+# straight back to it. It refuses while 10db runs.
 # Exit 0: restored. Exit 1: refused or failed; the current app is put back, and when it can't be,
 # the last message says where it is. Exit 2: bad argument.
 set -euo pipefail
@@ -68,6 +70,13 @@ stamp="$(zip_stamp "$zip")"
 # back again finds that backup.
 now="$(new_stamp)"
 
+# The commit the app being replaced was built from, for the self-update (empty when it names none).
+replaced_commit=""
+build_info="$app_path/Contents/Resources/daemon/build-info.json"
+if [ -f "$build_info" ] && [[ "$(cat "$build_info")" =~ \"commit\"[[:space:]]*:[[:space:]]*\"([0-9a-f]{40})\" ]]; then
+  replaced_commit="${BASH_REMATCH[1]}"
+fi
+
 bundle="$(unpack_app "$zip")" || fail "could not unpack the app in $zip, so nothing was moved"
 stage="$(dirname "$bundle")"
 
@@ -84,6 +93,13 @@ move_unpacked "$bundle"
 clear_quarantine || fail "com.apple.quarantine is still set inside $app_path"
 register_app
 if [ -n "$current_zip" ]; then keep_only_zip "$current_zip"; fi
+# Tells the restored app's daemon which build it replaced, so updating by itself does not install
+# that build again until main moves on (apps/daemon/src/self-update). Not the database: a file.
+rm -f "$rollback_marker"
+if [ -n "$replaced_commit" ]; then
+  mkdir -p "$(dirname "$rollback_marker")" && printf '%s\n' "$replaced_commit" > "$rollback_marker" \
+    || echo "$script_name: could not write $rollback_marker; turn Update by itself off in Settings before 10db installs the build you rolled back from again" >&2
+fi
 
 echo "Restored $app_path from $zip."
 if [ -n "$current_zip" ]; then echo "  The app it replaced is kept in $current_zip; run make rollback-app again to go back to it."; fi
