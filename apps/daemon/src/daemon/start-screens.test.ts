@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
+import { pngImage } from '../../test/png';
 import { FakeAdapter, scriptedShapeBehaviour } from '../sessions';
 import { RENDER_READS } from '../screens';
 import { startDaemon, type RunningDaemon } from './index';
@@ -32,17 +33,6 @@ afterEach(async () => {
   repo.cleanup();
   dir.cleanup();
 });
-
-/** A PNG with a real header and no pixels: what the daemon checks of a picture. */
-function png(width: number, height: number): Buffer {
-  const header = Buffer.alloc(33);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
-  header.writeUInt32BE(13, 8);
-  header.write('IHDR', 12, 'ascii');
-  header.writeUInt32BE(width, 16);
-  header.writeUInt32BE(height, 20);
-  return header;
-}
 
 interface Sqlite {
   prepare(sql: string): { all(): unknown[]; pluck(): { all(): unknown[] } };
@@ -163,7 +153,7 @@ describe('see_screen on a started daemon', () => {
     expect(changed(before, dump(running))).toEqual([]);
 
     // The window answers with the picture, and the session is given it.
-    const picture = png(900, 900);
+    const picture = pngImage(900, 900);
     const delivered = await fetch(
       `${running.url}/screens/${request.id}/image`,
       ui(running, {

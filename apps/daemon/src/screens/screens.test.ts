@@ -21,6 +21,7 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pngImage as png } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker, ScreenOutcome, ScreenSpec } from './broker';
@@ -29,16 +30,6 @@ import { createScreens } from './screens';
 // Shape spec §5.5: see_screen. The service asks the window for a picture, checks it, keeps it with the
 // conversation and shows it there; a screen that can't be drawn is a refusal that says why.
 
-/** A PNG with a real signature and header and no pixels: enough for what the daemon checks. */
-function png(width: number, height: number, pad = 0): Buffer {
-  const header = Buffer.alloc(33);
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(header, 0);
-  header.writeUInt32BE(13, 8);
-  header.write('IHDR', 12, 'ascii');
-  header.writeUInt32BE(width, 16);
-  header.writeUInt32BE(height, 20);
-  return Buffer.concat([header, Buffer.alloc(pad)]);
-}
 const asImage = (bytes: Buffer, width: number, height: number): ScreenImageInput => ({
   mediaType: 'image/png',
   data: bytes.toString('base64'),
@@ -223,6 +214,12 @@ describe('see_screen', () => {
 
     it('is refused when it is empty of picture: a header and nothing else', async () => {
       await refused(asImage(png(1200, 900).subarray(0, 12), 1200, 900), /not a PNG or a JPEG/);
+      await refused(asImage(png(1200, 900).subarray(0, 33), 1200, 900), /not a PNG or a JPEG/);
+    });
+
+    it('is refused when it was cut short: its size is right and its end is missing', async () => {
+      const whole = png(1200, 900);
+      await refused(asImage(whole.subarray(0, whole.length - 1), 1200, 900), /not a PNG or a JPEG/);
     });
   });
 
