@@ -11,7 +11,7 @@ import {
 } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { delay, http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { batchDto, projectViewDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import {
@@ -1271,21 +1271,23 @@ describe('FactoryView benchmark sync note', () => {
   });
 });
 
+function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusDto {
+  return SelfUpdateStatusDto.parse({
+    enabled: true,
+    isDefault: true,
+    runningCommit: '1'.repeat(40),
+    availableCommit: '2'.repeat(40),
+    waitMinutes: 15,
+    waitingSince: '2026-11-03T12:00:00.000Z',
+    draining: false,
+    drainingSince: null,
+    ...over,
+  });
+}
+
 function selfUpdate(over: Partial<SelfUpdateStatusDto>): RequestHandler {
   return http.get(daemonUrl('/settings/self-update'), () =>
-    HttpResponse.json(
-      SelfUpdateStatusDto.parse({
-        enabled: true,
-        isDefault: true,
-        runningCommit: '1'.repeat(40),
-        availableCommit: '2'.repeat(40),
-        waitMinutes: 15,
-        waitingSince: '2026-11-03T12:00:00.000Z',
-        draining: false,
-        drainingSince: null,
-        ...over,
-      }),
-    ),
+    HttpResponse.json(selfUpdateStatus(over)),
   );
 }
 
@@ -1302,19 +1304,124 @@ describe('FactoryView waiting update', () => {
     expect(link.getAttribute('href')).toBe('/settings/updates');
   });
 
-  it('says nothing while the update only waits for an idle moment', async () => {
+  it('says an update is waiting, and since when, while it only waits for an idle moment', async () => {
     serve(selfUpdate({}));
     renderApp('/factory');
 
-    await screen.findByRole('heading', { name: 'Factory' });
+    const note = await screen.findByRole('status', { name: 'Update waiting' });
+    expect(note.textContent).toMatch(/waiting since 2026-11-03/);
+    expect(note.textContent).toMatch(/2222222/);
+    expect(note.textContent).toMatch(/15 minutes/);
+    expect(note.textContent).not.toMatch(/lanes are paused/i);
+    const link = within(note).getByRole('link', { name: 'Update settings' });
+    expect(link.getAttribute('href')).toBe('/settings/updates');
     expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
   });
 
-  it('says nothing with the switch off', async () => {
-    serve(selfUpdate({ enabled: false, isDefault: false, draining: true }));
+  it('says one thing at a time: a drain, not the wait before it', async () => {
+    serve(selfUpdate({ draining: true, drainingSince: '2026-11-03T12:15:00.000Z' }));
+    renderApp('/factory');
+
+    await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(screen.queryByRole('status', { name: 'Update waiting' })).toBeNull();
+  });
+
+  it.each([
+    ['main has no update', { availableCommit: null, waitingSince: null }],
+    ['the build of an update is not staged yet', { waitingSince: null }],
+    ['the switch is off', { enabled: false, isDefault: false, draining: true }],
+  ])('says nothing while %s', async (_name, over) => {
+    serve(selfUpdate(over));
     renderApp('/factory');
 
     await screen.findByRole('heading', { name: 'Factory' });
     expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Update waiting' })).toBeNull();
+  });
+
+  describe('on a view left open', () => {
+    /**
+     * Serves the status the test last set, and counts how often it was asked. The event stream never
+     * opens: its opening refetches every query, which would show a change with no poll at all.
+     */
+    function statusThatChanges(first: Partial<SelfUpdateStatusDto>) {
+      const served = { asked: 0, now: first, projectKnown: false };
+      serve(
+        http.get(daemonUrl('/settings/self-update'), () => {
+          served.asked += 1;
+          return HttpResponse.json(selfUpdateStatus(served.now));
+        }),
+        http.get(daemonUrl('/events/head'), () => delay('infinite')),
+        http.get(daemonUrl('/projects/:projectId/goals'), () => {
+          served.projectKnown = true;
+          return HttpResponse.json({ goals: [], ungrouped: null });
+        }),
+      );
+      return served;
+    }
+
+    /**
+     * Opens the view and waits until it stops asking. It mounts again once the project is known, and
+     * that mount asks for the status too, so a change made before then shows with no poll.
+     */
+    async function opened(served: ReturnType<typeof statusThatChanges>): Promise<void> {
+      const { queryClient } = renderApp('/factory');
+      await vi.waitFor(
+        () => {
+          expect(served.projectKnown).toBe(true);
+          expect(queryClient.isFetching({ queryKey: ['self-update'] })).toBe(0);
+        },
+        { timeout: 10_000 },
+      );
+    }
+
+    const NOTHING = { availableCommit: null, waitingSince: null };
+    const DRAINING = { draining: true, drainingSince: '2026-11-03T12:15:00.000Z' };
+
+    // The view polls by interval: the test moves that clock by hand and every other timer stays real.
+    beforeEach(() => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('shows a drain that begins after it opened with no update', async () => {
+      const served = statusThatChanges(NOTHING);
+      await opened(served);
+      expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
+
+      served.now = DRAINING;
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await screen.findByRole('status', { name: 'Update draining the factory' });
+    });
+
+    it('shows sooner that lanes paused for an update it already said was waiting', async () => {
+      const served = statusThatChanges({});
+      await opened(served);
+      await screen.findByRole('status', { name: 'Update waiting' });
+
+      served.now = DRAINING;
+      await vi.advanceTimersByTimeAsync(15_000);
+
+      await screen.findByRole('status', { name: 'Update draining the factory' });
+    });
+
+    it('stops looking with the switch off, where nothing waits or drains by itself', async () => {
+      const served = statusThatChanges({ ...NOTHING, enabled: false, isDefault: false });
+      await opened(served);
+      const { asked } = served;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(served.asked).toBe(asked);
+    });
+
+    it('stops looking in a run from source, which never updates itself', async () => {
+      const served = statusThatChanges({ ...NOTHING, runningCommit: null });
+      await opened(served);
+      const { asked } = served;
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      expect(served.asked).toBe(asked);
+    });
   });
 });

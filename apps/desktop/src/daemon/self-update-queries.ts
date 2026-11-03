@@ -7,6 +7,8 @@ const selfUpdateKey = ['self-update'] as const;
 
 /** How often an update that waits or drains is looked at again: no event says when it starts or ends. */
 const UPDATE_REFRESH_MS = 15_000;
+/** How often the status is looked at with no update in sight: one can be staged at any moment. */
+const NO_UPDATE_REFRESH_MS = 60_000;
 
 /**
  * Whether 10db installs main's build by itself, the commits involved, and whether an update waits or
@@ -17,11 +19,13 @@ export function useSelfUpdate() {
   return useQuery({
     queryKey: selfUpdateKey,
     queryFn: async () => readJson(await client.settings['self-update'].$get(), SelfUpdateStatusDto),
-    // While an update is available its wait and drain change with no event, so they are looked at.
-    refetchInterval: (query) =>
-      query.state.data?.availableCommit != null && query.state.data.enabled
-        ? UPDATE_REFRESH_MS
-        : false,
+    // An update's wait and drain change with no event, so a view left open has to look. Nothing
+    // changes by itself with the switch off, or in a run from source, which never updates.
+    refetchInterval: (query) => {
+      const status = query.state.data;
+      if (status?.enabled === false || status?.runningCommit === null) return false;
+      return status?.availableCommit == null ? NO_UPDATE_REFRESH_MS : UPDATE_REFRESH_MS;
+    },
   });
 }
 
