@@ -23,6 +23,20 @@
           },
           "rationale": {
             "type": "string"
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "you",
+              "project",
+              "area"
+            ]
+          },
+          "area": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -30,7 +44,9 @@
           "id",
           "question",
           "choice",
-          "rationale"
+          "rationale",
+          "scope",
+          "area"
         ]
       }
     },

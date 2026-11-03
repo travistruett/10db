@@ -70,7 +70,8 @@ export function searchDecisions(
   if (match === null) return [];
   // Rows are parsed against the contract so a schema drift fails here rather than downstream.
   const rows = db.all(sql`
-    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice, d.rationale AS rationale
+    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice,
+      d.rationale AS rationale, d.scope AS scope, d.area AS area
     FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
     WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
       AND ${currentDecisionSql}

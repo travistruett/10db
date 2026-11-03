@@ -196,6 +196,8 @@ export function listRecentDecisions(
       question: schema.decisions.question,
       choice: schema.decisions.choice,
       rationale: schema.decisions.rationale,
+      scope: schema.decisions.scope,
+      area: schema.decisions.area,
     })
     .from(schema.decisions)
     .where(

@@ -18,7 +18,7 @@
 - [ ] M2: let a resumed agent retrying `ask_human` with the same `opId` get the parked answer back, instead of only the "do not ask again" message.
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
-- [ ] Spec §9: the context pack uses FTS only; area match is not built.
+- [x] Spec §9: the context pack uses FTS only; area match is not built. Built: the pack matches areas and fills a token budget by shelf (`decisions/2026-11-03-the-context-pack-is-budgeted-in-tokens-by-shelf.md`).
 - [x] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
 - [ ] Spec §4: the inbox delivery record, persona avatars and people's channels are not built yet.
 - [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.

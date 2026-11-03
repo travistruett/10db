@@ -90,12 +90,14 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  contextPackedEvent,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
   HANDOFF_NUDGE_ACCOUNT,
   HANDOFF_NUDGE_ACCOUNT_READ_ONLY,
   HANDOFF_NUDGE_READ_ONLY,
+  PackReason,
   RESULT_NUDGE,
 } from '../briefing';
 import {
@@ -1548,6 +1550,15 @@ export function createRunner(opts: RunnerOptions): Runner {
           baseHead,
           ...(fresh ? { nextAction: fresh } : {}),
         });
+        // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
+        ctx.emit(
+          contextPackedEvent(
+            s.id,
+            id,
+            contextPack,
+            resumeId ? PackReason.Resume : PackReason.Start,
+          ),
+        );
         return s;
       });
       if (fresh) {
@@ -1827,7 +1838,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             }
             break;
           }
-          case 'compacted':
+          case 'compacted': {
+            const pack = buildContextPack(db, getWorkstream(db, id));
             opts.state.write((ctx) => {
               const sourceId = insertSource(ctx, 'daemon', { sessionId: session.id });
               insertDeviation(ctx, {
@@ -1838,14 +1850,11 @@ export function createRunner(opts: RunnerOptions): Runner {
                 signedReason: 'Context ran out before a handoff (10db)',
                 sourceId,
               });
+              ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
-            handle.send(
-              compactionReinjection(
-                buildContextPack(db, getWorkstream(db, id)),
-                deniedPermissionsForWorkstream(db, id),
-              ),
-            );
+            handle.send(compactionReinjection(pack, deniedPermissionsForWorkstream(db, id)));
             break;
+          }
           case 'rate_limit':
             // Logged without any identity: what a Max plan reports here is not yet verified.
             log.info(
