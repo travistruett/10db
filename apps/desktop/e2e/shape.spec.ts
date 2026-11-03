@@ -176,7 +176,17 @@ test('under 1100 px the sidebar is a drawer, and the summary line stays on scree
   const projectId = projects.get('dark');
   if (projectId === undefined) throw new Error('The dark run makes the project this test opens');
   await openShape(page, projectId, 'dark');
-  await page.getByRole('textbox', { name: 'Message' }).fill(MESSAGE);
+  // Like the runs above, wait for the screen to finish loading before typing: a draft entered while it
+  // is still loading can be lost, and then the key sends nothing.
+  const input = page.getByRole('textbox', { name: 'Message' });
+  await expect(input).toBeFocused();
+  await expect(
+    page.getByText(
+      'Nothing is proposed until you press Propose. Nothing starts until you Convert.',
+    ),
+  ).toBeVisible();
+  await input.fill(MESSAGE);
+  await expect(input).toHaveValue(MESSAGE);
   await page.keyboard.press('ControlOrMeta+Enter');
   await expect(page).toHaveURL(/\/shape\/shp_/);
   await page.getByRole('button', { name: 'Propose', exact: true }).click();
