@@ -4,6 +4,7 @@ import type * as fs from 'node:fs';
 import type * as fsPromises from 'node:fs/promises';
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -261,6 +262,41 @@ describe('stampOrReason', () => {
       expect(swapped.opens).toBe(2);
       expect(swapped.blockingOpens).toBe(0);
     });
+  });
+
+  describe('a path that cannot be read', () => {
+    // root reads a mode 000 file, so the permission denial this relies on cannot happen as root.
+    const asRoot = process.getuid?.() === 0;
+
+    it.skipIf(asRoot)(
+      'says unreadable for a file with no read permission, and no stamp',
+      async () => {
+        const file = join(root, 'secret.txt');
+        writeFileSync(file, 'hello');
+        chmodSync(file, 0o000);
+        try {
+          expect(await stampOrReason(root, 'secret.txt')).toEqual({ reason: 'unreadable' });
+          expect(await writeStamp(root, 'secret.txt')).toBeNull();
+        } finally {
+          chmodSync(file, 0o644);
+        }
+      },
+    );
+
+    it.skipIf(asRoot)(
+      'says unreadable for a file in a directory that cannot be searched',
+      async () => {
+        const dir = join(root, 'locked');
+        mkdirSync(dir);
+        writeFileSync(join(dir, 'file.txt'), 'hello');
+        chmodSync(dir, 0o000);
+        try {
+          expect(await stampOrReason(root, 'locked/file.txt')).toEqual({ reason: 'unreadable' });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
   });
 
   describe('a symlink is not a file', () => {

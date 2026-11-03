@@ -2708,11 +2708,11 @@ describe('worktree checkouts', () => {
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
         });
 
-        it('cards a path that cannot be read, and leaves the card unused', async () => {
+        it('cards a dangling link, and leaves the card unused', async () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          // A dangling link: it is there, but there is nothing to read.
+          // A dangling link: it is there, but it is not a file.
           const link = join(repo.path, SENSITIVE_FILE);
           symlinkSync(join(repo.path, 'nowhere'), link);
           emit(SENSITIVE_FILE);
@@ -2724,6 +2724,34 @@ describe('worktree checkouts', () => {
           // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
           expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         });
+
+        // root reads a mode 000 file, so the permission denial this relies on cannot happen as root.
+        it.skipIf(process.getuid?.() === 0)(
+          'cards a path that cannot be read, and leaves the card unused',
+          async () => {
+            const lane = running();
+            watcher.sync();
+            editCard(lane, SENSITIVE_FILE, 'allow_once');
+            const file = join(repo.path, SENSITIVE_FILE);
+            mkdirSync(dirname(file), { recursive: true });
+            writeFileSync(file, 'unreadable');
+            chmodSync(file, 0o000);
+            try {
+              emit(SENSITIVE_FILE);
+              await watcher.flush();
+              expect(await vi.mocked(stampOrReason).mock.results.at(-1)?.value).toEqual({
+                reason: 'unreadable',
+              });
+              expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+            } finally {
+              chmodSync(file, 0o644);
+            }
+            // The card is still unused: once the file can be read, its write is excused and uses the card.
+            await write(SENSITIVE_FILE);
+            expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+            expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+          },
+        );
 
         it('cards a FIFO at a card-named path, finishing the batch instead of blocking on it', async () => {
           const lane = running();
