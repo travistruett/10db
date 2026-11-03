@@ -7,8 +7,10 @@
 
 - **A health check, not a lockfile comparison.** `delivery/install-health.ts` (`checkInstall`) reads the copy's
   `pnpm-lock.yaml` and checks that every direct dependency (`dependencies`, `devDependencies`) of every workspace
-  package it names resolves from that package's `node_modules` (`existsSync` follows the link, so a link into a
-  pruned `.pnpm` fails). It runs no program from the repository. An importer path that leaves the copy is ignored,
+  package it names resolves from that package the way Node looks: `node_modules/<name>` in the package's directory
+  or any above it, up to the copy's root and never past it (`existsSync` follows the link, so a link into a pruned
+  `.pnpm` fails). The walk up keeps a hoisted install (`node-linker=hoisted`, `dedupe-direct-deps=true`), whose
+  workspace packages have no `node_modules` of their own, from reading as broken. It runs no program from the repository. An importer path that leaves the copy is ignored,
   since a lane writes the lockfile. `optionalDependencies` are not checked: pnpm leaves out the ones the platform
   cannot use. A lockfile it cannot parse counts as broken.
 - **Repair.** `WorktreeDependencies.refresh` removes the copy's root `node_modules` (the daemon, a plain `rm`; a link
@@ -20,7 +22,9 @@
   that names the unresolved dependencies. The gate does not start. The runner fails the task with the new failure
   kind `install_broken` and its card, **without counting a fix attempt** (`attempt` is not raised): a fix session
   cannot repair a copy's packages, and 10db already installed. Retry runs the step again, and the next gate checks
-  and installs again. The shipping gate runs on as before, with the note on its card.
+  and installs again. The shipping gate treats `install_broken` as it treats `conflicted`: it does not start, and
+  the batch fails with `BatchFailure.InstallBroken` and a card that says the copy's install is broken, names the
+  unresolved dependencies and says Retry installs again (`shipCards.installBroken`), never a gate-failed card.
 - **Not decided here:** which pnpm the gate's install runs. `resolvePnpm` still skips version managers' shims and so
   runs the Homebrew pnpm, not the version `packageManager` pins. The repair above makes a mismatch recoverable
   instead of fatal; running the pinned version is a separate decision.

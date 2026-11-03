@@ -966,13 +966,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
                 inSession: true,
               });
               before.update = update;
-              // Markers in the branch fail any gate, and the stale branch isn't what would merge.
-              return update.kind !== 'aborted' && update.kind !== 'conflicted';
+              // Markers in the branch fail any gate, and the stale branch isn't what would merge. A
+              // broken install fails every tool of the gate, whatever the batch's code is.
+              return (
+                update.kind !== 'aborted' &&
+                update.kind !== 'conflicted' &&
+                update.kind !== 'install_broken'
+              );
             }),
           );
           if (gate === null) {
             if (before.update?.kind === 'conflicted' && !stopped())
               sendToMerge(batch, before.update);
+            if (before.update?.kind === 'install_broken' && !stopped())
+              fail(batch, shipCards.installBroken(batch, before.update.note));
             return null;
           }
           return {

@@ -44,6 +44,7 @@ import {
   createWorktreeGenerators,
   DEFAULT_DELIVERY_LIMITS,
   subscribeShipTrigger,
+  type BaseUpdates,
   type BatchStarter,
   type DeliveryContext,
   type DeliveryJobs,
@@ -264,6 +265,8 @@ export function createDeliveryHarness(
     readonly load?: Pick<LoadGuard, 'overloadedSince'>;
     /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
     readonly shipGate?: (gate: GateRunner) => GateRunner;
+    /** Wraps the shipper's base updates, as a test that needs an update the real copy can't give. */
+    readonly shipBaseUpdates?: (updates: BaseUpdates) => BaseUpdates;
     /** Wraps the real git, as a test that needs a push GitHub's server fails. */
     readonly wrapGit?: (git: Git) => Git;
   } = {},
@@ -343,7 +346,7 @@ export function createDeliveryHarness(
     createShipper({
       ...ctx,
       gate: opts.shipGate?.(shipGate) ?? shipGate,
-      baseUpdates: createBaseUpdates(ctx),
+      baseUpdates: opts.shipBaseUpdates?.(createBaseUpdates(ctx)) ?? createBaseUpdates(ctx),
       clock: (shipClock = new ManualClock()),
       dataDir: data.path,
       sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),

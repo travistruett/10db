@@ -275,6 +275,11 @@ export const BatchFailure = {
   GateTimedOut: 'gate_timed_out',
   /** The base merge left conflicts and no task could take them to a session. */
   BaseConflict: 'base_conflict',
+  /**
+   * The copy's packages do not resolve what its lockfile names, even after 10db installed again: the
+   * shipping gate did not run, and nothing the batch's code did is counted against it.
+   */
+  InstallBroken: 'install_broken',
   PushRejected: 'push_rejected',
   GhUnavailable: 'gh_unavailable',
   Network: 'network',

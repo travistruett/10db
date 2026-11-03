@@ -779,6 +779,19 @@ export const shipCards = {
       detail: { batchId: batch.id },
     },
   }),
+  /**
+   * The copy's packages still did not resolve what its lockfile names after 10db installed again
+   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
+   * failure would have said nothing of the batch's code. Retry installs again before the gate.
+   */
+  installBroken: (batch: BatchDto, note: string): ShipFailure => ({
+    failure: BatchFailure.InstallBroken,
+    card: {
+      title: `${notShipped(batch)}: the install in its copy is broken`,
+      body: `${note}\n\nNo gate ran and nothing was pushed. This is the copy's packages, not the batch's code. Retry removes the copy's node_modules and installs again from the lockfile before the gate runs.\n\n${RETRY}`,
+      detail: answers(batch),
+    },
+  }),
   pushRejected: (batch: BatchDto, detail: string): ShipFailure => ({
     failure: BatchFailure.PushRejected,
     card: {

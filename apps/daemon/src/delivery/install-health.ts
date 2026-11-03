@@ -34,13 +34,30 @@ function insideCopy(importer: string): boolean {
   return clean !== '..' && !clean.startsWith('../');
 }
 
+/**
+ * Whether `name` resolves from the workspace package at `importer` the way Node looks for it: in
+ * `node_modules/<name>` of the package and of each directory above it, up to the copy's root and
+ * no further. pnpm's isolated linker puts the link in the package's own `node_modules`; a hoisted
+ * one (`node-linker=hoisted`, `dedupe-direct-deps`) leaves it in the root's.
+ */
+function resolvesFrom(path: string, importer: string, name: string): boolean {
+  const segments = normalize(importer)
+    .split(/[\\/]/)
+    .filter((part) => part !== '' && part !== '.');
+  for (let depth = segments.length; depth >= 0; depth -= 1) {
+    if (existsSync(join(path, ...segments.slice(0, depth), 'node_modules', name))) return true;
+  }
+  return false;
+}
+
 function brokenLockfile(): InstallHealth {
   return { kind: 'broken', missing: ['pnpm-lock.yaml (unreadable)'], total: 0, unresolved: 1 };
 }
 
 /**
  * Whether the copy's packages are installed: for every workspace package the lockfile names, each
- * direct dependency must resolve from that package's `node_modules` (`existsSync` follows the link,
+ * direct dependency must resolve from that package (its `node_modules` or one above it, inside the
+ * copy, as Node looks) (`existsSync` follows the link,
  * so one that points into a pruned `.pnpm` fails). This is what the gate's tools need to start: the
  * run of 2026-11-03 left `.pnpm` with a fifth of its packages and `tsx` could not be found. It reads
  * the lockfile and the file system only; no program from the repository runs. An importer path
@@ -73,8 +90,7 @@ export function checkInstall(path: string): InstallHealth {
       if (typeof names !== 'object' || names === null) continue;
       for (const name of Object.keys(names)) {
         total += 1;
-        if (!existsSync(join(path, importer, 'node_modules', name)))
-          missing.push(`${importer}: ${name}`);
+        if (!resolvesFrom(path, importer, name)) missing.push(`${importer}: ${name}`);
       }
     }
   }

@@ -96,6 +96,41 @@ describe('checkInstall', () => {
     expect(checkInstall(root)).toMatchObject({ kind: 'broken', missing: ['apps/daemon: zod'] });
   });
 
+  it('calls a hoisted install whole: a dependency in the root node_modules resolves from a package', () => {
+    // node-linker=hoisted (or dedupe-direct-deps): packages/app has no node_modules of its own.
+    write(
+      join(root, 'pnpm-lock.yaml'),
+      [
+        'importers:',
+        '  .: {}',
+        '  packages/app:',
+        '    dependencies:',
+        '      react:',
+        '        version: 19.0.0',
+        '',
+      ].join('\n'),
+    );
+    mkdirSync(join(root, 'packages/app'), { recursive: true });
+    mkdirSync(join(root, 'node_modules/react'), { recursive: true });
+    expect(checkInstall(root)).toEqual({ kind: 'whole' });
+  });
+
+  it('does not look above the copy for a dependency', () => {
+    write(
+      join(root, 'pnpm-lock.yaml'),
+      [
+        'importers:',
+        '  .:',
+        '    dependencies:',
+        '      above:',
+        '        version: 1.0.0',
+        '',
+      ].join('\n'),
+    );
+    mkdirSync(join(tmp.path, 'node_modules/above'), { recursive: true });
+    expect(checkInstall(root)).toMatchObject({ kind: 'broken', missing: ['.: above'] });
+  });
+
   it('reads a lockfile it cannot parse as broken, not as whole', () => {
     write(join(root, 'pnpm-lock.yaml'), 'importers: [unclosed');
     expect(checkInstall(root).kind).toBe('broken');
