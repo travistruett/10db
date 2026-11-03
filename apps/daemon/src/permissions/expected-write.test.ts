@@ -60,6 +60,13 @@ describe('editResult', () => {
     );
   });
 
+  it('counts matches without overlap, as Claude Code does', () => {
+    // '==' in 'a === b' is one match to Claude Code (split), not two overlapping ones.
+    expect(editResult('Edit', { old_string: '==', new_string: 'X' }, 'a === b')).toBe('a X= b');
+    // Two separate matches are still refused.
+    expect(editResult('Edit', { old_string: '==', new_string: 'X' }, 'a == b ==')).toBeUndefined();
+  });
+
   it('applies a MultiEdit one edit after another', () => {
     expect(
       editResult(

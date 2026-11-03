@@ -40,8 +40,9 @@ function applyEdit(current: string | null, edit: unknown): string | undefined {
   const at = current.indexOf(oldText);
   if (at < 0) return undefined;
   const replaceAll = fields['replace_all'] === true;
-  // Without replace_all an old_string found more than once is refused, and nothing is written.
-  if (!replaceAll && current.includes(oldText, at + 1)) return undefined;
+  // Without replace_all an old_string found more than once is refused, and nothing is written. Claude Code
+  // counts with split, so matches that overlap ('==' in 'a === b') are one match, not two.
+  if (!replaceAll && current.split(oldText).length - 1 > 1) return undefined;
   // A deletion takes the newline after its text with it, where one follows (Claude Code's applyEditToFile).
   const search =
     newText === '' && !oldText.endsWith('\n') && current.includes(`${oldText}\n`)
