@@ -55,11 +55,19 @@ export function ConversationPane({
   const canPropose = shapeId !== null && heardBuilder;
 
   const doPropose = (): void => {
-    if (canPropose && !(view?.turn.proposing ?? false)) propose.mutate(shapeId);
+    if (canPropose && !(view?.turn.proposing ?? false)) {
+      stop.reset();
+      propose.mutate(shapeId);
+    }
   };
   const doStop = (): void => {
-    if (shapeId !== null) stop.mutate(shapeId);
+    if (shapeId !== null) {
+      propose.reset();
+      stop.mutate(shapeId);
+    }
   };
+  // A refused Propose or Stop is the daemon's words in the same alert as a load failure.
+  const shownError = propose.error?.message ?? stop.error?.message ?? error;
   useShapeKeys({ onPropose: doPropose, onStop: doStop, answering });
 
   return (
@@ -113,7 +121,7 @@ export function ConversationPane({
         proposing={(view?.turn.proposing ?? false) || propose.isPending}
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
-        error={error}
+        error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
