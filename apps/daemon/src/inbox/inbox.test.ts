@@ -2183,6 +2183,66 @@ describe('permission broker in a sandboxed lane', () => {
       });
     });
 
+    describe("answering one lane's Edit card with allow_project", () => {
+      const twoLanes = () => {
+        const a = seedWorkstream(base);
+        const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+        writeFileSync(file(), '{"a":1,"b":1}');
+        const editOf = (key: string) =>
+          request('Edit', {
+            file_path: file(),
+            old_string: `"${key}":1`,
+            new_string: `"${key}":2`,
+          });
+        const first = sandboxed(a)(editOf('a'));
+        const second = sandboxed(b)(editOf('b'));
+        const cardOf = (lane: typeof a) => {
+          const card = openCards().find((c) => c.targets[0]?.workstreamId === lane.workstream.id);
+          if (card === undefined) throw new Error('no card for the lane');
+          return card;
+        };
+        return { a, b, first, second, cardOf };
+      };
+
+      it("releases the other lane's open card for the same edit, and records its hash", async () => {
+        const { a, b, first, second, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(await second).toEqual({ behavior: 'allow' });
+        expect(openCards()).toEqual([]);
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'RESOLVED' });
+        expect(getInboxItem(state.db, betaCard.id).detail).toMatchObject({
+          allowedWrites: { [b.workstream.id]: sha('{"a":1,"b":2}') },
+        });
+        // One rule and one decision: the released card stores none of its own.
+        expect(listPermissionRules(state.db, a.project.id, a.workstream.id)).toHaveLength(1);
+      });
+
+      it('leaves another lane’s card for a different file open', () => {
+        const a = seedWorkstream(base);
+        const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+        writeFileSync(file(), '{"a":1}');
+        const other = join(fileAccess.checkout, 'src', 'b.json');
+        writeFileSync(other, '{"a":1}');
+        void sandboxed(a)(edit('"a":2')).catch(() => undefined);
+        void sandboxed(b)(
+          request('Edit', { file_path: other, old_string: '"a":1', new_string: '"a":2' }),
+        ).catch(() => undefined);
+        const alphaCard = openCards().find((c) => c.targets[0]?.workstreamId === a.workstream.id);
+        if (alphaCard === undefined) throw new Error('no card for Alpha');
+        inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(openCards()).toHaveLength(1);
+      });
+
+      it('leaves the other lane’s card open for allow_once', () => {
+        const { a, cardOf } = twoLanes();
+        inbox.answer(cardOf(a).id, { choice: 'allow_once' });
+        expect(openCards()).toHaveLength(1);
+      });
+    });
+
     it("still folds two lanes' Writes to one file, keeping each lane's content", async () => {
       const a = seedWorkstream(base);
       const b = seedWorkstream(base, { project: a.project, title: 'Beta' });

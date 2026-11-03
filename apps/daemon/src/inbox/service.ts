@@ -38,6 +38,7 @@ import {
   insertPermissionRule,
   insertSource,
   insertTaskFromProposal,
+  listInbox,
   openItemsForWorkstream,
   resolveProposal,
   updateInboxItem,
@@ -45,7 +46,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { storableRule } from '../permissions';
+import { EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
@@ -354,7 +355,45 @@ export function createInboxService(deps: {
     return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
   }
 
-  return {
+  /**
+   * An edit card folds only within its lane, so two lanes asking for the same edit have a card each. The
+   * builder's allow-for-project answer to one stores a rule that covers the other's, so those cards are
+   * answered allow_once here: each lane's broker, handed that answer, records the hash of the write its own
+   * call makes, as it does for any allowed edit. It stores no rule and no decision of its own. A card that
+   * was answered meanwhile is left as it is.
+   */
+  function releaseCoveredEditCards(answered: InboxItemDto): void {
+    const ruleOf = (card: InboxItemDto): ReturnType<typeof storableRule> => {
+      const toolName = card.detail?.['toolName'];
+      const summary = card.detail?.['summary'];
+      return typeof toolName === 'string' && typeof summary === 'string'
+        ? storableRule(toolName, summary)
+        : undefined;
+    };
+    const rule = ruleOf(answered);
+    if (rule === undefined) return;
+    const covered = listInbox(deps.state.db, {
+      states: [InboxState.Open],
+      projectId: answered.projectId,
+    }).filter((card) => {
+      if (card.id === answered.id || card.kind !== InboxKind.Permission) return false;
+      if (card.detail?.[EXACT_WRITE_KEY] !== true) return false;
+      const theirs = ruleOf(card);
+      return theirs?.toolName === rule.toolName && theirs.pattern === rule.pattern;
+    });
+    for (const card of covered) {
+      try {
+        service.answer(card.id, {
+          choice: PermissionChoice.AllowOnce,
+          note: 'Covered by the project rule just allowed on another lane’s card',
+        });
+      } catch (error) {
+        if (!(error instanceof ConflictError)) throw error;
+      }
+    }
+  }
+
+  const service: InboxService = {
     ask(raw) {
       // Whatever the lane wrote, a question can be answered by parking the task.
       const input =
@@ -465,7 +504,14 @@ export function createInboxService(deps: {
         waiters.delete(id);
         deps.onParkAnswer?.(answered);
       }
-      return answered.state === InboxState.Resolved ? answered : deliver(answered);
+      const delivered = answered.state === InboxState.Resolved ? answered : deliver(answered);
+      if (
+        answered.kind === InboxKind.Permission &&
+        answer.choice === PermissionChoice.AllowProject
+      ) {
+        releaseCoveredEditCards(answered);
+      }
+      return delivered;
     },
 
     flag(input) {
@@ -524,4 +570,5 @@ export function createInboxService(deps: {
         : item;
     },
   };
+  return service;
 }

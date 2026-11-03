@@ -34,6 +34,15 @@ landed. Write cards still fold across lanes, since a Write's content doesn't dep
 keeps one hash per lane, so each lane's own write is excused and neither lane's write is excused for the
 other.
 
+Answering one lane's edit card with allow_project stores a rule that covers another lane's open card for
+the same path, so the inbox service then answers each such card (an open permission card of the project,
+marked `exactWrite`, whose storable rule is the same tool and pattern) allow_once, with a note saying a
+project rule covered it. It stores no rule and no decision of its own. Each lane's broker, handed that
+answer, records the hash of the write its own call makes, as for any allowed edit. The released lanes are
+allowed together, so a lane's hash can be read before another lane's write lands and then differ from what
+its own write makes; that write is carded, never excused, so the race fails closed. Allow once and
+allow-for-workstream answers release nothing, and neither does a card for another path.
+
 A card without `exactWrite` (raised before this) behaves as before: it excuses the next write to its path.
 
 ## Why
