@@ -29,7 +29,12 @@ app_process_pattern='/10db\.app(\.[^/]*)?/Contents/MacOS/'
 # it must not hold an install back.
 bridge_process_pattern='/Contents/Resources/daemon/builder-mcp\.mjs'
 
+# The step a failure belongs to and its message, for the status file install-app.sh writes when it
+# is run by 10db itself (--status-file).
+step=""
+last_failure=""
 fail() {
+  last_failure="$*"
   echo "$script_name: $*" >&2
   exit 1
 }
@@ -53,18 +58,50 @@ fi
 backup_file_for() { echo "$(dirname "$data_dir")/$(basename "$data_dir")-backup-$1/10db.sqlite"; }
 previous_zip_for() { echo "$previous_dir/10db-$1.zip"; }
 
-refuse_while_running() {
+# Prints the pids of the app's processes that hold the database (all of the app's but the bridge),
+# on one line; nothing when none runs. Returns pgrep's own status when it cannot look (2 or more).
+running_pids() {
   local listing pids status=0
   listing="$(pgrep -lf "$app_process_pattern")" || status=$?
   case "$status" in
     0)
       # grep exits 1 when the bridge was the only match; that is not a failure.
       pids="$(grep -Ev -- "$bridge_process_pattern" <<< "$listing" | awk '{ print $1 }')" || true
-      [ -z "$pids" ] || fail "10db is running (process $(echo $pids)). Quit it with ⌘Q, then run this again. This script never quits 10db for you."
+      echo $pids
       ;;
     1) ;;
-    *) fail "pgrep could not check whether 10db is running (exit $status)" ;;
+    *) return "$status" ;;
   esac
+}
+
+refuse_while_running() {
+  local pids status=0
+  pids="$(running_pids)" || status=$?
+  [ "$status" -eq 0 ] || fail "pgrep could not check whether 10db is running (exit $status)"
+  [ -z "$pids" ] || fail "10db is running (process $pids). Quit it with ⌘Q, then run this again. This script never quits 10db for you."
+}
+
+# The window alone: quitting it stops the daemon, which sees its stdin close.
+desktop_process_pattern='/10db\.app(\.[^/]*)?/Contents/MacOS/tendb-desktop'
+quit_attempted=0
+
+# Asks the running 10db to quit, as ⌘Q would, and waits until no process of the app is left. Only
+# 10db's own update calls it (install-app.sh --quit-first), after it made sure nothing was mid-session;
+# it never kills the daemon itself.
+quit_app() {
+  local limit="${TENDB_INSTALL_QUIT_SECONDS:-90}" waited=0 status=0 pids=""
+  step=quit
+  quit_attempted=1
+  pkill -TERM -f "$desktop_process_pattern" || true
+  while :; do
+    status=0
+    pids="$(running_pids)" || status=$?
+    [ "$status" -eq 0 ] || fail "pgrep could not check whether 10db has quit (exit $status)"
+    [ -n "$pids" ] || return 0
+    [ "$waited" -lt "$limit" ] || fail "10db did not quit within $limit seconds"
+    waited=$((waited + 1))
+    sleep "${TENDB_INSTALL_QUIT_POLL_SECONDS:-1}"
+  done
 }
 
 # One install or rollback at a time: two at once would replace each other's apps.

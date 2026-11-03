@@ -15,17 +15,41 @@
 # but the newest 5 database backups. It refuses while 10db runs and never quits it.
 # Exit 0: installed. Exit 1: refused or failed; the previous app is put back, and when it can't be,
 # the last message says where it is. Exit 2: bad argument.
+#
+# 10db runs it in two halves to update itself (apps/daemon/src/self-update), each with absolute paths:
+#   install-app.sh --stage <dir> [--running <sha>] [ref]
+#                                        choose, fetch and check the build exactly as above, leave it in
+#                                        <dir> with a copy of these scripts, and install nothing; 10db may
+#                                        be running. With --running, a build of that very commit is not
+#                                        fetched: the status says step "current".
+#   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first] [--relaunch]
+#                                        install that build. --quit-first asks the running 10db to
+#                                        quit instead of refusing; --relaunch opens the app again,
+#                                        the old one when the install failed.
+#   --status-file <file>                 either half writes {ok, mode, step, message, commit} there
+#                                        when it ends, so 10db can say which step failed.
+# 10db starts both halves with PATH=/usr/bin:/bin:/usr/sbin:/sbin and TENDB_INSTALL_GH set to the gh
+# it resolved from its fixed install prefixes, and GH_REPO set to the repository the app was built
+# from (its build-info.json), so nothing here is looked up on the login PATH or in a checkout.
+# The builder's MCP bridge (tendb-node builder-mcp.mjs) is not waited for when quitting.
 set -euo pipefail
 
 script_name=install-app.sh
-# gh works out {owner}/{repo} from this checkout's origin, wherever make was run from.
+# gh works out {owner}/{repo} from this checkout's origin (or GH_REPO), wherever make was run from.
 cd "$(dirname "$0")/../.."
 # shellcheck source=scripts/release/installed-app.sh
 . scripts/release/installed-app.sh
 
+# 10db's own update runs this with a fixed PATH and TENDB_INSTALL_GH, the gh the daemon resolved, so
+# no gh is looked up on a PATH a lane could write to. Run by hand, it uses the builder's own gh.
+gh() {
+  if [ -n "${TENDB_INSTALL_GH:-}" ]; then "$TENDB_INSTALL_GH" "$@"; else command gh "$@"; fi
+}
+
 usage() {
   echo "usage: install-app.sh [branch-or-tag] (default main)" >&2
   echo "  A name of 7 to 40 hex characters is taken for a commit SHA and refused: GitHub builds only a branch or tag." >&2
+  echo "  10db's own update: --stage <dir> [--running <sha>] [ref], or --apply <dir> [--quit-first] [--relaunch]; --status-file <file>; absolute paths." >&2
   exit 2
 }
 
@@ -39,9 +63,39 @@ valid_ref() {
   esac
 }
 
+stage_dir=""
+apply_dir=""
+status_file=""
+running_commit=""
+quit_first=0
+relaunch=0
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --stage) [ "$#" -ge 2 ] || usage; stage_dir="$2"; shift 2 ;;
+    --apply) [ "$#" -ge 2 ] || usage; apply_dir="$2"; shift 2 ;;
+    --status-file) [ "$#" -ge 2 ] || usage; status_file="$2"; shift 2 ;;
+    --running) [ "$#" -ge 2 ] || usage; running_commit="$2"; shift 2 ;;
+    --quit-first) quit_first=1; shift ;;
+    --relaunch) relaunch=1; shift ;;
+    *) break ;;
+  esac
+done
 [ "$#" -le 1 ] || usage
 ref="${1:-main}"
 valid_ref "$ref" || usage
+mode=install
+[ -z "$stage_dir" ] || mode=stage
+if [ -n "$apply_dir" ]; then
+  [ -z "$stage_dir" ] && [ "$#" -eq 0 ] || usage
+  mode=apply
+fi
+for path in "$stage_dir" "$apply_dir" "$status_file"; do
+  case "$path" in "" | /*) ;; *) usage ;; esac
+done
+if [ "$mode" != apply ] && { [ "$quit_first" -eq 1 ] || [ "$relaunch" -eq 1 ]; }; then usage; fi
+if [ -n "$running_commit" ]; then
+  [ "$mode" = stage ] && [[ "$running_commit" =~ ^[0-9a-f]{40}$ ]] || usage
+fi
 
 workflow=release-dry-run.yml
 artifact=unsigned-dmg
@@ -49,7 +103,8 @@ poll_seconds="${TENDB_INSTALL_POLL_SECONDS:-20}"
 # The build's own limit is 60 minutes (release-dry-run.yml), plus time queued for a macOS runner.
 deadline_seconds="${TENDB_INSTALL_DEADLINE_SECONDS:-5400}"
 
-refuse_while_running
+# Staging runs beside a running 10db, and applying quits it; only a plain install refuses.
+if [ "$mode" = install ]; then refuse_while_running; fi
 
 work="$(mktemp -d "${TMPDIR:-/tmp}/10db-install.XXXXXX")"
 mount="$(mktemp -d "${TMPDIR:-/tmp}/10db-install-mount.XXXXXX")"
@@ -63,6 +118,10 @@ removing=0
 copying=0
 installed=0
 backups_kept=5
+head=""
+run_id=""
+sha=""
+behind=0 # the commits the installed one trails the head of the ref by
 
 detach_dmg() {
   hdiutil detach "$mount" -quiet && return 0
@@ -70,12 +129,32 @@ detach_dmg() {
   return 1
 }
 
+json_escape() {
+  printf '%s' "$1" | tr '\n\r\t' '   ' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+# What 10db reads to raise its card: whether this ended well, and if not at which step and why.
+write_status() {
+  [ -n "$status_file" ] || return 0
+  local ok=false message="" partial="$status_file.partial"
+  if [ "$1" -eq 0 ]; then
+    ok=true
+  else
+    message="${last_failure:-$script_name stopped at step ${step:-unknown} (exit $1)}"
+  fi
+  printf '{"ok":%s,"mode":"%s","step":"%s","message":"%s","commit":"%s"}\n' \
+    "$ok" "$mode" "$(json_escape "$step")" "$(json_escape "$message")" "$(json_escape "$head")" \
+    > "$partial" && mv "$partial" "$status_file"
+}
+
 # Never aborts part way: each step runs whatever the one before it did, and a Ctrl-C while it runs
 # is ignored. The previous app is unpacked from its zip only into an empty place, so it can't end
 # up inside a partial copy; once it is back, its zip goes, leaving the earlier one.
 cleanup() {
+  local code=$?
   trap '' INT TERM HUP
   set +e
+  write_status "$code"
   if [ "$mounted" -eq 1 ]; then detach_dmg > /dev/null 2>&1; fi
   rmdir "$mount" 2> /dev/null
   rm -rf "$work"
@@ -96,6 +175,10 @@ cleanup() {
     elif [ "$zip_done" -eq 1 ]; then
       rm -f "$previous_zip"
     fi
+  fi
+  # The app was asked to quit, so it is started again: the new one, or the old one when this failed.
+  if [ "$relaunch" -eq 1 ] && [ "$quit_attempted" -eq 1 ]; then
+    open "$app_path" || echo "$script_name: could not start $app_path; open 10db yourself" >&2
   fi
   release_lock
 }
@@ -119,6 +202,23 @@ past_deadline() { [ $((SECONDS - started)) -ge "$deadline_seconds" ]; }
 cancelled_runs=0
 max_cancelled_runs=3
 while :; do
+  if [ "$mode" = apply ]; then
+    # The build was chosen, downloaded and checked when it was staged; what is installed is what the
+    # stage folder holds, not whatever main has become since.
+    step=staged-build
+    shopt -s nullglob
+    dmgs=("$apply_dir"/*.dmg)
+    sums="$apply_dir/SHA256SUMS"
+    [ "${#dmgs[@]}" -eq 1 ] && [ -f "$sums" ] && [ -f "$apply_dir/commit" ] \
+      || fail "$apply_dir holds no staged build (one DMG, SHA256SUMS and commit)"
+    dmg="${dmgs[0]}"
+    head="$(tr -d '[:space:]' < "$apply_dir/commit")"
+    [[ "$head" =~ ^[0-9a-f]{40}$ ]] || fail "$apply_dir/commit holds '$head', not a commit SHA"
+    sha="$head"
+    run_id=staged
+    break
+  fi
+  step=find-commit
   if ! sha="$(gh api "repos/{owner}/{repo}/commits/$ref" --jq .sha 2> "$gh_err")"; then
     grep -q 'No commit found' "$gh_err" && fail "GitHub has no branch or tag named $ref"
     fail "gh could not ask GitHub about $ref: $(cat "$gh_err"). Check gh auth status and the network."
@@ -128,6 +228,7 @@ while :; do
   # Main moves faster than a build takes, so the head's build is often still queued or running while
   # an older commit's has finished. The newest commit of the ref with a finished successful build and
   # a live artifact is installed; the head's build is waited for only when none of them has one.
+  step=find-build
   commits_scanned=100
   if ! commits="$(gh api "repos/{owner}/{repo}/commits?sha=$ref&per_page=$commits_scanned" --jq '.[].sha' 2> "$gh_err")"; then
     fail "gh could not list the commits of $ref: $(cat "$gh_err")"
@@ -139,7 +240,7 @@ while :; do
 
   run_id=""
   built=""
-  behind=0 # the commits the installed one trails the head of the ref by
+  behind=0
   position=0
   while IFS= read -r commit; do
     [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || continue
@@ -171,6 +272,7 @@ while :; do
     [ -z "$run_id" ] || echo "A build of ${sha:0:12} is already under way in run $run_id; waiting for it."
   fi
 
+  step=wait-for-build
   if [ -z "$run_id" ]; then
     # gh workflow run does not say which run it started, so the new run is the one that wasn't there before.
     before="$(dispatched_runs)"
@@ -250,30 +352,60 @@ while :; do
   break
 done
 
-gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
+if [ "$mode" != apply ]; then
+  if [ -n "$running_commit" ] && [ "$head" = "$running_commit" ]; then
+    # Nothing newer has finished: the app already runs the newest finished build.
+    step=current
+    echo "The newest finished build of $ref, ${head:0:12}, is the one the app runs; nothing was fetched."
+    exit 0
+  fi
 
-shopt -s nullglob
-dmgs=("$work/artifact"/*.dmg)
-[ "${#dmgs[@]}" -eq 1 ] || fail "expected one DMG in run $run_id's $artifact, found ${#dmgs[@]}"
-dmg="${dmgs[0]}"
-sums="$work/artifact/SHA256SUMS"
-[ -f "$sums" ] || fail "run $run_id's $artifact has no SHA256SUMS"
+  step=download
+  gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
+
+  shopt -s nullglob
+  dmgs=("$work/artifact"/*.dmg)
+  [ "${#dmgs[@]}" -eq 1 ] || fail "expected one DMG in run $run_id's $artifact, found ${#dmgs[@]}"
+  dmg="${dmgs[0]}"
+  sums="$work/artifact/SHA256SUMS"
+  [ -f "$sums" ] || fail "run $run_id's $artifact has no SHA256SUMS"
+fi
 # SHA256SUMS comes in the same artifact as the DMG, so this catches a corrupt or truncated download,
 # not a forged one. Trust rests on gh fetching the builder's own run over GitHub's authenticated API,
 # from a workflow that holds no secrets and builds exactly the commit the run names.
+step=verify-checksum
 expected="$(awk -v name="$(basename "$dmg")" '$2 == name || $2 == "*" name { print $1 }' "$sums")"
 actual="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
 [ -n "$expected" ] || fail "SHA256SUMS does not list $(basename "$dmg")"
 [ "$expected" = "$actual" ] || fail "checksum mismatch for $(basename "$dmg"): SHA256SUMS says $expected, the download is $actual"
 
+if [ "$mode" = stage ]; then
+  step=stage
+  mkdir -p "$stage_dir/scripts/release" || fail "could not create $stage_dir"
+  # The app that is installed may be replaced while --apply runs, so the apply half runs from here.
+  cp scripts/release/install-app.sh scripts/release/installed-app.sh "$stage_dir/scripts/release/" \
+    && cp "$dmg" "$stage_dir/" && cp "$sums" "$stage_dir/SHA256SUMS" \
+    && printf '%s\n' "$head" > "$stage_dir/commit" \
+    || fail "could not copy the build into $stage_dir"
+  step=done
+  echo "Staged the build of $ref at commit $head (GitHub run $run_id) in $stage_dir."
+  exit 0
+fi
+
+step=lock
 take_lock
-# 10db may have been opened while the build ran.
-refuse_while_running
+if [ "$quit_first" -eq 1 ]; then
+  quit_app
+else
+  # 10db may have been opened while the build ran.
+  refuse_while_running
+fi
 refuse_broken_app "make install-app again or make rollback-app"
 
 stamp="$(new_stamp)"
 [ ! -e "$(previous_zip_for "$stamp")" ] || fail "$(previous_zip_for "$stamp") already exists"
 backup=""
+step=backup-database
 if [ -f "$db_file" ]; then
   backup="$(backup_file_for "$stamp")"
   case "$backup" in *"'"*) fail "the backup path holds a single quote, which sqlite3's .backup can't take: $backup" ;; esac
@@ -291,6 +423,7 @@ fi
 # 10db may have been opened during the backup.
 refuse_while_running
 
+step=zip-previous
 if [ -e "$app_path" ]; then
   previous_zip="$(previous_zip_for "$stamp")"
   zip_app "$previous_zip" || fail "could not zip $app_path to $previous_zip and test the zip, so the app stays in place"
@@ -299,6 +432,7 @@ if [ -e "$app_path" ]; then
   rm -rf "$app_path"
 fi
 
+step=install
 # Set first: an attach that fails part way may still leave the image mounted.
 mounted=1
 hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" > /dev/null
@@ -336,8 +470,15 @@ prune_backups() {
   [ -z "$removed" ] || echo "  Removed older database backups, keeping the newest $backups_kept:$removed"
 }
 
-echo "Installed 10db from $ref at commit $head (GitHub run $run_id) as $app_path."
-if [ "$behind" -eq 0 ]; then
+step=done
+if [ "$mode" = apply ]; then
+  echo "Installed 10db at the staged commit $head as $app_path."
+else
+  echo "Installed 10db from $ref at commit $head (GitHub run $run_id) as $app_path."
+fi
+if [ "$mode" = apply ]; then
+  :
+elif [ "$behind" -eq 0 ]; then
   echo "  That is the head of $ref."
 else
   echo "  That is $behind commit$([ "$behind" -eq 1 ] || echo s) behind the head of $ref (${sha:0:12}); its build had not finished. Run this again later for a newer one."
@@ -352,4 +493,8 @@ prune_backups
 for leftover in "$app_path".*; do
   echo "$script_name: $leftover is another copy of 10db in Applications, which the Dock icon may open; zip it or delete it" >&2
 done
-echo "Open 10db to start it. To go back to the previous app: quit 10db, then run make rollback-app."
+if [ "$relaunch" -eq 1 ]; then
+  echo "Starting 10db again. To go back to the previous app: quit 10db, then run make rollback-app."
+else
+  echo "Open 10db to start it. To go back to the previous app: quit 10db, then run make rollback-app."
+fi
