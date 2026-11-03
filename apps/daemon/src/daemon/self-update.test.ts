@@ -1,18 +1,23 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
+  BatchDto,
   HealthResponse,
   ProjectDto,
   SelfUpdateStatusDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { apiClient, quickFlowId } from '../../test/api-client';
+import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
+  createTempRepoWithOrigin,
+  githubOrigin,
   isolatedGitEnv,
+  NETWORK_ENV,
   tempDir,
   waitFor,
   waitForAsync,
@@ -111,6 +116,8 @@ async function start(
     intervalMs?: number;
     adapter?: FakeAdapter;
     caps?: { global: number };
+    /** What a batch's delivery reaches GitHub with: a project that ships needs both. */
+    delivery?: { gh: FakeGh; networkEnv: () => Readonly<Record<string, string>> };
   } = {},
 ): Promise<ReturnType<typeof apiClient>> {
   daemon = await startDaemon({
@@ -120,6 +127,7 @@ async function start(
     adapter: options.adapter ?? new FakeAdapter({}),
     logLevel: 'warn',
     ...(options.caps ? { caps: options.caps } : {}),
+    ...options.delivery,
     build: {
       commit: RUNNING,
       repository: options.repository === undefined ? BUILT_FOR : options.repository,
@@ -382,6 +390,72 @@ describe('self-update in the daemon', () => {
       const beta = await startTask(api, project.id, 'Beta', 'src');
       await afterChecks(3);
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
+    });
+
+    it('installs with two lanes of one batch held at their gates, neither waiting on the other', async () => {
+      const remote = createTempRepoWithOrigin();
+      const network = githubOrigin(remote.repo.path, remote.origin.path);
+      try {
+        head = RUNNING;
+        const sessionEnd = [
+          { do: 'await_message', contains: 'go' },
+          { do: 'turn_complete' },
+        ] as const;
+        const adapter = new FakeAdapter({ Alpha: [[...sessionEnd]], Beta: [[...sessionEnd]] });
+        const started = vi.spyOn(adapter, 'start');
+        const api = await start({
+          caps: { global: 2 },
+          adapter,
+          delivery: {
+            gh: new FakeGh(),
+            networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
+          },
+        });
+        await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'shop',
+          repoPath: remote.repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [
+            { name: 'api', globs: ['src/api/**'] },
+            { name: 'ui', globs: ['src/ui/**'] },
+          ],
+          delivery: 'pull_request',
+          prTitlePrefix: 'feat(app)',
+        });
+        const task = (title: string, area: string) =>
+          api.post(`/projects/${project.id}/tasks`, TaskDto, {
+            title,
+            acceptanceCriteria: ['it works'],
+            areas: [area],
+          });
+        const alpha = await task('Alpha', 'api');
+        const beta = await task('Beta', 'ui');
+        await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
+          title: 'Greetings',
+          taskIds: [alpha.id, beta.id],
+        });
+        await waitFor(() => started.mock.results.length === 2);
+
+        head = NEW;
+        await waitForAsync(async () => (await selfUpdate(api)).draining);
+        expect(applied).toEqual([]);
+
+        // Both sessions end during the drain, so both lanes reach their gates.
+        for (const session of started.mock.results)
+          (session.value as { send(text: string): void }).send('go');
+        await waitFor(() => applied.length > 0 && applied);
+        expect(applied).toEqual([NEW]);
+        const lanes = await lanesOf(api);
+        expect(lanes.get(alpha.id)?.state).toBe('VERIFYING');
+        expect(lanes.get(beta.id)?.state).toBe('VERIFYING');
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        network.cleanup();
+        remote.cleanup();
+      }
     });
   });
 

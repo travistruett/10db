@@ -41,6 +41,7 @@ export function createDrain(): Drain {
     get since() {
       return since;
     },
+    holding: () => since !== null,
     parked: () => waiting.size,
     begin(at) {
       since ??= at;
@@ -74,24 +75,20 @@ export function createDrain(): Drain {
   };
 }
 
-/** A hold, and whether it holds now: `untilClear` alone cannot say whether it would wait. */
-export interface Holding {
-  holding(): boolean;
-  readonly hold: Hold;
-}
-
 /**
  * Waits for each hold in turn, and again from the first when one began holding while another was
  * waited for, so work starts only at a moment when none of them holds.
  */
-export function holdBoth(holds: readonly Holding[]): Hold {
+export function holdBoth(holds: readonly Hold[]): Hold {
+  const holding = (): boolean => holds.some((hold) => hold.holding());
   return {
+    holding,
     async untilClear(signal) {
       for (;;) {
-        for (const { hold } of holds) {
+        for (const hold of holds) {
           if (!(await hold.untilClear(signal))) return false;
         }
-        if (!holds.some((h) => h.holding())) return true;
+        if (!holding()) return true;
       }
     },
   };

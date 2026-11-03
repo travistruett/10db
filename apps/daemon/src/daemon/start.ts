@@ -513,10 +513,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
   const updateDrain = createDrain();
   // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain.
-  const startHold = holdBoth([
-    { holding: () => loadGuard.overloaded, hold: loadGuard },
-    { holding: () => updateDrain.draining, hold: updateDrain },
-  ]);
+  const startHold = holdBoth([loadGuard, updateDrain]);
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
@@ -608,12 +605,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'gate' }),
   });
   const gateSlots = createGateSlots(limits.gateSlots);
-  // A task's gate: held for the drain too, since it begins a step.
+  // A task's gate has no hold here: the runner holds it, for the load and the drain, before it takes
+  // its batch's turn and its slot, so a held gate keeps neither.
   const gate = limitGates(gateRunner, {
     slots: gateSlots,
     clock,
     logger: logger.child({ component: 'gate' }),
-    hold: startHold,
   });
   // A batch's shipping gate belongs to a ship that has begun, and a drain lets that finish: only
   // the load holds it. No new ship begins during the drain (`holdShips`).

@@ -71,9 +71,7 @@ describe('holdBoth', () => {
     let overloaded = false;
     const waiters: (() => void)[] = [];
     return {
-      get overloaded() {
-        return overloaded;
-      },
+      holding: () => overloaded,
       set(value: boolean) {
         overloaded = value;
         if (!value) for (const wake of waiters.splice(0)) wake();
@@ -92,10 +90,7 @@ describe('holdBoth', () => {
   it('waits until both are clear, even when one clears while the other starts holding', async () => {
     const guard = load();
     const drain = createDrain();
-    const hold = holdBoth([
-      { holding: () => guard.overloaded, hold: guard },
-      { holding: () => drain.draining, hold: drain },
-    ]);
+    const hold = holdBoth([guard, drain]);
     guard.set(true);
     let released = false;
     void hold.untilClear().then(() => {
@@ -112,10 +107,24 @@ describe('holdBoth', () => {
     expect(released).toBe(true);
   });
 
+  it('says it holds while any of them does', () => {
+    const guard = load();
+    const drain = createDrain();
+    const hold = holdBoth([guard, drain]);
+    expect(hold.holding()).toBe(false);
+    drain.begin(SINCE);
+    expect(hold.holding()).toBe(true);
+    drain.end();
+    guard.set(true);
+    expect(hold.holding()).toBe(true);
+    guard.set(false);
+    expect(hold.holding()).toBe(false);
+  });
+
   it('resolves false when the signal aborts while held', async () => {
     const drain = createDrain();
     drain.begin(SINCE);
-    const hold = holdBoth([{ holding: () => drain.draining, hold: drain }]);
+    const hold = holdBoth([drain]);
     const abort = new AbortController();
     const waiting = hold.untilClear(abort.signal);
     abort.abort();

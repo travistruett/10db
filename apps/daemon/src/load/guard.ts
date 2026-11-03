@@ -49,6 +49,8 @@ export interface OverloadNote {
 export interface LoadGuard {
   /** True from the moment an overload is declared until the load has fallen. */
   readonly overloaded: boolean;
+  /** `overloaded`, as a hold on new work asks it. */
+  holding(): boolean;
   /**
    * Resolves true at once when the Mac is not overloaded, or once it is no longer. Resolves false when
    * `signal` aborts first. Shutdown (`stop`) releases every waiter with true.
@@ -184,6 +186,7 @@ export function createLoadGuard(opts: LoadGuardOptions): LoadGuard {
     get overloaded() {
       return current !== null;
     },
+    holding: () => current !== null,
     untilClear(signal) {
       if (signal?.aborted) return Promise.resolve(false);
       if (current === null) return Promise.resolve(true);
