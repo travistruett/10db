@@ -78,12 +78,78 @@ describe('the bundled daemon', () => {
       }, 30_000);
       const res = await fetch(`http://127.0.0.1:${String(info.port)}/health`);
       expect(res.status).toBe(200);
-      expect(await res.json()).toMatchObject({ status: 'ok' });
+      // The header shows this commit; a bundle outside Applications shows it and never updates itself.
+      const built = z
+        .object({ commit: z.string() })
+        .parse(JSON.parse(readFileSync(join(appDir, 'build-info.json'), 'utf8')));
+      expect(await res.json()).toMatchObject({ status: 'ok', commit: built.commit });
     } finally {
       child.kill('SIGTERM');
     }
     expect(await exited).toBe(0);
   }, 60_000);
+
+  it('records the commit it was built from, for the header and for the update check', () => {
+    const out = join(work.path, 'stamped');
+    const commit = 'ab'.repeat(20);
+    execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+      cwd: daemonRoot,
+      stdio: 'pipe',
+      env: { ...process.env, GITHUB_SHA: commit, GITHUB_REPOSITORY: '' },
+    });
+    expect(JSON.parse(readFileSync(join(out, 'build-info.json'), 'utf8'))).toEqual({ commit });
+  }, 120_000);
+
+  it('bakes in the repository GitHub built it for, the only one the app updates from', () => {
+    const out = join(work.path, 'pinned');
+    const commit = 'cd'.repeat(20);
+    execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+      cwd: daemonRoot,
+      stdio: 'pipe',
+      env: { ...process.env, GITHUB_SHA: commit, GITHUB_REPOSITORY: 'acme/10db' },
+    });
+    expect(JSON.parse(readFileSync(join(out, 'build-info.json'), 'utf8'))).toEqual({
+      commit,
+      repository: 'acme/10db',
+    });
+  }, 120_000);
+
+  it('bakes in no repository that is not an owner/name pair', () => {
+    const out = join(work.path, 'odd-repository');
+    const commit = 'ef'.repeat(20);
+    execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+      cwd: daemonRoot,
+      stdio: 'pipe',
+      env: { ...process.env, GITHUB_SHA: commit, GITHUB_REPOSITORY: '--hostname=evil/x y' },
+    });
+    expect(JSON.parse(readFileSync(join(out, 'build-info.json'), 'utf8'))).toEqual({ commit });
+  }, 120_000);
+
+  it("records the checkout's own commit when GitHub names none", () => {
+    const out = join(work.path, 'local');
+    execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+      cwd: daemonRoot,
+      stdio: 'pipe',
+      env: { ...process.env, GITHUB_SHA: '', GITHUB_REPOSITORY: '' },
+    });
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: daemonRoot,
+      encoding: 'utf8',
+      env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    expect(JSON.parse(readFileSync(join(out, 'build-info.json'), 'utf8'))).toEqual({
+      commit: head,
+    });
+  }, 120_000);
+
+  it('ships the install scripts the app replaces itself with', () => {
+    for (const name of ['install-app.sh', 'installed-app.sh']) {
+      expect(
+        readFileSync(join(work.path, 'dist', 'release', 'scripts', 'release', name), 'utf8'),
+      ).toBe(readFileSync(join(daemonRoot, '..', '..', 'scripts', 'release', name), 'utf8'));
+    }
+  });
 
   it("ships the builder's MCP bridge, runnable with no node_modules and no daemon", async () => {
     const appDir = join(work.path, 'bridge-app');

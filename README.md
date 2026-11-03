@@ -31,9 +31,21 @@ Status: under construction. The design is in
   the same stamp. Nothing else is left in `/Applications`, so the Dock, Launchpad and Spotlight open the new
   app; the install warns about any other `10db.app.*` copy there, which the Dock icon may still open. Each
   install keeps only its newest zip; a zip you named yourself stays.
+- The installed app also follows main by itself
+  ([decision](docs/architecture/decisions/2026-11-03-app-follows-main-by-itself.md)). Each minute 10db checks main's
+  head; when it is ahead of the commit the app runs, 10db fetches main's newest finished build while you work and
+  installs it once nothing is mid-session: no lane running, no gate, no batch being cut or shipped (queued and
+  waiting tasks carry on afterwards). It quits, backs up the database, keeps the old app as above and opens the
+  new one, so `make rollback-app` works the same. The header shows the commit the app runs, and Settings >
+  Updates turns the self-update off; turning it off also stops a download under way, and nothing installs after.
+  When a build or install fails, the app keeps running (or the previous app is put back), the lanes resume, and
+  one card in the Inbox names the failing step.
 - `make rollback-app` unzips that app into place and keeps the one it replaces as the zip, so running it again
   toggles back. It changes no data: it prints the commands that save the current database and restore the
-  matching backup.
+  matching backup. It notes the commit it rolled back from in
+  `~/Library/Application Support/10db/self-update/rolled-back-from`, so the self-update does not reinstall that
+  build: the app stays rolled back until main has a newer finished build, or until you turn Update by itself off
+  and on in Settings.
 
 ## Develop
 

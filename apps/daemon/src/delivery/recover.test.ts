@@ -93,6 +93,7 @@ describe('recoverBatches', () => {
     const noJobs: DeliveryJobs = {
       run: () => undefined,
       idle: () => Promise.resolve(),
+      pending: () => 0,
       stop: () => Promise.resolve(),
     };
     const task = h.addTask('Alpha');

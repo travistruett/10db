@@ -32,6 +32,29 @@ describe('delivery jobs', () => {
     expect(order).toEqual(['b1', 'a1', 'a2']);
   });
 
+  it('counts the jobs queued or running, from the moment they are queued until they settle', async () => {
+    const jobs = createDeliveryJobs(silentLogger);
+    expect(jobs.pending()).toBe(0);
+    let release = (): void => undefined;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    jobs.run('a', () => gate);
+    jobs.run('a', () => Promise.resolve());
+    jobs.run('b', () => gate);
+    expect(jobs.pending()).toBe(3);
+    release();
+    await jobs.idle();
+    expect(jobs.pending()).toBe(0);
+  });
+
+  it('counts a job that fails as done', async () => {
+    const jobs = createDeliveryJobs({ ...silentLogger, error: () => undefined });
+    jobs.run('a', () => Promise.reject(new Error('boom')));
+    await jobs.idle();
+    expect(jobs.pending()).toBe(0);
+  });
+
   it('logs a failing job and runs the next one', async () => {
     const errors: unknown[] = [];
     const jobs = createDeliveryJobs({ ...silentLogger, error: (obj) => errors.push(obj) });

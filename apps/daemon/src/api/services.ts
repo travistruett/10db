@@ -66,6 +66,7 @@ import type {
   ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
+  SelfUpdateStatusDto,
   OneWayPathsDto,
   ShapeConvertInput,
   ShapeConvertResult,
@@ -116,6 +117,14 @@ export type GoalAdoptResult =
 export type ShapeConvertOutcome =
   | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
   | { readonly kind: 'refused'; readonly errors: string[] };
+
+/** The setting that lets 10db install main's build by itself. */
+export interface SelfUpdateServices {
+  /** The one app-wide setting (on until the builder turns it off) and the commits involved. */
+  selfUpdateStatus(): SelfUpdateStatusDto;
+  /** Turns it on or off for the whole app; null goes back to the default. */
+  setSelfUpdate(enabled: boolean | null): SelfUpdateStatusDto;
+}
 
 /** Removing a task that hasn't run. */
 export interface TaskRemovalServices {
