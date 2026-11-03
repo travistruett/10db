@@ -1,7 +1,7 @@
 import type { BatchDto, RequiredChecksDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, workstreamDto } from '../../test/fixtures';
-import { ciLine, ciResult, withFixTaskTitles } from './ci-line';
+import { ciLine, ciResult, ciStatus, withFixTaskTitles } from './ci-line';
 
 const PR = 'https://github.com/acme/widgets/pull/9';
 const job = (name: string, link: string | null) => ({
@@ -320,5 +320,19 @@ describe('ciResult', () => {
 
   it('says nothing with no batch', () => {
     expect(ciResult(undefined, [])).toBeNull();
+  });
+});
+
+describe('ciStatus', () => {
+  it('drops the pull request the status line already says, and keeps the rest', () => {
+    expect(ciStatus('Pull request open · CI running')).toBe('CI running');
+    expect(ciStatus('Pull request open · CI failed: build · fixing in "Fix build"')).toBe(
+      'CI failed: build · fixing in "Fix build"',
+    );
+    expect(ciStatus('Pull request open · behind main')).toBe('behind main');
+  });
+
+  it('leaves a line that does not start with it, such as a merged one', () => {
+    expect(ciStatus('Merged · CI passed')).toBe('Merged · CI passed');
   });
 });

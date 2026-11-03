@@ -169,7 +169,12 @@ describe('MCP approval card', () => {
     items = [b, a];
     await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
     await screen.findByText('Run the repo\'s MCP server "beta"?');
-    expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+    // Only the open card's options: not the header's Open/Resolved switch.
+    expect(
+      screen
+        .getAllByRole('radiogroup')
+        .filter((g) => g.getAttribute('aria-label') !== 'Inbox view'),
+    ).toHaveLength(1);
     fireEvent.keyDown(document.body, { key: 'Enter' });
     await waitFor(() => {
       expect(answers).toEqual([{ id: a.id, body: { choice: McpApprovalChoice.Approve } }]);

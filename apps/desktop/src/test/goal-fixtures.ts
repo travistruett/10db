@@ -63,7 +63,7 @@ export function goalDigestDto(
     goalId,
     status: 'not_started',
     since: null,
-    progress: { done: 0, total: 3, cancelled: [] },
+    progress: { merged: 0, inReview: 0, total: 3, cancelled: [] },
     openPullRequests: 0,
     workingNow: [],
     team: [],

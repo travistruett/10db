@@ -181,7 +181,7 @@ describe('GoalDigestDto', () => {
     goalId,
     status: 'running',
     since: '2026-10-29T09:00:00.000Z',
-    progress: { done: 6, total: 11, cancelled: [] },
+    progress: { merged: 4, inReview: 2, total: 11, cancelled: [] },
     openPullRequests: 1,
     workingNow: [
       {
@@ -212,6 +212,7 @@ describe('GoalDigestDto', () => {
     next: {
       taskId,
       title: 'Edit areas in the drawer',
+      headline: 'Areas can be edited in the drawer',
       waitsOn: [{ taskId, title: 'Task patch route' }],
     },
     deviations: {
@@ -279,6 +280,7 @@ describe('GoalDigestDto', () => {
       [
         'done',
         'failed',
+        'idle',
         'not_started',
         'paused',
         'queued',

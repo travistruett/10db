@@ -18,6 +18,7 @@ const ORDER: readonly Status[] = [
   G.Running,
   G.Queued,
   G.Shipping,
+  G.Idle,
   G.NotStarted,
 ];
 
@@ -29,10 +30,11 @@ export function openCards(digest: GoalDigestDto): number {
   return digest.waitingOn.recent.length + digest.waitingOn.earlier.length;
 }
 
-/** "6 of 11 tasks done", the progress bar's label. */
+/** "6 of 11 tasks merged · 2 in review", the progress bar's label. A task in review is not merged. */
 export function progressLine(digest: GoalDigestDto): string {
-  const { done, total } = digest.progress;
-  return `${String(done)} of ${plural(total, 'task')} done`;
+  const { merged, inReview, total } = digest.progress;
+  const line = `${String(merged)} of ${plural(total, 'task')} merged`;
+  return inReview > 0 ? `${line} · ${String(inReview)} in review` : line;
 }
 
 /** A goal's one-line verdict, as the collapsed row says it. */
@@ -41,6 +43,7 @@ export function verdictLine(digest: GoalDigestDto): string {
   const total = digest.progress.total;
   switch (digest.status) {
     case G.Failed:
+    case G.Idle:
     case G.Running:
     case G.Paused:
     case G.Done:
@@ -53,7 +56,7 @@ export function verdictLine(digest: GoalDigestDto): string {
     case G.Shipping:
       return `${label} · ${progressLine(digest)} · ${plural(digest.openPullRequests, 'pull request')} open`;
     case G.NotStarted:
-      return `${label} · ${plural(total, 'task')} · Start Ready Tasks on the Board`;
+      return `${label} · ${plural(total, 'task')}`;
   }
 }
 

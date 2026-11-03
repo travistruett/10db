@@ -1,5 +1,5 @@
 import { Alert, Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
-import { Link } from '@tanstack/react-router';
+import { Link, useSearch } from '@tanstack/react-router';
 import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
@@ -15,6 +15,7 @@ export function FactoryView() {
 function Factory() {
   const { project } = useSelectedProject();
   const goals = useGoals(project?.id ?? null);
+  const { goal: linkedGoalId } = useSearch({ from: '/factory' });
 
   return (
     <Stack>
@@ -45,7 +46,7 @@ function Factory() {
           Code to with the 10db-task skill.
         </Text>
       ) : null}
-      {goals.isSuccess ? <GoalList list={goals.data} /> : null}
+      {goals.isSuccess ? <GoalList list={goals.data} linkedGoalId={linkedGoalId} /> : null}
     </Stack>
   );
 }

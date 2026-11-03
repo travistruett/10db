@@ -1,20 +1,20 @@
-import type { GoalDigestDto, TaskId, WorkstreamDto, WorkstreamId } from '@10db/contracts';
-import { Divider, Stack } from '@mantine/core';
-import { useBatches, useWorkstreams } from '../../daemon/queries';
+import type { GoalSummaryDto, WorkstreamDto, WorkstreamId } from '@10db/contracts';
+import { Button, Divider, Group, Stack } from '@mantine/core';
+import { useState } from 'react';
+import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { useSelectedProject } from '../../shell/selected-project';
-import { GoalDigest, type OpenedDigest } from './goal-digest';
-import { GoalPullRequests } from './goal-pull-requests';
+import { BatchSheet } from '../board/batch/batch-sheet';
+import {
+  AboutGoal,
+  GoalBar,
+  GoalFooter,
+  NeedsYou,
+  SinceYouLooked,
+  type OpenedDigest,
+} from './goal-digest';
 import { GoalSessions } from './goal-sessions';
-
-/** The newest workstream of each task, oldest task first: a task's earlier runs are its history. */
-function latestPerTask(workstreams: readonly WorkstreamDto[]): WorkstreamDto[] {
-  const latest = new Map<TaskId, WorkstreamDto>();
-  for (const ws of workstreams) {
-    const seen = latest.get(ws.taskId);
-    if (!seen || seen.createdAt < ws.createdAt) latest.set(ws.taskId, ws);
-  }
-  return [...latest.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-}
+import { GoalTasks } from './goal-tasks';
+import { taskRows } from './task-rows';
 
 /** The workstreams `select` keeps, and whether they are still loading or failed to load. */
 function useSessions(select: (ws: WorkstreamDto) => boolean) {
@@ -27,38 +27,75 @@ function useSessions(select: (ws: WorkstreamDto) => boolean) {
 }
 
 export interface GoalDetailProps {
-  /** The goal's current state, from the list. */
-  readonly live: GoalDigestDto;
-  readonly taskIds: readonly TaskId[];
+  /** The goal and its current state, from the list. */
+  readonly summary: GoalSummaryDto;
   readonly opened: OpenedDigest;
 }
 
 /**
- * An expanded goal: its digest, then its Sessions (the workstreams of its tasks) and its Pull
- * requests (the batches they ran in). One self-contained component, so it can move into a drawer
- * or a page.
+ * An expanded goal, ordered by what the builder acts on: the bar by state, what needs them (only
+ * when something does), one task list, the collapsed history and brief, and one dimmed footer line.
+ * One self-contained component, so it can move into a drawer or a page.
  */
-export function GoalDetail({ live, taskIds, opened }: GoalDetailProps) {
+export function GoalDetail({ summary, opened }: GoalDetailProps) {
+  const { goal, digest } = summary;
   const { project } = useSelectedProject();
-  const sessions = useSessions((ws) => taskIds.includes(ws.taskId));
+  const [starting, setStarting] = useState(false);
+  const tasks = useTasks(project?.id ?? null);
+  const sessions = useSessions((ws) => goal.taskIds.includes(ws.taskId));
   const batches = useBatches(project?.id ?? null);
-  const batchIds = new Set(sessions.all.flatMap((ws) => (ws.batchId ? [ws.batchId] : [])));
+  const goalTasks = (tasks.data ?? []).filter((t) => t.goalId === goal.id);
+  const ordered = goal.taskIds.flatMap((id) => goalTasks.filter((t) => t.id === id));
+  const rows = taskRows({
+    tasks: ordered,
+    workstreams: sessions.all,
+    batches: batches.data ?? [],
+    nextTaskId: digest.next?.waitsOn.length === 0 ? digest.next.taskId : null,
+    gateCommand: project?.gateCommand ?? null,
+  });
+  const ready = rows.filter((r) => r.bucket === 'ready').length;
+  const loadError = tasks.isError
+    ? tasks.error.message
+    : (sessions.error ?? (batches.isError ? batches.error.message : null));
 
   return (
     <Stack gap="md">
-      <GoalDigest live={live} opened={opened} />
-      <Divider />
-      <GoalSessions
-        goalId={live.goalId}
-        workstreams={latestPerTask(sessions.all)}
-        loading={sessions.loading}
-        error={sessions.error}
+      <Group justify="space-between" wrap="nowrap" align="center">
+        <GoalBar digest={digest} rows={rows} />
+        <Button
+          variant="default"
+          size="xs"
+          disabled={ready === 0 || project === null}
+          onClick={() => {
+            setStarting(true);
+          }}
+        >
+          Start Ready Tasks…
+        </Button>
+      </Group>
+      <NeedsYou digest={digest} rows={rows} />
+      <GoalTasks
+        goalId={goal.id}
+        rows={rows}
+        loading={tasks.isPending || sessions.loading}
+        error={loadError}
       />
       <Divider />
-      <GoalPullRequests
-        batches={(batches.data ?? []).filter((batch) => batchIds.has(batch.id))}
-        error={batches.isError ? batches.error.message : null}
-      />
+      <Stack gap="xs">
+        <SinceYouLooked opened={opened} />
+        <AboutGoal goal={goal} />
+      </Stack>
+      <GoalFooter digest={digest} />
+      {starting && project ? (
+        <BatchSheet
+          project={project}
+          opened
+          goal={{ id: goal.id, title: goal.title }}
+          onClose={() => {
+            setStarting(false);
+          }}
+        />
+      ) : null}
     </Stack>
   );
 }

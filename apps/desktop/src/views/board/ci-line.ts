@@ -24,6 +24,17 @@ export interface CiLine {
   readonly link: CiLink | null;
 }
 
+const OPEN_PREFIX = 'Pull request open · ';
+
+/**
+ * A CI line as the drawer's status line says it, after the state it follows: "CI running" for "Pull
+ * request open · CI running". The status line already says where the task stands and carries the
+ * pull request link, so the pull request needs no second mention.
+ */
+export function ciStatus(line: string): string {
+  return line.startsWith(OPEN_PREFIX) ? line.slice(OPEN_PREFIX.length) : line;
+}
+
 /** An https github.com address, the only kind the app opens; null for anything else. */
 function githubUrl(url: string | null): string | null {
   if (url === null) return null;

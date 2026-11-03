@@ -6,7 +6,7 @@ import {
   type ProjectId,
   type TaskDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
@@ -32,6 +32,11 @@ function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(...overrides);
 }
 
+/** The task drawer opens on Overview; its form, placement and landing choices are on the Edit tab. */
+function openEditTab(drawer: HTMLElement): void {
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Edit' }));
+}
+
 function type(label: string | RegExp, value: string, scope: HTMLElement): void {
   fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
 }
@@ -53,7 +58,7 @@ describe('BoardView', () => {
       const [, beta] = serveTasks('Alpha', 'Beta');
       renderApp(`/board?task=${beta?.id ?? ''}`);
       const drawer = await screen.findByRole('dialog', { name: 'Task' });
-      expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+      expect(within(drawer).getByRole('heading', { name: 'Beta' })).toBeTruthy();
     });
 
     it.each([
@@ -137,7 +142,7 @@ describe('BoardView', () => {
         const { there } = serveTwoProjects();
         renderApp(`/board?task=${there.id}`);
         const drawer = await screen.findByRole('dialog', { name: 'Task' });
-        expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+        expect(within(drawer).getByRole('heading', { name: 'Beta' })).toBeTruthy();
       });
 
       it('says a task that no longer exists is gone instead of showing an empty board', async () => {
@@ -468,6 +473,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add a migration' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    openEditTab(drawer);
     expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Separate copy');
     expect(
       within(drawer).getByRole('radiogroup', { name: 'Where Add a migration runs' }),
@@ -485,6 +491,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Plain task' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    openEditTab(drawer);
     expect(within(drawer).queryByRole('radiogroup')).toBeNull();
     expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Your folder');
   });
@@ -611,6 +618,7 @@ describe('BoardView', () => {
       renderApp('/board');
       fireEvent.click(await screen.findByRole('button', { name: 'Gamma' }));
       const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      openEditTab(drawer);
       expect(
         within(drawer).getByRole<HTMLInputElement>('radio', { name: 'Hold for my review' }).checked,
       ).toBe(true);
@@ -973,9 +981,13 @@ describe('BoardView', () => {
       'Backlog tasks',
       'Ready tasks',
       'In progress tasks',
-      'In review tasks',
-      'Blocked tasks',
-      'Done tasks',
+    ]);
+    // The empty system columns after them fold to rails, in board order.
+    const rails = screen.getAllByRole('group', { name: /, collapsed$/ });
+    expect(rails.map((r) => r.getAttribute('aria-label'))).toEqual([
+      'In review, collapsed',
+      'Blocked, collapsed',
+      'Done, collapsed',
     ]);
     const inProgress = screen.getByRole('list', { name: 'In progress tasks' });
     // A running card has a blue edge and no line.
@@ -1316,6 +1328,117 @@ describe('BoardView', () => {
     expect(paper?.getAttribute('style')).toContain('dashed');
   });
 
+  describe('column widths and rails', () => {
+    function doneTasks(projectId: ProjectId, n: number): TaskDto[] {
+      return Array.from({ length: n }, (_, i) =>
+        taskDto({
+          projectId,
+          title: `Done ${String(i)}`,
+          boardStatus: 'done',
+          status: 'done',
+          boardOrder: i,
+        }),
+      );
+    }
+
+    it('flexes an open column between 260 and 380 px', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+      const style = ready.closest('.mantine-Paper-root')?.getAttribute('style') ?? '';
+      expect(style).toContain('flex: 1 1 0');
+      expect(style).toContain('min-width: 260px');
+      expect(style).toContain('max-width: 380px');
+    });
+
+    it('shows an empty column as a rail with its label and count', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Ready tasks' });
+      const rail = screen.getByRole('group', { name: 'In progress, collapsed' });
+      expect(within(rail).getByText('In progress')).toBeTruthy();
+      expect(within(rail).getByText('0', { selector: 'p' }).textContent).toBe('0 tasks');
+      expect(rail.getAttribute('style')).toContain('width: 44px');
+      expect(screen.queryByRole('list', { name: 'In progress tasks' })).toBeNull();
+      // A rail has nothing to expand.
+      expect(within(rail).queryByRole('button')).toBeNull();
+    });
+
+    it('collapses Done to a rail, and opens it again', async () => {
+      const project = projectDto();
+      const done = doneTasks(project.id, 3);
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Done tasks' });
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse Done' }));
+      const rail = screen.getByRole('group', { name: 'Done, collapsed' });
+      expect(within(rail).getByText('3', { selector: 'p' }).textContent).toBe('3 tasks');
+      expect(screen.queryByRole('list', { name: 'Done tasks' })).toBeNull();
+      fireEvent.click(within(rail).getByRole('button', { name: 'Expand Done' }));
+      expect(await screen.findByRole('list', { name: 'Done tasks' })).toBeTruthy();
+    });
+
+    it('collapses Icebox, and remembers the choice per project', async () => {
+      const project = projectDto();
+      const other = projectDto({ name: 'other' });
+      const icebox = boardColumnDto({ projectId: project.id, name: 'Icebox', position: 0 });
+      const parked = taskDto({
+        projectId: project.id,
+        title: 'Parked',
+        boardStatus: 'backlog',
+        boardColumnId: icebox.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project, other])),
+        http.get(daemonUrl('/projects/:projectId/board-columns'), () =>
+          HttpResponse.json([icebox]),
+        ),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([parked])),
+      );
+      window.localStorage.clear();
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Icebox tasks' });
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse Icebox' }));
+      await screen.findByRole('group', { name: 'Icebox, collapsed' });
+      expect(window.localStorage.getItem(`tendb.board-collapsed.${project.id}`)).toContain(
+        `human:${icebox.id}`,
+      );
+      cleanup();
+
+      // A reload keeps it collapsed.
+      renderApp('/board');
+      expect(await screen.findByRole('group', { name: 'Icebox, collapsed' })).toBeTruthy();
+      expect(screen.queryByRole('list', { name: 'Icebox tasks' })).toBeNull();
+      expect(window.localStorage.getItem(`tendb.board-collapsed.${other.id}`)).toBeNull();
+      window.localStorage.clear();
+    });
+
+    it('offers no collapse on a column that cannot be collapsed', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Ready tasks' });
+      expect(screen.queryByRole('button', { name: 'Collapse Ready' })).toBeNull();
+    });
+  });
+
   it('a column with a card hides its hint and has a solid border', async () => {
     const project = projectDto();
     const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
@@ -1483,7 +1606,7 @@ describe('BoardView', () => {
     });
   });
 
-  it('has no page title or metadata line', async () => {
+  it('has a Board title and no metadata line', async () => {
     const project = projectDto({ gateCommand: 'make gate-marker' });
     serve(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
@@ -1491,8 +1614,27 @@ describe('BoardView', () => {
     );
     renderApp('/board');
     expect(await screen.findByRole('button', { name: 'New Task' })).toBeTruthy();
-    expect(screen.queryByRole('heading', { name: 'Board' })).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Board', level: 2 })).toBeTruthy();
     expect(screen.queryByText(/make gate-marker/)).toBeNull();
+  });
+
+  it('puts the Goal select inline with an aria-label and no stacked label', async () => {
+    const project = projectViewDto({ gateCommand: null });
+    const summary = goalSummaryDto({ projectId: project.id, title: 'Real areas' });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([])),
+      http.get(daemonUrl('/projects/:projectId/goals'), () =>
+        HttpResponse.json(goalListDto(summary)),
+      ),
+      http.get(daemonUrl('/flows'), () => HttpResponse.json([])),
+    );
+    renderApp('/board');
+    const select = await screen.findByRole('combobox', { name: 'Goal' });
+    expect(select.getAttribute('aria-label')).toBe('Goal');
+    expect((select as HTMLInputElement).value).toBe('All goals');
+    expect(document.querySelector(`label[for="${select.id}"]`)).toBeNull();
+    expect(screen.queryByText('Goal', { selector: 'label' })).toBeNull();
   });
 
   it('redirects /tasks to the board', async () => {
@@ -1650,6 +1792,11 @@ describe('BoardView', () => {
     boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
     fireEvent.click(await screen.findByRole('button', { name: 'One' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByRole('heading', { name: 'One' })).toBeTruthy();
+    expect(
+      within(drawer).getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    openEditTab(drawer);
     expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One');
   });
 
@@ -1895,9 +2042,9 @@ describe('BoardView', () => {
         // Where a card has no line of its own, the summary speaks it; the link left for the drawer.
         expect(within(card).getAllByText(line, { exact: false }).length).toBeGreaterThan(0);
         expect(within(card).queryByRole('link')).toBeNull();
-        expect(
-          within(screen.getByRole('list', { name: 'Done tasks' })).queryByText('Alpha'),
-        ).toBeNull();
+        // Done holds nothing, so it is a rail with no cards.
+        expect(screen.getByRole('group', { name: 'Done, collapsed' })).toBeTruthy();
+        expect(screen.queryByRole('list', { name: 'Done tasks' })).toBeNull();
       },
     );
 
@@ -2303,7 +2450,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Busy is running: cancel it first)',
+      name: 'Hold (It is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2317,7 +2464,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Again' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Again has already run: cancel it first)',
+      name: 'Hold (It has already run: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2469,7 +2616,7 @@ describe('BoardView holding a started task', () => {
     });
   });
 
-  it('explains in the drawer why a running task can’t be held', async () => {
+  it('explains in a tooltip why a running task can’t be held, without naming the task', async () => {
     serveRun('RUNNING', 'Busy');
     renderApp('/board');
 
@@ -2477,7 +2624,10 @@ describe('BoardView holding a started task', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
     const hold = within(drawer).getByRole('button', { name: 'Hold' });
     expect(hold.hasAttribute('disabled')).toBe(true);
-    expect(within(drawer).getByText('Busy is running: cancel it first.')).toBeTruthy();
+    // No sentence under the buttons; the reason is the tooltip of the disabled button.
+    expect(within(drawer).queryByText(/cancel it first/)).toBeNull();
+    fireEvent.mouseEnter(within(drawer).getByTestId('hold-refused'));
+    expect(await screen.findByText('It is running: cancel it first.')).toBeTruthy();
   });
 
   it('starts and removes a held task from the drawer', async () => {

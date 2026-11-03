@@ -25,7 +25,6 @@ import { useAbandonBatch, useShipBatch } from '../../daemon/queries';
 import { FAILURE_LABELS } from './batch-labels';
 import { abandonNote } from './batch/abandon-note';
 import { AddFixTask } from './batch/add-fix-task';
-import { PullRequestLink } from './pull-request-link';
 
 const B = BatchState;
 
@@ -35,17 +34,13 @@ export interface BatchPanelProps {
   readonly workstreams: readonly WorkstreamDto[];
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand: string | null;
-  /** Whether the panel shows the pull request link; the task drawer shows it beside the CI link instead. */
-  readonly pullRequestLink?: boolean;
 }
 
-/** Where a task's work ships: its branch, its pull request, why a ship failed and what the builder can do about it. */
-export function BatchPanel({
-  batch,
-  workstreams,
-  gateCommand,
-  pullRequestLink = true,
-}: BatchPanelProps) {
+/**
+ * Where a task's work ships: its branch, why a ship failed and what the builder can do about it. The
+ * pull request link is on the drawer's status line, beside the CI link, and is not repeated here.
+ */
+export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps) {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const [fixOpen, fix] = useDisclosure(false);
@@ -76,9 +71,21 @@ export function BatchPanel({
 
   return (
     <Stack gap="xs" aria-label="Delivery" role="group">
-      <Group gap="sm" wrap="wrap">
-        {batch.branch ? <Code>{batch.branch}</Code> : null}
-        {pullRequestLink && batch.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+      <Group gap="xs" wrap="nowrap">
+        {batch.branch ? (
+          // The branch is a slug of the title; a long one is cut with an ellipsis, whole in its tooltip.
+          <Code
+            title={batch.branch}
+            style={{
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {batch.branch}
+          </Code>
+        ) : null}
         {path ? (
           <CopyButton value={path}>
             {({ copied, copy }) => (

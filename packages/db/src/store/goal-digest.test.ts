@@ -171,8 +171,15 @@ function deviation(workstreamId: WorkstreamId | null, cause: string) {
   );
 }
 
-function decision(question: string, projectId: ProjectDto['id'] | null = project.id) {
-  const sourceId = source();
+function decision(
+  question: string,
+  projectId: ProjectDto['id'] | null = project.id,
+  workstreamId: WorkstreamId | null = null,
+) {
+  const sourceId =
+    workstreamId === null
+      ? source()
+      : store.write((ctx) => insertSource(ctx, SourceKind.Agent, { workstreamId })).value;
   store.write((ctx) =>
     insertDecision(ctx, {
       projectId,
@@ -192,8 +199,13 @@ describe('a goal’s status', () => {
     const { goal, a } = adopt();
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.NotStarted);
-    expect(digest.progress).toEqual({ done: 0, total: 3, cancelled: [] });
-    expect(digest.next).toEqual({ taskId: a, title: 'Patch route', waitsOn: [] });
+    expect(digest.progress).toEqual({ merged: 0, inReview: 0, total: 3, cancelled: [] });
+    expect(digest.next).toEqual({
+      taskId: a,
+      title: 'Patch route',
+      headline: '',
+      waitsOn: [],
+    });
     expect(digest.workingNow).toEqual([]);
     expect(digest.since).toBeNull();
   });
@@ -283,7 +295,8 @@ describe('a goal’s status', () => {
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.Done);
     expect(digest.progress).toMatchObject({
-      done: 2,
+      merged: 2,
+      inReview: 0,
       total: 2,
       cancelled: [{ taskId: c, title: 'Proposal' }],
     });
@@ -296,7 +309,43 @@ describe('a goal’s status', () => {
     });
     run(a, WorkstreamState.Done);
     finish(a);
-    expect(goalDigest(store.db, goal.id, null).progress).toMatchObject({ done: 1, total: 2 });
+    expect(goalDigest(store.db, goal.id, null).progress).toMatchObject({
+      merged: 1,
+      inReview: 0,
+      total: 2,
+    });
+  });
+
+  it('is idle, not not started, once a task is done and nothing runs or waits in the queue', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Done);
+    finish(a);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.status).toBe(GoalStatus.Idle);
+    expect(digest.progress).toMatchObject({ merged: 1, inReview: 0, total: 3 });
+  });
+
+  it('is idle when a task ran and was cancelled, and nothing else runs', () => {
+    const { goal, a } = adopt();
+    const ws = run(a, WorkstreamState.Cancelled);
+    store.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: ws,
+        provider: 'claude',
+        model: 'sonnet-5.5',
+        effort: Effort.High,
+        mode: 'managed',
+        mcpTokenHash: `hash-${ws}`,
+      }),
+    );
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.Idle);
+  });
+
+  it('stays not started when a task was only held or queued-then-cancelled', () => {
+    const { goal, a, b } = adopt();
+    run(a, WorkstreamState.Held);
+    run(b, WorkstreamState.Cancelled);
+    expect(goalDigest(store.db, goal.id, null).status).toBe(GoalStatus.NotStarted);
   });
 });
 
@@ -359,12 +408,13 @@ describe('a goal in a project with pull requests', () => {
     let digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.Shipping);
     expect(digest.openPullRequests).toBe(2);
-    expect(digest.progress).toMatchObject({ done: 3, total: 3 });
+    expect(digest.progress).toMatchObject({ merged: 0, inReview: 3, total: 3 });
 
     merge(one);
     digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.Shipping);
     expect(digest.openPullRequests).toBe(1);
+    expect(digest.progress).toMatchObject({ merged: 2, inReview: 1, total: 3 });
 
     merge(two);
     digest = goalDigest(store.db, goal.id, null);
@@ -464,8 +514,38 @@ describe('the rows', () => {
     expect(goalDigest(store.db, goal.id, null).next).toEqual({
       taskId: b,
       title: 'Drawer',
+      headline: '',
       waitsOn: [{ taskId: a, title: 'Patch route' }],
     });
+  });
+
+  it('carries the next task’s headline', () => {
+    const { goal, a } = adopt();
+    store.write((ctx) => {
+      ctx.tx
+        .update(schema.tasks)
+        .set({ headline: 'Routes can be patched' })
+        .where(eq(schema.tasks.id, a))
+        .run();
+    });
+    expect(goalDigest(store.db, goal.id, null).next).toMatchObject({
+      taskId: a,
+      headline: 'Routes can be patched',
+    });
+  });
+
+  it('keeps each step’s effort in the team, so one persona and model at two efforts shows twice', () => {
+    const { goal, a } = adopt();
+    run(a, WorkstreamState.Running, {
+      steps: [
+        step({ personaName: 'Implementer', effort: Effort.High }),
+        step({ role: StepRole.Review, personaName: 'Implementer', effort: Effort.Medium }),
+      ],
+    });
+    expect(goalDigest(store.db, goal.id, null).team).toEqual([
+      { persona: 'Implementer', model: 'sonnet-5.5', effort: Effort.High },
+      { persona: 'Implementer', model: 'sonnet-5.5', effort: Effort.Medium },
+    ]);
   });
 
   it('has no next task once every task has started', () => {
@@ -485,7 +565,7 @@ describe('the rows', () => {
     run(b, WorkstreamState.Queued);
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.status).toBe(GoalStatus.Queued);
-    expect(digest.next).toEqual({ taskId: b, title: 'Drawer', waitsOn: [] });
+    expect(digest.next).toEqual({ taskId: b, title: 'Drawer', headline: '', waitsOn: [] });
   });
 
   it('puts a task the builder ran next ahead of the others in an all-queued goal’s next', () => {
@@ -527,6 +607,7 @@ describe('the rows', () => {
     expect(goalDigest(store.db, goal.id, null).next).toEqual({
       taskId: a,
       title: 'Patch route',
+      headline: '',
       waitsOn: [],
     });
   });
@@ -542,6 +623,7 @@ describe('the rows', () => {
     expect(goalDigest(store.db, goal.id, null).next).toEqual({
       taskId: b,
       title: 'Drawer',
+      headline: '',
       waitsOn: [{ taskId: a, title: 'Patch route' }],
     });
   });
@@ -590,6 +672,7 @@ describe('the rows', () => {
       expect(goalDigest(store.db, goal.id, null).next).toEqual({
         taskId: b,
         title: 'Drawer',
+        headline: '',
         waitsOn: [],
       });
     });
@@ -652,10 +735,10 @@ describe('the window', () => {
     const ws = run(a, WorkstreamState.Running);
     setClock(9);
     deviation(ws, 'Split A in two');
-    decision('Areas follow packages?');
+    decision('Areas follow packages?', project.id, ws);
     setClock(11);
     deviation(ws, 'Split B in two');
-    decision('Names read how?');
+    decision('Names read how?', project.id, ws);
 
     const digest = goalDigest(store.db, goal.id, at(10));
     expect(digest.since).toBe(at(10));
@@ -671,8 +754,9 @@ describe('the window', () => {
 
   it('counts every item as recent on the first visit', () => {
     const { goal, a } = adopt();
-    deviation(run(a, WorkstreamState.Running), 'Split A in two');
-    decision('Areas follow packages?');
+    const ws = run(a, WorkstreamState.Running);
+    deviation(ws, 'Split A in two');
+    decision('Areas follow packages?', project.id, ws);
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.deviations.recent).toHaveLength(1);
     expect(digest.decisions.recent).toHaveLength(1);
@@ -691,6 +775,17 @@ describe('the window', () => {
     const digest = goalDigest(store.db, goal.id, null);
     expect(digest.deviations).toEqual({ recent: [], earlier: [] });
     expect(digest.decisions).toEqual({ recent: [], earlier: [] });
+  });
+
+  it('reads only the decisions recorded by the goal’s own tasks', () => {
+    const { goal, a } = adopt();
+    const mine = run(a, WorkstreamState.Running);
+    const other = run(insertGoalFreeTask(), WorkstreamState.Running);
+    decision('Mine', project.id, mine);
+    decision('Another task’s', project.id, other);
+    decision('By nobody', project.id);
+    const digest = goalDigest(store.db, goal.id, null);
+    expect(digest.decisions.recent.map((d) => d.question)).toEqual(['Mine']);
   });
 
   it('opening a goal answers the previous mark, then advances it', () => {
@@ -804,7 +899,7 @@ describe('the goal list', () => {
     const ws = run(a, WorkstreamState.Running);
     setClock(9);
     deviation(ws, 'Split A in two');
-    decision('Areas follow packages?');
+    decision('Areas follow packages?', project.id, ws);
     card(ws);
 
     setClock(10);
@@ -827,7 +922,7 @@ describe('the goal list', () => {
     const { a } = adopt();
     const ws = run(a, WorkstreamState.Running);
     deviation(ws, 'Split A in two');
-    decision('Areas follow packages?');
+    decision('Areas follow packages?', project.id, ws);
     expect(listGoalSummaries(store.db, project.id).goals[0]?.newItems).toBe(2);
   });
 

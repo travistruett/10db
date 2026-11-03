@@ -159,14 +159,11 @@ async function expectColumnsUsable(page: Page): Promise<void> {
   await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
   expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(COLUMNS_MIN_HEIGHT);
 
-  // One task per batch: no batch strip, so the only strip above the columns is the seeded goal's
-  // (it has an open task), and the batch history is Factory's, not the Board's.
-  const above = page.getByTestId('board-above-columns');
-  await expect(above.getByTestId('goal-strip')).toHaveCount(1);
-  await expect(above.getByRole('button', { name: GOAL_TITLE })).toBeVisible();
-  for (const { title } of OPEN_BATCHES) {
-    await expect(above.getByText(title)).toHaveCount(0);
-  }
+  // Nothing sits above the columns: no goal strip, no batch strip (the batch history is Factory's,
+  // not the Board's), and with All goals chosen no goal line either.
+  await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+  await expect(page.getByTestId('goal-strip')).toHaveCount(0);
+  await expect(page.getByTestId('goal-line')).toHaveCount(0);
   await expect(page.getByRole('button', { name: /^Batches \(\d+\)$/ })).toHaveCount(0);
   for (const { title } of OPEN_BATCHES) {
     await expect(page.getByRole('listitem', { name: title })).toBeAttached();
@@ -225,12 +222,31 @@ test.describe('the Board with several open batches', () => {
   for (const size of SIZES) {
     const label = `${String(size.width)}x${String(size.height)}`;
 
+    test(`flexes open columns between 260 and 380 px and folds empty ones to rails at ${label}`, async ({
+      page,
+    }) => {
+      await openBoard(page, size);
+      await expectColumnsUsable(page);
+      // Ready is open even when empty (it holds Add Task); the seeded open tasks sit in open columns.
+      const ready = page
+        .getByRole('list', { name: 'Ready tasks' })
+        .locator('xpath=ancestor::*[contains(@class, "mantine-Paper-root")][1]');
+      const open = await ready.boundingBox();
+      expect(open).not.toBeNull();
+      expect(open?.width).toBeGreaterThanOrEqual(260);
+      expect(open?.width).toBeLessThanOrEqual(381);
+      // Every rail is 44 px wide, and the label and count stay readable on it.
+      for (const rail of await page.getByRole('group', { name: /, collapsed$/ }).all()) {
+        expect((await rail.boundingBox())?.width).toBeCloseTo(44, 0);
+      }
+    });
+
     test(`keeps the columns visible at ${label}`, async ({ page }) => {
       await openBoard(page, size);
       await expectColumnsUsable(page);
       await expect(columnHeader(page)).toBeInViewport();
       if (size.roomy) {
-        // Only the one goal strip above the columns: the Board fills the window and the page does not scroll.
+        // Nothing above the columns: the Board fills the window and the page does not scroll.
         expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
         const scrolls = await page.evaluate(
           () => document.documentElement.scrollHeight - window.innerHeight,
@@ -300,10 +316,12 @@ test.describe('the Board with several open batches', () => {
 
         await goal.click();
         const goalRegion = page.getByRole('region', { name: GOAL_TITLE });
-        await expect(goalRegion.getByRole('heading', { name: 'Sessions' })).toBeVisible();
-        await expect(goalRegion.getByRole('heading', { name: 'Pull requests' })).toBeVisible();
-        // The window's rows have loaded once the Δ row labels are there.
-        await expect(goalRegion.getByText(/^Deviations/)).toBeVisible();
+        await expect(goalRegion.getByText('Tasks', { exact: true })).toBeVisible();
+        await expect(goalRegion.getByRole('button', { name: 'Start Ready Tasks…' })).toBeVisible();
+        // The window has loaded once its summary is on the Since you last looked line.
+        await expect(
+          goalRegion.getByRole('button', { name: /^Since you last looked.+/ }),
+        ).toBeVisible();
         await expectAccessible(page, `factory, goal open, ${scheme}`);
 
         // One at a time: opening Not in a goal closes the goal, and the queued task is not among its sessions.
@@ -330,7 +348,7 @@ test.describe('the Board with several open batches', () => {
 
 const GOAL_TITLES = ['Greet the visitor', 'Say farewell', 'Tidy the rooms'] as const;
 
-/** A brief with two tasks, so its goal has open tasks and earns a strip. */
+/** A brief with two tasks, so its goal has open tasks. */
 function briefOf(title: string, n: number): string {
   return [
     '---',
@@ -383,10 +401,15 @@ test.describe('the Board with three goals', () => {
     await request.dispose();
   });
 
+  // The test ends on Factory, whose /system read may still be in the route; drop it rather than fail.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
   for (const size of SIZES) {
     const label = `${String(size.width)}x${String(size.height)}`;
 
-    test(`shows the goal strips and keeps the columns' minimum height at ${label}`, async ({
+    test(`shows no goal strips, one line for a chosen goal, and keeps the columns' minimum height at ${label}`, async ({
       page,
     }) => {
       await page.setViewportSize(size);
@@ -397,20 +420,22 @@ test.describe('the Board with three goals', () => {
       await page.goto('/board');
       await expect(page.getByTestId('board-columns')).toBeVisible();
 
-      // One slim strip per goal, above the columns, and no goal among the cards.
-      const above = page.getByTestId('board-above-columns');
-      await expect(above.getByTestId('goal-strip')).toHaveCount(GOAL_TITLES.length);
+      // No strip per goal above the columns, and no goal among the cards.
+      await expect(page.getByTestId('board-above-columns')).toHaveCount(0);
+      await expect(page.getByTestId('goal-strip')).toHaveCount(0);
+      await expect(page.getByTestId('goal-line')).toHaveCount(0);
       for (const title of GOAL_TITLES) {
-        await expect(above.getByRole('button', { name: title })).toBeVisible();
-        // The goal's title shows in the columns only as the dimmed label on its two tasks' cards.
-        const inColumns = page.getByTestId('board-columns').getByText(title, { exact: true });
-        await expect(inColumns.and(page.getByTestId('task-card-goal'))).toHaveCount(2);
+        // The goal's title shows in the columns only as the badge in the indicator row of its two
+        // tasks' cards (these titles are short enough to show whole).
+        // A Mantine badge puts its text in an inner span, so the test id sits on the span's parent.
+        const columns = page.getByTestId('board-columns');
         await expect(
-          inColumns.and(page.locator(':not([data-testid="task-card-goal"])')),
-        ).toHaveCount(0);
+          columns.getByTestId('indicator-goal').filter({ hasText: new RegExp(`^${title}$`) }),
+        ).toHaveCount(2);
+        await expect(columns.getByText(title, { exact: true })).toHaveCount(2);
       }
 
-      // The strips leave the columns their minimum height; where the window is short the page scrolls.
+      // The columns keep their minimum height; where the window is short the page scrolls.
       await expect(page.getByRole('list', { name: 'Ready tasks' })).toBeAttached();
       expect((await boxOf(page, 'board-columns')).height).toBeGreaterThanOrEqual(
         COLUMNS_MIN_HEIGHT,
@@ -418,14 +443,23 @@ test.describe('the Board with three goals', () => {
       await expectColumnsBottomReachable(page);
       if (size.roomy) expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
 
-      // A strip opens its goal's drawer.
-      await above.getByRole('button', { name: GOAL_TITLES[0] }).click();
-      const drawer = page.getByRole('dialog', { name: 'Goal' });
-      await expect(drawer).toBeVisible();
-      await expect(drawer.getByText('Every visitor is looked after.')).toBeVisible();
+      // Choosing a goal shows its one line beside the select, with no drawer.
+      await page.getByRole('combobox', { name: 'Goal' }).click();
+      await page.getByRole('option', { name: GOAL_TITLES[0] }).click();
+      const line = page.getByTestId('goal-line');
+      await expect(line).toBeVisible();
+      await expect(line.getByRole('button', { name: 'Start Ready…' })).toBeVisible();
+      await expect(page.getByRole('dialog', { name: 'Goal' })).toHaveCount(0);
       if (SHOTS) {
         await page.screenshot({ path: join(SHOTS, `e2e-board-goals-${String(size.width)}.png`) });
       }
+
+      // Open in Factory lands on that goal expanded.
+      await line.getByRole('button', { name: /^Open in Factory/ }).click();
+      await expect(page).toHaveURL(/\/factory\?goal=/);
+      await expect(
+        page.getByRole('button', { name: new RegExp(`^${GOAL_TITLES[0]}`) }),
+      ).toHaveAttribute('aria-expanded', 'true');
     });
   }
 });

@@ -20,7 +20,7 @@ export interface InboxShortcutsProps {
 export function InboxShortcuts({ opened, onOpen, onClose }: InboxShortcutsProps) {
   return (
     <>
-      <ActionIcon variant="default" aria-label="Keyboard shortcuts" onClick={onOpen}>
+      <ActionIcon variant="subtle" size="xs" aria-label="Keyboard shortcuts" onClick={onOpen}>
         ?
       </ActionIcon>
       <Modal
