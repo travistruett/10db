@@ -57,4 +57,11 @@ describe('runNextNote', () => {
   ])('says it for $name', ({ title, waitingOn, note }) => {
     expect(runNextNote(title, waitingOn)).toBe(note);
   });
+
+  it('says "It" where the task is already on screen, as in its own drawer', () => {
+    expect(runNextNote(null, [])).toBe('It is next in line for a free lane.');
+    expect(runNextNote(null, ['Base'])).toBe(
+      'It will run once Base is done, before the other queued tasks.',
+    );
+  });
 });

@@ -57,6 +57,7 @@ export function baseHandlers(
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/goals', base), () =>
       HttpResponse.json({ goals: [], ungrouped: null }),
     ),

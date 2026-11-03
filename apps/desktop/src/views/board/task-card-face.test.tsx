@@ -57,6 +57,47 @@ describe('TaskCard face: words', () => {
   });
 });
 
+describe('TaskCard face: goal badge', () => {
+  it('leads with the headline and puts the goal in the indicator row, not above the headline', () => {
+    card({
+      task: taskDto({ title: 'A title', headline: 'The headline', why: 'Because.' }),
+      goalTitle: 'Greet the visitor',
+    });
+    const paper = screen.getByTestId('task-card');
+    expect(paper.firstElementChild?.firstElementChild?.textContent).toBe('The headline');
+    expect(screen.queryByTestId('task-card-goal')).toBeNull();
+    expect(screen.getByTestId('indicator-row').textContent).toContain('Greet the visitor');
+  });
+
+  it('cuts a long goal title to about 18 characters and shows the whole title in a tooltip', async () => {
+    const title = 'Shape gets contracts and tables';
+    card({ goalTitle: title });
+    const badge = screen.getByTestId('indicator-goal');
+    expect(badge.textContent).toBe('Shape gets contra…');
+    fireEvent.mouseEnter(badge);
+    expect(await screen.findByText(title)).toBeTruthy();
+  });
+
+  it('keeps a short goal title whole', () => {
+    card({ goalTitle: 'Tidy up' });
+    expect(screen.getByTestId('indicator-goal').textContent).toBe('Tidy up');
+  });
+
+  it('shows no goal badge, and no indicator row, when the card has no goal title', () => {
+    card({});
+    expect(screen.queryByTestId('indicator-goal')).toBeNull();
+    expect(screen.queryByTestId('indicator-row')).toBeNull();
+  });
+
+  it('puts the goal first in the row, before the other indicators', () => {
+    card({ goalTitle: 'Tidy up', batchTaskCount: 2 });
+    const kinds = Array.from(screen.getByTestId('indicator-row').children).map((n) =>
+      n.getAttribute('data-testid'),
+    );
+    expect(kinds).toEqual(['indicator-goal', 'indicator-shared-branch']);
+  });
+});
+
 describe('TaskCard face: status line', () => {
   it.each(['RUNNING', 'DONE', 'QUEUED'] as const)('shows no status line for a %s task', (state) => {
     card({ workstream: workstreamDto({ state }) });

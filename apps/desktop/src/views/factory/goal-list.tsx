@@ -1,6 +1,6 @@
-import type { GoalListDto, GoalSummaryDto } from '@10db/contracts';
+import { GoalStatus, type GoalId, type GoalListDto, type GoalSummaryDto } from '@10db/contracts';
 import { Box } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useOpenGoal } from '../../daemon/goal-queries';
 import { useNow } from '../../shell/relative';
 import { GoalDetail, UngroupedDetail } from './goal-detail';
@@ -25,12 +25,32 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
  * The project's goals as one list: open goals in status order, Not in a goal, then the done ones
  * behind one collapsed line. Every row starts collapsed and one is open at a time.
  */
-export function GoalList({ list }: { readonly list: GoalListDto }) {
+export function GoalList({
+  list,
+  linkedGoalId,
+}: {
+  readonly list: GoalListDto;
+  /** A link's goal (the Board's "Open in Factory"): its row starts open, with the Done group open if it is in it. */
+  readonly linkedGoalId?: GoalId | undefined;
+}) {
   const now = useNow();
   const open = useOpenGoal();
-  const [openKey, setOpenKey] = useState<string | null>(null);
-  const [doneShown, setDoneShown] = useState(false);
+  // A link to a goal this project does not have opens nothing.
+  const linked = list.goals.find((g) => g.goal.id === linkedGoalId);
+  const [openKey, setOpenKey] = useState<string | null>(linked?.goal.id ?? null);
+  const [doneShown, setDoneShown] = useState(linked?.digest.status === GoalStatus.Done);
   const { open: goals, done } = groupGoals(list.goals);
+
+  // A row opened by a link reads the digest once, as a click would; a ref keeps a StrictMode
+  // remount from reading it twice and finding its own window closed.
+  const openedForLink = useRef<GoalId | null>(null);
+  const linkedId = linked?.goal.id;
+  const { mutate } = open;
+  useEffect(() => {
+    if (linkedId === undefined || openedForLink.current === linkedId) return;
+    openedForLink.current = linkedId;
+    mutate(linkedId);
+  }, [linkedId, mutate]);
 
   function toggleGoal(summary: GoalSummaryDto): void {
     if (openKey === summary.goal.id) {
@@ -57,8 +77,7 @@ export function GoalList({ list }: { readonly list: GoalListDto }) {
         }}
       >
         <GoalDetail
-          live={summary.digest}
-          taskIds={summary.goal.taskIds}
+          summary={summary}
           opened={{
             data: open.data?.goalId === id ? open.data : undefined,
             error: open.isError && open.variables === id ? open.error.message : null,

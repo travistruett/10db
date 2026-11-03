@@ -1,7 +1,7 @@
 import { InboxKind, type InboxItemDto } from '@10db/contracts';
-import { Alert, Group, Stack, Tabs, Text, Title } from '@mantine/core';
+import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useRef, useState, type ReactNode } from 'react';
+import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
 import { queryKeys, useAnswerInbox, useInbox } from '../../daemon/queries';
 import { InboxCard } from './inbox-card';
@@ -32,34 +32,52 @@ type Tab = 'open' | 'resolved';
 /** The Inbox: the cards that wait on the builder, and a view of the ones already closed. */
 export function InboxView() {
   const [tab, setTab] = useState<Tab>('open');
-  const tabs = (
-    <Tabs
-      value={tab}
-      onChange={(value) => {
-        setTab(value === 'resolved' ? 'resolved' : 'open');
-      }}
-    >
-      <Tabs.List>
-        <Tabs.Tab value="open">Open</Tabs.Tab>
-        <Tabs.Tab value="resolved">Resolved</Tabs.Tab>
-      </Tabs.List>
-    </Tabs>
-  );
+  const [helpOpen, setHelpOpen] = useState(false);
+  const inbox = useInbox();
+  // The header is drawn here once, the same for both views, so switching moves nothing in it.
+  const openCount = inbox.isSuccess ? inboxRows(inbox.data).length : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
-  return tab === 'open' ? (
-    <OpenInbox tabs={tabs} />
-  ) : (
+  return (
     <Stack>
       <Group justify="space-between">
-        <Title order={2}>Inbox</Title>
-        {tabs}
+        <Group gap="md">
+          <Title order={2}>Inbox</Title>
+          <SegmentedControl
+            aria-label="Inbox view"
+            value={tab}
+            onChange={(value) => {
+              setTab(value === 'resolved' ? 'resolved' : 'open');
+            }}
+            data={[
+              { value: 'open', label: openCount === null ? 'Open' : `Open ${String(openCount)}` },
+              { value: 'resolved', label: 'Resolved' },
+            ]}
+          />
+        </Group>
+        <InboxShortcuts
+          opened={helpOpen}
+          onOpen={() => {
+            setHelpOpen(true);
+          }}
+          onClose={() => {
+            setHelpOpen(false);
+          }}
+        />
       </Group>
-      <ResolvedInbox />
+      {tab === 'open' ? (
+        <OpenInbox
+          onHelp={() => {
+            setHelpOpen(true);
+          }}
+        />
+      ) : (
+        <ResolvedInbox />
+      )}
     </Stack>
   );
 }
 
-function OpenInbox({ tabs }: { readonly tabs: ReactNode }) {
+function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
@@ -73,7 +91,6 @@ function OpenInbox({ tabs }: { readonly tabs: ReactNode }) {
   } | null>(null);
   // A check card's Send Back note, by card, so deselecting the card does not lose it.
   const [sendBackNotes, setSendBackNotes] = useState<Readonly<Record<string, string>>>({});
-  const [helpOpen, setHelpOpen] = useState(false);
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   // Selection follows the row, not its position: when an answered card leaves the list, the first row is next.
@@ -187,28 +204,11 @@ function OpenInbox({ tabs }: { readonly tabs: ReactNode }) {
       noteRef.current?.focus();
     },
     onSubmit: submit,
-    onHelp: () => {
-      setHelpOpen(true);
-    },
+    onHelp,
   });
 
   return (
     <Stack>
-      <Group justify="space-between">
-        <Title order={2}>Inbox</Title>
-        <Group gap="sm">
-          {tabs}
-          <InboxShortcuts
-            opened={helpOpen}
-            onOpen={() => {
-              setHelpOpen(true);
-            }}
-            onClose={() => {
-              setHelpOpen(false);
-            }}
-          />
-        </Group>
-      </Group>
       {inbox.isError ? (
         <Alert color="red" title="Couldn't load the inbox">
           {inbox.error.message}

@@ -28,7 +28,7 @@ export interface TaskCardProps {
   readonly startNote?: StartNote | null | undefined;
   /** A queued task's place in line, counting from 1. */
   readonly place?: number | undefined;
-  /** The title of the goal the task belongs to, shown dimmed above its title. */
+  /** The title of the goal the task belongs to, shown as a short badge; none under a Goal filter. */
   readonly goalTitle?: string | undefined;
   /** How many tasks share the task's batch (`batchTaskCount`); more than one shows the shared-branch indicator. */
   readonly batchTaskCount?: number | undefined;
@@ -100,6 +100,19 @@ export function cardSummary(
 /** The state colors whose line the card shows: waiting on the builder, failed or paused (spec §5). */
 const LINE_COLORS: ReadonlySet<string> = new Set(['yellow', 'red', 'orange']);
 
+/** The goal badge's longest label, ellipsis included; the tooltip carries the whole title. */
+const GOAL_BADGE_LENGTH = 18;
+
+function shortGoalTitle(title: string): string {
+  const chars = Array.from(title);
+  return chars.length <= GOAL_BADGE_LENGTH
+    ? title
+    : `${chars
+        .slice(0, GOAL_BADGE_LENGTH - 1)
+        .join('')
+        .trimEnd()}…`;
+}
+
 /**
  * The card's indicators, in the order they show (readable board spec §4). Each kind is derived from data
  * the card already has; a later kind is one more entry here.
@@ -110,10 +123,19 @@ function indicatorsOf(
   batch: BatchDto | undefined,
   batches: readonly BatchDto[],
   sharedWith: number,
+  goalTitle: string | undefined,
 ): Indicator[] {
   const waits = waitsOn(task, peers);
   const ci = ciResult(batch, batches);
   return [
+    goalTitle
+      ? {
+          kind: 'goal',
+          label: shortGoalTitle(goalTitle),
+          color: 'gray',
+          tooltip: goalTitle,
+        }
+      : null,
     sharedWith > 1
       ? {
           kind: 'shared-branch',
@@ -139,8 +161,9 @@ function indicatorsOf(
 }
 
 /**
- * A board card (readable board spec §5): the goal label, the headline (the title when there is none),
- * the why, a status line only when the task needs the builder or has failed, then the indicator row.
+ * A board card (readable board spec §5): the headline (the title when there is none), the why, a
+ * status line only when the task needs the builder or has failed, then the indicator row, which
+ * starts with the goal's badge.
  * Everything else about the task is in its drawer; `cardSummary` still speaks it.
  */
 export function TaskCard({
@@ -163,7 +186,7 @@ export function TaskCard({
   const colored = state !== null && state.color !== 'gray';
   const waiting = state?.color === 'yellow';
   const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
-  const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount);
+  const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount, goalTitle);
   return (
     <Paper
       withBorder
@@ -181,11 +204,6 @@ export function TaskCard({
       }
     >
       <Stack gap="xs">
-        {goalTitle ? (
-          <Text size="xs" c="dimmed" truncate="end" pr={28} data-testid="task-card-goal">
-            {goalTitle}
-          </Text>
-        ) : null}
         {/* The card's menu sits over the top-right corner, outside this element; the headline leaves room. */}
         <Text size="sm" fw={500} pr={28} lineClamp={3}>
           {task.headline || task.title}

@@ -196,14 +196,21 @@ function deviationsOf(db: DbReader, facts: Facts): DigestDeviation[] {
     }));
 }
 
-function decisionsOf(db: DbReader, projectId: ProjectId): DigestDecision[] {
+/**
+ * The decisions the goal's own tasks recorded: those whose source names one of the goal's
+ * workstreams. A decision the builder or another task made in the same project is not the goal's.
+ */
+function decisionsOf(db: DbReader, facts: Facts): DigestDecision[] {
+  const ids = facts.workstreams.map((w) => w.id);
+  if (ids.length === 0) return [];
   return db
-    .select()
+    .select({ decision: schema.decisions })
     .from(schema.decisions)
-    .where(eq(schema.decisions.projectId, projectId))
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.decisions.sourceId))
+    .where(inArray(sql<string>`json_extract(${schema.sources.ref}, '$.workstreamId')`, ids))
     .orderBy(desc(schema.decisions.createdAt), desc(schema.decisions.id))
     .all()
-    .map((d) => ({
+    .map(({ decision: d }) => ({
       id: d.id,
       question: d.question,
       choice: d.choice,
@@ -299,7 +306,7 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
     return state === undefined || state === WorkstreamState.Cancelled;
   });
   const ready = unstarted.find((t) => dependenciesDone(db, t.id));
-  if (ready) return { taskId: ready.id, title: ready.title, waitsOn: [] };
+  if (ready) return nextEntry(ready, []);
   const blocked = unstarted[0];
   if (!blocked) {
     const queued: { task: TaskRow; ws: WorkstreamRow }[] = [];
@@ -315,17 +322,41 @@ function nextOf(db: DbReader, tasks: readonly TaskRow[], facts: Facts): DigestNe
       queueOrder(x.ws, y.ws),
     );
     const startable = inLine.find((q) => dependenciesDone(db, q.task.id));
-    if (startable) return { taskId: startable.task.id, title: startable.task.title, waitsOn: [] };
+    if (startable) return nextEntry(startable.task, []);
     const first = inLine[0];
-    return first
-      ? {
-          taskId: first.task.id,
-          title: first.task.title,
-          waitsOn: openDependenciesOf(db, first.task.id),
-        }
-      : null;
+    return first ? nextEntry(first.task, openDependenciesOf(db, first.task.id)) : null;
   }
-  return { taskId: blocked.id, title: blocked.title, waitsOn: openDependenciesOf(db, blocked.id) };
+  return nextEntry(blocked, openDependenciesOf(db, blocked.id));
+}
+
+function nextEntry(task: TaskRow, waitsOn: DigestNext['waitsOn']): DigestNext {
+  return { taskId: task.id, title: task.title, headline: task.headline, waitsOn };
+}
+
+/**
+ * Whether any task of the goal has ever run: one is done, a workstream got past the queue (a run
+ * that is only queued, held or cancelled before it began has not run), or a cancelled run made a session.
+ */
+function hasRun(db: DbReader, all: readonly TaskRow[], facts: Facts): boolean {
+  if (all.some((t) => t.status === TaskStatus.Done)) return true;
+  const notRun: readonly WorkstreamState[] = [
+    WorkstreamState.Queued,
+    WorkstreamState.Held,
+    WorkstreamState.Cancelled,
+  ];
+  if (facts.workstreams.some((w) => !notRun.includes(w.state))) return true;
+  const cancelled = facts.workstreams
+    .filter((w) => w.state === WorkstreamState.Cancelled)
+    .map((w) => w.id);
+  if (cancelled.length === 0) return false;
+  return (
+    db
+      .select({ id: schema.sessions.id })
+      .from(schema.sessions)
+      .where(inArray(schema.sessions.workstreamId, cancelled))
+      .limit(1)
+      .get() !== undefined
+  );
 }
 
 function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
@@ -339,7 +370,7 @@ function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
 
 /**
  * A goal's status, progress and rows. Status, first match wins: failed, waiting on you, running,
- * queued (nothing runs, an open task waits for a lane), shipping (every task done, a pull request unmerged), not started, done. `since` is the builder's
+ * queued (nothing runs, an open task waits for a lane), shipping (every task done, a pull request unmerged), idle (some task has run or finished, nothing runs or is queued), not started (no task has ever run), done. `since` is the builder's
  * previous view of the goal; Δ rows hold what is newer, and null counts everything.
  */
 export function goalDigest(db: DbReader, goalId: GoalId, since: string | null): GoalDigestDto {
@@ -355,6 +386,10 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   const facts = gatherFacts(db, all);
 
   const done = tasks.filter((t) => t.status === TaskStatus.Done);
+  // A done task is in review until its work reaches the base; with no pull requests it lands at once.
+  const merged = done.filter(
+    (t) => project.delivery !== Delivery.PullRequest || isMerged(facts.latest.get(t.id)),
+  );
   const waitingOn = openCards(db, goal.projectId, facts).filter((c) =>
     tasks.some((t) => t.id === c.taskId),
   );
@@ -366,11 +401,8 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   else if (open.some((t) => isRunning(facts.latest.get(t.id)))) status = GoalStatus.Running;
   else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
-    const shipped =
-      project.delivery !== Delivery.PullRequest ||
-      done.every((t) => isMerged(facts.latest.get(t.id)));
-    status = shipped ? GoalStatus.Done : GoalStatus.Shipping;
-  } else status = GoalStatus.NotStarted;
+    status = merged.length === done.length ? GoalStatus.Done : GoalStatus.Shipping;
+  } else status = hasRun(db, all, facts) ? GoalStatus.Idle : GoalStatus.NotStarted;
 
   const openBatches = new Set<string>();
   for (const task of tasks) {
@@ -383,7 +415,8 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
     status,
     since,
     progress: {
-      done: done.length,
+      merged: merged.length,
+      inReview: done.length - merged.length,
       total: tasks.length,
       cancelled: all
         .filter((t) => t.status === TaskStatus.Cancelled)
@@ -395,7 +428,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
     waitingOn: partition(waitingOn, since),
     next: nextOf(db, tasks, facts),
     deviations: partition(deviationsOf(db, facts), since),
-    decisions: partition(decisionsOf(db, goal.projectId), since),
+    decisions: partition(decisionsOf(db, facts), since),
     cost: costOf(db, facts),
     ungrouped: null,
   };

@@ -59,7 +59,7 @@ without calling complete_step" next to a bare Retry. The builder couldn't tell w
   request and squash-commit title (`apps/daemon/src/delivery/start.ts`, `pr-text.ts`). The drawer calls it
   "What it promises".
 - **Headline**: new. The plain-words what, a few words long ("Odd files can't freeze 10db"). The desktop names a
-  task by its headline everywhere it names one: the card, the drawer, Factory's session rows, the goal drawer's
+  task by its headline everywhere it names one: the card, the drawer, Factory's session rows, Factory's
   task lists and Inbox cards that name a task. It falls back to the title when the headline is empty. Git never
   sees it: pull requests, commits and branches keep the title. `WorkstreamDto` gets `taskHeadline` beside
   `taskTitle` so Factory rows can show it.
@@ -134,21 +134,38 @@ The menu, drag behaviour and click-to-open stay as they are (`DESIGN.md`, Board 
 
 ## 6. The drawer
 
-`apps/desktop/src/views/board/task-drawer.tsx` stays the one detail view for a task. Its order becomes:
+`apps/desktop/src/views/board/task-drawer.tsx` stays the one detail view for a task. A first build listed
+its sections in one long column; a design review of the installed app found that unreadable (its content
+measured 2,635 px, more than three screens; the pull request and CI appeared twice; the title up to four
+times; the whole form was always open, with Save the one filled button on screen). It is now a side panel
+of `min(640px, 50vw)`, never wider, so the Board stays visible beside it. Top to bottom:
 
-1. **Headline**, with the why under it.
-2. **Status**: the existing workstream line, notices, CI status line, closed-pull-request and at-limit alerts,
-   unchanged.
-3. **What it promises**: the title, then the acceptance criteria as a list.
-4. **Pull request and CI** links.
-5. **Shared branch**: the existing `BatchPanel`, which already holds Abandon. Its explanation of what Abandon
-   does (from `abandon-note.ts`, today in the strip's tooltip) shows as text under the button.
-6. Review rounds (unchanged).
-7. The edit form: Headline, Why, Title, Areas, Description, Acceptance criteria, Flow, Risks, Landing,
-   placement, then the task ID. The fields and their rules are unchanged apart from the two new ones.
+1. **Header**: the headline, with the why under it. With no headline the header shows the title, and a
+   dimmed "Add a headline" link opens Edit. With no why that line is absent.
+2. **One status line**: the run's state (or the column's name once the run has finished), where the required
+   checks stand (`ciStatus`), the Pull request and CI job links, and the run actions: Retry, Start over,
+   Cancel Run, Close task, Start, Remove, Run Next and Hold. `CiStatusLine` and `DrawerLinks` are folded
+   into it, and the column badge is gone because the line says it. A Hold the daemon would refuse is a
+   disabled button with its reason in a tooltip, and the sentence under the buttons is gone; the reason
+   never names the task ("It is running: cancel it first."), nor does Run Next's note.
+3. **Alerts**, only when there is one: the workstream's notices, the closed-pull-request and at-limit
+   alerts, and a failed run's plain-words line, raw reason and retry note.
+4. **Tabs**: **Overview** (the default), **Reviews** (with a count of rounds) and **Edit**.
+   - **Overview**, with no Save bar: **What it promises** (the acceptance criteria, with the title above
+     them only when a headline exists, so the title is said once outside Edit); **Waits on** (one task a
+     line, not dimmed text among badges); **Delivery** (the existing `BatchPanel`: the branch, a failed
+     ship, and Abandon with its explanation as text under the button; its pull request link is the status
+     line's); the **latest review** ("Approved by Reviewer · 2h", linking to Reviews); the task ID.
+   - **Reviews**: `ReviewRoundsList`.
+   - **Edit**: the form (Headline, Why, Title, Areas, Description, Acceptance criteria, Flow, Risks,
+     Landing, placement) with the sticky Cancel / Save Changes bar, which is on Edit alone. The fields and
+     their rules are unchanged apart from the two new ones, and Areas moved here from the badge row. The
+     form's state lives in the drawer, so a tab switch keeps an edit, and closing the drawer with an
+     unsaved edit still asks to discard.
 
-Later work adds its sections between 5 and 6 (eval result, schema change, query counts, decisions and
-principles, agent feedback). This design adds no empty sections for them.
+Later work adds its sections to Overview, between Delivery and the latest review (eval result, schema
+change, query counts, decisions and principles, agent feedback), and an "open conversation" entry goes in
+the header. This design adds no empty sections for them.
 
 ## 7. Board fixes
 
@@ -157,8 +174,9 @@ principles, agent feedback). This design adds no empty sections for them.
   as its own task (`tsk_01a19d9f-870f`).
 - **Batch strip:** `BatchStrip` and its place above the columns go (`board-view.tsx`, `batch-strip.tsx`).
   - `abandonNote` stays, used by the drawer.
-  - The goal strip stays.
-  - `DESIGN.md` loses the batch strip and keeps the goal strip's own wording.
+  - The goal strip went later, with the goal drawer: a chosen goal shows one line beside the Goal select, and
+    its detail is Factory's (`goal-line.tsx`).
+  - `DESIGN.md` loses the batch strip and words the goal line in its place.
 
 ## 8. Factory
 

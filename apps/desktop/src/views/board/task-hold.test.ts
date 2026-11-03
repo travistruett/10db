@@ -21,11 +21,19 @@ describe('holdOption', () => {
     { name: 'a usage pause', state: 'PAUSED_LIMIT' },
     { name: 'a recovery', state: 'RECOVERING' },
     { name: 'a taken-over run', state: 'TAKEN_OVER' },
-  ] as const)('refuses $name, saying the task is running and where to cancel it', ({ state }) => {
+  ] as const)('refuses $name, saying it is running and how to stop it', ({ state }) => {
     expect(holdOption(task, workstreamDto({ state }))).toEqual({
       kind: 'refused',
-      reason: 'Alpha is running: cancel it first.',
+      reason: 'It is running: cancel it first.',
     });
+  });
+
+  it('never names the task in a reason, since the builder is already looking at it', () => {
+    for (const state of ['RUNNING', 'QUEUED'] as const) {
+      const option = holdOption(task, workstreamDto({ state, sessionCount: 1 }));
+      expect(option?.kind).toBe('refused');
+      expect(JSON.stringify(option)).not.toContain('Alpha');
+    }
   });
 
   it.each([
@@ -35,7 +43,7 @@ describe('holdOption', () => {
   ] as const)('refuses a queued run with $name, saying it has already run', ({ over }) => {
     expect(holdOption(task, workstreamDto({ state: 'QUEUED', ...fresh, ...over }))).toEqual({
       kind: 'refused',
-      reason: 'Alpha has already run: cancel it first.',
+      reason: 'It has already run: cancel it first.',
     });
   });
 
