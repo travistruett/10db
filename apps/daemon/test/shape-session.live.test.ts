@@ -17,6 +17,7 @@ import { loadEnv } from '../src/env';
 import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
 import { createLogger } from '../src/log';
 import {
+  SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
@@ -37,6 +38,120 @@ interface Judged {
 }
 
 describe.skipIf(!live)('a Shape session, live', () => {
+  it('lets only the researcher search and fetch, and refuses its reads, on the real SDK', async () => {
+    const login = await captureLoginEnv({ inherited: process.env });
+    const claudePath = findClaude();
+    if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+    const repo = createTempRepo();
+    const checkout = realpathSync(repo.path);
+    const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
+    writeFileSync(join(checkout, 'notes.txt'), 'original\n');
+    const adapter = createClaudeAdapter({
+      claudePath,
+      pluginDir: HARNESS_PLUGIN_DIR,
+      logger: createLogger({ level: 'info', destination: { write: () => undefined } }),
+    });
+    const launcher = createLauncher({
+      base: login.vars,
+      clientApp: '10db/live-test',
+      keychain: systemKeychain,
+    });
+    const account: AccountRow = {
+      id: mintId('Account'),
+      kind: 'claude_subscription',
+      label: 'Claude plan',
+      payer: '',
+      expectedIdentity: null,
+      configDir: launcher.loginConfigDir(),
+      secretRef: null,
+      secretFingerprint: null,
+      settings: {},
+      laneCap: 4,
+      monthlyCapUsd: null,
+      archived: false,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const seen = await adapter.probeAccount({
+      cwd: checkout,
+      env: launcher.probe(account).env,
+    });
+    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const access = {
+      checkout,
+      home: homedir(),
+      protectedReads: [],
+      filesDir,
+      tempRoot: realpathSync(tmpdir()),
+    };
+
+    const judged: Judged[] = [];
+    const handle = adapter.startShape({
+      sessionId: mintId('Session'),
+      shapeId: mintId('Shape'),
+      cwd: checkout,
+      systemPrompt: SHAPE_SYSTEM_PROMPT,
+      prompt: [
+        `Do these two things in order, calling the tool each time even if you expect it to fail:`,
+        `1. Use the WebSearch tool yourself, not through an agent, to search for "vega-lite".`,
+        `2. Launch the researcher agent to find out what Vega-Lite is, and report its answer and its URLs.`,
+      ].join('\n'),
+      model: launch.model,
+      effort: 'low',
+      resumeProviderSessionId: null,
+      env: launch.env,
+      account: launch.expect,
+      tools: [...SHAPE_BUILT_IN_TOOLS],
+      allowedTools: SHAPE_ALLOWED_TOOLS,
+      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+      agents: SHAPE_AGENTS,
+      mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+      preToolUse: (req) => {
+        const verdict = judgeShapeCall(
+          {
+            toolName: req.toolName,
+            toolInput: req.input,
+            agentId: req.agentId,
+            agentType: req.agentType,
+          },
+          access,
+        );
+        judged.push({ req, decision: verdict.decision });
+        return verdict;
+      },
+    });
+    const events: SessionEvent[] = [];
+    for await (const event of handle.events) {
+      events.push(event);
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+
+    try {
+      const web = judged.filter((c) => ['WebSearch', 'WebFetch'].includes(c.req.toolName));
+      // The main session's own web call was refused; the researcher, a subagent of that type, reached it.
+      for (const call of web) {
+        const decision = call.req.agentType === 'researcher' ? 'allow' : 'deny';
+        expect(
+          call.decision,
+          `${call.req.toolName} by ${call.req.agentType ?? 'the session'}`,
+        ).toBe(decision);
+      }
+      expect(web.some((c) => c.req.agentType === 'researcher' && c.decision === 'allow')).toBe(
+        true,
+      );
+      for (const call of judged)
+        if (
+          call.req.agentType === 'researcher' &&
+          ['Read', 'Grep', 'Glob'].includes(call.req.toolName)
+        )
+          expect(call.decision).toBe('deny');
+      expect(judged.every((call) => call.decision !== 'ask')).toBe(true);
+    } finally {
+      repo.cleanup();
+      rmSync(filesDir, { recursive: true, force: true });
+    }
+  }, 240_000);
+
   it('refuses an Edit, a Bash command and a Read outside the checkout on the real SDK', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
     const claudePath = findClaude();

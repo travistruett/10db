@@ -73,7 +73,7 @@ import {
   oneWayNamesOf,
   type TrackedFiles,
 } from './ceremony';
-import { judgeShapeCall, type ShapeAccess } from './confinement';
+import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
 import { asImage, checkDroppedFile, storeFile } from './dropped-files';
@@ -613,6 +613,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             ShapeMessageKind.Tool,
             `${req.toolName} · refused · ${verdict.reason}`,
           );
+        else {
+          // Research (§5.2): the question and every search and fetch shows, so the builder sees
+          // what left the machine.
+          const line = researchLine(req.toolName, req.input);
+          if (line !== null) say(shapeId, ShapeMessageAuthor.Claude, ShapeMessageKind.Tool, line);
+        }
         return verdict;
       },
     };

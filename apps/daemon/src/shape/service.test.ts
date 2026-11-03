@@ -130,7 +130,7 @@ describe('a message', () => {
     expect(session.spec.prompt).toBe(`[m:${sent.id}] Make the board denser.`);
     expect(session.spec.resumeProviderSessionId).toBeNull();
     expect(session.spec.shapeId).toBe(shapeId);
-    expect(session.spec.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+    expect(session.spec.tools).toEqual(['Read', 'Grep', 'Glob', 'Agent', 'WebSearch', 'WebFetch']);
     expect(session.spec.disallowedTools).toContain('Bash');
     expect(session.spec.systemPrompt).toMatch(/note_heard/);
     const row = getSession(c.store.db, session.spec.sessionId);

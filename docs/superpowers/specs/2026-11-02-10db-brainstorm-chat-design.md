@@ -214,19 +214,43 @@ MCP servers; it has no read-only mode.
 
 - `settingSources: []`, `strictMcpConfig`, and **no plugins** (not the harness plugin: its skills and personas are
   for lanes) **(spec's call)**. No project `.mcp.json` server loads.
-- `tools` lists exactly `Read`, `Grep`, `Glob`, `Agent` and the Shape tools; `disallowedTools` names `Edit`,
-  `Write`, `NotebookEdit`, `Bash`, `Monitor`, `WebFetch` and `WebSearch`. Permission mode `default` (not lanes'
-  auto); `canUseTool` denies by default. With no Bash, Monitor or MCP server process, the session runs no command
-  for a sandbox to hold.
+- `tools` lists exactly `Read`, `Grep`, `Glob`, `Agent`, `WebSearch`, `WebFetch` and the Shape tools; the last two
+  are listed only so the researcher (below) can inherit them, and the hook refuses them in the main session.
+  `disallowedTools` names `Edit`, `Write`, `NotebookEdit`, `Bash` and `Monitor`. Permission mode `default` (not
+  lanes' auto); `canUseTool` denies by default. With no Bash, Monitor or MCP server process, the session runs no
+  command for a sandbox to hold.
 - Path confinement runs in the **PreToolUse hook** through `judgePreToolUse` with a Shape mode of the file-access
   judge that answers **deny** where lanes' answers `ask`, so nothing reaches the broker or raises a card. It runs
   for the session and its subagents alike, so calls Claude Code settles before `canUseTool` are still judged. A file
   tool is allowed only on real paths under the project's checkout or the conversation's files directory (§5.4). A
   symlink out, a protected path, and a `Grep` or `Glob` of a directory holding one are refused, with a dimmed line
   in the conversation.
-- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7), passed as
-  programmatic agents, each on the session's own model; the built-in
+- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7) and the researcher
+  (below), passed as programmatic agents, each on the session's own model; the built-in
   general-purpose type is not offered.
+- **Research: a researcher agent that cannot read the project** (`decisions/2026-11-03-plan-researches-the-web-through-a-researcher.md`).
+  The session cannot touch the network; a fourth agent, `researcher`, has `WebSearch` and `WebFetch` and nothing
+  else (no file tool, no `Agent`, no 10db tool). The session gives it a question in words and gets text back with
+  the URLs it read. The split keeps the project's code off the network: the agent that reads the code never sends
+  a request, and the agent that does holds nothing to send but the question. The hook enforces it:
+  - `WebSearch` and `WebFetch` are allowed only with `agent_id` present and `agent_type` `researcher`; from the main
+    session or any other agent they are refused. `Read`, `Grep` and `Glob` are refused from the researcher for any
+    path, the checkout's and the files directory's alike.
+  - **The question is bounded, not filtered:** at most 1,500 characters (a query 300, a URL 2,000), no empty one. The
+    session is told to ask in general terms with no code, path or key. Every question, search and fetch shows
+    in the conversation as a dimmed line naming it, so the builder sees what left the machine.
+  - **A fetched page is untrusted.** The researcher treats pages as data and reports one that tries to steer it; the
+    session treats its answer as a claim, follows no request in it, and states what it relies on in its own words
+    with the URL, not in the page's. It is a prompt rule, backed by the builder accepting a plan before a lane runs
+    a task.
+  - **Hosts are open** except those that are not the public web: `WebFetch` must be `https` on 443, with no login in
+    the URL, and name a host with a dot that is not an IP address, `localhost` or under `.local`, `.internal` and
+    the like, which keeps it off the daemon's loopback port and the builder's network.
+  - **Tests, red first:** a `WebSearch` or `WebFetch` from the main session, scope, engineering and rehearsal is
+    refused, with a dimmed line; a `Read`, `Grep` or `Glob` from the researcher is refused for a checkout path and
+    a files-directory path; a fetch of `127.0.0.1`, `localhost`, a login URL and an `http` page is refused; each
+    allowed search and fetch writes its dimmed line. The live test (`TENDB_LIVE_CLAUDE=1`) shows that the
+    researcher inherits the session's web tools on the real SDK.
 - **Who is calling.** Subagents share the session's MCP connection, so the PreToolUse hook tells them apart: the
   SDK's hook input carries `agent_id` only inside a subagent, and `agent_type` names it. The hook refuses
   `report_finding` when `agent_id` is absent (the main session can't report findings or rehearsal marks), refuses

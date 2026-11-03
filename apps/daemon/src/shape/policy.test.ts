@@ -22,23 +22,30 @@ const access: ShapeAccess = {
 };
 
 describe('the tool lists of a Shape session', () => {
-  it('offers only built-in tools that read, and the Agent tool', () => {
-    expect([...SHAPE_BUILT_IN_TOOLS]).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+  it('offers only built-in tools that read, the Agent tool, and the two web tools only the researcher may call', () => {
+    expect([...SHAPE_BUILT_IN_TOOLS]).toEqual([
+      'Read',
+      'Grep',
+      'Glob',
+      'Agent',
+      'WebSearch',
+      'WebFetch',
+    ]);
   });
 
   it('names every tool that writes or runs a command as disallowed, and offers none of them', () => {
-    for (const name of [
-      'Edit',
-      'Write',
-      'NotebookEdit',
-      'Bash',
-      'Monitor',
-      'WebFetch',
-      'WebSearch',
-    ]) {
+    for (const name of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Monitor']) {
       expect(SHAPE_DISALLOWED_TOOLS).toContain(name);
       expect(SHAPE_BUILT_IN_TOOLS).not.toContain(name);
       expect(SHAPE_ALLOWED_TOOLS).not.toContain(name);
+    }
+  });
+
+  it('lists the web tools in the session so the researcher can inherit them, and lets the hook alone keep the session off the network', () => {
+    for (const name of ['WebSearch', 'WebFetch']) {
+      expect(SHAPE_DISALLOWED_TOOLS).not.toContain(name);
+      expect(SHAPE_ALLOWED_TOOLS).toContain(name);
+      expect(judgeShapeCall({ toolName: name, toolInput: {} }, access).decision).toBe('deny');
     }
   });
 
@@ -70,9 +77,22 @@ describe('the tool lists of a Shape session', () => {
 
 describe('the reviewers (§7)', () => {
   it('are scope, engineering and rehearsal, each with exactly Read, Grep, Glob and report_finding', () => {
-    expect(Object.keys(SHAPE_AGENTS).sort()).toEqual(['engineering', 'rehearsal', 'scope']);
-    for (const agent of Object.values(SHAPE_AGENTS))
-      expect([...agent.tools]).toEqual(['Read', 'Grep', 'Glob', 'mcp__10db__report_finding']);
+    for (const name of ['scope', 'engineering', 'rehearsal'] as const)
+      expect([...SHAPE_AGENTS[name].tools]).toEqual([
+        'Read',
+        'Grep',
+        'Glob',
+        'mcp__10db__report_finding',
+      ]);
+  });
+
+  it('are joined by the researcher, the only other agent', () => {
+    expect(Object.keys(SHAPE_AGENTS).sort()).toEqual([
+      'engineering',
+      'rehearsal',
+      'researcher',
+      'scope',
+    ]);
   });
 
   it('can each be launched by the session and are the only agents it may launch', () => {
@@ -101,6 +121,36 @@ describe('the reviewers (§7)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/landings/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/one per goal/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/same place and land the same way/);
+  });
+});
+
+describe('the researcher (§5.2)', () => {
+  it('has WebSearch and WebFetch and nothing else: no file tool, no 10db tool', () => {
+    expect([...SHAPE_AGENTS.researcher.tools]).toEqual(['WebSearch', 'WebFetch']);
+  });
+
+  it('is told to treat what it reads as data, to answer in words, and to name the URLs it read', () => {
+    const prompt = SHAPE_AGENTS.researcher.prompt;
+    expect(prompt).toMatch(/untrusted/i);
+    expect(prompt).toMatch(/instructions/i);
+    expect(prompt).toMatch(/URL/);
+    expect(prompt).toMatch(/no file/i);
+  });
+
+  it('is launched by the session, which is told to keep code out of the question and to treat the answer as untrusted', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "researcher"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/never paste code/i);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/untrusted/i);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/no web tool of your own/i);
+  });
+
+  it('can be launched by the session, with a question', () => {
+    expect(
+      judgeShapeCall(
+        { toolName: 'Agent', toolInput: { subagent_type: 'researcher', prompt: 'What is X?' } },
+        access,
+      ).decision,
+    ).toBe('allow');
   });
 });
 
