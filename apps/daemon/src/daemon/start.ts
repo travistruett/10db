@@ -49,7 +49,7 @@ import {
   createUsageReports,
   type AccountLimits,
 } from '../accounts';
-import { createApp } from '../api';
+import { createApp, type SelfUpdateServices } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
@@ -143,6 +143,18 @@ import {
   type SandboxRuntime,
 } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
+import {
+  createScriptInstaller,
+  createSelfUpdate,
+  githubHeadOfMain,
+  githubMainIsAhead,
+  midSessionWork,
+  selfUpdateSetting,
+  setSelfUpdateChoice,
+  type BuildInfo,
+  type ScriptInstaller,
+  type SelfUpdate,
+} from '../self-update';
 import type { SessionAdapter } from '../sessions';
 import { retryWorkstream, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
@@ -231,6 +243,18 @@ export interface DaemonOptions {
   ) => Promise<SystemCheckDto>;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
+  /**
+   * What this bundle was built from (main.ts reads `build-info.json`); absent for a run from source,
+   * which shows no commit and never updates itself. The bundle replaces itself only when `updatable`.
+   */
+  readonly build?: BuildInfo | null;
+  /** Self-update overrides: tests pass a short interval, a fake head of main and a fake installer. */
+  readonly selfUpdate?: {
+    readonly intervalMs?: number;
+    readonly headOf?: (repo: string) => Promise<string>;
+    readonly isAhead?: (repo: string, base: string, head: string) => Promise<boolean>;
+    readonly installer?: ScriptInstaller;
+  };
   /** What reads the load and the busy processes, and how much and how long counts as overloaded; tests replace them. */
   readonly load?: Pick<
     LoadMonitorOptions,
@@ -269,6 +293,8 @@ const DEFAULTS = {
   defaultPauseMs: 30 * 60_000,
   nightlyBackupHour: 3,
   nightlyBackupsKept: 7,
+  /** How often main is looked at: one cheap gh call a minute, so a new commit is seen within one. */
+  selfUpdateIntervalMs: 60_000,
 } as const;
 
 /** Used when no system check is wired (tests): every tool reads as not found. */
@@ -826,7 +852,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           checkout: project.repoPath,
           home: homedir(),
           protectedReads: guarded.map((p) => p.path),
-          filesDir: join(opts.dataDir, 'shapes'),
           tempRoot: sandboxTempRoot ?? LANE_TEMP_ROOT,
         },
       };
@@ -1019,7 +1044,91 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       git.gitDirs(repoPath).catch(() => undefined);
     },
   });
+  const build = opts.build ?? null;
+  let selfUpdate: SelfUpdate | null = null;
+  // Only a bundle in Applications that knows the repository it was built for follows it; a project,
+  // its checkout and its origin have no say in where an update comes from.
+  const updateRepository = build?.updatable === true ? build.repository : null;
+  if (build !== null && updateRepository !== null) {
+    const updateLogger = logger.child({ component: 'self-update' });
+    const installer =
+      opts.selfUpdate?.installer ??
+      (ghBin === null
+        ? null
+        : createScriptInstaller({
+            releaseDir: build.releaseDir,
+            workDir: join(opts.dataDir, 'self-update'),
+            dataDir: opts.dataDir,
+            gh: ghBin,
+            env: () => delivery.networkEnv(),
+            logger: updateLogger,
+          }));
+    if (installer === null) {
+      updateLogger.warn({}, 'gh is not installed, so the app cannot update itself');
+    } else {
+      const ghExec = createSystemGhExec({ gh: ghBin, git: gitBin });
+      const ghCall = () => ({
+        env: delivery.networkEnv(),
+        timeoutMs: delivery.limits.networkTimeoutMs,
+      });
+      selfUpdate = createSelfUpdate({
+        state,
+        inbox,
+        clock,
+        logger: updateLogger,
+        runningCommit: build.commit,
+        intervalMs: opts.selfUpdate?.intervalMs ?? DEFAULTS.selfUpdateIntervalMs,
+        repository: updateRepository,
+        enabled: () => selfUpdateSetting(state.db).enabled,
+        // A card only needs a project to sit under in the Inbox.
+        cardProject: () => listProjects(state.db)[0]?.id ?? null,
+        headOf: opts.selfUpdate?.headOf ?? githubHeadOfMain(ghExec, ghCall),
+        isAhead: opts.selfUpdate?.isAhead ?? githubMainIsAhead(ghExec, ghCall),
+        stage: (target, running, skip) => installer.stage(target, running, skip),
+        stopStage: () => installer.stop(),
+        cancelStage: () => installer.cancel(),
+        apply: (staged) => installer.apply(staged),
+        outcome: installer.outcome,
+        rollback: installer.rollback,
+        // A queued ship, checkout return or cleanup is a delivery job before it is a row.
+        midSession: () => midSessionWork(state.db, deliveryJobs),
+        // New work waits from here on, and the tick the scheduler is in has finished: it may be
+        // reading branches and about to launch a lane.
+        pause: async () => {
+          createdScheduler.stop();
+          await createdScheduler.idle();
+        },
+        resume: () => {
+          createdScheduler.start();
+          createdScheduler.requestTick();
+        },
+      });
+    }
+  }
+  const selfUpdateServices: SelfUpdateServices = {
+    selfUpdateStatus: () => ({
+      ...selfUpdateSetting(state.db),
+      runningCommit: build?.commit ?? null,
+      availableCommit: selfUpdate?.status().availableCommit ?? null,
+    }),
+    setSelfUpdate: (enabled) => {
+      setSelfUpdateChoice(state, enabled);
+      // A head of main whose update failed, or the build make rollback-app replaced, is tried again
+      // once the builder touches the switch.
+      selfUpdate?.retry();
+      // Off means nothing installs: a stage under way is killed, and a check under way sees the
+      // switch before it installs.
+      if (!enabled) {
+        selfUpdate?.turnOff().catch((error: unknown) => {
+          logger.warn({ err: error }, 'could not stop the self-update’s stage');
+        });
+      }
+      return selfUpdateServices.selfUpdateStatus();
+    },
+  };
   const app = createApp({
+    commit: build?.commit ?? null,
+    selfUpdate: selfUpdateServices,
     startedAt,
     allowedOrigins: [
       ...(opts.allowedOrigins ?? UI_ORIGINS),
@@ -1086,14 +1195,30 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       logger.error({ err: error }, 'nightly backup failed');
     },
   );
+  // How an install that was under way ended is reported before the scheduler can start anything.
+  selfUpdate?.settle();
   createdScheduler.start();
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
+  if (selfUpdate) {
+    selfUpdate.start();
+    selfUpdate.tick().catch((error: unknown) => {
+      logger.error({ err: error }, 'the first self-update check failed');
+    });
+  }
   logger.info({ port, dataDir: opts.dataDir }, 'daemon started');
 
   async function shutdown(): Promise<void> {
     try {
+      // First: a check that is holding the scheduler back would otherwise start it again while the
+      // rest of this shutdown runs. Its flags are set at the call; what it settles on is a stage
+      // under way, killed with the gh it started, which is awaited beside the delivery jobs.
+      const selfUpdateStopped = (selfUpdate?.stop() ?? Promise.resolve()).catch(
+        (error: unknown) => {
+          logger.warn({ err: error }, 'could not stop the self-update’s stage');
+        },
+      );
       createdScheduler.stop();
       unsubscribeShip();
       unsubscribePrWatch();
@@ -1101,7 +1226,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
-      await deliveryJobs.stop();
+      await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
       accountPauses.stop();
       moveBack.stop();

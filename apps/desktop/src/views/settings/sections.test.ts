@@ -17,6 +17,7 @@ describe('settings sections', () => {
       'team',
       'routing-rules',
       'keep-awake',
+      'updates',
       'lane-permissions',
       'accounts',
       'decisions',
@@ -32,6 +33,10 @@ describe('settings sections', () => {
     expect(SettingsGroup).toEqual({ Project: 'project', Global: 'global' });
   });
 
+  it('keeps the update switch among the app-wide sections', () => {
+    expect(SETTINGS_SECTIONS.find((s) => s.key === 'updates')?.group).toBe(SettingsGroup.Global);
+  });
+
   it.each([
     { key: 'general', planned: false },
     { key: 'board-columns', planned: false },
@@ -39,6 +44,7 @@ describe('settings sections', () => {
     { key: 'network-hosts', planned: false },
     { key: 'billing', planned: false },
     { key: 'keep-awake', planned: false },
+    { key: 'updates', planned: false },
     { key: 'lane-permissions', planned: false },
     { key: 'team', planned: true },
     { key: 'routing-rules', planned: true },
