@@ -28,6 +28,7 @@ import {
   ALLOWED_WRITES_KEY,
   allowedWriteHash,
   allowedWritesIn,
+  ESCALATED_KEY,
   EXACT_WRITE_KEY,
   foundHostFile,
   matchPermissionRule,
@@ -324,7 +325,12 @@ export function createPermissionBroker(
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
-      detail: { toolName: req.toolName, summary, ...editDetail(req, ask) },
+      detail: {
+        toolName: req.toolName,
+        summary,
+        ...editDetail(req, ask),
+        ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
+      },
       signal: ctx.signal,
       // An edit's result depends on the file it lands on. Folded with another lane's, both lanes would read the
       // file on the one answer, before either writes, and the second write would match neither record.

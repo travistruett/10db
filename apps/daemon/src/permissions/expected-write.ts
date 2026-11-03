@@ -16,6 +16,11 @@ import { isAbsolute } from 'node:path';
  */
 export const EXACT_WRITE_KEY = 'exactWrite';
 export const ALLOWED_WRITES_KEY = 'allowedWrites';
+/**
+ * `escalated: true` marks a card raised for a call Claude Code's classifier handed to a person. No stored
+ * rule answers such a call, so a project rule allowed on another lane's card does not release it either.
+ */
+export const ESCALATED_KEY = 'escalated';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 

@@ -2236,6 +2236,23 @@ describe('permission broker in a sandboxed lane', () => {
         expect(openCards()).toHaveLength(1);
       });
 
+      it('leaves the other lane’s card open when Claude Code escalated its call', async () => {
+        const a = seedWorkstream(base);
+        const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+        writeFileSync(file(), '{"a":1}');
+        const first = sandboxed(a)(edit('"a":2'));
+        void sandboxed(b)(
+          request('Edit', { file_path: file(), old_string: '"a":1', new_string: '"a":2' }, true),
+        ).catch(() => undefined);
+        const alphaCard = openCards().find((c) => c.targets[0]?.workstreamId === a.workstream.id);
+        if (alphaCard === undefined) throw new Error('no card for Alpha');
+        inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        const open = openCards();
+        expect(open).toHaveLength(1);
+        expect(open[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+      });
+
       it('leaves the other lane’s card open for allow_once', () => {
         const { a, cardOf } = twoLanes();
         inbox.answer(cardOf(a).id, { choice: 'allow_once' });

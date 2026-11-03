@@ -46,7 +46,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { EXACT_WRITE_KEY, storableRule } from '../permissions';
+import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
@@ -378,6 +378,8 @@ export function createInboxService(deps: {
     }).filter((card) => {
       if (card.id === answered.id || card.kind !== InboxKind.Permission) return false;
       if (card.detail?.[EXACT_WRITE_KEY] !== true) return false;
+      // The classifier handed that call to a person; the stored rule would not have answered it either.
+      if (card.detail[ESCALATED_KEY] === true) return false;
       const theirs = ruleOf(card);
       return theirs?.toolName === rule.toolName && theirs.pattern === rule.pattern;
     });
