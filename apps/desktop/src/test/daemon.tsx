@@ -71,6 +71,9 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/one-way-paths', base), () =>
       HttpResponse.json({ paths: [] }),
     ),
+    // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
+    http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>

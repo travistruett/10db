@@ -8,6 +8,7 @@ import {
   ShapeMessageInput,
   ShapeProposalDto,
   ShapeViewDto,
+  ShapeAttachmentDto,
   ShapeWithdrawInput,
 } from './index';
 
@@ -214,7 +215,17 @@ describe('ShapeViewDto', () => {
         nonLaneHoursPerTask: null,
         endEstimateHours: 2,
       },
+      attachments: [
+        {
+          id: mintId('ShapeAttachment'),
+          key: 'thin-scrollbars',
+          goalId: null,
+          taskId: null,
+          attachment: { kind: 'mermaid', source: 'flowchart LR\n  a --> b' },
+        },
+      ],
     });
+    expect(view.attachments[0]?.attachment.kind).toBe('mermaid');
     expect(view.preview.criticalPath).toEqual(['thin-scrollbars']);
     expect(view.proposals).toHaveLength(1);
     expect(view.findings[0]?.reviewer).toBe('scope');
@@ -226,6 +237,19 @@ describe('ShapeViewDto', () => {
 
   it('is in the contract schemas the generator writes', () => {
     expect(Object.keys(CONTRACT_SCHEMAS)).toContain('shape-view-dto');
+  });
+
+  it('refuses an attachment whose chart names a URL (§10.3)', () => {
+    const attachment = (spec: Record<string, unknown>) =>
+      ShapeAttachmentDto.safeParse({
+        id: mintId('ShapeAttachment'),
+        key: 'thin-scrollbars',
+        goalId: null,
+        taskId: null,
+        attachment: { kind: 'chart', spec },
+      }).success;
+    expect(attachment({ mark: 'bar', data: { values: [] } })).toBe(true);
+    expect(attachment({ mark: 'bar', data: { url: 'https://example.com/x.json' } })).toBe(false);
   });
 });
 

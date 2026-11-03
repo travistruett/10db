@@ -1,6 +1,15 @@
 import { z } from 'zod';
-import { DecisionId, GoalId, ShapeId, ShapeMessageId, ShapeProposalId, TaskId } from './ids';
 import {
+  DecisionId,
+  GoalId,
+  ShapeAttachmentId,
+  ShapeId,
+  ShapeMessageId,
+  ShapeProposalId,
+  TaskId,
+} from './ids';
+import {
+  ShapeAttachment,
   ShapeDto,
   ShapeMessageDto,
   ShapeProposalBody,
@@ -108,6 +117,19 @@ export const ShapeTurnDto = z.object({
 });
 export type ShapeTurnDto = z.infer<typeof ShapeTurnDto>;
 
+/**
+ * A diagram, chart or mockup the session attached (§10.3): to a proposal by `key`, or to a goal or task
+ * the conversation converted (its id, and `key` holds the same id). The screen renders each inert.
+ */
+export const ShapeAttachmentDto = z.object({
+  id: ShapeAttachmentId,
+  key: z.string(),
+  goalId: GoalId.nullable(),
+  taskId: TaskId.nullable(),
+  attachment: ShapeAttachment,
+});
+export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;
+
 /** Everything the Shape screen renders for one conversation. */
 export const ShapeViewDto = z.object({
   shape: ShapeDto,
@@ -130,6 +152,8 @@ export const ShapeViewDto = z.object({
   rehearsals: z.array(ShapeRehearsalDto),
   /** How the project's lanes would run the pending tasks, with the work already there holding lanes first (§10.2). */
   preview: ShapePreviewDto,
+  /** The diagrams, charts and mockups attached so far, oldest first; specs and evals are not here. */
+  attachments: z.array(ShapeAttachmentDto),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 

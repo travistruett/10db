@@ -8,6 +8,7 @@ import {
 import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
+import { attach } from './attach';
 import { reconcileDraft } from './rounds';
 import { reportFinding, resolveFinding, writeSpec } from './review';
 import { buildSizes } from './sizing';
@@ -96,6 +97,8 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
       );
       return Promise.resolve({ records });
     },
+    attach: (input) =>
+      Promise.resolve().then(() => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>
       Promise.resolve().then(() => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
     report_finding: (input) =>

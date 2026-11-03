@@ -51,18 +51,18 @@ describe('the tool lists of a Shape session', () => {
     }
   });
 
-  it('offers none of the tools whose slice is not built, and report_finding only to reviewers', () => {
+  it('offers every tool but report_finding to the session, and report_finding only to reviewers', () => {
     expect([...SHAPE_OFFERED_TOOLS].sort()).toEqual(
       [
         ShapeToolName.NoteHeard,
         ShapeToolName.ProposePlan,
+        ShapeToolName.Attach,
         ShapeToolName.SimilarTasks,
         ShapeToolName.FindRecords,
         ShapeToolName.WriteSpec,
         ShapeToolName.ResolveFinding,
       ].sort(),
     );
-    expect(SHAPE_OFFERED_TOOLS).not.toContain(ShapeToolName.Attach);
     expect(SHAPE_OFFERED_TOOLS).not.toContain(ShapeToolName.ReportFinding);
     expect(SHAPE_ALLOWED_TOOLS).toContain('mcp__10db__report_finding');
   });

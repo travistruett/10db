@@ -4,6 +4,7 @@ import {
   ShapeDto,
   ShapeFileDto,
   ShapeMessageDto,
+  ShapeOfDto,
   ShapeProposeResult,
   ShapeRehearseResult,
   ShapeViewDto,
@@ -13,6 +14,7 @@ import {
   type ShapeFindingId,
   type ShapeId,
   type ShapeProposalId,
+  type TaskId,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
@@ -51,6 +53,31 @@ export function useShapeView(shapeId: ShapeId | null) {
         ? readJson(await client.shapes[':shapeId'].$get({ param: { shapeId } }), ShapeViewDto)
         : Promise.reject(new Error('Open a conversation first.')),
     enabled: shapeId !== null,
+  });
+}
+
+/** What a goal's or task's drawer asks: the conversation that made it, if one did (§12). */
+export type ShapeOfTarget = { readonly goalId: GoalId } | { readonly taskId: TaskId };
+
+/**
+ * The conversation that made a goal or a task, for its drawer's Open conversation; null when none
+ * did. Under `shapeKeys.all`, so a Convert's `shape.changed` asks again.
+ */
+export function useShapeOf(target: ShapeOfTarget) {
+  const { client } = useDaemon();
+  const id = 'goalId' in target ? target.goalId : target.taskId;
+  return useQuery({
+    queryKey: ['shapes', 'of', id] as const,
+    queryFn: async () =>
+      'goalId' in target
+        ? readJson(
+            await client.goals[':goalId'].shape.$get({ param: { goalId: target.goalId } }),
+            ShapeOfDto,
+          )
+        : readJson(
+            await client.tasks[':taskId'].shape.$get({ param: { taskId: target.taskId } }),
+            ShapeOfDto,
+          ),
   });
 }
 

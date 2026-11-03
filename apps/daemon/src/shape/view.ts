@@ -32,6 +32,7 @@ import {
   type ShapeProposalRow,
 } from '@10db/db';
 import { ceremonyFor, type EffortFacts } from './ceremony';
+import { attachmentsOf } from './attach';
 import { buildPreview } from './preview';
 import { rehearsalTasks } from './review';
 import { buildSizes } from './sizing';
@@ -229,5 +230,6 @@ export function buildShapeView(
       rehearsed: marked.has(`${t.taskKey}\0${t.hash}`),
     })),
     preview: buildPreview(db, shapeId, now),
+    attachments: attachmentsOf(db, shapeId),
   };
 }

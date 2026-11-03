@@ -8,6 +8,7 @@ import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@man
 import { IconClockExclamation, IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../daemon/shape-queries';
+import { RowAttachments } from './attachments/row-attachments';
 import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
 import type { RowReview } from './review-lines';
 import { ReviewLines } from './review-notes';
@@ -324,6 +325,7 @@ export function ProposalRow({
               ) : (
                 <>
                   <RowDetails row={row} />
+                  <RowAttachments row={row} title={title} />
                   <Group gap="xs" pt="xs">
                     <Button
                       variant="subtle"

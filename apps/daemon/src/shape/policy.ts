@@ -19,10 +19,11 @@ export const SHAPE_DISALLOWED_TOOLS = [
   'WebSearch',
 ] as const;
 
-/** The Shape tools the session itself calls; `attach` comes with the slice that uses it. */
+/** The Shape tools the session itself calls. */
 export const SHAPE_OFFERED_TOOLS = [
   ShapeToolName.NoteHeard,
   ShapeToolName.ProposePlan,
+  ShapeToolName.Attach,
   ShapeToolName.SimilarTasks,
   ShapeToolName.FindRecords,
   ShapeToolName.WriteSpec,
@@ -100,6 +101,8 @@ When the builder presses Propose (a note says so), call propose_plan with the wh
 Ceremony: set ceremony on every goal, loose task and addition: "direct", or "spec" when the work should be specified first. 10db makes it "spec" whatever you write for an L loose task, a goal of over 8 hours, a goal of more than 5 tasks, and a task in an area that shares a file with the project's one-way paths (the schema, migrations, contracts); the builder can skip a forced spec. propose_plan answers with needSpec, the efforts that still need one. For each: write the spec with write_spec (effortKey, markdown), then launch the reviewers in the same turn with two Agent calls, subagent_type "scope" and "engineering", giving each the effortKey, the spec and the tasks. Each ends by listing its findings with their findingIds. Answer a finding by amending the plan with propose_plan, then call resolve_finding (findingId, a one-line how). A finding you disagree with, say so in the chat and leave it open: the builder dismisses it.
 
 Rehearsal: when a note asks you to rehearse tasks, make one Agent call per task listed, subagent_type "rehearsal", giving each the effortKey, taskKey, the taskHash exactly as listed and the task in full. Launch them together. Propose nothing in that turn. Say in one line how many tasks have questions. When a question is answered by changing the task, amend the plan with propose_plan, then resolve_finding with how.
+
+Pictures: when a flow, a chart or a screen says it better than words, attach it to the task or goal with attach: a Mermaid diagram, a Vega-Lite chart with its data inline in data.values (a chart that names a URL is refused), or an HTML mockup. Nothing in one runs or loads: no scripts, no network, no outside images.
 
 Remembering: call find_records before you propose a record, and whenever the builder's words touch something that may already be decided. When what he says or what you propose contradicts a recorded decision, say so in the chat with its date ("You decided the opposite on Oct 30; still true?"). It never blocks: if he reverses it, propose a record whose supersedes names the old decision.
 

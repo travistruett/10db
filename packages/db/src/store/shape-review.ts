@@ -207,6 +207,32 @@ export function upsertShapeAttachment(
   announce(ctx, input.shapeId);
 }
 
+/**
+ * Keeps a diagram, chart or mockup (§10.3); each call adds one. A goal or task the conversation
+ * converted is named by its id, which is also the row's key.
+ */
+export function insertShapeAttachment(
+  ctx: WriteContext,
+  input: {
+    readonly shapeId: ShapeId;
+    readonly kind: 'mermaid' | 'chart' | 'mockup';
+    readonly key: string;
+    readonly body: string;
+    readonly goalId: GoalId | null;
+    readonly taskId: TaskId | null;
+  },
+): ShapeAttachmentRow {
+  const row: ShapeAttachmentRow = {
+    id: mintId('ShapeAttachment'),
+    ...input,
+    createdAt: ctx.now,
+    updatedAt: ctx.now,
+  };
+  ctx.tx.insert(schema.shapeAttachments).values(row).run();
+  announce(ctx, input.shapeId);
+  return row;
+}
+
 export function listShapeAttachments(db: DbReader, shapeId: ShapeId): ShapeAttachmentRow[] {
   return db
     .select()

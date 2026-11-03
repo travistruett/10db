@@ -718,6 +718,12 @@ All in scope; this is build order. Each slice ships something usable.
    Migration 0033. See `decisions/2026-11-02-shape-ceremony-review-and-rehearsal.md`.*
 5. **Preview, attachments, reopen.** The factory preview; Mermaid, charts and mockups with §10.3's tests; Open
    conversation, the resume route, re-plan additions, changes and removals.
+   *Built. The preview is in `ShapeViewDto.preview` and under the Proposed list. `attach` keeps a diagram, chart or
+   mockup in `shape_attachments` (on a proposal key, or a goal or task the conversation converted) and the view
+   carries them as `attachments`. Charts and diagrams are drawn to SVG and shown as an `<img>`, so no script or link
+   in them runs; charts use `vega-interpreter` (a fifth pinned renderer package) because the window's CSP has no
+   `unsafe-eval`. Open conversation reads `GET /goals/:id/shape` and `GET /tasks/:id/shape` and opens the Shape
+   view; `POST /shapes/:id/resume` is for the engine's Re-plan in Shape cards, which don't exist yet.*
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
    `groupByDependency` joining a landing's tasks and a late task joining its group's open batch; pull request and CI
    counts in the preview.

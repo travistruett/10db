@@ -11,7 +11,9 @@ import {
 import { shortAgo } from '../factory/short-ago';
 import { useNow } from '../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
+import { AttachmentsContext } from './attachments/row-attachments';
 import { HeardSoFar } from './heard-so-far';
+import { PreviewPanel } from './preview-panel';
 import type { RowAction, RowHandlers } from './proposal-row';
 import { ProposedList } from './proposed-list';
 import { groupProposals, roundChanges, type SectionKey } from './proposed-groups';
@@ -188,13 +190,16 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
               <Skeleton height={14} width="80%" />
             </Stack>
           ) : view !== undefined && hasProposals ? (
-            <ProposedList
-              groups={groups}
-              sizes={view.sizes}
-              actionsFor={actionsFor}
-              reviewOf={reviewOf}
-              handlers={handlers}
-            />
+            <AttachmentsContext value={view.attachments}>
+              <ProposedList
+                groups={groups}
+                sizes={view.sizes}
+                actionsFor={actionsFor}
+                reviewOf={reviewOf}
+                handlers={handlers}
+              />
+              <PreviewPanel preview={view.preview} />
+            </AttachmentsContext>
           ) : (
             <HeardSoFar heard={view?.heard ?? []} />
           )}

@@ -1191,6 +1191,7 @@ describe('shape routes', () => {
         nonLaneHoursPerTask: null,
         endEstimateHours: 0,
       },
+      attachments: [],
     };
     const services = stubServices({
       getShapeView: (id) => {

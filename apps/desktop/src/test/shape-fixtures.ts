@@ -3,6 +3,7 @@ import {
   ShapeFindingDto,
   ShapeDto,
   ShapeMessageDto,
+  ShapePreviewDto,
   ShapeProposalDto,
   ShapeViewDto,
   type ShapeId,
@@ -166,7 +167,85 @@ export function shapeViewDto(
     ceremony: [],
     findings: [],
     rehearsals: [],
+    preview: EMPTY_PREVIEW,
+    attachments: [],
     ...rest,
+  });
+}
+
+/** A preview with nothing placed: no pending task, nothing running. */
+export const EMPTY_PREVIEW: ShapePreviewDto = {
+  lanes: [],
+  criticalPath: [],
+  clashes: [],
+  tasks: 0,
+  totalLaneHours: 0,
+  scheduleHours: 0,
+  nonLaneHoursPerTask: null,
+  endEstimateHours: 0,
+};
+
+/**
+ * Two lanes: a task already running holds lane 1 first, the draft's two tasks clash on `desktop` and
+ * run one after the other behind it, the critical path; a third draft task runs beside them.
+ */
+export function previewDto(): ShapePreviewDto {
+  return ShapePreviewDto.parse({
+    lanes: [
+      {
+        items: [
+          {
+            key: 'tsk_running',
+            title: 'Fix the gate log',
+            startHours: 0,
+            endHours: 1.5,
+            existing: true,
+            critical: true,
+          },
+          {
+            key: 'density',
+            title: 'Compact density',
+            startHours: 1.5,
+            endHours: 3.5,
+            existing: false,
+            critical: true,
+          },
+          {
+            key: 'shape-view',
+            title: 'Shape view',
+            startHours: 3.5,
+            endHours: 5,
+            existing: false,
+            critical: true,
+          },
+        ],
+      },
+      {
+        items: [
+          {
+            key: 'scrollbars',
+            title: 'Thin scrollbars',
+            startHours: 0,
+            endHours: 1,
+            existing: false,
+            critical: false,
+          },
+        ],
+      },
+    ],
+    criticalPath: ['tsk_running', 'density', 'shape-view'],
+    clashes: [
+      {
+        area: 'desktop',
+        titles: ['Compact density', 'Shape view'],
+        text: "Compact density and Shape view both claim `desktop`: they'll run one after the other",
+      },
+    ],
+    tasks: 3,
+    totalLaneHours: 4.5,
+    scheduleHours: 5,
+    nonLaneHoursPerTask: 2,
+    endEstimateHours: 9,
   });
 }
 
