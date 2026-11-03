@@ -463,18 +463,27 @@ export function createWatcher(deps: {
     const allowed = new Set<string>();
     if (paths.length === 0 || lanes.length === 0) return allowed;
     forgetEndedLanes();
-    const inScope = (a: { workstreamId: WorkstreamId | null }) =>
-      a.workstreamId !== null && lanes.includes(a.workstreamId);
     const named = <T extends { path: string }>(list: readonly T[]) =>
       list.flatMap((a) => {
         const rel = relativeIn(root, a.path);
         return rel === null ? [] : [{ rel, a }];
       });
-    const cards = named(answeredEditCards(projectId).filter(inScope));
-    const standing = [
-      ...cards.filter(({ a }) => a.standing),
-      ...named(lanes.flatMap((id) => ruleAllowances(listPermissionRules(db, projectId, id)))),
-    ];
+    // The cards and rules that allow a write by one of `scope`, as they are when this is called.
+    const allowancesOf = (scope: readonly WorkstreamId[]) => {
+      const cardsOf = named(
+        answeredEditCards(projectId).filter(
+          (a) => a.workstreamId !== null && scope.includes(a.workstreamId),
+        ),
+      );
+      return {
+        cards: cardsOf,
+        standing: [
+          ...cardsOf.filter(({ a }) => a.standing),
+          ...named(scope.flatMap((id) => ruleAllowances(listPermissionRules(db, projectId, id)))),
+        ],
+      };
+    };
+    let { cards, standing } = allowancesOf(lanes);
     const keysOf = (path: string): string[] =>
       lanes.map((l) => excusedKey(root, path, l)).filter((k) => excusedWrites.has(k));
     const unusedCardsOf = (path: string) =>
@@ -485,7 +494,7 @@ export function createWatcher(deps: {
     // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
     // is read; any other write is carded as it is. The reads run together, each within its time budget, so
     // a batch waits for its slowest file and no longer than that; the decisions below then run without
-    // awaiting, one path after the other.
+    // awaiting, one path after the other, against the cards and lanes as they are after the reads.
     const reads = new Map(
       await Promise.all(
         paths
@@ -497,6 +506,11 @@ export function createWatcher(deps: {
           .map(async (p) => [p, await stampOrReason(root, p)] as const),
       ),
     );
+    // A card withdrawn or a rule removed during the reads allows nothing now, and a lane whose run ended
+    // meanwhile has no card to use up or write to excuse.
+    forgetEndedLanes();
+    const active = new Set(listWorkstreams(db, { states: ACTIVE_STATES }).map((ws) => ws.id));
+    ({ cards, standing } = allowancesOf(lanes.filter((l) => active.has(l))));
     for (const path of paths) {
       if (standing.some(({ rel }) => rel === path)) {
         allowed.add(path);

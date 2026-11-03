@@ -16,6 +16,11 @@ import { isAbsolute } from 'node:path';
  */
 export const EXACT_WRITE_KEY = 'exactWrite';
 export const ALLOWED_WRITES_KEY = 'allowedWrites';
+/**
+ * `escalated: true` marks a card raised for a call Claude Code's classifier handed to a person. No stored
+ * rule answers such a call, so a project rule allowed on another lane's card does not release it either.
+ */
+export const ESCALATED_KEY = 'escalated';
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -27,21 +32,41 @@ const stringIn = (input: Record<string, unknown>, key: string): string | null =>
   return typeof value === 'string' ? value : null;
 };
 
-/** One `old_string` → `new_string` edit applied to `current` as Claude Code applies it; undefined when it fails. */
-function applyEdit(current: string | null, edit: unknown): string | undefined {
+/**
+ * Claude Code's `stripTrailingWhitespace`: every line of `new_string` loses the whitespace at its end
+ * (`trimEnd`, so a no-break space too), the line separators (LF, CRLF, CR) staying as they are. It runs on an
+ * edit to a file that exists, not markdown (see `editResult`).
+ */
+function stripTrailingWhitespace(text: string): string {
+  return text
+    .split(/(\r\n|\n|\r)/)
+    .map((part, index) => (index % 2 === 0 ? part.trimEnd() : part))
+    .join('');
+}
+
+/** Markdown keeps its trailing whitespace (two spaces are a line break); Claude Code tells it by extension. */
+const isMarkdown = (path: string | null): boolean => path !== null && /\.(md|mdx)$/i.test(path);
+
+/**
+ * One `old_string` → `new_string` edit applied to `current` as Claude Code applies it; undefined when it fails.
+ * `strip` says whether `new_string` loses its trailing whitespace.
+ */
+function applyEdit(current: string | null, edit: unknown, strip: boolean): string | undefined {
   if (typeof edit !== 'object' || edit === null) return undefined;
   const fields = edit as Record<string, unknown>;
   const oldText = stringIn(fields, 'old_string');
-  const newText = stringIn(fields, 'new_string');
-  if (oldText === null || newText === null) return undefined;
+  const rawNewText = stringIn(fields, 'new_string');
+  if (oldText === null || rawNewText === null) return undefined;
+  const newText = strip ? stripTrailingWhitespace(rawNewText) : rawNewText;
   // An empty old_string creates the file, or fills one that is empty; on a file with content it fails.
   if (oldText === '') return current === null || current === '' ? newText : undefined;
   if (current === null) return undefined;
   const at = current.indexOf(oldText);
   if (at < 0) return undefined;
   const replaceAll = fields['replace_all'] === true;
-  // Without replace_all an old_string found more than once is refused, and nothing is written.
-  if (!replaceAll && current.includes(oldText, at + 1)) return undefined;
+  // Without replace_all an old_string found more than once is refused, and nothing is written. Claude Code
+  // counts with split, so matches that overlap ('==' in 'a === b') are one match, not two.
+  if (!replaceAll && current.split(oldText).length - 1 > 1) return undefined;
   // A deletion takes the newline after its text with it, where one follows (Claude Code's applyEditToFile).
   const search =
     newText === '' && !oldText.endsWith('\n') && current.includes(`${oldText}\n`)
@@ -67,14 +92,16 @@ export function editResult(
   // endings: CRLF when the start of the file has more CRLF than bare LF.
   const crlf = current !== null && usesCrlf(current);
   const lf = current === null ? null : current.replaceAll('\r\n', '\n');
+  // Claude Code strips only when it can read the file, so a call that creates one keeps its whitespace.
+  const strip = current !== null && !isMarkdown(stringIn(input, 'file_path'));
   let content: string | undefined;
   if (toolName === 'Edit') {
-    content = applyEdit(lf, input);
+    content = applyEdit(lf, input, strip);
   } else {
     if (!Array.isArray(input['edits'])) return undefined;
     let next: string | null = lf;
     for (const edit of input['edits'] as unknown[]) {
-      const applied = applyEdit(next, edit);
+      const applied = applyEdit(next, edit, strip);
       if (applied === undefined) return undefined;
       next = applied;
     }

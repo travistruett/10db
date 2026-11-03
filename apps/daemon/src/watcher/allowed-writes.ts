@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, realpathSync, statSync } from 'node:fs';
+import { constants, lstatSync, realpathSync, statSync } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
@@ -160,6 +160,28 @@ function deletionStamp(root: string, path: string): string | null {
   }
 }
 
+/**
+ * Whether a directory between `root` and `path` (`root` itself excluded: the checkout may be reached by a
+ * link) is a symlink. O_NOFOLLOW only checks the last component, so without this a lane that makes `sub` a
+ * link to another directory gets 'sub/file' stamped by the content it reaches through the link. An ancestor
+ * that is missing, or not a directory, is not a link: the open then fails as before.
+ */
+function throughSymlink(root: string, path: string): boolean {
+  const rel = relative(root, path);
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+  const parts = rel.split(sep).slice(0, -1);
+  let dir = root;
+  for (const part of parts) {
+    dir = resolve(dir, part);
+    try {
+      if (lstatSync(dir).isSymbolicLink()) return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 export const STAMP_ATTEMPTS = 3;
 
@@ -177,6 +199,7 @@ export const STAMP_BUDGET_MS = 30_000;
 /**
  * One read of a regular file through a single descriptor: the file type and the metadata before and after
  * come from that descriptor (`fstat`), never from path lookups that another process could answer differently.
+ * A link in a directory above the file is refused by `stampOrReason` (`throughSymlink`) before this opens it.
  * The open is non-blocking, so a FIFO can't block the daemon on the open, and it doesn't follow a link at the
  * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The read is
  * asynchronous, a chunk at a time, so the event loop turns between chunks, and it stops at the size the first
@@ -263,6 +286,7 @@ export async function stampOrReason(
   const path = resolve(root, rel);
   const deadline = performance.now() + budgetMs;
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
+    if (throughSymlink(root, path)) return { reason: 'not-a-file' };
     try {
       const read = await readStamp(path, deadline);
       if ('stamp' in read) return read;

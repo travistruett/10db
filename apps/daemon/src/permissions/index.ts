@@ -18,6 +18,7 @@ export {
   allowedWriteHash,
   allowedWritesIn,
   editResult,
+  ESCALATED_KEY,
   EXACT_WRITE_KEY,
 } from './expected-write';
 export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
