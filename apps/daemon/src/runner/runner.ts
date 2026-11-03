@@ -2308,7 +2308,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               before.update = update;
               // Markers left in the branch fail any gate; a session resolves them first.
-              return update.kind !== 'aborted' && update.kind !== 'conflicted';
+              // A broken install fails any gate before it starts: its tools are not there.
+              return (
+                update.kind !== 'aborted' &&
+                update.kind !== 'conflicted' &&
+                update.kind !== 'install_broken'
+              );
             },
           }),
       project: projectAtCheckout(project, checkout),
@@ -2366,6 +2371,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     // The base merge left conflict markers: no gate ran, and a session resolves them.
     if (before.update?.kind === 'conflicted' && ctl.stopReason !== 'shutdown') {
       sendToMerge(id, ctl, row, before.update);
+      return;
+    }
+    // The copy's packages do not resolve what its lockfile names: no gate ran, and the task's code did
+    // not fail. The task stops with a card that says the install is broken, and no attempt is counted
+    // (a fix session could not repair it: 10db installs, and already did).
+    if (before.update?.kind === 'install_broken' && ctl.stopReason !== 'shutdown') {
+      fail(id, ctl.fence, {
+        kind: WorkstreamFailure.InstallBroken,
+        reason: before.update.note,
+      });
       return;
     }
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.

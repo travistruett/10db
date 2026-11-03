@@ -575,7 +575,8 @@
             "gate_failed",
             "session_failed",
             "retry_limit",
-            "rejected_at_limit"
+            "rejected_at_limit",
+            "install_broken"
           ]
         },
         {

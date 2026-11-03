@@ -7,6 +7,8 @@ import {
   patchBatch,
   patchWorkstream,
 } from '@10db/db';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { z } from 'zod';
 import type { BranchMerge, ResolvedConflict } from '../git';
 import { baseCards, baseConflictKey, baseKeptKey, detailOf } from './cards';
@@ -18,6 +20,7 @@ import {
   withdraw,
   type DeliveryContext,
 } from './context';
+import { checkInstall, describeBroken } from './install-health';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import { baseNotices, NOTICE_KEY } from './notices';
@@ -73,6 +76,13 @@ export type BaseUpdate =
        */
       readonly fresh?: true;
     }
+  /**
+   * The copy's packages do not match its lockfile even after the install ran again: some dependency
+   * the lockfile names does not resolve, so the gate's tools could not start. No gate runs, and the
+   * task's code is not at fault: the runner does not count an attempt
+   * (`decisions/2026-11-03-a-broken-install-is-not-a-failed-gate.md`).
+   */
+  | { readonly kind: 'install_broken'; readonly note: string }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
 
@@ -149,6 +159,7 @@ export function gateNote(update: BaseUpdate): string | null {
     case 'merged':
     case 'not_merged':
     case 'conflicted':
+    case 'install_broken':
       return update.note;
     case 'aborted':
       return null;
@@ -193,7 +204,13 @@ const JOURNAL_MAX_BYTES = 1024 * 1024;
 
 /** What the install before a gate came to: whether the packages match the lockfile, a note to add, or a stop. */
 type Installed =
-  | { readonly kind: 'done'; readonly ok: boolean; readonly note: string | null }
+  | {
+      readonly kind: 'done';
+      readonly ok: boolean;
+      readonly note: string | null;
+      /** Set when the packages still do not resolve after the install: what is missing, in a sentence. */
+      readonly broken?: string;
+    }
   | { readonly kind: 'aborted' };
 
 /** A merge that settled conflicts by itself. */
@@ -896,15 +913,32 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Installed> {
     try {
       const lockfile = await ctx.git.blobAt(path, 'HEAD', PNPM_LOCKFILE);
-      if (lockfile === null || lockfile === installedLockfile(db, batch.id))
+      if (lockfile === null) return { kind: 'done', ok: true, note: null };
+      const recorded = installedLockfile(db, batch.id);
+      // A copy that was installed (it has a node_modules, or an install passed and was recorded)
+      // must still resolve what its lockfile names, whether or not the lockfile changed: an install
+      // made outside the sandbox, or one the sandbox stopped half way, leaves a node_modules the
+      // gate's tools cannot start from. A project with neither was never installed, and is left so.
+      const expected = existsSync(join(path, 'node_modules')) || recorded !== null;
+      const before = expected ? checkInstall(path) : { kind: 'not_pnpm' as const };
+      if (lockfile === recorded && before.kind !== 'broken')
         return { kind: 'done', ok: true, note: null };
+      if (before.kind === 'broken')
+        ctx.logger.warn(
+          { batchId: batch.id, unresolved: before.unresolved, total: before.total },
+          'worktree packages do not match the lockfile; installing again',
+        );
       const installed = await ctx.dependencies.refresh({
         batch: getBatch(db, batch.id),
         project,
         path,
         signal,
+        // A broken copy is one an install is expected for, even when its node_modules is gone.
+        ...(before.kind === 'broken' ? { seeded: false } : {}),
       });
       await recordInstall(ctx, batch.id, path, installed);
+      const after = expected && installed.kind !== 'aborted' ? checkInstall(path) : null;
+      const broken = after?.kind === 'broken' ? describeBroken(after) : undefined;
       switch (installed.kind) {
         case 'aborted':
           return { kind: 'aborted' };
@@ -932,6 +966,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             kind: 'done',
             ok: false,
             note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
+            ...(broken === undefined ? {} : { broken }),
           };
         }
         case 'installed':
@@ -939,9 +974,19 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             { batchId: batch.id, logPath: installed.logPath, durationMs: installed.durationMs },
             'worktree dependencies installed',
           );
-          return { kind: 'done', ok: true, note: null };
+          return {
+            kind: 'done',
+            ok: broken === undefined,
+            note: null,
+            ...(broken === undefined ? {} : { broken }),
+          };
         case 'skipped':
-          return { kind: 'done', ok: true, note: null };
+          return {
+            kind: 'done',
+            ok: broken === undefined,
+            note: null,
+            ...(broken === undefined ? {} : { broken }),
+          };
       }
     } catch (error) {
       if (signal.aborted) return { kind: 'aborted' };
@@ -1011,6 +1056,24 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (path === null || options.forMigrations) return merged;
     const installed = await install(batch, project, path, signal);
     if (installed.kind === 'aborted' || stopped()) return stop();
+    // The packages still do not resolve what the lockfile names, so the gate's tools would not even
+    // start; the gate does not run, and the generated directories wait for a working install.
+    if (installed.broken !== undefined) {
+      if (pending !== null)
+        unregenerated(batch, path, pending, {
+          why: 'the install is broken',
+          logPath: null,
+          restored: false,
+        });
+      return {
+        kind: 'install_broken',
+        note:
+          joined(
+            merged.note,
+            `The install in this copy is broken: ${installed.broken}. 10db installed again from the lockfile and it did not bring them back${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
+          ) ?? 'The install in this copy is broken.',
+      };
+    }
     switch (merged.kind) {
       // Installed now, so the session works with the merged packages; its markers are not regenerated from.
       case 'conflicted':
@@ -1019,6 +1082,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         return { kind: 'not_merged', note: joined(merged.note, installed.note) ?? merged.note };
       case 'up_to_date':
         return { ...merged, note: joined(merged.note, installed.note) };
+      // The merge step never says so: only the install does, above.
+      case 'install_broken':
+        return merged;
       case 'merged': {
         if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
         // Its own stop says so on the card; once it has run, a stop leaves nothing undone.

@@ -29,6 +29,7 @@ export const McpToolName = {
   ReportDeviation: 'report_deviation',
   FileFollowUp: 'file_follow_up',
   RequestClaim: 'request_claim',
+  InstallDependencies: 'install_dependencies',
   Commit: 'commit',
   RecordEvidence: 'record_evidence',
   WriteHandoff: 'write_handoff',
@@ -132,6 +133,7 @@ export const McpToolInputs = {
     name: z.string().min(1),
     reason: z.string().min(1),
   }),
+  install_dependencies: z.object({ opId: OpId }),
   commit: z.object({
     opId: OpId,
     paths: z.array(z.string().min(1)).min(1).max(200),
@@ -193,6 +195,16 @@ export const McpToolOutputs = {
       instruction: z.string().nullable().default(null),
     }),
   ]),
+  install_dependencies: z.object({
+    /** True when the manifests are resolved, the lockfile is written and every package resolves. */
+    installed: z.boolean(),
+    /** The files the install changed in the copy (the lockfile among them), which the lane commits. */
+    changed: z.array(z.string()).default([]),
+    /** The install's log; null when nothing ran. */
+    logPath: z.string().nullable().default(null),
+    /** What to do next. */
+    instruction: z.string(),
+  }),
   commit: z.object({ sha: z.string().regex(/^[0-9a-f]{40}$/), alreadyCommitted: z.boolean() }),
   record_evidence: z.object({ evidenceId: EvidenceId }),
   write_handoff: z.object({ handoffId: HandoffId, instruction: z.string() }),

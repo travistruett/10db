@@ -4726,6 +4726,27 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
       });
 
+      it('stops a broken install with a card that says so, runs no gate and counts no attempt of the task’s code', async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
+        const note =
+          'The install in this copy is broken: 3 of 9 dependencies do not resolve (.: tsx)';
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-6', ['src/api/a.txt']), turn]],
+          { baseUpdates: recordingBaseUpdates({ kind: 'install_broken', note }, order) },
+        ).finally(restore);
+        expect(order).not.toContain('gate spawned');
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'FAILED',
+          failureKind: 'install_broken',
+          attempt: 0,
+        });
+        expect(ws(workstream.id).failureReason).toContain(note);
+        expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
+        const cards = listInbox(engine.store.db, { states: ['OPEN'] });
+        expect(cards.map((card) => card.body)).toEqual([expect.stringContaining('(.: tsx)')]);
+      });
+
       it('sends the work back to a session that resolves the conflict markers the base merge left, running no gate and raising no card, then gates the merged branch', async () => {
         const order: string[] = [];
         const options: (BeforeGateOptions | undefined)[] = [];

@@ -209,6 +209,81 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     expect(h.pnpm.calls()).toHaveLength(3);
   });
 
+  describe('a copy whose node_modules lost packages', () => {
+    const NEEDS_LEFT_PAD = [
+      'importers:',
+      '  .:',
+      '    dependencies:',
+      '      left-pad:',
+      '        specifier: 1.3.0',
+      '        version: 1.3.0',
+      '',
+    ].join('\n');
+
+    /** A cut whose lockfile names left-pad, installed and recorded; then the packages are pruned. */
+    async function pruned(): Promise<{ batch: BatchDto; path: string }> {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      h.commit('.gitignore', 'node_modules/\n');
+      h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
+      h.git$('push', '-q', 'origin', 'main');
+      mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      const { batch } = await opened();
+      await commitOnBatch(batch, 'src/api/alpha.txt');
+      const path = pathOf(batch);
+      expect(h.pnpm.calls()).toHaveLength(1);
+      // What the 2026-11-03 run left: node_modules is there, what the lockfile names is not.
+      rmSync(join(path, 'node_modules', 'left-pad'), { recursive: true });
+      mkdirSync(join(path, 'node_modules', '.pnpm', 'leftover'), { recursive: true });
+      return { batch, path };
+    }
+
+    it('starts the install over before the gate, though the lockfile did not change, and the gate runs', async () => {
+      const { batch, path } = await pruned();
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
+        kind: 'up_to_date',
+        note: null,
+      });
+      expect(h.pnpm.calls()).toHaveLength(2);
+      expect(existsSync(join(path, 'node_modules', '.pnpm', 'leftover'))).toBe(false);
+      expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
+    });
+
+    it('reinstalls a copy whose node_modules is gone altogether once an install was recorded', async () => {
+      const { batch, path } = await pruned();
+      rmSync(join(path, 'node_modules'), { recursive: true });
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+      expect(h.pnpm.calls()).toHaveLength(2);
+      expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
+    });
+
+    it('says the install is broken, and runs no gate, when the install does not bring the packages back', async () => {
+      const { batch } = await pruned();
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(
+        /install in this copy is broken: 1 of 1 dependencies.*\(\.: left-pad\).*no fix attempt was counted/s,
+      );
+      // The next gate tries again: nothing recorded this install as good.
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    });
+
+    it('leaves a project whose gate never needed node_modules alone', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
+      h.git$('push', '-q', 'origin', 'main');
+      const { batch } = await opened();
+      expect(h.pnpm.calls()).toHaveLength(0);
+      expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
+        kind: 'up_to_date',
+        note: null,
+      });
+      expect(h.pnpm.calls()).toHaveLength(0);
+    });
+  });
+
   it('installs at the next gate of a worktree made again for Retry', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     withLockfile();

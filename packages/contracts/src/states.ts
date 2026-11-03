@@ -293,6 +293,11 @@ export const WorkstreamFailure = {
   RetryLimit: 'retry_limit',
   /** A reviewer rejected the work with no fix attempt left. */
   RejectedAtLimit: 'rejected_at_limit',
+  /**
+   * The copy's packages do not resolve what its lockfile names, even after 10db installed again: no
+   * gate ran, and no attempt of the task's code was counted.
+   */
+  InstallBroken: 'install_broken',
 } as const;
 export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
 
