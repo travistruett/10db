@@ -77,6 +77,32 @@ describe('checkInstall', () => {
     expect(checkInstall(root)).toEqual({ kind: 'whole' });
   });
 
+  it("reads a pnpm 12 lockfile, whose env document comes before the project's own", () => {
+    install();
+    const env = [
+      '---',
+      "lockfileVersion: '9.0'",
+      'importers:',
+      '  .:',
+      '    configDependencies: {}',
+      '    packageManagerDependencies:',
+      '      pnpm:',
+      '        specifier: 12.15.0',
+      '        version: 12.15.0',
+      '',
+      '---',
+      '',
+    ].join('\n');
+    write(join(root, 'pnpm-lock.yaml'), env + LOCKFILE);
+    expect(checkInstall(root)).toEqual({ kind: 'whole' });
+    rmSync(join(root, 'apps/daemon/node_modules/zod'));
+    expect(checkInstall(root)).toMatchObject({
+      kind: 'broken',
+      missing: ['apps/daemon: zod'],
+      total: 3,
+    });
+  });
+
   it('names the dependencies that do not resolve when node_modules is missing', () => {
     write(join(root, 'pnpm-lock.yaml'), LOCKFILE);
     const result = checkInstall(root);
