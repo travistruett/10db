@@ -23,7 +23,11 @@
 - `allowedWrites` reads the stamps of a batch's card-named paths together, then decides path by path with no
   await between the decisions, against the cards and excused writes as they are after the reads.
 - A step end reads a file for another lane's excused stamp only when that lane has an excused write for the
-  path, and the reads run together, so another lane's step end waits at most one budget.
+  path, and those reads run together. A step end does not wait on its checkout's queue: it makes two rounds
+  of reads one after the other, its own lane's (`allowedWrites`) and then the others' excused stamps, each
+  within one budget, so it waits at most two budgets (60 s). A read that runs out of time gives no stamp, so
+  the file is carded (fail closed). A test pins this: a step end settles while another lane's batch is still
+  held on a stamp read.
 
 ## Why
 

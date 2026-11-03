@@ -62,15 +62,23 @@ import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import { editResult } from '../permissions';
-import { ANSWERED_CARDS_READ, stampOrReason } from './allowed-writes';
+import { ANSWERED_CARDS_READ, stampOrReason, writeStamp } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
 // The real stamp read, watched, so a test can tell which files the watcher read to stamp, and make a read
-// give 'changing' as the real one does for a file that keeps changing while it is read.
+// give 'changing' as the real one does for a file that keeps changing while it is read. `writeStamp` is
+// watched too (a step end reads another lane's excused file through it), so a test can make that read slow.
 vi.mock('./allowed-writes', async (importOriginal) => {
-  const real = await importOriginal<{ stampOrReason: typeof stampOrReason }>();
-  return { ...real, stampOrReason: vi.fn(real.stampOrReason) };
+  const real = await importOriginal<{
+    stampOrReason: typeof stampOrReason;
+    writeStamp: typeof writeStamp;
+  }>();
+  return {
+    ...real,
+    stampOrReason: vi.fn(real.stampOrReason),
+    writeStamp: vi.fn(real.writeStamp),
+  };
 });
 
 const CHANGING = { reason: 'changing' } as const;
@@ -2204,6 +2212,50 @@ describe('worktree checkouts', () => {
         const { b } = await excusedForA();
         expect(await watcher.stepEnd(b.workstream.id)).toEqual([]);
         expect(flags()).toEqual([]);
+      });
+
+      it("settles the other lane's step end within the stamp budget while A's batch still waits on a stamp", async () => {
+        const { b } = await excusedForA();
+        // A touches its file again and that batch's stamp read never finishes until released.
+        const batchStamp = vi.mocked(stampOrReason);
+        batchStamp.mockClear();
+        let release: (r: { reason: 'too-large' }) => void = () => undefined;
+        batchStamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve;
+            }),
+        );
+        touch(SENSITIVE_FILE);
+        emit(SENSITIVE_FILE);
+        const flushing = watcher.flush();
+        await vi.waitFor(() => {
+          expect(batchStamp).toHaveBeenCalledTimes(1);
+        });
+        // B's read of A's excused file is slow too: it gives up after its (here tiny) budget with no stamp.
+        const stepStamp = vi.mocked(writeStamp);
+        stepStamp.mockClear();
+        stepStamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                resolve(null);
+              }, 20);
+            }),
+        );
+        let settled = false;
+        const ending = watcher.stepEnd(b.workstream.id).finally(() => {
+          settled = true;
+        });
+        // B's step end settles although A's queued batch is still held: it never waits on the checkout queue.
+        await vi.waitFor(() => {
+          expect(settled).toBe(true);
+        });
+        expect(stepStamp).toHaveBeenCalledTimes(1);
+        // A file that could not be stamped in time fails closed: carded to B.
+        expect(await ending).toEqual([SENSITIVE_FILE]);
+        release({ reason: 'too-large' });
+        await flushing;
       });
 
       it("still cards at the other lane's step end a different write to that file", async () => {
