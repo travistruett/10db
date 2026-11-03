@@ -96,6 +96,7 @@ function cuttingRow(): { batch: BatchDto; path: string; branch: string } {
   const noJobs: DeliveryJobs = {
     run: () => undefined,
     idle: () => Promise.resolve(),
+    pending: () => 0,
     stop: () => Promise.resolve(),
   };
   const started = createBatchStarter({ ...h.ctx, jobs: noJobs }).startTask(h.addTask('Alpha').id);
@@ -218,6 +219,7 @@ describe('recoverBatches with worktrees', () => {
     const noJobs: DeliveryJobs = {
       run: () => undefined,
       idle: () => Promise.resolve(),
+      pending: () => 0,
       stop: () => Promise.resolve(),
     };
     const landing = { landing: { kind: 'branch', branch: 'feature/x' } } as const;
@@ -307,6 +309,7 @@ describe('recoverBatches with worktrees', () => {
     const noJobs: DeliveryJobs = {
       run: () => undefined,
       idle: () => Promise.resolve(),
+      pending: () => 0,
       stop: () => Promise.resolve(),
     };
     const landing = { landing: { kind: 'branch', branch: 'feature/x' } } as const;

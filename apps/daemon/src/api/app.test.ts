@@ -278,6 +278,7 @@ describe('API', () => {
       status: 'ok',
       protocolVersion: PROTOCOL_VERSION,
       startedAt: startedAt.toISOString(),
+      commit: null,
     });
   });
 

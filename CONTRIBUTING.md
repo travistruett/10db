@@ -108,7 +108,8 @@ Follow these steps in order on a new computer. Each one says how to check it wor
 To run 10db itself on your Mac, install GitHub's build of main instead of building the app: quit 10db (⌘Q),
 run `make install-app`, then open 10db. `make rollback-app` puts the previous app back. What each step does,
 and where the backups and the previous app go, is in
-[README.md](README.md#install-the-app-from-main).
+[README.md](README.md#install-the-app-from-main). The installed app also installs main's newest finished build by
+itself when no task is mid-session; Settings > Updates turns that off.
 
 ## Commits
 

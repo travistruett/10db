@@ -7,6 +7,7 @@ export const SettingsSectionKey = {
   Team: 'team',
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
+  Updates: 'updates',
   LanePermissions: 'lane-permissions',
   Accounts: 'accounts',
   Decisions: 'decisions',
@@ -78,6 +79,12 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.KeepAwake,
     group: SettingsGroup.Global,
     label: 'Keep-awake',
+    planned: null,
+  },
+  {
+    key: SettingsSectionKey.Updates,
+    group: SettingsGroup.Global,
+    label: 'Updates',
     planned: null,
   },
   {

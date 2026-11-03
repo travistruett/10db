@@ -77,7 +77,8 @@ const STUBS: Record<string, readonly string[]> = {
   ],
   pgrep: [
     count('pgrep'),
-    'if [ -n "${STUB_RUNNING:-}" ] && [ "$n" -ge "${STUB_RUNNING_FROM_CALL:-1}" ]; then',
+    'if [ -n "${STUB_RUNNING:-}" ] && [ "$n" -ge "${STUB_RUNNING_FROM_CALL:-1}" ] \\',
+    '  && [ "$n" -le "${STUB_RUNNING_UNTIL_CALL:-999999}" ]; then',
     '  echo "$STUB_RUNNING"',
     '  exit 0',
     'fi',
@@ -149,6 +150,9 @@ const STUBS: Record<string, readonly string[]> = {
     'exec /bin/mv "$@"',
   ],
   xattr: ['exit 0'],
+  // Asks the running app to quit and starts it again; only their calls matter.
+  pkill: ['exit 0'],
+  open: ['[ -z "${STUB_OPEN_FAILS:-}" ] || exit 1'],
 };
 
 export interface InstalledAppSandbox {

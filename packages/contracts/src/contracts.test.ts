@@ -10,7 +10,7 @@ describe('HealthResponse', () => {
       protocolVersion: PROTOCOL_VERSION,
       startedAt: '2026-10-13T12:00:00.000Z',
     };
-    expect(HealthResponse.parse(payload)).toEqual(payload);
+    expect(HealthResponse.parse(payload)).toEqual({ ...payload, commit: null });
   });
 
   it.each([

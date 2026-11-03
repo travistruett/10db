@@ -31,6 +31,9 @@ export function useShapeKeys(keys: ShapeKeys): void {
     const onKeyDown = (event: KeyboardEvent): void => {
       const { onPropose, onStop, answering } = latest.current;
       if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && event.shiftKey) {
+        // A modal (Convert, Remove Draft Goal, Withdraw Decision) owns the keyboard: no Propose
+        // turn gets queued behind it.
+        if (document.querySelector('[role="dialog"]') !== null) return;
         event.preventDefault();
         onPropose();
       } else if (event.key === 'Escape' && answering && !escapeIsTaken(event)) {

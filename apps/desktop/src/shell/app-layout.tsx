@@ -13,6 +13,7 @@ import { useDesktopSync } from '../desktop/sync';
 import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
+import { BuildCommit } from './build-commit';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
@@ -75,6 +76,7 @@ function FullLayout() {
           the header's empty space drags the window. */}
       <AppShell.Header data-tauri-drag-region>
         <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
+          <BuildCommit />
           <DaemonStatus />
           <KeepAwakeControl />
           <ColorSchemeToggle />

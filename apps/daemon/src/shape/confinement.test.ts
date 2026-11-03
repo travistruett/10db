@@ -29,7 +29,8 @@ beforeEach(() => {
     join(checkout, 'src'),
     dataDir,
     outside,
-    join(root, 'files'),
+    join(root, 'shapes', 'shp_own', 'files'),
+    join(root, 'shapes', 'shp_other', 'files'),
     join(root, 'tmp'),
   ])
     mkdirSync(dir, { recursive: true });
@@ -37,14 +38,15 @@ beforeEach(() => {
   writeFileSync(join(checkout, 'src', 'a.ts'), 'a');
   writeFileSync(join(dataDir, 'db.sqlite'), 'db');
   writeFileSync(join(outside, 'notes.txt'), 'outside');
-  writeFileSync(join(root, 'files', 'brief.md'), 'brief');
+  writeFileSync(join(root, 'shapes', 'shp_own', 'files', 'brief.md'), 'brief');
+  writeFileSync(join(root, 'shapes', 'shp_other', 'files', 'brief.md'), 'another conversation’s');
   symlinkSync(outside, join(checkout, 'link-out'));
   symlinkSync(join(outside, 'notes.txt'), join(checkout, 'notes-link'));
   access = {
     checkout,
     home,
     protectedReads: [dataDir, join(home, '.ssh')],
-    filesDir: join(root, 'files'),
+    filesDir: join(root, 'shapes', 'shp_own', 'files'),
     tempRoot: join(root, 'tmp'),
   };
 });
@@ -83,6 +85,14 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   [
     'a Read through a file link out',
     () => call('Read', { file_path: path('checkout/notes-link') }),
+  ],
+  [
+    'a Read of another conversation’s dropped file',
+    () => call('Read', { file_path: path('shapes/shp_other/files/brief.md') }),
+  ],
+  [
+    'a Glob of the directory holding every conversation’s files',
+    () => call('Glob', { pattern: '**/*', path: path('shapes') }),
   ],
   ['a Read by ~ that names the home', () => call('Read', { file_path: '~/.ssh/id_ed25519' })],
   [
@@ -286,7 +296,10 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
     'a Glob inside the checkout',
     () => call('Glob', { pattern: '**/*.ts', path: path('checkout/src') }),
   ],
-  ['a Read of a dropped file', () => call('Read', { file_path: path('files/brief.md') })],
+  [
+    'a Read of this conversation’s dropped file',
+    () => call('Read', { file_path: path('shapes/shp_own/files/brief.md') }),
+  ],
   ['an Agent for a reviewer', () => call('Agent', { subagent_type: 'rehearsal', prompt: 'x' })],
   ['note_heard', () => call('mcp__10db__note_heard', { items: [] })],
   ['propose_plan', () => call('mcp__10db__propose_plan', {})],
