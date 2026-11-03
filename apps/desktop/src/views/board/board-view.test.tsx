@@ -6,7 +6,7 @@ import {
   type ProjectId,
   type TaskDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
@@ -1314,6 +1314,117 @@ describe('BoardView', () => {
     expect(screen.getAllByText('Next up. Start Ready Tasks picks from here.')).toHaveLength(1);
     const paper = ready.closest('.mantine-Paper-root');
     expect(paper?.getAttribute('style')).toContain('dashed');
+  });
+
+  describe('column widths and rails', () => {
+    function doneTasks(projectId: ProjectId, n: number): TaskDto[] {
+      return Array.from({ length: n }, (_, i) =>
+        taskDto({
+          projectId,
+          title: `Done ${String(i)}`,
+          boardStatus: 'done',
+          status: 'done',
+          boardOrder: i,
+        }),
+      );
+    }
+
+    it('flexes an open column between 260 and 380 px', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      const ready = await screen.findByRole('list', { name: 'Ready tasks' });
+      const style = ready.closest('.mantine-Paper-root')?.getAttribute('style') ?? '';
+      expect(style).toContain('flex: 1 1 0');
+      expect(style).toContain('min-width: 260px');
+      expect(style).toContain('max-width: 380px');
+    });
+
+    it('shows an empty column as a rail with its label and count', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Ready tasks' });
+      const rail = screen.getByRole('group', { name: 'In progress, collapsed' });
+      expect(within(rail).getByText('In progress')).toBeTruthy();
+      expect(within(rail).getByText('0', { selector: 'p' }).textContent).toBe('0 tasks');
+      expect(rail.getAttribute('style')).toContain('width: 44px');
+      expect(screen.queryByRole('list', { name: 'In progress tasks' })).toBeNull();
+      // A rail has nothing to expand.
+      expect(within(rail).queryByRole('button')).toBeNull();
+    });
+
+    it('collapses Done to a rail, and opens it again', async () => {
+      const project = projectDto();
+      const done = doneTasks(project.id, 3);
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(done)),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Done tasks' });
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse Done' }));
+      const rail = screen.getByRole('group', { name: 'Done, collapsed' });
+      expect(within(rail).getByText('3', { selector: 'p' }).textContent).toBe('3 tasks');
+      expect(screen.queryByRole('list', { name: 'Done tasks' })).toBeNull();
+      fireEvent.click(within(rail).getByRole('button', { name: 'Expand Done' }));
+      expect(await screen.findByRole('list', { name: 'Done tasks' })).toBeTruthy();
+    });
+
+    it('collapses Icebox, and remembers the choice per project', async () => {
+      const project = projectDto();
+      const other = projectDto({ name: 'other' });
+      const icebox = boardColumnDto({ projectId: project.id, name: 'Icebox', position: 0 });
+      const parked = taskDto({
+        projectId: project.id,
+        title: 'Parked',
+        boardStatus: 'backlog',
+        boardColumnId: icebox.id,
+      });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project, other])),
+        http.get(daemonUrl('/projects/:projectId/board-columns'), () =>
+          HttpResponse.json([icebox]),
+        ),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([parked])),
+      );
+      window.localStorage.clear();
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Icebox tasks' });
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse Icebox' }));
+      await screen.findByRole('group', { name: 'Icebox, collapsed' });
+      expect(window.localStorage.getItem(`tendb.board-collapsed.${project.id}`)).toContain(
+        `human:${icebox.id}`,
+      );
+      cleanup();
+
+      // A reload keeps it collapsed.
+      renderApp('/board');
+      expect(await screen.findByRole('group', { name: 'Icebox, collapsed' })).toBeTruthy();
+      expect(screen.queryByRole('list', { name: 'Icebox tasks' })).toBeNull();
+      expect(window.localStorage.getItem(`tendb.board-collapsed.${other.id}`)).toBeNull();
+      window.localStorage.clear();
+    });
+
+    it('offers no collapse on a column that cannot be collapsed', async () => {
+      const project = projectDto();
+      const task = taskDto({ projectId: project.id, title: 'Alpha', boardStatus: 'ready' });
+      serve(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+        http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      );
+      renderApp('/board');
+      await screen.findByRole('list', { name: 'Ready tasks' });
+      expect(screen.queryByRole('button', { name: 'Collapse Ready' })).toBeNull();
+    });
   });
 
   it('a column with a card hides its hint and has a solid border', async () => {

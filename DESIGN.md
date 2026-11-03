@@ -24,8 +24,14 @@ favors legibility and calm over decoration.
 - **Board cards:** compact `Paper`s that drag from anywhere on the card, with no handle: a pointer drag
   starts after a few pixels of movement, so a click still opens the card, and Space picks a focused card
   up. A card that can't move (In progress, Blocked, Done) says why in a tooltip. The card's actions menu
-  sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns;
-  columns scroll horizontally on narrow windows.
+  sits in its corner and keeps its own clicks and keys. Human columns sit left of the system columns.
+  Open columns flex (`flex: 1 1 0`) between 260 and 380 px, so they fill the window and a card gets
+  about 300 px; the board scrolls sideways only when the open columns can't fit at 260 px. An empty
+  column folds to a 44 px rail: its label turned on its side and its count. The rail is the column's
+  drop target, so it still takes a card. Ready stays open while empty, because its foot holds Add
+  Task. The builder can collapse the human columns (Icebox among them) and Done with the chevron in
+  the column's header, and open a rail again with the chevron on it; the choice is remembered per
+  project in this browser (`localStorage`, `tendb.board-collapsed.<project id>`), not on the daemon.
   A card's face, top to bottom: the goal's title (small, dimmed, when the task is in a goal); the headline,
   or the title when the headline is empty (weight 500, at most three lines); the why (dimmed, `xs`, at most
   two lines, only when there is one); a status line (see Card state); and a row of indicators, only when

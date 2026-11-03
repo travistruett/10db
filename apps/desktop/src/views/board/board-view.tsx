@@ -41,6 +41,7 @@ import { batchTaskCount } from './batch/batch-task-count';
 import { BoardColumn } from './board-column';
 import { BoardScroll } from './board-scroll';
 import { columnHint } from './column-hints';
+import { isCollapsible, isRail, useCollapsedColumns } from './column-rail';
 import { GoalDrawer } from './goal-drawer';
 import { GoalStrip, goalsWithOpenTasks } from './goal-strip';
 import { BoardDnd } from './board-dnd';
@@ -182,6 +183,7 @@ function BoardColumns({
   const stepCheck =
     project.gateCommand === null ? null : (project.changedCheckCommand ?? project.gateCommand);
   const [showAllDone, setShowAllDone] = useState(false);
+  const { collapsed, toggle: toggleCollapsed } = useCollapsedColumns(projectId);
   // The task whose details are open, by ID, so the drawer follows the task as the board refetches.
   // The link opens its task's drawer without a state change, so it works once the board has moved to
   // the task's project; `choice` takes over as soon as the builder opens or closes a drawer.
@@ -272,6 +274,14 @@ function BoardColumns({
               label={column.label}
               count={column.tasks.length}
               hint={columnHint(column)}
+              rail={isRail(column, collapsed)}
+              {...(isCollapsible(column.key)
+                ? {
+                    onToggle: () => {
+                      toggleCollapsed(column.key);
+                    },
+                  }
+                : {})}
               footer={
                 isDone(column) && !showAllDone && column.tasks.length > DONE_LIMIT ? (
                   <Button
@@ -638,6 +648,7 @@ export function BoardView() {
 
       {project && tasks.isSuccess && (columns.data !== undefined || columns.isError) ? (
         <BoardColumns
+          key={project.id}
           projectId={project.id}
           project={project}
           layout={layout}

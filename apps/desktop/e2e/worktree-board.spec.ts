@@ -225,6 +225,25 @@ test.describe('the Board with several open batches', () => {
   for (const size of SIZES) {
     const label = `${String(size.width)}x${String(size.height)}`;
 
+    test(`flexes open columns between 260 and 380 px and folds empty ones to rails at ${label}`, async ({
+      page,
+    }) => {
+      await openBoard(page, size);
+      await expectColumnsUsable(page);
+      // Ready is open even when empty (it holds Add Task); the seeded open tasks sit in open columns.
+      const ready = page
+        .getByRole('list', { name: 'Ready tasks' })
+        .locator('xpath=ancestor::*[contains(@class, "mantine-Paper-root")][1]');
+      const open = await ready.boundingBox();
+      expect(open).not.toBeNull();
+      expect(open?.width).toBeGreaterThanOrEqual(260);
+      expect(open?.width).toBeLessThanOrEqual(381);
+      // Every rail is 44 px wide, and the label and count stay readable on it.
+      for (const rail of await page.getByRole('group', { name: /, collapsed$/ }).all()) {
+        expect((await rail.boundingBox())?.width).toBeCloseTo(44, 0);
+      }
+    });
+
     test(`keeps the columns visible at ${label}`, async ({ page }) => {
       await openBoard(page, size);
       await expectColumnsUsable(page);
