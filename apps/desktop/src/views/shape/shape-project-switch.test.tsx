@@ -45,4 +45,63 @@ describe('Shape: switching project', () => {
       await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
     ).toBeTruthy();
   });
+
+  it('never posts a send in the new project to the conversation a failed send made in the old one', async () => {
+    const alphaShape = shapeDto({ projectId: alpha.id, state: 'listening', round: 0 });
+    const betaShape = shapeDto({ projectId: beta.id, state: 'listening', round: 0 });
+    const createdFor: string[] = [];
+    const posted: string[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([])),
+      http.post(daemonUrl('/projects/:projectId/shapes'), ({ params }) => {
+        const projectId = String(params['projectId']);
+        createdFor.push(projectId);
+        return HttpResponse.json(projectId === alpha.id ? alphaShape : betaShape, {
+          status: 201,
+        });
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), ({ params }) => {
+        const shapeId = String(params['shapeId']);
+        posted.push(shapeId);
+        if (posted.length === 1) {
+          return HttpResponse.json(
+            { error: 'unavailable', message: 'Claude is away' },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json(shapeMessageDto(betaShape.id), { status: 202 });
+      }),
+      http.get(daemonUrl('/shapes/:shapeId'), ({ params }) =>
+        HttpResponse.json(
+          shapeViewDto({ shape: params['shapeId'] === alphaShape.id ? alphaShape : betaShape }),
+        ),
+      ),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', () => undefined),
+    );
+    const { router } = renderApp('/shape');
+    const trigger = await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    const input = await screen.findByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'Move density ahead of the scrollbars.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    expect(await screen.findByText('Claude is away')).toBeTruthy();
+
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('option', { name: /beta/, ...HIDDEN }));
+    await screen.findByRole('button', { name: 'Project: beta. Switch project' });
+    expect(router.state.location.pathname).toBe('/shape');
+
+    const again = screen.getByRole('textbox', { name: 'Message' });
+    fireEvent.change(again, { target: { value: 'Something for beta.' } });
+    fireEvent.keyDown(again, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(posted).toHaveLength(2);
+    });
+    expect(createdFor).toEqual([alpha.id, beta.id]);
+    expect(posted).toEqual([alphaShape.id, betaShape.id]);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${betaShape.id}`);
+    });
+  });
 });

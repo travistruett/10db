@@ -52,12 +52,21 @@ export function ConversationPane({
   const upload = useUploadShapeFile();
 
   // The conversation a first send or drop made. The screen opens it only once that succeeds, so a
-  // retry after a failure reuses it instead of leaving another empty conversation behind.
-  const created = useRef<ShapeId | null>(null);
+  // retry after a failure reuses it instead of leaving another empty conversation behind. It is
+  // remembered with its project: switching project stays on this screen, and a send there must
+  // start that project's conversation, not post into the old one.
+  const created = useRef<{ readonly projectId: ProjectId | null; readonly id: ShapeId } | null>(
+    null,
+  );
+  const createdHere = (): ShapeId | null =>
+    created.current?.projectId === projectId ? created.current.id : null;
   const ensureId = async (): Promise<ShapeId> => {
     if (shapeId !== null) return shapeId;
-    created.current ??= (await create.mutateAsync()).id;
-    return created.current;
+    const remembered = createdHere();
+    if (remembered !== null) return remembered;
+    const id = (await create.mutateAsync()).id;
+    created.current = { projectId, id };
+    return id;
   };
 
   const answering = view?.turn.running ?? false;
@@ -135,7 +144,7 @@ export function ConversationPane({
         files={(view?.files ?? []).map((f) => f.name)}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
-          const made: { id: ShapeId | null } = { id: shapeId ?? created.current };
+          const made: { id: ShapeId | null } = { id: shapeId ?? createdHere() };
           const problems = await addFiles(dropped, view?.files.length ?? 0, {
             ensureConversation: async () => {
               made.id ??= await ensureId();
