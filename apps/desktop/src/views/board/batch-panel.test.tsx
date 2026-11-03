@@ -67,15 +67,8 @@ describe('BatchPanel', () => {
     expect(abandoned).toEqual([]);
   });
 
-  it('links the pull request once it is opened, and not before', async () => {
+  it('leaves the pull request link to the drawer’s status line', async () => {
     panel(batchDto({ state: 'SHIPPED', prUrl: 'https://github.com/acme/widgets/pull/7' }));
-    expect((await screen.findByRole('link', { name: 'Pull request' })).getAttribute('href')).toBe(
-      'https://github.com/acme/widgets/pull/7',
-    );
-  });
-
-  it('shows no pull request link before one is opened', async () => {
-    panel(batch);
     await screen.findByText('10db/greetings-0a1b2c3d');
     expect(screen.queryByRole('link', { name: 'Pull request' })).toBeNull();
   });

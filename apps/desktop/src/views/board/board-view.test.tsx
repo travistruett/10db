@@ -32,6 +32,11 @@ function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(...overrides);
 }
 
+/** The task drawer opens on Overview; its form, placement and landing choices are on the Edit tab. */
+function openEditTab(drawer: HTMLElement): void {
+  fireEvent.click(within(drawer).getByRole('tab', { name: 'Edit' }));
+}
+
 function type(label: string | RegExp, value: string, scope: HTMLElement): void {
   fireEvent.change(within(scope).getByLabelText(label), { target: { value } });
 }
@@ -53,7 +58,7 @@ describe('BoardView', () => {
       const [, beta] = serveTasks('Alpha', 'Beta');
       renderApp(`/board?task=${beta?.id ?? ''}`);
       const drawer = await screen.findByRole('dialog', { name: 'Task' });
-      expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+      expect(within(drawer).getByRole('heading', { name: 'Beta' })).toBeTruthy();
     });
 
     it.each([
@@ -137,7 +142,7 @@ describe('BoardView', () => {
         const { there } = serveTwoProjects();
         renderApp(`/board?task=${there.id}`);
         const drawer = await screen.findByRole('dialog', { name: 'Task' });
-        expect(within(drawer).getByDisplayValue('Beta')).toBeTruthy();
+        expect(within(drawer).getByRole('heading', { name: 'Beta' })).toBeTruthy();
       });
 
       it('says a task that no longer exists is gone instead of showing an empty board', async () => {
@@ -468,6 +473,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Add a migration' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    openEditTab(drawer);
     expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Separate copy');
     expect(
       within(drawer).getByRole('radiogroup', { name: 'Where Add a migration runs' }),
@@ -485,6 +491,7 @@ describe('BoardView', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Plain task' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    openEditTab(drawer);
     expect(within(drawer).queryByRole('radiogroup')).toBeNull();
     expect(within(drawer).getByTestId('placement-badge').textContent).toBe('Your folder');
   });
@@ -611,6 +618,7 @@ describe('BoardView', () => {
       renderApp('/board');
       fireEvent.click(await screen.findByRole('button', { name: 'Gamma' }));
       const drawer = await screen.findByRole('dialog', { name: 'Task' });
+      openEditTab(drawer);
       expect(
         within(drawer).getByRole<HTMLInputElement>('radio', { name: 'Hold for my review' }).checked,
       ).toBe(true);
@@ -1780,6 +1788,11 @@ describe('BoardView', () => {
     boardWith([taskDto({ title: 'One', boardStatus: 'ready' })], []);
     fireEvent.click(await screen.findByRole('button', { name: 'One' }));
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByRole('heading', { name: 'One' })).toBeTruthy();
+    expect(
+      within(drawer).getByRole('tab', { name: 'Overview' }).getAttribute('aria-selected'),
+    ).toBe('true');
+    openEditTab(drawer);
     expect(within(drawer).getByLabelText<HTMLInputElement>('Title').value).toBe('One');
   });
 
@@ -2433,7 +2446,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Busy' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Busy is running: cancel it first)',
+      name: 'Hold (It is running: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2447,7 +2460,7 @@ describe('BoardView holding a started task', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for Again' }));
     const item = await screen.findByRole('menuitem', {
-      name: 'Hold (Again has already run: cancel it first)',
+      name: 'Hold (It has already run: cancel it first)',
       hidden: true,
     });
     expect(item.hasAttribute('data-disabled')).toBe(true);
@@ -2599,7 +2612,7 @@ describe('BoardView holding a started task', () => {
     });
   });
 
-  it('explains in the drawer why a running task can’t be held', async () => {
+  it('explains in a tooltip why a running task can’t be held, without naming the task', async () => {
     serveRun('RUNNING', 'Busy');
     renderApp('/board');
 
@@ -2607,7 +2620,10 @@ describe('BoardView holding a started task', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Task' });
     const hold = within(drawer).getByRole('button', { name: 'Hold' });
     expect(hold.hasAttribute('disabled')).toBe(true);
-    expect(within(drawer).getByText('Busy is running: cancel it first.')).toBeTruthy();
+    // No sentence under the buttons; the reason is the tooltip of the disabled button.
+    expect(within(drawer).queryByText(/cancel it first/)).toBeNull();
+    fireEvent.mouseEnter(within(drawer).getByTestId('hold-refused'));
+    expect(await screen.findByText('It is running: cancel it first.')).toBeTruthy();
   });
 
   it('starts and removes a held task from the drawer', async () => {

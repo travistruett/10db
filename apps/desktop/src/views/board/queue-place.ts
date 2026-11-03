@@ -25,8 +25,12 @@ function listOf(titles: readonly string[]): string {
     : `${titles.slice(0, -1).join(', ')} and ${titles.at(-1) ?? ''}`;
 }
 
-/** What the builder is told after Run Next: it is first in line, and runs once its dependencies are done. */
-export function runNextNote(title: string, waitingOn: readonly string[]): string {
-  if (waitingOn.length === 0) return `${title} is next in line for a free lane.`;
-  return `${title} will run once ${listOf(waitingOn)} ${waitingOn.length === 1 ? 'is' : 'are'} done, before the other queued tasks.`;
+/**
+ * What the builder is told after Run Next: it is first in line, and runs once its dependencies are
+ * done. The task drawer passes no title: it is the task's own, and the title is already on screen.
+ */
+export function runNextNote(title: string | null, waitingOn: readonly string[]): string {
+  const subject = title ?? 'It';
+  if (waitingOn.length === 0) return `${subject} is next in line for a free lane.`;
+  return `${subject} will run once ${listOf(waitingOn)} ${waitingOn.length === 1 ? 'is' : 'are'} done, before the other queued tasks.`;
 }

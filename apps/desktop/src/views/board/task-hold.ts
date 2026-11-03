@@ -21,17 +21,15 @@ export function isHeld(workstream: Pick<WorkstreamDto, 'state'> | undefined): bo
  * `holdTask`). Null when there is nothing to hold: no run, a finished or held one, a removed task.
  */
 export function holdOption(
-  task: Pick<TaskDto, 'title' | 'status'>,
+  task: Pick<TaskDto, 'status'>,
   workstream: WorkstreamDto | undefined,
 ): HoldOption | null {
   if (!workstream || task.status !== TaskStatus.Open) return null;
   if (isTerminal(workstream.state) || isHeld(workstream)) return null;
+  // The reasons never name the task: the card menu and the drawer already show whose it is.
   if (workstream.state !== WorkstreamState.Queued)
-    return { kind: 'refused', reason: `${task.title} is running: cancel it first.` };
+    return { kind: 'refused', reason: 'It is running: cancel it first.' };
   if (workstream.sessionCount > 0 || workstream.attempt > 0 || workstream.recoveryAttempts > 0)
-    return {
-      kind: 'refused',
-      reason: `${task.title} has already run: cancel it first.`,
-    };
+    return { kind: 'refused', reason: 'It has already run: cancel it first.' };
   return { kind: 'hold' };
 }

@@ -55,6 +55,19 @@ favors legibility and calm over decoration.
   follows, so after a review's rejection at the retry limit it names the earlier step that runs again. A run
   with no kind, or one this build doesn't know, gets a generic line. The raw reason is the line's tooltip
   on the card and in Factory, and is shown under the line in the drawer.
+- **Task drawer:** a side panel, `min(640px, 50vw)` wide and never wider, so the Board stays visible beside
+  it. Top to bottom: the headline (the title when there is none) with the why under it (no line when there
+  is none; with no headline a dimmed "Add a headline" link opens Edit); **one status line** (the run's state,
+  or the column's name once the run has finished; where the required checks stand; the Pull request and CI
+  job links; the run actions Retry, Start over, Cancel Run, Close task, Start, Remove, Run Next and Hold);
+  an alert only when the task needs the builder or has failed; then the tabs **Overview** (the default),
+  **Reviews** (with a count of rounds) and **Edit**. There is no column badge and no separate links row.
+  Overview reads What it promises (the criteria; the title above them only when there is a headline, so the
+  title shows once outside Edit), Waits on (one task a line), Delivery (branch and Abandon) and the latest
+  review. Only Edit holds the form and the sticky Cancel / Save Changes bar, so the drawer reads as a
+  record when the builder came only to look; closing it with an unsaved edit still asks first. A Hold the
+  daemon would refuse stays as a disabled button with its reason in a tooltip, and the reason never names
+  the task.
 - **Goal line:** the Board has no goal strips and no goal drawer; a goal's detail lives in Factory. Choosing a
   goal in the header's Goal select shows one compact line beside it: the status dot, "Idle · 4 in review ·
   1 ready", **Start Ready…** and **Open in Factory ›**. With All goals selected nothing shows. A goal is never a

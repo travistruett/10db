@@ -2,6 +2,7 @@ import {
   isTerminal,
   NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
+  reviewRounds,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
   TaskStatus,
@@ -14,6 +15,7 @@ import {
 } from '@10db/contracts';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Drawer,
@@ -22,10 +24,12 @@ import {
   Modal,
   MultiSelect,
   Stack,
+  Tabs,
   Text,
   Textarea,
   TextInput,
   Title,
+  Tooltip,
 } from '@mantine/core';
 import { useState } from 'react';
 import {
@@ -39,14 +43,15 @@ import {
   useStartTask,
   useStartTaskOver,
 } from '../../daemon/queries';
+import { RelativeTime } from '../factory/relative-time';
 import { StateBadge } from '../factory/state-badge';
 import { canRetry } from '../factory/workstream-state';
-import { ReviewRoundsList } from '../review/review-rounds-list';
+import { ReviewRoundsList, roundReviewer, roundVerdict } from '../review/review-rounds-list';
 import { criteriaLines } from './areas-text';
 import { closeNote } from './batch/close-note';
 import { CopyTaskId } from './copy-task-id';
 import { BatchPanel } from './batch-panel';
-import { ciLine } from './ci-line';
+import { ciLine, ciStatus } from './ci-line';
 import { FlowSelect } from './flow-select';
 import {
   draftOf,
@@ -76,6 +81,8 @@ import {
   shippedAtLimitLine,
   taskNotices,
 } from './task-state';
+
+type DrawerTab = 'overview' | 'reviews' | 'edit';
 
 const RISKS: readonly RiskTag[] = Object.values(RiskTag);
 const isRisk = (value: string): value is RiskTag => RISKS.some((r) => r === value);
@@ -169,6 +176,13 @@ export function TaskDrawer({
   });
   const live = workstream !== undefined && !isTerminal(workstream.state);
   const limitLine = shippedAtLimitLine(workstream);
+  // Overview is where a drawer opens; the form and its Save bar are on Edit alone.
+  const [tab, setTab] = useState<DrawerTab>('overview');
+  // With a headline the header says it and What it promises says the title; without one the title is
+  // the header and What it promises is only the criteria, so the title shows once.
+  const hasHeadline = task.headline !== '';
+  const rounds = reviewRounds(workstream?.steps ?? []);
+  const latestRound = rounds[0];
 
   const dirty =
     title !== task.title ||
@@ -245,34 +259,48 @@ export function TaskDrawer({
       onClose={requestClose}
       closeOnEscape={!confirmingDiscard}
       position="right"
-      size={520}
+      // A side panel: the Board stays visible beside it, so it is never wider than half the window.
+      size="min(640px, 50vw)"
       title="Task"
       padding="lg"
     >
-      <Stack gap="lg">
+      <Stack gap="md">
         <Stack gap={4}>
           <Title order={3} size="h4" fw={600}>
-            {task.headline || task.title}
+            {hasHeadline ? task.headline : task.title}
           </Title>
           {task.why ? (
             <Text size="sm" c="dimmed">
               {task.why}
             </Text>
           ) : null}
+          {hasHeadline ? null : (
+            <Anchor
+              component="button"
+              type="button"
+              size="xs"
+              c="dimmed"
+              style={{ alignSelf: 'flex-start' }}
+              onClick={() => {
+                setTab('edit');
+              }}
+            >
+              Add a headline
+            </Anchor>
+          )}
         </Stack>
-        {workstream ? (
-          <WorkstreamLine
-            task={task}
-            workstream={workstream}
-            holdable={holdOption(task, workstream)}
-            batch={batch}
-            place={place}
-            onClosed={onClose}
-            {...(onCancelRun ? { onCancelRun } : {})}
-          />
-        ) : null}
+        <StatusLine
+          task={task}
+          columnName={columnName}
+          workstream={workstream}
+          holdable={holdOption(task, workstream)}
+          batch={batch}
+          batches={batches}
+          place={place}
+          onClosed={onClose}
+          {...(onCancelRun ? { onCancelRun } : {})}
+        />
         <TaskNotices notices={taskNotices(workstream, batch)} />
-        <CiStatusLine batch={batch} batches={batches} />
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
@@ -289,173 +317,239 @@ export function TaskDrawer({
             {limitLine}
           </Alert>
         ) : null}
-        <Group gap={6}>
-          <Badge size="sm" variant="light" color="gray" tt="none" fw={500}>
-            {columnName}
-          </Badge>
-          {placementIsOpen ? <PlacementBadge task={task} /> : null}
-          {areasEditable
-            ? null
-            : task.areas.map((area) => (
-                <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
-                  {area}
-                </Badge>
-              ))}
-          {waitsOn.length > 0 ? (
-            <Text size="xs" c="dimmed">{`Waits on ${waitsOn.join(', ')}`}</Text>
-          ) : null}
-        </Group>
-        <Stack gap={4}>
-          <Text size="sm" fw={500}>
-            What it promises
-          </Text>
-          <Text size="sm">{task.title}</Text>
-          {task.acceptanceCriteria.length > 0 ? (
-            <List size="sm" spacing={2}>
-              {task.acceptanceCriteria.map((line, index) => (
-                <List.Item key={`${String(index)}:${line}`}>{line}</List.Item>
-              ))}
-            </List>
-          ) : null}
-        </Stack>
-        <DrawerLinks batch={batch} batches={batches} />
-        {batch ? (
-          <BatchPanel
-            batch={batch}
-            workstreams={workstreams}
-            gateCommand={gateCommand}
-            pullRequestLink={false}
-          />
-        ) : null}
-        {workstream ? <ReviewRoundsList steps={workstream.steps} /> : null}
-        <HeadlineField value={headline} onChange={setHeadline} />
-        <WhyField value={why} onChange={setWhy} />
-        <TextInput
-          label="Title"
-          fw={600}
-          value={title}
-          onChange={(e) => {
-            setTitle(e.currentTarget.value);
+        <Tabs
+          value={tab}
+          onChange={(value) => {
+            if (value === 'overview' || value === 'reviews' || value === 'edit') setTab(value);
           }}
-        />
-        {areasEditable ? (
-          <MultiSelect
-            label="Areas"
-            description="The parts of the project this task works in. They are fixed once it starts."
-            data={areaNames}
-            value={areas}
-            onChange={setAreas}
-          />
-        ) : null}
-        <Textarea
-          label="Description"
-          autosize
-          minRows={2}
-          maxRows={12}
-          value={description}
-          onChange={(e) => {
-            setDescription(e.currentTarget.value);
-          }}
-        />
-        <Textarea
-          label="Acceptance criteria"
-          description="One per line. A reviewer agent checks each one and asks for a test that proves it."
-          autosize
-          minRows={2}
-          maxRows={16}
-          value={criteria}
-          onChange={(e) => {
-            setCriteria(e.currentTarget.value);
-          }}
-        />
-        <FlowSelect
-          label="Flow"
-          description="The steps this task goes through."
-          placeholder="Project default"
-          clearable
-          value={flowId}
-          onChange={setFlowId}
-        />
-        <MultiSelect
-          label="Risks"
-          description="Security, sign-in or migration work gets a review of the plan before any code."
-          data={RISKS.map((r) => ({ value: r, label: RISK_LABEL[r] }))}
-          value={risks}
-          onChange={(values) => {
-            setRisks(values.filter(isRisk));
-          }}
-        />
-        {pullRequestBase === undefined ? null : landingEditable ? (
-          <LandingField
-            baseBranch={pullRequestBase}
-            value={landing}
-            error={landingError}
-            onChange={(draft) => {
-              setLanding(draft);
-              setLandingError(null);
-            }}
-          />
-        ) : (
-          <Stack gap={2}>
-            <Text size="sm" fw={500}>
-              Where it lands
-            </Text>
-            <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
-          </Stack>
-        )}
-        {placementIsOpen && placementEditable ? (
-          <Stack gap={4}>
-            <PlacementChoice
-              task={task}
-              showReason={false}
-              pending={placementPatch.isPending}
-              onChange={(workspaceMode) => {
-                placementPatch.mutate({ taskId: task.id, patch: { workspaceMode } });
-              }}
-            />
-            {placementPatch.error ? (
-              <Text size="sm" c="red" role="alert">
-                {placementPatch.error.message}
-              </Text>
-            ) : null}
-          </Stack>
-        ) : null}
-        <CopyTaskId id={task.id} />
-      </Stack>
-      {/* Pinned to the drawer's bottom edge, so Save never scrolls away. */}
-      <Group
-        justify="space-between"
-        wrap="nowrap"
-        pos="sticky"
-        bottom={0}
-        mt="xl"
-        mx="calc(var(--mantine-spacing-lg) * -1)"
-        mb="calc(var(--mantine-spacing-lg) * -1)"
-        px="lg"
-        py="md"
-        bg="var(--mantine-color-body)"
-        style={{
-          borderTop: '1px solid var(--mantine-color-default-border)',
-          zIndex: 'var(--mantine-z-index-app)',
-        }}
-      >
-        <Text
-          size="sm"
-          c={error !== null || patch.error ? 'red' : 'dimmed'}
-          role="alert"
-          lineClamp={2}
+          // Only the open tab is drawn. What was typed lives in this component, so it survives a switch.
+          keepMounted={false}
         >
-          {message ?? ''}
-        </Text>
-        <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-          <Button variant="default" onClick={requestClose}>
-            Cancel
-          </Button>
-          <Button onClick={save} loading={patch.isPending}>
-            Save Changes
-          </Button>
-        </Group>
-      </Group>
+          <Tabs.List>
+            <Tabs.Tab value="overview">Overview</Tabs.Tab>
+            <Tabs.Tab
+              value="reviews"
+              rightSection={
+                rounds.length > 0 ? (
+                  <Badge size="xs" circle variant="light" color="gray">
+                    {rounds.length}
+                  </Badge>
+                ) : null
+              }
+            >
+              Reviews
+            </Tabs.Tab>
+            <Tabs.Tab value="edit">Edit</Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="overview" pt="md">
+            <Stack gap="lg">
+              {hasHeadline || task.acceptanceCriteria.length > 0 ? (
+                <Stack gap={4}>
+                  <SectionLabel>What it promises</SectionLabel>
+                  {/* Without a headline the title is the header above; saying it twice is noise. */}
+                  {hasHeadline ? <Text size="sm">{task.title}</Text> : null}
+                  {task.acceptanceCriteria.length > 0 ? (
+                    <List size="sm" spacing={2}>
+                      {task.acceptanceCriteria.map((line, index) => (
+                        <List.Item key={`${String(index)}:${line}`}>{line}</List.Item>
+                      ))}
+                    </List>
+                  ) : null}
+                </Stack>
+              ) : null}
+              {waitsOn.length > 0 ? (
+                <Stack gap={4} data-testid="waits-on">
+                  <SectionLabel>Waits on</SectionLabel>
+                  {waitsOn.map((waitTitle, index) => (
+                    <Text key={`${String(index)}:${waitTitle}`} size="sm">
+                      {waitTitle}
+                    </Text>
+                  ))}
+                </Stack>
+              ) : null}
+              {batch ? (
+                <Stack gap={4}>
+                  <SectionLabel>Delivery</SectionLabel>
+                  <BatchPanel batch={batch} workstreams={workstreams} gateCommand={gateCommand} />
+                </Stack>
+              ) : null}
+              {latestRound ? (
+                <Group gap="xs" data-testid="latest-review">
+                  <SectionLabel>Latest review</SectionLabel>
+                  <Text size="sm" c={roundVerdict(workstream?.steps ?? [], latestRound).color}>
+                    {`${roundVerdict(workstream?.steps ?? [], latestRound).label} by ${roundReviewer(latestRound)}`}
+                  </Text>
+                  <RelativeTime at={latestRound.result.at} />
+                  <Anchor
+                    component="button"
+                    type="button"
+                    size="sm"
+                    onClick={() => {
+                      setTab('reviews');
+                    }}
+                  >
+                    Reviews <span aria-hidden>›</span>
+                  </Anchor>
+                </Group>
+              ) : null}
+              <CopyTaskId id={task.id} />
+            </Stack>
+          </Tabs.Panel>
+          <Tabs.Panel value="reviews" pt="md">
+            {workstream && rounds.length > 0 ? (
+              <ReviewRoundsList steps={workstream.steps} />
+            ) : (
+              <Text size="sm" c="dimmed">
+                Nobody has reviewed this task yet.
+              </Text>
+            )}
+          </Tabs.Panel>
+          <Tabs.Panel value="edit" pt="md">
+            <Stack gap="lg">
+              <HeadlineField value={headline} onChange={setHeadline} />
+              <WhyField value={why} onChange={setWhy} />
+              <TextInput
+                label="Title"
+                fw={600}
+                value={title}
+                onChange={(e) => {
+                  setTitle(e.currentTarget.value);
+                }}
+              />
+              {areasEditable ? (
+                <MultiSelect
+                  label="Areas"
+                  description="The parts of the project this task works in. They are fixed once it starts."
+                  data={areaNames}
+                  value={areas}
+                  onChange={setAreas}
+                />
+              ) : task.areas.length > 0 ? (
+                <Stack gap={4}>
+                  <Text size="sm" fw={500}>
+                    Areas
+                  </Text>
+                  <Group gap={6}>
+                    {task.areas.map((area) => (
+                      <Badge key={area} size="sm" variant="light" color="gray" tt="none" fw={500}>
+                        {area}
+                      </Badge>
+                    ))}
+                  </Group>
+                </Stack>
+              ) : null}
+              <Textarea
+                label="Description"
+                autosize
+                minRows={2}
+                maxRows={12}
+                value={description}
+                onChange={(e) => {
+                  setDescription(e.currentTarget.value);
+                }}
+              />
+              <Textarea
+                label="Acceptance criteria"
+                description="One per line. A reviewer agent checks each one and asks for a test that proves it."
+                autosize
+                minRows={2}
+                maxRows={16}
+                value={criteria}
+                onChange={(e) => {
+                  setCriteria(e.currentTarget.value);
+                }}
+              />
+              <FlowSelect
+                label="Flow"
+                description="The steps this task goes through."
+                placeholder="Project default"
+                clearable
+                value={flowId}
+                onChange={setFlowId}
+              />
+              <MultiSelect
+                label="Risks"
+                description="Security, sign-in or migration work gets a review of the plan before any code."
+                data={RISKS.map((r) => ({ value: r, label: RISK_LABEL[r] }))}
+                value={risks}
+                onChange={(values) => {
+                  setRisks(values.filter(isRisk));
+                }}
+              />
+              {pullRequestBase === undefined ? null : landingEditable ? (
+                <LandingField
+                  baseBranch={pullRequestBase}
+                  value={landing}
+                  error={landingError}
+                  onChange={(draft) => {
+                    setLanding(draft);
+                    setLandingError(null);
+                  }}
+                />
+              ) : (
+                <Stack gap={2}>
+                  <Text size="sm" fw={500}>
+                    Where it lands
+                  </Text>
+                  <Text size="sm">{landingLine(task, batch, pullRequestBase)}</Text>
+                </Stack>
+              )}
+              {placementIsOpen ? <PlacementBadge task={task} /> : null}
+              {placementIsOpen && placementEditable ? (
+                <Stack gap={4}>
+                  <PlacementChoice
+                    task={task}
+                    showReason={false}
+                    pending={placementPatch.isPending}
+                    onChange={(workspaceMode) => {
+                      placementPatch.mutate({ taskId: task.id, patch: { workspaceMode } });
+                    }}
+                  />
+                  {placementPatch.error ? (
+                    <Text size="sm" c="red" role="alert">
+                      {placementPatch.error.message}
+                    </Text>
+                  ) : null}
+                </Stack>
+              ) : null}
+            </Stack>
+            {/* Pinned to the drawer's bottom edge, so Save never scrolls away. It is on Edit alone. */}
+            <Group
+              justify="space-between"
+              wrap="nowrap"
+              pos="sticky"
+              bottom={0}
+              mt="xl"
+              mx="calc(var(--mantine-spacing-lg) * -1)"
+              mb="calc(var(--mantine-spacing-lg) * -1)"
+              px="lg"
+              py="md"
+              bg="var(--mantine-color-body)"
+              style={{
+                borderTop: '1px solid var(--mantine-color-default-border)',
+                zIndex: 'var(--mantine-z-index-app)',
+              }}
+            >
+              <Text
+                size="sm"
+                c={error !== null || patch.error ? 'red' : 'dimmed'}
+                role="alert"
+                lineClamp={2}
+              >
+                {message ?? ''}
+              </Text>
+              <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
+                <Button variant="default" onClick={requestClose}>
+                  Cancel
+                </Button>
+                <Button onClick={save} loading={patch.isPending}>
+                  Save Changes
+                </Button>
+              </Group>
+            </Group>
+          </Tabs.Panel>
+        </Tabs>
+      </Stack>
       <Modal
         opened={confirmingDiscard}
         onClose={() => {
@@ -483,41 +577,12 @@ export function TaskDrawer({
   );
 }
 
-/**
- * Where a pull request's required checks stand (CI-decides spec §5), as the card says it. Nothing for
- * a pull request with no required checks. Its link to the job or the checks is with `DrawerLinks`.
- */
-function CiStatusLine({
-  batch,
-  batches,
-}: {
-  readonly batch: BatchDto | undefined;
-  readonly batches: readonly BatchDto[];
-}) {
-  const ci = ciLine(batch, batches);
-  if (!ci) return null;
+/** The small caps label above an Overview section. */
+function SectionLabel({ children }: { readonly children: string }) {
   return (
-    <Text size="sm" c={ci.color} data-testid="ci-line" data-color={ci.color}>
-      {ci.line}
+    <Text size="xs" fw={600} c="dimmed" tt="uppercase">
+      {children}
     </Text>
-  );
-}
-
-/** The batch's pull request and the CI job or checks behind its status line. Nothing when it has neither. */
-function DrawerLinks({
-  batch,
-  batches,
-}: {
-  readonly batch: BatchDto | undefined;
-  readonly batches: readonly BatchDto[];
-}) {
-  const link = ciLine(batch, batches)?.link;
-  if (!batch?.prUrl && !link) return null;
-  return (
-    <Group gap="sm" data-testid="drawer-links">
-      {batch?.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
-      {link ? <ExternalLink url={link.url} label={link.label} /> : null}
-    </Group>
   );
 }
 
@@ -547,24 +612,30 @@ function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
 }
 
 /**
- * The workstream's state: for a failed one why, a way to retry it and a way to close its task; for
- * a queued one its place in line, Run Next and Hold; for a held one Start and Remove.
+ * The one status line: where the task stands, where its checks stand, the links out to its pull
+ * request and CI job, and what the builder can do about the run. For a failed run it adds why; for a
+ * queued one its place in line, Run Next and Hold; for a held one Start and Remove. The state is the
+ * run's while it is live or failed, else the column the card sits in ("In review", "Done").
  */
-function WorkstreamLine({
+function StatusLine({
   task,
+  columnName,
   workstream,
   holdable,
   batch,
+  batches,
   place,
   onClosed,
   onCancelRun,
 }: {
   readonly onCancelRun?: (workstream: WorkstreamDto) => void;
   readonly task: TaskDto;
-  readonly workstream: WorkstreamDto;
+  readonly columnName: string;
+  readonly workstream: WorkstreamDto | undefined;
   /** Hold for a started task that has not run, or why it can't be held; null when there is nothing to hold. */
   readonly holdable: HoldOption | null;
   readonly batch: BatchDto | undefined;
+  readonly batches: readonly BatchDto[];
   readonly place: number | undefined;
   readonly onClosed: () => void;
 }) {
@@ -577,31 +648,52 @@ function WorkstreamLine({
   const start = useStartTask();
   const startOver = useStartTaskOver();
   const remove = useRemoveTask();
-  const failed = canRetry(workstream.state);
+  const failed = workstream !== undefined && canRetry(workstream.state);
   // A run shipped anyway is not retried; once its pull request closed, the panel below closes it.
-  const retryable = canRetryRun(workstream, batch);
-  const startableOver = canStartOver(task, workstream, batch);
-  const closable = canCloseRun(workstream, batch) && !pullRequestClosed(batch);
+  const retryable = workstream !== undefined && canRetryRun(workstream, batch);
+  const startableOver = workstream !== undefined && canStartOver(task, workstream, batch);
+  const closable =
+    workstream !== undefined && canCloseRun(workstream, batch) && !pullRequestClosed(batch);
   // A parked task never takes a lane, so putting it first would change nothing.
-  const queued = canRunNext(task, workstream.state);
+  const queued = workstream !== undefined && canRunNext(task, workstream.state);
   const held = isHeld(workstream);
-  if (isTerminal(workstream.state) && !failed) {
-    return null;
-  }
+  // A finished run is no state to show: the column says it. A live, held or failed one is.
+  const runState = workstream !== undefined && (!isTerminal(workstream.state) || failed);
+  const ci = ciLine(batch, batches);
+  // A CI link to the pull request itself (queued, conflicting) would repeat the pull request link.
+  const ciLink = ci?.link && ci.link.url !== batch?.prUrl ? ci.link : null;
   const busy = hold.isPending || start.isPending || startOver.isPending || remove.isPending;
   const refusal = [hold, start, startOver, remove].find((m) => m.error)?.error?.message ?? null;
   return (
-    <Stack gap={4}>
-      <Group justify="space-between" wrap="nowrap">
-        <Group gap="xs" wrap="nowrap">
-          <StateBadge state={workstream.state} />
+    <Stack gap={4} data-testid="status-line">
+      <Group justify="space-between" align="center" gap="xs">
+        <Group gap="xs" align="center">
+          {runState ? (
+            <StateBadge state={workstream.state} />
+          ) : (
+            <Text size="sm" fw={500}>
+              {columnName}
+            </Text>
+          )}
           {queued && place !== undefined ? (
             <Text size="xs" c="dimmed">
               {place === 1 ? 'next in line' : `${ordinal(place)} in line`}
             </Text>
           ) : null}
+          {ci ? (
+            <>
+              <Text size="sm" c="dimmed" aria-hidden>
+                ·
+              </Text>
+              <Text size="sm" c={ci.color} data-testid="ci-line" data-color={ci.color}>
+                {ciStatus(ci.line)}
+              </Text>
+            </>
+          ) : null}
+          {batch?.prUrl ? <PullRequestLink url={batch.prUrl} /> : null}
+          {ciLink ? <ExternalLink url={ciLink.url} label={ciLink.label} /> : null}
         </Group>
-        <Group gap="xs" wrap="nowrap">
+        <Group gap="xs">
           {queued ? (
             <Button
               size="xs"
@@ -614,11 +706,11 @@ function WorkstreamLine({
               Run Next
             </Button>
           ) : null}
-          {holdable ? (
+          {holdable?.kind === 'hold' ? (
             <Button
               size="xs"
               variant="default"
-              disabled={holdable.kind === 'refused' || busy}
+              disabled={busy}
               loading={hold.isPending}
               onClick={() => {
                 hold.mutate(taskId);
@@ -626,6 +718,17 @@ function WorkstreamLine({
             >
               Hold
             </Button>
+          ) : null}
+          {holdable?.kind === 'refused' ? (
+            // A disabled button gets no pointer events, so the tooltip hangs on its wrapper. The reason
+            // never names the task: the builder is already looking at it.
+            <Tooltip label={holdable.reason} withArrow>
+              <span data-testid="hold-refused">
+                <Button size="xs" variant="default" disabled aria-description={holdable.reason}>
+                  Hold
+                </Button>
+              </span>
+            </Tooltip>
           ) : null}
           {held ? (
             <>
@@ -686,7 +789,7 @@ function WorkstreamLine({
               Start over
             </Button>
           ) : null}
-          {onCancelRun && canCancelRun(task, workstream) ? (
+          {onCancelRun && workstream && canCancelRun(task, workstream) ? (
             <Button
               size="xs"
               variant="default"
@@ -714,11 +817,6 @@ function WorkstreamLine({
           ) : null}
         </Group>
       </Group>
-      {holdable?.kind === 'refused' ? (
-        <Text size="xs" c="dimmed">
-          {holdable.reason}
-        </Text>
-      ) : null}
       {held ? (
         <Text size="xs" c="dimmed">
           Held: it keeps its worktree and takes no lane. Start it to queue it again, or Remove it to
@@ -759,7 +857,7 @@ function WorkstreamLine({
       ) : null}
       {runNext.data ? (
         <Text size="xs" c="dimmed">
-          {runNextNote(task.title, runNext.data.waitingOn)}
+          {runNextNote(null, runNext.data.waitingOn)}
         </Text>
       ) : null}
       {runNext.error ? (
