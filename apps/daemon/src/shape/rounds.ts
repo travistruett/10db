@@ -310,7 +310,10 @@ export function reconcileDraft(
 
   patchShape(ctx, shapeId, {
     round,
-    ...(shape.state === ShapeState.Listening ? { state: ShapeState.Proposed } : {}),
+    // A reopened, converted conversation is proposing again once a round makes something pending.
+    ...(shape.state === ShapeState.Listening || shape.state === ShapeState.Converted
+      ? { state: ShapeState.Proposed }
+      : {}),
   });
   return { ok: true, round, created, updated, superseded, kept, converted };
 }

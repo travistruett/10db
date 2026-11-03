@@ -46,7 +46,7 @@ export function withinOneBucket(a: TaskSize, b: TaskSize): boolean {
   return Math.abs(BUCKETS.indexOf(a) - BUCKETS.indexOf(b)) <= 1;
 }
 
-function median(values: readonly number[]): number {
+export function median(values: readonly number[]): number {
   const sorted = [...values].sort((x, y) => x - y);
   const mid = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1

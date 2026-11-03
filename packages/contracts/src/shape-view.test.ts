@@ -191,7 +191,31 @@ describe('ShapeViewDto', () => {
         },
       ],
       rehearsals: [{ proposalId: base.id, key: 'thin-scrollbars', hash: 'abc', rehearsed: false }],
+      preview: {
+        lanes: [
+          {
+            items: [
+              {
+                key: 'thin-scrollbars',
+                title: 'Thin scrollbars',
+                startHours: 0,
+                endHours: 2,
+                existing: false,
+                critical: true,
+              },
+            ],
+          },
+        ],
+        criticalPath: ['thin-scrollbars'],
+        clashes: [],
+        tasks: 1,
+        totalLaneHours: 2,
+        scheduleHours: 2,
+        nonLaneHoursPerTask: null,
+        endEstimateHours: 2,
+      },
     });
+    expect(view.preview.criticalPath).toEqual(['thin-scrollbars']);
     expect(view.proposals).toHaveLength(1);
     expect(view.findings[0]?.reviewer).toBe('scope');
     expect(view.ceremony[0]?.reasons).toEqual(['one_way_path']);

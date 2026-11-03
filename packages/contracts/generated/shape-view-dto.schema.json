@@ -2189,6 +2189,128 @@
           "rehearsed"
         ]
       }
+    },
+    "preview": {
+      "type": "object",
+      "properties": {
+        "lanes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "startHours": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "endHours": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "existing": {
+                      "type": "boolean"
+                    },
+                    "critical": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "key",
+                    "title",
+                    "startHours",
+                    "endHours",
+                    "existing",
+                    "critical"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "items"
+            ]
+          }
+        },
+        "criticalPath": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "clashes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "area": {
+                "type": "string"
+              },
+              "titles": {
+                "minItems": 2,
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "area",
+              "titles",
+              "text"
+            ]
+          }
+        },
+        "tasks": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "totalLaneHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "scheduleHours": {
+          "type": "number",
+          "minimum": 0
+        },
+        "nonLaneHoursPerTask": {
+          "anyOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "endEstimateHours": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "lanes",
+        "criticalPath",
+        "clashes",
+        "tasks",
+        "totalLaneHours",
+        "scheduleHours",
+        "nonLaneHoursPerTask",
+        "endEstimateHours"
+      ]
     }
   },
   "required": [
@@ -2201,7 +2323,8 @@
     "sizes",
     "ceremony",
     "findings",
-    "rehearsals"
+    "rehearsals",
+    "preview"
   ],
   "$defs": {
     "__schema0": {

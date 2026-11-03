@@ -130,6 +130,32 @@ export function listFinishedLaneTimes(db: DbReader, projectId: ProjectId): TaskL
   return [...laneTimesOf(db, [...new Set(rows.map((r) => r.taskId))]).values()];
 }
 
+/**
+ * For each finished task of the project with lane time, the minutes it spent outside a lane: from its
+ * first run's creation to its last run's last change, less its lane time (queueing, review waits, CI).
+ */
+export function listFinishedNonLaneMinutes(db: DbReader, projectId: ProjectId): number[] {
+  const finished = listFinishedLaneTimes(db, projectId);
+  if (finished.length === 0) return [];
+  const spans = db
+    .select({
+      taskId: schema.workstreams.taskId,
+      from: sql<string>`min(${schema.workstreams.createdAt})`,
+      to: sql<string>`max(${schema.workstreams.updatedAt})`,
+    })
+    .from(schema.workstreams)
+    .where(
+      inArray(
+        schema.workstreams.taskId,
+        finished.map((t) => t.taskId),
+      ),
+    )
+    .groupBy(schema.workstreams.taskId)
+    .all();
+  const lane = new Map(finished.map((t) => [t.taskId, t.minutes]));
+  return spans.map((s) => Math.max(0, minutesBetween(s.from, s.to) - (lane.get(s.taskId) ?? 0)));
+}
+
 export interface SimilarTask {
   readonly taskId: TaskId;
   readonly title: string;

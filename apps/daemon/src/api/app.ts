@@ -53,6 +53,7 @@ import {
   ShapeMessageInput,
   ShapeProposalId,
   ShapeRehearseInput,
+  ShapeResumeInput,
   ShapeUnpinInput,
   ShapeWithdrawInput,
   ShapeJevSettingDto,
@@ -327,6 +328,23 @@ export function createApp(deps: ApiDeps) {
         if (outcome.kind === 'converted') return c.json(outcome.result, 200);
         return c.json({ errors: outcome.errors } satisfies ShapeConvertError, 400);
       },
+    )
+    .post(
+      '/shapes/:shapeId/resume',
+      validator('json', (value): ShapeResumeInput => ShapeResumeInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.resumeShape(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json').event,
+          ),
+        ),
+    )
+    .get('/goals/:goalId/shape', (c) =>
+      c.json(deps.services.getGoalShape(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/tasks/:taskId/shape', (c) =>
+      c.json(deps.services.getTaskShape(TaskId.parse(c.req.param('taskId')))),
     )
     .post('/goals/:goalId/remove-draft', (c) => {
       deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));

@@ -78,6 +78,7 @@ import type {
   ShapeId,
   ShapeInput,
   ShapeMessageDto,
+  ShapeOfDto,
   ShapeProposalId,
   ShapeProposeResult,
   ShapeRehearseInput,
@@ -225,6 +226,14 @@ export interface ApiServices {
    * makes its proposal pending again. Throws InvalidError for any other goal.
    */
   removeDraftGoal(goalId: GoalId): void;
+  /**
+   * Open conversation and Re-plan in Shape: records the event as a note the session may cite and
+   * tells it where each converted row stands; starts no turn. Throws NotFoundError for an unknown conversation.
+   */
+  resumeShape(id: ShapeId, event: string): ShapeMessageDto;
+  /** The conversation that made a goal or a task, for its drawer's Open conversation; none for work filed by hand. */
+  getGoalShape(goalId: GoalId): ShapeOfDto;
+  getTaskShape(taskId: TaskId): ShapeOfDto;
   /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**

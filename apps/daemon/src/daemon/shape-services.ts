@@ -1,5 +1,12 @@
 import { ShapeOrigin, type ShapeConvertedRow } from '@10db/contracts';
-import { getProject, getShapeJevOptIn, questionCardRates, setShapeJevOptIn } from '@10db/db';
+import {
+  findShapeLinkOfGoal,
+  findShapeLinkOfTask,
+  getProject,
+  getShapeJevOptIn,
+  questionCardRates,
+  setShapeJevOptIn,
+} from '@10db/db';
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -17,6 +24,9 @@ export type ShapeApiServices = Pick<
   | 'convertShape'
   | 'removeDraftGoal'
   | 'withdrawShapeDecision'
+  | 'resumeShape'
+  | 'getGoalShape'
+  | 'getTaskShape'
   | 'editShapeProposal'
   | 'unpinShapeProposal'
   | 'restoreShapeProposal'
@@ -71,6 +81,13 @@ export function createShapeServices(deps: {
     removeDraftGoal: (goalId) => {
       shape.removeDraftGoal(goalId);
     },
+    resumeShape: (id, event) => shape.resume(id, event),
+    getGoalShape: (goalId) => ({
+      shapeId: findShapeLinkOfGoal(state.db, goalId)?.shapeId ?? null,
+    }),
+    getTaskShape: (taskId) => ({
+      shapeId: findShapeLinkOfTask(state.db, taskId)?.shapeId ?? null,
+    }),
     withdrawShapeDecision: (shapeId, decisionId, reason) => {
       shape.withdrawDecision(shapeId, decisionId, reason);
     },

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DecisionId, GoalId, ShapeMessageId, ShapeProposalId, TaskId } from './ids';
+import { DecisionId, GoalId, ShapeId, ShapeMessageId, ShapeProposalId, TaskId } from './ids';
 import {
   ShapeDto,
   ShapeMessageDto,
@@ -9,6 +9,7 @@ import {
 } from './shape';
 import { ShapeFileDto } from './shape-files';
 import { ShapeTaskSizeDto } from './shape-measures';
+import { ShapePreviewDto } from './shape-preview';
 import { ShapeCeremonyDto, ShapeFindingDto, ShapeRehearsalDto } from './shape-review';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §4, §6 Rows, §11.
@@ -127,6 +128,8 @@ export const ShapeViewDto = z.object({
   findings: z.array(ShapeFindingDto),
   /** Whether each pending task has been rehearsed at the content it has now (§7). */
   rehearsals: z.array(ShapeRehearsalDto),
+  /** How the project's lanes would run the pending tasks, with the work already there holding lanes first (§10.2). */
+  preview: ShapePreviewDto,
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 
@@ -190,6 +193,17 @@ export type ShapeEditInput = z.infer<typeof ShapeEditInput>;
 /** Unpin one field, or with none the whole row (a restored row is pinned as a whole). */
 export const ShapeUnpinInput = z.object({ field: z.string().min(1).optional() });
 export type ShapeUnpinInput = z.infer<typeof ShapeUnpinInput>;
+
+/**
+ * Reopens a conversation with an event injected as a note (§12). The event is what happened, in a
+ * sentence: the engine's cards (an exhausted task, Flip) word it when they offer Re-plan in Shape.
+ */
+export const ShapeResumeInput = z.object({ event: z.string().min(1).max(2000) });
+export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
+
+/** The conversation that made a goal or a task, for its drawer's Open conversation; null when none did. */
+export const ShapeOfDto = z.object({ shapeId: ShapeId.nullable() });
+export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 
 /** Withdraw Decision…: the builder's reason is required. */
 export const ShapeWithdrawInput = z.object({ reason: z.string().min(1).max(2000) });

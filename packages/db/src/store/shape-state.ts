@@ -325,6 +325,11 @@ export function findShapeLinkOfGoal(db: DbReader, goalId: GoalId): ShapeLinkRow 
   return db.select().from(schema.shapeLinks).where(eq(schema.shapeLinks.goalId, goalId)).get();
 }
 
+/** The link naming a task Convert made, or undefined for a task no conversation made. */
+export function findShapeLinkOfTask(db: DbReader, taskId: TaskId): ShapeLinkRow | undefined {
+  return db.select().from(schema.shapeLinks).where(eq(schema.shapeLinks.taskId, taskId)).get();
+}
+
 /** Deletes the links of one proposal, when Remove Draft Goal makes it pending again. */
 export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalId): void {
   ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.proposalId, proposalId)).run();

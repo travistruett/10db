@@ -73,7 +73,9 @@ import {
   ShapeConvertResult,
   ShapeInput,
   ShapeMessageInput,
+  ShapeOfDto,
   ShapeProposeResult,
+  ShapeResumeInput,
   ShapeViewDto,
   ShapeWithdrawInput,
 } from './shape-view';
@@ -214,6 +216,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-convert-result': ShapeConvertResult,
   'shape-convert-error': ShapeConvertError,
   'shape-withdraw-input': ShapeWithdrawInput,
+  'shape-resume-input': ShapeResumeInput,
+  'shape-of-dto': ShapeOfDto,
   'shape-measures-dto': ShapeMeasuresDto,
   'shape-jev-setting-dto': ShapeJevSettingDto,
   'one-way-paths-dto': OneWayPathsDto,

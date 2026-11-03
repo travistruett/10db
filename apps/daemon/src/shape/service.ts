@@ -102,6 +102,7 @@ import {
 import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
+import { convertedStateLines } from './converted-state';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
@@ -182,6 +183,12 @@ export interface ShapeService {
     shapeId: ShapeId,
     proposalIds?: readonly ShapeProposalId[],
   ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /**
+   * Reopens a conversation with an event as a note (spec §12): the note is a transcript row a
+   * proposal may cite, and with each converted row's current state it reaches the next turn. Starts no
+   * turn. Throws NotFoundError for an unknown conversation.
+   */
+  resume(shapeId: ShapeId, event: string): ShapeMessageDto;
   /**
    * The project's one-way paths (§7) in force: what the builder set, else the 10db defaults that this
    * project has. `setOneWayPaths` replaces them (an empty list included) and answers what is in force.
@@ -934,6 +941,26 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       return { status: 'started', tasks: tasks.length };
     },
 
+    resume(shapeId, event) {
+      getShape(state.db, shapeId);
+      const message = say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Event, event);
+      // The session sees what Convert made as it stands now, read-only, ahead of its next turn; a
+      // fresh session gets the same lines in its digest.
+      const lines = convertedStateLines(state.db, shapeId);
+      runtimeOf(shapeId).notes.push(
+        [
+          `[m:${message.id}] ${event}`,
+          ...(lines.length === 0
+            ? []
+            : [
+                'Converted so far, read-only (propose a change or removal only for a task marked "not started"):',
+                ...lines,
+              ]),
+        ].join('\n'),
+      );
+      return message;
+    },
+
     oneWayPaths: oneWayPathsOf,
 
     setOneWayPaths(projectId, paths) {
@@ -972,6 +999,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           rehearsing: rt?.current?.kind === 'rehearse' || queue.some((t) => t.kind === 'rehearse'),
         },
         worldOfShape(shapeId),
+        clock.now(),
       );
     },
 

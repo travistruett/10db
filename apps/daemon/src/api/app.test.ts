@@ -105,6 +105,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
+    resumeShape: track('resumeShape'),
+    getGoalShape: track('getGoalShape'),
+    getTaskShape: track('getTaskShape'),
     editShapeProposal: track('editShapeProposal'),
     unpinShapeProposal: track('unpinShapeProposal'),
     restoreShapeProposal: track('restoreShapeProposal'),
@@ -1050,6 +1053,47 @@ describe('shape routes', () => {
     ).toBe(400);
   });
 
+  it('reopens a conversation with an event, refusing an empty one', async () => {
+    const resumed: unknown[] = [];
+    const note = {
+      id: mintId('ShapeMessage'),
+      shapeId,
+      author: 'note',
+      kind: 'event',
+      body: 'Task a ran out of attempts.',
+      createdAt: AT,
+    } as const;
+    const services = stubServices({
+      resumeShape: (id, event) => {
+        resumed.push([id, event]);
+        return note;
+      },
+    });
+    const ok = await app(services).request(
+      `/shapes/${shapeId}/resume`,
+      post({ event: 'Task a ran out of attempts.' }),
+    );
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual(note);
+    expect(resumed).toEqual([[shapeId, 'Task a ran out of attempts.']]);
+    expect(
+      (await app(services).request(`/shapes/${shapeId}/resume`, post({ event: '' }))).status,
+    ).toBe(400);
+  });
+
+  it("names the conversation behind a goal's or a task's drawer, or none", async () => {
+    const goalId = mintId('Goal');
+    const taskId = mintId('Task');
+    const services = stubServices({
+      getGoalShape: (id) => ({ shapeId: id === goalId ? shapeId : null }),
+      getTaskShape: () => ({ shapeId: null }),
+    });
+    const goal = await app(services).request(`/goals/${goalId}/shape`, auth);
+    expect(await goal.json()).toEqual({ shapeId });
+    const task = await app(services).request(`/tasks/${taskId}/shape`, auth);
+    expect(await task.json()).toEqual({ shapeId: null });
+  });
+
   it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {
     const set: unknown[] = [];
     const services = stubServices({
@@ -1137,6 +1181,16 @@ describe('shape routes', () => {
       ceremony: [],
       findings: [],
       rehearsals: [],
+      preview: {
+        lanes: [{ items: [] }, { items: [] }],
+        criticalPath: [],
+        clashes: [],
+        tasks: 0,
+        totalLaneHours: 0,
+        scheduleHours: 0,
+        nonLaneHoursPerTask: null,
+        endEstimateHours: 0,
+      },
     };
     const services = stubServices({
       getShapeView: (id) => {
