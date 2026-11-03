@@ -365,7 +365,12 @@ describe('FactoryView goal detail', () => {
       },
       cost: { tokens: 412_000, dollars: 3.5, sessions: 14 },
     });
-    const task = taskDto({ id: wsA.taskId, title: 'Patch route', goalId: summaryA.goal.id });
+    const task = taskDto({
+      id: wsA.taskId,
+      title: 'Patch route',
+      goalId: summaryA.goal.id,
+      boardStatus: 'in_progress',
+    });
     serve(
       goals(goalListDto({ ...summaryA, digest })),
       workstreams(wsA),
@@ -513,6 +518,34 @@ describe('FactoryView goal detail', () => {
     expect(await screen.findByText('Only tasks of the goal Real areas.')).toBeTruthy();
     await waitFor(() => {
       expect(asked).toEqual([summaryA.goal.id]);
+    });
+  });
+
+  it('counts a ready task whose run was cancelled as ready, and enables Start Ready Tasks…', async () => {
+    const { a } = fixtures();
+    const task = taskDto({ goalId: a.id, title: 'Tried once', boardStatus: 'ready' });
+    const cancelled = workstreamDto({
+      taskId: task.id,
+      taskTitle: 'Tried once',
+      state: 'CANCELLED',
+    });
+    const summary = goalSummaryDto({ ...a, taskIds: [task.id] }, { status: 'idle' });
+    serve(
+      goals(goalListDto(summary)),
+      workstreams(cancelled),
+      tasksOf(task),
+      digests([], summary.digest),
+    );
+    renderApp('/factory');
+
+    fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
+    const region = await screen.findByRole('region', { name: 'Real areas' });
+    const row = (await within(region).findByText('Tried once')).closest('[role="listitem"]');
+    if (!(row instanceof HTMLElement)) throw new Error('Tried once is not in a list row');
+    expect(within(row).getByText(/^Ready/)).toBeTruthy();
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    await waitFor(() => {
+      expect(start.hasAttribute('disabled')).toBe(false);
     });
   });
 
@@ -851,12 +884,14 @@ describe('FactoryView task list', () => {
           id: a.taskId,
           title: 'First',
           goalId: summary.goal.id,
+          status: 'done',
           boardStatus: 'in_review',
         }),
         taskDto({
           id: b.taskId,
           title: 'Second',
           goalId: summary.goal.id,
+          status: 'done',
           boardStatus: 'in_review',
         }),
       ),

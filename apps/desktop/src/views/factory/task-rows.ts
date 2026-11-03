@@ -83,12 +83,20 @@ function runningStep(ws: WorkstreamDto): string {
   return `${STEP_LABEL[step.role]} ${String(ws.stepIndex + 1)}/${String(ws.steps.length)} · ${step.model}`;
 }
 
-function bucketOf(task: TaskDto, ws: WorkstreamDto | undefined): TaskRow['bucket'] {
-  if (task.boardStatus === BoardStatus.Done || task.status === TaskStatus.Done) return 'merged';
-  if (task.boardStatus === BoardStatus.InReview) return 'in_review';
-  if (ws) return 'in_progress';
-  return task.boardStatus === BoardStatus.Ready ? 'ready' : 'not_started';
-}
+/**
+ * Where a task sits in the bar, taken from its Board column so Factory and the Board agree. The
+ * task's status cannot say it: the daemon marks a shipped task done while its pull request is
+ * still open (In review) or its batch still ships (In progress), and a task whose run was
+ * cancelled goes back to Ready or Backlog with that run still its latest.
+ */
+const BUCKET: Readonly<Record<BoardStatus, TaskRow['bucket']>> = {
+  [BoardStatus.Done]: 'merged',
+  [BoardStatus.InReview]: 'in_review',
+  [BoardStatus.InProgress]: 'in_progress',
+  [BoardStatus.Blocked]: 'in_progress',
+  [BoardStatus.Ready]: 'ready',
+  [BoardStatus.Backlog]: 'not_started',
+};
 
 /**
  * The goal's task list: one row per task that is not cancelled, each with its state said once. The
@@ -116,9 +124,9 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
   return open.map((task): TaskRow => {
     const ws = runs.get(task.id);
     const batch = ws?.batchId ? batchById.get(ws.batchId) : undefined;
-    const bucket = bucketOf(task, ws);
+    const bucket = BUCKET[task.boardStatus];
     const label = task.headline || task.title;
-    const next = ws === undefined && bucket === 'ready' && task.id === input.nextTaskId;
+    const next = bucket === 'ready' && task.id === input.nextTaskId;
     const shared = ws?.batchId ? (perBatch.get(ws.batchId) ?? 0) > 1 : false;
     let prUrl: string | null = null;
     if (batch?.prUrl && !(ws?.batchId && linked.has(ws.batchId))) {
@@ -136,7 +144,9 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
       activity: ws?.lastActivityAt ?? null,
     };
 
-    if (!ws) {
+    // A task with no run, or one whose run ended without finishing it (cancelled), is said by its
+    // column alone; the old run's state would contradict the Board.
+    if (!ws || bucket === 'ready' || bucket === 'not_started') {
       const waits = unmet(task);
       const state =
         bucket === 'ready'

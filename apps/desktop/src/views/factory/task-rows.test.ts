@@ -93,9 +93,10 @@ describe('taskRows', () => {
   });
 
   it('links a pull request, and shows a shared one once, with every row marked shared', () => {
-    const a = taskDto({ boardStatus: 'in_review' });
-    const b = taskDto({ boardStatus: 'in_review' });
-    const c = taskDto({ boardStatus: 'in_review' });
+    // The daemon marks a shipped task done; its open pull request puts it In review on the Board.
+    const a = taskDto({ status: 'done', boardStatus: 'in_review' });
+    const b = taskDto({ status: 'done', boardStatus: 'in_review' });
+    const c = taskDto({ status: 'done', boardStatus: 'in_review' });
     const shared = batchDto({ state: 'SHIPPED', prUrl: 'https://github.com/a/b/pull/1' });
     const alone = batchDto({ state: 'SHIPPED', prUrl: 'https://github.com/a/b/pull/2' });
     const rows = taskRows(
@@ -116,6 +117,48 @@ describe('taskRows', () => {
     ]);
     expect(rows.map((r) => r.shared)).toEqual([true, true, false]);
     expect(rows[0]?.state.startsWith('In review')).toBe(true);
+    expect(rows.map((r) => r.bucket)).toEqual(['in_review', 'in_review', 'in_review']);
+  });
+
+  it('counts a done task whose batch still ships as in progress, not merged', () => {
+    const task = taskDto({ status: 'done', boardStatus: 'in_progress' });
+    const shipping = batchDto({ state: 'SHIPPING' });
+    const [row] = taskRows(
+      input({
+        tasks: [task],
+        batches: [shipping],
+        workstreams: [workstreamDto({ taskId: task.id, state: 'DONE', batchId: shipping.id })],
+      }),
+    );
+    expect(row?.bucket).toBe('in_progress');
+  });
+
+  it('counts a merged task as merged', () => {
+    const task = taskDto({ status: 'done', boardStatus: 'done' });
+    const [row] = taskRows(
+      input({ tasks: [task], workstreams: [workstreamDto({ taskId: task.id, state: 'DONE' })] }),
+    );
+    expect(row?.bucket).toBe('merged');
+  });
+
+  it('says Ready for a ready task whose last run was cancelled, and can tag it next', () => {
+    const task = taskDto({ boardStatus: 'ready' });
+    const cancelled = workstreamDto({ taskId: task.id, state: 'CANCELLED', contextPct: 40 });
+    const [row] = taskRows(input({ tasks: [task], workstreams: [cancelled], nextTaskId: task.id }));
+    expect(row?.bucket).toBe('ready');
+    expect(row?.state).toBe('Ready · next');
+    expect(row?.next).toBe(true);
+    expect(row?.running).toBeNull();
+    expect(row?.failed).toBeNull();
+  });
+
+  it('says Waits on for a backlog task whose last run was cancelled', () => {
+    const dep = taskDto({ boardStatus: 'ready' });
+    const task = taskDto({ boardStatus: 'backlog', dependsOn: [dep.id] });
+    const cancelled = workstreamDto({ taskId: task.id, state: 'CANCELLED' });
+    const rows = taskRows(input({ tasks: [dep, task], workstreams: [cancelled] }));
+    expect(rows[1]?.bucket).toBe('not_started');
+    expect(rows[1]?.state).toBe('Waits on 1');
   });
 });
 
