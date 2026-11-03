@@ -7,6 +7,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
+import { shapeKeys } from './shape-queries';
 
 // Shape spec §8 and §9: the Sizing hit rate and the shadow agreement Settings › Decisions shows, and a
 // project's "Send brainstorm messages to fast models".
@@ -44,6 +45,9 @@ export function useSetOneWayPaths(projectId: ProjectId) {
       ),
     onSuccess: (setting) => {
       queryClient.setQueryData(shapeMeasureKeys.oneWay(projectId), setting);
+      // The daemon works a conversation's ceremony out from these paths and emits no event when they
+      // change, so an open conversation asks again.
+      void queryClient.invalidateQueries({ queryKey: shapeKeys.all });
     },
   });
 }
