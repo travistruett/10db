@@ -475,6 +475,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         break;
       case 'activity':
       case 'compacted':
+      case 'background_tasks':
         break;
     }
   };
