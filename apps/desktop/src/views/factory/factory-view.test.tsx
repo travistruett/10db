@@ -181,7 +181,7 @@ describe('FactoryView goal list', () => {
     {
       name: 'a failed goal',
       summary: goal('Real areas', 'failed', { digest: { progress: progress(6, 11) } }),
-      line: 'Failed · 6 of 11 tasks done',
+      line: 'Failed · 6 of 11 tasks merged',
     },
     {
       name: 'a goal waiting on cards',
@@ -194,24 +194,29 @@ describe('FactoryView goal list', () => {
           },
         },
       }),
-      line: 'Waiting on you · 1 card · 1 of 8 tasks done',
+      line: 'Waiting on you · 1 card · 1 of 8 tasks merged',
     },
     {
       name: 'a goal that is shipping',
       summary: goal('Real areas', 'shipping', {
-        digest: { progress: progress(11, 11), openPullRequests: 3 },
+        digest: { progress: progress(8, 11, 3), openPullRequests: 3 },
       }),
-      line: 'Shipping · 11 of 11 tasks done · 3 pull requests open',
+      line: 'Shipping · 8 of 11 tasks merged · 3 in review · 3 pull requests open',
     },
     {
       name: 'a goal not started',
       summary: goal('Real areas', 'not_started', { digest: { progress: progress(0, 11) } }),
-      line: 'Not started · 11 tasks · Start Ready Tasks on the Board',
+      line: 'Not started · 11 tasks',
+    },
+    {
+      name: 'a goal with progress and nothing running',
+      summary: goal('Real areas', 'idle', { digest: { progress: progress(4, 8, 4) } }),
+      line: 'Idle · 4 of 8 tasks merged · 4 in review',
     },
     {
       name: 'a goal whose open tasks are queued',
       summary: goal('Real areas', 'queued', { digest: { progress: progress(6, 11) } }),
-      line: 'Queued · 6 of 11 tasks done · waiting for a lane',
+      line: 'Queued · 6 of 11 tasks merged · waiting for a lane',
     },
   ])('says $name in one line', async ({ summary, line }) => {
     serve(goals(goalListDto(summary)));
@@ -244,8 +249,8 @@ describe('FactoryView goal list', () => {
   });
 });
 
-function progress(done: number, total: number): GoalDigestDto['progress'] {
-  return { done, total, cancelled: [] };
+function progress(merged: number, total: number, inReview = 0): GoalDigestDto['progress'] {
+  return { merged, inReview, total, cancelled: [] };
 }
 
 describe('FactoryView goal detail', () => {
@@ -352,6 +357,7 @@ describe('FactoryView goal detail', () => {
       next: {
         taskId: wsA.taskId,
         title: 'Edit areas in the drawer',
+        headline: '',
         waitsOn: [{ taskId: wsA.taskId, title: 'Patch route' }],
       },
       deviations: {
@@ -365,8 +371,8 @@ describe('FactoryView goal detail', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    expect(await within(region).findByText('6 of 11 tasks done')).toBeTruthy();
-    expect(within(region).getByRole('progressbar', { name: 'Tasks done' })).toBeTruthy();
+    expect(await within(region).findByText('6 of 11 tasks merged')).toBeTruthy();
+    expect(within(region).getByRole('progressbar', { name: 'Tasks merged' })).toBeTruthy();
     expect(within(region).getByText(/Implementer · sonnet-5\.5@high/)).toBeTruthy();
     expect(within(region).getByText(/Patch route · step 2 of 3/)).toBeTruthy();
     expect(within(region).getByText(/Reviewer opus-5\.5/)).toBeTruthy();

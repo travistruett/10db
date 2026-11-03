@@ -57,15 +57,19 @@ favors legibility and calm over decoration.
   failed (red: a goal task failed and isn't retried), waiting on you (yellow: an open Inbox card on one of its
   tasks), waiting on someone (yellow: a card owned by another person; from phase 3), paused (orange), running
   (blue: a goal task's run is active), shipping (blue: every task is done but a pull request isn't merged),
-  not started (gray: nothing runs and tasks wait unstarted, such as "Not started · 11 tasks · Start Ready
-  Tasks on the Board") and done (green: every task not cancelled is done and merged). Gray is queued, so a
-  goal nobody has started is gray, not blue. Green is only for work that has merged: a goal with open pull
-  requests is Shipping, in blue, never green.
+  idle (gray: some task has run or finished, and nothing runs or waits in the queue, such as "Idle · 4 of 8
+  tasks merged · 4 in review"), not started (gray: no task in the goal has ever run, such as "Not started ·
+  11 tasks"; the line states a fact, it gives no instruction) and done (green: every task not cancelled is
+  done and merged). Gray is queued, idle and not started, so a goal nobody is running is gray, not blue.
+  Progress counts merged tasks and in-review tasks apart ("6 of 11 tasks merged · 2 in review"), matching
+  the Board's In review column: a task whose pull request is open is in review, never done. Green is only
+  for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
+  Decisions are those its own tasks recorded, not every decision in the project.
 - **Factory is one list, not cards:** goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
-  shipping, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
+  shipping, idle, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
   no badge and no color. A session row names its task by headline (the title when it has none) and goes to the
   Board with that task's drawer open and the Board filtered to the task's goal; a task not in a goal opens the
   Board unfiltered. The row keeps its Retry button.

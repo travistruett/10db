@@ -333,6 +333,9 @@ export const GoalStatus = {
   Queued: 'queued',
   /** Every task is done but a pull request is still open. */
   Shipping: 'shipping',
+  /** Some task has made progress, and nothing is running or queued. */
+  Idle: 'idle',
+  /** No task in the goal has ever run. */
   NotStarted: 'not_started',
   Done: 'done',
 } as const;

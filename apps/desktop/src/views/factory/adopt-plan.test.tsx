@@ -121,7 +121,7 @@ describe('Adopt a Plan…', () => {
     serve(
       goalSummaryDto(
         { title: 'Ship the importer' },
-        { status: 'running', progress: { done: 1, total: 3, cancelled: [] } },
+        { status: 'running', progress: { merged: 1, inReview: 0, total: 3, cancelled: [] } },
         2,
       ),
     );
@@ -131,7 +131,7 @@ describe('Adopt a Plan…', () => {
     await adopt();
 
     const row = await rowOf('Ship the importer');
-    expect(row.textContent).toContain('Running · 1 of 3 tasks done · 2 new');
+    expect(row.textContent).toContain('Running · 1 of 3 tasks merged · 2 new');
     expect(screen.queryByText(NO_GOALS)).toBeNull();
     expect(screen.queryByText("This plan can't be adopted yet")).toBeNull();
   });

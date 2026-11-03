@@ -187,8 +187,10 @@ function deltaRow<T extends z.ZodType>(item: T) {
 }
 
 export const GoalProgress = z.object({
-  /** Tasks with status `done`, their pull requests possibly still open. */
-  done: z.int().min(0),
+  /** Done tasks whose work has reached its base (no pull request to merge, or it merged). */
+  merged: z.int().min(0),
+  /** Done tasks whose pull request is still open or not made: the Board's In review column. */
+  inReview: z.int().min(0),
   /** Tasks that are not cancelled. */
   total: z.int().min(0),
   /** Cancelled tasks, listed in the goal's drawer. */
@@ -231,6 +233,8 @@ export type DigestWaitingOn = z.infer<typeof DigestWaitingOn>;
 export const DigestNext = z.object({
   taskId: TaskId,
   title: z.string(),
+  /** The task's headline; empty when it has none, and the desktop shows `title`. */
+  headline: z.string(),
   /** The open tasks it waits on; empty when it is ready now. */
   waitsOn: z.array(z.object({ taskId: TaskId, title: z.string() })),
 });

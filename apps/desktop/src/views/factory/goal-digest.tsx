@@ -123,7 +123,7 @@ export function GoalDigest({ live, opened }: GoalDigestProps) {
   const { data: window } = opened;
   const since = window?.since ?? null;
   const total = live.progress.total;
-  const pct = total === 0 ? 0 : (live.progress.done / total) * 100;
+  const pct = total === 0 ? 0 : (live.progress.merged / total) * 100;
   // A failed load leaves the Δ rows out rather than showing skeleton lines for ever.
   const failed = opened.error !== null;
 
@@ -138,7 +138,7 @@ export function GoalDigest({ live, opened }: GoalDigestProps) {
         <Row label="Progress">
           <Group gap="sm" wrap="nowrap">
             <Progress.Root w={160} size="sm">
-              <Progress.Section value={pct} aria-label="Tasks done" />
+              <Progress.Section value={pct} aria-label="Tasks merged" />
             </Progress.Root>
             <Text size="sm">{progressLine(live)}</Text>
           </Group>

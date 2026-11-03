@@ -12,10 +12,10 @@ export function goalsWithOpenTasks(
   return goals.filter((g) => open.has(g.goal.id));
 }
 
-/** "6 of 11 tasks": the tasks done out of those not cancelled. */
+/** "6 of 11 tasks": the tasks merged out of those not cancelled; a task in review is not counted. */
 export function progressLine(summary: GoalSummaryDto): string {
-  const { done, total } = summary.digest.progress;
-  return `${String(done)} of ${String(total)} ${total === 1 ? 'task' : 'tasks'}`;
+  const { merged, total } = summary.digest.progress;
+  return `${String(merged)} of ${String(total)} ${total === 1 ? 'task' : 'tasks'}`;
 }
 
 /** One slim line for a goal: the status dot, its title and how far along it is. Opens the goal's drawer. */

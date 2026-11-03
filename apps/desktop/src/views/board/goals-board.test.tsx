@@ -34,15 +34,15 @@ const greetings = goalSummaryDto(
     objective: 'Every visitor is greeted by name.',
     taskIds: [hello.id, named.id, shipped.id],
   },
-  { status: 'running', progress: { done: 1, total: 3, cancelled: [] } },
+  { status: 'running', progress: { merged: 1, inReview: 0, total: 3, cancelled: [] } },
 );
 const farewells = goalSummaryDto(
   { ...inProject, title: 'Say farewell', taskIds: [bye.id] },
-  { status: 'not_started', progress: { done: 0, total: 1, cancelled: [] } },
+  { status: 'not_started', progress: { merged: 0, inReview: 0, total: 1, cancelled: [] } },
 );
 const cleanup = goalSummaryDto(
   { ...inProject, title: 'Tidy up', taskIds: [swept.id] },
-  { status: 'done', progress: { done: 1, total: 1, cancelled: [] } },
+  { status: 'done', progress: { merged: 1, inReview: 0, total: 1, cancelled: [] } },
 );
 
 const withGoal = (task: TaskDto, goalId: GoalId): TaskDto => ({ ...task, goalId });

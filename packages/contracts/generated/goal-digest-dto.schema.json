@@ -16,6 +16,7 @@
         "running",
         "queued",
         "shipping",
+        "idle",
         "not_started",
         "done"
       ]
@@ -35,7 +36,12 @@
     "progress": {
       "type": "object",
       "properties": {
-        "done": {
+        "merged": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "inReview": {
           "type": "integer",
           "minimum": 0,
           "maximum": 9007199254740991
@@ -66,7 +72,8 @@
         }
       },
       "required": [
-        "done",
+        "merged",
+        "inReview",
         "total",
         "cancelled"
       ]
@@ -273,6 +280,9 @@
             "title": {
               "type": "string"
             },
+            "headline": {
+              "type": "string"
+            },
             "waitsOn": {
               "type": "array",
               "items": {
@@ -296,6 +306,7 @@
           "required": [
             "taskId",
             "title",
+            "headline",
             "waitsOn"
           ]
         },
@@ -503,6 +514,7 @@
                 "running",
                 "queued",
                 "shipping",
+                "idle",
                 "not_started",
                 "done"
               ]
