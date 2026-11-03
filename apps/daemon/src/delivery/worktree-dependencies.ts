@@ -8,23 +8,13 @@ import { raiseGateHostCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
-<<<<<<< ad7ed0912c9083d612c027d67000efa2967bf1ee
 import {
   checkInstall,
   madeByAnotherPnpm,
-  PNPM_LOCKFILE,
-  removeBrokenInstall,
-} from './install-health';
-||||||| db9a11d
-import { checkInstall, PNPM_LOCKFILE, removeBrokenInstall } from './install-health';
-=======
-import {
-  checkInstall,
   madeFromAnotherStore,
   PNPM_LOCKFILE,
   removeBrokenInstall,
 } from './install-health';
->>>>>>> a793f191930d56295afd996ba54c38c48ad4031c
 
 export { PNPM_LOCKFILE };
 
@@ -168,27 +158,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
       if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
-<<<<<<< ad7ed0912c9083d612c027d67000efa2967bf1ee
-||||||| db9a11d
-      // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
-      // pnpm and store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and the
-      // copy is left holding a fifth of its packages. A copy whose dependencies do not resolve starts
-      // over, as the first install of a copy does, which works. Sources are not touched.
-      if (checkInstall(path).kind === 'broken') removeBrokenInstall(path);
-=======
       const env = deps.sessionEnv(project);
-      // pnpm repairs an install that is out of date, but not one that is pruned or was made from
-      // another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and
-      // the copy is left holding a fraction of its packages. A sandboxed install is given a store of
-      // its own in its run's temp dir, so a seed from the main checkout, or an earlier run's install,
-      // names another store even when every dependency resolves. Either starts over, as the first
-      // install of a copy does, which works. Sources are not touched.
-      if (
-        checkInstall(path).kind === 'broken' ||
-        madeFromAnotherStore(path, env['pnpm_config_store_dir'])
-      )
-        removeBrokenInstall(path);
->>>>>>> a793f191930d56295afd996ba54c38c48ad4031c
       const logPath = join(
         deps.dataDir,
         'logs',
@@ -210,13 +180,20 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         removeBrokenInstall(path);
       };
       // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
-      // pnpm: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and the copy
-      // is left holding a fifth of its packages. A copy whose dependencies do not resolve, or whose
-      // install another pnpm made (a seed cloned from a main checkout the builder installed with
-      // their own pnpm), starts over, as the first install of a copy does, which works. Sources are
-      // not touched.
+      // pnpm or from another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses
+      // part way, and the copy is left holding a fraction of its packages. A sandboxed install is
+      // given a store of its own in its run's temp dir, so a seed from the main checkout, or an
+      // earlier run's install, names another store even when every dependency resolves. A copy whose
+      // dependencies do not resolve, or whose install another pnpm made (a seed cloned from a main
+      // checkout the builder installed with their own pnpm), or from another store, starts over, as
+      // the first install of a copy does, which works. Sources are not touched.
       const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
-      if (madeByAnotherPnpm(path, version) || checkInstall(path).kind === 'broken') startOver();
+      if (
+        madeByAnotherPnpm(path, version) ||
+        madeFromAnotherStore(path, env['pnpm_config_store_dir']) ||
+        checkInstall(path).kind === 'broken'
+      )
+        startOver();
       const install = async (): Promise<DependencyRefresh> => {
         const result = await deps.gate.run({
           project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
