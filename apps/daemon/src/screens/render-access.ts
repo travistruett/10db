@@ -7,7 +7,10 @@
 // Every GET the daemon serves is named below, allowed or refused, and a test fails for one that is
 // in neither, so a new route has to be decided before a screen can reach it.
 
-/** A route a screen may read. Each is a plain database read: nothing it answers writes a row. */
+/**
+ * A route a screen may read. None writes anything. Each is a database read, but for `/shapes/:shapeId`:
+ * its view also lists the repository's tracked files with `git ls-files`, a read of the checkout.
+ */
 export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects' },
   { route: '/projects/:projectId/tasks' },

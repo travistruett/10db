@@ -327,44 +327,57 @@ not by the token.
 | `see_screen(screen, taskId?, width?, height?)` | session            | a screenshot of one of 10db's own screens (`factory`, `board`, `inbox`, `plan`, or `task` with a `taskId`), at a window of 480 to 1600 by 400 to 2000 px (default 1200 by 900), with the project's real data as it is now; answers an image, or a refusal that says why (below)                                                                                    |
 
 **Seeing the app: `see_screen`** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
-**Built.**
+**Built, not yet proven live** (see Open, below).
 
 - **The app's own window draws it, in a hidden frame of itself.** The installed app ships no browser engine of its
   own for this (the e2e suite's Playwright WebKit is not in the bundle). A call becomes a request in the daemon's
   broker; the window, which long-polls `POST /screens/claim`, loads the app in a hidden `<iframe>`
-  (`sandbox="allow-scripts allow-same-origin"`, `inert`, off-screen) at the screen's route, waits until nothing
-  is loading, draws the frame to an image with `html-to-image` and answers with it (`POST /screens/:id/image`) or
-  with why it could not (`…/refuse`). Nothing is stored for a request: asking writes no row. With the window
-  closed, the call is refused at once, saying so. Not chosen: a Tauri webview snapshot (needs `unsafe` Rust, which
+  (`sandbox="allow-scripts allow-same-origin"`, `inert`, transparent, behind the window) at the screen's route,
+  waits until nothing is loading, draws the frame to an image with `html-to-image` and answers with it
+  (`POST /screens/:id/image`) or with why it could not (`…/refuse`). Nothing is stored for a request: asking
+  writes no row. Two refusals come at once. With no window asking for work (the app has quit), the daemon refuses.
+  A window that is hidden, closed (which only hides it, §3) or minimised keeps asking, and a hidden WebKit page
+  runs no animation frame, which the drawing waits on, so the window itself refuses when
+  `document.visibilityState` isn't `visible`, and the session asks the builder to bring 10db forward. A window
+  fully covered by another counts as hidden only if WebKit says so. Not chosen: a Tauri webview snapshot (needs `unsafe` Rust, which
   `src-tauri` forbids; still the upgrade path behind the same capture seam), capturing the real window (shows only
   what is on screen, needs Screen Recording) and downloading a WebKit build (a second browser the daemon drives).
-- **Live data, as it is now,** for the conversation's project; never a fixture.
+- **Live data, as it is now,** for the conversation's project; never a fixture. The Inbox reads every project's
+  cards, so a frame shows only that project's: a session held to one project sees nothing of another.
 - **It can change nothing.** The frame runs under a **render token**, minted for that one request and dead when it
   is answered, which the daemon's auth middleware holds to `GET` of the routes a screen shows
   (`screens/render-access.ts`): never a write, the digest (it moves a goal's last-opened mark, the 2026-11-02
-  design review's refused read), the event stream, `/mcp`, or a GET that runs a command (`/system`, an account's
-  `identity`, a lane's `changes`). Every GET the daemon serves is named there, allowed or refused with a reason, and
-  a test fails for one that is in neither. The frame's own client sends reads only, and it draws the screen alone
+  design review's refused read), the event stream, `/mcp`, or a GET that probes the machine or runs a command
+  against an account or a lane (`/system`, an account's `identity`, a lane's `changes`). One allowed read runs a
+  command: `GET /shapes/:id`, the Plan screen's own view, lists the checkout's tracked files with `git ls-files`,
+  which reads and writes nothing. Every GET the daemon serves is named there, allowed or refused with a reason,
+  and a test fails for one that is in neither. A kept picture is refused too, so a Plan screen draws a line in each
+  screenshot's place, not the picture. The frame's own client sends reads only, and it draws the screen alone
   (no shell, no stream, no write of the builder's remembered project). **Tests, red first:** with the token, every
   allowed route answers and the database dump is identical before and after; each write, the digest, `/system`,
   `identity`, `changes`, the stream and the screen routes answer 403; the token is dead once the request is
   answered; a screenshot changes no task, batch, card, goal view mark, setting or decision; a control shows the
   dump does see a settings write.
-- **What comes back is checked by its bytes** (a PNG or a JPEG with the size it says, no larger than the window
-  asked for, at most 1.5 MB), kept under the conversation's `screens/` directory, and written as a `screen`
+- **What comes back is checked by its bytes** (a whole PNG or JPEG, to its IEND or EOI, with the size it says, no
+  larger than the window asked for, at most 1.5 MB; the window has already refused a drawing of one flat colour),
+  kept under the conversation's `screens/` directory, and written as a `screen`
   transcript row that names it, with a dimmed `see_screen · board · 1200×900` line before it. **The builder sees
   the same image the session was given:** the transcript draws the row as the picture (read with the UI token, as
-  a data URL). A picture that is wrong, a screen that fails to load or does not finish in 15 s, a crashed view, a
-  task outside the project, and a window that is closed are each a refusal with the reason (and a dimmed
+  a data URL). A picture that is wrong or blank, a screen that fails to load or does not finish in 15 s, a crashed
+  view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
   `see_screen · refused · …` line), never a blank image.
 - **Budget.** At most 12 screens a conversation; each is at most 1600 by 2000 px; the system prompt says to ask for
   the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
   (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
   not carried over.
-- **Open.** Whether `html-to-image` draws the Tauri WKWebView's real screens faithfully (fonts, theme variables) and
-  that Claude Code passes the image block to the model are checked by hand in the installed app: the Tauri window
-  has no scripted coverage. Task `tsk_01a18a08-e391` (a task's copy previewed live) can point the same frame and
-  broker at its dev server.
+- **Open.** `e2e/see-screen.spec.ts` runs the real capture through the real host in Playwright WebKit (Board and
+  Plan: the picture in the conversation has the width asked for and many colours), which is the nearest thing to
+  WKWebView a script reaches. It asserts neither that a picture is faithful nor that the installed app's CSP lets
+  it work, so the Tauri window itself is still checked by hand. That Claude Code hands the image block to the model
+  is `test/shape-session.live.test.ts` under `TENDB_LIVE_CLAUDE=1`, which a lane can't run. So is the refusal of a
+  hidden window on a real one: the host's test fakes `visibilityState`. Until those have been seen, treat
+  `see_screen` as built and unproven live. Task `tsk_01a18a08-e391` (a task's copy previewed live) can point the
+  same frame and broker at its dev server.
 
 **Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
 touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You

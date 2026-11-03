@@ -96,6 +96,12 @@ were made.
 - It spawns lanes' `claude` processes, the gate, `git`, `gh`, `security`, `caffeinate` and `ps`.
 - It listens on `127.0.0.1` only. Every route needs the UI token except `/health` and `/mcp`, and `/mcp` needs
   a session's token. `/builder/mcp` needs the UI token (§4.11). CORS limits browsers only, so a local process with the token is a full client.
+- A **render token** is the one other token the routes take. The daemon mints one for each screen a Shape session
+  asks to see (Shape spec §5.5), and it dies when that request is answered. It reads the `GET` routes named in
+  `screens/render-access.ts` and nothing else, every other request answering 403 (`/mcp` answers 401: it is no
+  session's token). `/screens/*` takes the UI token only, so a frame can't claim, answer or refuse a screen, and
+  a frame can't read a kept screenshot (`GET /shapes/:id/screens/:name`). The allowed reads write nothing, and
+  one runs a command: `GET /shapes/:id` lists the checkout's tracked files with `git ls-files`.
 - Its risk is being a confused deputy for a lane (§5).
 
 ### 4.2 The desktop app

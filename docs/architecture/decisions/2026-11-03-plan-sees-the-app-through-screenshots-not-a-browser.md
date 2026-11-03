@@ -20,9 +20,12 @@ conversation. The session gets no browser, no click and no command.
   the app in a hidden, sandboxed `<iframe>` at the route, waits until nothing is loading, captures the frame
   with `html-to-image` (the frame's DOM and styles drawn to a canvas) and posts the picture to
   `POST /screens/:id/image`, or a reason to `…/refuse`. No request is stored: it lives in memory until answered,
-  so asking for a screen writes no row.
+  so asking for a screen writes no row. The capture draws once and encodes that one canvas, as a PNG or, when
+  that is too big, a JPEG.
 - **Live data.** The frame reads the conversation's project through the daemon as it is now, not a fixture. A
   fixture would show the session a screen the builder does not have and could not be told from the real one.
+  The Inbox's read spans projects, so a frame filters it to the conversation's project, and a card of another
+  project (perhaps another account's) never reaches the picture.
 - **Read-only, by the daemon and again by the frame.**
   - Each request carries its own **render token**, valid until that request is answered. The daemon's auth
     middleware lets it make a `GET` of a route a screen shows, and nothing else: any other method, any other
@@ -36,23 +39,40 @@ conversation. The session gets no browser, no click and no command.
     `?recheck=1` runs the probes again on every read) and `GET /workstreams/:id/changes` (runs git in a lane's
     checkout). All are refused, and so is every route no screen draws (settings, accounts, benchmarks, the
     event log). The drawer's Changes section therefore shows its own "can't be read" answer in a screenshot.
+  - **One allowed read runs a command.** `GET /shapes/:id`, the Plan screen's own view, lists the checkout's
+    tracked files with `git ls-files` to work out one-way paths. It writes nothing, so it stays: Plan's screen
+    can't be drawn without it, and refusing it would be refusing the screen. The rule is that a screen may not
+    change anything, not that no read may touch git.
+  - **A kept picture is refused.** `GET /shapes/:id/screens/:name` is not for a render token: it would widen the
+    token for a picture of a picture, which spends what one image may hold. A frame draws a dimmed line ("A
+    screenshot of the Board at 900×900.") in its place and asks for nothing.
   - The frame's client is built with `readOnly`: its `fetch` rejects any method but GET before a request leaves
     the window. The frame renders the screen alone (no shell, so no tray, notification, window theme or
     keep-awake call), draws the project it was told to without writing the builder's remembered selection,
     and opens no event stream.
   - The `<iframe>` is `sandbox="allow-scripts allow-same-origin"` (no form, popup or top navigation),
-    `inert`, `aria-hidden`, out of focus, `pointer-events: none` and off-screen. The window listens only to
+    `inert`, `aria-hidden`, out of focus, `pointer-events: none`, fully transparent and behind the window, not
+    outside it: WebKit is understood to slow the timers and animation frames of a subframe outside the viewport
+    (recalled from its source, not observed here), which would hold a drawer's transition back. The window
+    listens only to
     messages from that frame, from the app's own origin. The frame's URL is parsed with care: it believes a
     known screen, ids that are ids and the daemon's own `http://127.0.0.1:<port>` and nothing else.
   - A test dumps every table of a started daemon before and after: reading every allowed route with the token
     changes no row at all, and a screenshot changes no task, batch, card, goal view mark, setting or decision.
     A control shows the dump does see a write.
 - **Refusals say why.** A screen that cannot be drawn is the tool's error with a reason, never a blank or broken
-  image: the window is not open (nothing asked for work lately), the frame did not finish loading in 15 s, the
-  screen failed to load (a 401 or 5xx on its data), the view crashed, the capture failed, the picture is not a
-  PNG or JPEG by its bytes, is not the size it says, is larger than the window asked for, or is too large to
-  keep; the task is not in this project; the conversation already holds 12 screens. Each writes
-  `see_screen · refused · <reason>` as a dimmed line.
+  image: no window is open (nothing asked for work lately), the window is hidden, the frame did not finish loading
+  in 15 s, the screen failed to load (a 401 or 5xx on its data), the view crashed, the capture failed or came out
+  one flat colour, the picture is not a whole PNG or JPEG by its bytes (a PNG to its IEND, a JPEG to its EOI), is
+  not the size it says, is larger than the window asked for, or is too large to keep; the task is not in this
+  project; the conversation already holds 12 screens. Each writes `see_screen · refused · <reason>` as a dimmed
+  line.
+- **A hidden window refuses at once, from the window.** Closing 10db's window only hides it (spec §3), and a
+  hidden window keeps long-polling, so the daemon cannot tell it from a visible one. A hidden WebKit page runs no
+  animation frame, which `html-to-image` waits on (from WebKit's behaviour, not observed here), so a capture there
+  would hang until the 15 s timeout and blame the screen. The host checks `document.visibilityState` before it
+  draws, and refuses with a reason that tells the session to ask the builder to bring 10db forward; a window
+  hidden part-way through a draw gets the same reason, not the timeout's.
 - **Image budget and context.** One picture is at most the window asked for (so at most 1600 × 2000, inside
   the API's 2000 px limit for many images), at most 1.5 MB decoded, a PNG, or a JPEG at quality 0.85 when the
   PNG is bigger. A conversation takes at most 12 screens, and the tool's description and the system prompt tell
@@ -91,9 +111,23 @@ conversation. The session gets no browser, no click and no command.
 
 The broker, the token rule, the image checks, the tool, the MCP image result, the hook's refusals, the frame's
 parameters, sandbox and read-only client, the host's answers and the transcript image are tested, and a started
-daemon drives a conversation's `see_screen` through a window played over HTTP with the database dump above. **Not
-proven here:** that `html-to-image` draws the real screens faithfully in the Tauri WKWebView (fonts, Mantine's
-CSS variables, `content-visibility`) and that Claude Code hands the image block to the model; the Tauri window has
-no scripted coverage, so both are checked by hand in the installed app. Until they have been, treat `see_screen`
-as built but unproven live. `tsk_01a18a08-e391` (preview a task's copy live with its own dev server) can reuse
+daemon drives a conversation's `see_screen` through a window played over HTTP with the database dump above, on a
+real PNG. Every one of those fakes a seam of the drawing, so `e2e/see-screen.spec.ts` runs it with nothing faked: a
+session on the fake adapter asks, the real host draws in Playwright WebKit, and the picture in the conversation
+must have the width asked for and many colours, for the Board and for a Plan screen that already holds a
+screenshot.
+
+**Not proven here, and what would prove it:**
+
+- That spec needs WebKit, which a lane's sandbox can't launch, so its first run is the gate's. It also says
+  nothing of fidelity (fonts, Mantine's CSS variables) and it runs without the Tauri CSP.
+- Claude Code handing the image block to the model is `test/shape-session.live.test.ts` under
+  `TENDB_LIVE_CLAUDE=1`: only the model can say what colours the picture holds. It type-checks; a lane can't run it.
+- That a hidden WKWebView really reports `hidden` and stops its animation frames, and whether a fully covered
+  window does, are read from WebKit's behaviour. The host's test fakes `visibilityState`.
+- That the transcript's `content-visibility` blocks would have come out blank is reasoned, not seen; the frame
+  turns `content-visibility` off so it can't happen either way.
+
+Until the installed app has been checked by hand and the live test has passed, treat `see_screen` as built but
+unproven live. `tsk_01a18a08-e391` (preview a task's copy live with its own dev server) can reuse
 the broker and the `capture` seam, pointing the frame at its dev server's origin.
