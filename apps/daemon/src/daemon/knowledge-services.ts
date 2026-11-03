@@ -1,5 +1,6 @@
 import {
   InvalidError,
+  KnowledgeState,
   ProposalKind,
   type DecisionItem,
   type KnowledgeDryRunDto,
@@ -18,15 +19,13 @@ import {
   getProject,
   getProposalDto,
   listProposals,
-  retirePrinciple,
-  withdrawDecision,
-  withdrawPrinciple,
   type WriteContext,
 } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { StateStore } from '../events';
 import {
   acceptProposal,
+  actionSourceFor,
   closeProposalCard,
   createPrinciple,
   decisionItem,
@@ -38,8 +37,11 @@ import {
   recordDecision,
   rejectProposal,
   resolveTarget,
+  retirePrincipleRecord,
   supersedeDecisionRecord,
   supersedePrincipleRecord,
+  withdrawDecisionRecord,
+  withdrawPrincipleRecord,
 } from '../knowledge';
 
 /** The builder-facing knowledge routes' side of the services (docs/knowledge-api.md). */
@@ -81,29 +83,45 @@ export function createKnowledgeServices(deps: {
 
   /**
    * Runs the real write and rolls it back, so a dry run meets every check the write does (the same
-   * 409, the same 400) and writes nothing. `replaces` is read after the rollback, as the record is now.
+   * 409, the same 400) and writes nothing. `replaces` is read after the rollback, as the record is now;
+   * `restores` is read inside the write, since only there is the record current again.
    */
   function dryRun<T extends KnowledgeItemDto>(
     write: (ctx: WriteContext) => T,
     replaced: (item: T) => KnowledgeItemDto | null,
+    restored: (ctx: WriteContext, item: T) => KnowledgeItemDto | null = () => null,
   ): KnowledgeDryRunDto {
     let written: T | undefined;
+    let restores: KnowledgeItemDto | null = null;
     try {
       state.write((ctx) => {
-        written = write(ctx);
+        const item = write(ctx);
+        written = item;
+        restores = restored(ctx, item);
         throw new RolledBack('dry run');
       });
     } catch (error) {
       if (!(error instanceof RolledBack)) throw error;
     }
     if (written === undefined) throw new Error('a dry run wrote nothing to read');
-    return { dryRun: true, wouldWrite: draftOf(written), replaces: replaced(written) };
+    return { dryRun: true, wouldWrite: draftOf(written), replaces: replaced(written), restores };
   }
 
   const decisionReplaced = (item: Pick<DecisionItem, 'supersedesId'>) =>
     item.supersedesId === null ? null : decisionItem(getDecisionDto(db, item.supersedesId));
   const principleReplaced = (item: Pick<PrincipleItem, 'supersedesId'>) =>
     item.supersedesId === null ? null : principleItem(getPrinciple(db, item.supersedesId));
+
+  function decisionRestored(ctx: WriteContext, item: DecisionItem): DecisionItem | null {
+    if (item.supersedesId === null) return null;
+    const predecessor = getDecisionDto(ctx.tx, item.supersedesId);
+    return predecessor.state === KnowledgeState.Current ? decisionItem(predecessor) : null;
+  }
+  function principleRestored(ctx: WriteContext, item: PrincipleItem): PrincipleItem | null {
+    if (item.supersedesId === null) return null;
+    const predecessor = getPrinciple(ctx.tx, item.supersedesId);
+    return predecessor.state === KnowledgeState.Current ? principleItem(predecessor) : null;
+  }
 
   function principleProposal(ctx: WriteContext, id: ProposalId) {
     const proposal = getProposalDto(ctx.tx, id);
@@ -127,11 +145,12 @@ export function createKnowledgeServices(deps: {
         ? dryRun<DecisionItem>((ctx) => supersedeDecisionRecord(ctx, id, body), decisionReplaced)
         : state.write((ctx) => supersedeDecisionRecord(ctx, id, body));
     },
-    withdrawDecision: (id, { reason }) =>
-      state.write((ctx) => {
-        withdrawDecision(ctx, id, { by: BUILDER_HANDLE, reason });
-        return decisionItem(getDecisionDto(ctx.tx, id));
-      }),
+    withdrawDecision(id, { dryRun: dry, reason, source }) {
+      const write = (ctx: WriteContext) => withdrawDecisionRecord(ctx, id, reason, source);
+      return dry === true
+        ? dryRun<DecisionItem>(write, () => decisionItem(getDecisionDto(db, id)), decisionRestored)
+        : state.write(write);
+    },
     decisionProvenance: (id) => decisionProvenance(db, id),
 
     createPrinciple(projectId, { dryRun: dry, ...body }) {
@@ -144,10 +163,18 @@ export function createKnowledgeServices(deps: {
         ? dryRun<PrincipleItem>((ctx) => supersedePrincipleRecord(ctx, id, body), principleReplaced)
         : state.write((ctx) => supersedePrincipleRecord(ctx, id, body));
     },
-    retirePrinciple: (id, { reason }) =>
-      state.write((ctx) => principleItem(retirePrinciple(ctx, id, BUILDER_HANDLE, reason))),
-    withdrawPrinciple: (id, { reason }) =>
-      state.write((ctx) => principleItem(withdrawPrinciple(ctx, id, BUILDER_HANDLE, reason))),
+    retirePrinciple(id, { dryRun: dry, reason, source }) {
+      const write = (ctx: WriteContext) => retirePrincipleRecord(ctx, id, reason, source);
+      return dry === true
+        ? dryRun<PrincipleItem>(write, () => principleItem(getPrinciple(db, id)))
+        : state.write(write);
+    },
+    withdrawPrinciple(id, { dryRun: dry, reason, source }) {
+      const write = (ctx: WriteContext) => withdrawPrincipleRecord(ctx, id, reason, source);
+      return dry === true
+        ? dryRun<PrincipleItem>(write, () => principleItem(getPrinciple(db, id)), principleRestored)
+        : state.write(write);
+    },
     principleProvenance: (id) => principleProvenance(db, id),
 
     listProposals(projectId, query) {
@@ -156,7 +183,7 @@ export function createKnowledgeServices(deps: {
         (p) => p.kind === ProposalKind.Principle,
       );
     },
-    acceptProposal(id, { dryRun: dry, scope, area, note, ...edits }) {
+    acceptProposal(id, { dryRun: dry, scope, area, note, source, ...edits }) {
       const accept = (ctx: WriteContext): ProposalDto => {
         const { proposal, principle } = principleProposal(ctx, id);
         const target = resolveTarget({ scope, area }, proposal.projectId, whereOf(principle));
@@ -165,6 +192,7 @@ export function createKnowledgeServices(deps: {
           id,
           { target, ...edits, ...(note === undefined ? {} : { note }) },
           BUILDER_HANDLE,
+          actionSourceFor(ctx, source),
         );
         closeProposalCard(ctx, accepted, note);
         return accepted;
@@ -177,10 +205,12 @@ export function createKnowledgeServices(deps: {
         return principleItem(proposal.principle);
       }, principleReplaced);
     },
-    rejectProposal: (id, { note }) =>
+    rejectProposal: (id, { note, source }) =>
       state.write((ctx) => {
         principleProposal(ctx, id);
-        const rejected = rejectProposal(ctx, id, note ?? null, BUILDER_HANDLE);
+        const rejected = rejectProposal(ctx, id, note ?? null, BUILDER_HANDLE, {
+          sourceId: actionSourceFor(ctx, source),
+        });
         closeProposalCard(ctx, rejected, note);
         return rejected;
       }),

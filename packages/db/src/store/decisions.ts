@@ -98,7 +98,7 @@ export function decisionSuccessor(db: DbReader, id: DecisionId): DecisionId | nu
   );
 }
 
-/** The current decision of the chain `id` belongs to: `id` itself when nothing live replaced it. */
+/** The head of the chain `id` belongs to: `id` itself when nothing live replaced it. */
 export function decisionHead(db: DbReader, id: DecisionId): DecisionId {
   let head = id;
   for (let next = decisionSuccessor(db, head); next !== null; next = decisionSuccessor(db, head))
@@ -106,10 +106,21 @@ export function decisionHead(db: DbReader, id: DecisionId): DecisionId {
   return head;
 }
 
+/**
+ * The decision of `id`'s chain that is current now, or null when none is. A withdrawn head hands the
+ * chain back to its predecessor, so the walk goes back through `supersedes_id` past each withdrawn one.
+ */
+export function currentDecisionOf(db: DbReader, id: DecisionId): DecisionId | null {
+  const head = decisionHead(db, id);
+  const row = getDecision(db, head);
+  if (row.withdrawnAt === null) return head;
+  return row.supersedesId === null ? null : currentDecisionOf(db, row.supersedesId);
+}
+
 /** Where a script is told which decision to use instead, when the one it named is not current. */
 function currentOne(db: DbReader, id: DecisionId): string {
-  const head = decisionHead(db, id);
-  return head === id ? '' : ` (the current one is ${head})`;
+  const current = currentDecisionOf(db, id);
+  return current === null ? ' (none is current)' : ` (the current one is ${current})`;
 }
 
 export interface DecisionFilter {
@@ -170,25 +181,30 @@ export function supersedeDecision(
 export function withdrawDecision(
   ctx: WriteContext,
   id: DecisionId,
-  input: { readonly by: string; readonly reason: string },
+  input: {
+    readonly by: string;
+    readonly reason: string;
+    /** Where the withdrawal came from, when the write named a source. */
+    readonly sourceId?: SourceId | null;
+  },
 ): void {
   const reason = input.reason.trim();
   if (reason === '') throw new InvalidError('Say why the decision is withdrawn');
   const decision = getDecision(ctx.tx, id);
-  if (decision.withdrawnAt !== null) throw new ConflictError('This decision is already withdrawn');
+  if (decision.withdrawnAt !== null)
+    throw new ConflictError(`Decision ${id} is already withdrawn${currentOne(ctx.tx, id)}`);
   const successor = decisionSuccessor(ctx.tx, id);
-  if (successor !== null) {
-    const head = decisionHead(ctx.tx, id);
+  if (successor !== null)
     throw new ConflictError(
-      `A later decision (${successor}) supersedes this one; withdraw that one first${head === successor ? '' : ` (the current one is ${head})`}`,
+      `A later decision (${successor}) supersedes this one; withdraw that one first${currentOne(ctx.tx, id)}`,
     );
-  }
   ctx.tx
     .update(schema.decisions)
     .set({
       withdrawnAt: ctx.now,
       withdrawnBy: input.by,
       withdrawnReason: reason,
+      withdrawnSourceId: input.sourceId ?? null,
       updatedAt: ctx.now,
     })
     .where(eq(schema.decisions.id, id))

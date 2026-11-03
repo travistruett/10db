@@ -8,14 +8,16 @@ import {
   NotFoundError,
   PrincipleDto,
   PrincipleStatus,
+  ProposalStatus,
   targetColumns,
   type KnowledgeTarget,
   type PrincipleId,
   type PrincipleKind,
   type ProjectId,
+  type ProposalId,
   type SourceId,
 } from '@10db/contracts';
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { and, eq, sql, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
@@ -87,10 +89,41 @@ export function principleHead(db: DbReader, id: PrincipleId): PrincipleId {
   return head;
 }
 
-/** What a 409 adds when the principle named is superseded: the one to use instead. */
+/**
+ * The principle that is current now in `id`'s place, or null when none is. A withdrawn head hands its
+ * chain back to its predecessor, so the walk goes back through `supersedes_id`. A retired head ends the
+ * chain: its predecessors stay superseded, and only a later principle under the key can be current.
+ */
+export function currentPrincipleOf(db: DbReader, id: PrincipleId): PrincipleId | null {
+  const head = getPrinciple(db, principleHead(db, id));
+  if (head.state === KnowledgeState.Current) return head.id;
+  if (head.state === KnowledgeState.Withdrawn && head.supersedesId !== null)
+    return currentPrincipleOf(db, head.supersedesId);
+  return currentPrincipleFor(db, head.topicKey, targetOf(head))?.id ?? null;
+}
+
+/** The pending proposal that decides a proposed principle, or null when none does. */
+export function pendingProposalOf(db: DbReader, id: PrincipleId): ProposalId | null {
+  return (
+    db
+      .select({ id: schema.proposals.id })
+      .from(schema.proposals)
+      .where(
+        and(
+          eq(schema.proposals.principleId, id),
+          eq(schema.proposals.status, ProposalStatus.Pending),
+        ),
+      )
+      .get()?.id ?? null
+  );
+}
+
+/** What a 409 adds about a principle that isn't current: what to act on instead, or that nothing is. */
 function currentOne(db: DbReader, p: PrincipleDto): string {
-  if (p.state !== KnowledgeState.Superseded) return '';
-  return ` (the current one is ${principleHead(db, p.id)})`;
+  const proposal = pendingProposalOf(db, p.id);
+  if (proposal !== null) return ` (accept or reject proposal ${proposal} instead)`;
+  const current = currentPrincipleOf(db, p.id);
+  return current === null ? ' (none is current)' : ` (the current one is ${current})`;
 }
 
 /** The target a stored principle applies to. */
@@ -185,6 +218,8 @@ export interface ConfirmPrinciple {
   readonly kind?: PrincipleKind | undefined;
   readonly topicKey?: string | undefined;
   readonly confirmedBy: string;
+  /** Where the confirmation came from, when the write named a source. */
+  readonly confirmedSourceId?: SourceId | null | undefined;
 }
 
 /** Confirms a proposed principle at a target, with any edits; it supersedes like an insert does. */
@@ -211,6 +246,7 @@ export function confirmPrinciple(
       supersedesId: previous?.id ?? null,
       confirmedBy: input.confirmedBy,
       confirmedAt: ctx.now,
+      confirmedSourceId: input.confirmedSourceId ?? null,
       updatedAt: ctx.now,
     })
     .where(eq(schema.principles.id, id))
@@ -281,6 +317,7 @@ export function retirePrinciple(
   id: PrincipleId,
   by: string,
   reason: string,
+  sourceId: SourceId | null = null,
 ): PrincipleDto {
   const why = requireReason(reason, 'retired');
   const current = getPrinciple(ctx.tx, id);
@@ -295,6 +332,7 @@ export function retirePrinciple(
       retiredAt: ctx.now,
       retiredBy: by,
       retiredReason: why,
+      retiredSourceId: sourceId,
       updatedAt: ctx.now,
     })
     .where(eq(schema.principles.id, id))
@@ -326,23 +364,28 @@ export function withdrawPrinciple(
   id: PrincipleId,
   by: string,
   reason: string,
+  sourceId: SourceId | null = null,
 ): PrincipleDto {
   const why = requireReason(reason, 'withdrawn');
   const current = getPrinciple(ctx.tx, id);
-  if (current.supersededById !== null) {
-    const head = principleHead(ctx.tx, id);
+  if (current.supersededById !== null)
     throw new ConflictError(
-      `A later principle (${current.supersededById}) supersedes principle ${id}; only the head of a chain can be withdrawn${head === current.supersededById ? '' : ` (the current one is ${head})`}`,
+      `A later principle (${current.supersededById}) supersedes principle ${id}; only the head of a chain can be withdrawn${currentOne(ctx.tx, current)}`,
     );
-  }
   if (current.state !== KnowledgeState.Current && current.state !== KnowledgeState.Proposed)
     throw new ConflictError(
-      `Principle ${id} is ${current.state}; only a current or proposed principle can be withdrawn`,
+      `Principle ${id} is ${current.state}; only a current or proposed principle can be withdrawn${currentOne(ctx.tx, current)}`,
     );
   refuseRevivingClash(ctx.tx, current);
   ctx.tx
     .update(schema.principles)
-    .set({ withdrawnAt: ctx.now, withdrawnBy: by, withdrawnReason: why, updatedAt: ctx.now })
+    .set({
+      withdrawnAt: ctx.now,
+      withdrawnBy: by,
+      withdrawnReason: why,
+      withdrawnSourceId: sourceId,
+      updatedAt: ctx.now,
+    })
     .where(eq(schema.principles.id, id))
     .run();
   saved(ctx, id, { withdrawn: true, by });

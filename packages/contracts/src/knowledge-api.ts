@@ -51,8 +51,10 @@ export type KnowledgeDraftDto = z.infer<typeof KnowledgeDraftDto>;
 export const KnowledgeDryRunDto = z.object({
   dryRun: z.literal(true),
   wouldWrite: KnowledgeDraftDto,
-  /** The record the write would replace, as it is now; null when it replaces none. */
+  /** The record the write would stop being current, as it is now; null when there is none. */
   replaces: KnowledgeItemDto.nullable(),
+  /** The record a withdrawal would make current again, as it would then be; null when there is none. */
+  restores: KnowledgeItemDto.nullable(),
 });
 export type KnowledgeDryRunDto = z.infer<typeof KnowledgeDryRunDto>;
 
@@ -167,8 +169,12 @@ export const PrincipleEdit = z
   });
 export type PrincipleEdit = z.infer<typeof PrincipleEdit>;
 
-/** `POST …/retire` and `POST …/withdraw`: a reason, nothing else. */
-export const KnowledgeReason = z.strictObject(ReasonInput.shape);
+/** `POST …/retire` and `POST …/withdraw`: a reason, and the source and dry run every write takes. */
+export const KnowledgeReason = z.strictObject({
+  ...ReasonInput.shape,
+  source: KnowledgeSource.optional(),
+  dryRun: DryRun,
+});
 export type KnowledgeReason = z.infer<typeof KnowledgeReason>;
 
 /** `POST /proposals/:id/accept`: any field given replaces the proposed principle's before it is confirmed. */
@@ -179,11 +185,15 @@ export const ProposalVerdictAccept = z.strictObject({
   kind: z.enum(PrincipleKind).optional(),
   topicKey: TopicKey.optional(),
   note: z.string().max(4000).optional(),
+  source: KnowledgeSource.optional(),
   dryRun: DryRun,
 });
 export type ProposalVerdictAccept = z.infer<typeof ProposalVerdictAccept>;
 
-export const ProposalVerdictReject = z.strictObject({ note: z.string().max(4000).optional() });
+export const ProposalVerdictReject = z.strictObject({
+  note: z.string().max(4000).optional(),
+  source: KnowledgeSource.optional(),
+});
 export type ProposalVerdictReject = z.infer<typeof ProposalVerdictReject>;
 
 /** The query string of `GET /projects/:projectId/proposals`. */

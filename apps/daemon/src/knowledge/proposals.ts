@@ -202,6 +202,7 @@ export function acceptProposal(
   id: ProposalId,
   accept: ProposalAccept,
   by: string,
+  sourceId: SourceId | null = null,
 ): ProposalDto {
   const proposal = pending(ctx, id);
   const { principle } = proposal;
@@ -214,6 +215,7 @@ export function acceptProposal(
       kind: accept.kind,
       topicKey: accept.topicKey,
       confirmedBy: by,
+      confirmedSourceId: sourceId,
     });
   } else if (
     [accept.target, accept.statement, accept.kind, accept.topicKey].some((v) => v !== undefined)
@@ -235,12 +237,13 @@ export function rejectProposal(
   id: ProposalId,
   note: string | null,
   by: string,
-  noNoteReason = 'Rejected',
+  options: { readonly noNoteReason?: string; readonly sourceId?: SourceId | null } = {},
 ): ProposalDto {
   const proposal = pending(ctx, id);
   if (proposal.principle) {
-    const reason = note === null || note.trim() === '' ? noNoteReason : note;
-    withdrawPrinciple(ctx, proposal.principle.id, by, reason);
+    const reason =
+      note === null || note.trim() === '' ? (options.noNoteReason ?? 'Rejected') : note;
+    withdrawPrinciple(ctx, proposal.principle.id, by, reason, options.sourceId ?? null);
   }
   resolveProposal(ctx, id, { status: ProposalStatus.Rejected, rationale: note });
   return getProposalDto(ctx.tx, id);
@@ -286,7 +289,9 @@ export function applyPrincipleCard(
   if (!verdict.success) throw new InvalidError(`${answer.choice} is not a verdict on a principle`);
   const target = verdictTarget(verdict.data, principle, proposal.projectId);
   if (target === null)
-    rejectProposal(ctx, proposal.id, note ?? null, BUILDER_HANDLE, REJECTED_IN_INBOX);
+    rejectProposal(ctx, proposal.id, note ?? null, BUILDER_HANDLE, {
+      noNoteReason: REJECTED_IN_INBOX,
+    });
   else
     acceptProposal(
       ctx,

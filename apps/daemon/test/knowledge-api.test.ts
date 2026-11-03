@@ -76,6 +76,26 @@ function running(): RunningDaemon {
 const sourceCount = (d: RunningDaemon) =>
   (d.state.db.$client.prepare('SELECT count(*) AS n FROM sources').get() as { n: number }).n;
 
+type Caller = ReturnType<typeof caller>;
+
+function proposeRule(project: { id: z.infer<typeof ProjectDto>['id'] }, key = 'testing.no-sleeps') {
+  return running().state.write((ctx) =>
+    proposePrinciple(ctx, {
+      projectId: project.id,
+      title: 'No sleeps',
+      body: 'b',
+      draft: {
+        statement: 'Never sleep in tests',
+        kind: 'policy',
+        scope: 'project',
+        topicKey: key,
+      },
+      sourceId: insertSource(ctx, 'agent', {}),
+      speaker: 'agent:x',
+    }),
+  );
+}
+
 describe('one list for decisions and principles', () => {
   it('returns both kinds, builder-wide ones too, each with its id, kind, scope, area, state and date', async () => {
     const { project, call } = await start();
@@ -413,6 +433,305 @@ describe('writing and reading back', () => {
   });
 });
 
+describe('a 409 names the live record', () => {
+  const decide = async (call: Caller, base: string) =>
+    (await call('POST', `${base}/decisions`, { question: 'q', choice: 'a', rationale: 'r' })).body;
+  const state = async (call: Caller, id: string) =>
+    (await call('GET', `/${id.startsWith('dec_') ? 'decisions' : 'principles'}/${id}/provenance`))
+      .body.state;
+  const rule = async (call: Caller, base: string) =>
+    (await call('POST', `${base}/principles`, { statement: 'Rule', topicKey: 'k.rule' })).body;
+
+  it('walks back from a withdrawn decision to the one that is current again', async () => {
+    const { project, call } = await start();
+    const a = await decide(call, `/projects/${project.id}`);
+    const b = (await call('POST', `/decisions/${a.id}/supersede`, { choice: 'b' })).body;
+    await call('POST', `/decisions/${b.id}/withdraw`, { reason: 'wrong' });
+    for (const [path, body] of [
+      ['supersede', { choice: 'c' }],
+      ['withdraw', { reason: 'again' }],
+    ] as const) {
+      const res = await call('POST', `/decisions/${b.id}/${path}`, body);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain(`the current one is ${a.id}`);
+    }
+  });
+
+  it('walks back from a withdrawn principle to the one that is current again', async () => {
+    const { project, call } = await start();
+    const a = await rule(call, `/projects/${project.id}`);
+    const b = (await call('POST', `/principles/${a.id}/supersede`, { statement: 'Next' })).body;
+    await call('POST', `/principles/${b.id}/withdraw`, { reason: 'wrong' });
+    for (const [path, body] of [
+      ['supersede', { statement: 'x' }],
+      ['retire', { reason: 'x' }],
+      ['withdraw', { reason: 'again' }],
+    ] as const) {
+      const res = await call('POST', `/principles/${b.id}/${path}`, body);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain(`the current one is ${a.id}`);
+    }
+  });
+
+  it('says none is current rather than naming a retired head', async () => {
+    const { project, call } = await start();
+    const a = await rule(call, `/projects/${project.id}`);
+    const b = (await call('POST', `/principles/${a.id}/supersede`, { statement: 'Next' })).body;
+    await call('POST', `/principles/${b.id}/retire`, { reason: 'obsolete' });
+    expect([await state(call, a.id), await state(call, b.id)]).toEqual(['superseded', 'retired']);
+    for (const [path, body] of [
+      ['supersede', { statement: 'x' }],
+      ['retire', { reason: 'x' }],
+      ['withdraw', { reason: 'x' }],
+    ] as const) {
+      const res = await call('POST', `/principles/${a.id}/${path}`, body);
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain('none is current');
+      expect(res.body.message).not.toContain(`the current one is ${b.id}`);
+    }
+  });
+
+  it('says none is current for a withdrawn decision with nothing behind it', async () => {
+    const { project, call } = await start();
+    const a = await decide(call, `/projects/${project.id}`);
+    await call('POST', `/decisions/${a.id}/withdraw`, { reason: 'wrong' });
+    const res = await call('POST', `/decisions/${a.id}/withdraw`, { reason: 'again' });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain('none is current');
+  });
+});
+
+describe('dry runs of a retire or a withdrawal', () => {
+  const snapshot = async (call: Caller, base: string) => ({
+    list: (await call('GET', `${base}/knowledge?history=1`)).body,
+    sources: sourceCount(running()),
+  });
+
+  it('say what a retire would change, and write nothing', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const made = await call('POST', `${base}/principles`, { statement: 'Rule', topicKey: 'k.r' });
+    const before = await snapshot(call, base);
+    const dry = await call('POST', `/principles/${made.body.id}/retire`, {
+      reason: 'obsolete',
+      dryRun: true,
+      source: { via: 'claude_code' },
+    });
+    expect(dry.status).toBe(200);
+    expect(dry.body).toMatchObject({
+      dryRun: true,
+      wouldWrite: { kind: 'principle', state: 'retired', retiredReason: 'obsolete' },
+      replaces: { id: made.body.id, state: 'current' },
+      restores: null,
+    });
+    expect(await snapshot(call, base)).toEqual(before);
+  });
+
+  it('say which principle a withdrawal would make current again', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (await call('POST', `${base}/principles`, { statement: 'A', topicKey: 'k.r' })).body;
+    const b = (await call('POST', `/principles/${a.id}/supersede`, { statement: 'B' })).body;
+    const before = await snapshot(call, base);
+    const dry = await call('POST', `/principles/${b.id}/withdraw`, {
+      reason: 'wrong',
+      dryRun: true,
+    });
+    expect(dry.status).toBe(200);
+    expect(dry.body).toMatchObject({
+      dryRun: true,
+      wouldWrite: { state: 'withdrawn', withdrawnReason: 'wrong' },
+      replaces: { id: b.id, state: 'current' },
+      restores: { id: a.id, state: 'current' },
+    });
+    expect(await snapshot(call, base)).toEqual(before);
+  });
+
+  it('say which decision a withdrawal would make current again', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (
+      await call('POST', `${base}/decisions`, { question: 'q', choice: 'a', rationale: 'r' })
+    ).body;
+    const b = (await call('POST', `/decisions/${a.id}/supersede`, { choice: 'b' })).body;
+    const before = await snapshot(call, base);
+    const dry = await call('POST', `/decisions/${b.id}/withdraw`, {
+      reason: 'wrong',
+      dryRun: true,
+    });
+    expect(dry.status).toBe(200);
+    expect(dry.body).toMatchObject({
+      wouldWrite: { kind: 'decision', state: 'withdrawn' },
+      replaces: { id: b.id, state: 'current' },
+      restores: { id: a.id, state: 'current', choice: 'a' },
+    });
+    expect(await snapshot(call, base)).toEqual(before);
+  });
+
+  it('answer the 400 and the 409 the write would', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (await call('POST', `${base}/principles`, { statement: 'A', topicKey: 'k.a' })).body;
+    const b = (await call('POST', `/principles/${a.id}/supersede`, { statement: 'B' })).body;
+    expect((await call('POST', `/principles/${b.id}/retire`, { dryRun: true })).status).toBe(400);
+    for (const path of ['retire', 'withdraw']) {
+      const res = await call('POST', `/principles/${a.id}/${path}`, { reason: 'x', dryRun: true });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain(b.id);
+    }
+    const unknown = await call('POST', `/decisions/${mintId('Decision')}/withdraw`, {
+      reason: 'x',
+      dryRun: true,
+    });
+    expect(unknown.status).toBe(404);
+  });
+
+  it('answer the 409 of a withdrawal that would revive a clash', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (await call('POST', `${base}/principles`, { statement: 'A', topicKey: 'k.a' })).body;
+    const b = (
+      await call('POST', `/principles/${a.id}/supersede`, { statement: 'B', topicKey: 'k.b' })
+    ).body;
+    const c = (await call('POST', `${base}/principles`, { statement: 'C', topicKey: 'k.a' })).body;
+    const res = await call('POST', `/principles/${b.id}/withdraw`, { reason: 'x', dryRun: true });
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain(c.id);
+  });
+});
+
+describe('a source on every write', () => {
+  const source = {
+    via: 'claude_code',
+    sessionId: 'cc-9',
+    cwd: '/repo',
+    quote: 'that is out of date',
+  };
+  const shown = {
+    via: 'claude_code',
+    sessionId: 'cc-9',
+    cwd: '/repo',
+    quote: 'that is out of date',
+    recordedAt: expect.any(String),
+  };
+
+  it('shows a retire, and a principle withdrawal, in provenance with their source', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (await call('POST', `${base}/principles`, { statement: 'A', topicKey: 'k.a' })).body;
+    const b = (await call('POST', `${base}/principles`, { statement: 'B', topicKey: 'k.b' })).body;
+    const before = sourceCount(running());
+    const retired = await call('POST', `/principles/${a.id}/retire`, { reason: 'old', source });
+    const gone = await call('POST', `/principles/${b.id}/withdraw`, { reason: 'wrong', source });
+    expect([retired.status, gone.status]).toEqual([200, 200]);
+    expect(sourceCount(running())).toBe(before + 2);
+    expect((await call('GET', `/principles/${a.id}/provenance`)).body).toMatchObject({
+      retired: { by: 'me', reason: 'old', source: shown },
+      withdrawn: null,
+    });
+    expect((await call('GET', `/principles/${b.id}/provenance`)).body).toMatchObject({
+      withdrawn: { by: 'me', reason: 'wrong', source: shown },
+    });
+    expect((await call('GET', `${base}/knowledge`)).body.items).toEqual([]);
+    const history = (await call('GET', `${base}/knowledge?history=1`)).body.items;
+    expect(history.map((i: Body) => i.state).toSorted()).toEqual(['retired', 'withdrawn']);
+  });
+
+  it('shows a decision withdrawal in provenance with its source', async () => {
+    const { project, call } = await start();
+    const d = (
+      await call('POST', `/projects/${project.id}/decisions`, {
+        question: 'q',
+        choice: 'a',
+        rationale: 'r',
+      })
+    ).body;
+    await call('POST', `/decisions/${d.id}/withdraw`, { reason: 'wrong', source });
+    expect((await call('GET', `/decisions/${d.id}/provenance`)).body).toMatchObject({
+      confirmedSource: null,
+      withdrawn: { by: 'me', reason: 'wrong', source: shown },
+    });
+    expect((await call('GET', `/projects/${project.id}/knowledge`)).body.items).toEqual([]);
+  });
+
+  it('writes no source row for a retire that names none, and shows null', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const a = (await call('POST', `${base}/principles`, { statement: 'A', topicKey: 'k.a' })).body;
+    const before = sourceCount(running());
+    await call('POST', `/principles/${a.id}/retire`, { reason: 'old' });
+    expect(sourceCount(running())).toBe(before);
+    expect((await call('GET', `/principles/${a.id}/provenance`)).body.retired.source).toBeNull();
+  });
+
+  it('shows the source of an accepted proposal, keeping the proposal own source', async () => {
+    const { project, call } = await start();
+    const { proposalId, principle } = proposeRule(project);
+    await call('POST', `/proposals/${proposalId}/accept`, { source });
+    expect((await call('GET', `/principles/${principle.id}/provenance`)).body).toMatchObject({
+      sourceKind: 'agent',
+      confirmedBy: 'me',
+      confirmedSource: shown,
+      withdrawn: null,
+    });
+    const found = await call('GET', `/projects/${project.id}/knowledge?q=sleep`);
+    expect(found.body.items.map((i: Body) => i.id)).toEqual([principle.id]);
+  });
+
+  it('shows the source of a rejected proposal on the withdrawal', async () => {
+    const { project, call } = await start();
+    const { proposalId, principle } = proposeRule(project);
+    await call('POST', `/proposals/${proposalId}/reject`, { note: 'no', source });
+    expect((await call('GET', `/principles/${principle.id}/provenance`)).body).toMatchObject({
+      sourceKind: 'agent',
+      confirmedSource: null,
+      withdrawn: { reason: 'no', source: shown },
+    });
+    const found = await call('GET', `/projects/${project.id}/knowledge?q=sleep&history=1`);
+    expect(found.body.items.map((i: Body) => i.state)).toEqual(['withdrawn']);
+  });
+
+  it('keeps the source of the principle replaced to itself: a quote is the words of its own write', async () => {
+    const { project, call } = await start();
+    const base = `/projects/${project.id}`;
+    const old = (
+      await call('POST', `${base}/principles`, {
+        statement: 'Never sleep',
+        topicKey: 'k.sleep',
+        quote: 'never sleep',
+      })
+    ).body;
+    const next = (await call('POST', `/principles/${old.id}/supersede`, { kind: 'belief' })).body;
+    expect(next.sourceQuote).toBeNull();
+    expect((await call('GET', `/principles/${next.id}/provenance`)).body).toMatchObject({
+      quote: null,
+      supersedes: old.id,
+    });
+    expect((await call('GET', `/principles/${old.id}/provenance`)).body.quote).toBe('never sleep');
+  });
+});
+
+describe('an unknown project', () => {
+  it.each([
+    ['decisions', { scope: 'you', question: 'q', choice: 'c', rationale: 'r' }],
+    ['principles', { scope: 'you', statement: 'Rule', topicKey: 'k.r' }],
+    ['decisions', { question: 'q', choice: 'c', rationale: 'r' }],
+    ['principles', { statement: 'Rule', topicKey: 'k.r' }],
+  ])('answers 404 on a create of %s and writes nothing', async (collection, body) => {
+    const { project, call } = await start();
+    const res = await call('POST', `/projects/${mintId('Project')}/${collection}`, body);
+    expect(res.status).toBe(404);
+    expect((await call('GET', `/projects/${project.id}/knowledge?history=1`)).body.items).toEqual(
+      [],
+    );
+    const dry = await call('POST', `/projects/${mintId('Project')}/${collection}`, {
+      ...body,
+      dryRun: true,
+    });
+    expect(dry.status).toBe(404);
+  });
+});
+
 describe('dry runs', () => {
   it('write nothing and say what would be written and replaced', async () => {
     const { project, call } = await start();
@@ -505,27 +824,40 @@ describe('dry runs', () => {
 });
 
 describe('proposals', () => {
-  function propose(project: { id: z.infer<typeof ProjectDto>['id'] }, key = 'testing.no-sleeps') {
-    return running().state.write((ctx) =>
-      proposePrinciple(ctx, {
-        projectId: project.id,
-        title: 'No sleeps',
-        body: 'b',
-        draft: {
-          statement: 'Never sleep in tests',
-          kind: 'policy',
-          scope: 'project',
-          topicKey: key,
-        },
-        sourceId: insertSource(ctx, 'agent', {}),
-        speaker: 'agent:x',
-      }),
-    );
-  }
+  it('refuses to withdraw a proposed principle, naming the proposal, so the proposal stays decidable', async () => {
+    const { project, call } = await start();
+    const { proposalId, principle } = proposeRule(project);
+    for (const dryRun of [false, true]) {
+      const res = await call('POST', `/principles/${principle.id}/withdraw`, {
+        reason: 'x',
+        dryRun,
+      });
+      expect(res.status).toBe(409);
+      expect(res.body.message).toContain(proposalId);
+    }
+    // The refusal changed nothing: the proposal is still pending, and rejecting it closes the card.
+    expect((await call('GET', `/projects/${project.id}/proposals`)).body).toHaveLength(1);
+    const rejected = await call('POST', `/proposals/${proposalId}/reject`, { note: 'no' });
+    expect(rejected.status).toBe(200);
+    expect(
+      (await call('GET', '/inbox?state=OPEN')).body.filter((c: Body) => c.kind === 'proposal'),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ['supersede', { statement: 'x' }],
+    ['retire', { reason: 'x' }],
+  ] as const)('names the proposal when asked to %s a proposed principle', async (path, body) => {
+    const { project, call } = await start();
+    const { proposalId, principle } = proposeRule(project);
+    const res = await call('POST', `/principles/${principle.id}/${path}`, body);
+    expect(res.status).toBe(409);
+    expect(res.body.message).toContain(proposalId);
+  });
 
   it('lists pending proposals, accepts one with edits, closes its card and answers 409 to a second verdict', async () => {
     const { project, call } = await start();
-    const { proposalId } = propose(project);
+    const { proposalId } = proposeRule(project);
     const listed = await call('GET', `/projects/${project.id}/proposals`);
     expect(listed.body.map((p: Body) => p.id)).toEqual([proposalId]);
     const dry = await call('POST', `/proposals/${proposalId}/accept`, {
@@ -569,7 +901,7 @@ describe('proposals', () => {
         topicKey: 'testing.no-sleeps',
       })
     ).body;
-    const { proposalId } = propose(project);
+    const { proposalId } = proposeRule(project);
     const dry = await call('POST', `/proposals/${proposalId}/accept`, { dryRun: true });
     expect(dry.body.replaces).toMatchObject({ id: existing.id });
     const bad = await call('POST', `/proposals/${proposalId}/accept`, {
@@ -582,7 +914,7 @@ describe('proposals', () => {
 
   it('rejects a proposal, withdrawing its principle and closing its card', async () => {
     const { project, call } = await start();
-    const { proposalId, principle } = propose(project);
+    const { proposalId, principle } = proposeRule(project);
     const res = await call('POST', `/proposals/${proposalId}/reject`, { note: 'too strict' });
     expect(res.body).toMatchObject({ status: 'rejected' });
     expect(res.body.principle).toMatchObject({

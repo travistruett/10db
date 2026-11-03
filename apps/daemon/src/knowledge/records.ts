@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   InvalidError,
   KnowledgeScope,
   PrincipleKind,
@@ -33,10 +34,14 @@ import {
   insertSource,
   listDecisions,
   listPrinciples,
+  pendingProposalOf,
+  retirePrinciple,
   searchDecisionIds,
   searchPrincipleIds,
   supersedeDecision,
   supersedePrinciple,
+  withdrawDecision,
+  withdrawPrinciple,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
@@ -53,6 +58,17 @@ function sourceFor(ctx: WriteContext, source: KnowledgeSource | undefined): Sour
     if (source.quote !== undefined) ref['quote'] = source.quote;
   }
   return insertSource(ctx, SourceKind.Builder, ref);
+}
+
+/**
+ * The source of a write on a record that already has its own: a retire, a withdrawal, a verdict. It is
+ * written only when named, since a record needs a source and an act on one does not.
+ */
+export function actionSourceFor(
+  ctx: WriteContext,
+  source: KnowledgeSource | undefined,
+): SourceId | null {
+  return source === undefined ? null : sourceFor(ctx, source);
 }
 
 interface Placement {
@@ -177,12 +193,16 @@ function interleave(
   return out;
 }
 
-/** The builder records a decision. */
+/**
+ * The builder records a decision. The project in the URL must exist at any scope: a `you` target names
+ * none, so checking the target alone would write a builder-wide record through an unknown project.
+ */
 export function recordDecision(
   ctx: WriteContext,
   projectId: ProjectId,
   body: DecisionWrite,
 ): DecisionItem {
+  getProject(ctx.tx, projectId);
   const target = resolveTarget(body, projectId, null);
   checkTarget(ctx.tx, target);
   const id = insertDecision(ctx, {
@@ -216,12 +236,28 @@ export function supersedeDecisionRecord(
   return decisionItem(getDecisionDto(ctx.tx, next));
 }
 
+/** The builder withdraws a decision; the row stays as a tombstone. */
+export function withdrawDecisionRecord(
+  ctx: WriteContext,
+  id: DecisionId,
+  reason: string,
+  source: KnowledgeSource | undefined,
+): DecisionItem {
+  withdrawDecision(ctx, id, {
+    by: BUILDER_HANDLE,
+    reason,
+    sourceId: actionSourceFor(ctx, source),
+  });
+  return decisionItem(getDecisionDto(ctx.tx, id));
+}
+
 /** The builder states a principle; it is confirmed at once and replaces the current one with its key and target. */
 export function createPrinciple(
   ctx: WriteContext,
   projectId: ProjectId,
   body: PrincipleWrite,
 ): PrincipleItem {
+  getProject(ctx.tx, projectId);
   const target = resolveTarget(body, projectId, null);
   checkTarget(ctx.tx, target);
   return principleItem(
@@ -240,7 +276,10 @@ export function createPrinciple(
   );
 }
 
-/** The builder edits a principle by the store's explicit link; the 409 for a taken key names its holder. */
+/**
+ * The builder edits a principle by the store's explicit link; the 409 for a taken key names its holder.
+ * A quote is the words of one write, so it isn't carried over: the old one stays on the record replaced.
+ */
 export function supersedePrincipleRecord(
   ctx: WriteContext,
   id: PrincipleId,
@@ -261,5 +300,35 @@ export function supersedePrincipleRecord(
       speaker: BUILDER_HANDLE,
       confirmedBy: BUILDER_HANDLE,
     }),
+  );
+}
+
+/** The builder retires a principle. */
+export function retirePrincipleRecord(
+  ctx: WriteContext,
+  id: PrincipleId,
+  reason: string,
+  source: KnowledgeSource | undefined,
+): PrincipleItem {
+  return principleItem(
+    retirePrinciple(ctx, id, BUILDER_HANDLE, reason, actionSourceFor(ctx, source)),
+  );
+}
+
+/**
+ * The builder withdraws a principle. A proposed one is decided through its proposal: withdrawing it
+ * here would leave the proposal pending with no way to accept or reject it, and its card open for good.
+ */
+export function withdrawPrincipleRecord(
+  ctx: WriteContext,
+  id: PrincipleId,
+  reason: string,
+  source: KnowledgeSource | undefined,
+): PrincipleItem {
+  const proposal = pendingProposalOf(ctx.tx, id);
+  if (proposal !== null)
+    throw new ConflictError(`Principle ${id} is proposed; reject proposal ${proposal} instead`);
+  return principleItem(
+    withdrawPrinciple(ctx, id, BUILDER_HANDLE, reason, actionSourceFor(ctx, source)),
   );
 }

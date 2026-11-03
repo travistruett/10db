@@ -742,6 +742,10 @@ export const decisions = sqliteTable(
     withdrawnAt: text('withdrawn_at'),
     withdrawnBy: text('withdrawn_by'),
     withdrawnReason: text('withdrawn_reason'),
+    /** Where the withdrawal came from, when the write named a source. */
+    withdrawnSourceId: text('withdrawn_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -779,12 +783,22 @@ export const principles = sqliteTable(
     speaker: text('speaker'),
     confirmedBy: text('confirmed_by'),
     confirmedAt: text('confirmed_at'),
+    /** Where the confirmation came from, when the write named a source; `source_id` is the proposal's own. */
+    confirmedSourceId: text('confirmed_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
     retiredAt: text('retired_at'),
     retiredBy: text('retired_by'),
     retiredReason: text('retired_reason'),
+    retiredSourceId: text('retired_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
     withdrawnAt: text('withdrawn_at'),
     withdrawnBy: text('withdrawn_by'),
     withdrawnReason: text('withdrawn_reason'),
+    withdrawnSourceId: text('withdrawn_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

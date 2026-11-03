@@ -13,11 +13,15 @@ export {
 } from './proposals';
 export { decisionProvenance, principleProvenance } from './provenance';
 export {
+  actionSourceFor,
   createPrinciple,
   knowledgeList,
   recordDecision,
   resolveTarget,
+  retirePrincipleRecord,
   supersedeDecisionRecord,
   supersedePrincipleRecord,
+  withdrawDecisionRecord,
+  withdrawPrincipleRecord,
 } from './records';
 export { renderDecisions, renderRules } from './render';

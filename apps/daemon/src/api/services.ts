@@ -418,12 +418,13 @@ export interface ApiServices {
   recordDecision(projectId: ProjectId, body: DecisionWrite): DecisionItem | KnowledgeDryRunDto;
   /** Replaces a current decision; a decision that isn't current is a ConflictError naming the one that is. */
   supersedeDecision(id: DecisionId, body: DecisionEdit): DecisionItem | KnowledgeDryRunDto;
-  withdrawDecision(id: DecisionId, body: KnowledgeReason): DecisionItem;
+  withdrawDecision(id: DecisionId, body: KnowledgeReason): DecisionItem | KnowledgeDryRunDto;
   decisionProvenance(id: DecisionId): ProvenanceDto;
   createPrinciple(projectId: ProjectId, body: PrincipleWrite): PrincipleItem | KnowledgeDryRunDto;
   supersedePrinciple(id: PrincipleId, body: PrincipleEdit): PrincipleItem | KnowledgeDryRunDto;
-  retirePrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem;
-  withdrawPrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem;
+  retirePrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem | KnowledgeDryRunDto;
+  /** A proposed principle is a ConflictError naming the proposal to reject. */
+  withdrawPrinciple(id: PrincipleId, body: KnowledgeReason): PrincipleItem | KnowledgeDryRunDto;
   principleProvenance(id: PrincipleId): ProvenanceDto;
   /** A project's principle proposals in one status, oldest first. */
   listProposals(projectId: ProjectId, query: ProposalListQuery): ProposalDto[];

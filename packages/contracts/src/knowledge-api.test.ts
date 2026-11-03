@@ -7,6 +7,8 @@ import {
   PrincipleEdit,
   PrincipleWrite,
   ProposalListQuery,
+  ProposalVerdictAccept,
+  ProposalVerdictReject,
 } from './knowledge-api';
 
 const paths = (r: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) =>
@@ -81,8 +83,21 @@ describe('the write bodies', () => {
   });
 
   it('refuses a stray field on a reason, and a blank reason', () => {
-    expect(KnowledgeReason.safeParse({ reason: 'x', source: { via: 'y' } }).success).toBe(false);
+    expect(KnowledgeReason.safeParse({ reason: 'x', colour: 'y' }).success).toBe(false);
     expect(KnowledgeReason.safeParse({ reason: ' ' }).success).toBe(false);
+  });
+
+  it.each([
+    ['a retire or a withdrawal', KnowledgeReason, { reason: 'x' }],
+    ['an accepted proposal', ProposalVerdictAccept, {}],
+    ['a rejected proposal', ProposalVerdictReject, {}],
+  ] as const)('takes a source on %s', (_name, schema, body) => {
+    const source = { via: 'claude_code', sessionId: 's1', cwd: '/x', quote: 'it is wrong' };
+    expect(schema.parse({ ...body, source }).source).toEqual(source);
+  });
+
+  it('takes a dry run on a reason', () => {
+    expect(KnowledgeReason.parse({ reason: 'x', dryRun: true }).dryRun).toBe(true);
   });
 
   it('lists pending proposals by default', () => {

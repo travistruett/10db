@@ -222,8 +222,23 @@ export type ProposalAccept = z.infer<typeof ProposalAccept>;
 export const ProposalReject = z.object({ note: z.string().max(4000).optional() });
 export type ProposalReject = z.infer<typeof ProposalReject>;
 
+/** The source a confirmation, a retire or a withdrawal named: the tool, its session and the words. */
+const ActionSource = z.object({
+  via: z.string(),
+  sessionId: z.string().nullable(),
+  cwd: z.string().nullable(),
+  quote: z.string().nullable(),
+  recordedAt: Timestamp,
+});
+
+const Actor = z.object({
+  at: Timestamp,
+  by: z.string().nullable(),
+  reason: z.string().nullable(),
+  source: ActionSource.nullable(),
+});
+
 /** Where a record came from, resolved from its `sources` row (spec §9 provenance). */
-const Actor = z.object({ at: Timestamp, by: z.string().nullable(), reason: z.string().nullable() });
 
 export const ProvenanceDto = z.object({
   /** The record this answers for. */
@@ -263,6 +278,7 @@ export const ProvenanceDto = z.object({
   speaker: z.string().nullable(),
   confirmedBy: z.string().nullable(),
   confirmedAt: Timestamp.nullable(),
+  confirmedSource: ActionSource.nullable(),
 });
 export type ProvenanceDto = z.infer<typeof ProvenanceDto>;
 

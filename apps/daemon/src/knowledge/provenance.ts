@@ -107,6 +107,22 @@ function describeSource(db: DbReader, a: Attribution): Common {
   };
 }
 
+/** The source a confirmation, a retire or a withdrawal named, or null when it named none. */
+function actionSource(db: DbReader, id: SourceId | null): ProvenanceDto['confirmedSource'] {
+  if (id === null) return null;
+  const source = getSource(db, id);
+  const ref: Ref = source.ref;
+  const via = text(ref['via']);
+  if (via === null) return null;
+  return {
+    via,
+    sessionId: text(ref['sessionId']),
+    cwd: text(ref['cwd']),
+    quote: text(ref['quote']),
+    recordedAt: source.createdAt,
+  };
+}
+
 export function decisionProvenance(db: DbReader, id: DecisionId): ProvenanceDto {
   const d = getDecisionDto(db, id);
   const row = getDecision(db, id);
@@ -122,13 +138,19 @@ export function decisionProvenance(db: DbReader, id: DecisionId): ProvenanceDto 
       confirmedBy: null,
       confirmedAt: null,
     }),
+    confirmedSource: null,
     supersedes: d.supersedesId,
     supersededBy: d.supersededById,
     retired: null,
     withdrawn:
       row.withdrawnAt === null
         ? null
-        : { at: row.withdrawnAt, by: row.withdrawnBy, reason: row.withdrawnReason },
+        : {
+            at: row.withdrawnAt,
+            by: row.withdrawnBy,
+            reason: row.withdrawnReason,
+            source: actionSource(db, row.withdrawnSourceId),
+          },
   };
 }
 
@@ -147,15 +169,26 @@ export function principleProvenance(db: DbReader, id: PrincipleId): ProvenanceDt
       confirmedBy: p.confirmedBy,
       confirmedAt: p.confirmedAt,
     }),
+    confirmedSource: actionSource(db, row.confirmedSourceId),
     supersedes: p.supersedesId,
     supersededBy: p.supersededById,
     retired:
       row.retiredAt === null
         ? null
-        : { at: row.retiredAt, by: row.retiredBy, reason: row.retiredReason },
+        : {
+            at: row.retiredAt,
+            by: row.retiredBy,
+            reason: row.retiredReason,
+            source: actionSource(db, row.retiredSourceId),
+          },
     withdrawn:
       row.withdrawnAt === null
         ? null
-        : { at: row.withdrawnAt, by: row.withdrawnBy, reason: row.withdrawnReason },
+        : {
+            at: row.withdrawnAt,
+            by: row.withdrawnBy,
+            reason: row.withdrawnReason,
+            source: actionSource(db, row.withdrawnSourceId),
+          },
   };
 }

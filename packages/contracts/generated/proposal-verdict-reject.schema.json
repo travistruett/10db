@@ -5,6 +5,38 @@
     "note": {
       "type": "string",
       "maxLength": 4000
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "via": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The tool that wrote it, such as claude_code."
+        },
+        "sessionId": {
+          "description": "The tool's own session id.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "quote": {
+          "description": "The builder's own words.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "via"
+      ],
+      "additionalProperties": false
     }
   },
   "additionalProperties": false
