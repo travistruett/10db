@@ -12,7 +12,7 @@ export {
   resolveInRepo,
 } from './paths';
 export { parseShell, splitCommand, stripCommandPrefixes, type ShellSegment } from './shell-words';
-export { READ_COMMANDS } from './read-only';
+export { READ_COMMANDS, readOnlyShellRefusal } from './read-only';
 export { protectedPaths, type ProtectedPath } from './account-rules';
 export { EQUALS_EXPANSION } from './plain-command';
 export { plainWordReadings } from './command-forms';

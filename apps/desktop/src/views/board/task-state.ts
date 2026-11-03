@@ -7,6 +7,7 @@ import {
   rejectionsSentBack,
   retryTargetAfterRejection,
   StepRole,
+  TaskStatus,
   WorkstreamFailure,
   WorkstreamState,
   type BatchDto,
@@ -105,14 +106,19 @@ function whatRetryDoes(
 
 /**
  * A failed run in plain words: what happened, then what Retry will do. The Board card, the task drawer
- * and Factory's session rows all say this line; the raw `failureReason` stays beside it.
+ * and Factory's rows all say this line; the raw `failureReason` stays beside it. `retryable` is
+ * whether `retryWorkstream` would accept a retry (`canRetryRun`): when it would refuse, the line says
+ * only what happened and never promises a Retry.
  */
 export function failureLine(
   workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & { readonly failureKind: string | null },
+  retryable: boolean,
 ): string {
   const failed = workstream.steps[workstream.stepIndex];
   const step = failed ? STEP_NAME[failed.role] : null;
-  return `${whatHappened(workstream.failureKind, step)} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step)}`;
+  const happened = whatHappened(workstream.failureKind, step);
+  if (!retryable) return happened;
+  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step)}`;
 }
 
 function building(workstream: WorkstreamDto): string {
@@ -175,12 +181,36 @@ export function pullRequestClosed(batch: BatchDto | undefined): boolean {
   return batch?.state === BatchState.Shipped && batch.pr?.state === PullRequestState.Closed;
 }
 
+/** The task fields `retryWorkstream` reads before it accepts a retry. */
+export type RetryTask = Pick<TaskDto, 'status' | 'boardColumnId' | 'workstreamId'>;
+
 /**
- * Whether a failed run can be retried: retry reopens its batch, and a batch shipped anyway never
- * reopens, so a run whose batch shipped is run again with a fresh Start instead.
+ * Whether the batch lets a retry through: only an open or failed one reopens, and a run with no batch
+ * has none to refuse. A run with a batch that is not loaded yet, or failed to, is not known to pass.
  */
-export function canRetryRun(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
-  return canRetry(workstream.state) && batch?.state !== BatchState.Shipped;
+function batchAllowsRetry(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+  if (!batch) return workstream.batchId === null;
+  return batch.state === BatchState.Open || batch.state === BatchState.Failed;
+}
+
+/**
+ * Whether `retryWorkstream` would accept a retry of this run: it failed, its task was not closed or
+ * parked and has no newer run, and its batch is still open or failed (retry reopens it; a batch shipped
+ * anyway never reopens, so that run is run again with a fresh Start instead). Every line or button that
+ * offers Retry asks this, so none promises what the daemon refuses.
+ */
+export function canRetryRun(
+  task: RetryTask,
+  workstream: WorkstreamDto,
+  batch: BatchDto | undefined,
+): boolean {
+  return (
+    canRetry(workstream.state) &&
+    task.status !== TaskStatus.Cancelled &&
+    task.boardColumnId === null &&
+    task.workstreamId === workstream.id &&
+    batchAllowsRetry(workstream, batch)
+  );
 }
 
 /**
@@ -293,7 +323,9 @@ const CALM: ReadonlySet<MantineColor> = new Set(['blue', 'gray', 'green']);
 /**
  * What a task is doing right now, from its latest workstream and the batch it ships in, with the
  * notices that stand beside it. Null when there is nothing to say: no run, a cancelled one, or finished
- * work that is not being shipped and has no notice.
+ * work that is not being shipped and has no notice. A failed run says what Retry will do only when
+ * `retryWorkstream` would accept it; pass `task` so a closed, parked or replaced run is judged too
+ * (without it only the batch is).
  */
 export function taskState(
   workstream: WorkstreamDto | undefined,
@@ -301,8 +333,9 @@ export function taskState(
   gateCommand: string | null,
   place?: number,
   batches?: readonly BatchDto[],
+  task?: RetryTask,
 ): TaskState | null {
-  const state = stateOf(workstream, batch, gateCommand, place, batches);
+  const state = stateOf(workstream, batch, gateCommand, place, batches, task);
   const notices = taskNotices(workstream, batch);
   if (notices.length === 0) return state;
   const text = notices.map((n) => n.line).join(' · ');
@@ -321,6 +354,7 @@ function stateOf(
   gateCommand: string | null,
   place?: number,
   batches?: readonly BatchDto[],
+  task?: RetryTask,
 ): TaskState | null {
   if (!workstream) return null;
   switch (workstream.state) {
@@ -349,7 +383,14 @@ function stateOf(
       // A failed run the builder shipped anyway is judged by its pull request.
       if (batch?.state === BatchState.Shipped && batch.prUrl)
         return pullRequestState(batch, batches);
-      return { line: failureLine(workstream), color: 'red', detail: workstream.failureReason };
+      return {
+        line: failureLine(
+          workstream,
+          task ? canRetryRun(task, workstream, batch) : batchAllowsRetry(workstream, batch),
+        ),
+        color: 'red',
+        detail: workstream.failureReason,
+      };
     case S.Done:
       if (batch?.state === BatchState.Failed) {
         return {

@@ -2,6 +2,7 @@ import { mintId } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
+import { WorkstreamList } from '../../daemon/queries';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { theme } from '../../theme';
 import { cardSummary, TaskCard } from './task-card';
@@ -10,7 +11,12 @@ import { failureLine } from './task-state';
 function card(props: Partial<Parameters<typeof TaskCard>[0]>) {
   render(
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      <TaskCard task={taskDto()} workstream={undefined} peers={new Map()} {...props} />
+      <TaskCard
+        task={taskDto({ workstreamId: props.workstream?.id ?? null })}
+        workstream={undefined}
+        peers={new Map()}
+        {...props}
+      />
     </MantineProvider>,
   );
 }
@@ -228,7 +234,7 @@ describe('TaskCard state', () => {
           stepIndex: 1,
         });
         card({ workstream });
-        const line = screen.getByText(failureLine(workstream));
+        const line = screen.getByText(failureLine(workstream, true));
         expect(line.textContent).toMatch(/Retry /);
         expect(screen.queryByText(REASON)).toBeNull();
         fireEvent.mouseEnter(line);
@@ -236,15 +242,45 @@ describe('TaskCard state', () => {
       },
     );
 
+    it('parses a list with a kind this build does not know and shows the generic line', () => {
+      // A newer daemon's kind, as it arrives over the wire.
+      const wire: unknown = JSON.parse(
+        JSON.stringify([
+          {
+            ...workstreamDto({ state: 'FAILED', failureReason: REASON }),
+            failureKind: 'a_kind_from_a_newer_daemon',
+          },
+        ]),
+      );
+      const [workstream] = WorkstreamList.parse(wire);
+      if (!workstream) throw new Error('the list lost its workstream');
+      expect(workstream.failureKind).toBe('a_kind_from_a_newer_daemon');
+      card({ workstream });
+      expect(screen.getByText(/^The run failed\. Retry runs it again\.$/)).toBeTruthy();
+    });
+
     it('speaks the plain line and the raw reason to a screen reader', () => {
       const workstream = workstreamDto({
         state: 'FAILED',
         failureKind: 'gate_failed',
         failureReason: 'The gate failed 4 times (last exit 2)',
       });
-      const summary = cardSummary(taskDto(), workstream, new Map());
-      expect(summary).toContain(`${failureLine(workstream)} `);
+      const summary = cardSummary(taskDto({ workstreamId: workstream.id }), workstream, new Map());
+      expect(summary).toContain(`${failureLine(workstream, true)} `);
       expect(summary).toContain('Reason: The gate failed 4 times (last exit 2).');
+    });
+
+    it('says only what happened, to the eye and to a screen reader, when the task is parked', () => {
+      const workstream = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
+      const task = taskDto({ workstreamId: workstream.id, boardColumnId: mintId('BoardColumn') });
+      render(
+        <MantineProvider theme={theme} defaultColorScheme="dark">
+          <TaskCard task={task} workstream={workstream} peers={new Map()} />
+        </MantineProvider>,
+      );
+      expect(screen.getByText(failureLine(workstream, false))).toBeTruthy();
+      expect(screen.queryByText(/Retry/)).toBeNull();
+      expect(cardSummary(task, workstream, new Map())).not.toContain('Retry');
     });
   });
 

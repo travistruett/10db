@@ -1,8 +1,17 @@
 import { unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { BranchName, ConflictError, InvalidError, mintId, type TaskDto } from '@10db/contracts';
+import {
+  BranchName,
+  ConflictError,
+  InvalidError,
+  mintId,
+  type BatchDto,
+  type BatchId,
+  type TaskDto,
+} from '@10db/contracts';
 import {
   clearWorktreePath,
+  getAppSetting,
   getBatch,
   insertBatch,
   insertWorkstream,
@@ -21,7 +30,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { GITHUB_ORIGIN } from '../../test/fixtures';
 import { GitTrustFailure } from '../git';
 import { createInboxService } from '../inbox';
-import { batchBranchName, createStartCardAnswers, StartChoice } from './index';
+import { batchBranchName, createBatchStarter, createStartCardAnswers, StartChoice } from './index';
 
 let h: DeliveryHarness;
 beforeEach(() => {
@@ -331,6 +340,77 @@ describe('cutting a branch', () => {
     const cut = getBatch(h.store.db, batch.id);
     expect(cut.title).toBe('Stamping a file never blocks on a FIFO');
     expect(cut.branch).toContain('stamping-a-file');
+  });
+});
+
+describe("a start's record of its batches", () => {
+  /**
+   * A starter whose state notes, after every write, each watched batch that has left CUTTING (opened
+   * or deleted) while its start_siblings record is still set. A crash right after that write would
+   * leave the record for good.
+   */
+  function starterWatchingSiblings() {
+    const leaked: BatchId[] = [];
+    const watched: BatchId[] = [];
+    const state: typeof h.state = {
+      db: h.state.db,
+      now: () => h.state.now(),
+      write: (fn) => {
+        const value = h.state.write(fn);
+        for (const id of watched) {
+          const row = listBatches(h.store.db).find((b) => b.id === id);
+          if (row?.state !== 'CUTTING' && getAppSetting(h.store.db, `start_siblings.${id}`))
+            leaked.push(id);
+        }
+        return value;
+      },
+    };
+    return {
+      starter: createBatchStarter({ ...h.ctx, state }),
+      watch: (batches: readonly BatchDto[]) => watched.push(...batches.map((b) => b.id)),
+      leaked,
+    };
+  }
+
+  /** The start's batches: the shared one, and a copy of the task that runs apart. */
+  function startWithCopy(
+    starter: ReturnType<typeof createBatchStarter>,
+    shared: TaskDto,
+  ): { sharedBatch: BatchDto; all: BatchDto[] } {
+    const copy = h.addTask('Beta', { areas: ['ui'], workspaceMode: 'worktree' });
+    const all = starter.startBatch(h.project.id, {
+      title: 'Together',
+      taskIds: [shared.id, copy.id],
+    });
+    expect(all).toHaveLength(2);
+    // Both are written CUTTING, with the record that names the other.
+    for (const { id } of all)
+      expect(getAppSetting(h.store.db, `start_siblings.${id}`)).toHaveLength(2);
+    const sharedBatch = all.find((b) => b.worktreePath === null);
+    if (!sharedBatch) throw new Error('the start made no shared batch');
+    return { sharedBatch, all };
+  }
+
+  it("drops the record in the write that opens the shared cut's batch", async () => {
+    const { starter, watch, leaked } = starterWatchingSiblings();
+    const { sharedBatch, all } = startWithCopy(starter, h.addTask('Alpha'));
+    watch(all);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, sharedBatch.id).state).toBe('OPEN');
+    expect(leaked).toEqual([]);
+  });
+
+  it("drops the record in the write that deletes the shared cut's refused batch", async () => {
+    const { starter, watch, leaked } = starterWatchingSiblings();
+    // The landing branch is nowhere on origin, so the shared cut is refused.
+    const landing = { landing: { kind: 'branch', branch: 'feature/missing' } } as const;
+    const { sharedBatch, all } = startWithCopy(starter, h.addTask('Alpha', landing));
+    watch(all);
+    await h.jobs.idle();
+
+    expect(listBatches(h.store.db).map((b) => b.id)).not.toContain(sharedBatch.id);
+    expect(leaked).toEqual([]);
   });
 });
 

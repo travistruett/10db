@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
-import { checkInstall, removeBrokenInstall } from './install-health';
+import { checkInstall, madeByAnotherPnpm, removeBrokenInstall } from './install-health';
 
 let tmp: TempDir;
 let root: string;
@@ -175,6 +175,52 @@ describe('checkInstall', () => {
       ].join('\n'),
     );
     expect(checkInstall(root)).toEqual({ kind: 'whole' });
+  });
+});
+
+describe('madeByAnotherPnpm', () => {
+  const modules = (text: string) => {
+    write(join(root, 'node_modules/.modules.yaml'), text);
+  };
+
+  it('says yes for another pnpm', () => {
+    modules('packageManager: pnpm@12.15.0\n');
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(true);
+  });
+
+  it('says no for the same pnpm, whatever store the file names', () => {
+    // A sandboxed run's store is its own temp dir, so this never matches a store the daemon holds.
+    modules('packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-x/cache/pnpm-store/v11\n');
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(false);
+  });
+
+  it('says no when the daemon’s version is unknown', () => {
+    modules('packageManager: pnpm@12.15.0\n');
+    expect(madeByAnotherPnpm(root, null)).toBe(false);
+  });
+
+  it.each([
+    [
+      'no .modules.yaml',
+      () => {
+        /* none written */
+      },
+    ],
+    [
+      'an unreadable one',
+      () => {
+        modules(': : [');
+      },
+    ],
+    [
+      'an empty one',
+      () => {
+        modules('');
+      },
+    ],
+  ])('says no for %s', (_name, arrange) => {
+    arrange();
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(false);
   });
 });
 

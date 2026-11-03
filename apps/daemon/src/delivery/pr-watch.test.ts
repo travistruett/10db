@@ -9,7 +9,7 @@ import {
   transitionBatch,
 } from '@10db/db';
 import type { BatchId, ProjectId } from '@10db/contracts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
@@ -1591,6 +1591,8 @@ describe('a required check GitHub cancelled', () => {
 
   const stored = (id: BatchId) => getBatch(h.store.db, id);
   const noticeOf = (id: BatchId) => stored(id).notices.find((n) => n.key === 'checks-cancelled');
+  const rerunNoticeOf = (id: BatchId) =>
+    stored(id).notices.find((n) => n.key === `checks-rerun:${HEAD_A}`);
 
   function watching(autoMerge = true): { id: BatchId; prUrl: string; w: PrWatch } {
     setup();
@@ -1791,6 +1793,112 @@ describe('a required check GitHub cancelled', () => {
     await round(w);
     expect(h.gh.reruns).toEqual(['77']);
     expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('runs the one run again only once when GitHub refuses the other, which is still running', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    // Run 77 was run again and the record says so; run 88 was refused, so 10db asks again.
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)).toBeUndefined();
+    expect(rerunNoticeOf(id)?.line).toContain('desktop');
+    expect(rerunNoticeOf(id)?.line).not.toContain('lint');
+    await round(w);
+    await round(w);
+    // Run 77 is not run a second time; run 88 is accepted once.
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(noticeOf(id)).toBeUndefined();
+    expect(rerunNoticeOf(id)?.line).toContain('desktop');
+    expect(rerunNoticeOf(id)?.line).toContain('lint');
+  });
+
+  it('keeps naming a check it ran when a later round runs the other, once GitHub no longer lists it', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    // Run 77 is running now, so only lint is left cancelled.
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [job('desktop', '77')],
+      cancelled: [job('lint', '88')],
+    });
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(rerunNoticeOf(id)?.line).toContain('desktop');
+    expect(rerunNoticeOf(id)?.line).toContain('lint');
+  });
+
+  it('does not run the first run again when the daemon stops between two reruns', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    // What a killed daemon leaves behind is what is stored when the call for run 88 goes out.
+    const rerun = h.gh.rerunFailed.bind(h.gh);
+    let storedAtSecondRun: string | undefined;
+    const spy = vi.spyOn(h.gh, 'rerunFailed').mockImplementation((input) => {
+      if (input.runId === '88') storedAtSecondRun = rerunNoticeOf(id)?.line;
+      return rerun(input);
+    });
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    spy.mockRestore();
+    expect(storedAtSecondRun).toContain('desktop');
+    await w.stop();
+
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('names only the check GitHub refused when it hard-refuses the second run', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)?.line).toContain('lint');
+    expect(noticeOf(id)?.line).not.toContain('desktop');
+    expect(noticeOf(id)?.body).toContain('Resource not accessible');
+    expect(rerunNoticeOf(id)?.line).toContain('desktop');
+    expect(rerunNoticeOf(id)?.line).not.toContain('lint');
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
   });
 
   it('gives a new head its own rerun', async () => {

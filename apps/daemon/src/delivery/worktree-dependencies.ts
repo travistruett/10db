@@ -10,6 +10,7 @@ import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
 import {
   checkInstall,
+  madeByAnotherPnpm,
   madeFromAnotherStore,
   PNPM_LOCKFILE,
   removeBrokenInstall,
@@ -55,7 +56,13 @@ export function installCommand(pnpm: string, mode: InstallMode = 'frozen'): stri
 export type DependencyRefresh =
   /** Nothing to do: the project is not pnpm's, or the seed left no `node_modules`. */
   | { readonly kind: 'skipped' }
-  | { readonly kind: 'installed'; readonly logPath: string; readonly durationMs: number }
+  | {
+      readonly kind: 'installed';
+      readonly logPath: string;
+      readonly durationMs: number;
+      /** The copy's `node_modules` was removed first, so whatever install scripts had built went with it. */
+      readonly startedOver: boolean;
+    }
   | {
       readonly kind: 'failed';
       readonly exitCode: number;
@@ -127,6 +134,14 @@ export interface WorktreeDependenciesDeps {
     env: Readonly<Record<string, string>>,
     checkouts: readonly string[],
   ): Promise<string | null>;
+  /**
+   * The version of that pnpm, or null when it can't be read. Without it, a copy made by another pnpm
+   * is told from the daemon's only by the install that fails on it.
+   */
+  readonly pnpmVersion?: (
+    pnpm: string,
+    env: Readonly<Record<string, string>>,
+  ) => Promise<string | null>;
 }
 
 /**
@@ -144,17 +159,6 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
       if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
       const env = deps.sessionEnv(project);
-      // pnpm repairs an install that is out of date, but not one that is pruned or was made from
-      // another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and
-      // the copy is left holding a fraction of its packages. A sandboxed install is given a store of
-      // its own in its run's temp dir, so a seed from the main checkout, or an earlier run's install,
-      // names another store even when every dependency resolves. Either starts over, as the first
-      // install of a copy does, which works. Sources are not touched.
-      if (
-        checkInstall(path).kind === 'broken' ||
-        madeFromAnotherStore(path, env['pnpm_config_store_dir'])
-      )
-        removeBrokenInstall(path);
       const logPath = join(
         deps.dataDir,
         'logs',
@@ -170,28 +174,69 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         writeFileSync(logPath, `${tail}\n`);
         return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
       }
-      const result = await deps.gate.run({
-        project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
-        command: installCommand(pnpm, mode),
-        logPath,
-        timeoutMs: deps.timeoutMs,
-        env,
-        rules: deps.rules(project),
-        checkouts,
-        signal,
-        packageInstall: true,
-      });
-      if (result.aborted) return { kind: 'aborted' };
-      if (result.exitCode !== 0 || result.timedOut)
+      let startedOver = false;
+      const startOver = (): void => {
+        startedOver ||= existsSync(join(path, 'node_modules'));
+        removeBrokenInstall(path);
+      };
+      // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
+      // pnpm or from another store: it decides to remove `node_modules/.pnpm`, the sandbox refuses
+      // part way, and the copy is left holding a fraction of its packages. A sandboxed install is
+      // given a store of its own in its run's temp dir, so a seed from the main checkout, or an
+      // earlier run's install, names another store even when every dependency resolves. A copy whose
+      // dependencies do not resolve, or whose install another pnpm made (a seed cloned from a main
+      // checkout the builder installed with their own pnpm), or from another store, starts over, as
+      // the first install of a copy does, which works. Sources are not touched.
+      const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
+      if (
+        madeByAnotherPnpm(path, version) ||
+        madeFromAnotherStore(path, env['pnpm_config_store_dir']) ||
+        checkInstall(path).kind === 'broken'
+      )
+        startOver();
+      const install = async (): Promise<DependencyRefresh> => {
+        const result = await deps.gate.run({
+          project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
+          command: installCommand(pnpm, mode),
+          logPath,
+          timeoutMs: deps.timeoutMs,
+          env,
+          rules: deps.rules(project),
+          checkouts,
+          signal,
+          packageInstall: true,
+        });
+        if (result.aborted) return { kind: 'aborted' };
+        if (result.exitCode !== 0 || result.timedOut)
+          return {
+            kind: 'failed',
+            exitCode: result.exitCode,
+            timedOut: result.timedOut,
+            tail: result.tail,
+            logPath: result.logPath,
+            blockedHosts: result.blockedHosts,
+          };
         return {
-          kind: 'failed',
-          exitCode: result.exitCode,
-          timedOut: result.timedOut,
-          tail: result.tail,
+          kind: 'installed',
           logPath: result.logPath,
-          blockedHosts: result.blockedHosts,
+          durationMs: result.durationMs,
+          startedOver,
         };
-      return { kind: 'installed', logPath: result.logPath, durationMs: result.durationMs };
+      };
+      const first = await install();
+      // An install the sandbox stopped part way leaves packages missing. Once is enough to start
+      // over: a copy with nothing in node_modules installs as a new one does. Not after a timeout
+      // (it would only wait again) or a refused host (the same refusal would come back).
+      if (
+        first.kind === 'failed' &&
+        !first.timedOut &&
+        first.blockedHosts.length === 0 &&
+        checkInstall(path).kind === 'broken'
+      ) {
+        startOver();
+        return install();
+      }
+      return first;
     },
   };
 }

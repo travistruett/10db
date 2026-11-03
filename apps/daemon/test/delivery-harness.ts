@@ -261,6 +261,8 @@ export function createDeliveryHarness(
     /** Added to the network calls' environment, such as an ssh command for a hanging transport. */
     readonly networkEnv?: Readonly<Record<string, string>>;
     readonly trigger?: boolean;
+    /** The version the worktree install's pnpm says it is; unread when not given. */
+    readonly pnpmVersion?: string;
     /** What the shipper reads to say a failed gate ran while the Mac was overloaded. */
     readonly load?: Pick<LoadGuard, 'overloadedSince'>;
     /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
@@ -312,6 +314,9 @@ export function createDeliveryHarness(
     dataDir: data.path,
     sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
     resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
+    ...(opts.pnpmVersion === undefined
+      ? {}
+      : { pnpmVersion: () => Promise.resolve(opts.pnpmVersion ?? null) }),
     rules: () => [],
     checkouts: () => [remote.repo.path],
     timeoutMs: opts.gateTimeoutMs ?? 20_000,
