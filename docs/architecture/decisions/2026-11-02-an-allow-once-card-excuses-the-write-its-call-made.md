@@ -15,9 +15,29 @@ doesn't end in a newline deletes the newline after its text too, where the file 
 
 A file with CRLF line endings is mirrored: Claude Code reads it as LF, applies the edit, and writes it back in
 the file's own endings (CRLF when the first 4096 characters hold more CRLF than bare LF), so a multi-line
-`new_string` lands with `\r\n`. The broker does the same before hashing. One case where Claude Code's result
-differs from the broker's is not mirrored, and fails closed (the builder's allowed write is carded): an
-`old_string` with straight quotes that Claude Code matches to curly quotes in the file.
+`new_string` lands with `\r\n`. The broker does the same before hashing.
+
+Claude Code also normalizes an Edit's input before it applies it. Checked against the Claude Code the lanes
+run (2.1.310, by editing scratch files through its own Edit tool, since the native binary isn't in
+node_modules to read), with these results:
+
+- **Mirrored: trailing whitespace.** Unless the path ends in `.md` or `.mdx` (any case), every line of
+  `new_string` loses the whitespace at its end (`trimEnd`, so a no-break space too; a whitespace-only line
+  becomes empty; line separators stay). The broker does the same in `editResult`, for Edit and MultiEdit,
+  before the deletion rule. `old_string` isn't touched.
+- **Not mirrored, fails closed: desanitizing.** When `old_string` isn't in the file but is once certain
+  tokens are swapped for the longer ones Claude Code strips from its own input (`<fnr>` →
+  `<function_results>`, and the like), Claude Code matches on the swapped text and swaps the same tokens in
+  `new_string`. The broker finds no match, so `editResult` is undefined and the card records no hash.
+- **Not mirrored, fails closed: quote style.** An `old_string` with straight quotes that Claude Code matches
+  to curly quotes in the file, and then the same curly style in `new_string` (double quotes were
+  converted in the probe; an apostrophe in `new_string` stayed straight when `old_string` had no single
+  quote). The broker finds no match, so `editResult` is undefined and the card records no hash.
+
+In each of the last two the builder's allowed write is carded as a stray: noise, and never an excuse for a
+write that wasn't approved. Mirroring them needs Claude Code's token table and its curly-quote placement
+rules, which can't be read from here and change with its version, so a wrong copy would be worse than
+carding.
 
 The watcher excuses an unused allow-once card's write for a lane only when the file's content hash is the one
 recorded for that lane. Another lane's write to the path, in the same watch window or not, is carded, both

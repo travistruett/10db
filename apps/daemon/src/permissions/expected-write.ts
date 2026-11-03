@@ -32,13 +32,31 @@ const stringIn = (input: Record<string, unknown>, key: string): string | null =>
   return typeof value === 'string' ? value : null;
 };
 
-/** One `old_string` → `new_string` edit applied to `current` as Claude Code applies it; undefined when it fails. */
-function applyEdit(current: string | null, edit: unknown): string | undefined {
+/**
+ * Claude Code's `stripTrailingWhitespace`: every line of `new_string` loses the whitespace at its end
+ * (`trimEnd`, so a no-break space too), the line separators (LF, CRLF, CR) staying as they are.
+ */
+function stripTrailingWhitespace(text: string): string {
+  return text
+    .split(/(\r\n|\n|\r)/)
+    .map((part, index) => (index % 2 === 0 ? part.trimEnd() : part))
+    .join('');
+}
+
+/** Markdown keeps its trailing whitespace (two spaces are a line break); Claude Code tells it by extension. */
+const isMarkdown = (path: string | null): boolean => path !== null && /\.(md|mdx)$/i.test(path);
+
+/**
+ * One `old_string` → `new_string` edit applied to `current` as Claude Code applies it; undefined when it fails.
+ * `path` is the edited file's `file_path`, which decides whether `new_string` loses its trailing whitespace.
+ */
+function applyEdit(current: string | null, edit: unknown, path: string | null): string | undefined {
   if (typeof edit !== 'object' || edit === null) return undefined;
   const fields = edit as Record<string, unknown>;
   const oldText = stringIn(fields, 'old_string');
-  const newText = stringIn(fields, 'new_string');
-  if (oldText === null || newText === null) return undefined;
+  const rawNewText = stringIn(fields, 'new_string');
+  if (oldText === null || rawNewText === null) return undefined;
+  const newText = isMarkdown(path) ? rawNewText : stripTrailingWhitespace(rawNewText);
   // An empty old_string creates the file, or fills one that is empty; on a file with content it fails.
   if (oldText === '') return current === null || current === '' ? newText : undefined;
   if (current === null) return undefined;
@@ -73,14 +91,15 @@ export function editResult(
   // endings: CRLF when the start of the file has more CRLF than bare LF.
   const crlf = current !== null && usesCrlf(current);
   const lf = current === null ? null : current.replaceAll('\r\n', '\n');
+  const path = stringIn(input, 'file_path');
   let content: string | undefined;
   if (toolName === 'Edit') {
-    content = applyEdit(lf, input);
+    content = applyEdit(lf, input, path);
   } else {
     if (!Array.isArray(input['edits'])) return undefined;
     let next: string | null = lf;
     for (const edit of input['edits'] as unknown[]) {
-      const applied = applyEdit(next, edit);
+      const applied = applyEdit(next, edit, path);
       if (applied === undefined) return undefined;
       next = applied;
     }
