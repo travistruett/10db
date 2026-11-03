@@ -51,11 +51,19 @@ as the last ended, so the idle moment never came. Once a build is staged and has
 builder chose Install Now (`POST /settings/self-update/install-now`, drains at once), the daemon _drains_ the
 factory (`self-update/drain.ts`) until the app has installed:
 
-- **Held:** the scheduler launches no queued lane (its `held` hook, beside the overload hold), a running lane starts
-  no next session (the runner's hold), a task's gate takes no slot (`limitGates`), and no open batch moves to
-  SHIPPING (`ShipperDeps.holdShips`; a batch whose work is done stays OPEN and is shipped by `checkOpenBatches` when
-  the drain ends or after the relaunch). The runner's and the task gate's hold is the load guard _and_ the drain
-  (`holdBoth`): work starts only when neither holds.
+- **Held:** the scheduler launches no queued lane (its `held` hook, beside the overload hold). A running lane starts
+  no next session (the runner's hold, which it looks at again after the waits before a session starts, and a lane
+  that finds it on starts over at it). A task's gate waits at the same hold in the runner, before it takes its
+  batch's turn or a slot, and looks again in its `beforeStart` once it has both and again after the base has come
+  in: a gate that finds the hold on starts nothing, gives both back and waits above. No open batch moves to SHIPPING
+  (`ShipperDeps.holdShips`; a batch whose work is done stays OPEN and is shipped by `checkOpenBatches` when the drain
+  ends or after the relaunch), a ship the builder asks for (Ship anyway, Retry, a failed task's card) is refused with
+  a `ConflictError` that says why, and no catch-up begins, since it runs the shipping gate (the pull request watch
+  asks again on a later round). The runner's hold is the load guard _and_ the drain (`holdBoth`): work starts only
+  when neither holds.
+- **Why a held gate keeps neither its batch's turn nor a slot:** a sibling's gate, a running session's
+  `install_dependencies` and its migrations claim all queue behind the turn without being parked at the drain, so a
+  gate parked while it held the turn would keep the count above 0 for ever, and the update would never install.
 - **Not stopped:** a session, a task gate, a shipping gate, a cut and a ship that began before the drain run to the
   end. A shipping gate is held only by the load, never by the drain, because its batch is already SHIPPING and a
   parked ship would keep the update waiting for ever; delivery jobs already queued (a ship, a checkout return, a
@@ -67,11 +75,18 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Ends:** the check installs as soon as the count is 0 (the drain stays on until the relaunch, so nothing starts in
   the gap). It ends, and lanes start again, when the builder turns the switch off, the install does not start or
   its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
-  Install Now remembered before the build is staged drains the moment one is.
+  Install Now is remembered while no build is staged yet, and drains the moment one is.
+- **Without GitHub:** a check that can't reach it goes on from the staged build, which was checked when it was
+  fetched and installs with no network, so the drain still installs or waits for the running steps. With no build
+  staged (a stage replaces the one before it) the drain has nothing to install and ends, and the update's wait goes
+  on from where it was.
+- **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
+  released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
   `draining` and `drainingSince`. Settings > Updates shows an update status line, the wait limit and Install Now;
-  the Factory view shows a note, with the time, while lanes are paused. The status is polled every 15 s while an
-  update is available, as no event says it.
+  the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
+  when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
+  and not at all with the switch off or in a run from source, where nothing changes by itself.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
