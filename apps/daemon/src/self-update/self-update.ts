@@ -248,6 +248,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   let available: string | null = null;
   let staged: (StagedBuild & { readonly head: string }) | null = null;
   let working = false;
+  /** From the moment the install is asked to start: the app is about to quit. */
   let applying = false;
   let timer: Timer | null = null;
   let running = false;
@@ -275,14 +276,26 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     deps.drain.begin(drainingSince);
   }
 
-  /** The update is not going to install (or has no build): work starts again, and the wait is forgotten. */
-  function clearWaiting(): void {
-    waitingSince = null;
-    forced = false;
+  function endDrain(): void {
     if (drainingSince === null) return;
     drainingSince = null;
     logger.info({}, 'the update no longer waits: lanes start again');
     deps.drain.end();
+  }
+
+  /**
+   * Main has an update, but no build of it to install yet: work starts again and nothing waits, and
+   * Install Now stays asked for, so the factory drains the moment a build is staged.
+   */
+  function noBuildYet(): void {
+    waitingSince = null;
+    endDrain();
+  }
+
+  /** The update is not going to install: work starts again, and the wait is forgotten. */
+  function clearWaiting(): void {
+    forced = false;
+    noBuildYet();
   }
 
   const failedHead = (): string | null => {
@@ -319,7 +332,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub for the head of main');
-      return TickResult.Unreachable;
+      return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
     if (head === runningCommit) {
@@ -335,7 +348,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub how main compares with this build');
-      return TickResult.Unreachable;
+      return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
     if (!ahead) {
@@ -383,7 +396,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
       // when it is the build the builder rolled back from; the next check looks again.
       if (result.current) {
-        clearWaiting();
+        noBuildYet();
         return skip !== null && result.commit === skip
           ? TickResult.RolledBack
           : TickResult.NoNewerBuild;
@@ -395,11 +408,14 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       } catch (error) {
         if (isStopped()) return TickResult.Working;
         logger.warn({ err: error }, 'could not ask GitHub how the staged build compares');
+        // The stage replaced the build it could have fallen back on, so no drain has anything to
+        // install. The next check fetches again, and the update's wait goes on from where it was.
+        endDrain();
         return TickResult.Unreachable;
       }
       if (isStopped()) return TickResult.Working;
       if (!newer) {
-        clearWaiting();
+        noBuildYet();
         logger.info(
           { running: runningCommit, build: result.commit },
           'the newest finished build is not ahead of the running one, so it is not installed',
@@ -410,12 +426,32 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // A newer head restages while the update waits: the wait goes on from the first staging.
       waitingSince ??= deps.clock.now();
     }
+    return installWhenIdle(runningCommit, staged);
+  }
 
+  /**
+   * GitHub can't be asked. A staged build was checked when it was fetched and installs with no
+   * network, so it goes on waiting, draining or installing, unless its install already failed. With
+   * none the drain has nothing to install and would hold lanes for as long as GitHub stays away.
+   */
+  async function withoutGitHub(runningCommit: string): Promise<TickResult> {
+    if (staged === null || staged.head === failedHead()) {
+      endDrain();
+      return TickResult.Unreachable;
+    }
+    return installWhenIdle(runningCommit, staged);
+  }
+
+  /** The staged build installs when nothing is mid-session; until then it waits or drains. */
+  async function installWhenIdle(
+    runningCommit: string,
+    build: StagedBuild & { readonly head: string },
+  ): Promise<TickResult> {
     // Main's head has no newer finished build than the one the builder rolled back from. The copy
     // is dropped, so the next check looks again for the head's build instead of keeping this one.
-    if (staged.commit === rolledBackFrom()) {
+    if (build.commit === rolledBackFrom()) {
       staged = null;
-      clearWaiting();
+      noBuildYet();
       return TickResult.RolledBack;
     }
     if (!deps.enabled()) {
@@ -423,7 +459,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0) return waitOrDrain();
-    return install(runningCommit, { head, commit: staged.commit }, staged);
+    return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 
   /**
@@ -470,6 +506,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           commit: attempt.commit,
         });
       });
+      // Before the install is asked for: a lane released from here on would be cut off by the quit.
+      applying = true;
       result = await deps.apply(build);
     } catch (error) {
       if (isStopped()) return TickResult.Working;
@@ -477,7 +515,6 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     }
     if (isStopped()) return TickResult.Working;
     if (!result.ok) return notStarted(runningCommit, attempt, result.step, result.message);
-    applying = true;
     logger.info({ ...attempt }, 'installing the newest finished build of main');
     void result.ended
       .then(() => {
@@ -496,6 +533,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     step: string,
     message: string,
   ): TickResult {
+    applying = false;
     deps.resume();
     state.write((ctx) => {
       deleteAppSetting(ctx, SELF_UPDATE_APPLYING_KEY);
@@ -627,8 +665,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     },
     async turnOff() {
       staged = null;
-      // Before the stage is killed: lanes start again at once, not once gh has gone.
-      clearWaiting();
+      // Before the stage is killed: lanes start again at once, not once gh has gone. Not once the
+      // install has started, which the switch can't stop: the quit would cut them off. If the
+      // install fails with this daemon still running, that ends the drain.
+      if (!applying) clearWaiting();
       await deps.cancelStage();
     },
     installNow() {
