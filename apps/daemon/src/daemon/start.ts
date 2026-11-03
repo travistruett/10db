@@ -143,13 +143,17 @@ import {
 } from '../sandbox';
 import { createScheduler, type Scheduler } from '../scheduler';
 import {
+  createDrain,
   createScriptInstaller,
   createSelfUpdate,
   githubHeadOfMain,
   githubMainIsAhead,
+  holdBoth,
   midSessionWork,
   selfUpdateSetting,
+  selfUpdateWaitMinutes,
   setSelfUpdateChoice,
+  setSelfUpdateWaitMinutes,
   type BuildInfo,
   type ScriptInstaller,
   type SelfUpdate,
@@ -505,6 +509,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     ...opts.load,
   });
+  // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
+  const updateDrain = createDrain();
+  // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain.
+  const startHold = holdBoth([
+    { holding: () => loadGuard.overloaded, hold: loadGuard },
+    { holding: () => updateDrain.draining, hold: updateDrain },
+  ]);
   const git = createGit({
     onRefused: createGitRefusalHandler({ db: state.db, inbox, logger }),
     onTrusted: createCheckoutTrustedHandler({ db: state.db, inbox }),
@@ -596,7 +607,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'gate' }),
   });
   const gateSlots = createGateSlots(limits.gateSlots);
+  // A task's gate: held for the drain too, since it begins a step.
   const gate = limitGates(gateRunner, {
+    slots: gateSlots,
+    clock,
+    logger: logger.child({ component: 'gate' }),
+    hold: startHold,
+  });
+  // A batch's shipping gate belongs to a ship that has begun, and a drain lets that finish: only
+  // the load holds it. No new ship begins during the drain (`holdShips`).
+  const shipGate = limitGates(gateRunner, {
     slots: gateSlots,
     clock,
     logger: logger.child({ component: 'gate' }),
@@ -655,7 +675,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const dependencyChanges = createDependencyChanges(delivery, baseUpdates);
   const shipper = createShipper({
     ...delivery,
-    gate,
+    gate: shipGate,
+    holdShips: () => updateDrain.draining,
     baseUpdates,
     clock,
     dataDir: opts.dataDir,
@@ -872,7 +893,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
-    hold: loadGuard,
+    hold: startHold,
     laneTempDirs,
     state,
     adapter,
@@ -931,7 +952,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       flagWorktreeMissing(inbox, batch, path);
     },
     awaitedHolders: () => claimWaits.awaitedHolders(),
-    held: () => loadGuard.overloaded,
+    held: () => loadGuard.overloaded || updateDrain.draining,
   });
   scheduler = createdScheduler;
 
@@ -1089,7 +1110,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         outcome: installer.outcome,
         rollback: installer.rollback,
         // A queued ship, checkout return or cleanup is a delivery job before it is a row.
-        midSession: () => midSessionWork(state.db, deliveryJobs),
+        // A lane or gate parked by the drain has begun nothing: it is not cut off by the quit (the
+        // stop leaves its saved action for recovery), and counting it would keep the drain going for ever.
+        midSession: () =>
+          Math.max(0, midSessionWork(state.db, deliveryJobs) - updateDrain.parked()),
+        waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
+        drain: {
+          begin: (since) => {
+            updateDrain.begin(since);
+          },
+          end: () => {
+            updateDrain.end();
+            // Lanes start again, and a batch whose work finished while new ships were held ships.
+            createdScheduler.requestTick();
+            shipper.checkOpenBatches();
+          },
+        },
         // New work waits from here on, and the tick the scheduler is in has finished: it may be
         // reading branches and about to launch a lane.
         pause: async () => {
@@ -1104,11 +1140,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }
   }
   const selfUpdateServices: SelfUpdateServices = {
-    selfUpdateStatus: () => ({
-      ...selfUpdateSetting(state.db),
-      runningCommit: build?.commit ?? null,
-      availableCommit: selfUpdate?.status().availableCommit ?? null,
-    }),
+    selfUpdateStatus: () => {
+      const progress = selfUpdate?.status();
+      return {
+        ...selfUpdateSetting(state.db),
+        runningCommit: build?.commit ?? null,
+        availableCommit: progress?.availableCommit ?? null,
+        waitMinutes: selfUpdateWaitMinutes(state.db),
+        waitingSince: progress?.waitingSince?.toISOString() ?? null,
+        draining: progress?.draining ?? false,
+        drainingSince: progress?.drainingSince?.toISOString() ?? null,
+      };
+    },
+    setSelfUpdateWait: (minutes) => {
+      setSelfUpdateWaitMinutes(state, minutes);
+      return selfUpdateServices.selfUpdateStatus();
+    },
+    installNow: () => {
+      selfUpdate?.installNow();
+      return selfUpdateServices.selfUpdateStatus();
+    },
     setSelfUpdate: (enabled) => {
       setSelfUpdateChoice(state, enabled);
       // A head of main whose update failed, or the build make rollback-app replaced, is tried again
@@ -1239,6 +1290,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await createdRunner.stopAll('shutdown');
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
+      updateDrain.stop();
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();

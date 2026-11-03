@@ -666,6 +666,38 @@ describe('shipping', () => {
   });
 });
 
+describe('a waiting update that drains the factory', () => {
+  it('starts no ship while it drains, and ships the batch once lanes may start again', async () => {
+    let draining = true;
+    h = createDeliveryHarness({}, { holdShips: () => draining });
+    const { batch } = await openBatch('Held', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const held = await finishAll(batch);
+    // Every member is done, yet the batch stays open: nothing is pushed or opened.
+    expect(held.state).toBe('OPEN');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(h.gh.prCreates()).toEqual([]);
+    expect(h.jobs.pending()).toBe(0);
+
+    draining = false;
+    h.shipper.checkOpenBatches();
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+    expect(h.gh.prCreates()).toHaveLength(1);
+  });
+
+  it('does not stop a ship that began before the drain', async () => {
+    let draining = false;
+    h = createDeliveryHarness({}, { holdShips: () => draining });
+    const { batch } = await openBatch('Running', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
+    draining = true;
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+  });
+});
+
 describe('the push', () => {
   it("ships without running the clone's pre-push hook, which a lane can write", async () => {
     h = createDeliveryHarness();

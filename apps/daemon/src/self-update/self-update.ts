@@ -110,6 +110,13 @@ export interface SelfUpdateDeps {
    * Work that only waits is not counted.
    */
   midSession(): number;
+  /** How long a staged build waits for an idle moment before the factory drains for it. */
+  waitLimitMs(): number;
+  /**
+   * The factory's drain: from `begin`, nothing new starts (no lane, no session, no gate, no ship)
+   * and nothing that runs is stopped; `end` lets work start again. Both are idempotent here.
+   */
+  readonly drain: { begin(since: Date): void; end(): void };
   /**
    * Stops the scheduler starting new work and settles once the tick it was in has finished, so
    * nothing begins between the last check and the quit.
@@ -133,6 +140,8 @@ export const TickResult = {
   Failed: 'failed',
   Busy: 'busy',
   Applying: 'applying',
+  /** The update has waited past the limit (or the builder asked): new work is held until it installs. */
+  Draining: 'draining',
 } as const;
 export type TickResult = (typeof TickResult)[keyof typeof TickResult];
 
@@ -158,7 +167,22 @@ export interface SelfUpdate {
    * under way looks at the switch again before it installs, so nothing installs from here on.
    */
   turnOff(): Promise<void>;
-  status(): { readonly availableCommit: string | null };
+  /**
+   * The builder wants the update now: starts the drain at once when a build is staged and work is
+   * running, and otherwise the moment one is staged. Does nothing when no update is available.
+   */
+  installNow(): void;
+  status(): SelfUpdateProgress;
+}
+
+/** What the builder sees of an update: that it is waiting, and whether the factory drains for it. */
+export interface SelfUpdateProgress {
+  readonly availableCommit: string | null;
+  /** When the build was staged and began to wait for an idle moment; null with no staged build. */
+  readonly waitingSince: Date | null;
+  readonly draining: boolean;
+  /** When new work stopped starting; null while it is not held. */
+  readonly drainingSince: Date | null;
 }
 
 const STEP_LABELS: Readonly<Record<string, string>> = {
@@ -234,6 +258,33 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   /** The head of main last logged as not ahead of the running build. */
   let notAheadOf: string | null = null;
 
+  /** When the staged build began to wait for an idle moment. */
+  let waitingSince: Date | null = null;
+  /** When the factory began to drain for it: new work starts nothing from then on. */
+  let drainingSince: Date | null = null;
+  /** The builder chose Install Now: the wait limit has run out, whatever the clock says. */
+  let forced = false;
+
+  function startDrain(): void {
+    if (drainingSince !== null) return;
+    drainingSince = deps.clock.now();
+    logger.info(
+      { available, waitedSince: waitingSince?.toISOString() ?? null, forced },
+      'an update is waiting: holding new lanes, sessions, gates and ships until it installs',
+    );
+    deps.drain.begin(drainingSince);
+  }
+
+  /** The update is not going to install (or has no build): work starts again, and the wait is forgotten. */
+  function clearWaiting(): void {
+    waitingSince = null;
+    forced = false;
+    if (drainingSince === null) return;
+    drainingSince = null;
+    logger.info({}, 'the update no longer waits: lanes start again');
+    deps.drain.end();
+  }
+
   const failedHead = (): string | null => {
     const stored = getAppSetting(state.db, SELF_UPDATE_FAILED_KEY);
     return typeof stored === 'string' ? stored : null;
@@ -248,6 +299,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       setAppSetting(ctx, SELF_UPDATE_FAILED_KEY, attempt.head);
     });
     logger.error({ ...attempt, step, message }, 'could not update the app');
+    clearWaiting();
     const projectId = deps.cardProject();
     // A card needs a project to sit under; with none registered the log is all there is to say.
     if (projectId === null) return;
@@ -256,7 +308,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   }
 
   async function check(runningCommit: string): Promise<TickResult> {
-    if (!deps.enabled()) return TickResult.Off;
+    if (!deps.enabled()) {
+      clearWaiting();
+      return TickResult.Off;
+    }
     const target: UpdateTarget = { repo: deps.repository };
     let head: string;
     try {
@@ -269,6 +324,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (isStopped()) return TickResult.Working;
     if (head === runningCommit) {
       available = null;
+      clearWaiting();
       return TickResult.Current;
     }
     // Only a main that holds the running commit and more is an update. A build installed from
@@ -284,6 +340,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (isStopped()) return TickResult.Working;
     if (!ahead) {
       available = null;
+      clearWaiting();
       // Once per head of main, so the log says why this build never updates by itself.
       if (notAheadOf !== head) {
         notAheadOf = head;
@@ -295,9 +352,15 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.NotAhead;
     }
     available = head;
-    if (failedHead() === head) return TickResult.FailedBefore;
+    if (failedHead() === head) {
+      clearWaiting();
+      return TickResult.FailedBefore;
+    }
     // The builder rolled back from this head: it stays rolled back until main moves on.
-    if (rolledBackFrom() === head) return TickResult.RolledBack;
+    if (rolledBackFrom() === head) {
+      clearWaiting();
+      return TickResult.RolledBack;
+    }
 
     if (staged?.head !== head) {
       staged = null;
@@ -308,7 +371,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
       // Turned off while the build was fetched: a stage it killed is no failure, and nothing installs.
-      if (!deps.enabled()) return TickResult.Off;
+      if (!deps.enabled()) {
+        clearWaiting();
+        return TickResult.Off;
+      }
       if (!result.ok) {
         fail(runningCommit, { head, commit: head }, result.step, result.message);
         return TickResult.Failed;
@@ -317,6 +383,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
       // when it is the build the builder rolled back from; the next check looks again.
       if (result.current) {
+        clearWaiting();
         return skip !== null && result.commit === skip
           ? TickResult.RolledBack
           : TickResult.NoNewerBuild;
@@ -332,6 +399,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       }
       if (isStopped()) return TickResult.Working;
       if (!newer) {
+        clearWaiting();
         logger.info(
           { running: runningCommit, build: result.commit },
           'the newest finished build is not ahead of the running one, so it is not installed',
@@ -339,17 +407,34 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         return TickResult.NoNewerBuild;
       }
       staged = { dir: result.dir, commit: result.commit, head };
+      // A newer head restages while the update waits: the wait goes on from the first staging.
+      waitingSince ??= deps.clock.now();
     }
 
     // Main's head has no newer finished build than the one the builder rolled back from. The copy
     // is dropped, so the next check looks again for the head's build instead of keeping this one.
     if (staged.commit === rolledBackFrom()) {
       staged = null;
+      clearWaiting();
       return TickResult.RolledBack;
     }
-    if (!deps.enabled()) return TickResult.Off;
-    if (deps.midSession() > 0) return TickResult.Busy;
+    if (!deps.enabled()) {
+      clearWaiting();
+      return TickResult.Off;
+    }
+    if (deps.midSession() > 0) return waitOrDrain();
     return install(runningCommit, { head, commit: staged.commit }, staged);
+  }
+
+  /**
+   * Work is running, so the build can't install yet. Within the limit it waits quietly; past it (or
+   * once the builder asked) the factory drains: nothing new starts until what runs has finished.
+   */
+  function waitOrDrain(): TickResult {
+    const waited = waitingSince === null ? 0 : deps.clock.now().getTime() - waitingSince.getTime();
+    if (drainingSince === null && !forced && waited < deps.waitLimitMs()) return TickResult.Busy;
+    startDrain();
+    return TickResult.Draining;
   }
 
   /**
@@ -372,6 +457,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // The builder turned the switch off while new work was held back.
       if (!deps.enabled()) {
         deps.resume();
+        clearWaiting();
         return TickResult.Off;
       }
       if (deps.midSession() > 0) {
@@ -541,8 +627,24 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     },
     async turnOff() {
       staged = null;
+      // Before the stage is killed: lanes start again at once, not once gh has gone.
+      clearWaiting();
       await deps.cancelStage();
     },
-    status: () => ({ availableCommit: available }),
+    installNow() {
+      if (available === null || !deps.enabled() || deps.runningCommit === null) return;
+      forced = true;
+      if (staged !== null && deps.midSession() > 0) startDrain();
+      // A check under way takes `forced` up when it gets there; otherwise this one does.
+      tick().catch((error: unknown) => {
+        if (!stopped) logger.error({ err: error }, 'the self-update check failed');
+      });
+    },
+    status: () => ({
+      availableCommit: available,
+      waitingSince,
+      draining: drainingSince !== null,
+      drainingSince,
+    }),
   };
 }

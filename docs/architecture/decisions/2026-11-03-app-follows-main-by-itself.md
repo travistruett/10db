@@ -44,6 +44,38 @@ staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Sched
 was reading branches launch nothing, so no lane begins between the last check and the quit. It waits and checks
 again each minute while a batch is cutting or shipping or a lane runs.
 
+**When it has waited too long: the factory drains.** On 2026-11-03 #466 merged and its build finished, yet the app
+was still on the previous commit 30 minutes later: three lanes ran back to back, each starting its next step as soon
+as the last ended, so the idle moment never came. Once a build is staged and has waited longer than the wait limit
+(`app_settings` key `self_update.wait_minutes`, default 15, 0 to 1440, `PUT /settings/self-update/wait`), or the
+builder chose Install Now (`POST /settings/self-update/install-now`, drains at once), the daemon _drains_ the
+factory (`self-update/drain.ts`) until the app has installed:
+
+- **Held:** the scheduler launches no queued lane (its `held` hook, beside the overload hold), a running lane starts
+  no next session (the runner's hold), a task's gate takes no slot (`limitGates`), and no open batch moves to
+  SHIPPING (`ShipperDeps.holdShips`; a batch whose work is done stays OPEN and is shipped by `checkOpenBatches` when
+  the drain ends or after the relaunch). The runner's and the task gate's hold is the load guard _and_ the drain
+  (`holdBoth`): work starts only when neither holds.
+- **Not stopped:** a session, a task gate, a shipping gate, a cut and a ship that began before the drain run to the
+  end. A shipping gate is held only by the load, never by the drain, because its batch is already SHIPPING and a
+  parked ship would keep the update waiting for ever; delivery jobs already queued (a ship, a checkout return, a
+  cleanup, a catch-up) run, as they are short and a restart would lose them.
+- **What counts as mid-session while it drains:** the same count as before, minus the callers parked at the drain
+  (`Drain.parked()`): a lane parked before its next session or its gate has begun nothing a quit would cut off, and
+  counting it would hold the update up for ever. A stop at the quit leaves such a lane's saved next action, as any
+  stop before a session did, and recovery queues it again, so lanes resume after the relaunch with no card.
+- **Ends:** the check installs as soon as the count is 0 (the drain stays on until the relaunch, so nothing starts in
+  the gap). It ends, and lanes start again, when the builder turns the switch off, the install does not start or
+  its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
+  Install Now remembered before the build is staged drains the moment one is.
+- **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
+  `draining` and `drainingSince`. Settings > Updates shows an update status line, the wait limit and Install Now;
+  the Factory view shows a note, with the time, while lanes are paused. The status is polled every 15 s while an
+  update is available, as no event says it.
+
+The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
+runs the new commit within the wait limit plus the time the running steps take plus that minute.
+
 **What the script does.** `--apply` takes the install lock, sends the window SIGTERM (the supervisor stops the
 daemon cleanly), waits until no process that holds the database is left (the builder's MCP bridge,
 `builder-mcp.mjs`, holds none and is neither waited for nor signalled), then does what an install does: back up
@@ -108,6 +140,11 @@ The repository is baked in at build time because a running app has nothing it ca
 origin, or a `package.json` and script read from a checkout lanes can write, would let a lane choose which
 repository's build runs, with the builder's token, outside any sandbox. The same reasoning gives the script a fixed
 `PATH` and the resolved gh, and makes the switch one app-wide setting: it says whether, never from where.
+
+Turned down for the drain: waiting for an idle moment alone (what failed on 2026-11-03); stopping a session to
+install (work lost, and the builder's rule is that nothing running is killed); holding queued delivery jobs too
+(they live in memory, so a restart would drop a ship that was accepted); holding a batch's shipping gate for the
+drain (it would park a SHIPPING batch and the update would never see an idle moment).
 
 Turned down: a Tauri-side updater (needs the signed releases and an update server that do not exist yet); a
 migration for the setting (an `app_settings` key costs less than regenerating the migration baseline); a

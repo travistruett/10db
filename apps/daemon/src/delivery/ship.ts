@@ -148,6 +148,12 @@ export interface ShipperDeps extends DeliveryContext {
   isRunning(id: WorkstreamId): boolean;
   /** Says whether the Mac was overloaded while a gate ran, so a failed gate's card can say so. */
   readonly load?: Pick<LoadGuard, 'overloadedSince'>;
+  /**
+   * True while a waiting update drains the factory: no open batch moves to shipping, so no ship
+   * begins. A batch whose work is done stays open and `checkOpenBatches` ships it once this is
+   * false again; one already shipping runs on.
+   */
+  readonly holdShips?: () => boolean;
 }
 
 export interface Shipper {
@@ -1102,6 +1108,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   function checkBatch(batchId: BatchId): void {
+    // The batch stays open; the check that follows the drain ships it.
+    if (deps.holdShips?.()) return;
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;

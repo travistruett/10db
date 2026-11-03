@@ -1,5 +1,6 @@
 import {
   mintId,
+  SelfUpdateStatusDto,
   SystemCheckDto,
   type BenchmarkSyncWarning,
   type GoalDigestDto,
@@ -1075,5 +1076,53 @@ describe('FactoryView benchmark sync note', () => {
     const alert = await screen.findByRole('alert');
     expect(within(alert).getByText('Artificial Analysis refused the key')).toBeTruthy();
     expect(screen.queryByText(/Routing uses the last good scores\.$/)).toBeNull();
+  });
+});
+
+function selfUpdate(over: Partial<SelfUpdateStatusDto>): RequestHandler {
+  return http.get(daemonUrl('/settings/self-update'), () =>
+    HttpResponse.json(
+      SelfUpdateStatusDto.parse({
+        enabled: true,
+        isDefault: true,
+        runningCommit: '1'.repeat(40),
+        availableCommit: '2'.repeat(40),
+        waitMinutes: 15,
+        waitingSince: '2026-11-03T12:00:00.000Z',
+        draining: false,
+        drainingSince: null,
+        ...over,
+      }),
+    ),
+  );
+}
+
+describe('FactoryView waiting update', () => {
+  it('says why lanes paused while the factory drains for an update, and since when', async () => {
+    serve(selfUpdate({ draining: true, drainingSince: '2026-11-03T12:15:00.000Z' }));
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(note.textContent).toMatch(/lanes are paused/i);
+    expect(note.textContent).toMatch(/since 2026-11-03/);
+    expect(note.textContent).toMatch(/2222222/);
+    const link = within(note).getByRole('link', { name: 'Update settings' });
+    expect(link.getAttribute('href')).toBe('/settings/updates');
+  });
+
+  it('says nothing while the update only waits for an idle moment', async () => {
+    serve(selfUpdate({}));
+    renderApp('/factory');
+
+    await screen.findByRole('heading', { name: 'Factory' });
+    expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
+  });
+
+  it('says nothing with the switch off', async () => {
+    serve(selfUpdate({ enabled: false, isDefault: false, draining: true }));
+    renderApp('/factory');
+
+    await screen.findByRole('heading', { name: 'Factory' });
+    expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
   });
 });
