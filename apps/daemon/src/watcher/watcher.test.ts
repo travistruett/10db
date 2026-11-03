@@ -2300,6 +2300,27 @@ describe('worktree checkouts', () => {
         touch('.env');
         expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
       });
+
+      it("reads no file at a step end for a written path no other lane's excused write names", async () => {
+        const { b } = await excusedForA();
+        touch('.env');
+        const stamp = vi.mocked(writeStamp);
+        stamp.mockClear();
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+        // Only the path A's card excused is read; `.env` has no excused entry for any lane.
+        expect(stamp.mock.calls.map((c) => c[1])).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    it('reads no file at a step end when two lanes run and no excused write names the written path', async () => {
+      running('Alpha', ['ui']);
+      const b = running('Beta', ['api']);
+      watcher.sync();
+      touch('.env');
+      const stamp = vi.mocked(writeStamp);
+      stamp.mockClear();
+      expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+      expect(stamp).not.toHaveBeenCalled();
     });
 
     describe("the write the card's own call made", () => {
