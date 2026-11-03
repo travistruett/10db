@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installedAppSandbox, type InstalledAppSandbox } from './installed-app-sandbox';
@@ -132,6 +132,36 @@ describe('rollback-app.sh refusals', () => {
     const after = calls.slice(calls.findIndex((call) => call.startsWith('ditto -c -k ')));
     expect(after).toContain(`xattr -r -s -d com.apple.quarantine ${app()}`);
     expect(after).toContain(`lsregister -f -R ${app()}`);
+  });
+});
+
+describe('rollback-app.sh and the self-update', () => {
+  const COMMIT = 'abcdef0123456789abcdef0123456789abcdef01';
+  const rolledBackFrom = () => join(box.dataDir, 'self-update', 'rolled-back-from');
+  function stampCurrentApp(contents: string): void {
+    const daemon = join(app(), 'Contents', 'Resources', 'daemon');
+    mkdirSync(daemon, { recursive: true });
+    writeFileSync(join(daemon, 'build-info.json'), contents);
+  }
+
+  it('records the commit of the app it replaced, so 10db does not install it again by itself', () => {
+    stampCurrentApp(JSON.stringify({ commit: COMMIT, repository: 'acme/10db' }, null, 2));
+    expect(rollback().status).toBe(0);
+    expect(readFileSync(rolledBackFrom(), 'utf8')).toBe(`${COMMIT}\n`);
+  });
+
+  it('records nothing, and removes an old record, when the replaced app names no commit', () => {
+    mkdirSync(join(box.dataDir, 'self-update'));
+    writeFileSync(rolledBackFrom(), `${COMMIT}\n`);
+    stampCurrentApp('{"commit":"main"}');
+    expect(rollback().status).toBe(0);
+    expect(existsSync(rolledBackFrom())).toBe(false);
+  });
+
+  it('records nothing when the rollback moves nothing', () => {
+    stampCurrentApp(JSON.stringify({ commit: COMMIT }));
+    expect(rollback({ STUB_UNPACK_FAILS: '1' }).status).toBe(1);
+    expect(existsSync(rolledBackFrom())).toBe(false);
   });
 });
 

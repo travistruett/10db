@@ -1085,8 +1085,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         isAhead: opts.selfUpdate?.isAhead ?? githubMainIsAhead(ghExec, ghCall),
         stage: (target, running) => installer.stage(target, running),
         stopStage: () => installer.stop(),
+        cancelStage: () => installer.cancel(),
         apply: (staged) => installer.apply(staged),
         outcome: installer.outcome,
+        rollback: installer.rollback,
         // A queued ship, checkout return or cleanup is a delivery job before it is a row.
         midSession: () => midSessionWork(state.db, deliveryJobs),
         // New work waits from here on, and the tick the scheduler is in has finished: it may be
@@ -1110,8 +1112,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
     setSelfUpdate: (enabled) => {
       setSelfUpdateChoice(state, enabled);
-      // A head of main whose update failed is tried again once the builder touches the switch.
+      // A head of main whose update failed, or the build make rollback-app replaced, is tried again
+      // once the builder touches the switch.
       selfUpdate?.retry();
+      // Off means nothing installs: a stage under way is killed, and a check under way sees the
+      // switch before it installs.
+      if (!enabled) {
+        selfUpdate?.turnOff().catch((error: unknown) => {
+          logger.warn({ err: error }, 'could not stop the self-update’s stage');
+        });
+      }
       return selfUpdateServices.selfUpdateStatus();
     },
   };

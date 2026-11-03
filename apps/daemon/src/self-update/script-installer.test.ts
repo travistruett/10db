@@ -322,6 +322,47 @@ describe('stop', () => {
   });
 });
 
+describe('cancel', () => {
+  it('kills a stage under way and removes its folders, and later stages still run', async () => {
+    fakeScript(`sleep 30 & echo $! > "${workDir}/grandchild"\nwait`);
+    const stage = installer.stage(TARGET, RUNNING);
+    const grandchild = await waitFor(() => {
+      const path = join(workDir, 'grandchild');
+      const text = existsSync(path) ? readFileSync(path, 'utf8').trim() : '';
+      return text !== '' && Number(text);
+    });
+    await installer.cancel();
+    await waitFor(() => !alive(grandchild));
+    expect(await stage).toMatchObject({ ok: false, step: 'stage' });
+    expect(existsSync(join(workDir, 'tmp'))).toBe(false);
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
+
+    fakeScript(stagedOk());
+    expect(await installer.stage(TARGET, RUNNING)).toMatchObject({ ok: true, commit: COMMIT });
+  });
+
+  it('settles at once when no stage is under way', async () => {
+    await installer.cancel();
+  });
+});
+
+describe('rollback', () => {
+  const marker = () => join(workDir, 'rolled-back-from');
+
+  it('reads the commit make rollback-app recorded it replaced, and forgets it', () => {
+    writeFileSync(marker(), `${COMMIT}\n`);
+    expect(installer.rollback.read()).toBe(COMMIT);
+    installer.rollback.clear();
+    expect(existsSync(marker())).toBe(false);
+    expect(installer.rollback.read()).toBeNull();
+  });
+
+  it('reads a marker that is not a commit as none', () => {
+    writeFileSync(marker(), 'main\n');
+    expect(installer.rollback.read()).toBeNull();
+  });
+});
+
 describe('outcome', () => {
   it('is empty before any install', () => {
     expect(installer.outcome.read()).toBeNull();

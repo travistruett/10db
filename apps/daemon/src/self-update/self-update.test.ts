@@ -40,6 +40,12 @@ interface World {
   stage: () => Promise<StageResult>;
   /** Stops a stage under way, as the installer kills the script's process group. */
   stopStage: () => Promise<void>;
+  /** Kills a stage under way because the switch was turned off; later stages still run. */
+  cancelStage: () => Promise<void>;
+  /** Whether the builder's switch is on; a test turns it off part way. */
+  enabled: boolean;
+  /** The commit make rollback-app recorded it replaced, until the daemon takes it in. */
+  rolledBackFrom: string | null;
   /** Called as the installer's apply is: a throw here is a synchronous throw from apply. */
   apply: () => { readonly ok: true } | Extract<ApplyResult, { ok: false }>;
   busy: number;
@@ -71,7 +77,7 @@ function make(
     runningCommit: overrides.runningCommit === undefined ? RUNNING : overrides.runningCommit,
     intervalMs: 120_000,
     repository: 'o/10db',
-    enabled: () => overrides.enabled !== false,
+    enabled: () => overrides.enabled !== false && world.enabled,
     cardProject: () => (overrides.cardProject === undefined ? projectId : overrides.cardProject),
     headOf:
       overrides.headOf ??
@@ -94,6 +100,17 @@ function make(
     stopStage: () => {
       world.calls.push('stop-stage');
       return world.stopStage();
+    },
+    cancelStage: () => {
+      world.calls.push('cancel-stage');
+      return world.cancelStage();
+    },
+    rollback: {
+      read: () => world.rolledBackFrom,
+      clear: () => {
+        world.calls.push('clear-rollback');
+        world.rolledBackFrom = null;
+      },
     },
     apply: () => {
       world.calls.push('apply');
@@ -141,6 +158,9 @@ beforeEach(() => {
     pause: () => Promise.resolve(),
     stage: () => Promise.resolve(STAGED_OK),
     stopStage: () => Promise.resolve(),
+    cancelStage: () => Promise.resolve(),
+    enabled: true,
+    rolledBackFrom: null,
     apply: () => ({ ok: true }),
     busy: 0,
     busyAfterPause: null,
@@ -614,6 +634,133 @@ describe('settle, at the start of a daemon', () => {
     make().settle();
     expect(cards()).toEqual([]);
     expect(world.status).toBeNull();
+  });
+});
+
+describe('turning the switch off', () => {
+  it('installs nothing from a stage that ends after the switch was turned off', async () => {
+    let finish: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise<StageResult>((resolve) => {
+        finish = resolve;
+      });
+    const update = make();
+    const check = update.tick();
+    await waitFor(() => world.calls.includes('stage'));
+    world.enabled = false;
+    finish(STAGED_OK);
+    expect(await check).toBe('off');
+    expect(world.calls).not.toContain('apply');
+    expect(world.calls).not.toContain('pause');
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toBeUndefined();
+    expect(cards()).toEqual([]);
+  });
+
+  it('lets work go on and installs nothing when the switch is turned off while work is held back', async () => {
+    let settle: () => void = () => undefined;
+    world.pause = () =>
+      new Promise<void>((resolve) => {
+        settle = resolve;
+      });
+    const check = make().tick();
+    await waitFor(() => world.calls.includes('pause'));
+    world.enabled = false;
+    settle();
+    expect(await check).toBe('off');
+    expect(world.calls).toEqual(['stage', 'pause', 'resume']);
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toBeUndefined();
+  });
+
+  it('kills a stage under way, with no card, and stages again once it is back on', async () => {
+    let finish: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise<StageResult>((resolve) => {
+        finish = resolve;
+      });
+    world.cancelStage = () => {
+      world.enabled = false;
+      finish({ ok: false, step: 'stage', message: 'killed' });
+      return Promise.resolve();
+    };
+    const update = make();
+    const check = update.tick();
+    await waitFor(() => world.calls.includes('stage'));
+    await update.turnOff();
+    expect(await check).toBe('off');
+    expect(world.calls).toEqual(['stage', 'cancel-stage']);
+    expect(cards()).toEqual([]);
+    expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+
+    world.enabled = true;
+    world.stage = () => Promise.resolve(STAGED_OK);
+    expect(await update.tick()).toBe('applying');
+  });
+
+  it('forgets a build staged before it was turned off, so turning it on fetches afresh', async () => {
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    await update.turnOff();
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls.filter((call) => call === 'stage')).toHaveLength(2);
+  });
+});
+
+describe('after make rollback-app', () => {
+  /** A daemon started on RUNNING after the builder rolled back from NEW. */
+  function rolledBack(): SelfUpdate {
+    world.rolledBackFrom = NEW;
+    const update = make();
+    update.settle();
+    return update;
+  }
+
+  it('installs nothing for the head of main it rolled back from', async () => {
+    const update = rolledBack();
+    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('rolled-back');
+    expect(world.calls).toEqual(['clear-rollback']);
+    expect(cards()).toEqual([]);
+  });
+
+  it('keeps it across restarts: the record is in the database, not the marker file', async () => {
+    rolledBack();
+    expect(world.rolledBackFrom).toBeNull();
+    const next = make();
+    next.settle();
+    expect(await next.tick()).toBe('rolled-back');
+  });
+
+  it('does not install the rolled-back build when it is still the newest finished one, and fetches it once', async () => {
+    world.head = NEWER;
+    const update = rolledBack();
+    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('rolled-back');
+    expect(world.calls.filter((call) => call === 'stage')).toHaveLength(1);
+    expect(world.calls).not.toContain('apply');
+  });
+
+  it('installs a newer build of main once one finishes', async () => {
+    world.head = NEWER;
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    const update = rolledBack();
+    expect(await update.tick()).toBe('applying');
+  });
+
+  it('installs the rolled-back build again once the builder touches the switch', async () => {
+    const update = rolledBack();
+    update.retry();
+    expect(await update.tick()).toBe('applying');
+  });
+
+  it('ignores a marker naming the commit that runs: the builder rolled back to it again', async () => {
+    world.rolledBackFrom = RUNNING;
+    const update = make();
+    update.settle();
+    expect(world.rolledBackFrom).toBeNull();
+    expect(await update.tick()).toBe('applying');
   });
 });
 

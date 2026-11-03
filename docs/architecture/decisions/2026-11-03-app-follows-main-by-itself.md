@@ -70,10 +70,23 @@ the card. An apply failure after the quit is reported once by the next daemon, f
 switch, so one failure is one card. Cards sit under the first project; with none registered the failure is only
 logged.
 
+**After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its
+first check and installs the build the builder just rolled back from. `rollback-app.sh` reads the commit from the
+replaced bundle's `Contents/Resources/daemon/build-info.json` and, once the swap has finished, writes it to
+`<data dir>/self-update/rolled-back-from` (it still never touches the database). At startup the daemon moves that
+commit into `app_settings` key `self_update.rolled_back_from` and removes the file. While main's head is that
+commit, a check stops there; when main has moved on but its newest finished build is still that commit, the build
+is fetched once, kept staged and not installed. The first newer finished build of main is installed as usual.
+Touching the switch (off, or on) clears the record, as it clears `self_update.failed_commit`.
+
 **The switch and the commit.** One app-wide setting, `app_settings` key `self_update.enabled`: true, false, or
 absent for the default, which is on. Settings > Updates has the switch, served by `GET/PUT /settings/self-update`;
-with it off a check asks GitHub nothing and nothing is staged or installed. `/health` reports `commit` (null for
-a run from source) and the header shows its first 7 characters.
+with it off a check asks GitHub nothing and nothing is staged or installed. Turning it off also stops a check
+already under way: the daemon kills a stage in progress (its process group, gh included, and its folders) with a
+cancel that, unlike the shutdown stop, lets later stages run, and forgets a staged build. A check looks at the
+switch again when its stage ends and again once the scheduler is held back, just before it writes
+`self_update.applying`; finding it off, it lets work go on and installs nothing. `/health` reports `commit` (null
+for a run from source) and the header shows its first 7 characters.
 
 ## Why
 

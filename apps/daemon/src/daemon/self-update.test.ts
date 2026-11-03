@@ -42,11 +42,14 @@ let heads: number;
 let installer: ScriptInstaller;
 /** What the install script left behind, as the next daemon finds it. */
 let status: ScriptStatus | null;
+/** The commit make rollback-app recorded it replaced, as the next daemon finds it. */
+let rolledBackFrom: string | null;
 /** Ends the detached install script while the daemon still runs; it never ends by itself. */
 let endScript: () => void;
 
 beforeEach(() => {
   status = null;
+  rolledBackFrom = null;
   endScript = () => undefined;
   dir = tempDir('daemon-self-update');
   daemon = null;
@@ -66,6 +69,13 @@ beforeEach(() => {
       });
     },
     stop: () => Promise.resolve(),
+    cancel: () => Promise.resolve(),
+    rollback: {
+      read: () => rolledBackFrom,
+      clear: () => {
+        rolledBackFrom = null;
+      },
+    },
     apply: (build) => {
       applied.push(build.commit);
       const ended = new Promise<void>((resolve) => {
@@ -417,6 +427,59 @@ describe('self-update in the daemon', () => {
     await daemon?.stop();
     daemon = null;
     expect(stageStopped).toBe(true);
+  });
+
+  it('kills a stage under way when the builder turns the switch off, and installs nothing', async () => {
+    let finish: (result: { ok: false; step: string; message: string }) => void = () => undefined;
+    installer.stage = (target) => {
+      staged.push(target.repo);
+      // Waiting for the build of main, which only the cancel ends.
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    };
+    let cancelled = false;
+    installer.cancel = () => {
+      cancelled = true;
+      finish({ ok: false, step: 'stage', message: 'turned off' });
+      return Promise.resolve();
+    };
+    const api = await start();
+    await waitFor(() => staged.length > 0);
+    await api.put('/settings/self-update', SelfUpdateStatusDto, { enabled: false });
+    await waitFor(() => cancelled);
+    // Checks go on asking nothing while the switch is off.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(applied).toEqual([]);
+    expect(staged).toHaveLength(1);
+    expect(await failureCards(api)).toEqual([]);
+  });
+
+  it('stays on the build make rollback-app put back, for the same head of main', async () => {
+    // The builder rolled back from NEW, which main's head still is, to RUNNING.
+    rolledBackFrom = NEW;
+    const api = await start();
+    await afterChecks(3);
+    expect(rolledBackFrom).toBeNull();
+    expect(staged).toEqual([]);
+    expect(applied).toEqual([]);
+    expect(await failureCards(api)).toEqual([]);
+
+    // A restart keeps it: the daemon recorded the rollback in its database.
+    await daemon?.stop();
+    daemon = null;
+    await start();
+    await afterChecks(3);
+    expect(applied).toEqual([]);
+  });
+
+  it('installs again after a rollback once the builder touches the switch', async () => {
+    rolledBackFrom = NEW;
+    const api = await start();
+    await afterChecks(2);
+    await api.put('/settings/self-update', SelfUpdateStatusDto, { enabled: true });
+    await waitFor(() => applied.length > 0 && applied);
+    expect(applied).toEqual([NEW]);
   });
 
   it('reports an install that failed after the app quit, once, on the next start', async () => {

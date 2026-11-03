@@ -672,6 +672,8 @@ describe('pull-request delivery', () => {
         stage: () =>
           Promise.resolve({ ok: true, current: false, dir: '/stage', commit: 'b'.repeat(40) }),
         stopStage: () => Promise.resolve(),
+        cancelStage: () => Promise.resolve(),
+        rollback: { read: () => null, clear: () => undefined },
         apply: (build) => {
           applied.push(build.commit);
           return Promise.resolve({ ok: true, ended: new Promise<void>(() => undefined) });

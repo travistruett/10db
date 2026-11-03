@@ -9,6 +9,11 @@ import type { Logger } from '../log';
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
 /** The head of main whose update failed: 10db does not try it again until main moves on or the builder asks. */
 export const SELF_UPDATE_FAILED_KEY = 'self_update.failed_commit';
+/**
+ * The commit `make rollback-app` replaced: 10db does not install that build again by itself, nor
+ * update while main's head is still that commit, until the builder touches the switch.
+ */
+export const SELF_UPDATE_ROLLED_BACK_KEY = 'self_update.rolled_back_from';
 
 /** The GitHub repository (`owner/name`) the builds come from: the one the app was built for. */
 export interface UpdateTarget {
@@ -84,6 +89,16 @@ export interface SelfUpdateDeps {
    * gone. Leaves an install under way alone.
    */
   stopStage(): Promise<void>;
+  /**
+   * Kills a stage under way because the builder turned the switch off, and removes its files;
+   * settles once it is gone. Unlike `stopStage`, later stages still run.
+   */
+  cancelStage(): Promise<void>;
+  /**
+   * The marker `make rollback-app` leaves in the data directory: the commit of the app it
+   * replaced. Read and cleared at startup.
+   */
+  readonly rollback: { read(): string | null; clear(): void };
   /** Starts the install, which quits the app, swaps it and starts it again. */
   apply(staged: StagedBuild): Promise<ApplyResult>;
   /**
@@ -110,6 +125,7 @@ export const TickResult = {
   NotAhead: 'not-ahead',
   NoNewerBuild: 'no-newer-build',
   FailedBefore: 'failed-before',
+  RolledBack: 'rolled-back',
   Working: 'working',
   Failed: 'failed',
   Busy: 'busy',
@@ -129,8 +145,16 @@ export interface SelfUpdate {
    * nor the log, and no check starts; settles once a stage under way has been killed.
    */
   stop(): Promise<void>;
-  /** Lets the next check try a head of main whose update failed. */
+  /**
+   * Lets the next check try a head of main whose update failed, or the build `make rollback-app`
+   * replaced.
+   */
   retry(): void;
+  /**
+   * The builder turned the switch off: kills a stage under way and forgets a staged build. A check
+   * under way looks at the switch again before it installs, so nothing installs from here on.
+   */
+  turnOff(): Promise<void>;
   status(): { readonly availableCommit: string | null };
 }
 
@@ -211,6 +235,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     const stored = getAppSetting(state.db, SELF_UPDATE_FAILED_KEY);
     return typeof stored === 'string' ? stored : null;
   };
+  const rolledBackFrom = (): string | null => {
+    const stored = getAppSetting(state.db, SELF_UPDATE_ROLLED_BACK_KEY);
+    return typeof stored === 'string' ? stored : null;
+  };
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -265,12 +293,16 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     }
     available = head;
     if (failedHead() === head) return TickResult.FailedBefore;
+    // The builder rolled back from this head: it stays rolled back until main moves on.
+    if (rolledBackFrom() === head) return TickResult.RolledBack;
 
     if (staged?.head !== head) {
       staged = null;
       const result = await deps.stage(target, runningCommit);
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
+      // Turned off while the build was fetched: a stage it killed is no failure, and nothing installs.
+      if (!deps.enabled()) return TickResult.Off;
       if (!result.ok) {
         fail(runningCommit, { head, commit: head }, result.step, result.message);
         return TickResult.Failed;
@@ -298,6 +330,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       staged = { dir: result.dir, commit: result.commit, head };
     }
 
+    // Main's head has no newer finished build than the one the builder rolled back from. The
+    // staged copy is kept, so the next check fetches nothing until main moves on.
+    if (staged.commit === rolledBackFrom()) return TickResult.RolledBack;
+    if (!deps.enabled()) return TickResult.Off;
     if (deps.midSession() > 0) return TickResult.Busy;
     return install(runningCommit, { head, commit: staged.commit }, staged);
   }
@@ -319,6 +355,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       await deps.pause();
       // Shutting down: the scheduler is stopped for good and the database is about to close.
       if (isStopped()) return TickResult.Working;
+      // The builder turned the switch off while new work was held back.
+      if (!deps.enabled()) {
+        deps.resume();
+        return TickResult.Off;
+      }
       if (deps.midSession() > 0) {
         deps.resume();
         return TickResult.Busy;
@@ -394,6 +435,25 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     }
   }
 
+  /**
+   * Moves the marker `make rollback-app` left into the database, where it outlives restarts. A
+   * marker naming the commit that runs means the builder rolled back to it again: nothing to hold.
+   */
+  function takeInRollback(): void {
+    const from = deps.rollback.read();
+    if (from === null) return;
+    if (from !== deps.runningCommit) {
+      state.write((ctx) => {
+        setAppSetting(ctx, SELF_UPDATE_ROLLED_BACK_KEY, from);
+      });
+      logger.info(
+        { rolledBackFrom: from, running: deps.runningCommit },
+        'make rollback-app replaced this build: it is not installed again until main moves on',
+      );
+    }
+    deps.rollback.clear();
+  }
+
   async function tick(): Promise<TickResult> {
     if (deps.runningCommit === null) return TickResult.Disabled;
     if (working || applying) return TickResult.Working;
@@ -422,6 +482,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   return {
     tick,
     settle() {
+      takeInRollback();
       const status = deps.outcome.read();
       deps.outcome.clear();
       const marker = getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY);
@@ -461,7 +522,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     retry() {
       state.write((ctx) => {
         deleteAppSetting(ctx, SELF_UPDATE_FAILED_KEY);
+        deleteAppSetting(ctx, SELF_UPDATE_ROLLED_BACK_KEY);
       });
+    },
+    async turnOff() {
+      staged = null;
+      await deps.cancelStage();
     },
     status: () => ({ availableCommit: available }),
   };

@@ -17,6 +17,9 @@ db_file="$data_dir/10db.sqlite"
 # follows a renamed bundle, so the Dock and Spotlight would go on opening the old copy.
 previous_dir="$(dirname "$data_dir")/10db-previous"
 lock_dir="$apps_dir/.10db-install.lock"
+# Where rollback-app.sh names the commit of the app it replaced, for the daemon's self-update
+# (ROLLBACK_MARKER in apps/daemon/src/self-update/script-installer.ts).
+rollback_marker="$data_dir/self-update/rolled-back-from"
 locked=0
 lsregister="${TENDB_INSTALL_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
 

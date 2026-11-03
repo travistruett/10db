@@ -2,6 +2,7 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
+import { CommitSha } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock, type Timer } from '../clock';
 import type { Logger } from '../log';
@@ -70,8 +71,18 @@ export interface ScriptInstaller {
    * stage after. An install under way is left running: it is what quits the app.
    */
   stop(): Promise<void>;
+  /**
+   * The builder turned the switch off: kills a stage under way, with the gh it started, and removes
+   * its folders. Later stages still run.
+   */
+  cancel(): Promise<void>;
   readonly outcome: SelfUpdateDeps['outcome'];
+  /** The marker scripts/release/rollback-app.sh leaves: the commit of the app it replaced. */
+  readonly rollback: SelfUpdateDeps['rollback'];
 }
+
+/** Written by scripts/release/rollback-app.sh into the work folder, `<data dir>/self-update`. */
+export const ROLLBACK_MARKER = 'rolled-back-from';
 
 /** A stage under way: how to kill its process group, and its result once it is tidied up. */
 interface StageRun {
@@ -142,6 +153,8 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
   function runStage(target: UpdateTarget, running: string): StageRun {
     const timeout = options.stageTimeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
     let killGroup = (): void => undefined;
+    /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
+    let cancelled = false;
     const ended = new Promise<StageResult>((resolve) => {
       let child: ChildProcessByStdio<null, null, Readable>;
       try {
@@ -206,11 +219,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
         });
       });
       child.once('close', (code) => {
-        if (stopped) {
+        if (stopped || cancelled) {
           finish({
             ok: false,
             step: 'stage',
-            message: 'The install script was stopped: 10db quit.',
+            message: stopped
+              ? 'The install script was stopped: 10db quit.'
+              : 'The install script was stopped: Update by itself was turned off.',
           });
           return;
         }
@@ -240,11 +255,31 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     });
     return {
       kill: () => {
+        cancelled = true;
         killGroup();
       },
       ended,
     };
   }
+
+  /** Kills the stage under way, if any, and settles once it ended or a bounded wait has passed. */
+  async function killCurrent(): Promise<void> {
+    const run = current;
+    if (run === null) return;
+    run.kill();
+    let bound: Timer | null = null;
+    await Promise.race([
+      run.ended,
+      new Promise<void>((resolve) => {
+        bound = clock.setTimeout(resolve, STOP_WAIT_MS);
+      }),
+    ]);
+    (bound as Timer | null)?.cancel();
+    // A stage whose pipe never closed has had its group killed; its folders go all the same.
+    tidy(false);
+  }
+
+  const rollbackMarker = join(options.workDir, ROLLBACK_MARKER);
 
   return {
     stage(target, running) {
@@ -276,20 +311,10 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
 
     async stop() {
       stopped = true;
-      const run = current;
-      if (run === null) return;
-      run.kill();
-      let bound: Timer | null = null;
-      await Promise.race([
-        run.ended,
-        new Promise<void>((resolve) => {
-          bound = clock.setTimeout(resolve, STOP_WAIT_MS);
-        }),
-      ]);
-      (bound as Timer | null)?.cancel();
-      // A stage whose pipe never closed has had its group killed; its folders go all the same.
-      tidy(false);
+      await killCurrent();
     },
+
+    cancel: killCurrent,
 
     apply(staged) {
       const script = scriptIn(staged.dir);
@@ -366,6 +391,20 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           resolve({ ok: true, ended });
         });
       });
+    },
+
+    rollback: {
+      read() {
+        try {
+          const parsed = CommitSha.safeParse(readFileSync(rollbackMarker, 'utf8').trim());
+          return parsed.success ? parsed.data : null;
+        } catch {
+          return null;
+        }
+      },
+      clear() {
+        rmSync(rollbackMarker, { force: true });
+      },
     },
 
     outcome: {
