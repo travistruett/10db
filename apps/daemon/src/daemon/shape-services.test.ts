@@ -40,6 +40,7 @@ describe('the Jev opt-in and the measures', () => {
           },
           overrides: 0,
         },
+        questions: { converted: { tasks: 0, cards: 0 }, other: { tasks: 0, cards: 0 } },
         shadow: ['shape_ready', 'shape_record', 'shape_elsewhere'].map((decision) => ({
           decision,
           answered: 0,

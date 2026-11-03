@@ -1,5 +1,5 @@
 import { ShapeOrigin, type ShapeConvertedRow } from '@10db/contracts';
-import { getProject, getShapeJevOptIn, setShapeJevOptIn } from '@10db/db';
+import { getProject, getShapeJevOptIn, questionCardRates, setShapeJevOptIn } from '@10db/db';
 import type { ApiServices } from '../api';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
@@ -26,6 +26,10 @@ export type ShapeApiServices = Pick<
   | 'shapeMeasures'
   | 'getShapeJev'
   | 'setShapeJev'
+  | 'getOneWayPaths'
+  | 'setOneWayPaths'
+  | 'rehearseShape'
+  | 'dismissShapeFinding'
 >;
 
 export function createShapeServices(deps: {
@@ -84,8 +88,17 @@ export function createShapeServices(deps: {
     },
     addShapeFile: (shapeId, file) => shape.addFile(shapeId, file),
     startShape: (input) => shape.startFromTerminal(input),
+    getOneWayPaths: (projectId) => ({ paths: shape.oneWayPaths(projectId) }),
+    setOneWayPaths: (projectId, input) => ({
+      paths: shape.setOneWayPaths(projectId, input.paths),
+    }),
+    rehearseShape: (shapeId, input) => shape.rehearse(shapeId, input.proposalIds),
+    dismissShapeFinding: (shapeId, findingId, input) => {
+      shape.dismissFinding(shapeId, findingId, input.how);
+    },
     shapeMeasures: () => ({
       sizing: sizingMeasure(state.db),
+      questions: questionCardRates(state.db),
       shadow: shadowAgreement(state.db, deps.clock.now()),
     }),
     getShapeJev: (projectId) => {

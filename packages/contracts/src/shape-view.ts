@@ -9,6 +9,7 @@ import {
 } from './shape';
 import { ShapeFileDto } from './shape-files';
 import { ShapeTaskSizeDto } from './shape-measures';
+import { ShapeCeremonyDto, ShapeFindingDto, ShapeRehearsalDto } from './shape-review';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §4, §6 Rows, §11.
 // What the Shape routes answer and accept: the view the screen renders, and the builder's actions.
@@ -101,6 +102,8 @@ export const ShapeTurnDto = z.object({
   queued: z.int().min(0),
   /** A Propose turn is queued or running; pressing Propose again would be ignored. */
   proposing: z.boolean(),
+  /** A rehearsal turn is queued or running (§7): the Convert modal says "Rehearsing n tasks…". */
+  rehearsing: z.boolean(),
 });
 export type ShapeTurnDto = z.infer<typeof ShapeTurnDto>;
 
@@ -118,6 +121,12 @@ export const ShapeViewDto = z.object({
   turn: ShapeTurnDto,
   /** Each proposed task's derived size and hours, and its actual once converted and finished (§8). */
   sizes: z.array(ShapeTaskSizeDto),
+  /** Each pending effort's ceremony: what the rule forces and what applies (§7). */
+  ceremony: z.array(ShapeCeremonyDto),
+  /** Reviewers' findings and the rehearsal's questions, oldest first, resolved and dismissed included. */
+  findings: z.array(ShapeFindingDto),
+  /** Whether each pending task has been rehearsed at the content it has now (§7). */
+  rehearsals: z.array(ShapeRehearsalDto),
 });
 export type ShapeViewDto = z.infer<typeof ShapeViewDto>;
 

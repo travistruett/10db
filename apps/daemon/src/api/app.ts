@@ -43,12 +43,16 @@ import {
   RetryInput,
   RoutingRulesInput,
   SHAPE_FILE_MAX_BYTES,
+  OneWayPathsDto,
   ShapeConvertInput,
+  ShapeDismissInput,
   ShapeEditInput,
+  ShapeFindingId,
   ShapeId,
   ShapeInput,
   ShapeMessageInput,
   ShapeProposalId,
+  ShapeRehearseInput,
   ShapeUnpinInput,
   ShapeWithdrawInput,
   ShapeJevSettingDto,
@@ -254,6 +258,20 @@ export function createApp(deps: ApiDeps) {
           deps.services.setShapeJev(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
         ),
     )
+    .get('/projects/:projectId/one-way-paths', (c) =>
+      c.json(deps.services.getOneWayPaths(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/one-way-paths',
+      validator('json', (value): OneWayPathsDto => OneWayPathsDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setOneWayPaths(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .get('/shape-measures', (c) => c.json(deps.services.shapeMeasures()))
     .get('/shapes/:shapeId', (c) =>
       c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
@@ -272,6 +290,27 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/shapes/:shapeId/propose', (c) =>
       c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
+    )
+    .post(
+      '/shapes/:shapeId/rehearse',
+      validator('json', (value): ShapeRehearseInput => ShapeRehearseInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.rehearseShape(ShapeId.parse(c.req.param('shapeId')), c.req.valid('json')),
+          202,
+        ),
+    )
+    .post(
+      '/shapes/:shapeId/findings/:findingId/dismiss',
+      validator('json', (value): ShapeDismissInput => ShapeDismissInput.parse(value)),
+      (c) => {
+        deps.services.dismissShapeFinding(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeFindingId.parse(c.req.param('findingId')),
+          c.req.valid('json'),
+        );
+        return c.body(null, 204);
+      },
     )
     .post('/shapes/:shapeId/stop', async (c) => {
       await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));

@@ -102,11 +102,19 @@ function canonical(value: unknown): unknown {
 const same = (a: unknown, b: unknown): boolean =>
   JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 
-const hashOf = (value: unknown): string =>
-  createHash('sha256')
-    .update(JSON.stringify(canonical(value)))
+/**
+ * A task's content hash: what an implementer reads. `ceremony` is how the plan treats the task, not
+ * what it asks for, so pinning it neither re-rehearses the task nor answers its questions (§7).
+ */
+const hashOf = (value: unknown): string => {
+  const content = Object.fromEntries(
+    Object.entries(asRecord(value)).filter(([field]) => field !== 'ceremony'),
+  );
+  return createHash('sha256')
+    .update(JSON.stringify(canonical(content)))
     .digest('hex')
     .slice(0, 16);
+};
 
 /** The fields of `after` that differ from `before`. */
 function changedFields(before: Record<string, unknown>, after: Record<string, unknown>): string[] {

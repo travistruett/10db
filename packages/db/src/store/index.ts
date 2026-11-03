@@ -14,6 +14,7 @@ export * from './holds';
 export * from './inbox';
 export * from './knowledge';
 export * from './lane-times';
+export * from './shape-review';
 export * from './shape-shadow';
 export * from './mcp-approvals';
 export * from './model-profiles';

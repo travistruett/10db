@@ -232,6 +232,13 @@
       "when": 1793667404382,
       "tag": "0032_lane_time_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1793669161849,
+      "tag": "0033_acoustic_professor_monster",
+      "breakpoints": true
     }
   ]
 }

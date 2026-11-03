@@ -148,7 +148,7 @@ describe('ShapeViewDto', () => {
           createdAt: AT,
         },
       ],
-      turn: { running: false, queued: 0, proposing: false },
+      turn: { running: false, queued: 0, proposing: false, rehearsing: false },
       sizes: [
         {
           proposalId: mintId('ShapeProposal'),
@@ -161,8 +161,40 @@ describe('ShapeViewDto', () => {
           missized: false,
         },
       ],
+      ceremony: [
+        {
+          proposalId: base.id,
+          key: 'thin-scrollbars',
+          ceremony: 'spec',
+          reasons: ['one_way_path'],
+          skippedByYou: false,
+          specWritten: false,
+          spec: null,
+        },
+      ],
+      findings: [
+        {
+          id: mintId('ShapeFinding'),
+          shapeId,
+          effortKey: 'thin-scrollbars',
+          taskKey: null,
+          reviewer: 'scope',
+          kind: 'finding',
+          severity: 'medium',
+          text: 'Names no migration',
+          state: 'open',
+          how: null,
+          round: 1,
+          taskHash: null,
+          createdAt: AT,
+          updatedAt: AT,
+        },
+      ],
+      rehearsals: [{ proposalId: base.id, key: 'thin-scrollbars', hash: 'abc', rehearsed: false }],
     });
     expect(view.proposals).toHaveLength(1);
+    expect(view.findings[0]?.reviewer).toBe('scope');
+    expect(view.ceremony[0]?.reasons).toEqual(['one_way_path']);
     expect(view.sizes[0]?.size).toBe('M');
     expect(view.heard).toEqual(['Thinner scrollbars']);
     expect(view.files[0]?.name).toBe('brief.md');

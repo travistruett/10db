@@ -30,6 +30,7 @@ export * from './send-back';
 export * from './shape';
 export * from './shape-files';
 export * from './shape-measures';
+export * from './shape-review';
 export * from './shape-view';
 export * from './states';
 export * from './steps';

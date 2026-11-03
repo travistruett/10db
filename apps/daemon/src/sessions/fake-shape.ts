@@ -7,8 +7,8 @@ import type {
   ShapeSessionHandle,
   ShapeSessionSpec,
   ShapeToolRequest,
+  ShapeVerdict,
 } from './types';
-import type { GuardVerdict } from '../guard';
 
 /** What a scripted turn of a fake Shape session did. */
 export interface FakeShapeTurnResult {
@@ -30,7 +30,7 @@ export interface FakeShapeTurn {
   /** Aborts when the turn is interrupted. */
   readonly signal: AbortSignal;
   /** The session's PreToolUse hook, as Claude Code runs it before each call. */
-  guard(request: ShapeToolRequest): GuardVerdict;
+  guard(request: ShapeToolRequest): ShapeVerdict;
 }
 
 export type FakeShapeBehaviour = (turn: FakeShapeTurn) => Promise<FakeShapeTurnResult>;
@@ -194,7 +194,7 @@ export function createFakeShapeSession(
     wake?.();
   };
 
-  const guard = (request: ShapeToolRequest): GuardVerdict => {
+  const guard = (request: ShapeToolRequest): ShapeVerdict => {
     try {
       return spec.preToolUse(request);
     } catch (error) {

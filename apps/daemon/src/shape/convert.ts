@@ -23,11 +23,13 @@ import {
   insertShapeLink,
   insertSource,
   insertTask,
+  linkShapeAttachments,
   listShapeLinks,
   listShapeProposals,
   patchShape,
   patchShapeProposal,
   patchTask,
+  upsertShapeAttachment,
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
@@ -230,6 +232,15 @@ export function convertProposals(
         insertShapeLink(ctx, { shapeId, proposalId: row.id, key, taskId: id });
       }
       made.set(row.id, { goalId: written.goal.id, taskIds: ids });
+      // The proposed eval is kept as an attachment on the goal, with the spec (§7).
+      if (goal.eval !== undefined)
+        upsertShapeAttachment(ctx, {
+          shapeId,
+          kind: 'eval',
+          key: row.key,
+          body: JSON.stringify(goal.eval, null, 2),
+        });
+      linkShapeAttachments(ctx, shapeId, row.key, { goalId: written.goal.id });
     } else {
       const task: Task = ShapeProposalBody.task.parse(row.body);
       const base = {
@@ -254,6 +265,7 @@ export function convertProposals(
       taskIds.set(row.key, written.id);
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, taskId: written.id });
       made.set(row.id, { taskIds: [written.id] });
+      linkShapeAttachments(ctx, shapeId, row.key, { taskId: written.id });
     }
   }
 

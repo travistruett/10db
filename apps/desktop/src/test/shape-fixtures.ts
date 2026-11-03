@@ -1,5 +1,6 @@
 import {
   mintId,
+  ShapeFindingDto,
   ShapeDto,
   ShapeMessageDto,
   ShapeProposalDto,
@@ -160,8 +161,35 @@ export function shapeViewDto(
     proposals: [],
     heard: [],
     files: [],
-    turn: { running: false, queued: 0, proposing: false },
+    turn: { running: false, queued: 0, proposing: false, rehearsing: false },
     sizes: [],
+    ceremony: [],
+    findings: [],
+    rehearsals: [],
     ...rest,
+  });
+}
+
+/** A reviewer's finding or a rehearsal question, open unless the override says otherwise. */
+export function findingDto(
+  shapeId: ShapeId,
+  overrides: Partial<ShapeFindingDto> = {},
+): ShapeFindingDto {
+  return ShapeFindingDto.parse({
+    id: mintId('ShapeFinding'),
+    shapeId,
+    effortKey: 'brainstorm',
+    taskKey: null,
+    reviewer: 'scope',
+    kind: 'finding',
+    severity: 'medium',
+    text: 'Names no migration',
+    state: 'open',
+    how: null,
+    round: 1,
+    taskHash: null,
+    createdAt: AT,
+    updatedAt: AT,
+    ...overrides,
   });
 }

@@ -77,9 +77,15 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  ShapeAttachmentId,
   ShapeFileId,
+  ShapeFindingId,
+  ShapeFindingKind,
+  ShapeFindingSeverity,
+  ShapeFindingState,
   ShapeId,
   ShapeLinkId,
+  ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
   ShapeMessageKind,
@@ -1114,6 +1120,86 @@ export const shapeLinks = sqliteTable(
       'shape_links_one_target',
       sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) = 1`,
     ),
+  ],
+);
+
+/**
+ * A reviewer's finding, or a question the rehearsal's implementer would have to ask (Shape spec §7).
+ * `task_key` names the task a rehearsal read; `task_hash` is the content hash the daemon stamped.
+ */
+export const shapeFindings = sqliteTable(
+  'shape_findings',
+  {
+    id: text('id').$type<ShapeFindingId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    effortKey: text('effort_key').notNull(),
+    taskKey: text('task_key'),
+    reviewer: text('reviewer').$type<ShapeReviewer>().notNull(),
+    kind: text('kind').$type<ShapeFindingKind>().notNull(),
+    severity: text('severity').$type<ShapeFindingSeverity>(),
+    text: text('text').notNull(),
+    state: text('state').$type<ShapeFindingState>().notNull(),
+    how: text('how'),
+    round: integer('round').notNull(),
+    taskHash: text('task_hash'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('shape_findings_shape_idx').on(t.shapeId, t.id)],
+);
+
+/**
+ * The rehearsal read this task at this content hash and reported (Shape spec §7), zero questions
+ * included. Written only on the reviewer's closing report; a task edited since has a new hash and no mark.
+ */
+export const shapeRehearsals = sqliteTable(
+  'shape_rehearsals',
+  {
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    taskKey: text('task_key').notNull(),
+    hash: text('hash').notNull(),
+    round: integer('round').notNull(),
+    questions: integer('questions').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.shapeId, t.taskKey, t.hash] })],
+);
+
+/**
+ * What a conversation attaches to an effort: its spec (Shape spec §7), and later diagrams, charts,
+ * mockups and an eval. `key` is the proposal's key; Convert sets `goal_id` or `task_id`.
+ */
+export const shapeAttachments = sqliteTable(
+  'shape_attachments',
+  {
+    id: text('id').$type<ShapeAttachmentId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    kind: text('kind').$type<'mermaid' | 'chart' | 'mockup' | 'spec' | 'eval'>().notNull(),
+    key: text('key').notNull(),
+    body: text('body').notNull(),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('shape_attachments_shape_idx').on(t.shapeId, t.key),
+    uniqueIndex('shape_attachments_one_spec')
+      .on(t.shapeId, t.key, t.kind)
+      .where(sql`${t.kind} IN ('spec', 'eval')`),
   ],
 );
 

@@ -199,7 +199,10 @@ describe('Shape: the conversation', () => {
   });
 
   it('shows Propose as pending while a Propose turn is queued or running', async () => {
-    const view = proposed([], { round: 0, turn: { running: true, queued: 0, proposing: true } });
+    const view = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: true, rehearsing: false },
+    });
     serve(...conversations(view));
     open(view);
     const propose = await screen.findByRole('button', { name: 'Propose' });
@@ -209,7 +212,10 @@ describe('Shape: the conversation', () => {
   });
 
   it('shows Stop while a turn runs and stops it on Esc', async () => {
-    const view = proposed([], { round: 0, turn: { running: true, queued: 0, proposing: false } });
+    const view = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
     const stops: string[] = [];
     serve(
       ...conversations(view),
@@ -464,7 +470,10 @@ describe('Shape: Convert', () => {
 
   it('offers Stop while Claude is answering, with Convert waiting', async () => {
     const view = convertible();
-    const running = { ...view, turn: { running: true, queued: 0, proposing: false } };
+    const running = {
+      ...view,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    };
     serve(...conversations(running));
     open(running);
     const button = await screen.findByRole('button', { name: 'Convert…' });

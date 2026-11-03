@@ -108,12 +108,15 @@ describe('note_heard', () => {
 });
 
 describe('the tool set', () => {
-  it('offers note_heard, propose_plan, similar_tasks and find_records', () => {
+  it('offers the planning tools and the review tools, but not attach, whose slice is not built', () => {
     expect(Object.keys(tools()).sort()).toEqual([
       'find_records',
       'note_heard',
       'propose_plan',
+      'report_finding',
+      'resolve_finding',
       'similar_tasks',
+      'write_spec',
     ]);
   });
 

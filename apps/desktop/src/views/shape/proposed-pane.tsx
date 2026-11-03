@@ -1,7 +1,13 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
 import { useRef, useState } from 'react';
-import { useConvertShape, useRowChange, useStopShape } from '../../daemon/shape-queries';
+import {
+  useConvertShape,
+  useDismissFinding,
+  useRehearseShape,
+  useRowChange,
+  useStopShape,
+} from '../../daemon/shape-queries';
 import { shortAgo } from '../factory/short-ago';
 import { useNow } from '../../shell/relative';
 import { ConvertModal, convertibleRows } from './convert-modal';
@@ -9,6 +15,7 @@ import { HeardSoFar } from './heard-so-far';
 import type { RowAction, RowHandlers } from './proposal-row';
 import { ProposedList } from './proposed-list';
 import { groupProposals, roundChanges, type SectionKey } from './proposed-groups';
+import { rowReview } from './review-lines';
 import { SummaryLine } from './summary-line';
 import {
   RemoveDraftGoalModal,
@@ -43,12 +50,23 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
   const groups = groupProposals(filtering ? changes : (view?.proposals ?? []));
   const rows = convertibleRows(view?.proposals ?? []);
   const hasProposals = (view?.proposals.length ?? 0) > 0;
+  const dismiss = useDismissFinding(view?.shape.id ?? null);
+  const rehearse = useRehearseShape(view?.shape.id ?? null);
   const handlers: RowHandlers = {
     onChange: (row, action) => {
       change.mutate({ id: row.id, action });
     },
     onWhy,
+    onDismiss: (findingId) => {
+      dismiss.mutate({ findingId });
+    },
   };
+  // The ceremony, findings and rehearsal questions show under a pending goal or task.
+  const reviewOf = (row: ShapeProposalDto) =>
+    view !== undefined && row.state === 'pending' && (row.kind === 'goal' || row.kind === 'task')
+      ? rowReview(view, row)
+      : undefined;
+  const unread = view?.rehearsals.some((r) => !r.rehearsed) ?? false;
 
   const jump = (section: SectionKey): void => {
     const target = listRef.current?.querySelector<HTMLElement>(`[data-section="${section}"]`);
@@ -98,16 +116,28 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
               ? 'Proposed'
               : `Proposed · round ${String(view.shape.round)} · updated ${shortAgo(view.shape.updatedAt, now)}`}
           </Text>
-          <Button
-            variant="default"
-            size="xs"
-            disabled={view === undefined || rows.length === 0}
-            onClick={() => {
-              setConverting(true);
-            }}
-          >
-            Convert…
-          </Button>
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              variant="default"
+              size="xs"
+              disabled={view === undefined || !unread || view.turn.rehearsing || rehearse.isPending}
+              onClick={() => {
+                rehearse.mutate(undefined);
+              }}
+            >
+              {view?.turn.rehearsing === true ? 'Rehearsing…' : 'Rehearse'}
+            </Button>
+            <Button
+              variant="default"
+              size="xs"
+              disabled={view === undefined || rows.length === 0}
+              onClick={() => {
+                setConverting(true);
+              }}
+            >
+              Convert…
+            </Button>
+          </Group>
         </Group>
         {summaryHere ? (
           <SummaryLine groups={groupProposals(view?.proposals ?? [])} onJump={jump} />
@@ -128,6 +158,16 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
         {change.isError ? (
           <Alert color="red" title="Couldn't change the row">
             {change.error.message}
+          </Alert>
+        ) : null}
+        {dismiss.isError ? (
+          <Alert color="red" title="Couldn't dismiss it">
+            {dismiss.error.message}
+          </Alert>
+        ) : null}
+        {rehearse.isError ? (
+          <Alert color="red" title="Couldn't start the rehearsal">
+            {rehearse.error.message}
           </Alert>
         ) : null}
       </Stack>
@@ -152,6 +192,7 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
               groups={groups}
               sizes={view.sizes}
               actionsFor={actionsFor}
+              reviewOf={reviewOf}
               handlers={handlers}
             />
           ) : (
@@ -201,6 +242,8 @@ function ConvertPanel({
 }) {
   const convert = useConvertShape(view.shape.id);
   const stop = useStopShape();
+  const rehearse = useRehearseShape(view.shape.id);
+  const { mutate: startRehearsal } = rehearse;
   const [refusals, setRefusals] = useState<readonly string[]>([]);
   const close = () => {
     setRefusals([]);
@@ -212,18 +255,27 @@ function ConvertPanel({
       opened={opened}
       onClose={close}
       rows={rows}
+      view={view}
       answering={view.turn.running}
       pending={convert.isPending}
       refusals={refusals}
       failure={convert.error?.message ?? null}
-      onConvert={async (ids) => {
+      onConvert={async (ids, options) => {
         setRefusals([]);
-        const result = await convert.mutateAsync(ids).catch(() => undefined);
+        const result = await convert
+          .mutateAsync({
+            proposalIds: ids,
+            ...(options?.interrupt === true ? { interrupt: true } : {}),
+          })
+          .catch(() => undefined);
         if (result?.kind === 'refused') setRefusals(result.errors);
         return result;
       }}
       onStop={() => {
         stop.mutate(view.shape.id);
+      }}
+      onRehearse={(ids) => {
+        startRehearsal(ids);
       }}
     />
   );

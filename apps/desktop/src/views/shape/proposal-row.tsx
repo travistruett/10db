@@ -1,9 +1,16 @@
-import { ShapeProposalState, type ShapeProposalDto, type ShapeTaskSizeDto } from '@10db/contracts';
+import {
+  ShapeProposalState,
+  type ShapeFindingId,
+  type ShapeProposalDto,
+  type ShapeTaskSizeDto,
+} from '@10db/contracts';
 import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
 import { IconClockExclamation, IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../daemon/shape-queries';
 import { convertedLine, markText, proposalTitle, rowMeta } from './proposal-text';
+import type { RowReview } from './review-lines';
+import { ReviewLines } from './review-notes';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
 import { goalHoursLine, sizeLine } from './size-line';
@@ -33,6 +40,8 @@ export interface RowHandlers {
   readonly onChange: (row: ShapeProposalDto, change: RowChange) => void;
   /** Scrolls the conversation to the messages the row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
+  /** Dismisses a reviewer's finding or a rehearsal question under a row (spec §7). */
+  readonly onDismiss: (id: ShapeFindingId) => void;
 }
 
 export interface ProposalRowProps {
@@ -49,6 +58,8 @@ export interface ProposalRowProps {
   readonly sizes: readonly ShapeTaskSizeDto[];
   /** Extra menu items, such as the undos of a converted row. */
   readonly actions: readonly RowAction[];
+  /** The ceremony, findings and rehearsal questions of a pending goal or task (spec §7). */
+  readonly review?: RowReview | undefined;
   readonly handlers: RowHandlers;
 }
 
@@ -109,6 +120,7 @@ export function ProposalRow({
   tabbable,
   sizes,
   actions,
+  review,
   handlers,
 }: ProposalRowProps) {
   const [opened, setOpened] = useState(false);
@@ -285,6 +297,19 @@ export function ProposalRow({
               </Menu.Dropdown>
             </Menu>
           </Group>
+          {review === undefined ? null : (
+            <ReviewLines
+              review={review}
+              onDismiss={handlers.onDismiss}
+              onCeremony={(c) => {
+                change(
+                  c === 'skip'
+                    ? { kind: 'edit', fields: { ceremony: 'direct' } }
+                    : { kind: 'unpin', field: 'ceremony' },
+                );
+              }}
+            />
+          )}
           {opened ? (
             <Box id={regionId} role="region" aria-label={`${title} details`} pt="xs" pb={4}>
               {editing ? (

@@ -66,10 +66,13 @@ import type {
   ProjectViewDto,
   RoutingRuleDto,
   RoutingRulesInput,
+  OneWayPathsDto,
   ShapeConvertInput,
   ShapeConvertResult,
+  ShapeDismissInput,
   ShapeDto,
   ShapeFileDto,
+  ShapeFindingId,
   ShapeJevSettingDto,
   ShapeMeasuresDto,
   ShapeId,
@@ -77,6 +80,8 @@ import type {
   ShapeMessageDto,
   ShapeProposalId,
   ShapeProposeResult,
+  ShapeRehearseInput,
+  ShapeRehearseResult,
   ShapeViewDto,
   StartShapeInput,
   StepPlanDto,
@@ -248,6 +253,13 @@ export interface ApiServices {
   /** A project's "Send brainstorm messages to fast models"; throws NotFoundError for an unknown project. */
   getShapeJev(projectId: ProjectId): ShapeJevSettingDto;
   setShapeJev(projectId: ProjectId, input: ShapeJevSettingDto): ShapeJevSettingDto;
+  /** Settings › General: the paths a task in needs a spec (Shape §7); the 10db defaults until the builder sets them. */
+  getOneWayPaths(projectId: ProjectId): OneWayPathsDto;
+  setOneWayPaths(projectId: ProjectId, input: OneWayPathsDto): OneWayPathsDto;
+  /** Rehearse, and opening the Convert modal with an unrehearsed task (spec §7). */
+  rehearseShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
+  /** The builder dismisses a finding or a rehearsal question. */
+  dismissShapeFinding(shapeId: ShapeId, findingId: ShapeFindingId, input: ShapeDismissInput): void;
   /** Ship anyway (from OPEN) or Retry (from FAILED). */
   shipBatch(id: BatchId): BatchDto;
   abandonBatch(id: BatchId): BatchDto;

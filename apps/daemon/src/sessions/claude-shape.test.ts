@@ -217,6 +217,22 @@ describe('the PreToolUse hook', () => {
     });
   });
 
+  it('runs an allowed call with the input 10db set in place of the model’s', async () => {
+    const call = await hookFor(() => ({
+      decision: 'allow',
+      updatedInput: { effortKey: 'density', reviewer: 'scope' },
+    }));
+    expect(
+      await call({ tool_name: 'mcp__10db__report_finding', tool_input: { reviewer: 'x' } }),
+    ).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        updatedInput: { effortKey: 'density', reviewer: 'scope' },
+      },
+    });
+  });
+
   it('denies when the guard throws', async () => {
     const call = await hookFor(() => {
       throw new Error('boom');

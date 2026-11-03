@@ -3,26 +3,36 @@ import {
   ShapeMessageKind,
   ShapeProposalBody,
   ShapeProposalDto,
+  ShapeProposalKind,
   ShapeProposalState,
   ShapeRoundMark,
+  type ShapeCeremonyDto,
   type ShapeConvertedDto,
   type ShapeFileDto,
+  type ShapeFindingDto,
   type ShapeId,
+  type ShapeTaskSizeDto,
   type ShapeTurnDto,
   type ShapeViewDto,
 } from '@10db/contracts';
 import {
   getDecision,
   getShape,
+  listRehearsals,
+  listShapeAttachments,
   listShapeFiles,
+  listShapeFindings,
   listShapeLinks,
   listShapeMessages,
   listShapeProposals,
   type DbReader,
   type ShapeFileRow,
+  type ShapeFindingRow,
   type ShapeLinkRow,
   type ShapeProposalRow,
 } from '@10db/db';
+import { ceremonyFor, type EffortFacts } from './ceremony';
+import { rehearsalTasks } from './review';
 import { buildSizes } from './sizing';
 
 // Shape spec §4, §6 Rows. What the Shape screen reads: the transcript, every proposal row with its
@@ -107,10 +117,97 @@ function proposalOf(
   });
 }
 
-export function buildShapeView(db: DbReader, shapeId: ShapeId, turn: ShapeTurnDto): ShapeViewDto {
+/** What the view reads about the project that the rows don't hold. */
+export interface ViewWorld {
+  /** The areas and hazards that hold a tracked file matching a one-way path (§7). */
+  readonly oneWayNames: ReadonlySet<string>;
+}
+
+const NO_WORLD: ViewWorld = { oneWayNames: new Set() };
+
+/** Each pending goal's, loose task's and addition's ceremony: what the rule forces, and what applies. */
+export function ceremonies(
+  db: DbReader,
+  shapeId: ShapeId,
+  sizes: readonly ShapeTaskSizeDto[],
+  world: ViewWorld,
+): ShapeCeremonyDto[] {
+  const specs = new Map(
+    listShapeAttachments(db, shapeId)
+      .filter((a) => a.kind === 'spec')
+      .map((a) => [a.key, a.body]),
+  );
+  return listShapeProposals(db, shapeId).flatMap((row): ShapeCeremonyDto[] => {
+    if (row.state !== ShapeProposalState.Pending) return [];
+    const mine = sizes.filter((s) => s.proposalId === row.id);
+    let facts: EffortFacts;
+    if (row.kind === ShapeProposalKind.Goal) {
+      const goal = ShapeProposalBody.goal.parse(row.body);
+      facts = {
+        kind: 'goal',
+        claude: goal.ceremony,
+        pinnedCeremony: row.pinned.includes('ceremony'),
+        size: undefined,
+        hours: mine.reduce((sum, s) => sum + s.hours, 0),
+        taskCount: goal.tasks.length,
+        taskAreas: goal.tasks.map((t) => t.areas),
+      };
+    } else if (row.kind === ShapeProposalKind.Task) {
+      const task = ShapeProposalBody.task.parse(row.body);
+      facts = {
+        kind: 'task',
+        claude: task.ceremony,
+        pinnedCeremony: row.pinned.includes('ceremony'),
+        size: mine[0]?.size,
+        hours: mine[0]?.hours ?? 0,
+        taskCount: 1,
+        taskAreas: [task.areas],
+      };
+    } else return [];
+    const verdict = ceremonyFor(facts, world.oneWayNames);
+    const spec = specs.get(row.key) ?? null;
+    return [
+      {
+        proposalId: row.id,
+        key: row.key,
+        ceremony: verdict.ceremony,
+        reasons: verdict.reasons,
+        skippedByYou: verdict.skippedByYou,
+        specWritten: spec !== null,
+        spec,
+      },
+    ];
+  });
+}
+
+const findingOf = (row: ShapeFindingRow): ShapeFindingDto => ({
+  id: row.id,
+  shapeId: row.shapeId,
+  effortKey: row.effortKey,
+  taskKey: row.taskKey,
+  reviewer: row.reviewer,
+  kind: row.kind,
+  severity: row.severity,
+  text: row.text,
+  state: row.state,
+  how: row.how,
+  round: row.round,
+  taskHash: row.taskHash,
+  createdAt: row.createdAt,
+  updatedAt: row.updatedAt,
+});
+
+export function buildShapeView(
+  db: DbReader,
+  shapeId: ShapeId,
+  turn: ShapeTurnDto,
+  world: ViewWorld = NO_WORLD,
+): ShapeViewDto {
   const messages = listShapeMessages(db, shapeId);
   const links = listShapeLinks(db, shapeId);
   const shape = getShape(db, shapeId);
+  const sizes = buildSizes(db, shapeId);
+  const marked = new Set(listRehearsals(db, shapeId).map((m) => `${m.taskKey}\0${m.hash}`));
   return {
     shape,
     messages,
@@ -120,6 +217,14 @@ export function buildShapeView(db: DbReader, shapeId: ShapeId, turn: ShapeTurnDt
     heard: latestHeard(messages),
     files: listShapeFiles(db, shapeId).map(fileDtoOf),
     turn,
-    sizes: buildSizes(db, shapeId),
+    sizes,
+    ceremony: ceremonies(db, shapeId, sizes, world),
+    findings: listShapeFindings(db, shapeId).map(findingOf),
+    rehearsals: rehearsalTasks(db, shapeId).map((t) => ({
+      proposalId: t.proposalId,
+      key: t.taskKey,
+      hash: t.hash,
+      rehearsed: marked.has(`${t.taskKey}\0${t.hash}`),
+    })),
   };
 }

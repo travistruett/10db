@@ -2,6 +2,7 @@ export { judgeToolUse, stringField, type FileAccessJudge, type GuardVerdict } fr
 export { judgePreToolUse } from './pre-tool-use';
 export { expandBraces } from './braces';
 export {
+  areaMatches,
   classifyPath,
   foldPathCase,
   isOverLongPath,

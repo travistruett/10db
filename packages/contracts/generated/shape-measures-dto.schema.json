@@ -115,6 +115,53 @@
         "overrides"
       ]
     },
+    "questions": {
+      "type": "object",
+      "properties": {
+        "converted": {
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cards": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "tasks",
+            "cards"
+          ]
+        },
+        "other": {
+          "type": "object",
+          "properties": {
+            "tasks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "cards": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "tasks",
+            "cards"
+          ]
+        }
+      },
+      "required": [
+        "converted",
+        "other"
+      ]
+    },
     "shadow": {
       "type": "array",
       "items": {
@@ -159,6 +206,7 @@
   },
   "required": [
     "sizing",
+    "questions",
     "shadow"
   ]
 }

@@ -5,10 +5,12 @@ import {
   ShapeFileDto,
   ShapeMessageDto,
   ShapeProposeResult,
+  ShapeRehearseResult,
   ShapeViewDto,
   type DecisionId,
   type GoalId,
   type ProjectId,
+  type ShapeFindingId,
   type ShapeId,
   type ShapeProposalId,
 } from '@10db/contracts';
@@ -111,6 +113,47 @@ export function useStopShape() {
   });
 }
 
+/**
+ * Rehearse (§7): the session has the rehearsal reviewer read each proposed task with no mark at its
+ * current content. Opening the Convert modal asks for it too, for the proposals about to be converted.
+ */
+export function useRehearseShape(shapeId: ShapeId | null) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (proposalIds?: readonly ShapeProposalId[]) => {
+      if (shapeId === null) throw new Error('Open a conversation first.');
+      return readJson(
+        await client.shapes[':shapeId'].rehearse.$post({
+          param: { shapeId },
+          json: proposalIds === undefined ? {} : { proposalIds: [...proposalIds] },
+        }),
+        ShapeRehearseResult,
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** The builder dismisses a reviewer's finding or a rehearsal question. */
+export function useDismissFinding(shapeId: ShapeId | null) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly findingId: ShapeFindingId; readonly how?: string }) => {
+      if (shapeId === null) throw new Error('Open a conversation first.');
+      await readJson(
+        await client.shapes[':shapeId'].findings[':findingId'].dismiss.$post({
+          param: { shapeId, findingId: input.findingId },
+          json: input.how === undefined ? {} : { how: input.how },
+        }),
+        z.null(),
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
 /** What Convert came to: the rows it made, or every reason it refused (nothing is written then). */
 export type ConvertShapeResult =
   | { readonly kind: 'converted'; readonly result: ShapeConvertResult }
@@ -124,10 +167,17 @@ export function useConvertShape(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (proposalIds: readonly ShapeProposalId[]): Promise<ConvertShapeResult> => {
+    // `interrupt` is Convert Anyway: it stops the turn that is running instead of answering 409 (§7).
+    mutationFn: async (input: {
+      readonly proposalIds: readonly ShapeProposalId[];
+      readonly interrupt?: boolean;
+    }): Promise<ConvertShapeResult> => {
       const res = await client.shapes[':shapeId'].convert.$post({
         param: { shapeId },
-        json: { proposalIds: [...proposalIds] },
+        json: {
+          proposalIds: [...input.proposalIds],
+          ...(input.interrupt === true ? { interrupt: true } : {}),
+        },
       });
       if (res.status === 400) {
         const body: unknown = await res

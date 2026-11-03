@@ -9,6 +9,9 @@ import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/d
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import { reconcileDraft } from './rounds';
+import { reportFinding, resolveFinding, writeSpec } from './review';
+import { buildSizes } from './sizing';
+import { ceremonies, type ViewWorld } from './view';
 
 // Shape spec §5.5. The tools a conversation's session calls through the `10db` MCP server: note_heard,
 // propose_plan, similar_tasks and find_records; the others come with the slices that use them.
@@ -17,6 +20,8 @@ export interface ShapeToolDeps {
   readonly state: StateStore;
   /** Told after each propose_plan call whether it was accepted, for the turn's guard (§5.3). */
   onProposal?(shapeId: ShapeId, accepted: boolean): void;
+  /** What the ceremony rule reads about the project: its one-way paths (§7). */
+  world?(shapeId: ShapeId): ViewWorld;
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}`;
@@ -91,6 +96,12 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
       );
       return Promise.resolve({ records });
     },
+    write_spec: (input) =>
+      Promise.resolve().then(() => deps.state.write((ctx) => writeSpec(ctx, shapeId, input))),
+    report_finding: (input) =>
+      Promise.resolve().then(() => deps.state.write((ctx) => reportFinding(ctx, shapeId, input))),
+    resolve_finding: (input) =>
+      Promise.resolve().then(() => deps.state.write((ctx) => resolveFinding(ctx, shapeId, input))),
     propose_plan: (input) => {
       if (!getShape(deps.state.db, shapeId).proposeUnlocked) {
         line('propose_plan · refused');
@@ -116,6 +127,15 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
             `${plural(outcome.errors.length, outcome.errors.length === 1 ? 'error' : 'errors')}; nothing was changed. Fix them all and call propose_plan again:\n${outcome.errors.map((e) => `- ${e}`).join('\n')}`,
           ),
         );
+      // The rule, not Claude's guess, says which efforts need a spec before Convert (§7).
+      const needSpec = ceremonies(
+        deps.state.db,
+        shapeId,
+        buildSizes(deps.state.db, shapeId),
+        deps.world?.(shapeId) ?? { oneWayNames: new Set() },
+      )
+        .filter((c) => c.ceremony === 'spec' && !c.specWritten)
+        .map((c) => c.key);
       return Promise.resolve({
         round: outcome.round,
         created: outcome.created,
@@ -123,6 +143,12 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
         superseded: outcome.superseded,
         kept: outcome.kept,
         converted: outcome.converted,
+        ...(needSpec.length === 0
+          ? {}
+          : {
+              needSpec,
+              next: 'These efforts need a spec: write it with write_spec, then launch the scope and engineering reviewers.',
+            }),
       });
     },
   };

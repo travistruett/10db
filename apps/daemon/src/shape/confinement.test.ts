@@ -107,6 +107,15 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   ['a tool nobody has heard of', () => call('Frobnicate', {})],
   ['report_finding from the main session', () => call('mcp__10db__report_finding', {})],
   [
+    'report_finding from a subagent that is not a reviewer',
+    () =>
+      call('mcp__10db__report_finding', {}, { agentId: 'agent-1', agentType: 'general-purpose' }),
+  ],
+  [
+    'report_finding from a subagent of no type',
+    () => call('mcp__10db__report_finding', {}, { agentId: 'agent-1' }),
+  ],
+  [
     'propose_plan from a reviewer',
     () => call('mcp__10db__propose_plan', {}, { agentId: 'agent-1', agentType: 'scope' }),
   ],
@@ -143,10 +152,6 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
   ['similar_tasks', () => call('mcp__10db__similar_tasks', { query: 'x' })],
   ['find_records', () => call('mcp__10db__find_records', { query: 'x' })],
   [
-    'report_finding from a reviewer',
-    () => call('mcp__10db__report_finding', {}, { agentId: 'agent-1', agentType: 'scope' }),
-  ],
-  [
     'a reviewer’s Read inside the checkout',
     () =>
       call('Read', { file_path: path('checkout/src/a.ts') }, { agentId: 'a', agentType: 'scope' }),
@@ -162,6 +167,24 @@ describe('judgeShapeCall', () => {
   it.each(ALLOWED)('allows %s', (_name, make) => {
     expect(judgeShapeCall(make(), access)).toEqual({ decision: 'allow' });
   });
+
+  it.each(['scope', 'engineering', 'rehearsal'])(
+    'lets a %s reviewer report a finding, with the reviewer set from its type over what it wrote',
+    (reviewer) => {
+      const verdict = judgeShapeCall(
+        call(
+          'mcp__10db__report_finding',
+          { effortKey: 'density', reviewer: 'scope', finding: { kind: 'none' } },
+          { agentId: 'agent-1', agentType: reviewer },
+        ),
+        access,
+      );
+      expect(verdict).toEqual({
+        decision: 'allow',
+        updatedInput: { effortKey: 'density', reviewer, finding: { kind: 'none' } },
+      });
+    },
+  );
 
   it('never answers ask, so nothing reaches the broker or raises a card', () => {
     for (const [, make] of [...REFUSED, ...ALLOWED])

@@ -78,6 +78,13 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
 }
 
+/**
+ * What a Shape session's PreToolUse hook answers. An allowed call may run with `updatedInput` instead
+ * of what the model wrote: how 10db stamps a reviewer's report with the subagent's type.
+ */
+export type ShapeVerdict =
+  GuardVerdict | { readonly decision: 'allow'; readonly updatedInput: Record<string, unknown> };
+
 /** A reviewer subagent, passed to Claude Code as a programmatic agent on the session's own model. */
 export interface ShapeAgentDefinition {
   readonly description: string;
@@ -117,7 +124,7 @@ export interface ShapeSessionSpec {
     readonly toolTimeoutMs: number;
   };
   /** Runs before every tool call, the session's and its subagents'. */
-  preToolUse(req: ShapeToolRequest): GuardVerdict;
+  preToolUse(req: ShapeToolRequest): ShapeVerdict;
 }
 
 export const SessionEndReason = {

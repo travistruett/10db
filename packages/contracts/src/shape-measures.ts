@@ -71,9 +71,24 @@ export const ShadowAgreementDto = z.object({
 });
 export type ShadowAgreementDto = z.infer<typeof ShadowAgreementDto>;
 
+/** Tasks that started, and the Inbox question cards raised on their workstreams. */
+const QuestionRate = z.object({ tasks: z.int().min(0), cards: z.int().min(0) });
+
+/**
+ * Settings › Decisions › Questions (§7 Measure): Inbox question cards per task that a Shape
+ * conversation converted, against the rate for the other tasks of the same projects. Only tasks that
+ * started count, since a card needs a workstream to land on.
+ */
+export const QuestionMeasureDto = z.object({
+  converted: QuestionRate,
+  other: QuestionRate,
+});
+export type QuestionMeasureDto = z.infer<typeof QuestionMeasureDto>;
+
 /** `GET /shape-measures`: what Settings › Decisions shows of Shape. */
 export const ShapeMeasuresDto = z.object({
   sizing: SizingMeasureDto,
+  questions: QuestionMeasureDto,
   shadow: z.array(ShadowAgreementDto),
 });
 export type ShapeMeasuresDto = z.infer<typeof ShapeMeasuresDto>;
