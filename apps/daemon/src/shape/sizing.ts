@@ -170,6 +170,33 @@ export function buildSizes(db: DbReader, shapeId: ShapeId): ShapeTaskSizeDto[] {
   }));
 }
 
+/** Hours as the builder reads them: at most one decimal, no trailing zero. */
+function hoursText(hours: number): string {
+  return String(Math.round(hours * 10) / 10);
+}
+
+/**
+ * What a reopened conversation is told (§8, §12): the converted tasks that finished more than one
+ * bucket from their size, each with its size and its actual. Empty when none did, so a note is
+ * written only when there is something to account for.
+ */
+export function missizedLines(db: DbReader, shapeId: ShapeId): string[] {
+  const off = sizedTasks(db, shapeId).filter(
+    (s) =>
+      s.taskId !== null &&
+      s.actualHours !== null &&
+      !withinOneBucket(s.size, bucketOf(s.actualHours)),
+  );
+  if (off.length === 0) return [];
+  return [
+    'Finished outside their size by more than one bucket; account for it when re-planning similar work:',
+    ...off.map(
+      (s) =>
+        `- ${s.task.key} → task ${s.taskId ?? ''} "${s.taskId === null ? '' : getTask(db, s.taskId).title}" — sized ${s.size} (~${hoursText(s.hours)} h), took ${hoursText(s.actualHours ?? 0)} h of lane time`,
+    ),
+  ];
+}
+
 /**
  * Settings › Decisions › Sizing: of the finished converted tasks with lane time, the share whose
  * derived size is within one bucket of what they took, overall and per bucket. Pinned sizes are

@@ -110,6 +110,7 @@ import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
 import { convertedStateLines } from './converted-state';
+import { missizedLines } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
@@ -989,6 +990,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             : [
                 'Converted so far, read-only (propose a change or removal only for a task marked "not started"):',
                 ...lines,
+                ...missizedLines(state.db, shapeId),
               ]),
         ].join('\n'),
       );

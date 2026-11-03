@@ -7,6 +7,7 @@ import {
   type ShapeProposalRow,
 } from '@10db/db';
 import { convertedStateLines } from './converted-state';
+import { missizedLines } from './sizing';
 
 /** How many of the latest transcript rows the digest repeats verbatim (Shape spec §5.3). */
 export const DIGEST_MESSAGES = 40;
@@ -50,7 +51,10 @@ export function buildDigest(db: DbReader, shapeId: ShapeId): string {
     lines.push(
       `- ${row.key} (${row.kind}, ${row.state}, round ${String(row.round)}; sources ${row.sourceMessageIds.join(', ') || 'none'}): ${titleOf(row)}`,
     );
-  if (links.length > 0)
+  if (links.length > 0) {
     lines.push('', 'What Convert made, as it stands now:', ...convertedStateLines(db, shapeId));
+    const missized = missizedLines(db, shapeId);
+    if (missized.length > 0) lines.push('', ...missized);
+  }
   return lines.join('\n');
 }

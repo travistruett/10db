@@ -7,6 +7,7 @@ import {
   ShapeProposalState,
   ShapeState,
   ShapeToolInputs,
+  TaskStatus,
   type ShapeMessageId,
   type TaskId,
 } from '@10db/contracts';
@@ -19,6 +20,8 @@ import {
   listShapeProposals,
   listTasks,
   patchShape,
+  schema,
+  setTaskStatus,
   type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -75,6 +78,24 @@ function convertTasks(...keys: string[]): TaskId[] {
   return out.results.flatMap((r) => r.taskIds);
 }
 
+/** Marks a task finished with this many lane minutes, as a finished workstream leaves it. */
+function finishTask(taskId: TaskId, minutes: number): void {
+  write((ctx) => {
+    const ws = insertWorkstream(ctx, taskId);
+    ctx.tx
+      .insert(schema.taskLaneTimes)
+      .values({
+        workstreamId: ws.id,
+        taskId,
+        laneMinutes: minutes,
+        sessionsOnly: false,
+        createdAt: ctx.now,
+      })
+      .run();
+    setTaskStatus(ctx, taskId, TaskStatus.Done);
+  });
+}
+
 const messages = () => listShapeMessages(f.c.store.db, shapeId());
 const prompts = () => f.adapter.shapeSessions.map((s) => s.spec.prompt);
 
@@ -123,6 +144,37 @@ describe('resuming a conversation', () => {
     expect(prompt).toContain(`[m:${note.id}] Task b is running late.`);
     expect(prompt).toContain(`${unstarted ?? ''} "Task a" — not started`);
     expect(prompt).toMatch(new RegExp(`${started ?? ''} "Task b" — started \\(queued\\)`));
+  });
+
+  it('names a task that finished outside its size, with its size and its actual, and no other', async () => {
+    const made = convertTasks('a', 'b');
+    const off = must(made[0], 'first task');
+    const near = must(made[1], 'second task');
+    finishTask(off, 300);
+    finishTask(near, 40);
+    f.service.resume(shapeId(), 'Task a is done.');
+    f.service.send(shapeId(), 'What should change?');
+    await f.service.settled(shapeId());
+    const prompt = must(prompts()[0], 'prompt');
+    expect(prompt).toContain('Finished outside their size');
+    expect(prompt).toContain(`task ${off} "Task a" — sized S (~0.5 h), took 5 h of lane time`);
+    expect(prompt).not.toContain(`task ${near} "Task b" — sized`);
+  });
+
+  it('says nothing about sizes when every finished task was within one bucket', async () => {
+    finishTask(must(convertTasks('a')[0], 'task'), 40);
+    f.service.resume(shapeId(), 'Task a is done.');
+    f.service.send(shapeId(), 'What should change?');
+    await f.service.settled(shapeId());
+    expect(must(prompts()[0], 'prompt')).not.toContain('Finished outside their size');
+  });
+
+  it('gives a fresh session the mis-sized task in its digest', () => {
+    const off = must(convertTasks('a')[0], 'task');
+    finishTask(off, 300);
+    expect(buildDigest(f.c.store.db, shapeId())).toContain(
+      `task ${off} "Task a" — sized S (~0.5 h), took 5 h of lane time`,
+    );
   });
 
   it('gives a fresh session the same state in its digest, the event citable', () => {
