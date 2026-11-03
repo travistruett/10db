@@ -62,15 +62,23 @@ import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import { editResult } from '../permissions';
-import { ANSWERED_CARDS_READ, stampOrReason } from './allowed-writes';
+import { ANSWERED_CARDS_READ, stampOrReason, writeStamp } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
 import { createWatcher, systemWatch, type WatchFn, type Watcher } from './index';
 
 // The real stamp read, watched, so a test can tell which files the watcher read to stamp, and make a read
-// give 'changing' as the real one does for a file that keeps changing while it is read.
+// give 'changing' as the real one does for a file that keeps changing while it is read. `writeStamp` is
+// watched too (a step end reads another lane's excused file through it), so a test can make that read slow.
 vi.mock('./allowed-writes', async (importOriginal) => {
-  const real = await importOriginal<{ stampOrReason: typeof stampOrReason }>();
-  return { ...real, stampOrReason: vi.fn(real.stampOrReason) };
+  const real = await importOriginal<{
+    stampOrReason: typeof stampOrReason;
+    writeStamp: typeof writeStamp;
+  }>();
+  return {
+    ...real,
+    stampOrReason: vi.fn(real.stampOrReason),
+    writeStamp: vi.fn(real.writeStamp),
+  };
 });
 
 const CHANGING = { reason: 'changing' } as const;
@@ -2046,6 +2054,36 @@ describe('worktree checkouts', () => {
       ).toEqual([`${a.path}: ${SENSITIVE_FILE}`, `${b.path}: docs/stray.md`].sort());
     });
 
+    it("does not excuse a write for a card whose lane ended while the file's stamp was being read", async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      let release: (r: { stamp: string }) => void = () => undefined;
+      stamp.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      writeAt(lane.path, SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      state.write((ctx) =>
+        transitionWorkstream(ctx, lane.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      release({ stamp: 'a-stamp' });
+      await flushing;
+      // The lane is over, so its card excuses nothing: the write is carded, not used up and remembered.
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+    });
+
     it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
       const a = running('Alpha', ['api']);
       running('Beta', ['ui']);
@@ -2206,6 +2244,50 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
       });
 
+      it("settles the other lane's step end within the stamp budget while A's batch still waits on a stamp", async () => {
+        const { b } = await excusedForA();
+        // A touches its file again and that batch's stamp read never finishes until released.
+        const batchStamp = vi.mocked(stampOrReason);
+        batchStamp.mockClear();
+        let release: (r: { reason: 'too-large' }) => void = () => undefined;
+        batchStamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              release = resolve;
+            }),
+        );
+        touch(SENSITIVE_FILE);
+        emit(SENSITIVE_FILE);
+        const flushing = watcher.flush();
+        await vi.waitFor(() => {
+          expect(batchStamp).toHaveBeenCalledTimes(1);
+        });
+        // B's read of A's excused file is slow too: it gives up after its (here tiny) budget with no stamp.
+        const stepStamp = vi.mocked(writeStamp);
+        stepStamp.mockClear();
+        stepStamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              setTimeout(() => {
+                resolve(null);
+              }, 20);
+            }),
+        );
+        let settled = false;
+        const ending = watcher.stepEnd(b.workstream.id).finally(() => {
+          settled = true;
+        });
+        // B's step end settles although A's queued batch is still held: it never waits on the checkout queue.
+        await vi.waitFor(() => {
+          expect(settled).toBe(true);
+        });
+        expect(stepStamp).toHaveBeenCalledTimes(1);
+        // A file that could not be stamped in time fails closed: carded to B.
+        expect(await ending).toEqual([SENSITIVE_FILE]);
+        release({ reason: 'too-large' });
+        await flushing;
+      });
+
       it("still cards at the other lane's step end a different write to that file", async () => {
         const { b } = await excusedForA();
         writeFileSync(join(repo.path, SENSITIVE_FILE), 'rewritten by lane Beta');
@@ -2218,6 +2300,27 @@ describe('worktree checkouts', () => {
         touch('.env');
         expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
       });
+
+      it("reads no file at a step end for a written path no other lane's excused write names", async () => {
+        const { b } = await excusedForA();
+        touch('.env');
+        const stamp = vi.mocked(writeStamp);
+        stamp.mockClear();
+        expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+        // Only the path A's card excused is read; `.env` has no excused entry for any lane.
+        expect(stamp.mock.calls.map((c) => c[1])).toEqual([SENSITIVE_FILE]);
+      });
+    });
+
+    it('reads no file at a step end when two lanes run and no excused write names the written path', async () => {
+      running('Alpha', ['ui']);
+      const b = running('Beta', ['api']);
+      watcher.sync();
+      touch('.env');
+      const stamp = vi.mocked(writeStamp);
+      stamp.mockClear();
+      expect(await watcher.stepEnd(b.workstream.id)).toEqual(['.env']);
+      expect(stamp).not.toHaveBeenCalled();
     });
 
     describe("the write the card's own call made", () => {
@@ -2708,11 +2811,11 @@ describe('worktree checkouts', () => {
           expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
         });
 
-        it('cards a path that cannot be read, and leaves the card unused', async () => {
+        it('cards a dangling link, and leaves the card unused', async () => {
           const lane = running();
           watcher.sync();
           editCard(lane, SENSITIVE_FILE, 'allow_once');
-          // A dangling link: it is there, but there is nothing to read.
+          // A dangling link: it is there, but it is not a file.
           const link = join(repo.path, SENSITIVE_FILE);
           symlinkSync(join(repo.path, 'nowhere'), link);
           emit(SENSITIVE_FILE);
@@ -2724,6 +2827,34 @@ describe('worktree checkouts', () => {
           // Only an unused card excuses and stamps the regular-file write, so the step end leaves it out.
           expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
         });
+
+        // root reads a mode 000 file, so the permission denial this relies on cannot happen as root.
+        it.skipIf(process.getuid?.() === 0)(
+          'cards a path that cannot be read, and leaves the card unused',
+          async () => {
+            const lane = running();
+            watcher.sync();
+            editCard(lane, SENSITIVE_FILE, 'allow_once');
+            const file = join(repo.path, SENSITIVE_FILE);
+            mkdirSync(dirname(file), { recursive: true });
+            writeFileSync(file, 'unreadable');
+            chmodSync(file, 0o000);
+            try {
+              emit(SENSITIVE_FILE);
+              await watcher.flush();
+              expect(await vi.mocked(stampOrReason).mock.results.at(-1)?.value).toEqual({
+                reason: 'unreadable',
+              });
+              expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+            } finally {
+              chmodSync(file, 0o644);
+            }
+            // The card is still unused: once the file can be read, its write is excused and uses the card.
+            await write(SENSITIVE_FILE);
+            expect(flags().map((f) => f.body)).toEqual([SENSITIVE_FILE]);
+            expect(await watcher.stepEnd(lane.workstream.id)).toEqual([]);
+          },
+        );
 
         it('cards a FIFO at a card-named path, finishing the batch instead of blocking on it', async () => {
           const lane = running();

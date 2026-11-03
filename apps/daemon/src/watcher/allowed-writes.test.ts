@@ -4,6 +4,7 @@ import type * as fs from 'node:fs';
 import type * as fsPromises from 'node:fs/promises';
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -263,6 +264,41 @@ describe('stampOrReason', () => {
     });
   });
 
+  describe('a path that cannot be read', () => {
+    // root reads a mode 000 file, so the permission denial this relies on cannot happen as root.
+    const asRoot = process.getuid?.() === 0;
+
+    it.skipIf(asRoot)(
+      'says unreadable for a file with no read permission, and no stamp',
+      async () => {
+        const file = join(root, 'secret.txt');
+        writeFileSync(file, 'hello');
+        chmodSync(file, 0o000);
+        try {
+          expect(await stampOrReason(root, 'secret.txt')).toEqual({ reason: 'unreadable' });
+          expect(await writeStamp(root, 'secret.txt')).toBeNull();
+        } finally {
+          chmodSync(file, 0o644);
+        }
+      },
+    );
+
+    it.skipIf(asRoot)(
+      'says unreadable for a file in a directory that cannot be searched',
+      async () => {
+        const dir = join(root, 'locked');
+        mkdirSync(dir);
+        writeFileSync(join(dir, 'file.txt'), 'hello');
+        chmodSync(dir, 0o000);
+        try {
+          expect(await stampOrReason(root, 'locked/file.txt')).toEqual({ reason: 'unreadable' });
+        } finally {
+          chmodSync(dir, 0o755);
+        }
+      },
+    );
+  });
+
   describe('a symlink is not a file', () => {
     it('gives no stamp to a link to a regular file, though the file has one', async () => {
       writeFileSync(join(root, 'target.txt'), 'hello');
@@ -288,6 +324,32 @@ describe('stampOrReason', () => {
       mkdirSync(join(root, 'dir'));
       symlinkSync(join(root, 'dir'), join(root, 'dirlink'));
       expect(await stampOrReason(root, 'dirlink')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no stamp to a file reached through a link to a directory', async () => {
+      mkdirSync(join(root, 'real'));
+      writeFileSync(join(root, 'real/file.txt'), 'hello');
+      symlinkSync(join(root, 'real'), join(root, 'sub'));
+      expect('stamp' in (await stampOrReason(root, 'real/file.txt'))).toBe(true);
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+      expect(await writeStamp(root, 'sub/file.txt')).toBeNull();
+    });
+
+    it('gives no stamp through a link nested deeper, or to a file that is not there', async () => {
+      mkdirSync(join(root, 'real/inner'), { recursive: true });
+      mkdirSync(join(root, 'a'));
+      symlinkSync(join(root, 'real'), join(root, 'a/b'));
+      expect(await stampOrReason(root, 'a/b/inner/x.txt')).toEqual({ reason: 'not-a-file' });
+      symlinkSync(join(root, 'nowhere'), join(root, 'dangling-dir'));
+      expect(await stampOrReason(root, 'dangling-dir/x.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('still stamps a file in a real directory when the checkout itself is reached through a link', async () => {
+      mkdirSync(join(root, 'real'));
+      writeFileSync(join(root, 'real/file.txt'), 'hello');
+      const viaLink = join(root, 'checkout-link');
+      symlinkSync(root, viaLink);
+      expect('stamp' in (await stampOrReason(viaLink, 'real/file.txt'))).toBe(true);
     });
   });
 });

@@ -15,9 +15,39 @@ doesn't end in a newline deletes the newline after its text too, where the file 
 
 A file with CRLF line endings is mirrored: Claude Code reads it as LF, applies the edit, and writes it back in
 the file's own endings (CRLF when the first 4096 characters hold more CRLF than bare LF), so a multi-line
-`new_string` lands with `\r\n`. The broker does the same before hashing. One case where Claude Code's result
-differs from the broker's is not mirrored, and fails closed (the builder's allowed write is carded): an
-`old_string` with straight quotes that Claude Code matches to curly quotes in the file.
+`new_string` lands with `\r\n`. The broker does the same before hashing.
+
+Claude Code also normalizes an Edit's input before it applies it. Checked against the Claude Code the lanes
+run (2.1.310, by editing scratch files through its own Edit tool, since the native binary isn't in
+node_modules to read), with these results:
+
+- **Mirrored: trailing whitespace.** Unless the path ends in `.md` or `.mdx` (any case), every line of
+  `new_string` loses the whitespace at its end (`trimEnd`, so a no-break space too; a whitespace-only line
+  becomes empty; line separators stay) when the file exists, even empty. An Edit that creates its file keeps
+  its whitespace. The broker does the same in `editResult`, before the deletion rule. `old_string` isn't
+  touched. MultiEdit gets the same rule, settled once for the call by whether the file exists when the call
+  starts; the probed Claude Code offers no MultiEdit tool, so that part isn't probed.
+- **Not mirrored, fails closed: desanitizing.** When `old_string` isn't in the file but is once certain
+  tokens are swapped for the longer ones Claude Code strips from its own input (`<fnr>` →
+  `<function_results>`, and the like), Claude Code matches on the swapped text and swaps the same tokens in
+  `new_string`. The broker finds no match, so `editResult` is undefined and the card records no hash.
+- **Not mirrored, fails closed: quote style.** An `old_string` with straight quotes that Claude Code matches
+  to curly quotes in the file, and then the same curly style in `new_string` (double quotes were
+  converted in the probe; an apostrophe in `new_string` stayed straight when `old_string` had no single
+  quote). The broker finds no match, so `editResult` is undefined and the card records no hash.
+- **Not mirrored, fails closed: an empty `old_string` on a whitespace-only file.** Claude Code replaces the
+  file with `new_string` (stripped: `'  \n'` became `'x\n'` in the probe). The broker treats only an empty file
+  this way, so `editResult` is undefined and the card records no hash.
+- **Not probed, fails closed if it differs: a carriage return in `new_string`.** The probe couldn't send one:
+  an `old_string` written with a CR didn't match a file holding that CR, so the CR never reached the tool. The
+  broker keeps the CR, so on a CRLF file `x\r\ny` hashes as `x\r\r\ny`. Whatever Claude Code writes that differs
+  from that (folding `\r\n` to `\n` first would give `x\r\ny`) doesn't match the hash, and the write is carded.
+
+In each of the three "fails closed" cases the builder's allowed write is carded as a stray: noise, and never
+an excuse for a write that wasn't approved. Mirroring desanitizing and quote style needs Claude Code's token
+table and its curly-quote placement rules, which can't be read from here and change with its version, so a
+wrong copy would be worse than carding. The carriage return stays unmirrored for the same reason: no probe
+has shown what Claude Code does with it.
 
 The watcher excuses an unused allow-once card's write for a lane only when the file's content hash is the one
 recorded for that lane. Another lane's write to the path, in the same watch window or not, is carded, both
@@ -33,6 +63,15 @@ card each, a lane's hash is computed when its own card is allowed, normally afte
 landed. Write cards still fold across lanes, since a Write's content doesn't depend on the file: such a card
 keeps one hash per lane, so each lane's own write is excused and neither lane's write is excused for the
 other.
+
+Answering one lane's edit card with allow_project stores a rule that covers another lane's open card for
+the same path, so the inbox service then answers each such card (an open permission card of the project,
+marked `exactWrite`, whose storable rule is the same tool and pattern) allow_once, with a note saying a
+project rule covered it. It stores no rule and no decision of its own. Each lane's broker, handed that
+answer, records the hash of the write its own call makes, as for any allowed edit. The released lanes are
+allowed together, so a lane's hash can be read before another lane's write lands and then differ from what
+its own write makes; that write is carded, never excused, so the race fails closed. Allow once and
+allow-for-workstream answers release nothing, and neither does a card for another path.
 
 A card without `exactWrite` (raised before this) behaves as before: it excuses the next write to its path.
 
