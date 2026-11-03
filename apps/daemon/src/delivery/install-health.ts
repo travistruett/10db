@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join, normalize } from 'node:path';
-import { parse } from 'yaml';
+import { parseAllDocuments } from 'yaml';
 
 /** The lockfile that says a project's packages are pnpm's. */
 export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
@@ -50,6 +50,19 @@ function resolvesFrom(path: string, importer: string, name: string): boolean {
   return false;
 }
 
+const UNREADABLE = Symbol('unreadable lockfile');
+
+/**
+ * The project's own document of a lockfile. pnpm 12 writes its env lockfile (the pnpm it runs as)
+ * as a document before the project's, so the project's is the last one.
+ */
+function projectDocument(text: string): unknown {
+  const documents = parseAllDocuments(text);
+  const last = documents.at(-1);
+  if (last === undefined || documents.some((doc) => doc.errors.length > 0)) return UNREADABLE;
+  return last.toJS();
+}
+
 function brokenLockfile(): InstallHealth {
   return { kind: 'broken', missing: ['pnpm-lock.yaml (unreadable)'], total: 0, unresolved: 1 };
 }
@@ -68,7 +81,8 @@ export function checkInstall(path: string): InstallHealth {
   if (!existsSync(lockfile)) return { kind: 'not_pnpm' };
   let importers: Record<string, unknown>;
   try {
-    const parsed: unknown = parse(readFileSync(lockfile, 'utf8'));
+    const parsed = projectDocument(readFileSync(lockfile, 'utf8'));
+    if (parsed === UNREADABLE) return brokenLockfile();
     const found =
       typeof parsed === 'object' && parsed !== null
         ? (parsed as { importers?: unknown }).importers
