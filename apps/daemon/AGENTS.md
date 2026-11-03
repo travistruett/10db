@@ -38,13 +38,7 @@ serves agents over MCP, and runs Claude Code sessions.
 modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `judge`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement` → `sessions`, `inbox`, `briefing`, `team` →
-<<<<<<< e24810447cbcccb2c7d91efad6992a5595a68bc2
-`delivery`, `accounts` → `mcp` → `screens` → `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
-||||||| 4845349
-`delivery`, `accounts` → `mcp` → `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks` → `daemon` (composition root) → `main.ts`.
-=======
-`delivery`, `accounts` → `mcp` → `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
->>>>>>> a793f191930d56295afd996ba54c38c48ad4031c
+`delivery`, `accounts` → `mcp` → `screens` → `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 
