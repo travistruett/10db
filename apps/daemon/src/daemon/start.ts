@@ -117,7 +117,7 @@ import {
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredProfiles, roleDefault } from '../routing';
-import { createScreenBroker, createScreens } from '../screens';
+import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
 import { createShapeServices } from './shape-services';
 import {
@@ -1042,6 +1042,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       deliver: (id, image) => screenBroker.deliver(id, image),
       refuse: (id, reason) => screenBroker.refuse(id, reason),
       tokenValid: (token) => screenBroker.tokenValid(token),
+      mayRead: renderMayRead,
       image: (shapeId, name) => screens.image(shapeId, name),
     },
     upgradeWebSocket,

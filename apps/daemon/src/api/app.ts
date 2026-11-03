@@ -79,7 +79,6 @@ import { HTTPException } from 'hono/http-exception';
 import { validator } from 'hono/validator';
 import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
-import { renderMayRead } from '../screens';
 import type { ApiServices } from './services';
 import type { TaskRemovalServices } from './services';
 import { streamEvents } from './stream';
@@ -90,6 +89,8 @@ export interface ScreenRoutes {
   deliver(id: string, image: ScreenImageInput): boolean;
   refuse(id: string, reason: string): boolean;
   tokenValid(token: string): boolean;
+  /** Whether a render token may make this request: a GET of a route a screen shows, nothing else. */
+  mayRead(method: string, path: string): boolean;
   image(
     shapeId: ShapeId,
     name: string,
@@ -191,7 +192,7 @@ export function createApp(deps: ApiDeps) {
       // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
       // shows and nothing else, so no write, no digest and no command can be reached with it.
       if (presented !== '' && deps.screens?.tokenValid(presented) === true)
-        return renderMayRead(c.req.method, c.req.path)
+        return deps.screens.mayRead(c.req.method, c.req.path)
           ? next()
           : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
       return c.json({ error: 'unauthorized' }, 401);

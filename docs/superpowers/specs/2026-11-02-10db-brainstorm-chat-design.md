@@ -251,6 +251,13 @@ MCP servers; it has no read-only mode.
     a files-directory path; a fetch of `127.0.0.1`, `localhost`, a login URL and an `http` page is refused; each
     allowed search and fetch writes its dimmed line. The live test (`TENDB_LIVE_CLAUDE=1`) shows that the
     researcher inherits the session's web tools on the real SDK.
+- **Seeing the app: a screenshot tool, never a browser** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
+  The session sees 10db's own screens through `see_screen` (§5.5), which answers a picture. It gets no browser
+  tool and no MCP server other than 10db's, so nothing it holds can click, type, scroll or run a command: a
+  browser would add a process that runs commands, and one click in the real app can Hold a task, answer a card
+  or start work. `playwright`, `browser` and any `mcp__` tool other than `mcp__10db__*` are refused by the
+  hook as they are now. Tests, red first: a browser tool call and a made-up click or key tool are each refused;
+  `see_screen` is refused from the researcher and from each reviewer; the session's tool lists name no browser.
 - **Who is calling.** Subagents share the session's MCP connection, so the PreToolUse hook tells them apart: the
   SDK's hook input carries `agent_id` only inside a subagent, and `agent_type` names it. The hook refuses
   `report_finding` when `agent_id` is absent (the main session can't report findings or rehearsal marks), refuses
@@ -311,6 +318,47 @@ not by the token.
 | `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                                          |
 | `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                                                    |
 | `find_records(query)`                          | session            | read-only search over the decisions that apply to this project (`searchDecisions`: the project's and the builder-wide `you` ones), principles once they exist, and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
+| `see_screen(screen, taskId?, width?, height?)` | session            | a screenshot of one of 10db's own screens (`factory`, `board`, `inbox`, `plan`, or `task` with a `taskId`), at a window of 480 to 1600 by 400 to 2000 px (default 1200 by 900), with the project's real data as it is now; answers an image, or a refusal that says why (below)                                                                                    |
+
+**Seeing the app: `see_screen`** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
+**Built.**
+
+- **The app's own window draws it, in a hidden frame of itself.** The installed app ships no browser engine of its
+  own for this (the e2e suite's Playwright WebKit is not in the bundle). A call becomes a request in the daemon's
+  broker; the window, which long-polls `POST /screens/claim`, loads the app in a hidden `<iframe>`
+  (`sandbox="allow-scripts allow-same-origin"`, `inert`, off-screen) at the screen's route, waits until nothing
+  is loading, draws the frame to an image with `html-to-image` and answers with it (`POST /screens/:id/image`) or
+  with why it could not (`…/refuse`). Nothing is stored for a request: asking writes no row. With the window
+  closed, the call is refused at once, saying so. Not chosen: a Tauri webview snapshot (needs `unsafe` Rust, which
+  `src-tauri` forbids; still the upgrade path behind the same capture seam), capturing the real window (shows only
+  what is on screen, needs Screen Recording) and downloading a WebKit build (a second browser the daemon drives).
+- **Live data, as it is now,** for the conversation's project; never a fixture.
+- **It can change nothing.** The frame runs under a **render token**, minted for that one request and dead when it
+  is answered, which the daemon's auth middleware holds to `GET` of the routes a screen shows
+  (`screens/render-access.ts`): never a write, the digest (it moves a goal's last-opened mark, the 2026-11-02
+  design review's refused read), the event stream, `/mcp`, or a GET that runs a command (`/system`, an account's
+  `identity`, a lane's `changes`). Every GET the daemon serves is named there, allowed or refused with a reason, and
+  a test fails for one that is in neither. The frame's own client sends reads only, and it draws the screen alone
+  (no shell, no stream, no write of the builder's remembered project). **Tests, red first:** with the token, every
+  allowed route answers and the database dump is identical before and after; each write, the digest, `/system`,
+  `identity`, `changes`, the stream and the screen routes answer 403; the token is dead once the request is
+  answered; a screenshot changes no task, batch, card, goal view mark, setting or decision; a control shows the
+  dump does see a settings write.
+- **What comes back is checked by its bytes** (a PNG or a JPEG with the size it says, no larger than the window
+  asked for, at most 1.5 MB), kept under the conversation's `screens/` directory, and written as a `screen`
+  transcript row that names it, with a dimmed `see_screen · board · 1200×900` line before it. **The builder sees
+  the same image the session was given:** the transcript draws the row as the picture (read with the UI token, as
+  a data URL). A picture that is wrong, a screen that fails to load or does not finish in 15 s, a crashed view, a
+  task outside the project, and a window that is closed are each a refusal with the reason (and a dimmed
+  `see_screen · refused · …` line), never a blank image.
+- **Budget.** At most 12 screens a conversation; each is at most 1600 by 2000 px; the system prompt says to ask for
+  the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
+  (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
+  not carried over.
+- **Open.** Whether `html-to-image` draws the Tauri WKWebView's real screens faithfully (fonts, theme variables) and
+  that Claude Code passes the image block to the model are checked by hand in the installed app: the Tauri window
+  has no scripted coverage. Task `tsk_01a18a08-e391` (a task's copy previewed live) can point the same frame and
+  broker at its dev server.
 
 **Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
 touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You
