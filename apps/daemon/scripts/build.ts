@@ -1,4 +1,5 @@
-import { cpSync, mkdirSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { DB_MIGRATIONS_DIR } from '@10db/db';
@@ -18,6 +19,8 @@ for (const name of [
   'drizzle',
   'harness',
   'better_sqlite3.node',
+  'build-info.json',
+  'release',
 ]) {
   rmSync(resolve(outDir, name), { recursive: true, force: true });
 }
@@ -68,8 +71,56 @@ cpSync(
 );
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });
+// The scripts the app installs a newer build with (src/self-update), laid out as in the repository
+// because they find each other relative to it.
+for (const name of ['install-app.sh', 'installed-app.sh']) {
+  cpSync(
+    resolve(root, '../../scripts/release', name),
+    resolve(outDir, 'release', 'scripts', 'release', name),
+  );
+}
+const commit = builtCommit();
+if (commit) {
+  // The repository is fixed here, from GitHub's own runner, and is the only one the app updates
+  // from. A build with none (a local one) shows its commit and never updates itself.
+  const repository = builtRepository();
+  writeFileSync(
+    resolve(outDir, 'build-info.json'),
+    `${JSON.stringify(repository ? { commit, repository } : { commit })}\n`,
+  );
+} else {
+  console.warn('No commit found for this build: the app will show none and never update itself.');
+}
 cpSync(sqliteAddonPath(), resolve(outDir, 'better_sqlite3.node'));
 console.log(`Built ${outDir}/daemon.mjs, builder-mcp.mjs and srt.mjs`);
+
+/** The `owner/name` repository GitHub's runner built this for (`GITHUB_REPOSITORY`), else null. */
+function builtRepository(): string | null {
+  const repository = process.env['GITHUB_REPOSITORY'];
+  return repository && /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._-]+$/.test(repository)
+    ? repository
+    : null;
+}
+
+/**
+ * The commit this bundle is built from: the one GitHub's runner checked out (`GITHUB_SHA`), else the
+ * checkout's own head. Null when neither names a full SHA, as in a source tree with no git.
+ */
+function builtCommit(): string | null {
+  const full = /^[0-9a-f]{40}$/;
+  const fromGitHub = process.env['GITHUB_SHA'];
+  if (fromGitHub && full.test(fromGitHub)) return fromGitHub;
+  try {
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    return full.test(head) ? head : null;
+  } catch {
+    return null;
+  }
+}
 
 /** better-sqlite3 ships one prebuilt addon per platform; @10db/db owns the dependency. */
 function sqliteAddonPath(): string {
