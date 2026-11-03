@@ -476,11 +476,11 @@ describe('buildSessionPrompt for flow steps', () => {
   });
 
   it.each([
-    ['an implement step', implementStep],
-    ['a read-only step', reviewStep],
+    ['an implement step', implementStep, 'prettier --write', 'prettier --check'],
+    ['a read-only step', reviewStep, 'prettier --check', 'prettier --write'],
   ])(
     'asks %s to run each formatter, linter and test as its own plain command naming its paths',
-    (_name, step) => {
+    (_name, step, shown, hidden) => {
       const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
       expect(prompt).toContain('formatters, linters and test commands');
       expect(prompt).toContain('its own command');
@@ -488,10 +488,22 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).toContain('no shell variables');
       expect(prompt).toContain('no `cd`');
       expect(prompt).toContain('no pipes through tail or grep');
-      expect(prompt).toContain('pnpm exec prettier --write path/a.ts path/b.ts');
+      expect(prompt).toContain(`pnpm exec ${shown} path/a.ts path/b.ts`);
+      expect(prompt).not.toContain(hidden);
       expect(prompt).toContain('stops on an "Allow Bash?" card');
     },
   );
+
+  it('keeps the sandbox lines beside the plain-commands line of a read-only step', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      step: reviewStep,
+      action: { kind: 'start' },
+      sandboxed: true,
+    });
+    expect(prompt).toContain('pnpm exec prettier --check path/a.ts path/b.ts');
+    expect(prompt).toContain('Make temp files with `mktemp');
+  });
 
   const SANDBOX_LINES = [
     "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",

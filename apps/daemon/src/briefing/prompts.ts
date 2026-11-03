@@ -122,8 +122,14 @@ export const BACKGROUND_DONE_NUDGE =
 export const BACKGROUND_DONE_NUDGE_READ_ONLY =
   '10db: the command you started in the background has finished. Read its output, finish the step and call mcp__10db__complete_step with your result (and, for a review, a verdict), then end your turn.';
 
-const PLAIN_COMMANDS =
-  'Run project commands in their plain form: `pnpm exec <tool> …` or the project\'s own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: `pnpm exec prettier --write path/a.ts path/b.ts`, then `pnpm exec eslint path/a.ts path/b.ts`. Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
+/** The plain-commands line, with the formatter flag its example shows. */
+const plainCommands = (formatFlag: string) =>
+  `Run project commands in their plain form: \`pnpm exec <tool> …\` or the project's own scripts, with no \`-s\` or \`--silent\`, no trailing \`; echo $?\` (the exit code is reported to you), no \`timeout\` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: \`pnpm exec prettier ${formatFlag} path/a.ts path/b.ts\`, then \`pnpm exec eslint path/a.ts path/b.ts\`. Use no shell variables or arrays to hold the paths, no \`cd\` into the worktree (you are already in it), no \`;\`, \`&&\` or \`$(…)\` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.`;
+
+const PLAIN_COMMANDS = plainCommands('--write');
+
+/** A read-only step's hook refuses a writing command, so its example only checks. */
+const PLAIN_COMMANDS_READ_ONLY = plainCommands('--check');
 
 /**
  * Ending the turn ends the step, and a background command (the Bash tool moves a long one there)
@@ -172,7 +178,7 @@ function readOnlyRules(role: StepRole): string[] {
           'A task is about one pull request (about 300 changed lines), design and docs included. If a design or docs plan would grow past that, plan the part that stands alone and list the sections left out by name, one per decision, as follow-up tasks for the implementer to file.',
         ]
       : []),
-    PLAIN_COMMANDS,
+    PLAIN_COMMANDS_READ_ONLY,
     BACKGROUND_COMMANDS,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
@@ -181,7 +187,11 @@ function readOnlyRules(role: StepRole): string[] {
 /** The rules with the sandbox's lines after the plain-commands line, when the session is sandboxed. */
 function withSandboxRules(rules: readonly string[], sandboxed: boolean): string[] {
   if (!sandboxed) return [...rules];
-  return rules.flatMap((rule) => (rule === PLAIN_COMMANDS ? [rule, ...SANDBOX_RULES] : [rule]));
+  return rules.flatMap((rule) =>
+    rule === PLAIN_COMMANDS || rule === PLAIN_COMMANDS_READ_ONLY
+      ? [rule, ...SANDBOX_RULES]
+      : [rule],
+  );
 }
 
 const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;
