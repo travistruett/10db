@@ -5,6 +5,8 @@ import {
   JudgeDecision,
   JudgeStatusDto,
   mintId,
+  SHAPE_JUDGE_DECISIONS,
+  ShapeMeasuresDto,
 } from '@10db/contracts';
 import { http, HttpResponse, type JsonBodyType } from 'msw';
 import { baseHandlers, daemonUrl, server } from './daemon';
@@ -14,6 +16,23 @@ export function judgeStatusDto(overrides: Partial<JudgeStatusDto> = {}): JudgeSt
     config: DEFAULT_JUDGE_CONFIG,
     keySet: false,
     off: false,
+    ...overrides,
+  });
+}
+
+/** Nothing measured yet: no finished converted task and no shadow answer. */
+export function shapeMeasuresDto(overrides: Partial<ShapeMeasuresDto> = {}): ShapeMeasuresDto {
+  const none = { n: 0, within: 0 };
+  return ShapeMeasuresDto.parse({
+    sizing: { ...none, buckets: { S: none, M: none, L: none, XL: none }, overrides: 0 },
+    questions: { converted: { tasks: 0, cards: 0 }, other: { tasks: 0, cards: 0 } },
+    shadow: SHAPE_JUDGE_DECISIONS.map((decision) => ({
+      decision,
+      answered: 0,
+      scored: 0,
+      agreed: 0,
+      canShow: false,
+    })),
     ...overrides,
   });
 }
@@ -47,6 +66,7 @@ export function serveJudge(initial: {
   readonly status?: JudgeStatusDto;
   readonly calls?: readonly JudgeCallDto[];
   readonly test?: JsonBodyType;
+  readonly measures?: ShapeMeasuresDto;
 }) {
   let status = initial.status ?? judgeStatusDto();
   const sent: JudgeRequest[] = [];
@@ -59,23 +79,31 @@ export function serveJudge(initial: {
     });
   };
   server.use(
+    http.get(daemonUrl('/shape-measures'), () =>
+      HttpResponse.json(initial.measures ?? shapeMeasuresDto()),
+    ),
     http.get(daemonUrl('/judge'), () => HttpResponse.json(status)),
     http.patch(daemonUrl('/judge'), async ({ request }) => {
       const body = JudgeConfigPatch.parse(await request.clone().json());
       await note(request);
+      const merged = (name: JudgeDecision) => {
+        const current = status.config.decisions[name];
+        const change = body.decisions?.[name];
+        return {
+          enabled: change?.enabled ?? current.enabled,
+          model: change?.model ?? current.model,
+          floor: change?.floor ?? current.floor,
+        };
+      };
       status = {
         ...status,
         config: {
           enabled: body.enabled ?? status.config.enabled,
           decisions: {
-            review_size: {
-              enabled:
-                body.decisions?.review_size?.enabled ?? status.config.decisions.review_size.enabled,
-              model:
-                body.decisions?.review_size?.model ?? status.config.decisions.review_size.model,
-              floor:
-                body.decisions?.review_size?.floor ?? status.config.decisions.review_size.floor,
-            },
+            review_size: merged(JudgeDecision.ReviewSize),
+            shape_ready: merged(JudgeDecision.ShapeReady),
+            shape_record: merged(JudgeDecision.ShapeRecord),
+            shape_elsewhere: merged(JudgeDecision.ShapeElsewhere),
           },
         },
       };

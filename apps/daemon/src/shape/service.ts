@@ -17,6 +17,7 @@ import {
   type ProjectId,
   type ShapeDto,
   type ShapeFileDto,
+  type ShapeFindingId,
   type ShapeId,
   type ShapeMessageDto,
   type ShapeMessageId,
@@ -29,8 +30,12 @@ import {
   countShapeFiles,
   endSession,
   findShapeLinkOfGoal,
+  getOneWayPaths,
+  getProject,
   getShape,
+  getShapeFinding,
   getShapeProposal,
+  listRehearsals,
   getShapeSdkSessionId,
   insertSession,
   insertShape,
@@ -43,6 +48,8 @@ import {
   markSessionStarted,
   markShapeFilesTold,
   patchShape,
+  setOneWayPaths as setOneWayPathsRow,
+  settleOpenQuestionsOfTask,
   updateSessionUsage,
   type ShapeFileRow,
   type WriteContext,
@@ -60,6 +67,12 @@ import type {
   ShapeSessionSpec,
   TurnResult,
 } from '../sessions';
+import {
+  effectiveOneWayPaths,
+  gitTrackedFiles,
+  oneWayNamesOf,
+  type TrackedFiles,
+} from './ceremony';
 import { judgeShapeCall, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
@@ -67,20 +80,30 @@ import { asImage, checkDroppedFile, storeFile } from './dropped-files';
 import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-notes';
 import {
   proposeNote,
+  rehearseNote,
+  SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_SYSTEM_PROMPT,
 } from './policy';
 import {
+  dismissFinding as dismissRow,
+  editedTaskKeys,
+  unrehearsedTasks,
+  type RehearsalTask,
+} from './review';
+import {
   dropProposal as dropRow,
   editProposal as editRow,
   restoreProposal as restoreRow,
   unpinProposal as unpinRow,
 } from './rounds';
+import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
-import { buildShapeView, fileDtoOf } from './view';
+import { convertedStateLines } from './converted-state';
+import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
 // Shape spec §5.1, §5.3, §6, §11. Runs each conversation's session: one turn at a time, a queue, the
 // Propose and Convert guards, the move to a fresh session when the context fills, and the idle close.
@@ -109,6 +132,10 @@ export interface ShapeServiceDeps {
   readonly idleMs?: number;
   /** The share of the context window past which a conversation moves to a fresh session; 70. */
   readonly contextLimitPct?: number;
+  /** Jev's shadow decisions, told of each builder message (§9); it asks only for a project that opted in. */
+  readonly jev?: ShapeJev;
+  /** The files git tracks in a checkout, for the ceremony rule's one-way paths (§7); `git ls-files` by default. */
+  readonly trackedFiles?: TrackedFiles;
 }
 
 /** A file as the input hands it over: the name and type the browser reported, and its bytes. */
@@ -146,6 +173,30 @@ export interface ShapeService {
   send(shapeId: ShapeId, text: string): ShapeMessageDto;
   /** Queues a Propose turn, or ignores the press while a Propose turn is queued or running. */
   propose(shapeId: ShapeId): { status: 'started' | 'ignored' };
+  /**
+   * Rehearse (spec §7): queues a turn in which the session has the rehearsal reviewer read each
+   * proposed task that has no mark at its current hash, narrowed to `proposalIds` when given. Opening
+   * the Convert modal asks for it too. `nothing` when every task has its mark; `running` when a
+   * rehearsal turn is already queued or running.
+   */
+  rehearse(
+    shapeId: ShapeId,
+    proposalIds?: readonly ShapeProposalId[],
+  ): { status: 'started' | 'running' | 'nothing'; tasks: number };
+  /**
+   * Reopens a conversation with an event as a note (spec §12): the note is a transcript row a
+   * proposal may cite, and with each converted row's current state it reaches the next turn. Starts no
+   * turn. Throws NotFoundError for an unknown conversation.
+   */
+  resume(shapeId: ShapeId, event: string): ShapeMessageDto;
+  /**
+   * The project's one-way paths (§7) in force: what the builder set, else the 10db defaults that this
+   * project has. `setOneWayPaths` replaces them (an empty list included) and answers what is in force.
+   */
+  oneWayPaths(projectId: ProjectId): string[];
+  setOneWayPaths(projectId: ProjectId, paths: readonly string[]): string[];
+  /** The builder dismisses a finding or a rehearsal question, with a one-line reason. */
+  dismissFinding(shapeId: ShapeId, findingId: ShapeFindingId, how?: string): void;
   /** Interrupts the turn that is running; the queue runs next. */
   stop(shapeId: ShapeId): Promise<void>;
   /** Everything the screen renders for the conversation, with where its session is. */
@@ -187,14 +238,18 @@ function titleFrom(text: string): string {
 }
 
 const IDLE_MS = 10 * 60_000;
+/** How long a checkout's tracked files are reused before git is asked again. */
+const TRACKED_FILES_TTL_MS = 30_000;
 const CONTEXT_LIMIT_PCT = 70;
 
 interface Turn {
-  readonly kind: 'message' | 'propose';
+  readonly kind: 'message' | 'propose' | 'rehearse';
   /** What the session is sent, with the id of the message it answers. */
   readonly prompt: string;
   /** The transcript row the turn answers; builder messages before it are context a fresh session lacks. */
   readonly messageId: ShapeMessageId;
+  /** A rehearsal turn: the tasks it was told to read, each at the hash it listed. */
+  readonly rehearsing?: readonly Pick<RehearsalTask, 'taskKey' | 'hash'>[];
 }
 
 /** What goes ahead of a turn's message: the builder's edits since the last turn and the files dropped. */
@@ -293,10 +348,43 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     });
   };
 
+  // What the ceremony rule reads about a project: the files git tracks, kept for a short while so the
+  // screen refreshing on every transcript line doesn't list a large repository each time.
+  const trackedFiles = deps.trackedFiles ?? gitTrackedFiles;
+  const tracked = new Map<string, { readonly at: number; readonly files: readonly string[] }>();
+  const trackedOf = (repoPath: string): readonly string[] => {
+    const now = clock.now().getTime();
+    let held = tracked.get(repoPath);
+    if (held === undefined || now - held.at > TRACKED_FILES_TTL_MS) {
+      held = { at: now, files: trackedFiles(repoPath) };
+      tracked.set(repoPath, held);
+    }
+    return held.files;
+  };
+  const oneWayPathsOf = (projectId: ProjectId): string[] =>
+    effectiveOneWayPaths(
+      getOneWayPaths(state.db, projectId),
+      trackedOf(getProject(state.db, projectId).repoPath),
+    );
+  const worldOf = (projectId: ProjectId): ViewWorld => {
+    const project = getProject(state.db, projectId);
+    return {
+      oneWayNames: oneWayNamesOf({
+        tracked: trackedOf(project.repoPath),
+        globs: oneWayPathsOf(projectId),
+        areas: project.areas,
+        hazards: project.hazards,
+      }),
+    };
+  };
+  const worldOfShape = (shapeId: ShapeId): ViewWorld =>
+    worldOf(getShape(state.db, shapeId).projectId);
+
   const toolsFor: ShapeToolsFor = ({ shapeId }) =>
     createShapeToolHandlers(
       {
         state,
+        world: worldOfShape,
         onProposal: (id, accepted) => {
           const rt = runtimeOf(id);
           if (accepted) rt.proposed = true;
@@ -505,7 +593,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       tools: [...SHAPE_BUILT_IN_TOOLS],
       allowedTools: SHAPE_ALLOWED_TOOLS,
       disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: {},
+      agents: SHAPE_AGENTS,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
@@ -621,6 +709,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         notice(shapeId, "Claude didn't propose; Propose Again");
       }
     }
+    // A task the turn listed and got no closing report for stays "Not rehearsed": never read as clean.
+    if (end.kind === 'complete' && !failed && !stopped() && turn.kind === 'rehearse') {
+      const marked = new Set(
+        listRehearsals(state.db, shapeId).map((m) => `${m.taskKey}\0${m.hash}`),
+      );
+      const skipped = (turn.rehearsing ?? []).filter((t) => !marked.has(`${t.taskKey}\0${t.hash}`));
+      if (skipped.length > 0)
+        notice(
+          shapeId,
+          `The rehearsal didn't read ${String(skipped.length)} of ${String(turn.rehearsing?.length ?? 0)} ${(turn.rehearsing?.length ?? 0) === 1 ? 'task' : 'tasks'}; ${skipped.length === 1 ? 'it shows' : 'they show'} as Not rehearsed.`,
+        );
+    }
     if (end.kind === 'ended') return;
     if (rt.contextPct > contextLimit) {
       // The next turn starts a fresh session from the digest; nothing the builder said is lost.
@@ -637,7 +737,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
   const pump = (shapeId: ShapeId, rt: Runtime): void => {
     if (rt.pump !== null) return;
-    rt.pump = (async () => {
+    // With nothing to run the body below finishes synchronously, and its `finally` would clear
+    // rt.pump before the assignment stores a settled promise there for good: settled() would spin.
+    const progress = { done: false };
+    let run: Promise<void> | null = null;
+    run = (async () => {
       try {
         while (rt.queue.length > 0 && !rt.held) {
           const turn = rt.queue.shift();
@@ -655,9 +759,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           }
         }
       } finally {
-        rt.pump = null;
+        progress.done = true;
+        if (rt.pump === run) rt.pump = null;
       }
     })();
+    if (!progress.done) rt.pump = run;
   };
 
   const interrupt = async (rt: Runtime): Promise<void> => {
@@ -745,6 +851,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     editProposal(shapeId, id, fields) {
       builderAction(shapeId, id, (ctx, label) => {
         editRow(ctx, id, fields);
+        // An edit to a task answers the questions the rehearsal asked of it (§7).
+        for (const taskKey of editedTaskKeys(getShapeProposal(ctx.tx, id), fields))
+          settleOpenQuestionsOfTask(ctx, shapeId, taskKey, 'answered by your edit');
         return editNote(label, fields);
       });
     },
@@ -785,6 +894,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         messageId: message.id,
       });
       pump(shapeId, rt);
+      // Shadow only: nothing waits on it, and it never throws.
+      void deps.jev?.heard(shapeId, message.id);
       return message;
     },
 
@@ -811,14 +922,85 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       return { status: 'started' };
     },
 
+    rehearse(shapeId, proposalIds) {
+      const rt = runtimeOf(shapeId);
+      const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
+      if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
+      if (rt.current?.kind === 'rehearse' || rt.queue.some((t) => t.kind === 'rehearse'))
+        return { status: 'running', tasks: tasks.length };
+      const { note, instruction } = rehearseNote(tasks);
+      // The note is a row in the transcript, and the turn lists each task at the hash it was read at.
+      const message = say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Rehearse, note);
+      rt.queue.push({
+        kind: 'rehearse',
+        prompt: `[m:${message.id}] ${instruction}`,
+        messageId: message.id,
+        rehearsing: tasks.map((t) => ({ taskKey: t.taskKey, hash: t.hash })),
+      });
+      pump(shapeId, rt);
+      return { status: 'started', tasks: tasks.length };
+    },
+
+    resume(shapeId, event) {
+      getShape(state.db, shapeId);
+      const message = say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Event, event);
+      // The session sees what Convert made as it stands now, read-only, ahead of its next turn; a
+      // fresh session gets the same lines in its digest.
+      const lines = convertedStateLines(state.db, shapeId);
+      runtimeOf(shapeId).notes.push(
+        [
+          `[m:${message.id}] ${event}`,
+          ...(lines.length === 0
+            ? []
+            : [
+                'Converted so far, read-only (propose a change or removal only for a task marked "not started"):',
+                ...lines,
+              ]),
+        ].join('\n'),
+      );
+      return message;
+    },
+
+    oneWayPaths: oneWayPathsOf,
+
+    setOneWayPaths(projectId, paths) {
+      state.write((ctx) => {
+        getProject(ctx.tx, projectId);
+        setOneWayPathsRow(ctx, projectId, paths);
+      });
+      return oneWayPathsOf(projectId);
+    },
+
+    dismissFinding(shapeId, findingId, how) {
+      const note = state.write((ctx) => {
+        const finding = getShapeFinding(ctx.tx, findingId);
+        dismissRow(ctx, shapeId, findingId, how ?? 'dismissed by you');
+        const body = `The builder dismissed the ${finding.reviewer} ${finding.kind === 'question' ? 'question' : 'finding'} on ${finding.taskKey ?? finding.effortKey}: ${finding.text}`;
+        insertShapeMessage(ctx, shapeId, {
+          author: ShapeMessageAuthor.Note,
+          kind: ShapeMessageKind.Edit,
+          body,
+        });
+        return body;
+      });
+      runtimeOf(shapeId).notes.push(note);
+    },
+
     view(shapeId) {
       const rt = runtimes.get(shapeId);
       const queue = rt?.queue ?? [];
-      return buildShapeView(state.db, shapeId, {
-        running: rt !== undefined && rt.current !== null,
-        queued: queue.length,
-        proposing: rt?.current?.kind === 'propose' || queue.some((t) => t.kind === 'propose'),
-      });
+      return buildShapeView(
+        state.db,
+        shapeId,
+        {
+          running: rt !== undefined && rt.current !== null,
+          queued: queue.length,
+          proposing: rt?.current?.kind === 'propose' || queue.some((t) => t.kind === 'propose'),
+          rehearsing: rt?.current?.kind === 'rehearse' || queue.some((t) => t.kind === 'rehearse'),
+        },
+        worldOfShape(shapeId),
+        clock.now(),
+      );
     },
 
     list: (projectId) =>
@@ -854,6 +1036,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     async convert(shapeId, proposalIds, options) {
       const rt = runtimeOf(shapeId);
+      if (options?.interrupt === true) {
+        // Convert Anyway stops the rehearsal (spec §7), queued as well as running: one left in the
+        // queue would read proposals that are no longer pending once the hold is released.
+        for (let i = rt.queue.length - 1; i >= 0; i -= 1)
+          if (rt.queue[i]?.kind === 'rehearse') rt.queue.splice(i, 1);
+      }
       if (rt.current !== null) {
         if (options?.interrupt !== true)
           throw new ConflictError('Claude is still answering; Stop or wait');

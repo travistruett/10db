@@ -1,4 +1,16 @@
-import { JudgeDecision, JudgeKeyInput, JudgeOutcome, type JudgeCallDto } from '@10db/contracts';
+import {
+  JudgeDecision,
+  JudgeKeyInput,
+  JudgeOutcome,
+  SHAPE_JUDGE_DECISIONS,
+  type JudgeCallDto,
+  type JudgeConfig,
+  type JudgeDecisionConfig,
+  type QuestionMeasureDto,
+  type ShadowAgreementDto,
+  type ShapeJudgeDecision,
+  type SizingMeasureDto,
+} from '@10db/contracts';
 import {
   Alert,
   Badge,
@@ -23,13 +35,28 @@ import {
 } from '../../daemon/judge-queries';
 import { removeJudgeKey, sendJudgeKey } from '../../daemon/judge-secret';
 import { useDaemon } from '../../daemon/provider';
+import { useShapeMeasures } from '../../daemon/shape-measures-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 
 const REVIEW = JudgeDecision.ReviewSize;
 const REVIEW_LABEL = 'Skip review for small, well-tested changes';
 
+/** Shape's decisions are named by the chip each would show (spec §9). */
+const SHAPE_LABEL: Readonly<Record<ShapeJudgeDecision, string>> = {
+  [JudgeDecision.ShapeReady]: 'Enough to propose',
+  [JudgeDecision.ShapeRecord]: 'Record as a decision?',
+  [JudgeDecision.ShapeElsewhere]: 'Question for someone else?',
+};
+
+const SHAPE_QUESTION: Readonly<Record<ShapeJudgeDecision, string>> = {
+  [JudgeDecision.ShapeReady]: 'After each message, until the first Propose: has he said enough?',
+  [JudgeDecision.ShapeRecord]: 'Does this message state a decision or principle worth recording?',
+  [JudgeDecision.ShapeElsewhere]: 'Is this a question only someone else can answer?',
+};
+
 const DECISION_LABEL: Readonly<Record<JudgeDecision, string>> = {
   [JudgeDecision.ReviewSize]: REVIEW_LABEL,
+  ...SHAPE_LABEL,
 };
 
 /** What 10db did, in the builder's words, for the outcomes that do not depend on the answer. */
@@ -40,7 +67,158 @@ const OUTCOME_TEXT: Readonly<Record<Exclude<JudgeOutcome, 'acted'>, string>> = {
   [JudgeOutcome.FallbackTimeout]: 'Timed out; the review ran',
   [JudgeOutcome.FallbackError]: 'The call failed; the review ran',
   [JudgeOutcome.Stopped]: 'Stopped before it answered',
+  [JudgeOutcome.Shadow]: 'Logged in shadow; nothing shown',
 };
+
+const percent = (part: number, whole: number): string =>
+  `${String(Math.round((part / whole) * 100))}%`;
+
+/** Settings › Decisions › Sizing (spec §8 Calibration). */
+function SizingRow({ sizing }: { readonly sizing: SizingMeasureDto }) {
+  const buckets = (['S', 'M', 'L', 'XL'] as const)
+    .filter((b) => sizing.buckets[b].n > 0)
+    .map((b) => `${b} ${String(sizing.buckets[b].within)} of ${String(sizing.buckets[b].n)}`);
+  return (
+    <SettingRow
+      label="Sizing"
+      description="Finished tasks Plan converted, whose size was within one bucket of the lane time they took."
+    >
+      <Stack gap={2} role="group" aria-label="Sizing">
+        {sizing.n === 0 ? (
+          <Text size="sm" c="dimmed">
+            No converted task has finished yet
+          </Text>
+        ) : (
+          <>
+            <Text size="sm">
+              {percent(sizing.within, sizing.n)} within one bucket ({String(sizing.within)} of{' '}
+              {String(sizing.n)})
+            </Text>
+            <Text size="xs" c="dimmed">
+              {buckets.join(' · ')}
+            </Text>
+          </>
+        )}
+        {sizing.overrides > 0 ? (
+          <Text size="xs" c="dimmed">
+            {String(sizing.overrides)} set by you, not counted
+          </Text>
+        ) : null}
+      </Stack>
+    </SettingRow>
+  );
+}
+
+const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
+
+const perTask = (rate: QuestionMeasureDto['converted']): string =>
+  `${String(Math.round((rate.cards / rate.tasks) * 100) / 100)} question cards per task (${taskCount(rate.tasks)})`;
+
+/** Settings › Decisions › Questions (spec §7 Measure): Inbox question cards, converted against other tasks. */
+function QuestionsRow({ questions }: { readonly questions: QuestionMeasureDto }) {
+  const { converted, other } = questions;
+  return (
+    <SettingRow
+      label="Questions"
+      description="Inbox question cards on tasks Plan converted, against the project's other tasks. Only tasks that started count."
+    >
+      <Stack gap={2} role="group" aria-label="Questions">
+        {converted.tasks === 0 ? (
+          <Text size="sm" c="dimmed">
+            No converted task has started yet
+          </Text>
+        ) : (
+          <Text size="sm">{perTask(converted)} converted</Text>
+        )}
+        {other.tasks === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            {perTask(other)} for the project&apos;s other tasks
+          </Text>
+        )}
+      </Stack>
+    </SettingRow>
+  );
+}
+
+function agreementText(a: ShadowAgreementDto): string {
+  if (a.scored === 0) return 'In shadow: No scored answers yet';
+  return `In shadow: ${String(a.agreed)} of ${String(a.scored)} scored answers agreed (${percent(a.agreed, a.scored)})`;
+}
+
+/** One of Shape's decisions: what it asks, its switch, and how often its shadow answers agreed. */
+function ShapeDecisionRow({
+  decision,
+  config,
+  agreement,
+  disabled,
+  onEnabled,
+}: {
+  readonly decision: ShapeJudgeDecision;
+  readonly config: JudgeDecisionConfig;
+  readonly agreement: ShadowAgreementDto | undefined;
+  readonly disabled: boolean;
+  readonly onEnabled: (enabled: boolean) => void;
+}) {
+  const label = SHAPE_LABEL[decision];
+  return (
+    <SettingRow label={label} description={SHAPE_QUESTION[decision]}>
+      <Stack gap={2} role="group" aria-label={label}>
+        <Switch
+          aria-label={label}
+          checked={config.enabled}
+          disabled={disabled}
+          onChange={(event) => {
+            onEnabled(event.currentTarget.checked);
+          }}
+        />
+        <Text size="xs" c="dimmed">
+          {agreement === undefined ? 'In shadow' : agreementText(agreement)}
+        </Text>
+        {agreement?.canShow ? (
+          <Badge size="xs" variant="light">
+            Ready to show
+          </Badge>
+        ) : null}
+      </Stack>
+    </SettingRow>
+  );
+}
+
+/** Shape's measures: the Sizing line, and its three decisions in shadow. */
+function ShapeMeasures({
+  decisions,
+  disabled,
+  onEnabled,
+}: {
+  readonly decisions: JudgeConfig['decisions'];
+  readonly disabled: boolean;
+  readonly onEnabled: (decision: ShapeJudgeDecision, enabled: boolean) => void;
+}) {
+  const measures = useShapeMeasures();
+  if (measures.data === undefined) return null;
+  return (
+    <SettingsCard>
+      <SizingRow sizing={measures.data.sizing} />
+      <QuestionsRow questions={measures.data.questions} />
+      {SHAPE_JUDGE_DECISIONS.map((decision) => (
+        <ShapeDecisionRow
+          key={decision}
+          decision={decision}
+          config={decisions[decision]}
+          agreement={measures.data.shadow.find((a) => a.decision === decision)}
+          disabled={disabled}
+          onEnabled={(enabled) => {
+            onEnabled(decision, enabled);
+          }}
+        />
+      ))}
+      <Text size="xs" c="dimmed">
+        Plan asks these only for a project with “Send brainstorm messages to fast models” on in its
+        settings, and only logs the answers until each has 20 scored answers with 75% agreeing.
+      </Text>
+    </SettingsCard>
+  );
+}
 
 /**
  * `acted` means 10db followed the model's answer, which is a skip or a review: what it did depends on
@@ -341,6 +519,13 @@ export function DecisionsSection() {
           />
         </SettingRow>
       </SettingsCard>
+      <ShapeMeasures
+        decisions={config.decisions}
+        disabled={disabled}
+        onEnabled={(decision, enabled) => {
+          patch.mutate({ decisions: { [decision]: { enabled } } });
+        }}
+      />
       <RecentDecisions />
     </Stack>
   );

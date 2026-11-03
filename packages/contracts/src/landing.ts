@@ -1,5 +1,21 @@
 import { z } from 'zod';
 import { BranchName } from './git-names';
+import { LandingGroupId, ProjectId, ShapeId } from './ids';
+
+/**
+ * Tasks that land in one pull request (Shape spec §10.4): starting them together puts them in one
+ * batch, and a task of the group started later joins that batch while it is open.
+ */
+export const LandingGroupDto = z.object({
+  id: LandingGroupId,
+  projectId: ProjectId,
+  title: z.string(),
+  /** The conversation that proposed it; null for a group made another way. */
+  shapeId: ShapeId.nullable(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+export type LandingGroupDto = z.infer<typeof LandingGroupDto>;
 
 /**
  * Where a new task lands unless it says otherwise: merged into the base branch, merged into the

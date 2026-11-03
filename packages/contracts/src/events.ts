@@ -44,6 +44,10 @@ export const EventType = {
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
   ShapeChanged: 'shape.changed',
+  /** A workstream's gate holds its slot and starts (Shape spec §8: lane time counts from here). */
+  GateStarted: 'gate.started',
+  /** The gate that `gate.started` began has ended, with its exit code. */
+  GateFinished: 'gate.finished',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

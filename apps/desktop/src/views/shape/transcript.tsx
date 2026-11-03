@@ -41,6 +41,8 @@ export function blocksOf(messages: readonly ShapeMessageDto[]): Block[] {
         return [{ kind: 'tool', id: m.id, body: m.body }];
       case 'propose':
         return [{ kind: 'note', id: m.id, body: 'You pressed Propose.' }];
+      case 'rehearse':
+        return [{ kind: 'note', id: m.id, body: m.body }];
       case 'event':
       case 'notice':
         return [{ kind: 'note', id: m.id, body: m.body }];

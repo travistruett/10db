@@ -42,6 +42,8 @@ export const ShapeMessageKind = {
   Text: 'text',
   Tool: 'tool',
   Propose: 'propose',
+  /** The note that starts a rehearsal turn (§7); like Propose it can't be cited as a source. */
+  Rehearse: 'rehearse',
   Edit: 'edit',
   Digest: 'digest',
   Event: 'event',
@@ -352,6 +354,26 @@ export type ShapeAttachTarget = z.infer<typeof ShapeAttachTarget>;
 export const ShapeFindingSeverity = { Low: 'low', Medium: 'medium', High: 'high' } as const;
 export type ShapeFindingSeverity = ValueOf<typeof ShapeFindingSeverity>;
 
+/** The reviewers a Shape session may launch with `Agent` (§7). */
+export const ShapeReviewer = {
+  Scope: 'scope',
+  Engineering: 'engineering',
+  Rehearsal: 'rehearsal',
+} as const;
+export type ShapeReviewer = ValueOf<typeof ShapeReviewer>;
+
+/** A finding is open until the session resolves it or the builder dismisses it (§7). */
+export const ShapeFindingState = {
+  Open: 'open',
+  Resolved: 'resolved',
+  Dismissed: 'dismissed',
+} as const;
+export type ShapeFindingState = ValueOf<typeof ShapeFindingState>;
+
+/** A `finding` is a review comment; a `question` is what the rehearsal's implementer would have to ask. */
+export const ShapeFindingKind = { Finding: 'finding', Question: 'question' } as const;
+export type ShapeFindingKind = ValueOf<typeof ShapeFindingKind>;
+
 /** A reviewer's report; `none` is a rehearsal with nothing to ask, which still marks the task read. */
 export const ShapeFindingReport = z.discriminatedUnion('kind', [
   z.object({
@@ -378,6 +400,13 @@ export const ShapeToolInputs = {
     taskKey: BriefKey.optional(),
     /** The hash the rehearsal note listed the task at; a mark at a stale hash is discarded. */
     taskHash: z.string().min(1).optional(),
+    /**
+     * The rehearsal's closing report: the questions reported so far were all of them. A `none` closes
+     * the rehearsal too. The task is marked read only on a closing report.
+     */
+    final: z.boolean().optional(),
+    /** Set by 10db's PreToolUse hook from the subagent's type, over whatever the model wrote. */
+    reviewer: z.enum(ShapeReviewer).optional(),
     finding: ShapeFindingReport,
   }),
   resolve_finding: z.object({ findingId: ShapeFindingId, how: HowResolved }),

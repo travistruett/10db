@@ -6,6 +6,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
 import { FakeAdapter } from '../sessions';
+import type { TrackedFiles } from './ceremony';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
 import { createShapeService, type ShapeService } from './service';
 
@@ -24,7 +25,7 @@ export interface ServiceFixture {
   close(): Promise<void>;
 }
 
-export function createServiceFixture(): ServiceFixture {
+export function createServiceFixture(opts: { trackedFiles?: TrackedFiles } = {}): ServiceFixture {
   const c = seedConversation();
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
@@ -39,6 +40,8 @@ export function createServiceFixture(): ServiceFixture {
       clock: new ManualClock(),
       log: silentLogger,
       filesDir,
+      // No git in a test: the project's checkout is not a repository, so nothing is one-way unless asked.
+      trackedFiles: opts.trackedFiles ?? (() => []),
       mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
       launch: () => ({
         cwd: '/repo',

@@ -15,6 +15,7 @@ import {
   fitNotice,
   type BatchId,
   type CiStopped,
+  type LandingGroupId,
   type Notice,
   type ProjectId,
   type PullRequestMergeBlocked,
@@ -173,6 +174,22 @@ export function sharedLaneRan(db: DbReader, projectId: ProjectId): boolean {
     .limit(1)
     .get();
   return ran !== undefined;
+}
+
+/**
+ * The batches a landing group's tasks have run in, newest first, each once (Shape spec §10.4). A
+ * task not yet started has none; a task that ran twice (a retry) can appear in two.
+ */
+export function landingBatches(db: DbReader, groupId: LandingGroupId): BatchDto[] {
+  return db
+    .selectDistinct({ batch: schema.batches })
+    .from(schema.tasks)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.taskId, schema.tasks.id))
+    .innerJoin(schema.batches, eq(schema.batches.id, schema.workstreams.batchId))
+    .where(eq(schema.tasks.landingGroupId, groupId))
+    .orderBy(desc(schema.batches.createdAt), desc(schema.batches.id))
+    .all()
+    .map((r) => toBatchDto(r.batch));
 }
 
 /** Every unfinished batch of the project in any mode, newest first. */

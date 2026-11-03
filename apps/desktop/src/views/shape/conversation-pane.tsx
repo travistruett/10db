@@ -4,7 +4,9 @@ import {
   type ShapeId,
   type ShapeViewDto,
 } from '@10db/contracts';
-import { Box, Group, Loader, Text } from '@mantine/core';
+import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
+import { IconPlus } from '@tabler/icons-react';
+import { Link } from '@tanstack/react-router';
 import {
   useCreateShape,
   useProposeShape,
@@ -14,6 +16,8 @@ import {
 } from '../../daemon/shape-queries';
 import { Composer } from './composer';
 import { addFiles } from './dropped-files';
+import { HistoryButton } from './history-button';
+import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
 
@@ -65,11 +69,42 @@ export function ConversationPane({
       h="100%"
       style={{ display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}
     >
-      <Group px="md" pt="md" pb="xs" gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
-        <Text size="sm" fw={500} lineClamp={1}>
-          {view?.shape.title ?? 'New conversation'}
-        </Text>
-        {loading ? <Loader size="xs" aria-label="Loading the conversation" /> : null}
+      <Group
+        px="md"
+        pt="md"
+        pb="xs"
+        gap="sm"
+        wrap="nowrap"
+        justify="space-between"
+        style={{ flex: 'none' }}
+      >
+        <Group gap="sm" wrap="nowrap" miw={0}>
+          <Title order={2} size="h4">
+            Plan
+          </Title>
+          {shapeId === null ? null : (
+            <Text size="sm" fw={500} lineClamp={1}>
+              {view?.shape.title}
+            </Text>
+          )}
+          {loading && shapeId !== null ? (
+            <Loader size="xs" aria-label="Loading the conversation" />
+          ) : null}
+        </Group>
+        {shapeId === null ? null : (
+          <Group gap="xs" wrap="nowrap">
+            <Button
+              component={Link}
+              to="/shape"
+              variant="default"
+              size="xs"
+              leftSection={<IconPlus size={14} stroke={1.5} />}
+            >
+              New
+            </Button>
+            <HistoryButton projectId={projectId} current={shapeId} />
+          </Group>
+        )}
       </Group>
       <Transcript messages={view?.messages ?? []} why={why} />
       <Composer
@@ -103,6 +138,7 @@ export function ConversationPane({
         onPropose={doPropose}
         onStop={doStop}
       />
+      {shapeId === null ? <RecentConversations projectId={projectId} /> : null}
     </Box>
   );
 }

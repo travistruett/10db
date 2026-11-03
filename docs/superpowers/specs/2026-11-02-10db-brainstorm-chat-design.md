@@ -698,14 +698,41 @@ All in scope; this is build order. Each slice ships something usable.
 3. **Intelligence.** `gate.started`/`finished` and lane-time reconstruction; `similar_tasks`, bases, derived sizes;
    calibration shown back (§8); `find_records` (§5.5); the three Jev decisions in shadow, their scoring and Settings
    rows; records with principles (§10.1); questions.
+   *Built: the gate events and `task_lane_times` with its backfill (migrations 0031, 0032); `similar_tasks`, derived
+   sizes and hours (a builder-pinned `size` is the override), the actual on a finished converted row and Settings ›
+   Decisions › Sizing; `find_records` with dated hits cited in the chat, and supersede through Convert; the
+   per-project opt-in (Settings › General), the three decisions in shadow (`shape_shadow_answers`, judge outcome
+   `shadow`), their scoring and agreement rows. `similar_tasks` ranks by shared words, not an FTS5 index (finished
+   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. Not built yet, and
+   filed as follow-ups: the `principles` table and converting principles and questions (`shape_questions`); the
+   actual in the task drawer; telling a reopened conversation which of its tasks mis-sized.*
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.
+   *Built, except the proposed eval's screen (only the eval a session states is stored as an attachment at Convert).
+   `oneWayPaths` is an app setting (`shape.oneWayPaths.<projectId>`, Settings › General), as `shape.jev` is.
+   `report_finding` takes a `final` flag: the rehearsal's mark for a task is written only by a closing report, so an
+   interrupted rehearsal leaves none. The reviewer is stamped by the PreToolUse hook (`updatedInput`) from the
+   subagent's `agent_type`. The Rehearse note has its own message kind (`rehearse`). A task's content hash ignores
+   `ceremony`. The question-card measure counts started, non-cancelled tasks of projects that have a converted task.
+   Migration 0033. See `decisions/2026-11-02-shape-ceremony-review-and-rehearsal.md`.*
 5. **Preview, attachments, reopen.** The factory preview; Mermaid, charts and mockups with §10.3's tests; Open
    conversation, the resume route, re-plan additions, changes and removals.
+   *Built. The preview is in `ShapeViewDto.preview` and under the Proposed list. `attach` keeps a diagram, chart or
+   mockup in `shape_attachments` (on a proposal key, or a goal or task the conversation converted) and the view
+   carries them as `attachments`. Charts and diagrams are drawn to SVG and shown as an `<img>`, so no script or link
+   in them runs; charts use `vega-interpreter` (a fifth pinned renderer package) because the window's CSP has no
+   `unsafe-eval`. Open conversation reads `GET /goals/:id/shape` and `GET /tasks/:id/shape` and opens the Shape
+   view; `POST /shapes/:id/resume` is for the engine's Re-plan in Shape cards, which don't exist yet.*
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
    `groupByDependency` joining a landing's tasks and a late task joining its group's open batch; pull request and CI
    counts in the preview.
+   *Built. Migration 0034 adds `landing_groups` and `tasks.landing_group_id`; Convert writes a selected landing as
+   a group; a landing's tasks start into one batch titled after the landing, a late task joins the landing's OPEN
+   batch, and once that batch has shipped it makes a new one with a `landing-shipped` notice. A landing whose batch
+   is cutting, shipping or failed refuses the start by name. The preview's `landings` counts pull requests and CI
+   runs with and without them (one CI run per pull request). Not built: removing a group with its last unstarted
+   task, and ungrouping from the task's drawer (§11 Undo). See `decisions/2026-11-02-landings-share-a-batch.md`.*
 
 ## 15. Testing
 

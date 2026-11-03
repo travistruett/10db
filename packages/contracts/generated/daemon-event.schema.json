@@ -52,7 +52,9 @@
         "network_hosts.changed",
         "goal.created",
         "goal.changed",
-        "shape.changed"
+        "shape.changed",
+        "gate.started",
+        "gate.finished"
       ]
     },
     "entityType": {

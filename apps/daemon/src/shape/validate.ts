@@ -2,6 +2,8 @@ import {
   TaskSize,
   type GoalBrief,
   type GoalId,
+  type LandingGroupId,
+  type WorkspaceMode,
   type PlanDraft,
   type PlanGoal,
   type ShapeMessageId,
@@ -15,6 +17,18 @@ import { checkBriefRules } from '../goals';
 export const MAX_GOALS = 12;
 export const MAX_TASKS_PER_GOAL = 40;
 export const MAX_PROPOSALS = 80;
+
+/** Where a task works and where its work lands, as a landing's checks compare them (§10.4). */
+export interface TaskPlace {
+  readonly place: WorkspaceMode;
+  /** How the task lands, as a verb phrase: "merges into main when checks pass". */
+  readonly lands: string;
+  /** The landing group the task is already in, if any. */
+  readonly landingGroup: LandingGroupId | null;
+}
+
+const placeName = (place: WorkspaceMode): string =>
+  place === 'shared' ? 'your folder' : 'a separate copy';
 
 /** What the checks need to know about the project and the conversation. */
 export interface PlanWorld {
@@ -34,6 +48,10 @@ export interface PlanWorld {
   unstartedProblem(id: TaskId): string | null;
   /** Keys of the rows that already hold source ids, which a draft may leave out. */
   readonly storedSources: ReadonlySet<string>;
+  /** The place and landing a task still in the draft gets when converted: the project's defaults. */
+  readonly draftPlace: TaskPlace;
+  /** Where a task Convert made works and lands now; null when it is not a task of the project. */
+  placeOf(id: TaskId): TaskPlace | null;
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
@@ -263,18 +281,36 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     seenTasks.add(`remove:${r.taskId}`);
   });
 
-  // Landings: a task is in at most one, and each key is a task.
+  // Landings: a task is in at most one, each key is a task, and the tasks of one share a pull
+  // request, so they work in the same place and land the same way (§10.4).
   const landed = new Map<string, string>();
   draft.landings.forEach((landing, i) => {
+    const label = `Landing ${String(i + 1)}, keys`;
+    let first: { key: string; place: TaskPlace } | undefined;
     for (const key of landing.keys) {
       if (!knownTask(key)) {
-        errors.push(`Landing ${String(i + 1)}, keys: no proposal has the key ${key}`);
+        errors.push(`${label}: no proposal has the key ${key}`);
         continue;
       }
       const other = landed.get(key);
       if (other !== undefined && other !== landing.key)
-        errors.push(`Landing ${String(i + 1)}, keys: ${key} is already in landing ${other}`);
+        errors.push(`${label}: ${key} is already in landing ${other}`);
       else landed.set(key, landing.key);
+      // A task Convert made is judged by the place and landing it has; one still in the draft gets
+      // the project's defaults when it is converted.
+      const convertedId = world.convertedTasks.get(key);
+      const place = convertedId === undefined ? world.draftPlace : world.placeOf(convertedId);
+      if (place === null) continue;
+      if (place.landingGroup !== null) errors.push(`${label}: ${key} is already in a landing`);
+      if (first === undefined) first = { key, place };
+      else if (first.place.place !== place.place)
+        errors.push(
+          `${label}: ${first.key} works in ${placeName(first.place.place)}, but ${key} works in ${placeName(place.place)}; a landing's tasks share a pull request, so they must work in the same place`,
+        );
+      else if (first.place.lands !== place.lands)
+        errors.push(
+          `${label}: ${first.key} ${first.place.lands}, but ${key} ${place.lands}; a landing's tasks share a pull request, so they must land the same way`,
+        );
     }
   });
 

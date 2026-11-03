@@ -9,6 +9,7 @@ import {
   type BatchDto,
   type FlowId,
   type Notice,
+  type ShapeId,
   type TaskDto,
   type TaskId,
   type WorkstreamDto,
@@ -32,6 +33,7 @@ import {
   Tooltip,
 } from '@mantine/core';
 import { useState } from 'react';
+import { OpenConversation } from '../shape/open-conversation';
 import {
   useCloseTask,
   useHoldTask,
@@ -123,6 +125,11 @@ export interface TaskDrawerProps {
    * here; without them, or once it has started, they show as they are.
    */
   readonly areaNames?: readonly string[];
+  /**
+   * Opens the conversation that made the task (Shape spec §12). With it, the drawer asks whether one
+   * did and offers Open conversation only then; without it (a drawer outside the router), nothing.
+   */
+  readonly onOpenConversation?: (shapeId: ShapeId) => void;
   readonly onClose: () => void;
 }
 
@@ -142,6 +149,7 @@ export function TaskDrawer({
   place,
   pullRequestBase,
   areaNames,
+  onOpenConversation,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -391,6 +399,9 @@ export function TaskDrawer({
                     Reviews <span aria-hidden>›</span>
                   </Anchor>
                 </Group>
+              ) : null}
+              {onOpenConversation ? (
+                <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
               ) : null}
               <CopyTaskId id={task.id} />
             </Stack>

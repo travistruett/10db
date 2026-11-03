@@ -623,3 +623,89 @@ describe('migrating to Shape sessions (Shape spec §5.1, §13)', () => {
     ).toEqual([{ id: 'dec_a', withdrawn_at: null }]);
   });
 });
+
+describe('migrating to lane time (Shape spec §8)', () => {
+  const AT = '2026-11-02T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before task_lane_times.
+    migrateDatabase(db, migrationsThrough('0030_shape_files_told'));
+    const run = (sql: string, ...args: (string | number | null)[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    // Finished with two ended sessions, finished with one never ended, and still running.
+    const cases: readonly [string, string, readonly (readonly [string, string | null])[]][] = [
+      [
+        'wst_done',
+        'DONE',
+        [
+          ['09:00', '09:30'],
+          ['10:00', '10:45'],
+        ],
+      ],
+      ['wst_open', 'DONE', [['09:00', null]]],
+      ['wst_run', 'RUNNING', [['09:00', '09:10']]],
+    ];
+    const at = (hm: string): string => `2026-11-01T${hm}:00.000Z`;
+    for (const [ws, state, spans] of cases) {
+      const task = ws.replace('wst', 'tsk');
+      run(
+        `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+           workspace_mode, created_at, updated_at)
+         VALUES (?, 'prj_a', 't', '', '[]', '[]', 'done', 1, 'shared', ?, ?)`,
+        task,
+        AT,
+        AT,
+      );
+      run(
+        `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts,
+           model, effort, fence, created_at, updated_at)
+         VALUES (?, ?, 'prj_a', ?, '"none"', 1, 0, 'sonnet', 'medium', 1, ?, ?)`,
+        ws,
+        task,
+        state,
+        AT,
+        AT,
+      );
+      spans.forEach(([start, end], i) => {
+        run(
+          `INSERT INTO sessions (id, workstream_id, account_id, sequence, provider, model, effort, mode,
+             mcp_token_hash, started_at, ended_at, input_tokens, output_tokens, cached_tokens, created_at, updated_at)
+           VALUES (?, ?, 'acc_x', ?, 'claude', 'sonnet', 'medium', 'managed', ?, ?, ?, 1, 1, 0, ?, ?)`,
+          `ses_${ws}_${String(i)}`,
+          ws,
+          i + 1,
+          `hash-${ws}-${String(i)}`,
+          at(start),
+          end === null ? null : at(end),
+          AT,
+          AT,
+        );
+      });
+    }
+    migrateDatabase(db);
+  });
+
+  it('backfills a finished workstream from its sessions alone, marked sessions-only', () => {
+    const rows = db.$client
+      .prepare('SELECT workstream_id, task_id, lane_minutes, sessions_only FROM task_lane_times')
+      .all() as { lane_minutes: number }[];
+    expect(rows.map((r) => ({ ...r, lane_minutes: Math.round(r.lane_minutes) }))).toEqual([
+      { workstream_id: 'wst_done', task_id: 'tsk_done', lane_minutes: 75, sessions_only: 1 },
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+});

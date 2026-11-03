@@ -12,6 +12,7 @@ import {
   getTask,
   insertWorkstream,
   listGoalTasks,
+  listLandingGroups,
   listShapeLinks,
   listShapeProposals,
   listTasks,
@@ -247,15 +248,11 @@ describe('a partial selection', () => {
     const m = c.say();
     propose({
       looseTasks: [loose(m, 'a')],
-      landings: [{ key: 'land', title: 'One PR', keys: ['a'], sourceMessageIds: [m] }],
       questions: [{ key: 'ask', text: 'When?', for: 'Ana', sourceMessageIds: [m] }],
     });
-    const out = convert('a', 'land', 'ask');
+    const out = convert('a', 'ask');
     expect(out).toMatchObject({ ok: false });
-    expect(out.ok ? [] : out.errors).toEqual([
-      expect.stringContaining('land'),
-      expect.stringContaining('ask'),
-    ]);
+    expect(out.ok ? [] : out.errors).toEqual([expect.stringContaining('ask')]);
     expect(tasks()).toEqual([]);
   });
 });
@@ -409,5 +406,89 @@ describe('additions, changes and removals', () => {
     }).toThrow(/dropped/);
     propose(change('Renamed differently'));
     expect(rowOf(`change:${id}`).state).toBe(ShapeProposalState.Pending);
+  });
+});
+
+describe('landings (§10.4)', () => {
+  const landingOf = (m: string, key: string, keys: string[], title = 'Real areas') => ({
+    key,
+    title,
+    keys,
+    sourceMessageIds: [m],
+  });
+
+  it("writes a landing group for a goal's tasks and a loose task, and sets each task's group", () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'areas', ['r1', 'r2'])],
+      looseTasks: [loose(m, 'solo'), loose(m, 'other')],
+      landings: [landingOf(m, 'l1', ['r1', 'r2', 'solo'])],
+    });
+    const out = converted('areas', 'solo', 'other', 'l1');
+    expect(out.results.map((r) => r.kind)).toEqual(['goal', 'task', 'task', 'landing']);
+    const groups = listLandingGroups(c.store.db, c.project.id);
+    expect(groups).toHaveLength(1);
+    expect(groups[0]).toMatchObject({ title: 'Real areas', shapeId: c.shape.id });
+    const grouped = tasks()
+      .filter((t) => t.landingGroupId === groups[0]?.id)
+      .map((t) => t.title)
+      .sort();
+    expect(grouped).toEqual(['Task r1', 'Task r2', 'Task solo']);
+    expect(taskTitled('Task other').landingGroupId ?? null).toBeNull();
+    expect(rowOf('l1').state).toBe(ShapeProposalState.Accepted);
+  });
+
+  it('refuses a landing naming a task that is neither selected nor converted, and writes nothing', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'a'), loose(m, 'b')],
+      landings: [landingOf(m, 'l1', ['a', 'b'])],
+    });
+    const out = convert('a', 'l1');
+    expect(out).toMatchObject({ ok: false });
+    expect(!out.ok && out.errors.join('\n')).toMatch(/Real areas.*Task b.*isn't selected/);
+    expect(tasks()).toEqual([]);
+    expect(listLandingGroups(c.store.db, c.project.id)).toEqual([]);
+  });
+
+  it('a landing converted after its tasks groups the tasks Convert already made', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'a'), loose(m, 'b')],
+      landings: [landingOf(m, 'l1', ['a', 'b'])],
+    });
+    converted('a', 'b');
+    expect(listLandingGroups(c.store.db, c.project.id)).toEqual([]);
+    converted('l1');
+    const [group] = listLandingGroups(c.store.db, c.project.id);
+    expect(tasks().every((t) => t.landingGroupId === group?.id)).toBe(true);
+  });
+
+  it('starts none of its tasks, and a repeated Convert makes the group once', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'a'), loose(m, 'b')],
+      landings: [landingOf(m, 'l1', ['a', 'b'])],
+    });
+    converted('a', 'b', 'l1');
+    const again = converted('a', 'b', 'l1');
+    expect(again.createdNow).toBe(0);
+    expect(listLandingGroups(c.store.db, c.project.id)).toHaveLength(1);
+    expect(listWorkstreams(c.store.db, { projectId: c.project.id })).toEqual([]);
+  });
+
+  it('refuses a landing that takes a task already in another landing', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'a'), loose(m, 'b')],
+      landings: [landingOf(m, 'l1', ['a', 'b'])],
+    });
+    converted('a', 'b', 'l1');
+    expect(() => {
+      propose({
+        looseTasks: [loose(m, 'x')],
+        landings: [landingOf(m, 'l3', ['x', 'a'], 'Third')],
+      });
+    }).toThrow(/a is already in a landing/);
   });
 });

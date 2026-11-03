@@ -30,6 +30,8 @@ export const NOTICE_KEY = {
   landingBehind: 'landing-behind',
   /** The branch the batch lands in is used by no other task under way or unfinished batch, and isn't the project's base. */
   landingUnused: 'landing-unused',
+  /** The batch is a landing's second, because the landing's earlier batch had already shipped. */
+  landingShipped: 'landing-shipped',
   /** A copy was cut without the ignored directories a seed clones, and 10db could not make them. */
   seedSkipped: 'seed-skipped',
   /** A copy's install skipped the install scripts of packages the project allows to build. */
@@ -122,6 +124,13 @@ export const seedNotices = {
 
 /** What a batch's tasks are told when the branch they land in has fallen behind the project's base. */
 export const landingNotices = {
+  /** A task of a landing started after the landing's batch shipped, so it makes a pull request of its own. */
+  shipped: (landing: string, shipped: string): Notice => ({
+    key: NOTICE_KEY.landingShipped,
+    tone: 'info',
+    line: `Part of ${landing}, which has already shipped`,
+    body: `This task belongs to the landing ${landing}, whose pull request (batch "${shipped}") has already shipped, so it can't join it. It makes a new batch and its own pull request, with its own CI run.`,
+  }),
   behind: (branch: string, base: string, missing: number): Notice => ({
     key: NOTICE_KEY.landingBehind,
     tone: 'warning',

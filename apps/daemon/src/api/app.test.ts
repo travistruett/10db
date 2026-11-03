@@ -105,12 +105,22 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
+    resumeShape: track('resumeShape'),
+    getGoalShape: track('getGoalShape'),
+    getTaskShape: track('getTaskShape'),
     editShapeProposal: track('editShapeProposal'),
     unpinShapeProposal: track('unpinShapeProposal'),
     restoreShapeProposal: track('restoreShapeProposal'),
     dropShapeProposal: track('dropShapeProposal'),
     addShapeFile: track('addShapeFile'),
     startShape: track('startShape'),
+    shapeMeasures: track('shapeMeasures'),
+    getShapeJev: track('getShapeJev'),
+    setShapeJev: track('setShapeJev'),
+    getOneWayPaths: track('getOneWayPaths'),
+    setOneWayPaths: track('setOneWayPaths'),
+    rehearseShape: track('rehearseShape'),
+    dismissShapeFinding: track('dismissShapeFinding'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -1043,6 +1053,122 @@ describe('shape routes', () => {
     ).toBe(400);
   });
 
+  it('reopens a conversation with an event, refusing an empty one', async () => {
+    const resumed: unknown[] = [];
+    const note = {
+      id: mintId('ShapeMessage'),
+      shapeId,
+      author: 'note',
+      kind: 'event',
+      body: 'Task a ran out of attempts.',
+      createdAt: AT,
+    } as const;
+    const services = stubServices({
+      resumeShape: (id, event) => {
+        resumed.push([id, event]);
+        return note;
+      },
+    });
+    const ok = await app(services).request(
+      `/shapes/${shapeId}/resume`,
+      post({ event: 'Task a ran out of attempts.' }),
+    );
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual(note);
+    expect(resumed).toEqual([[shapeId, 'Task a ran out of attempts.']]);
+    expect(
+      (await app(services).request(`/shapes/${shapeId}/resume`, post({ event: '' }))).status,
+    ).toBe(400);
+  });
+
+  it("names the conversation behind a goal's or a task's drawer, or none", async () => {
+    const goalId = mintId('Goal');
+    const taskId = mintId('Task');
+    const services = stubServices({
+      getGoalShape: (id) => ({ shapeId: id === goalId ? shapeId : null }),
+      getTaskShape: () => ({ shapeId: null }),
+    });
+    const goal = await app(services).request(`/goals/${goalId}/shape`, auth);
+    expect(await goal.json()).toEqual({ shapeId });
+    const task = await app(services).request(`/tasks/${taskId}/shape`, auth);
+    expect(await task.json()).toEqual({ shapeId: null });
+  });
+
+  it("reads and sets a project's Jev opt-in, refusing a body that is not one", async () => {
+    const set: unknown[] = [];
+    const services = stubServices({
+      getShapeJev: () => ({ enabled: false }),
+      setShapeJev: (_id, input) => {
+        set.push(input);
+        return input;
+      },
+    });
+    const read = await app(services).request(`/projects/${projectId}/shape-jev`, auth);
+    expect(await read.json()).toEqual({ enabled: false });
+    const put = (body: unknown) =>
+      app(services).request(`/projects/${projectId}/shape-jev`, {
+        ...post(body),
+        method: 'PUT',
+      });
+    expect((await put({ enabled: true })).status).toBe(200);
+    expect((await put({ enabled: 'yes' })).status).toBe(400);
+    expect(set).toEqual([{ enabled: true }]);
+  });
+
+  it('reads and sets a project’s one-way paths, refusing an empty glob', async () => {
+    const set: unknown[] = [];
+    const services = stubServices({
+      getOneWayPaths: () => ({ paths: ['db/**'] }),
+      setOneWayPaths: (_id, input) => {
+        set.push(input);
+        return input;
+      },
+    });
+    const read = await app(services).request(`/projects/${projectId}/one-way-paths`, auth);
+    expect(await read.json()).toEqual({ paths: ['db/**'] });
+    const put = (body: unknown) =>
+      app(services).request(`/projects/${projectId}/one-way-paths`, {
+        ...post(body),
+        method: 'PUT',
+      });
+    expect((await put({ paths: ['a/**', 'b.ts'] })).status).toBe(200);
+    expect((await put({ paths: [''] })).status).toBe(400);
+    expect(set).toEqual([{ paths: ['a/**', 'b.ts'] }]);
+  });
+
+  it('Rehearse answers what it queued (202); a finding is dismissed (204)', async () => {
+    const dismissed: unknown[] = [];
+    const proposalId = mintId('ShapeProposal');
+    const findingId = mintId('ShapeFinding');
+    const services = stubServices({
+      rehearseShape: (_id, input) => ({
+        status: 'started',
+        tasks: input.proposalIds?.length ?? 3,
+      }),
+      dismissShapeFinding: (_shape, id, input) => {
+        dismissed.push([id, input]);
+      },
+    });
+    const all = await app(services).request(`/shapes/${shapeId}/rehearse`, post({}));
+    expect(all.status).toBe(202);
+    expect(await all.json()).toEqual({ status: 'started', tasks: 3 });
+    const some = await app(services).request(
+      `/shapes/${shapeId}/rehearse`,
+      post({ proposalIds: [proposalId] }),
+    );
+    expect(await some.json()).toEqual({ status: 'started', tasks: 1 });
+    expect(
+      (await app(services).request(`/shapes/${shapeId}/rehearse`, post({ proposalIds: [] })))
+        .status,
+    ).toBe(400);
+    const dismiss = await app(services).request(
+      `/shapes/${shapeId}/findings/${findingId}/dismiss`,
+      post({ how: 'not needed' }),
+    );
+    expect(dismiss.status).toBe(204);
+    expect(dismissed).toEqual([[findingId, { how: 'not needed' }]]);
+  });
+
   it('answers a conversation’s view, 404 for an unknown one', async () => {
     const view = {
       shape,
@@ -1050,7 +1176,23 @@ describe('shape routes', () => {
       proposals: [],
       heard: [],
       files: [],
-      turn: { running: false, queued: 0, proposing: false },
+      turn: { running: false, queued: 0, proposing: false, rehearsing: false },
+      sizes: [],
+      ceremony: [],
+      findings: [],
+      rehearsals: [],
+      preview: {
+        lanes: [{ items: [] }, { items: [] }],
+        criticalPath: [],
+        clashes: [],
+        tasks: 0,
+        totalLaneHours: 0,
+        scheduleHours: 0,
+        nonLaneHoursPerTask: null,
+        endEstimateHours: 0,
+        landings: { pullRequests: 0, pullRequestsAlone: 0, ciRuns: 0, ciRunsAlone: 0 },
+      },
+      attachments: [],
     };
     const services = stubServices({
       getShapeView: (id) => {

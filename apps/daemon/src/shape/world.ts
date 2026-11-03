@@ -1,8 +1,13 @@
 import {
+  Delivery,
+  landingTarget,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  taskLandingFor,
   TaskStatus,
+  WorkspaceMode,
   type DecisionId,
+  type LandingTarget,
   type ShapeId,
   type ShapeMessageId,
   type TaskId,
@@ -21,6 +26,12 @@ import {
   type DbReader,
 } from '@10db/db';
 import type { PlanWorld } from './validate';
+
+/** How a landing target reads in a refusal: "merges into main when checks pass". */
+const landsText = (target: LandingTarget): string =>
+  target.autoMerge
+    ? `merges into ${target.baseBranch} when checks pass`
+    : `is held for your review (pull request against ${target.baseBranch})`;
 
 /**
  * What the rules about the conversation and the project read, as of now. Built inside the write
@@ -56,6 +67,26 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
     convertedTasks,
     convertedGoals,
     storedSources: new Set(listShapeProposals(db, shapeId).map((r) => r.key)),
+    draftPlace: {
+      // What `insertTask` gives a task with no placement named: the project's own.
+      place:
+        project.delivery === Delivery.PullRequest ? project.workspaceMode : WorkspaceMode.Shared,
+      lands: landsText(landingTarget(taskLandingFor(project), project.baseBranch)),
+      landingGroup: null,
+    },
+    placeOf(id) {
+      try {
+        const task = getTask(db, id);
+        if (task.projectId !== project.id) return null;
+        return {
+          place: task.workspaceMode,
+          lands: landsText(landingTarget(task.landing, project.baseBranch)),
+          landingGroup: task.landingGroupId ?? null,
+        };
+      } catch {
+        return null;
+      }
+    },
     basisProblem(id) {
       try {
         const task = getTask(db, id);
