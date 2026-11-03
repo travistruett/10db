@@ -401,6 +401,11 @@ test.describe('the Board with three goals', () => {
     await request.dispose();
   });
 
+  // The test ends on Factory, whose /system read may still be in the route; drop it rather than fail.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
   for (const size of SIZES) {
     const label = `${String(size.width)}x${String(size.height)}`;
 
@@ -439,7 +444,7 @@ test.describe('the Board with three goals', () => {
       if (size.roomy) expect(await overflowOfMinimum(page)).toBeLessThanOrEqual(0);
 
       // Choosing a goal shows its one line beside the select, with no drawer.
-      await page.getByRole('textbox', { name: 'Goal' }).click();
+      await page.getByRole('combobox', { name: 'Goal' }).click();
       await page.getByRole('option', { name: GOAL_TITLES[0] }).click();
       const line = page.getByTestId('goal-line');
       await expect(line).toBeVisible();
