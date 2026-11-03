@@ -20,5 +20,6 @@
   "required": [
     "id",
     "reason"
-  ]
+  ],
+  "additionalProperties": false
 }

@@ -56,6 +56,48 @@ const principle = (args: Record<string, unknown> = {}) =>
     ...args,
   }) as PrincipleItem;
 
+/** What a call answers when it is refused for its input, in the words the client reads. */
+const refusal = (name: BuilderToolName, args: unknown): string => {
+  try {
+    call(name, args);
+  } catch (error) {
+    if (error instanceof ZodError) return refusalText(error.issues);
+    throw error;
+  }
+  throw new Error(`${name} was not refused`);
+};
+
+describe('an unknown key', () => {
+  it.each(['query', 'text'])('refuses a search that names the words %s', (key) => {
+    decide();
+    expect(refusal(BuilderToolName.SearchKnowledge, { projectId: project.id, [key]: 'x' })).toBe(
+      `Unrecognized key: "${key}"`,
+    );
+  });
+
+  it('refuses a proposal list with a key the API refuses', () => {
+    expect(refusal(BuilderToolName.ListProposals, { projectId: project.id, state: 'x' })).toBe(
+      'Unrecognized key: "state"',
+    );
+  });
+
+  it('refuses a retire with a dry run, and the principle stays current', () => {
+    const p = principle();
+    expect(refusal(BuilderToolName.RetireKnowledge, { id: p.id, reason: 'x', dryRun: true })).toBe(
+      'Unrecognized key: "dryRun"',
+    );
+    expect(ids(find())).toEqual([p.id]);
+  });
+
+  it('refuses a withdrawal with a dry run, and the record stays current', () => {
+    const d = decide();
+    expect(
+      refusal(BuilderToolName.WithdrawKnowledge, { id: d.id, reason: 'x', dryRun: true }),
+    ).toBe('Unrecognized key: "dryRun"');
+    expect(ids(find())).toEqual([d.id]);
+  });
+});
+
 describe('find_knowledge', () => {
   it('answers what the API’s list answers for the same words', () => {
     const d = decide();
