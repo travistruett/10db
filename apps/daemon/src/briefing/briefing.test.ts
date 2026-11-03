@@ -475,6 +475,24 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).toContain('no trailing `; echo $?`');
   });
 
+  it.each([
+    ['an implement step', implementStep],
+    ['a read-only step', reviewStep],
+  ])(
+    'asks %s to run each formatter, linter and test as its own plain command naming its paths',
+    (_name, step) => {
+      const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
+      expect(prompt).toContain('formatters, linters and test commands');
+      expect(prompt).toContain('its own command');
+      expect(prompt).toContain('naming its paths');
+      expect(prompt).toContain('no shell variables');
+      expect(prompt).toContain('no `cd`');
+      expect(prompt).toContain('no pipes through tail or grep');
+      expect(prompt).toContain('pnpm exec prettier --write path/a.ts path/b.ts');
+      expect(prompt).toContain('stops on an "Allow Bash?" card');
+    },
+  );
+
   const SANDBOX_LINES = [
     "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
     'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
