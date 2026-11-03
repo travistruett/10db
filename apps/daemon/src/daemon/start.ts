@@ -80,6 +80,7 @@ import {
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
+  readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
   resolvePnpm,
@@ -640,6 +641,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     checkouts: () => allCheckouts(state.db),
     timeoutMs: limits.gateTimeoutMs,
     resolvePnpm,
+    pnpmVersion: readPnpmVersion,
   };
   const delivery: DeliveryContext = {
     state,

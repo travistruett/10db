@@ -48,7 +48,7 @@ function open(opts: Opts = {}): { closed: () => number } {
   let closes = 0;
   renderWithDaemon(
     <TaskDrawer
-      task={taskDto(opts.task)}
+      task={taskDto({ workstreamId: opts.workstream?.id ?? null, ...opts.task })}
       columnName={opts.columnName ?? 'Ready'}
       peers={peers}
       {...(opts.workstream ? { workstream: opts.workstream } : {})}
@@ -817,7 +817,7 @@ describe('TaskDrawer', () => {
         open({ workstream });
         const d = await dialog();
         expect(within(d).getByText('Failed')).toBeTruthy();
-        expect(within(d).getByText(failureLine(workstream))).toBeTruthy();
+        expect(within(d).getByText(failureLine(workstream, true))).toBeTruthy();
         expect(within(d).getByText('The gate failed twice')).toBeTruthy();
         expect(within(d).getByRole('button', { name: 'Retry' })).toBeTruthy();
       },
@@ -834,6 +834,18 @@ describe('TaskDrawer', () => {
       expect(within(d).getByText('The gate failed twice')).toBeTruthy();
       const retry = within(d).getByRole('button', { name: 'Retry' });
       expect((retry as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('a failed run of a parked task says what happened and offers no Retry', async () => {
+      serve();
+      open({
+        task: { boardColumnId: mintId('BoardColumn') },
+        workstream: workstreamDto({ state: 'FAILED', failureReason: 'The gate failed twice' }),
+      });
+      const d = await dialog();
+      expect(within(d).getByText('The run failed.')).toBeTruthy();
+      expect(within(d).queryByText(/Retry runs/)).toBeNull();
+      expect(within(d).queryByRole('button', { name: 'Retry' })).toBeNull();
     });
 
     it('a queued task shows its place in line and Run Next, which says what it waits on', async () => {

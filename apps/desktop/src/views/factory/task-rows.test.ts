@@ -1,3 +1,4 @@
+import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { barCounts, taskRows, teamLine, type TaskRowsInput } from './task-rows';
@@ -85,11 +86,43 @@ describe('taskRows', () => {
     expect(row?.failed).toBeNull();
   });
 
-  it('keeps a failed run for the Needs you block', () => {
-    const task = taskDto({ boardStatus: 'blocked' });
-    const failed = workstreamDto({ taskId: task.id, state: 'FAILED' });
+  it('keeps a failed run for the Needs you block, with Retry when the daemon would accept it', () => {
+    const failed = workstreamDto({ state: 'FAILED' });
+    const task = taskDto({ id: failed.taskId, boardStatus: 'blocked', workstreamId: failed.id });
     const [row] = taskRows(input({ tasks: [task], workstreams: [failed] }));
     expect(row?.failed?.id).toBe(failed.id);
+    expect(row?.retryable).toBe(true);
+  });
+
+  it.each([
+    { name: 'closed', task: { status: 'cancelled' as const, boardStatus: 'blocked' as const } },
+    { name: 'parked', task: { boardColumnId: mintId('BoardColumn') } },
+    { name: 'replaced', task: { workstreamId: mintId('Workstream') } },
+  ])('offers no Retry for a failed run of a task that is $name', ({ task: over }) => {
+    const failed = workstreamDto({ state: 'FAILED' });
+    const task = taskDto({
+      id: failed.taskId,
+      boardStatus: 'blocked',
+      workstreamId: failed.id,
+      ...over,
+    });
+    const rows = taskRows(input({ tasks: [task], workstreams: [failed] }));
+    // A closed task has no row; the others keep the failure but not the Retry.
+    expect(rows.every((r) => !r.retryable)).toBe(true);
+  });
+
+  it('offers no Retry for a failed run whose batch shipped without a pull request', () => {
+    const failed = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
+    const task = taskDto({ id: failed.taskId, boardStatus: 'blocked', workstreamId: failed.id });
+    const shipped = batchDto({ state: 'SHIPPED', prUrl: null });
+    const [row] = taskRows(
+      input({
+        tasks: [task],
+        batches: [shipped],
+        workstreams: [{ ...failed, batchId: shipped.id }],
+      }),
+    );
+    expect(row?.retryable).toBe(false);
   });
 
   it('links a pull request, and shows a shared one once, with every row marked shared', () => {

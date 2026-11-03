@@ -169,20 +169,22 @@ export function NeedsYou({
                 openDelay={300}
               >
                 <Text size="sm" lineClamp={2}>
-                  {`Failed: ${row.label}. ${failureLine(ws)}`}
+                  {`Failed: ${row.label}. ${failureLine(ws, row.retryable)}`}
                 </Text>
               </Tooltip>
             </Group>
-            <Button
-              size="compact-xs"
-              variant="light"
-              loading={retry.isPending && retry.variables.id === ws.id}
-              onClick={() => {
-                retry.mutate({ id: ws.id });
-              }}
-            >
-              Retry
-            </Button>
+            {row.retryable ? (
+              <Button
+                size="compact-xs"
+                variant="light"
+                loading={retry.isPending && retry.variables.id === ws.id}
+                onClick={() => {
+                  retry.mutate({ id: ws.id });
+                }}
+              >
+                Retry
+              </Button>
+            ) : null}
           </Group>
         ))}
         {retry.error ? (

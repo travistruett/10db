@@ -221,10 +221,11 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     ].join('\n');
 
     /** A cut whose lockfile names left-pad, installed and recorded; then the packages are pruned. */
-    async function pruned(): Promise<{ batch: BatchDto; path: string }> {
+    async function pruned(workspace?: string): Promise<{ batch: BatchDto; path: string }> {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('.gitignore', 'node_modules/\n');
       h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
+      if (workspace !== undefined) h.commit('pnpm-workspace.yaml', workspace);
       h.git$('push', '-q', 'origin', 'main');
       mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
       const { batch } = await opened();
@@ -247,6 +248,24 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.pnpm.calls()).toHaveLength(2);
       expect(existsSync(join(path, 'node_modules', '.pnpm', 'leftover'))).toBe(false);
       expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
+    });
+
+    it('tells the builder which allowed packages starting over left unbuilt', async () => {
+      const { batch } = await pruned('allowBuilds:\n  prisma: true\n');
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      h.pnpm.makes({
+        'node_modules/left-pad/index.js': 'module.exports = 1;\n',
+        'node_modules/.pnpm/prisma@6.0.0/node_modules/prisma/package.json': JSON.stringify({
+          name: 'prisma',
+          version: '6.0.0',
+          scripts: { postinstall: 'node build.js' },
+        }),
+      });
+      await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-scripts-skipped', tone: 'warning' });
+      expect(notice.line).toContain('prisma');
+      expect(notice.body).toContain('removed it');
     });
 
     it('reinstalls a copy whose node_modules is gone altogether once an install was recorded', async () => {

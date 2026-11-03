@@ -122,8 +122,17 @@ export const BACKGROUND_DONE_NUDGE =
 export const BACKGROUND_DONE_NUDGE_READ_ONLY =
   '10db: the command you started in the background has finished. Read its output, finish the step and call mcp__10db__complete_step with your result (and, for a review, a verdict), then end your turn.';
 
-const PLAIN_COMMANDS =
-  'Run project commands in their plain form: `pnpm exec <tool> …` or the project\'s own scripts, with no `-s` or `--silent`, no trailing `; echo $?` (the exit code is reported to you), no `timeout` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: `pnpm exec prettier --write path/a.ts path/b.ts`, then `pnpm exec eslint path/a.ts path/b.ts`. Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
+const COMMAND_SHAPE =
+  'Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
+
+const PLAIN_COMMANDS = `Run project commands in their plain form: \`pnpm exec <tool> …\` or the project's own scripts, with no \`-s\` or \`--silent\`, no trailing \`; echo $?\` (the exit code is reported to you), no \`timeout\` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: \`pnpm exec prettier --write path/a.ts path/b.ts\`, then \`pnpm exec eslint path/a.ts path/b.ts\`. ${COMMAND_SHAPE}`;
+
+/**
+ * readOnlyShellRefusal denies anything outside READ_COMMANDS and read-only git, so pnpm and every
+ * check run through it are refused however they are spelled. Each backticked command here must
+ * pass that hook; briefing.test.ts checks every one.
+ */
+const READ_ONLY_COMMANDS = `The shell takes read-only commands only, so do not run pnpm, a formatter, a linter or a test: the hook refuses them. Formatting, lint and tests are left to the gate. Run each command on its own, naming its paths, from your working directory: \`grep -n name path/a.ts path/b.ts\`, then \`git log -p -- path/a.ts path/b.ts\`. ${COMMAND_SHAPE}`;
 
 /**
  * Ending the turn ends the step, and a background command (the Bash tool moves a long one there)
@@ -133,10 +142,18 @@ const PLAIN_COMMANDS =
 const BACKGROUND_COMMANDS =
   'Run a test or any other command in the foreground and wait for its result. A command moved to the background will not wake you by itself, and ending your turn ends the step: whatever you have not committed by then is left uncommitted. Do not end your turn to wait for one. If a background command is still running when you end your turn, 10db keeps the session open and tells you when it finishes, and fails the step naming the command if it never does.';
 
-/** Beside the plain-commands line in a sandboxed session. */
+/** A read-only step runs no tests and has nothing to commit. */
+const BACKGROUND_COMMANDS_READ_ONLY =
+  'Run every command in the foreground and wait for its result. A command moved to the background will not wake you by itself, and ending your turn ends the step. Do not end your turn to wait for one. If a background command is still running when you end your turn, 10db keeps the session open and tells you when it finishes, and fails the step naming the command if it never does.';
+
+/** The read-only hook refuses mktemp, so a read-only step does not get this line. */
+const TEMP_FILES_RULE =
+  'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.';
+
+/** Beside the commands line in a sandboxed session. */
 const SANDBOX_RULES = [
   "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
-  'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
+  TEMP_FILES_RULE,
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
   "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
   "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.",
@@ -172,16 +189,22 @@ function readOnlyRules(role: StepRole): string[] {
           'A task is about one pull request (about 300 changed lines), design and docs included. If a design or docs plan would grow past that, plan the part that stands alone and list the sections left out by name, one per decision, as follow-up tasks for the implementer to file.',
         ]
       : []),
-    PLAIN_COMMANDS,
-    BACKGROUND_COMMANDS,
+    READ_ONLY_COMMANDS,
+    BACKGROUND_COMMANDS_READ_ONLY,
     'If 10db asks you to hand off, call mcp__10db__write_handoff, and end your turn.',
   ];
 }
 
-/** The rules with the sandbox's lines after the plain-commands line, when the session is sandboxed. */
+/** The rules with the sandbox's lines after the commands line, when the session is sandboxed. */
 function withSandboxRules(rules: readonly string[], sandboxed: boolean): string[] {
   if (!sandboxed) return [...rules];
-  return rules.flatMap((rule) => (rule === PLAIN_COMMANDS ? [rule, ...SANDBOX_RULES] : [rule]));
+  return rules.flatMap((rule) => {
+    if (rule === PLAIN_COMMANDS) return [rule, ...SANDBOX_RULES];
+    if (rule === READ_ONLY_COMMANDS) {
+      return [rule, ...SANDBOX_RULES.filter((line) => line !== TEMP_FILES_RULE)];
+    }
+    return [rule];
+  });
 }
 
 const VERDICT_LABEL = { approve: 'approved', reject: 'rejected' } as const;

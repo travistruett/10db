@@ -1,4 +1,4 @@
-import type { GoalId, TaskId, WorkstreamDto } from '@10db/contracts';
+import type { BatchDto, GoalId, TaskDto, TaskId, WorkstreamDto } from '@10db/contracts';
 import {
   Alert,
   Button,
@@ -13,7 +13,7 @@ import {
 } from '@mantine/core';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useRetryWorkstream } from '../../daemon/queries';
-import { failureLine } from '../board/task-state';
+import { canRetryRun, failureLine } from '../board/task-state';
 import { ContextGauge } from './context-gauge';
 import { RelativeTime } from './relative-time';
 import { StateBadge } from './state-badge';
@@ -30,17 +30,41 @@ export interface GoalSessionsProps {
   readonly goalId: GoalId | null;
   /** The goal's workstreams, one per task (its latest run). */
   readonly workstreams: readonly WorkstreamDto[];
+  /** The project's tasks and batches, which say whether `retryWorkstream` would accept a retry. */
+  readonly tasks: readonly TaskDto[];
+  readonly batches: readonly BatchDto[];
   readonly loading: boolean;
   readonly error: string | null;
 }
 
 /**
- * A goal's sessions: its workstreams, each with Retry when it failed. A run is cancelled from its
+ * A goal's sessions: its workstreams, each failed one with what happened, and with what Retry will do
+ * and its Retry button only when `retryWorkstream` would accept it. A run is cancelled from its
  * task's card menu or drawer on the Board, not from every row here.
  */
-export function GoalSessions({ goalId, workstreams, loading, error }: GoalSessionsProps) {
+export function GoalSessions({
+  goalId,
+  workstreams,
+  tasks,
+  batches,
+  loading,
+  error,
+}: GoalSessionsProps) {
   const retry = useRetryWorkstream();
   const navigate = useNavigate();
+
+  // A task or batch that has not loaded yet is not known to be retryable, so it promises nothing.
+  function retryable(ws: WorkstreamDto): boolean {
+    const task = tasks.find((t) => t.id === ws.taskId);
+    return (
+      task !== undefined &&
+      canRetryRun(
+        task,
+        ws,
+        batches.find((b) => b.id === ws.batchId),
+      )
+    );
+  }
 
   function openOnBoard(ws: WorkstreamDto): void {
     void navigate({ to: '/board', search: boardSearch(ws, goalId) });
@@ -112,7 +136,7 @@ export function GoalSessions({ goalId, workstreams, loading, error }: GoalSessio
                         openDelay={300}
                       >
                         <Text size="xs" c="red">
-                          {failureLine(ws)}
+                          {failureLine(ws, retryable(ws))}
                         </Text>
                       </Tooltip>
                     ) : null}
@@ -134,7 +158,7 @@ export function GoalSessions({ goalId, workstreams, loading, error }: GoalSessio
                   </Table.Td>
                   <Table.Td>
                     <Group gap="xs" justify="flex-end" wrap="nowrap">
-                      {canRetry(ws.state) ? (
+                      {retryable(ws) ? (
                         <Button
                           size="xs"
                           variant="light"

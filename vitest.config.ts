@@ -10,6 +10,7 @@ export default defineConfig({
       'packages/db',
       'packages/harness',
       'apps/daemon',
+      'apps/daemon/vitest.delivery.config.ts',
       'apps/desktop',
       'apps/desktop/e2e',
       'apps/desktop/scripts',

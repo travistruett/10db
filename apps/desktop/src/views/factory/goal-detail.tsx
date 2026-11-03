@@ -116,12 +116,21 @@ export function UngroupedDetail({
   readonly workstreamIds: readonly WorkstreamId[];
 }) {
   const sessions = useSessions((ws) => workstreamIds.includes(ws.id));
+  const { project } = useSelectedProject();
+  const tasks = useTasks(project?.id ?? null);
+  const batches = useBatches(project?.id ?? null);
+  // A failed run offers Retry only once both are known, so a request that failed says why it does not.
+  const loadError = tasks.isError
+    ? tasks.error.message
+    : (sessions.error ?? (batches.isError ? batches.error.message : null));
   return (
     <GoalSessions
       goalId={null}
       workstreams={sessions.all}
+      tasks={tasks.data ?? []}
+      batches={batches.data ?? []}
       loading={sessions.loading}
-      error={sessions.error}
+      error={loadError}
     />
   );
 }

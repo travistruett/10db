@@ -75,7 +75,7 @@ export function cardSummary(
   const criteria = task.acceptanceCriteria.length;
   const state = startNote
     ? noteState(startNote)
-    : taskState(workstream, batch, gateCommand, place, batches);
+    : taskState(workstream, batch, gateCommand, place, batches, task);
   const sentBack = reviewSentBackLine(workstream);
   const atLimit = shippedAtLimitLine(workstream);
   return [
@@ -180,7 +180,7 @@ export function TaskCard({
 }: TaskCardProps) {
   const state = startNote
     ? noteState(startNote)
-    : taskState(workstream, batch, gateCommand, place, batches);
+    : taskState(workstream, batch, gateCommand, place, batches, task);
   // The border takes the state's DESIGN.md color whatever the line says, thicker when it is the builder's
   // turn: no fill, no stripe, no animation. Queued keeps the plain border.
   const colored = state !== null && state.color !== 'gray';
