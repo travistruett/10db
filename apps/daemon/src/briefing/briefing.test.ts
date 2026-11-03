@@ -3,6 +3,7 @@ import { mintId } from '@10db/contracts';
 import { createTestStore, insertDecision, insertSource } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
+import { readOnlyShellRefusal } from '../guard';
 import {
   buildContextPack,
   buildSessionPrompt,
@@ -466,38 +467,89 @@ describe('buildSessionPrompt for flow steps', () => {
     expect(prompt).not.toContain('complete_step');
   });
 
-  it.each([
-    ['an implement step', implementStep],
-    ['a read-only step', reviewStep],
-  ])('asks %s to run project commands in their plain form', (_name, step) => {
-    const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
+  it('asks an implement step to run project commands in their plain form', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain('Run project commands in their plain form');
     expect(prompt).toContain('no trailing `; echo $?`');
+  });
+
+  it('asks an implement step to run each formatter, linter and test as its own plain command naming its paths', () => {
+    const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+    expect(prompt).toContain('formatters, linters and test commands');
+    expect(prompt).toContain('its own command');
+    expect(prompt).toContain('naming its paths');
+    expect(prompt).toContain('pnpm exec prettier --write path/a.ts path/b.ts');
+    expect(prompt).toContain('pnpm exec eslint path/a.ts path/b.ts');
   });
 
   it.each([
     ['an implement step', implementStep],
     ['a read-only step', reviewStep],
-  ])(
-    'asks %s to run each formatter, linter and test as its own plain command naming its paths',
-    (_name, step) => {
-      const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
-      expect(prompt).toContain('formatters, linters and test commands');
-      expect(prompt).toContain('its own command');
-      expect(prompt).toContain('naming its paths');
-      expect(prompt).toContain('no shell variables');
-      expect(prompt).toContain('no `cd`');
-      expect(prompt).toContain('no pipes through tail or grep');
-      expect(prompt).toContain('pnpm exec prettier --write path/a.ts path/b.ts');
-      expect(prompt).toContain('stops on an "Allow Bash?" card');
-    },
-  );
+  ])('asks %s for commands 10db can store a rule for', (_name, step) => {
+    const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' } });
+    expect(prompt).toContain('no shell variables');
+    expect(prompt).toContain('no `cd`');
+    expect(prompt).toContain('no pipes through tail or grep');
+    expect(prompt).toContain('stops on an "Allow Bash?" card');
+  });
+
+  describe('the commands a read-only step is told to run', () => {
+    /** Backticked in the rules, but named as things to avoid, or not commands at all. */
+    const NOT_EXAMPLES = new Set([
+      '; echo $?',
+      '$(…)',
+      ';',
+      '&&',
+      'AGENTS.md',
+      'CLAUDE.md',
+      'Operation not permitted',
+    ]);
+
+    const rulesOf = (prompt: string) =>
+      prompt.slice(prompt.indexOf('Rules:'), prompt.indexOf('Context pack:'));
+
+    const examplesIn = (prompt: string) =>
+      [...rulesOf(prompt).matchAll(/`([^`]+)`/g)]
+        .flatMap((match) => match.slice(1))
+        .filter((span) => !NOT_EXAMPLES.has(span));
+
+    const readOnlyBriefs = [
+      ['a review step', reviewStep, false],
+      ['a sandboxed review step', reviewStep, true],
+      ['a plan step', { ...reviewStep, role: 'plan' as const }, false],
+      ['a sandboxed plan step', { ...reviewStep, role: 'plan' as const }, true],
+    ] as const;
+
+    it.each(readOnlyBriefs)('all pass the read-only hook in %s', (_name, step, sandboxed) => {
+      const prompt = buildSessionPrompt({ ...base, step, action: { kind: 'start' }, sandboxed });
+      const examples = examplesIn(prompt);
+      expect(examples.length).toBeGreaterThan(1);
+      expect(examples.filter((example) => readOnlyShellRefusal(example) !== null)).toEqual([]);
+    });
+
+    it.each(readOnlyBriefs)('name no formatter or pnpm command in %s', (_name, step, sandboxed) => {
+      const prompt = rulesOf(
+        buildSessionPrompt({ ...base, step, action: { kind: 'start' }, sandboxed }),
+      );
+      expect(prompt).not.toContain('pnpm exec');
+      expect(prompt).not.toContain('prettier');
+      expect(prompt).not.toContain('eslint');
+      expect(prompt).not.toContain('Run a test');
+    });
+
+    it('leave formatting, lint and tests to the gate', () => {
+      const prompt = buildSessionPrompt({ ...base, step: reviewStep, action: { kind: 'start' } });
+      expect(prompt).toContain('Formatting, lint and tests are left to the gate');
+    });
+  });
 
   const SANDBOX_LINES = [
     "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
-    'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.',
     "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
   ];
+
+  const TEMP_FILES_LINE =
+    'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.';
 
   it.each([
     ['an implement step', implementStep],
@@ -510,6 +562,12 @@ describe('buildSessionPrompt for flow steps', () => {
       sandboxed: true,
     });
     for (const line of SANDBOX_LINES) expect(prompt).toContain(`- ${line}`);
+  });
+
+  it('gives the temp-file line only to a step that can make one', () => {
+    const start = { ...base, action: { kind: 'start' as const }, sandboxed: true };
+    expect(buildSessionPrompt(start)).toContain(`- ${TEMP_FILES_LINE}`);
+    expect(buildSessionPrompt({ ...start, step: reviewStep })).not.toContain('mktemp');
   });
 
   it.each([

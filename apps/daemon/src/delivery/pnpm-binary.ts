@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { accessSync, closeSync, constants, openSync, readSync, realpathSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -39,6 +39,34 @@ function isScript(path: string): boolean {
     return true;
   } finally {
     if (fd !== null) closeSync(fd);
+  }
+}
+
+/**
+ * The version `pnpm` (a path `resolvePnpm` returned) reports, or null when it can't say. It runs from
+ * the temp directory, where no project config applies, and with version switching off, so it names
+ * itself and not a version a `packageManager` field pins.
+ */
+export async function readPnpmVersion(
+  pnpm: string,
+  env: Readonly<Record<string, string>>,
+): Promise<string | null> {
+  try {
+    const { stdout } = await run(pnpm, ['--version'], {
+      cwd: tmpdir(),
+      env: {
+        ...env,
+        pnpm_config_manage_package_manager_versions: 'false',
+        COREPACK_ENABLE_STRICT: '0',
+        COREPACK_ENABLE_AUTO_PIN: '0',
+      },
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
+    const version = stdout.trim();
+    return /^\d+\.\d+\.\d+\S*$/.test(version) ? version : null;
+  } catch {
+    return null;
   }
 }
 

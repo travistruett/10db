@@ -1,7 +1,7 @@
 import { mintId, PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { batchDto, stepDto, workstreamDto } from '../../test/fixtures';
-import { failureLine, taskNotices, taskState } from './task-state';
+import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { canRetryRun, failureLine, taskNotices, taskState } from './task-state';
 
 const AT = '2026-11-02T10:00:00.000Z';
 const SESSION = mintId('Session');
@@ -94,7 +94,26 @@ describe('failureLine', () => {
       line: 'The session stopped without reporting a result. Retry runs it again.',
     },
   ])('says $kind on step $stepIndex in plain words', ({ kind, steps, stepIndex, line }) => {
-    expect(failureLine({ failureKind: kind, steps, stepIndex })).toBe(line);
+    expect(failureLine({ failureKind: kind, steps, stepIndex }, true)).toBe(line);
+  });
+
+  it.each([
+    {
+      kind: 'gate_failed',
+      steps: [stepDto({ status: 'failed' })],
+      line: 'The checks kept failing and the build step ran out of fix attempts.',
+    },
+    {
+      kind: 'rejected_at_limit',
+      ...reviewFlow(rejected),
+      line: 'The review step rejected the work with no fix attempts left.',
+    },
+    { kind: null, steps: [], line: 'The run failed.' },
+  ])('says only what happened for $kind when Retry would be refused', ({ kind, steps, line }) => {
+    const stepIndex = Math.max(steps.length - 1, 0);
+    const said = failureLine({ failureKind: kind, steps, stepIndex }, false);
+    expect(said).toBe(line);
+    expect(said).not.toContain('Retry');
   });
 
   it('is the failed card’s line, with the raw reason as its detail', () => {
@@ -105,10 +124,48 @@ describe('failureLine', () => {
       steps: [stepDto({ status: 'failed' })],
     });
     expect(taskState(ws, undefined, 'make gate')).toEqual({
-      line: failureLine(ws),
+      line: failureLine(ws, true),
       color: 'red',
       detail: 'The gate failed 4 times (last exit 2)',
     });
+  });
+
+  it('says only what happened on the card when the batch shipped without a pull request', () => {
+    const ws = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
+    const shipped = batchDto({ state: 'SHIPPED', prUrl: null });
+    expect(taskState(ws, shipped, 'make gate')?.line).toBe(failureLine(ws, false));
+  });
+
+  it.each([
+    { name: 'closed', task: { status: 'cancelled' as const } },
+    { name: 'parked', task: { boardColumnId: mintId('BoardColumn') } },
+    { name: 'replaced by a newer run', task: { workstreamId: mintId('Workstream') } },
+  ])('says only what happened on the card when the task is $name', ({ task: over }) => {
+    const ws = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
+    const task = taskDto({ workstreamId: ws.id, ...over });
+    const line = taskState(ws, undefined, null, undefined, undefined, task)?.line;
+    expect(line).toBe(failureLine(ws, false));
+    expect(line).not.toContain('Retry');
+  });
+
+  it('says only what happened on the card while the run’s batch is not known', () => {
+    const ws = workstreamDto({
+      state: 'FAILED',
+      failureKind: 'gate_failed',
+      batchId: mintId('Batch'),
+    });
+    const task = taskDto({ workstreamId: ws.id });
+    expect(taskState(ws, undefined, null)?.line).toBe(failureLine(ws, false));
+    expect(taskState(ws, undefined, null, undefined, undefined, task)?.line).toBe(
+      failureLine(ws, false),
+    );
+  });
+
+  it('keeps promising Retry on the card when the task is retryable', () => {
+    const ws = workstreamDto({ state: 'FAILED', failureKind: 'gate_failed' });
+    const task = taskDto({ workstreamId: ws.id });
+    const open = batchDto({ state: 'OPEN' });
+    expect(taskState(ws, open, null, undefined, undefined, task)?.line).toBe(failureLine(ws, true));
   });
 
   it('gives a run that failed before kinds were kept the generic line and no detail without a reason', () => {
@@ -118,6 +175,45 @@ describe('failureLine', () => {
       color: 'red',
       detail: null,
     });
+  });
+});
+
+describe('canRetryRun', () => {
+  const failed = workstreamDto({ state: 'FAILED' });
+  const own = taskDto({ workstreamId: failed.id });
+
+  it('accepts what retryWorkstream accepts: a failed latest run of an open task in an open or failed batch', () => {
+    expect(canRetryRun(own, failed, undefined)).toBe(true);
+    expect(canRetryRun(own, failed, batchDto({ state: 'OPEN' }))).toBe(true);
+    expect(canRetryRun(own, failed, batchDto({ state: 'FAILED' }))).toBe(true);
+  });
+
+  it.each(['SHIPPED', 'SHIPPING', 'ABANDONED', 'CLOSED', 'CUTTING'] as const)(
+    'refuses a run whose batch is %s',
+    (state) => {
+      expect(canRetryRun(own, failed, batchDto({ state }))).toBe(false);
+    },
+  );
+
+  it('does not promise a retry of a run whose batch is not known, which may refuse it', () => {
+    const open = batchDto({ state: 'OPEN' });
+    const batched = workstreamDto({ state: 'FAILED', batchId: open.id });
+    const task = taskDto({ workstreamId: batched.id });
+    expect(canRetryRun(task, batched, undefined)).toBe(false);
+    expect(canRetryRun(task, batched, open)).toBe(true);
+  });
+
+  it('refuses a run that is not failed, and a task that is closed, parked or has a newer run', () => {
+    expect(canRetryRun(own, workstreamDto({ id: failed.id, state: 'RUNNING' }), undefined)).toBe(
+      false,
+    );
+    expect(canRetryRun({ ...own, status: 'cancelled' }, failed, undefined)).toBe(false);
+    expect(canRetryRun({ ...own, boardColumnId: mintId('BoardColumn') }, failed, undefined)).toBe(
+      false,
+    );
+    expect(canRetryRun({ ...own, workstreamId: mintId('Workstream') }, failed, undefined)).toBe(
+      false,
+    );
   });
 });
 

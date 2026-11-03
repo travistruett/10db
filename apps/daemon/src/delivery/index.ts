@@ -43,4 +43,4 @@ export { workstreamChanges } from './workstream-changes';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
 export { createWorktreeDependencies } from './worktree-dependencies';
 export { createWorktreeGenerators } from './worktree-generated';
-export { resolvePnpm } from './pnpm-binary';
+export { readPnpmVersion, resolvePnpm } from './pnpm-binary';

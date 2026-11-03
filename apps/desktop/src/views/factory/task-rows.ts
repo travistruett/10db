@@ -11,7 +11,7 @@ import {
   type WorkstreamDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
-import { taskState } from '../board/task-state';
+import { canRetryRun, taskState } from '../board/task-state';
 
 const S = WorkstreamState;
 
@@ -47,6 +47,8 @@ export interface TaskRow {
   readonly next: boolean;
   /** The task's failed latest run, which the Needs you block offers Retry on. */
   readonly failed: WorkstreamDto | null;
+  /** Whether `retryWorkstream` would accept a retry of `failed`; when not, the row offers no Retry and promises none. */
+  readonly retryable: boolean;
   /** The pull request link; a branch several tasks share shows it on its first row only. */
   readonly prUrl: string | null;
   /** Several tasks of the goal share this task's branch. */
@@ -156,7 +158,15 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
           : waits > 0
             ? `Waits on ${String(waits)}`
             : 'Not started';
-      return { ...common, color: 'gray', state, detail: null, running: null, failed: null };
+      return {
+        ...common,
+        color: 'gray',
+        state,
+        detail: null,
+        running: null,
+        failed: null,
+        retryable: false,
+      };
     }
     if (RUNNING_STATES.has(ws.state)) {
       const step = runningStep(ws);
@@ -167,6 +177,7 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
         detail: null,
         running: { step, contextPct: ws.contextPct },
         failed: null,
+        retryable: false,
       };
     }
     if (ws.state === S.Failed && !(batch?.prUrl && batch.state === 'SHIPPED')) {
@@ -177,9 +188,10 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
         detail: ws.failureReason,
         running: null,
         failed: ws,
+        retryable: canRetryRun(task, ws, batch),
       };
     }
-    const said = taskState(ws, batch, input.gateCommand, undefined, input.batches);
+    const said = taskState(ws, batch, input.gateCommand, undefined, input.batches, task);
     const failed = ws.state === S.Failed ? ws : null;
     let state: string;
     let color: MantineColor = said?.color ?? 'gray';
@@ -191,7 +203,15 @@ export function taskRows(input: TaskRowsInput): TaskRow[] {
     } else {
       state = bucket === 'in_review' ? 'In review' : 'In progress';
     }
-    return { ...common, color, state, detail: said?.detail ?? null, running: null, failed };
+    return {
+      ...common,
+      color,
+      state,
+      detail: said?.detail ?? null,
+      running: null,
+      failed,
+      retryable: failed !== null && canRetryRun(task, failed, batch),
+    };
   });
 }
 

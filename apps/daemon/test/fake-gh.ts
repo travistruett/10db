@@ -63,6 +63,8 @@ export class FakeGh implements Gh {
   readonly calls: { readonly method: GhMethod; readonly args: unknown }[] = [];
   /** The Actions runs `rerunFailed` was asked to rerun, in order. */
   readonly reruns: string[] = [];
+  /** One error per Actions run id, thrown by the next rerun of that run only. */
+  readonly failRerunOf = new Map<string, GhError>();
   private readonly required = new Map<string, RequiredChecks>();
   private readonly jobLogs = new Map<string, JobLog>();
   private readonly byRef = new Map<
@@ -170,6 +172,12 @@ export class FakeGh implements Gh {
   }
 
   rerunFailed(input: { readonly repo: string; readonly runId: string }): Promise<void> {
+    const refused = this.failRerunOf.get(input.runId);
+    if (refused) {
+      this.failRerunOf.delete(input.runId);
+      this.calls.push({ method: 'rerunFailed', args: input });
+      return Promise.reject(refused);
+    }
     return this.call('rerunFailed', input, () => {
       this.reruns.push(input.runId);
     });
