@@ -8,7 +8,12 @@ import { raiseGateHostCards, type InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
-import { checkInstall, foreignInstall, PNPM_LOCKFILE, removeBrokenInstall } from './install-health';
+import {
+  checkInstall,
+  madeByAnotherPnpm,
+  PNPM_LOCKFILE,
+  removeBrokenInstall,
+} from './install-health';
 
 export { PNPM_LOCKFILE };
 
@@ -50,7 +55,13 @@ export function installCommand(pnpm: string, mode: InstallMode = 'frozen'): stri
 export type DependencyRefresh =
   /** Nothing to do: the project is not pnpm's, or the seed left no `node_modules`. */
   | { readonly kind: 'skipped' }
-  | { readonly kind: 'installed'; readonly logPath: string; readonly durationMs: number }
+  | {
+      readonly kind: 'installed';
+      readonly logPath: string;
+      readonly durationMs: number;
+      /** The copy's `node_modules` was removed first, so whatever install scripts had built went with it. */
+      readonly startedOver: boolean;
+    }
   | {
       readonly kind: 'failed';
       readonly exitCode: number;
@@ -124,7 +135,7 @@ export interface WorktreeDependenciesDeps {
   ): Promise<string | null>;
   /**
    * The version of that pnpm, or null when it can't be read. Without it, a copy made by another pnpm
-   * is told from the daemon's only by its store, or by the install that fails on it.
+   * is told from the daemon's only by the install that fails on it.
    */
   readonly pnpmVersion?: (
     pnpm: string,
@@ -162,17 +173,19 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         writeFileSync(logPath, `${tail}\n`);
         return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
       }
+      let startedOver = false;
+      const startOver = (): void => {
+        startedOver ||= existsSync(join(path, 'node_modules'));
+        removeBrokenInstall(path);
+      };
       // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
-      // pnpm and store: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and the
-      // copy is left holding a fifth of its packages. A copy whose dependencies do not resolve, or
-      // whose install another pnpm or store made (a seed cloned from a main checkout the builder
-      // installed with their own pnpm), starts over, as the first install of a copy does, which
-      // works. Sources are not touched.
-      const foreign = foreignInstall(path, {
-        version: (await deps.pnpmVersion?.(pnpm, env)) ?? null,
-        storeDir: env['pnpm_config_store_dir'],
-      });
-      if (foreign !== null || checkInstall(path).kind === 'broken') removeBrokenInstall(path);
+      // pnpm: it decides to remove `node_modules/.pnpm`, the sandbox refuses part way, and the copy
+      // is left holding a fifth of its packages. A copy whose dependencies do not resolve, or whose
+      // install another pnpm made (a seed cloned from a main checkout the builder installed with
+      // their own pnpm), starts over, as the first install of a copy does, which works. Sources are
+      // not touched.
+      const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
+      if (madeByAnotherPnpm(path, version) || checkInstall(path).kind === 'broken') startOver();
       const install = async (): Promise<DependencyRefresh> => {
         const result = await deps.gate.run({
           project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
@@ -195,7 +208,12 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
             logPath: result.logPath,
             blockedHosts: result.blockedHosts,
           };
-        return { kind: 'installed', logPath: result.logPath, durationMs: result.durationMs };
+        return {
+          kind: 'installed',
+          logPath: result.logPath,
+          durationMs: result.durationMs,
+          startedOver,
+        };
       };
       const first = await install();
       // An install the sandbox stopped part way leaves packages missing. Once is enough to start
@@ -207,7 +225,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         first.blockedHosts.length === 0 &&
         checkInstall(path).kind === 'broken'
       ) {
-        removeBrokenInstall(path);
+        startOver();
         return install();
       }
       return first;

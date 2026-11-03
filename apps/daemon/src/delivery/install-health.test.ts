@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
-import { checkInstall, foreignInstall, removeBrokenInstall } from './install-health';
+import { checkInstall, madeByAnotherPnpm, removeBrokenInstall } from './install-health';
 
 let tmp: TempDir;
 let root: string;
@@ -178,29 +178,25 @@ describe('checkInstall', () => {
   });
 });
 
-describe('foreignInstall', () => {
+describe('madeByAnotherPnpm', () => {
   const modules = (text: string) => {
     write(join(root, 'node_modules/.modules.yaml'), text);
   };
-  const daemon = { version: '12.9.1', storeDir: '/data/store' };
 
-  it('names another pnpm', () => {
+  it('says yes for another pnpm', () => {
     modules('packageManager: pnpm@12.15.0\n');
-    expect(foreignInstall(root, daemon)).toContain('pnpm@12.15.0');
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(true);
   });
 
-  it('names a store outside the daemon’s, and takes one beneath it as the same', () => {
-    modules('packageManager: pnpm@12.9.1\nstoreDir: /Users/b/Library/pnpm/store/v10\n');
-    expect(foreignInstall(root, daemon)).toContain('/Users/b/Library/pnpm/store/v10');
-    modules('packageManager: pnpm@12.9.1\nstoreDir: /data/store/v10\n');
-    expect(foreignInstall(root, daemon)).toBeNull();
-    modules('storeDir: /data/store-other/v10\n');
-    expect(foreignInstall(root, daemon)).not.toBeNull();
+  it('says no for the same pnpm, whatever store the file names', () => {
+    // A sandboxed run's store is its own temp dir, so this never matches a store the daemon holds.
+    modules('packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-x/cache/pnpm-store/v11\n');
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(false);
   });
 
-  it('compares only what it knows', () => {
-    modules('packageManager: pnpm@12.15.0\nstoreDir: /elsewhere\n');
-    expect(foreignInstall(root, { version: null, storeDir: undefined })).toBeNull();
+  it('says no when the daemon’s version is unknown', () => {
+    modules('packageManager: pnpm@12.15.0\n');
+    expect(madeByAnotherPnpm(root, null)).toBe(false);
   });
 
   it.each([
@@ -222,9 +218,9 @@ describe('foreignInstall', () => {
         modules('');
       },
     ],
-  ])('says nothing for %s', (_name, arrange) => {
+  ])('says no for %s', (_name, arrange) => {
     arrange();
-    expect(foreignInstall(root, daemon)).toBeNull();
+    expect(madeByAnotherPnpm(root, '12.9.1')).toBe(false);
   });
 });
 

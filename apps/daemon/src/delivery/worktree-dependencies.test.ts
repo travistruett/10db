@@ -196,7 +196,7 @@ describe('refreshing a worktree’s dependencies', () => {
     mkdirSync(join(worktree, 'node_modules/.pnpm/stale'), { recursive: true });
     writeFileSync(join(worktree, 'node_modules/.modules.yaml'), 'packageManager: pnpm@12.15.0\n');
     const result = await refresh(dependencies());
-    expect(result.kind).toBe('installed');
+    expect(result).toMatchObject({ kind: 'installed', startedOver: true });
     expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(false);
     expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
   });
@@ -213,7 +213,7 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(existsSync(join(worktree, 'node_modules/.modules.yaml'))).toBe(true);
   });
 
-  describe('a node_modules another pnpm or store made', () => {
+  describe('a node_modules another pnpm made', () => {
     const stale = () => existsSync(join(worktree, 'node_modules/.pnpm/stale'));
 
     it('is removed, and installed from scratch, when .modules.yaml names another pnpm', async () => {
@@ -222,42 +222,57 @@ describe('refreshing a worktree’s dependencies', () => {
       const result = await refresh(
         dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
       );
-      expect(result.kind).toBe('installed');
+      expect(result).toMatchObject({ kind: 'installed', startedOver: true });
       expect(stale()).toBe(false);
       expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
     });
 
-    it('is removed when .modules.yaml names a store outside the daemon’s', async () => {
+    it('is left for pnpm to bring in line when it is the daemon’s pnpm', async () => {
       fakePnpm();
-      installedCopy(
-        `packageManager: pnpm@12.9.1\nstoreDir: ${join(tmp.path, 'other-store/v10')}\n`,
-      );
+      installedCopy('packageManager: pnpm@12.9.1\n');
       const result = await refresh(
         dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
       );
-      expect(result.kind).toBe('installed');
-      expect(stale()).toBe(false);
-    });
-
-    it('is left for pnpm to bring in line when pnpm and store are the daemon’s', async () => {
-      fakePnpm();
-      installedCopy(`packageManager: pnpm@12.9.1\nstoreDir: ${join(tmp.path, 'store/v10')}\n`);
-      const result = await refresh(
-        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
-      );
-      expect(result.kind).toBe('installed');
+      expect(result).toMatchObject({ kind: 'installed', startedOver: false });
       expect(stale()).toBe(true);
     });
 
-    it('is left alone when the daemon’s pnpm version cannot be read and the store matches', async () => {
+    it('is left alone when the daemon’s pnpm version cannot be read', async () => {
       fakePnpm();
-      installedCopy(`packageManager: pnpm@12.15.0\nstoreDir: ${join(tmp.path, 'store/v10')}\n`);
+      installedCopy('packageManager: pnpm@12.15.0\n');
       const result = await refresh(
         dependencies({}, 20_000, undefined, () => Promise.resolve(null)),
       );
-      expect(result.kind).toBe('installed');
+      expect(result).toMatchObject({ kind: 'installed', startedOver: false });
       expect(stale()).toBe(true);
     });
+  });
+
+  it('leaves a copy whose .modules.yaml names another store for the install to take up', async () => {
+    // Each sandboxed run has its own store under its temp dir, so every copy names a gone one.
+    fakePnpm();
+    installedCopy(
+      'packageManager: pnpm@12.9.1\nstoreDir: /private/tmp/10db-gone/cache/pnpm-store/v11\n',
+    );
+    const result = await refresh(
+      dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
+    );
+    expect(result).toMatchObject({ kind: 'installed', startedOver: false });
+    expect(existsSync(join(worktree, 'node_modules/.pnpm/stale'))).toBe(true);
+  });
+
+  it('says it started over only when it removed a node_modules', async () => {
+    fakePnpm();
+    // The cut skipped the seed: nothing was there to lose, though the lockfile's package is missing.
+    writeFileSync(join(worktree, 'pnpm-lock.yaml'), LEFT_PAD_LOCKFILE);
+    const result = await dependencies().refresh({
+      batch,
+      project,
+      path: worktree,
+      signal,
+      seeded: false,
+    });
+    expect(result).toMatchObject({ kind: 'installed', startedOver: false });
   });
 
   describe('an install that fails part way', () => {
@@ -288,7 +303,7 @@ describe('refreshing a worktree’s dependencies', () => {
       // A marker only a leftover of the broken install would keep.
       writeFileSync(join(worktree, 'node_modules/.pnpm/leftover'), '');
       const result = await refresh(dependencies());
-      expect(result.kind).toBe('installed');
+      expect(result).toMatchObject({ kind: 'installed', startedOver: true });
       expect(requests).toHaveLength(2);
       expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
       expect(existsSync(join(worktree, 'node_modules/left-pad'))).toBe(true);

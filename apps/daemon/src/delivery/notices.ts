@@ -88,6 +88,9 @@ export const supersededNotices = {
 /** How many unbuilt packages the install-scripts notice names before it counts the rest. */
 const SCRIPTS_SKIPPED_SHOWN = 10;
 
+/** Why a copy holds no built output: its cut skipped the seed, or 10db removed its `node_modules`. */
+export type UnbuiltWhy = 'seed_skipped' | 'started_over';
+
 export const seedNotices = {
   skipped: (dirs: readonly string[]): Notice => {
     const named = dirs.join(', ');
@@ -99,10 +102,11 @@ export const seedNotices = {
     };
   },
   /**
-   * The install made `node_modules` but ran no install script, and the seed that would have carried
-   * the built output was skipped, so these packages the project allows to build are unbuilt.
+   * The install made `node_modules` but ran no install script, and the built output a seed carries
+   * is not in the copy, so these packages the project allows to build are unbuilt. `why` says where
+   * the built output went: the cut skipped the seed, or 10db removed the `node_modules` that held it.
    */
-  scriptsSkipped: (names: readonly string[], legacyPnpmMajor?: number): Notice => {
+  scriptsSkipped: (names: readonly string[], why: UnbuiltWhy, legacyPnpmMajor?: number): Notice => {
     const shown = names.slice(0, SCRIPTS_SKIPPED_SHOWN);
     const rest = names.length - shown.length;
     const named = rest > 0 ? `${shown.join(', ')} and ${String(rest)} more` : shown.join(', ');
@@ -113,11 +117,19 @@ export const seedNotices = {
       legacyPnpmMajor === undefined
         ? `The project lets ${named} run ${one ? 'its' : 'their'} install script (allowBuilds),`
         : `The copy was installed with pnpm ${String(legacyPnpmMajor)}, which builds every dependency that has an install script unless the project limits it, ${named} included,`;
+    const cause =
+      why === 'seed_skipped'
+        ? 'A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included.'
+        : "This copy's node_modules was made by another version of pnpm than the one 10db runs, or had packages missing, so 10db removed it and installed it from nothing, and that install runs no repository code, install scripts included.";
+    const otherwise =
+      why === 'seed_skipped'
+        ? ", or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned"
+        : '';
     return {
       key: NOTICE_KEY.scriptsSkipped,
       tone: 'warning',
       line: `${named} ${one ? 'is' : 'are'} not built in this copy: its install ran without install scripts`,
-      body: `${allows} and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. A task in Your folder was unfinished when this copy was made, so 10db cloned nothing into it, and the install that made its node_modules runs no repository code, install scripts included. ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy, or abandon this batch and start the task again once Your folder's batch has shipped or been abandoned.`,
+      body: `${allows} and a new copy usually gets Your folder's built output for ${one ? 'it' : 'them'}. ${cause} ${one ? 'This package is' : 'These packages are'} installed but not built (a native addon, a generated client, a downloaded binary), and the copy's gate may fail on that.\n\nTo build ${one ? 'it' : 'them'}, run ${rebuild} in the copy${otherwise}.`,
     };
   },
 };
