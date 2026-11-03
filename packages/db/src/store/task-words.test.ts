@@ -66,7 +66,7 @@ describe('a task headline and why', () => {
           ],
         },
       }),
-    ).value;
+    ).value.goal;
     const [a, b] = goal.taskIds.map((id) => getTask(store.db, id));
     expect(a).toMatchObject(words);
     expect(b).toMatchObject({ headline: '', why: '' });

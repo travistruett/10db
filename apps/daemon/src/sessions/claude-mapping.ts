@@ -8,7 +8,7 @@ import type {
 import { MAX_STEP_SUMMARY } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
-import type { SessionEvent, SessionMcpServer, ToolDecision, TurnResult } from './types';
+import type { SessionEvent, SessionMcpServer, ShapeImage, ToolDecision, TurnResult } from './types';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -172,10 +172,30 @@ export function toHookOutput(verdict: GuardVerdict): HookJSONOutput {
   };
 }
 
-export function userMessage(text: string, priority?: 'now' | 'next' | 'later'): SDKUserMessage {
+export function userMessage(
+  text: string,
+  priority?: 'now' | 'next' | 'later',
+  images: readonly ShapeImage[] = [],
+): SDKUserMessage {
   return {
     type: 'user',
-    message: { role: 'user', content: text },
+    message: {
+      role: 'user',
+      content:
+        images.length === 0
+          ? text
+          : [
+              { type: 'text', text },
+              ...images.map((image) => ({
+                type: 'image' as const,
+                source: {
+                  type: 'base64' as const,
+                  media_type: image.mediaType,
+                  data: image.data,
+                },
+              })),
+            ],
+    },
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
   };

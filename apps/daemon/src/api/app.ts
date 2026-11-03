@@ -10,6 +10,7 @@ import {
   BoardColumnInput,
   BoardColumnPatch,
   AreaProposalInput,
+  DecisionId,
   DomainError,
   EventsHead,
   FlowId,
@@ -41,6 +42,15 @@ import {
   PROTOCOL_VERSION,
   RetryInput,
   RoutingRulesInput,
+  SHAPE_FILE_MAX_BYTES,
+  ShapeConvertInput,
+  ShapeEditInput,
+  ShapeId,
+  ShapeInput,
+  ShapeMessageInput,
+  ShapeProposalId,
+  ShapeUnpinInput,
+  ShapeWithdrawInput,
   StartTaskInput,
   SystemCheckDto,
   TaskId,
@@ -51,8 +61,9 @@ import {
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type ShapeConvertError,
 } from '@10db/contracts';
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { HTTPException } from 'hono/http-exception';
@@ -127,6 +138,16 @@ const StateList = z
  */
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
+const SHAPE_FILE_PATH = /^\/shapes\/[^/]+\/files$/;
+const ShapeFileQuery = z.object({ name: z.string().min(1).max(255) });
+type ShapeFileQuery = z.infer<typeof ShapeFileQuery>;
+const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
+// A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
+// can name the limit in its refusal.
+const fileBodyLimit = bodyLimit({ maxSize: SHAPE_FILE_MAX_BYTES + 1024 });
+const limitBody: MiddlewareHandler = (c, next) =>
+  (SHAPE_FILE_PATH.test(c.req.path) ? fileBodyLimit : bodyLimiter)(c, next);
+
 export function createApp(deps: ApiDeps) {
   const app = new Hono()
     .use(
@@ -147,7 +168,7 @@ export function createApp(deps: ApiDeps) {
     })
     // After the token check, before any route reads the body. A declared length over the limit is
     // refused unread; a body with none is read only up to the limit.
-    .use('*', bodyLimit({ maxSize: MAX_BODY_BYTES }))
+    .use('*', limitBody)
     .use(STREAM_PATH, async (c, next) => {
       // Browsers don't apply CORS to WebSockets; a page on another origin must not read the stream.
       // Non-browser clients send no Origin and are covered by the token alone.
@@ -208,6 +229,124 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/goals/:goalId', (c) =>
       c.json(deps.services.getGoal(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/projects/:projectId/shapes', (c) =>
+      c.json(deps.services.listShapes(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post(
+      '/projects/:projectId/shapes',
+      validator('json', (value): ShapeInput => ShapeInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.createShape(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+          201,
+        ),
+    )
+    .get('/shapes/:shapeId', (c) =>
+      c.json(deps.services.getShapeView(ShapeId.parse(c.req.param('shapeId')))),
+    )
+    .post(
+      '/shapes/:shapeId/messages',
+      validator('json', (value): ShapeMessageInput => ShapeMessageInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.sendShapeMessage(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json').text,
+          ),
+          202,
+        ),
+    )
+    .post('/shapes/:shapeId/propose', (c) =>
+      c.json(deps.services.proposeShape(ShapeId.parse(c.req.param('shapeId'))), 202),
+    )
+    .post('/shapes/:shapeId/stop', async (c) => {
+      await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));
+      return c.body(null, 204);
+    })
+    .post(
+      '/shapes/:shapeId/convert',
+      validator('json', (value): ShapeConvertInput => ShapeConvertInput.parse(value)),
+      async (c) => {
+        const outcome = await deps.services.convertShape(
+          ShapeId.parse(c.req.param('shapeId')),
+          c.req.valid('json'),
+        );
+        if (outcome.kind === 'converted') return c.json(outcome.result, 200);
+        return c.json({ errors: outcome.errors } satisfies ShapeConvertError, 400);
+      },
+    )
+    .post('/goals/:goalId/remove-draft', (c) => {
+      deps.services.removeDraftGoal(GoalId.parse(c.req.param('goalId')));
+      return c.body(null, 204);
+    })
+    .post(
+      '/shapes/:shapeId/decisions/:decisionId/withdraw',
+      validator('json', (value): ShapeWithdrawInput => ShapeWithdrawInput.parse(value)),
+      (c) => {
+        deps.services.withdrawShapeDecision(
+          ShapeId.parse(c.req.param('shapeId')),
+          DecisionId.parse(c.req.param('decisionId')),
+          c.req.valid('json').reason,
+        );
+        return c.body(null, 204);
+      },
+    )
+    .patch(
+      '/shapes/:shapeId/proposals/:proposalId',
+      validator('json', (value): ShapeEditInput => ShapeEditInput.parse(value)),
+      (c) => {
+        deps.services.editShapeProposal(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeProposalId.parse(c.req.param('proposalId')),
+          c.req.valid('json').fields,
+        );
+        return c.body(null, 204);
+      },
+    )
+    .post(
+      '/shapes/:shapeId/proposals/:proposalId/unpin',
+      validator('json', (value): ShapeUnpinInput => ShapeUnpinInput.parse(value)),
+      (c) => {
+        deps.services.unpinShapeProposal(
+          ShapeId.parse(c.req.param('shapeId')),
+          ShapeProposalId.parse(c.req.param('proposalId')),
+          c.req.valid('json').field,
+        );
+        return c.body(null, 204);
+      },
+    )
+    .post('/shapes/:shapeId/proposals/:proposalId/restore', (c) => {
+      deps.services.restoreShapeProposal(
+        ShapeId.parse(c.req.param('shapeId')),
+        ShapeProposalId.parse(c.req.param('proposalId')),
+      );
+      return c.body(null, 204);
+    })
+    .post('/shapes/:shapeId/proposals/:proposalId/drop', (c) => {
+      deps.services.dropShapeProposal(
+        ShapeId.parse(c.req.param('shapeId')),
+        ShapeProposalId.parse(c.req.param('proposalId')),
+      );
+      return c.body(null, 204);
+    })
+    // The file itself is the body, so a 20 MB drop is not base64 inside JSON: its name is the query and
+    // its type the content type.
+    .post(
+      '/shapes/:shapeId/files',
+      validator('query', (value): ShapeFileQuery => ShapeFileQuery.parse(value)),
+      async (c) => {
+        const { name } = c.req.valid('query');
+        const bytes = new Uint8Array(await c.req.arrayBuffer());
+        return c.json(
+          deps.services.addShapeFile(ShapeId.parse(c.req.param('shapeId')), {
+            name,
+            mediaType: c.req.header('content-type') ?? '',
+            bytes,
+          }),
+          201,
+        );
+      },
     )
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),

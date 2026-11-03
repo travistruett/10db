@@ -1,0 +1,1 @@
+ALTER TABLE `shape_files` ADD `told_at` text;

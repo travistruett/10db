@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "createdNow": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "goal",
+              "task",
+              "change_task",
+              "remove_task",
+              "decision",
+              "principle",
+              "question",
+              "landing"
+            ]
+          },
+          "goalId": {
+            "type": "string",
+            "pattern": "^gol_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "taskIds": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            }
+          },
+          "decisionId": {
+            "type": "string",
+            "pattern": "^dec_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        },
+        "required": [
+          "key",
+          "kind",
+          "taskIds"
+        ]
+      }
+    }
+  },
+  "required": [
+    "createdNow",
+    "results"
+  ]
+}

@@ -29,6 +29,7 @@ export type BuilderServices = Pick<
   | 'runNext'
   | 'listBoardColumns'
   | 'listInbox'
+  | 'startShape'
 > &
   TaskRemovalServices &
   TaskLookupServices;
@@ -182,6 +183,12 @@ export function createBuilderTools(
       const { taskId } = BuilderToolInputs.run_next.parse(args);
       const { workstream, waitingOn } = services.runNext(taskId);
       return { taskId, workstreamId: workstream.id, state: workstream.state, waitingOn };
+    },
+    // A brainstorm from a terminal session moves into Shape (spec §5.6): the summary is the builder's
+    // first message and the files are inline text. It starts no turn; the app lists the conversation.
+    [BuilderToolName.StartShape]: (args) => {
+      const shape = services.startShape(BuilderToolInputs.start_shape.parse(args));
+      return { id: shape.id, title: shape.title };
     },
     // Card text is written by managed sessions (an ask_human question becomes the title), so the
     // builder's clients get the title alone: no body, options or detail to act on.

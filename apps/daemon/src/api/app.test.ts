@@ -96,6 +96,21 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listBatches: track('listBatches'),
     listGoals: track('listGoals'),
     openGoalDigest: track('openGoalDigest'),
+    listShapes: track('listShapes'),
+    createShape: track('createShape'),
+    getShapeView: track('getShapeView'),
+    sendShapeMessage: track('sendShapeMessage'),
+    proposeShape: track('proposeShape'),
+    stopShape: track('stopShape'),
+    convertShape: track('convertShape'),
+    removeDraftGoal: track('removeDraftGoal'),
+    withdrawShapeDecision: track('withdrawShapeDecision'),
+    editShapeProposal: track('editShapeProposal'),
+    unpinShapeProposal: track('unpinShapeProposal'),
+    restoreShapeProposal: track('restoreShapeProposal'),
+    dropShapeProposal: track('dropShapeProposal'),
+    addShapeFile: track('addShapeFile'),
+    startShape: track('startShape'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -986,6 +1001,342 @@ describe('goal routes', () => {
     expect(ok.status).toBe(200);
     expect(GoalListDto.parse(await ok.json())).toEqual(list);
     expect((await app(services).request('/projects/not-a-project/goals', auth)).status).toBe(400);
+  });
+});
+
+describe('shape routes', () => {
+  const projectId = mintId('Project');
+  const shapeId = mintId('Shape');
+  const AT = '2026-11-02T12:00:00.000Z';
+  const shape = {
+    id: shapeId,
+    projectId,
+    title: 'New conversation',
+    state: 'listening',
+    origin: 'app',
+    proposeUnlocked: false,
+    round: 0,
+    createdAt: AT,
+    updatedAt: AT,
+  } as const;
+  const post = (body: unknown) => ({ method: 'POST', ...json, body: JSON.stringify(body) });
+
+  it('lists a project’s conversations and opens one with a title or none', async () => {
+    const made: unknown[] = [];
+    const services = stubServices({
+      listShapes: () => [shape],
+      createShape: (_id, input) => {
+        made.push(input);
+        return shape;
+      },
+    });
+    const list = await app(services).request(`/projects/${projectId}/shapes`, auth);
+    expect(list.status).toBe(200);
+    expect(await list.json()).toEqual([shape]);
+    expect((await app(services).request(`/projects/${projectId}/shapes`, post({}))).status).toBe(
+      201,
+    );
+    await app(services).request(`/projects/${projectId}/shapes`, post({ title: 'Density' }));
+    expect(made).toEqual([{}, { title: 'Density' }]);
+    expect(
+      (await app(services).request(`/projects/${projectId}/shapes`, post({ title: '' }))).status,
+    ).toBe(400);
+  });
+
+  it('answers a conversation’s view, 404 for an unknown one', async () => {
+    const view = {
+      shape,
+      messages: [],
+      proposals: [],
+      heard: [],
+      files: [],
+      turn: { running: false, queued: 0, proposing: false },
+    };
+    const services = stubServices({
+      getShapeView: (id) => {
+        if (id !== shapeId) throw new NotFoundError('shape', id);
+        return view;
+      },
+    });
+    const ok = await app(services).request(`/shapes/${shapeId}`, auth);
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual(view);
+    expect((await app(services).request(`/shapes/${mintId('Shape')}`, auth)).status).toBe(404);
+    expect((await app(services).request('/shapes/not-a-shape', auth)).status).toBe(400);
+  });
+
+  it('takes a message (202), refuses an empty one, and Propose answers started or ignored', async () => {
+    const sent: string[] = [];
+    const message = {
+      id: mintId('ShapeMessage'),
+      shapeId,
+      author: 'builder',
+      kind: 'text',
+      body: 'Hi',
+      createdAt: AT,
+    };
+    const services = stubServices({
+      sendShapeMessage: (_id, text) => {
+        sent.push(text);
+        return message as never;
+      },
+      proposeShape: () => ({ status: 'ignored' }),
+    });
+    const ok = await app(services).request(`/shapes/${shapeId}/messages`, post({ text: 'Hi' }));
+    expect(ok.status).toBe(202);
+    expect(await ok.json()).toEqual(message);
+    expect(sent).toEqual(['Hi']);
+    expect(
+      (await app(services).request(`/shapes/${shapeId}/messages`, post({ text: '' }))).status,
+    ).toBe(400);
+    const propose = await app(services).request(`/shapes/${shapeId}/propose`, post({}));
+    expect(propose.status).toBe(202);
+    expect(await propose.json()).toEqual({ status: 'ignored' });
+  });
+
+  it('Stop answers 204', async () => {
+    const stopped: string[] = [];
+    const services = stubServices({
+      stopShape: (id) => {
+        stopped.push(id);
+        return Promise.resolve();
+      },
+    });
+    const res = await app(services).request(`/shapes/${shapeId}/stop`, post({}));
+    expect(res.status).toBe(204);
+    expect(stopped).toEqual([shapeId]);
+  });
+
+  describe('Convert', () => {
+    const proposalId = mintId('ShapeProposal');
+    it('answers what was created', async () => {
+      const asked: unknown[] = [];
+      const result = {
+        createdNow: 1,
+        results: [{ key: 'a', kind: 'task' as const, taskIds: [mintId('Task')] }],
+      };
+      const services = stubServices({
+        convertShape: (_id, input) => {
+          asked.push(input);
+          return Promise.resolve({ kind: 'converted', result } as const);
+        },
+      });
+      const res = await app(services).request(
+        `/shapes/${shapeId}/convert`,
+        post({ proposalIds: [proposalId], interrupt: true }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual(result);
+      expect(asked).toEqual([{ proposalIds: [proposalId], interrupt: true }]);
+    });
+
+    it('answers every refusal at once as a 400 {errors}', async () => {
+      const services = stubServices({
+        convertShape: () =>
+          Promise.resolve({ kind: 'refused', errors: ['A depends on B', 'C is gone'] } as const),
+      });
+      const res = await app(services).request(
+        `/shapes/${shapeId}/convert`,
+        post({ proposalIds: [proposalId] }),
+      );
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ errors: ['A depends on B', 'C is gone'] });
+    });
+
+    it('answers 409 while Claude is still answering, and 400 for nothing selected', async () => {
+      const services = stubServices({
+        convertShape: () => Promise.reject(new ConflictError('Claude is still answering')),
+      });
+      const busy = await app(services).request(
+        `/shapes/${shapeId}/convert`,
+        post({ proposalIds: [proposalId] }),
+      );
+      expect(busy.status).toBe(409);
+      expect(await busy.json()).toMatchObject({ message: 'Claude is still answering' });
+      expect(
+        (await app(services).request(`/shapes/${shapeId}/convert`, post({ proposalIds: [] })))
+          .status,
+      ).toBe(400);
+    });
+  });
+
+  it('Remove Draft Goal and Withdraw Decision answer 204, with their refusals', async () => {
+    const goalId = mintId('Goal');
+    const decisionId = mintId('Decision');
+    const calls: string[] = [];
+    const services = stubServices({
+      removeDraftGoal: (id) => {
+        calls.push(`remove ${id}`);
+        if (id !== goalId) throw new InvalidError('not a goal a conversation made');
+      },
+      withdrawShapeDecision: (_shape, id, reason) => {
+        calls.push(`withdraw ${id} ${reason}`);
+      },
+    });
+    expect((await app(services).request(`/goals/${goalId}/remove-draft`, post({}))).status).toBe(
+      204,
+    );
+    expect(
+      (await app(services).request(`/goals/${mintId('Goal')}/remove-draft`, post({}))).status,
+    ).toBe(400);
+    const withdrawn = await app(services).request(
+      `/shapes/${shapeId}/decisions/${decisionId}/withdraw`,
+      post({ reason: 'We chose differently' }),
+    );
+    expect(withdrawn.status).toBe(204);
+    expect(calls).toContain(`withdraw ${decisionId} We chose differently`);
+    expect(
+      (
+        await app(services).request(
+          `/shapes/${shapeId}/decisions/${decisionId}/withdraw`,
+          post({ reason: '' }),
+        )
+      ).status,
+    ).toBe(400);
+  });
+
+  describe('editing a row', () => {
+    const proposalId = mintId('ShapeProposal');
+    const path = `/shapes/${shapeId}/proposals/${proposalId}`;
+    const patch = (body: unknown) => ({ method: 'PATCH', ...json, body: JSON.stringify(body) });
+
+    it('edits, unpins, restores and drops a row, each answering 204', async () => {
+      const calls: string[] = [];
+      const services = stubServices({
+        editShapeProposal: (s, p, fields) => {
+          calls.push(`edit ${s} ${p} ${JSON.stringify(fields)}`);
+        },
+        unpinShapeProposal: (s, p, field) => {
+          calls.push(`unpin ${s} ${p} ${field ?? '*'}`);
+        },
+        restoreShapeProposal: (s, p) => {
+          calls.push(`restore ${s} ${p}`);
+        },
+        dropShapeProposal: (s, p) => {
+          calls.push(`drop ${s} ${p}`);
+        },
+      });
+      const request = (url: string, init: RequestInit) => app(services).request(url, init);
+      expect((await request(path, patch({ fields: { size: 'M' } }))).status).toBe(204);
+      expect((await request(`${path}/unpin`, post({ field: 'size' }))).status).toBe(204);
+      expect((await request(`${path}/unpin`, post({}))).status).toBe(204);
+      expect((await request(`${path}/restore`, post({}))).status).toBe(204);
+      expect((await request(`${path}/drop`, post({}))).status).toBe(204);
+      expect(calls).toEqual([
+        `edit ${shapeId} ${proposalId} {"size":"M"}`,
+        `unpin ${shapeId} ${proposalId} size`,
+        `unpin ${shapeId} ${proposalId} *`,
+        `restore ${shapeId} ${proposalId}`,
+        `drop ${shapeId} ${proposalId}`,
+      ]);
+    });
+
+    it('refuses an edit that sets nothing or names a malformed row, and passes on a service refusal', async () => {
+      const services = stubServices({
+        editShapeProposal: () => {
+          throw new ConflictError('This proposal was converted');
+        },
+      });
+      expect((await app(services).request(path, patch({ fields: {} }))).status).toBe(400);
+      expect(
+        (
+          await app(services).request(
+            `/shapes/${shapeId}/proposals/nope`,
+            patch({ fields: { a: 1 } }),
+          )
+        ).status,
+      ).toBe(400);
+      const refused = await app(services).request(path, patch({ fields: { size: 'M' } }));
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ message: 'This proposal was converted' });
+    });
+  });
+
+  describe('dropping a file', () => {
+    const bytes = new TextEncoder().encode('# The brief');
+    const upload = (body: Uint8Array = bytes, type = 'text/markdown') => ({
+      method: 'POST',
+      headers: { Authorization: `Bearer ${TOKEN}`, 'content-type': type },
+      body,
+    });
+    const stored = (name: string) => ({
+      id: mintId('ShapeFile'),
+      shapeId,
+      name,
+      mediaType: 'text/markdown',
+      size: bytes.length,
+      storedPath: `/data/shapes/${shapeId}/files/${name}`,
+      createdAt: AT,
+    });
+
+    it('passes the name, type and bytes to the service and answers 201 with the stored file', async () => {
+      const seen: { name: string; mediaType: string; text: string }[] = [];
+      const services = stubServices({
+        addShapeFile: (_id, file) => {
+          seen.push({
+            name: file.name,
+            mediaType: file.mediaType,
+            text: new TextDecoder().decode(file.bytes),
+          });
+          return stored(file.name);
+        },
+      });
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=${encodeURIComponent('brief notes.md')}`,
+        upload(),
+      );
+      expect(res.status).toBe(201);
+      expect(await res.json()).toMatchObject({ name: 'brief notes.md' });
+      expect(seen).toEqual([
+        { name: 'brief notes.md', mediaType: 'text/markdown', text: '# The brief' },
+      ]);
+    });
+
+    it('takes a file up to 20 MB, past the limit every other body has', async () => {
+      const services = stubServices({ addShapeFile: (_id, file) => stored(file.name) });
+      const big = new Uint8Array(MAX_BODY_BYTES + 1024);
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=big.pdf`,
+        upload(big, 'application/pdf'),
+      );
+      expect(res.status).toBe(201);
+    });
+
+    it('refuses a body past 20 MB without reading it on', async () => {
+      const services = stubServices({ addShapeFile: (_id, file) => stored(file.name) });
+      const tooBig = new Uint8Array(20 * 1024 * 1024 + 4096);
+      const res = await app(services).request(
+        `/shapes/${shapeId}/files?name=big.pdf`,
+        upload(tooBig, 'application/pdf'),
+      );
+      expect(res.status).toBe(413);
+    });
+
+    it('needs a name, and says why a file is refused', async () => {
+      const services = stubServices({
+        addShapeFile: () => {
+          throw new InvalidError(
+            'run.sh can’t be added: drop Markdown, plain text, PDF, PNG, JPEG or WebP',
+          );
+        },
+      });
+      expect((await app(services).request(`/shapes/${shapeId}/files`, upload())).status).toBe(400);
+      const refused = await app(services).request(`/shapes/${shapeId}/files?name=run.sh`, upload());
+      expect(refused.status).toBe(400);
+      expect(JSON.stringify(await refused.json())).toContain('run.sh');
+    });
+  });
+
+  it('needs the token', async () => {
+    for (const [method, path] of [
+      ['GET', `/projects/${projectId}/shapes`],
+      ['GET', `/shapes/${shapeId}`],
+      ['POST', `/shapes/${shapeId}/messages`],
+      ['POST', `/shapes/${shapeId}/convert`],
+      ['POST', `/shapes/${shapeId}/files`],
+      ['PATCH', `/shapes/${shapeId}/proposals/${mintId('ShapeProposal')}`],
+    ] as const)
+      expect((await app().request(path, { method })).status).toBe(401);
   });
 });
 

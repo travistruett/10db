@@ -29,7 +29,7 @@ function goal() {
         ],
       },
     }),
-  );
+  ).goal;
 }
 
 function decide(question: string) {

@@ -7,6 +7,7 @@ import {
   InvalidError,
   mintId,
   NotFoundError,
+  TaskStatus,
   type GoalBriefTask,
   type GoalCriterionDto,
   type GoalDto,
@@ -33,16 +34,35 @@ export interface GoalInsert {
   readonly description?: string;
   /** Absent means the builder. */
   readonly ownerId?: PersonId;
+  /**
+   * Tasks outside the brief, by the key the caller knows them by: Shape's loose tasks, another
+   * goal's tasks, or tasks a conversation converted earlier (Shape spec §6, §11). Absent means none.
+   */
+  readonly outsideKeys?: ReadonlyMap<string, TaskId>;
+  /** For a brief task's key, the outside keys it also depends on (a draft's `dependsOnOutside`). */
+  readonly dependsOnOutside?: Readonly<Record<string, readonly string[]>>;
+}
+
+/** What `insertGoal` wrote: the goal, and the task it made for each brief key, in the order written. */
+export interface GoalInserted {
+  readonly goal: GoalDto;
+  readonly taskIds: ReadonlyMap<string, TaskId>;
 }
 
 /**
  * Writes a `draft` goal with its tasks, their dependencies and its `unproven` criteria. Brief keys
  * become the TaskIds made here. A brief that breaks a rule (a repeated or unknown key, a dependency
- * cycle, an unknown area or person) throws, and the caller's transaction leaves nothing behind.
+ * cycle, an unknown area or person, an outside key that names nothing) throws, and the caller's
+ * transaction leaves nothing behind.
  */
-export function insertGoal(ctx: WriteContext, projectId: ProjectId, input: GoalInsert): GoalDto {
+export function insertGoal(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: GoalInsert,
+): GoalInserted {
   getProject(ctx.tx, projectId);
   const brief = GoalBrief.parse(input.brief);
+  const outside = outsideDependencies(ctx.tx, projectId, brief.tasks, input);
   const ownerId = input.ownerId ?? builderId(ctx.tx);
   getPerson(ctx.tx, ownerId);
 
@@ -74,7 +94,10 @@ export function insertGoal(ctx: WriteContext, projectId: ProjectId, input: GoalI
       acceptanceCriteria: task.criteria,
       areas: task.areas,
       // inDependencyOrder put every task this one depends on before it.
-      dependsOn: task.depends_on.flatMap((key) => taskIds.get(key) ?? []),
+      dependsOn: [
+        ...task.depends_on.flatMap((key) => taskIds.get(key) ?? []),
+        ...(outside.get(task.key) ?? []),
+      ],
     });
     taskIds.set(task.key, written.id);
   }
@@ -117,7 +140,51 @@ export function insertGoal(ctx: WriteContext, projectId: ProjectId, input: GoalI
     entityId: goalId,
     data: { projectId },
   });
-  return getGoal(ctx.tx, goalId);
+  return { goal: getGoal(ctx.tx, goalId), taskIds };
+}
+
+/**
+ * Each brief task's outside dependencies as TaskIds. Refuses outside dependencies for a key no task
+ * of the brief has, an outside key with no entry, one that is also a brief key, and one naming a
+ * task that isn't in the project or was removed.
+ */
+function outsideDependencies(
+  db: DbReader,
+  projectId: ProjectId,
+  tasks: readonly GoalBriefTask[],
+  input: GoalInsert,
+): Map<string, TaskId[]> {
+  const keys = input.outsideKeys ?? new Map<string, TaskId>();
+  const briefKeys = new Set(tasks.map((t) => t.key));
+  for (const key of keys.keys())
+    if (briefKeys.has(key))
+      throw new InvalidError(`The outside key ${key} is also a key of the brief`);
+  const resolved = new Map<string, TaskId[]>();
+  for (const [taskKey, named] of Object.entries(input.dependsOnOutside ?? {})) {
+    if (!briefKeys.has(taskKey))
+      throw new InvalidError(`No task of the brief has the key ${taskKey}`);
+    if (new Set(named.map((key) => keys.get(key) ?? key)).size !== named.length)
+      throw new InvalidError(`Task ${taskKey} depends on the same outside task twice`);
+    resolved.set(
+      taskKey,
+      named.map((key) => {
+        const id = keys.get(key);
+        if (id === undefined)
+          throw new InvalidError(`Task ${taskKey} depends on ${key}, and no task has that key`);
+        const task = db
+          .select({ projectId: schema.tasks.projectId, status: schema.tasks.status })
+          .from(schema.tasks)
+          .where(eq(schema.tasks.id, id))
+          .get();
+        if (task?.projectId !== projectId || task.status === TaskStatus.Cancelled)
+          throw new InvalidError(
+            `Task ${taskKey} depends on ${key}, which is not a task of this project`,
+          );
+        return id;
+      }),
+    );
+  }
+  return resolved;
 }
 
 function builderId(db: DbReader): PersonId {

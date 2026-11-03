@@ -77,11 +77,23 @@ import type {
   WorkstreamId,
   WorkstreamState,
   WorkstreamStep,
+  ShapeFileId,
+  ShapeId,
+  ShapeLinkId,
+  ShapeMessageAuthor,
+  ShapeMessageId,
+  ShapeMessageKind,
+  ShapeOrigin,
+  ShapeProposalId,
+  ShapeProposalKind,
+  ShapeProposalState,
+  ShapeState,
 } from '@10db/contracts';
 import { USAGE_HANDOFF_AT } from '@10db/contracts';
 import { sql } from 'drizzle-orm';
 import {
   type AnySQLiteColumn,
+  check,
   customType,
   index,
   integer,
@@ -472,14 +484,20 @@ export const workstreams = sqliteTable(
   ],
 );
 
+/**
+ * A session runs a lane's workstream or a Shape conversation, never both and never neither (Shape
+ * spec §5.1), so a Shape session takes the project's account and counts in its usage like a lane's.
+ */
 export const sessions = sqliteTable(
   'sessions',
   {
     id: text('id').$type<SessionId>().primaryKey(),
     workstreamId: text('workstream_id')
       .$type<WorkstreamId>()
-      .notNull()
       .references(() => workstreams.id),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .references((): AnySQLiteColumn => shapes.id),
     accountId: text('account_id')
       .$type<AccountId>()
       .notNull()
@@ -519,7 +537,9 @@ export const sessions = sqliteTable(
   },
   (t) => [
     index('sessions_workstream_idx').on(t.workstreamId),
+    index('sessions_shape_idx').on(t.shapeId),
     index('sessions_account_started_idx').on(t.accountId, t.startedAt),
+    check('sessions_one_owner', sql`(${t.workstreamId} IS NULL) <> (${t.shapeId} IS NULL)`),
   ],
 );
 
@@ -666,6 +686,14 @@ export const decisions = sqliteTable('decisions', {
     .$type<SourceId>()
     .notNull()
     .references(() => sources.id),
+  /**
+   * A withdrawn decision is a tombstone: the row stays, search and the context pack skip it.
+   * `withdrawDecision` writes all three together and refuses an empty reason; no CHECK enforces it,
+   * since adding one rebuilds the table and drops its full-text triggers.
+   */
+  withdrawnAt: text('withdrawn_at'),
+  withdrawnBy: text('withdrawn_by'),
+  withdrawnReason: text('withdrawn_reason'),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -939,4 +967,152 @@ export const judgeCalls = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index('judge_calls_created_idx').on(t.createdAt)],
+);
+
+// --- Shape (docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §13) ----------------
+
+/** A Shape conversation: a structured brainstorm that turns talk into goals, tasks and records. */
+export const shapes = sqliteTable(
+  'shapes',
+  {
+    id: text('id').$type<ShapeId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    title: text('title').notNull(),
+    state: text('state').$type<ShapeState>().notNull(),
+    origin: text('origin').$type<ShapeOrigin>().notNull(),
+    /** The Claude Agent SDK session it resumes; null before the first turn. */
+    sdkSessionId: text('sdk_session_id'),
+    /** Set by the builder's first Propose, for good. */
+    proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
+    /** The last reconciled round; 0 before the first proposal. */
+    round: integer('round').notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('shapes_project_idx').on(t.projectId)],
+);
+
+/** The conversation's transcript (§5.3): append-only, so it renders and reopens however old it is. */
+export const shapeMessages = sqliteTable(
+  'shape_messages',
+  {
+    id: text('id').$type<ShapeMessageId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    author: text('author').$type<ShapeMessageAuthor>().notNull(),
+    kind: text('kind').$type<ShapeMessageKind>().notNull(),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shape_messages_shape_idx').on(t.shapeId, t.id)],
+);
+
+/** Per task key: the content hash a round last wrote and the fields it changed (§6 Rows). */
+export interface ShapeTaskMark {
+  readonly hash: string;
+  readonly changedFields: readonly string[];
+}
+
+/**
+ * Shape's own proposals (§6 Rows), apart from `proposals`, which agents' `propose` tool writes.
+ * One row per key in a conversation: a superseded or rejected key keeps its row as a tombstone.
+ */
+export const shapeProposals = sqliteTable(
+  'shape_proposals',
+  {
+    id: text('id').$type<ShapeProposalId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    key: text('key').notNull(),
+    kind: text('kind').$type<ShapeProposalKind>().notNull(),
+    state: text('state').$type<ShapeProposalState>().notNull(),
+    /** The round that last created or changed it; a round that restates it unchanged leaves this alone. */
+    round: integer('round').notNull(),
+    /** The round that created it (or brought it back after a drop); `round` equal to it means "new". */
+    createdRound: integer('created_round').notNull().default(0),
+    /** The fields the builder pinned; `*` pins the row as a whole (Restore). */
+    pinned: text('pinned', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The kind's body, parsed with `ShapeProposalBody[kind]` on read. */
+    body: text('body', { mode: 'json' }).$type<Json>().notNull(),
+    taskHashes: text('task_hashes', { mode: 'json' })
+      .$type<Record<string, ShapeTaskMark>>()
+      .notNull()
+      .default(sql`'{}'`),
+    sourceMessageIds: text('source_message_ids', { mode: 'json' })
+      .$type<ShapeMessageId[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('shape_proposals_key_unique').on(t.shapeId, t.key)],
+);
+
+/** A file the builder dropped into a conversation (§5.4), or a terminal session handed over (§5.6). */
+export const shapeFiles = sqliteTable(
+  'shape_files',
+  {
+    id: text('id').$type<ShapeFileId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    name: text('name').notNull(),
+    mediaType: text('media_type').notNull(),
+    size: integer('size').notNull(),
+    /** Where the daemon copied it, under the data directory. */
+    storedPath: text('stored_path').notNull(),
+    /** When a turn first carried it to Claude; null until then, so a restart still tells it. */
+    toldAt: text('told_at'),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
+);
+
+/**
+ * What Convert made from a proposal: one created goal, task or decision per row. `key` is the
+ * proposal's own key, or the task key inside a goal, so a later Convert resolves it to its task.
+ */
+export const shapeLinks = sqliteTable(
+  'shape_links',
+  {
+    id: text('id').$type<ShapeLinkId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    proposalId: text('proposal_id')
+      .$type<ShapeProposalId>()
+      .notNull()
+      .references(() => shapeProposals.id),
+    key: text('key').notNull(),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    decisionId: text('decision_id')
+      .$type<DecisionId>()
+      .references(() => decisions.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index('shape_links_shape_key_idx').on(t.shapeId, t.key),
+    index('shape_links_task_idx').on(t.taskId),
+    check(
+      'shape_links_one_target',
+      sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) = 1`,
+    ),
+  ],
 );

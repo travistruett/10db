@@ -25,8 +25,11 @@ import {
   type SessionEvent,
   type SessionHandle,
   type SessionSpec,
+  type ShapeSessionHandle,
+  type ShapeSessionSpec,
   type ToolDecision,
 } from './types';
+import { createFakeShapeSession, refusedShapeSession, type FakeShapeBehaviour } from './fake-shape';
 
 const Json: z.ZodType = z.json();
 
@@ -177,6 +180,46 @@ export class FakeAdapter implements SessionAdapter {
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
     this.probes.push(probe);
     return Promise.resolve(this.probeSeen);
+  }
+
+  /** What each Shape session started here ran with, and what it was sent after its first message. */
+  readonly shapeSessions: {
+    readonly spec: ShapeSessionSpec;
+    readonly sent: string[];
+    readonly handle: ShapeSessionHandle;
+  }[] = [];
+  /** How a Shape session answers a message; the default writes a short reply. */
+  shapeBehaviour: FakeShapeBehaviour = () => Promise.resolve({ text: 'Understood.' });
+  /**
+   * When set, a Shape session's stop waits for it before the session ends, as a real process can
+   * take seconds to close after it is asked to.
+   */
+  shapeStopGate: Promise<void> | null = null;
+
+  startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
+    const refusal = checkAccount(spec.account, expectedSeen(spec.account));
+    const sent: string[] = [];
+    const inner = refusal
+      ? refusedShapeSession(refusal.message)
+      : createFakeShapeSession(
+          spec,
+          (turn) => this.shapeBehaviour(turn),
+          `fake-shape-${String(this.shapeSessions.length + 1)}`,
+        );
+    const handle: ShapeSessionHandle = {
+      events: inner.events,
+      send: (text) => {
+        sent.push(text);
+        inner.send(text);
+      },
+      interrupt: () => inner.interrupt(),
+      stop: async () => {
+        if (this.shapeStopGate !== null) await this.shapeStopGate;
+        await inner.stop();
+      },
+    };
+    this.shapeSessions.push({ spec, sent, handle });
+    return handle;
   }
 
   start(spec: SessionSpec): SessionHandle {

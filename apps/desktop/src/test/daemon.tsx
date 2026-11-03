@@ -60,6 +60,8 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/goals', base), () =>
       HttpResponse.json({ goals: [], ungrouped: null }),
     ),
+    // The nav lists the project's conversations on every screen.
+    http.get(daemonUrl('/projects/:projectId/shapes', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/keep-awake', base), () =>

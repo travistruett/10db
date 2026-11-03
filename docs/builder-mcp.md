@@ -38,7 +38,7 @@ Any other client that starts stdio servers (Claude Desktop, say) takes the same 
 ```
 
 Start a new session in the client; the tools are `list_projects`, `list_flows`, `list_tasks`, `create_task`,
-`edit_task`, `remove_task`, `start_task`, `move_task`, `run_next` and `list_inbox`.
+`edit_task`, `remove_task`, `start_task`, `move_task`, `run_next`, `list_inbox` and `start_shape`.
 
 The server starts and lists its tools whether or not 10db is open. A call made while 10db is closed answers
 "10db is not running: open the 10db app and try again"; open the app and call again, with no restart of the
@@ -71,6 +71,7 @@ The bridge reads no other 10db variable.
 | `move_task`     | Moves a task to a board column (parking it), or with `to: null` back to Planned.                                                           |
 | `run_next`      | Puts a started task that is waiting for a lane first in line for the next free lane (see below).                                           |
 | `list_inbox`    | Open Inbox cards: id, kind, project, title, time. Answer them in the app.                                                                  |
+| `start_shape`   | Moves a brainstorm into Shape: a conversation whose first message is your summary, with inline text files (256 KB in all, never paths).    |
 
 `create_task` refuses what the New Task form refuses, with the same words ("Add at least one acceptance
 criterion", "Choose at least one area", and the API's messages for an unknown area or a title with a line break).

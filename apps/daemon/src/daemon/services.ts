@@ -97,6 +97,7 @@ import {
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
+import type { ShapeApiServices } from './shape-services';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -111,6 +112,7 @@ export function createServices(deps: {
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
   readonly judge: JudgeApiServices;
+  readonly shape: ShapeApiServices;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
@@ -349,6 +351,7 @@ export function createServices(deps: {
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
+    ...deps.shape,
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),

@@ -84,7 +84,7 @@ describe('refusalText', () => {
 });
 
 describe('the builder tools', () => {
-  it('lists exactly the ten tools, none of them a lane tool', () => {
+  it('lists exactly the eleven tools, none of them a lane tool', () => {
     expect(Object.values(BuilderToolName).sort()).toEqual([
       'create_task',
       'edit_task',
@@ -95,6 +95,7 @@ describe('the builder tools', () => {
       'move_task',
       'remove_task',
       'run_next',
+      'start_shape',
       'start_task',
     ]);
     const lane = new Set<string>(Object.values(McpToolName));
@@ -150,6 +151,26 @@ describe('the builder tools', () => {
     expect(BuilderToolInputs.edit_task.safeParse({ taskId, acceptanceCriteria }).success).toBe(
       true,
     );
+  });
+
+  it('start_shape takes the shape of StartShapeInput, and says files are text and never paths', () => {
+    expect(BuilderToolInputs.start_shape.parse({ projectId, title: 't', summary: 's' })).toEqual({
+      projectId,
+      title: 't',
+      summary: 's',
+      files: [],
+    });
+    expect(
+      BuilderToolInputs.start_shape.safeParse({
+        projectId,
+        title: 't',
+        summary: 's',
+        files: [{ name: '/etc/passwd', content: 'x' }],
+      }).success,
+    ).toBe(false);
+    const tool = builderToolList().find((t) => t.name === BuilderToolName.StartShape);
+    expect(tool?.description).toContain('never paths');
+    expect(tool?.description).toContain('256 KB');
   });
 
   it('defaults a move’s neighbours to none, so parking is a task and a column', () => {

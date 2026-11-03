@@ -280,6 +280,22 @@ describe('permission and hook translation', () => {
     });
     expect(userMessage('nudge', 'next')).toMatchObject({ priority: 'next' });
   });
+
+  it('sends a dropped image as an image content block after the text', () => {
+    expect(userMessage('look', 'next', [{ mediaType: 'image/png', data: 'AAAA' }]).message).toEqual(
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'look' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } },
+        ],
+      },
+    );
+  });
+
+  it('keeps a plain string when there is no image', () => {
+    expect(userMessage('hi', undefined, []).message.content).toBe('hi');
+  });
 });
 
 describe('toSdkMcpServer', () => {

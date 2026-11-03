@@ -4,6 +4,7 @@ import {
   IconInbox,
   IconLayoutKanban,
   IconSettings,
+  IconSparkles,
 } from '@tabler/icons-react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
@@ -18,11 +19,13 @@ import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { useSelectedProject } from './selected-project';
+import { ShapeNav } from './shape-nav';
 import { SystemAlert } from './system-alert';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: IconLayoutKanban },
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
+  { to: '/shape', label: 'Shape', icon: IconSparkles },
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
   { to: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;
@@ -87,19 +90,23 @@ export function AppLayout() {
           <>
             <ProjectSwitcher />
             <Divider my="xs" />
-            {NAV.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                component={Link}
-                to={to}
-                active={pathname === to || pathname.startsWith(`${to}/`)}
-                label={label}
-                leftSection={<Icon size={16} stroke={1.5} />}
-                rightSection={
-                  to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
-                }
-              />
-            ))}
+            {NAV.map(({ to, label, icon: Icon }) =>
+              to === '/shape' ? (
+                <ShapeNav key={to} pathname={pathname} />
+              ) : (
+                <NavLink
+                  key={to}
+                  component={Link}
+                  to={to}
+                  active={pathname === to || pathname.startsWith(`${to}/`)}
+                  label={label}
+                  leftSection={<Icon size={16} stroke={1.5} />}
+                  rightSection={
+                    to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
+                  }
+                />
+              ),
+            )}
           </>
         )}
       </AppShell.Navbar>

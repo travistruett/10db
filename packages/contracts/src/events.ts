@@ -22,6 +22,7 @@ export const EventType = {
   EvidenceRecorded: 'evidence.recorded',
   CommitRecorded: 'commit.recorded',
   DecisionRecorded: 'decision.recorded',
+  DecisionWithdrawn: 'decision.withdrawn',
   DeviationRecorded: 'deviation.recorded',
   ProposalCreated: 'proposal.created',
   ProposalResolved: 'proposal.resolved',
@@ -42,6 +43,7 @@ export const EventType = {
   NetworkHostsChanged: 'network_hosts.changed',
   GoalCreated: 'goal.created',
   GoalChanged: 'goal.changed',
+  ShapeChanged: 'shape.changed',
 } as const;
 export type EventType = (typeof EventType)[keyof typeof EventType];
 

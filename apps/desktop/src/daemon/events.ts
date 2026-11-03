@@ -8,6 +8,7 @@ import { accountKeys } from './account-queries';
 import { goalKeys } from './goal-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
+import { shapeKeys } from './shape-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -28,6 +29,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // The digest's Decisions and Deviations rows.
   decision: [goalKeys.all],
   deviation: [goalKeys.all],
+  // A conversation's transcript, proposals, round and turn all change under this one event.
+  shape: [shapeKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.

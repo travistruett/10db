@@ -1,0 +1,208 @@
+import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@mantine/core';
+import { IconPaperclip } from '@tabler/icons-react';
+import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { FILE_PICKER_ACCEPT } from './dropped-files';
+import { isSendKey } from './use-shape-keys';
+
+export interface ComposerProps {
+  /** No builder message yet: the input takes focus and the hint says what nothing does until you act. */
+  readonly firstRun: boolean;
+  readonly answering: boolean;
+  /** A Propose turn is queued or running; pressing again would be ignored. */
+  readonly proposing: boolean;
+  readonly proposeLabel: 'Propose' | 'Propose Again';
+  readonly canPropose: boolean;
+  /** Sends the text; rejects with the daemon's words. */
+  readonly onSend: (text: string) => Promise<void>;
+  readonly onPropose: () => void;
+  readonly onStop: () => void;
+  /** Why the conversation could not load, shown above the input in red. */
+  readonly error: string | null;
+  /** The names of the files already in the conversation. */
+  readonly files: readonly string[];
+  /** Adds dropped, pasted or picked files; answers a reason for each one it refused. */
+  readonly onFiles: (files: File[]) => Promise<string[]>;
+}
+
+const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
+
+/** The input, Send, the group's one filled primary Propose, and Stop while a turn runs. */
+export function Composer(props: ComposerProps) {
+  const { firstRun, answering, proposing, proposeLabel, canPropose } = props;
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [refused, setRefused] = useState<readonly string[]>([]);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (firstRun) input.current?.focus();
+  }, [firstRun]);
+
+  const addFiles = async (files: File[]): Promise<void> => {
+    if (files.length === 0) return;
+    try {
+      setRefused(await props.onFiles(files));
+    } catch (error) {
+      setRefused([error instanceof Error ? error.message : String(error)]);
+    }
+  };
+  const hasFiles = (event: DragEvent): boolean => event.dataTransfer.types.includes('Files');
+  const onDrop = (event: DragEvent): void => {
+    setDragging(false);
+    if (!hasFiles(event)) return;
+    event.preventDefault();
+    void addFiles([...event.dataTransfer.files]);
+  };
+  // A screenshot pastes as a file with no text; a copy that carries text too is pasted as text.
+  const onPaste = (event: ClipboardEvent): void => {
+    const files = [...event.clipboardData.files];
+    if (files.length === 0 || event.clipboardData.getData('text') !== '') return;
+    event.preventDefault();
+    void addFiles(files);
+  };
+
+  const send = async (): Promise<void> => {
+    const text = draft.trim();
+    if (text === '' || sending) return;
+    setSending(true);
+    setFailure(null);
+    try {
+      await props.onSend(text);
+      setDraft('');
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const shown = failure ?? props.error;
+
+  return (
+    <Stack
+      gap="xs"
+      px="md"
+      pb="md"
+      pt="xs"
+      style={{ flex: 'none' }}
+      onDragOver={(event: DragEvent) => {
+        if (!hasFiles(event)) return;
+        // Without this the browser opens the file instead of handing it over.
+        event.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => {
+        setDragging(false);
+      }}
+      onDrop={onDrop}
+    >
+      {shown === null ? null : (
+        <Alert color="red" title="Couldn't reach Claude">
+          {shown}
+        </Alert>
+      )}
+      {refused.length === 0 ? null : (
+        <Alert
+          color="red"
+          title="Couldn't add the file"
+          withCloseButton
+          closeButtonLabel="Dismiss"
+          onClose={() => {
+            setRefused([]);
+          }}
+        >
+          {refused.map((reason) => (
+            <Text key={reason} size="sm">
+              {reason}
+            </Text>
+          ))}
+        </Alert>
+      )}
+      <Box
+        style={{
+          outline: dragging ? '1px dashed var(--mantine-color-dimmed)' : undefined,
+          outlineOffset: 2,
+          borderRadius: 'var(--mantine-radius-sm)',
+        }}
+      >
+        <Textarea
+          ref={input}
+          aria-label="Message"
+          aria-describedby="shape-composer-hint"
+          autosize
+          minRows={2}
+          maxRows={8}
+          placeholder={firstRun ? FIRST_RUN_PLACEHOLDER : 'Talk it through…'}
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.currentTarget.value);
+          }}
+          onPaste={onPaste}
+          onKeyDown={(event) => {
+            if (isSendKey(event)) {
+              event.preventDefault();
+              void send();
+            }
+          }}
+        />
+      </Box>
+      {props.files.length === 0 ? null : (
+        <Text size="xs" c="dimmed" aria-label="Files in the conversation">
+          {props.files.join(' · ')}
+        </Text>
+      )}
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        hidden
+        accept={FILE_PICKER_ACCEPT}
+        aria-label="Choose files"
+        onChange={(event) => {
+          void addFiles([...(event.currentTarget.files ?? [])]);
+          event.currentTarget.value = '';
+        }}
+      />
+      <Group justify="space-between" align="flex-start" wrap="nowrap">
+        <Text id="shape-composer-hint" size="xs" c="dimmed">
+          {firstRun
+            ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
+            : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops'}
+        </Text>
+        <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
+          <ActionIcon
+            variant="subtle"
+            size="lg"
+            aria-label="Attach files"
+            onClick={() => {
+              picker.current?.click();
+            }}
+          >
+            <IconPaperclip size={18} stroke={1.5} />
+          </ActionIcon>
+          {answering ? (
+            <Button variant="default" onClick={props.onStop}>
+              Stop
+            </Button>
+          ) : null}
+          <Button
+            variant="default"
+            loading={sending}
+            disabled={draft.trim() === ''}
+            onClick={() => {
+              void send();
+            }}
+          >
+            Send
+          </Button>
+          <Button loading={proposing} disabled={!canPropose} onClick={props.onPropose}>
+            {proposeLabel}
+          </Button>
+        </Group>
+      </Group>
+    </Stack>
+  );
+}
