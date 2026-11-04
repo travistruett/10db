@@ -28,6 +28,7 @@ import {
   searchPrinciples,
   insertDecision,
   insertSource,
+  patchShapeProposal,
   type WriteContext,
 } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -532,6 +533,80 @@ describe('question records', () => {
       expect.stringMatching(/who-pays is about Task seats, which isn't selected/),
     ]);
     expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+  });
+
+  // A stored proposal that is not a live goal or task cannot hold a question.
+  const askAbout = (m: string, about: string) =>
+    write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({ questions: [questionOf(m, 'who-pays', { about })] }),
+      ),
+    );
+
+  it.each([
+    ['a decision', 'rule'],
+    ['a principle', 'habit'],
+    ['another question', 'first-q'],
+  ])('refuses to propose a question about %s', (_, about) => {
+    const m = c.say();
+    propose({
+      records: [decisionOf(m, 'rule'), principleOf(m, 'habit')],
+      questions: [questionOf(m, 'first-q')],
+    });
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+  });
+
+  it.each([
+    ['goal', 'g', (m: string) => ({ goals: [goalOf(m, 'g', ['g1'])] })],
+    ['task', 't', (m: string) => ({ looseTasks: [loose(m, 't')] })],
+  ])('refuses to propose a question about a dropped %s', (_, about, draftOf) => {
+    const m = c.say();
+    propose(draftOf(m));
+    write((ctx) => {
+      dropProposal(ctx, rowOf(about).id);
+    });
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+  });
+
+  it('says why Convert refuses a question about a goal that was dropped', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g' })],
+    });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g, which was dropped, so it cannot hold a question',
+    ]);
+  });
+
+  it('says why Convert refuses a question about a proposal that is not a goal or task', () => {
+    const m = c.say();
+    propose({
+      records: [decisionOf(m, 'rule')],
+      questions: [questionOf(m, 'who-pays')],
+    });
+    const question = rowOf('who-pays');
+    write((ctx) => {
+      patchShapeProposal(ctx, question.id, {
+        body: { ...(question.body as object), about: 'rule' },
+      });
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about rule, which is a decision, not a goal or task',
+    ]);
   });
 });
 

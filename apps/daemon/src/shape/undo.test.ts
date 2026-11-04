@@ -270,7 +270,9 @@ describe('Remove Draft Goal', () => {
       expect(row.state).toBe(ShapeProposalState.Pending);
       expect(write((ctx) => convertProposals(ctx, c.shape.id, [row.id]))).toEqual({
         ok: false,
-        errors: ['on-extra is about extra, and no proposal has that key'],
+        errors: [
+          'on-extra is about extra, which was converted and then taken back, so it cannot hold a question',
+        ],
       });
     });
 

@@ -44,6 +44,7 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
         ? `${id} has started`
         : `${id} was not created by this conversation`,
   storedSources: new Set(),
+  storedEfforts: new Set(),
   draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
   placeOf: (id) =>
     id === converted
@@ -360,6 +361,39 @@ describe('a plan that breaks a rule', () => {
       looseTasks: [loose('a', { dependsOn: ['typo'], size: 'XL' })],
     });
     expect(errors.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('refuses a question about a stored proposal that is not a live goal or task', () => {
+    const question = {
+      key: 'q',
+      text: 'Who pays?',
+      for: 'finance',
+      about: 'stored',
+      sourceMessageIds: [message],
+    };
+    // A decision, principle, question, or a dropped goal or task: stored, but no live effort.
+    expect(check({ questions: [question] }, world({ storedSources: new Set(['stored']) }))).toEqual(
+      [expect.stringMatching(/Question 1, about: stored is not a goal or task/)],
+    );
+  });
+
+  it('accepts a question about a stored goal or task that is still live', () => {
+    expect(
+      check(
+        {
+          questions: [
+            {
+              key: 'q',
+              text: 'Who pays?',
+              for: 'finance',
+              about: 'stored',
+              sourceMessageIds: [message],
+            },
+          ],
+        },
+        world({ storedSources: new Set(['stored']), storedEfforts: new Set(['stored']) }),
+      ),
+    ).toEqual([]);
   });
 
   it('lets a row without sources keep the ones it has stored', () => {

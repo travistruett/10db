@@ -3,6 +3,7 @@ import {
   landingTarget,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  ShapeProposalState,
   taskLandingFor,
   TaskStatus,
   WorkspaceMode,
@@ -60,13 +61,23 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       )
       .map((m) => m.id),
   );
+  const proposals = listShapeProposals(db, shapeId);
   return {
     areaNames: [...project.areas.map((a) => a.name), ...project.hazards.map((h) => h.name)],
     people: listPeople(db),
     citable,
     convertedTasks,
     convertedGoals,
-    storedSources: new Set(listShapeProposals(db, shapeId).map((r) => r.key)),
+    storedSources: new Set(proposals.map((r) => r.key)),
+    storedEfforts: new Set(
+      proposals
+        .filter(
+          (r) =>
+            (r.kind === 'goal' || r.kind === 'task') &&
+            (r.state === ShapeProposalState.Pending || r.state === ShapeProposalState.Accepted),
+        )
+        .map((r) => r.key),
+    ),
     draftPlace: {
       // What `insertTask` gives a task with no placement named: the project's own.
       place:
