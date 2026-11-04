@@ -167,6 +167,26 @@ describe('topic keys', () => {
     expect(first).not.toBe(second);
     expect(topicKeyFrom('永远不要在测试中休眠')).toBe(first);
   });
+
+  it.each([
+    { first: '在 CI 中不要休眠', second: '在 CI 中必须运行', prefix: 'ci' },
+    { first: '规则 2', second: '要求 2', prefix: '2' },
+    { first: `${'word '.repeat(30)}规则一`, second: `${'word '.repeat(30)}规则二`, prefix: 'word' },
+  ])('keeps mostly non-Latin statements apart: $first / $second', ({ first, second, prefix }) => {
+    const a = topicKeyFrom(first);
+    const b = topicKeyFrom(second);
+    expect(a).toMatch(new RegExp(`^${prefix}(-word)*-[0-9a-f]{6}$`));
+    expect(a).not.toBe(b);
+    expect(topicKeyFrom(first)).toBe(a);
+    expect(TopicKey.safeParse(a).success).toBe(true);
+    expect(TopicKey.safeParse(b).success).toBe(true);
+  });
+
+  it('keeps the Latin words and the 80 character limit when a long statement has non-Latin words', () => {
+    const key = topicKeyFrom(`${'a'.repeat(120)} 你好`);
+    expect(key.length).toBeLessThanOrEqual(80);
+    expect(key).toMatch(/^a+-[0-9a-f]{6}$/);
+  });
 });
 
 describe('PrincipleDraft', () => {
