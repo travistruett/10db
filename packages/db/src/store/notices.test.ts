@@ -192,6 +192,16 @@ describe('a notice longer than the contract allows', () => {
     expect(getWorkstream(store.db, workstream.id).notice).toEqual(notice);
   });
 
+  it('keeps the whole record of a notice whose body is cut', () => {
+    const { batch } = seed();
+    const record = JSON.stringify({ runs: { '77': ['desktop'] }, done: false });
+    store.write((ctx) => setBatchNotice(ctx, batch.id, { ...long, record }));
+    const [notice] = getBatch(store.db, batch.id).notices;
+    expect(notice?.body).toHaveLength(NOTICE_BODY_MAX);
+    expect(notice?.record).toBe(record);
+    expect(() => BatchDto.parse(getBatch(store.db, batch.id))).not.toThrow();
+  });
+
   it('cut the same way twice writes nothing the second time', () => {
     const { batch } = seed();
     store.write((ctx) => setBatchNotice(ctx, batch.id, long));

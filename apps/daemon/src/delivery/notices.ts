@@ -384,6 +384,8 @@ export const cancelledNotices = {
     batch: BatchDto,
     checks: readonly { readonly name: string; readonly link: string | null }[],
     why: CancelledWhy,
+    /** The pull request head the checks were cancelled on, stored so a restart knows the notice's head. */
+    head: string | null = null,
   ): Notice => {
     const prUrl = batch.prUrl;
     const number = prUrl === null ? null : /\/pull\/(\d+)$/.exec(prUrl)?.[1];
@@ -415,9 +417,42 @@ export const cancelledNotices = {
       tone: 'warning',
       line,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that ${batch.baseBranch} requires, so ${named}${prUrl === null ? '' : ` (${prUrl})`} cannot merge.\n\n${list}\n\n${tail} Run ${one ? 'it' : 'them'} again from the link${one ? '' : 's'} above (Re-run jobs), or push a commit to the branch. This notice goes once the check runs again or passes.`,
+      // Read back after a restart, so 10db knows which kind of notice this was.
+      record: JSON.stringify({ kind: why.kind === 'again' ? 'again' : 'stopped', head }),
     };
   },
 };
+
+/**
+ * The pull request head a stored cancelled-check notice is about. Null when the notice is an older
+ * one that did not record it.
+ */
+export function cancelledNoticeHead(notice: Notice): string | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    const head = (parsed as { head?: unknown } | null)?.head;
+    return typeof head === 'string' ? head : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Which kind of cancelled-check notice is stored: 'again' (10db ran the checks it names, and still
+ * runs one it has not run) or 'stopped' (10db could not run a check, so it asks nothing more). Null
+ * when the notice is an older one with no record of its kind.
+ */
+export function cancelledNoticeKind(notice: Notice): 'again' | 'stopped' | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    const kind = (parsed as { kind?: unknown } | null)?.kind;
+    return kind === 'again' || kind === 'stopped' ? kind : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The key of the rerun notice for one pull request head. */
 export const rerunNoticeKey = (head: string): string => `${NOTICE_KEY.checksRerun}:${head}`;
@@ -431,20 +466,27 @@ export function rerunNoticeHead(key: string): string | null {
 /** The Actions runs GitHub took a rerun of for one head, each with the checks it reran. */
 export type RerunRuns = ReadonlyMap<string, readonly { readonly name: string }[]>;
 
-const RUNS_MARK = 'Runs 10db started (run id: its checks, then whether it is done): ';
+/** Where an older daemon put the record: at the end of the notice's displayed body. */
+const LEGACY_RUNS_MARK = 'Runs 10db started (run id: its checks, then whether it is done): ';
 
 /**
  * What a stored rerun notice records of the head: the runs GitHub took, and whether 10db is done
  * asking (a run GitHub refused as still running is asked again, also by a daemon that restarted).
- * Null when the notice carries no record (an older one: the head counts as fully asked).
+ * The record is `Notice.record`, never part of the displayed body; a notice an older daemon stored
+ * carries it at the end of the body instead. Null when the notice carries no record (the head
+ * counts as fully asked).
  */
 export function rerunRecord(
   notice: Notice,
 ): { runs: Map<string, { name: string }[]>; done: boolean } | null {
-  const at = notice.body.lastIndexOf(RUNS_MARK);
-  if (at < 0) return null;
+  let json = notice.record;
+  if (json === undefined) {
+    const at = notice.body.lastIndexOf(LEGACY_RUNS_MARK);
+    if (at < 0) return null;
+    json = notice.body.slice(at + LEGACY_RUNS_MARK.length);
+  }
   try {
-    const parsed: unknown = JSON.parse(notice.body.slice(at + RUNS_MARK.length));
+    const parsed: unknown = JSON.parse(json);
     if (typeof parsed !== 'object' || parsed === null) return null;
     const { runs, done } = parsed as { runs?: unknown; done?: unknown };
     if (typeof runs !== 'object' || runs === null || typeof done !== 'boolean') return null;
@@ -466,22 +508,32 @@ export function rerunRecord(
 /** What delivery shows on a shipped batch's tasks once it ran a cancelled required check again. */
 export const rerunNotices = {
   /**
-   * Also the record that the head was asked: it is read back after a restart. It names only the
-   * checks of runs GitHub took, and `done` says there is no run left to ask for.
+   * Also the record that the head was asked: it is read back after a restart, from `record`, which
+   * no one sees. It names only the checks of runs GitHub took. `state` says what is left: `asking`
+   * is a run GitHub refused as still running, which 10db asks for again; `refused` is a run GitHub
+   * refused outright, which 10db never asks for again (the record still says it is not done, so a
+   * restart does not read the head as fully asked); `done` is no run left to ask for.
    */
-  ran: (head: string, runs: RerunRuns, done: boolean): Notice => {
+  ran: (head: string, runs: RerunRuns, state: 'asking' | 'refused' | 'done'): Notice => {
     const checks = [...runs.values()].flat();
     const names = checks.map((c) => `"${c.name}"`).join(', ');
     const one = checks.length === 1;
     const record = JSON.stringify({
       runs: Object.fromEntries([...runs].map(([runId, c]) => [runId, c.map((x) => x.name)])),
-      done,
+      done: state === 'done',
     });
+    const rest =
+      state === 'asking'
+        ? 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows. '
+        : state === 'refused'
+          ? 'GitHub refused to run another cancelled check, so 10db will not ask again; a notice beside this one says which. '
+          : '';
     return {
       key: rerunNoticeKey(head),
       tone: 'info',
       line: `${one ? `Required check ${names} was` : `Required checks ${names} were`} cancelled; 10db ran ${one ? 'it' : 'them'} again`,
-      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. ${done ? '' : 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows. '}This notice goes when the pull request merges, closes or gets a new commit.\n\n${RUNS_MARK}${record}`,
+      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. ${rest}This notice goes when the pull request merges, closes or gets a new commit.`,
+      record,
     };
   },
 };
