@@ -20,7 +20,16 @@ backtick, `$(…)` or `<(…)`, no variable, no subshell or group, no background
 other than `2>&1`, `>/dev/null` and `2>/dev/null`. The command word is a bare name: no path, no wrapper, no
 assignment. Writing options are refused whatever the command: `find -delete -exec -execdir -ok -okdir
 -fprint* -fls`, `sort -o --output --compress-program`, `tree -o -R`, `rg --pre --pre-glob --hostname-bin`, and
-for git `--output --ext-diff --textconv --open-files-in-pager -O`.
+for git `--output --ext-diff --textconv`, plus `--open-files-in-pager` and `-O` for `git grep` only. The git
+options are judged in two places (`gitRunsOrWrites` in `guard/read-only.ts` calls `gitVerdict` first):
+
+- `gitVerdict` (`guard/git-rules.ts`) refuses `--output` for every verb, and `-O` and `--open-files-in-pager` for
+  `git grep` only. `-O` means "open files in pager" only for grep, so `git log -SOption` is not refused, and
+  neither is `git diff -O<orderfile>`. For grep, any short bundle holding an `O` is refused (`-n1Osh`),
+  not just `-O`; pass a pattern that starts with `O` as `-e O`.
+- `gitRunsOrWrites` itself refuses `--ext-diff` and `--textconv`. Git accepts any unambiguous abbreviation of a
+  long option, so abbreviations of these two are refused as well (`--ext=…`, `--textc`). `--text` (treat files as
+  text) is **not** `--textconv`: it is a different option and is allowed, though it is a prefix of `--textconv`.
 
 Two differences from a read-only step's grammar, both for lanes only:
 
