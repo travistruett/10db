@@ -34,6 +34,7 @@ import type {
   GoalDto,
   GoalId,
   GoalListDto,
+  HumanTouchDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -211,6 +212,11 @@ export interface ApiServices {
    * it, and the Ungrouped group. Leaves every view mark as it was.
    */
   listGoals(projectId: ProjectId): GoalListDto;
+  /**
+   * How often a person was needed in the project over the last 14 days, today first. Throws
+   * NotFoundError for an unknown project.
+   */
+  humanTouch(projectId: ProjectId): HumanTouchDto;
   /**
    * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
    * advances to now. Throws NotFoundError for an unknown goal.

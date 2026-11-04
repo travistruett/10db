@@ -6,6 +6,7 @@ import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
 import { accountKeys } from './account-queries';
 import { goalKeys } from './goal-queries';
+import { humanTouchKeys } from './human-touch-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
@@ -36,14 +37,15 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES],
-  session: WORK,
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all],
+  // A session's span says which tasks ran that day.
+  session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all],
-  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all],
+  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
   persona: [CANDIDATES],

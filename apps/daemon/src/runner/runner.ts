@@ -19,6 +19,7 @@ import {
   StepStatus,
   ToolAccess,
   Verdict,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
   WorkstreamState as S,
   AccountKind,
@@ -684,7 +685,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: row.id,
-      title: `Workstream failed: ${getTask(db, row.taskId).title}`,
+      title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
       body: reason,
       ...(batch ? { options: batch.options } : {}),
       ...(batch || review

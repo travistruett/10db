@@ -11,6 +11,7 @@ export * from './goal-removal';
 export * from './goals';
 export * from './handoffs';
 export * from './holds';
+export * from './human-touch';
 export * from './inbox';
 export * from './knowledge';
 export * from './landing-groups';

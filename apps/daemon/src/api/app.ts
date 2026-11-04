@@ -434,6 +434,9 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/goals', (c) =>
       c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/human-touch', (c) =>
+      c.json(deps.services.humanTouch(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/goals/:goalId/digest', (c) =>
       c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),
     )

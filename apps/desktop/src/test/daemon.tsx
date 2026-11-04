@@ -62,6 +62,9 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/goals', base), () =>
       HttpResponse.json({ goals: [], ungrouped: null }),
     ),
+    http.get(daemonUrl('/projects/:projectId/human-touch', base), () =>
+      HttpResponse.json({ days: [] }),
+    ),
     // The nav lists the project's conversations on every screen.
     http.get(daemonUrl('/projects/:projectId/shapes', base), () => HttpResponse.json([])),
     // Settings › General reads the project's Jev opt-in (Shape spec §9); off, as for every project.

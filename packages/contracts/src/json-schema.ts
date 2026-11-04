@@ -60,6 +60,7 @@ import {
   GoalDto,
   GoalListDto,
 } from './goals';
+import { HumanTouchDayDto, HumanTouchDto } from './human-touch';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
@@ -209,6 +210,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'goal-digest-dto': GoalDigestDto,
   'goal-dto': GoalDto,
   'goal-list-dto': GoalListDto,
+  'human-touch-day-dto': HumanTouchDayDto,
+  'human-touch-dto': HumanTouchDto,
   'plan-draft': PlanDraft,
   'shape-dto': ShapeDto,
   'shape-message-dto': ShapeMessageDto,

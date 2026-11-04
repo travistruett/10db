@@ -4,6 +4,7 @@ import {
   GoalDigestDto,
   GoalListDto,
   HealthResponse,
+  HumanTouchDto,
   InvalidError,
   mintId,
   InboxAnswerRefused,
@@ -95,6 +96,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     startBatch: track('startBatch'),
     listBatches: track('listBatches'),
     listGoals: track('listGoals'),
+    humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),
     listShapes: track('listShapes'),
     createShape: track('createShape'),
@@ -1012,6 +1014,37 @@ describe('goal routes', () => {
     expect(ok.status).toBe(200);
     expect(GoalListDto.parse(await ok.json())).toEqual(list);
     expect((await app(services).request('/projects/not-a-project/goals', auth)).status).toBe(400);
+  });
+
+  it('GET /projects/:projectId/human-touch answers the days of the project asked for', async () => {
+    const asked: string[] = [];
+    const day = {
+      day: '2026-11-03',
+      permission: 1,
+      question: 0,
+      workstreamFailed: 0,
+      flag: 0,
+      proposal: 0,
+      review: 0,
+      check: 0,
+      cards: 1,
+      tasksRan: 1,
+      cardsPerTask: 1,
+      waitingMinutes: 12.5,
+    };
+    const services = stubServices({
+      humanTouch: (id) => {
+        asked.push(id);
+        return { days: [day] };
+      },
+    });
+    const ok = await app(services).request(`/projects/${projectId}/human-touch`, auth);
+    expect(ok.status).toBe(200);
+    expect(HumanTouchDto.parse(await ok.json())).toEqual({ days: [day] });
+    expect(asked).toEqual([projectId]);
+    expect((await app(services).request('/projects/not-a-project/human-touch', auth)).status).toBe(
+      400,
+    );
   });
 });
 
