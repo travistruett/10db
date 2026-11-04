@@ -8,7 +8,7 @@ import {
   type PointerEvent,
   type ReactNode,
 } from 'react';
-import { escapeIsTaken } from './use-shape-keys';
+import { escapeHasOwner, escapeIsTaken } from './use-shape-keys';
 import {
   CHAT_MIN,
   DEFAULT_CHAT_SHARE,
@@ -61,7 +61,7 @@ export function SplitPane({ children, drawerOpen, onClose }: SplitPaneProps) {
   const [chatPx, setChatPx] = useState<number | null>(null);
 
   // Esc closes the open drawer from anywhere on the screen, ahead of "Esc stops the turn" (capture
-  // phase, default prevented), but leaves it to a modal, menu or open select.
+  // phase, default prevented), but leaves it to a modal, menu, open select or row editor.
   const closing = layout.mode === 'drawer' && drawerOpen;
   const latestClose = useRef(onClose);
   useEffect(() => {
@@ -70,7 +70,7 @@ export function SplitPane({ children, drawerOpen, onClose }: SplitPaneProps) {
   useEffect(() => {
     if (!closing) return;
     const onKeyDown = (event: globalThis.KeyboardEvent): void => {
-      if (event.key !== 'Escape' || escapeIsTaken(event)) return;
+      if (event.key !== 'Escape' || escapeIsTaken(event) || escapeHasOwner(event)) return;
       event.preventDefault();
       latestClose.current();
     };

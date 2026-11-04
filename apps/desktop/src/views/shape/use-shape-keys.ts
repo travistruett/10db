@@ -21,6 +21,19 @@ export function escapeIsTaken(event: KeyboardEvent): boolean {
   );
 }
 
+/** Marks a form that cancels on Esc itself, so a key pressed inside it is left to it. */
+export const OWNS_ESCAPE_ATTRIBUTE = 'data-owns-escape';
+
+/**
+ * True when the key landed inside a form that answers Esc itself. That form hears the key only on
+ * the way back up, after a capture listener, so the listener has to ask where the key landed.
+ */
+export function escapeHasOwner(event: KeyboardEvent): boolean {
+  return (
+    event.target instanceof Element && event.target.closest(`[${OWNS_ESCAPE_ATTRIBUTE}]`) !== null
+  );
+}
+
 /** ⌘↩ is the input's (`isSendKey`); the screen's own keys are ⌘⇧↩ and Esc. */
 export function useShapeKeys(keys: ShapeKeys): void {
   const latest = useRef(keys);

@@ -70,17 +70,17 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
     };
   }, [highlighted]);
 
+  // The drawer's controls are about to unmount, so focus goes to the button that opens it. That
+  // button sits in the drawer layout's bar only: beside the chat there is none, and focus stays.
+  const closeDrawer = (): void => {
+    setDrawerOpen(false);
+    setJump(null);
+    toggle.current?.focus();
+  };
+
   return (
     <>
-      <SplitPane
-        drawerOpen={drawerOpen}
-        onClose={() => {
-          // The drawer's own controls are about to unmount: focus goes to the button that opens it.
-          setDrawerOpen(false);
-          setJump(null);
-          toggle.current?.focus();
-        }}
-      >
+      <SplitPane drawerOpen={drawerOpen} onClose={closeDrawer}>
         {(layout) => ({
           chat: (
             <ConversationPane
@@ -107,8 +107,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
               }}
               onWhy={(row) => {
                 // A drawer would cover the messages it points at.
-                setDrawerOpen(false);
-                setJump(null);
+                closeDrawer();
                 setWhy((previous) => ({
                   ids: row.sourceMessageIds,
                   nonce: (previous?.nonce ?? 0) + 1,

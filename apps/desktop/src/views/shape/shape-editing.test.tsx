@@ -311,6 +311,8 @@ describe('what changed, and why', () => {
       await waitFor(() => {
         expect(highlighted()).toEqual(['And thin the scrollbars.']);
       });
+      // The sidebar stays beside the chat here, so focus stays on the row; only a drawer moves it.
+      expect(document.activeElement).toBe(row);
       fireEvent.keyDown(document, { key: 'Escape' });
       fireEvent.click(row);
       fireEvent.click(await screen.findByRole('button', { name: 'Why?' }));

@@ -1,7 +1,7 @@
 import { mintId, type ShapeViewDto } from '@10db/contracts';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import {
@@ -199,5 +199,96 @@ describe('Shape: the drawer layout', () => {
     fireEvent.keyDown(document.body, { key: 'Escape' });
     menu.remove();
     expect(screen.getByRole('region', { name: 'Proposed' })).toBeTruthy();
+  });
+
+  it('leaves Esc to an open row editor, and the next Esc closes the drawer', async () => {
+    openNarrow(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Edit Compact card density' }));
+    const form = await within(sidebar).findByRole('form', { name: 'Edit row' });
+    fireEvent.keyDown(within(form).getByLabelText('Title'), { key: 'Escape' });
+    expect(within(sidebar).queryByRole('form', { name: 'Edit row' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Proposed' })).toBe(sidebar);
+    const row = within(sidebar).getByRole('button', { name: /^Compact card density/ });
+    expect(document.activeElement).toBe(row);
+    fireEvent.keyDown(row, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
+  });
+
+  it('stops a running turn only on the Esc after the editor and the drawer have closed', async () => {
+    const stops: string[] = [];
+    server.use(
+      http.post(daemonUrl('/shapes/:shapeId/stop'), ({ params }) => {
+        stops.push(String(params['shapeId']));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    openNarrow({
+      ...view,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
+    await screen.findByRole('button', { name: 'Stop' });
+    fireEvent.click(screen.getByRole('button', { name: 'Proposed' }));
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Edit Compact card density' }));
+    const form = await within(sidebar).findByRole('form', { name: 'Edit row' });
+    fireEvent.keyDown(within(form).getByLabelText('Title'), { key: 'Escape' });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+    expect(stops).toEqual([]);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    await waitFor(() => {
+      expect(stops).toEqual([view.shape.id]);
+    });
+  });
+
+  it('leaves Esc to the row editor from its Cancel button too', async () => {
+    openNarrow(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    fireEvent.click(within(sidebar).getByRole('button', { name: 'Edit Compact card density' }));
+    const form = await within(sidebar).findByRole('form', { name: 'Edit row' });
+    fireEvent.keyDown(within(form).getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
+    expect(within(sidebar).queryByRole('form', { name: 'Edit row' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Proposed' })).toBe(sidebar);
+  });
+
+  describe('Why?', () => {
+    // The transcript scrolls through its virtual list, which writes Element.scrollTo. jsdom has none.
+    beforeEach(() => {
+      Element.prototype.scrollTo = vi.fn();
+    });
+    afterEach(() => {
+      // @ts-expect-error jsdom has none; put that back.
+      delete Element.prototype.scrollTo;
+    });
+
+    it('closes the drawer and leaves focus on the Proposed button, from the W key', async () => {
+      openNarrow(view);
+      fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+      const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+      const row = within(sidebar).getByRole('button', { name: /^Compact card density/ });
+      row.focus();
+      fireEvent.keyDown(row, { key: 'w' });
+      expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
+    });
+
+    it('closes the drawer and leaves focus on the Proposed button, from the menu', async () => {
+      openNarrow(view);
+      fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+      const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+      fireEvent.click(
+        within(sidebar).getByRole('button', { name: 'Actions for Compact card density' }),
+      );
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Why?' }));
+      expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+      await waitFor(() => {
+        expect(screen.queryByRole('menu')).toBeNull();
+      });
+      expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
+    });
   });
 });
