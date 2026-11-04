@@ -22,6 +22,21 @@ describe('editResult', () => {
     expect(editResult('Edit', { old_string: '', new_string: 'new' }, null)).toBe('new');
   });
 
+  it('fills a file that holds only whitespace from an empty old_string, and refuses one with content', () => {
+    const fill = { file_path: '/p/a.ts', old_string: '', new_string: 'x  \ny\n' };
+    // Claude Code refuses only when the trimmed file is non-empty; new_string loses its trailing whitespace.
+    expect(editResult('Edit', fill, '')).toBe('x\ny\n');
+    expect(editResult('Edit', fill, '\n')).toBe('x\ny\n');
+    expect(editResult('Edit', fill, '  \n\t')).toBe('x\ny\n');
+    expect(editResult('Edit', { old_string: '', new_string: '  \n' }, '  \n')).toBe('\n');
+    expect(editResult('Edit', fill, ' a\n')).toBeUndefined();
+    // A CRLF file that holds only line breaks is written back in CRLF.
+    expect(editResult('Edit', fill, '\r\n\r\n')).toBe('x\r\ny\r\n');
+    expect(editResult('MultiEdit', { edits: [{ old_string: '', new_string: 'x' }] }, '\n')).toBe(
+      'x',
+    );
+  });
+
   it('takes the newline after deleted text with it, as Claude Code does', () => {
     const env = 'A=1\nB=2\nC=3\n';
     expect(editResult('Edit', { old_string: 'B=2', new_string: '' }, env)).toBe('A=1\nC=3\n');

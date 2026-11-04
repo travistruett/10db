@@ -58,8 +58,9 @@ function applyEdit(current: string | null, edit: unknown, strip: boolean): strin
   const rawNewText = stringIn(fields, 'new_string');
   if (oldText === null || rawNewText === null) return undefined;
   const newText = strip ? stripTrailingWhitespace(rawNewText) : rawNewText;
-  // An empty old_string creates the file, or fills one that is empty; on a file with content it fails.
-  if (oldText === '') return current === null || current === '' ? newText : undefined;
+  // An empty old_string creates the file, or fills one that holds only whitespace (Claude Code refuses when
+  // the trimmed file is non-empty); on a file with content it fails.
+  if (oldText === '') return current === null || current.trim() === '' ? newText : undefined;
   if (current === null) return undefined;
   const at = current.indexOf(oldText);
   if (at < 0) return undefined;
