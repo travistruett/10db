@@ -195,7 +195,8 @@ export function ConversationPane({
       <Transcript messages={view?.messages ?? []} why={why} />
       {view?.turn.waitingForUpdate === true ? (
         <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
-          Waiting for an update to install. Your message will run after it.
+          Waiting for an update to install. If the update installs, 10db restarts and this won’t
+          run: send or press it again afterwards. If it doesn’t install, this runs.
         </Text>
       ) : null}
       <Composer

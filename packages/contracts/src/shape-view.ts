@@ -125,8 +125,10 @@ export const ShapeTurnDto = z.object({
   /** A rehearsal turn is queued or running (§7): the Convert modal says "Rehearsing n tasks…". */
   rehearsing: z.boolean(),
   /**
-   * The next turn is held back by a waiting update's drain: nothing of it has started, and it runs
-   * once the update has installed or the drain ended. `running` is false and `queued` counts it.
+   * The next turn (a message, a Propose or a rehearsal) is held back by a waiting update's drain:
+   * nothing of it has started. If the update installs, 10db quits and the turn never runs (the
+   * builder is told to send it or press the button again); if the drain ends without an install
+   * (failed or cancelled), the turn runs. `running` is false and `queued` counts it.
    */
   waitingForUpdate: z.boolean(),
 });

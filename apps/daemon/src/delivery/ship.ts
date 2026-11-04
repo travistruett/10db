@@ -1076,7 +1076,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
             if (before.update?.kind === 'conflicted' && !stopped())
               sendToMerge(batch, before.update);
             if (before.update?.kind === 'install_broken' && !stopped())
-              fail(batch, shipCards.installBroken(batch, before.update.note));
+              fail(
+                batch,
+                shipCards.installBroken(batch, before.update.note, before.update.noPnpm === true),
+              );
             if (before.update?.kind === 'uncarried' && !stopped())
               fail(batch, shipCards.migrationsLost(batch, before.update.note));
             return null;
