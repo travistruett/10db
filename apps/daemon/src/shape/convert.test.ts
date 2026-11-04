@@ -9,6 +9,8 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  cancelTask,
+  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getPrinciple,
@@ -859,6 +861,53 @@ describe('additions, changes and removals', () => {
     ]);
   });
 
+  describe('a task the single-task Remove action cancelled', () => {
+    /** A converted task cancelled and detached as the daemon's removeTask does, with no remove_task proposal. */
+    const removedByAction = () => {
+      const m = c.say();
+      propose({ looseTasks: [loose(m, 'seats')] });
+      converted('seats');
+      const task = taskTitled('Task seats');
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+        detachShapeQuestionsOfTask(ctx, task.id);
+      });
+      return task;
+    };
+
+    it('refuses to propose a question about it, saying it was removed', () => {
+      removedByAction();
+      const m2 = c.say('Who pays for it?');
+      const out = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ questions: [whoPays(m2, 'seats')] })),
+      );
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/Question 1, about: seats was removed/),
+      ]);
+    });
+
+    it('refuses Convert of a question pending about it, and stores nothing against the cancelled task', () => {
+      const m = c.say();
+      propose({ looseTasks: [loose(m, 'seats')] });
+      converted('seats');
+      const task = taskTitled('Task seats');
+      const m2 = c.say('Who pays?');
+      propose({ questions: [whoPays(m2, 'seats')] });
+      write((ctx) => {
+        editProposal(ctx, rowOf('who-pays').id, { text: 'Who pays now?' });
+      });
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+        detachShapeQuestionsOfTask(ctx, task.id);
+      });
+      const out = convert('who-pays');
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/who-pays is about seats, which was removed/),
+      ]);
+      expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+    });
+  });
+
   const whoPays = (m: string, about: string) => ({
     key: 'who-pays',
     text: 'Who pays for the extra seats?',
@@ -924,6 +973,72 @@ describe('additions, changes and removals', () => {
     ]);
   });
 
+  /** A converted task seats, a pinned task `after` waiting on it and a pinned landing of it, and seats' removal pending. */
+  const removalBesideDependents = () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'seats'), loose(m, 'other')] });
+    converted('seats', 'other');
+    const task = taskTitled('Task seats');
+    const m2 = c.say('Then this.');
+    propose({
+      looseTasks: [loose(m2, 'after', { dependsOn: ['seats'] })],
+      landings: [{ key: 'l1', title: 'Seats', keys: ['seats', 'other'], sourceMessageIds: [m2] }],
+    });
+    write((ctx) => {
+      editProposal(ctx, rowOf('after').id, { title: 'After seats' });
+      editProposal(ctx, rowOf('l1').id, { title: 'Seats together' });
+    });
+    const m3 = c.say('Drop seats.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m3] }] });
+    return task;
+  };
+
+  it('refuses Convert of a task depending on, and a landing including, a task a removal cancelled', () => {
+    const task = removalBesideDependents();
+    converted(`remove:${task.id}`);
+    const out = convert('after', 'l1');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'After seats depends on seats, which was removed, so nothing can depend on it',
+      'Seats together includes seats, which was removed, so it cannot be in a landing',
+    ]);
+    expect(rowOf('after').state).toBe(ShapeProposalState.Pending);
+  });
+
+  it('refuses a landing of a task whose removal converts in the same call', () => {
+    const task = removalBesideDependents();
+    const out = convert(`remove:${task.id}`, 'l1');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'Seats together includes seats, which was removed, so it cannot be in a landing',
+    ]);
+    expect(getTask(c.store.db, task.id).status).not.toBe(TaskStatus.Cancelled);
+  });
+
+  it('refuses at propose a task depending on, and a landing including, a task a removal cancelled', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'seats')] });
+    converted('seats');
+    const task = taskTitled('Task seats');
+    const m2 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }] });
+    converted(`remove:${task.id}`);
+
+    const m3 = c.say('Something after it.');
+    const out = write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          looseTasks: [loose(m3, 'after', { dependsOn: ['seats'] })],
+          landings: [{ key: 'l1', title: 'Seats', keys: ['seats'], sourceMessageIds: [m3] }],
+        }),
+      ),
+    );
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Loose task 1, depends on: seats was removed/),
+      expect.stringMatching(/Landing 1, keys: seats was removed/),
+    ]);
+  });
+
   /** Goal g's task g1, converted and removed, so a later round can take the key g1 again. */
   const removedGoalTask = () => {
     const m = c.say();
@@ -962,6 +1077,80 @@ describe('additions, changes and removals', () => {
     propose({ questions: [whoPays(m2, 'g1')] });
     expect(rowOf('g1').state).toBe(ShapeProposalState.Pending);
     expect(rowOf('who-pays').state).toBe(ShapeProposalState.Pending);
+  });
+
+  it('lets a task wait on a removed key a pending task took again, once that task is selected', () => {
+    const removed = removedGoalTask();
+    const m = c.say('Bring it back, and something after it.');
+    propose({ looseTasks: [loose(m, 'g1'), loose(m, 'after', { dependsOn: ['g1'] })] });
+
+    const out = convert('after');
+    expect(out.ok ? [] : out.errors).toEqual([
+      "Task after depends on Task g1, which isn't selected",
+    ]);
+
+    converted('g1', 'after');
+    const g1 = tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id);
+    expect(taskTitled('Task after').dependsOn).toEqual([g1?.id]);
+  });
+
+  it('puts a landing of a removed key a pending task took again on that task, once it is selected', () => {
+    const removed = removedGoalTask();
+    const m = c.say('Bring it back, and land it.');
+    propose({
+      looseTasks: [loose(m, 'g1')],
+      landings: [{ key: 'l1', title: 'Back again', keys: ['g1'], sourceMessageIds: [m] }],
+    });
+
+    const out = convert('l1');
+    expect(out.ok ? [] : out.errors).toEqual(["Back again includes Task g1, which isn't selected"]);
+
+    const landing = converted('g1', 'l1').results.find((r) => r.key === 'l1');
+    const g1 = must(
+      tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+      'the new task',
+    );
+    expect(landing?.taskIds).toEqual([g1.id]);
+    expect(g1.landingGroupId).toEqual(expect.any(String));
+    expect(getTask(c.store.db, removed.id).landingGroupId ?? null).toBeNull();
+  });
+
+  describe('a removed key only a goal holds again', () => {
+    const refusals = (m: string): string[] => {
+      const out = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          PlanDraft.parse({
+            looseTasks: [loose(m, 'after', { dependsOn: ['g1'] })],
+            landings: [{ key: 'l1', title: 'Goal', keys: ['g1'], sourceMessageIds: [m] }],
+          }),
+        ),
+      );
+      return out.ok ? [] : [...out.errors];
+    };
+    const removedKeyRefusals = [
+      expect.stringMatching(/Loose task 1, depends on: g1 was removed/),
+      expect.stringMatching(/Landing 1, keys: g1 was removed/),
+    ];
+
+    it('is refused at propose when a converted goal holds it', () => {
+      removedGoalTask();
+      const m = c.say('A goal for it.');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])] });
+      converted('g1');
+      expect(refusals(c.say('Something after it.'))).toEqual(removedKeyRefusals);
+    });
+
+    it('is refused at propose when a pinned pending goal holds it', () => {
+      removedGoalTask();
+      const m = c.say('A goal for it.');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])] });
+      write((ctx) => {
+        editProposal(ctx, rowOf('g1').id, { title: 'Pinned goal' });
+      });
+      expect(refusals(c.say('Something after it.'))).toEqual(removedKeyRefusals);
+    });
   });
 
   it('puts a question on a goal that took a removed task’s key, not on the cancelled task', () => {

@@ -206,6 +206,10 @@ function withStoredSources(
 /** A kind as the builder reads it in a refusal: `a task`, `a change task`. */
 const withArticle = (kind: ShapeProposalKind): string => `a ${kind.replace('_', ' ')}`;
 
+/** The refusal for a key the builder dropped; `kind` is the dropped row's, which says `change` or `row`. */
+const droppedMessage = (key: string, kind: ShapeProposalKind): string =>
+  `${key}: the builder dropped this ${kind === 'change_task' ? 'change' : 'row'}; do not propose it again. Raise it in chat as a question if it matters.`;
+
 /** Parses a body as its kind says, so what is stored always reads back. */
 function parsedBody(kind: ShapeProposalKind, body: unknown): Record<string, unknown> {
   return asRecord(ShapeProposalBody[kind].parse(body));
@@ -240,8 +244,11 @@ export function reconcileDraft(
     const row = byKey.get(unit.key);
     // A stored row keeps its kind: a body parsed as another kind would not read back from it.
     if (row !== undefined && row.kind !== unit.kind) {
+      // A dropped key stays dropped under any kind: "use another key" would steer toward proposing it again.
       errors.push(
-        `${unit.key}: stored as ${withArticle(row.kind)}, so it cannot be stated as ${withArticle(unit.kind)}; use another key`,
+        row.state === ShapeProposalState.Rejected
+          ? droppedMessage(unit.key, row.kind)
+          : `${unit.key}: stored as ${withArticle(row.kind)}, so it cannot be stated as ${withArticle(unit.kind)}; use another key`,
       );
       continue;
     }
@@ -255,9 +262,7 @@ export function reconcileDraft(
       const sameChange =
         unit.kind === 'change_task' && hashOf(unit.body) === hashOf(asRecord(row.body));
       if (unit.kind !== 'change_task' || sameChange) {
-        errors.push(
-          `${unit.key}: the builder dropped this ${unit.kind === 'change_task' ? 'change' : 'row'}; do not propose it again. Raise it in chat as a question if it matters.`,
-        );
+        errors.push(droppedMessage(unit.key, unit.kind));
         continue;
       }
     }

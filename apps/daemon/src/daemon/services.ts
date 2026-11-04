@@ -21,7 +21,6 @@ import {
   closeTask,
   reopenTask,
   deleteBoardColumn,
-  detachShapeQuestionsOfTask,
   getGoal,
   getMcpApproval,
   getProject,
@@ -408,13 +407,7 @@ export function createServices(deps: {
       });
       return { limit: input.limit };
     },
-    removeTask: (id) =>
-      deps.state.write((ctx) => {
-        const task = cancelTask(ctx, id);
-        // A question stored under the task must not keep pointing at it once it is cancelled.
-        detachShapeQuestionsOfTask(ctx, id);
-        return task;
-      }),
+    removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),
     closeTask: (id) => deps.state.write((ctx) => closeTask(ctx, id)),

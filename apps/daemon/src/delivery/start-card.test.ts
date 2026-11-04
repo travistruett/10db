@@ -8,11 +8,13 @@ import {
   insertWorkstream,
   listBatches,
   listInbox,
+  listShapeQuestions,
   listWorkstreams,
   setTaskStatus,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { storeQuestionAbout } from '../../test/shape-question';
 import { createInboxService, type InboxService } from '../inbox';
 import { forTasks, startCards, startTitle } from './cards';
 import { createStartCardAnswers, StartChoice } from './index';
@@ -80,6 +82,34 @@ describe('the answers of a refused start', () => {
     for (const t of tasks) expect(getTask(h.store.db, t.id).status).toBe(TaskStatus.Cancelled);
     expect(listBatches(h.store.db)).toEqual([]);
     expect(h.cards()).toEqual([]);
+  });
+
+  it('leaves no question attached to a task it cancels, and keeps it stored', async () => {
+    const { tasks, card } = await refusedStart('Alpha');
+    const task = h.only(tasks);
+    const shapeId = storeQuestionAbout(h.state, h.project.id, task.id);
+    expect(listShapeQuestions(h.store.db, shapeId)[0]?.taskId).toBe(task.id);
+    inbox.answer(card.id, { choice: StartChoice.Cancel });
+    expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(listShapeQuestions(h.store.db, shapeId)).toMatchObject([
+      { key: 'who-pays', taskId: null },
+    ]);
+  });
+
+  it('leaves no question attached to a failed task it closes, and keeps it stored', () => {
+    const base = h.addTask('Base', { areas: ['api'] });
+    const task = h.addTask('Alpha', { areas: ['ui'], dependsOn: [base.id] });
+    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
+    h.settle(earlier.id, 'FAILED');
+    const shapeId = storeQuestionAbout(h.state, h.project.id, task.id);
+    expect(() =>
+      h.starter.startBatch(h.project.id, { title: 'Again', taskIds: [task.id] }),
+    ).toThrow(ConflictError);
+    inbox.answer(h.only(h.cards()).id, { choice: StartChoice.Cancel });
+    expect(getTask(h.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(listShapeQuestions(h.store.db, shapeId)).toMatchObject([
+      { key: 'who-pays', taskId: null },
+    ]);
   });
 
   /**

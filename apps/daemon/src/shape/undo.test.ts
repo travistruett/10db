@@ -12,6 +12,8 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  cancelTask,
+  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getGoal,
@@ -516,6 +518,73 @@ describe('Remove Draft Goal', () => {
       expect(
         listShapeQuestions(c.store.db, c.shape.id).find((q) => q.key === 'on-extra'),
       ).toMatchObject({ taskId: extra?.id });
+    });
+
+    // A removal detaches the question from the cancelled task (task_id null) but leaves it stored and
+    // its proposal accepted; Remove Draft Goal must still take it back, so it converts with the goal.
+    describe.each([
+      [
+        'the single-task Remove action',
+        (taskId: TaskId) => {
+          write((ctx) => {
+            cancelTask(ctx, taskId);
+            detachShapeQuestionsOfTask(ctx, taskId);
+          });
+        },
+      ],
+      [
+        'a converted remove_task',
+        (taskId: TaskId) => {
+          const m = c.say('Drop it.');
+          write((ctx) =>
+            reconcileDraft(
+              ctx,
+              c.shape.id,
+              PlanDraft.parse({ removals: [{ taskId, why: 'Not needed', sourceMessageIds: [m] }] }),
+            ),
+          );
+          const row = must(
+            listShapeProposals(c.store.db, c.shape.id).find((r) => r.key === `remove:${taskId}`),
+            'the removal',
+          );
+          const out = write((ctx) => convertProposals(ctx, c.shape.id, [row.id]));
+          if (!out.ok) throw new Error(out.errors.join('; '));
+        },
+      ],
+    ])('after %s cancelled the task the question is about', (_, removeTask) => {
+      it('takes the detached question back with the goal, and it converts onto the remade task', () => {
+        const goalId = convertedWithQuestion('cards');
+        const [task] = listTasks(c.store.db, c.project.id);
+        removeTask(task?.id ?? mintId('Task'));
+        expect(
+          listShapeQuestions(c.store.db, c.shape.id).find((q) => q.key === 'who-pays'),
+        ).toMatchObject({
+          taskId: null,
+          goalId: null,
+        });
+
+        write((ctx) => {
+          removeDraftGoalOf(ctx, c.shape.id, goalId);
+        });
+
+        expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['free']);
+        expect(listShapeLinks(c.store.db, c.shape.id).map((l) => l.key)).toEqual(['free']);
+        const rows = listShapeProposals(c.store.db, c.shape.id);
+        expect(rows.find((r) => r.key === 'who-pays')?.state).toBe(ShapeProposalState.Pending);
+        // A question about nothing stays converted.
+        expect(rows.find((r) => r.key === 'free')?.state).toBe(ShapeProposalState.Accepted);
+
+        const pending = rows.filter((r) => r.state === ShapeProposalState.Pending).map((r) => r.id);
+        const out = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+        expect(out).toMatchObject({ ok: true });
+        const remade = listTasks(c.store.db, c.project.id).find(
+          (t) => t.status !== TaskStatus.Cancelled,
+        );
+        expect(remade?.id).not.toBe(task?.id);
+        expect(
+          listShapeQuestions(c.store.db, c.shape.id).find((q) => q.key === 'who-pays'),
+        ).toMatchObject({ taskId: remade?.id });
+      });
     });
 
     it('leaves the question where it was when the removal is refused', () => {
