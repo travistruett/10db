@@ -1,4 +1,4 @@
-import type { ShapeViewDto } from '@10db/contracts';
+import { mintId, type ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -104,6 +104,28 @@ describe('Shape: the drawer layout', () => {
     fireEvent.click(within(bar).getByRole('button', { name: '1 goal' }));
     const goal = within(sidebar).getByRole('button', { name: /^Brainstorm chat/ });
     expect(document.activeElement).toBe(goal);
+  });
+
+  it('opens at a converted row when only loose tasks were converted and no goal exists', async () => {
+    const done = {
+      state: 'accepted' as const,
+      converted: { goalId: null, taskIds: [mintId('Task')], decisionId: null },
+    };
+    openNarrow(
+      shapeViewDto({
+        shape: base,
+        messages: [shapeMessageDto(base.id)],
+        proposals: [
+          looseTaskProposal('density', { title: 'Compact card density', ...done }),
+          looseTaskProposal('scrollbars', { title: 'Thin board scrollbars', ...done }),
+        ],
+      }),
+    );
+    const bar = await screen.findByRole('group', { name: 'Summary' });
+    fireEvent.click(within(bar).getByRole('button', { name: '2 converted' }));
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    const first = within(sidebar).getByRole('button', { name: /^Compact card density/ });
+    expect(document.activeElement).toBe(first);
   });
 
   it('opens at the top, with no jump left over, from the Proposed button', async () => {

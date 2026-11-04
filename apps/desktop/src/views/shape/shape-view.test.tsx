@@ -424,6 +424,26 @@ describe('Shape: the Proposed sidebar', () => {
     expect(screen.queryByRole('form', { name: 'Edit row' })).toBeNull();
   });
 
+  it('focuses a converted row from the converted count when no goal exists', async () => {
+    const done = {
+      state: 'accepted' as const,
+      converted: { goalId: null, taskIds: [mintId('Task')], decisionId: null },
+    };
+    const view = proposed([
+      looseTaskProposal('density', { title: 'Compact card density' }),
+      looseTaskProposal('scrollbars', { title: 'Thin board scrollbars', ...done }),
+      looseTaskProposal('tabs', { title: 'Calmer tabs', ...done }),
+    ]);
+    serve(...conversations(view));
+    open(view);
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    const summary = await within(sidebar).findByRole('group', { name: 'Summary' });
+    fireEvent.click(within(summary).getByRole('button', { name: '2 converted' }));
+    expect(focused(within(sidebar).getByRole('button', { name: /^Thin board scrollbars/ }))).toBe(
+      true,
+    );
+  });
+
   it('shows Superseded rows under a collapsed Earlier', async () => {
     const view = proposed([
       looseTaskProposal('old', { title: 'Old idea', state: 'superseded' }),
