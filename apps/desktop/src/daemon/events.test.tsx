@@ -12,7 +12,7 @@ import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '
 import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
-import { eventStreamUrl, useEventStream } from './events';
+import { eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
 import { useBatches, useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
@@ -306,6 +306,18 @@ describe('useEventStream', () => {
       { timeout: 15_000 },
     );
     expect(new URL(urls[1] ?? 'ws://missing').searchParams.get('after')).toBe('42');
+  });
+
+  it('maps the knowledge entities to the knowledge lists, their proposals and provenance', () => {
+    // The stream's first open refetches everything, so a rendered event test would pass without
+    // the mapping; the table is what can go wrong.
+    for (const entity of ['decision', 'principle', 'proposal']) {
+      expect(INVALIDATIONS[entity]).toEqual(
+        expect.arrayContaining([['knowledge'], ['proposals'], ['provenance']]),
+      );
+    }
+    // The goal digest's Decisions row still follows decisions.
+    expect(INVALIDATIONS['decision']).toEqual(expect.arrayContaining([['goals']]));
   });
 
   it('builds ws and wss stream URLs', () => {

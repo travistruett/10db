@@ -1,10 +1,11 @@
-import { mintId, type InboxItemDto } from '@10db/contracts';
+import { mintId, PARK_TASK_OPTION, type InboxItemDto, type ProvenanceDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
-import { batchDto, inboxItemDto } from '../../test/fixtures';
+import { batchDto, inboxItemDto, projectViewDto } from '../../test/fixtures';
+import { knowledgeList, proposalDto, provenanceDto } from '../../test/knowledge-fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
@@ -165,7 +166,7 @@ describe('InboxView', () => {
     key('Enter');
 
     await waitFor(() => {
-      expect(answers).toEqual([{ id: color.id, body: { choice: 'Red' } }]);
+      expect(answers).toEqual([{ id: color.id, body: { choice: 'Red', record: null } }]);
     });
     expect(await screen.findByRole('radio', { name: /Square/ })).toBeTruthy();
   });
@@ -188,7 +189,7 @@ describe('InboxView', () => {
 
     await waitFor(() => {
       expect(answers).toEqual([
-        { id: color.id, body: { choice: 'Teal', note: 'Teal matches the logo' } },
+        { id: color.id, body: { choice: 'Teal', note: 'Teal matches the logo', record: null } },
       ]);
     });
   });
@@ -947,11 +948,486 @@ describe('the resolved view', () => {
     expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
   });
 
+  it('says an answer in the words the card offered it', async () => {
+    const closedProposal = (choice: string): InboxItemDto =>
+      inboxItemDto({
+        kind: 'proposal',
+        state: 'RESOLVED',
+        title: 'Tests never sleep',
+        options: [
+          { label: 'accept_project', description: 'Confirm it for this project' },
+          { label: 'accept_you', description: 'Confirm it for you, in every project' },
+          { label: 'accept_area', description: 'Confirm it for the api area of this project' },
+          { label: 'reject', description: 'Reject it; it stays on record as withdrawn' },
+        ],
+        detail: { proposalId: mintId('Proposal'), principleId: mintId('Principle') },
+        answer: { choice },
+      });
+    const permission = inboxItemDto({
+      kind: 'permission',
+      state: 'RESOLVED',
+      title: 'Run a command?',
+      options: [{ label: 'allow_once', description: 'This time' }],
+      answer: { choice: 'allow_once' },
+    });
+    const gone = inboxItemDto({
+      kind: 'question',
+      state: 'RESOLVED',
+      title: 'An option no longer listed',
+      options: [{ label: 'Teal', description: 'A green-blue' }],
+      answer: { choice: 'Violet' },
+    });
+    serveBoth(
+      [],
+      [
+        closedProposal('accept_project'),
+        closedProposal('accept_you'),
+        closedProposal('accept_area'),
+        closedProposal('reject'),
+        permission,
+        gone,
+      ],
+    );
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
+    await screen.findAllByTestId('resolved-card');
+    for (const words of [
+      'Answered: This project',
+      'Answered: All my projects',
+      'Answered: This area',
+      'Answered: Reject',
+      'Answered: Allow once',
+      'Answered: Violet',
+    ]) {
+      expect(screen.getByText(words)).toBeTruthy();
+    }
+    expect(screen.queryByText(/accept_|allow_once/)).toBeNull();
+  });
+
   it('says so when nothing has been resolved', async () => {
     serveBoth([color], []);
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
     fireEvent.click(screen.getByRole('radio', { name: /^Resolved/ }));
     expect(await screen.findByText('Nothing has been resolved yet.')).toBeTruthy();
+  });
+});
+
+describe('knowledge on cards', () => {
+  const project = projectViewDto({ areas: [{ name: 'api', globs: ['src/api/**'] }] });
+  const base = proposalDto();
+  const proposal = proposalDto({
+    projectId: project.id,
+    principle: base.principle
+      ? {
+          ...base.principle,
+          statement: 'Never sleep in tests',
+          kind: 'policy',
+          scope: 'project',
+          area: 'api',
+        }
+      : null,
+  });
+  const principleCard = inboxItemDto({
+    kind: 'proposal',
+    projectId: project.id,
+    title: 'No sleeps in tests',
+    body: 'Never sleep in tests\n\nKind: policy. Key: testing.no-sleeps. Proposed for this project.',
+    options: [
+      { label: 'accept_project', description: 'Confirm it for this project' },
+      { label: 'accept_you', description: 'Confirm it for you, in every project' },
+      { label: 'accept_area', description: 'Confirm it for the api area of this project' },
+      { label: 'reject', description: 'Reject it; it stays on record as withdrawn' },
+    ],
+    recommendation: 'accept_project',
+    detail: { proposalId: proposal.id, principleId: proposal.principle?.id ?? null },
+  });
+
+  const serveProject = (proposals = [proposal]): void => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json(proposals)),
+    );
+  };
+
+  it('shows a principle proposal with its statement, kind and choices in words', async () => {
+    inbox([principleCard]);
+    serveProject();
+    renderApp('/inbox');
+    await screen.findByText('No sleeps in tests');
+    const card = selectedCard();
+    expect(within(card).getByText(/Never sleep in tests/)).toBeTruthy();
+    expect(await within(card).findByText('Policy')).toBeTruthy();
+    expect(await within(card).findByRole('radio', { name: /This area \(api\)/ })).toBeTruthy();
+    const names = ['This project', 'All my projects', 'This area (api)', 'Reject'];
+    for (const name of names) {
+      expect(within(card).getByText(name)).toBeTruthy();
+    }
+    // The stable verdict values never show.
+    expect(card.textContent).not.toContain('accept_');
+  });
+
+  it('sends the stable verdict, with no record, for the words chosen', async () => {
+    const { answers } = inbox([principleCard]);
+    serveProject();
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: /All my projects/ }));
+    expect(screen.queryByRole('checkbox', { name: 'Record as a decision' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: principleCard.id, body: { choice: 'accept_you' } }]);
+    });
+  });
+
+  it('words the area choice without a name while the proposal is not known', async () => {
+    inbox([principleCard]);
+    serveProject([]);
+    renderApp('/inbox');
+    expect(await screen.findByRole('radio', { name: /This area/ })).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: /This area \(/ })).toBeNull();
+  });
+
+  const queue = (category: InboxItemDto['category']): InboxItemDto =>
+    inboxItemDto({
+      projectId: project.id,
+      category,
+      title: 'Which queue?',
+      options: [
+        { label: 'BullMQ', description: '' },
+        { label: 'pg-boss', description: '' },
+        PARK_TASK_OPTION,
+      ],
+    });
+
+  it.each([
+    {
+      name: 'a design question records for the project by default',
+      category: 'design',
+      act: 'none',
+      record: { scope: 'project', area: null },
+    },
+    {
+      name: 'an other question records nothing by default',
+      category: 'other',
+      act: 'none',
+      record: null,
+    },
+    { name: 'unchecking skips the record', category: 'design', act: 'uncheck', record: null },
+    {
+      name: 'checking an other question records it for the project',
+      category: 'other',
+      act: 'check',
+      record: { scope: 'project', area: null },
+    },
+    {
+      name: 'choosing all my projects records it for the builder everywhere',
+      category: 'product',
+      act: 'you',
+      record: { scope: 'you', area: null },
+    },
+    {
+      name: 'choosing an area records it there',
+      category: 'other',
+      act: 'area',
+      record: { scope: 'area', area: 'api' },
+    },
+  ] as const)('$name', async ({ category, act, record }) => {
+    const card = queue(category);
+    const { answers } = inbox([card]);
+    serveProject();
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: /pg-boss/ }));
+    const box = screen.getByRole<HTMLInputElement>('checkbox', { name: 'Record as a decision' });
+    expect(box.checked).toBe(category !== 'other');
+    if (act === 'uncheck') fireEvent.click(box);
+    if ((act === 'check' || act === 'you' || act === 'area') && !box.checked) fireEvent.click(box);
+    if (act === 'you' || act === 'area') {
+      fireEvent.click(screen.getByRole('combobox', { name: 'Decision applies to' }));
+      const name = act === 'you' ? 'All my projects' : 'Area: api';
+      fireEvent.click(await screen.findByRole('option', { name, hidden: true }));
+    }
+    fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: card.id, body: { choice: 'pg-boss', record } }]);
+    });
+  });
+
+  it.each([
+    ['product', true],
+    ['design', true],
+    ['engineering', true],
+    ['environment', false],
+    ['other', false],
+  ] as const)('checks Record as a decision for a %s question: %s', async (category, checked) => {
+    inbox([queue(category)]);
+    serveProject();
+    renderApp('/inbox');
+    const box = await screen.findByRole<HTMLInputElement>('checkbox', {
+      name: 'Record as a decision',
+    });
+    expect(box.checked).toBe(checked);
+  });
+
+  it('sends a note beside the record', async () => {
+    const card = queue('engineering');
+    const { answers } = inbox([card]);
+    serveProject();
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: /BullMQ/ }));
+    fireEvent.change(screen.getByLabelText('Note for the agent (optional)'), {
+      target: { value: 'Redis is already deployed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([
+        {
+          id: card.id,
+          body: {
+            choice: 'BullMQ',
+            note: 'Redis is already deployed',
+            record: { scope: 'project', area: null },
+          },
+        },
+      ]);
+    });
+  });
+
+  it('keeps the keys working: a digit chooses and Enter sends with the record', async () => {
+    const card = queue('design');
+    const { answers } = inbox([card]);
+    serveProject();
+    renderApp('/inbox');
+    await screen.findByRole('checkbox', { name: 'Record as a decision' });
+    key('2');
+    key('Enter');
+    await waitFor(() => {
+      expect(answers).toEqual([
+        { id: card.id, body: { choice: 'pg-boss', record: { scope: 'project', area: null } } },
+      ]);
+    });
+  });
+
+  it('records nothing, and offers no record, when the answer is Park the task', async () => {
+    const card = queue('design');
+    const { answers } = inbox([card]);
+    serveProject();
+    renderApp('/inbox');
+    expect(await screen.findByRole('checkbox', { name: 'Record as a decision' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('radio', { name: /Park the task/ }));
+    expect(screen.queryByRole('checkbox', { name: 'Record as a decision' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: card.id, body: { choice: 'Park the task' } }]);
+    });
+  });
+
+  it('keeps a record choice for its own card only', async () => {
+    const first = queue('design');
+    const second = inboxItemDto({ ...queue('product'), title: 'Which cache?' });
+    inbox([first, second]);
+    serveProject();
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Record as a decision' }));
+    key('j');
+    await screen.findByText('Which cache?');
+    expect(
+      screen.getByRole<HTMLInputElement>('checkbox', { name: 'Record as a decision' }).checked,
+    ).toBe(true);
+  });
+
+  it('offers no decision control on a permission card', async () => {
+    inbox([
+      inboxItemDto({
+        kind: 'permission',
+        title: 'Run curl?',
+        options: [
+          { label: 'allow_once', description: '' },
+          { label: 'deny', description: '' },
+        ],
+      }),
+    ]);
+    renderApp('/inbox');
+    expect(await screen.findByText('Run curl?')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Record as a decision' })).toBeNull();
+  });
+});
+
+describe('a resolved answer that proposed a principle', () => {
+  const principleId = mintId('Principle');
+  const proposed = [{ proposalId: mintId('Proposal'), principleId }];
+  const answered = inboxItemDto({
+    kind: 'question',
+    state: 'RESOLVED',
+    title: 'Which queue?',
+    answer: { choice: 'pg-boss', note: 'Never add Redis for queues.' },
+    detail: { proposedPrinciples: proposed },
+    updatedAt: '2026-10-30T11:00:00.000Z',
+  });
+  const plain = inboxItemDto({
+    kind: 'question',
+    state: 'RESOLVED',
+    title: 'Which badge color?',
+    answer: { choice: 'Teal', note: 'Sounds good.' },
+    updatedAt: '2026-10-30T10:00:00.000Z',
+  });
+
+  function serveResolved(resolved: InboxItemDto[]): void {
+    serve(
+      http.get(daemonUrl('/inbox'), ({ request }) =>
+        HttpResponse.json(
+          new URL(request.url).searchParams.get('state') === 'RESOLVED' ? resolved : [],
+        ),
+      ),
+    );
+  }
+
+  /** The principle as the daemon reports it, whatever became of its proposal. */
+  function serveProvenance(...records: ProvenanceDto[]): void {
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/knowledge'), () =>
+        HttpResponse.json(knowledgeList()),
+      ),
+      http.get(daemonUrl('/principles/:id/provenance'), ({ params }) => {
+        const record = records.find((r) => r.id === params['id']);
+        return record
+          ? HttpResponse.json(record)
+          : HttpResponse.json({ error: 'not_found' }, { status: 404 });
+      }),
+    );
+  }
+
+  const openDrawer = async (): Promise<HTMLElement> =>
+    screen.findByRole('dialog', { name: 'Where it came from' });
+
+  const selectedTab = (): string | null => screen.getByRole('tab', { selected: true }).textContent;
+
+  async function clickOpenInKnowledge(): Promise<void> {
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    await screen.findAllByTestId('resolved-card');
+    fireEvent.click(screen.getByRole('link', { name: 'Open in Knowledge' }));
+  }
+
+  it('says a principle was proposed, on the card that proposed it only', async () => {
+    serveResolved([answered, plain]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    const rows = await screen.findAllByTestId('resolved-card');
+    expect(rows[0]?.textContent).toContain('A principle was proposed');
+    expect(rows[1]?.textContent).not.toContain('principle');
+  });
+
+  it('opens a principle still waiting for a verdict, over the Proposals tab', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({ id: principleId, state: 'proposed', text: 'Never add Redis for queues.' }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    await waitFor(() => {
+      expect(selectedTab()).toContain('Proposals');
+    });
+  });
+
+  it('opens a principle accepted since the answer, over the Principles tab', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({ id: principleId, state: 'current', text: 'Never add Redis for queues.' }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    expect(selectedTab()).toContain('Principles');
+  });
+
+  it('opens a principle rejected since the answer, saying it was withdrawn', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({
+        id: principleId,
+        state: 'withdrawn',
+        text: 'Never add Redis for queues.',
+        withdrawn: {
+          at: '2026-10-30T12:00:00.000Z',
+          by: 'me',
+          reason: 'Rejected in the inbox',
+          source: null,
+        },
+      }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    expect(within(drawer).getByText('Rejected in the inbox')).toBeTruthy();
+  });
+
+  it('lands on the project of the card, not the selected one', async () => {
+    const selected = projectViewDto({ name: 'Selected' });
+    const other = projectViewDto({ name: 'Other' });
+    const asked: string[] = [];
+    serveResolved([inboxItemDto({ ...answered, projectId: other.id })]);
+    serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([selected, other])),
+      http.get(daemonUrl('/projects/:projectId/proposals'), ({ params }) => {
+        asked.push(String(params['projectId']));
+        return HttpResponse.json([]);
+      }),
+    );
+    await clickOpenInKnowledge();
+    await openDrawer();
+    await waitFor(() => {
+      expect(asked).toContain(other.id);
+    });
+    expect(asked).not.toContain(selected.id);
+  });
+
+  it('forgets the link once the drawer closes, and keeps the tab it opened on', async () => {
+    serveResolved([answered]);
+    serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
+    const { router } = renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
+    const drawer = await openDrawer();
+    await waitFor(() => {
+      expect(selectedTab()).toContain('Proposals');
+    });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+    expect(selectedTab()).toContain('Proposals');
+  });
+
+  it('gives each principle its own link when an answer proposed several', async () => {
+    const second = mintId('Principle');
+    const two = inboxItemDto({
+      ...answered,
+      detail: {
+        proposedPrinciples: [...proposed, { proposalId: mintId('Proposal'), principleId: second }],
+      },
+    });
+    serveResolved([two]);
+    serveProvenance(
+      provenanceDto({ id: principleId, text: 'Never add Redis for queues.' }),
+      provenanceDto({ id: second, text: 'Always keep queues in Postgres.' }),
+    );
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    const [row] = await screen.findAllByTestId('resolved-card');
+    expect(row?.textContent).toContain('2 principles were proposed');
+    expect(screen.getByRole('link', { name: 'Open principle 1' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('link', { name: 'Open principle 2' }));
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Always keep queues in Postgres.')).toBeTruthy();
+  });
+
+  it('ignores a detail that is not a list of proposals', async () => {
+    serveResolved([inboxItemDto({ ...answered, detail: { proposedPrinciples: 'nope' } })]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    const [row] = await screen.findAllByTestId('resolved-card');
+    expect(row?.textContent).not.toContain('principle');
   });
 });

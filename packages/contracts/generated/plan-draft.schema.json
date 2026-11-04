@@ -583,6 +583,19 @@
               "rationale": {
                 "type": "string",
                 "minLength": 1
+              },
+              "principleKind": {
+                "type": "string",
+                "enum": [
+                  "policy",
+                  "heuristic",
+                  "belief"
+                ]
+              },
+              "topicKey": {
+                "type": "string",
+                "maxLength": 80,
+                "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
               }
             },
             "required": [
@@ -613,6 +626,10 @@
           "for": {
             "type": "string",
             "minLength": 1
+          },
+          "about": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$"
           },
           "sourceMessageIds": {
             "minItems": 1,

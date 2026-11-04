@@ -113,6 +113,41 @@
             "note": {
               "type": "string",
               "maxLength": 4000
+            },
+            "record": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "scope": {
+                      "type": "string",
+                      "enum": [
+                        "you",
+                        "project",
+                        "area"
+                      ]
+                    },
+                    "area": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "pattern": "^[a-z][a-z0-9-]*$"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "scope",
+                    "area"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [

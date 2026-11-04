@@ -1315,7 +1315,16 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
           claims: [],
           handoff: null,
           pendingAnswer: null,
-          knowledge: { decisions: [], budgetUsed: 0, droppedCount: 0, empty: true },
+          knowledge: {
+            policies: [],
+            heuristics: [],
+            decisions: [],
+            budget: 1500,
+            budgetUsed: 0,
+            dropped: { policies: 0, heuristics: 0, decisions: 0 },
+            droppedCount: 0,
+            empty: true,
+          },
         },
       });
       const run = await runLane({

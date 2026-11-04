@@ -65,6 +65,8 @@ export function baseHandlers(
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),
     http.get(daemonUrl('/projects/:projectId/batches', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/tasks', base), () => HttpResponse.json([])),
+    // A principle proposal's Inbox card reads its proposal; none pending.
+    http.get(daemonUrl('/projects/:projectId/proposals', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects/:projectId/goals', base), () =>
       HttpResponse.json({ goals: [], ungrouped: null }),
     ),

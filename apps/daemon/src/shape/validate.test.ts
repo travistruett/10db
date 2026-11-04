@@ -228,6 +228,38 @@ const REFUSED: readonly (readonly [string, Record<string, unknown>, RegExp])[] =
     /Record 1, supersedes: .* is not a decision that applies to this project/,
   ],
   [
+    'a principle record that names a decision to supersede',
+    {
+      records: [
+        {
+          key: 'r',
+          kind: 'principle',
+          scope: 'project',
+          statement: 'Never sleep in tests',
+          rationale: 'r',
+          supersedes: headDecision,
+          sourceMessageIds: [message],
+        },
+      ],
+    },
+    /Record 1, supersedes: a principle supersedes by topic key and scope/,
+  ],
+  [
+    'a question about a key no proposal has',
+    {
+      questions: [
+        {
+          key: 'q',
+          text: 'Who pays?',
+          for: 'finance',
+          about: 'nowhere',
+          sourceMessageIds: [message],
+        },
+      ],
+    },
+    /Question 1, about: no proposal has the key nowhere/,
+  ],
+  [
     'a change to a task that has started',
     { changes: [{ taskId: started, title: 'New', sourceMessageIds: [message] }] },
     /Change 1, task: .* has started/,

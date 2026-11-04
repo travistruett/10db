@@ -1,4 +1,5 @@
 import {
+  KnowledgeState,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeProposalBody,
@@ -17,6 +18,7 @@ import {
 } from '@10db/contracts';
 import {
   getDecision,
+  getPrinciple,
   getShape,
   listRehearsals,
   listShapeAttachments,
@@ -77,11 +79,22 @@ function convertedOf(
   if (row.state !== ShapeProposalState.Accepted) return null;
   const mine = links.filter((l) => l.proposalId === row.id);
   const decisionId = mine.find((l) => l.decisionId !== null)?.decisionId ?? null;
+  const principleId = mine.find((l) => l.principleId !== null)?.principleId ?? null;
+  const questionId = mine.find((l) => l.questionId !== null)?.questionId ?? null;
+  const principle = principleId === null ? null : getPrinciple(db, principleId);
   return {
     goalId: mine.find((l) => l.goalId !== null)?.goalId ?? null,
     taskIds: mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId])),
     decisionId,
+    ...(principleId === null ? {} : { principleId }),
+    ...(questionId === null ? {} : { questionId }),
     ...(decisionId === null ? {} : { withdrawn: getDecision(db, decisionId).withdrawnAt !== null }),
+    ...(principle === null
+      ? {}
+      : {
+          withdrawn: principle.state === KnowledgeState.Withdrawn,
+          superseded: principle.supersededById !== null,
+        }),
   };
 }
 

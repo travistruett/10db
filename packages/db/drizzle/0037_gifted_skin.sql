@@ -1,0 +1,1 @@
+ALTER TABLE `proposals` ADD `principle_id` text REFERENCES principles(id);

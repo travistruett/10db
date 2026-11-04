@@ -291,6 +291,47 @@ describe('Remove Draft Goal and Withdraw Decision', () => {
     }).toThrow(InvalidError);
   });
 
+  it('says what a converted principle and question became, and withdraws the principle', async () => {
+    const m = c.say('Never sleep in tests.');
+    adapter.shapeBehaviour = proposing({
+      records: [
+        {
+          key: 'no-sleeps',
+          kind: 'principle',
+          scope: 'project',
+          statement: 'Never sleep in tests',
+          rationale: 'Sleeps make the suite flaky.',
+          sourceMessageIds: [m],
+        },
+      ],
+      questions: [{ key: 'who', text: 'Who pays?', for: 'finance', sourceMessageIds: [m] }],
+    });
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    await service.convert(
+      shapeId,
+      service.view(shapeId).proposals.map((p) => p.id),
+    );
+    const rowOf = (kind: string) => service.view(shapeId).proposals.find((p) => p.kind === kind);
+    const principleId = must(rowOf('principle')?.converted?.principleId, 'the principle id');
+    expect(rowOf('principle')?.converted).toMatchObject({
+      decisionId: null,
+      withdrawn: false,
+      superseded: false,
+    });
+    expect(rowOf('question')?.converted?.questionId).toEqual(expect.any(String));
+
+    expect(() => {
+      service.withdrawPrinciple(shapeId, principleId, '');
+    }).toThrow(InvalidError);
+    events.length = 0;
+    service.withdrawPrinciple(shapeId, principleId, 'We allow it now');
+    expect(rowOf('principle')?.converted).toMatchObject({ withdrawn: true });
+    expect(events.some((e) => e.type === EventType.ShapeChanged && e.entityId === shapeId)).toBe(
+      true,
+    );
+  });
+
   it('withdraws a converted decision, and the view says so', async () => {
     await converted();
     const decisionId = must(

@@ -4,14 +4,14 @@ import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 import type { ConvertShapeResult } from '../../daemon/shape-queries';
 import { FormModal } from '../../shell/form-modal';
-import { destination, isConvertible, proposalTitle } from './proposal-text';
+import { destination, proposalTitle } from './proposal-text';
 import { isConverted } from './proposed-groups';
 import { ReviewLines } from './review-notes';
 import { convertWarnings, rowReview } from './review-lines';
 
-/** The rows Convert can write now: pending ones of a kind it writes. */
+/** The rows Convert can write now: the pending ones. */
 export function convertibleRows(proposals: readonly ShapeProposalDto[]): ShapeProposalDto[] {
-  return proposals.filter((p) => p.state === 'pending' && isConvertible(p) && !isConverted(p));
+  return proposals.filter((p) => p.state === 'pending' && !isConverted(p));
 }
 
 /** The rows with a task the rehearsal has not read at its current content (spec §7). */

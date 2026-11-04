@@ -8,9 +8,20 @@
     },
     "limit": {
       "default": 5,
+      "description": "The most results per shelf: up to this many decisions and this many principles.",
       "type": "integer",
       "minimum": 1,
       "maximum": 20
+    },
+    "kind": {
+      "default": "any",
+      "description": "Search only decisions, only principles, or both.",
+      "type": "string",
+      "enum": [
+        "any",
+        "decision",
+        "principle"
+      ]
     }
   },
   "required": [

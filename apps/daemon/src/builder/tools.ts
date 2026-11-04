@@ -1,12 +1,23 @@
 import {
   BoardStatus,
+  BUILDER_MCP_VIA,
   BuilderToolInputs,
   BuilderToolName,
+  DecisionEdit,
+  DecisionId,
+  DecisionWrite,
   DomainError,
   InboxState,
+  KnowledgeListQuery,
+  KnowledgeReason,
+  KnowledgeSource,
   NEW_TASK_NO_CRITERIA,
   newTaskRefusal,
   normaliseCriteria,
+  PrincipleEdit,
+  PrincipleId,
+  PrincipleWrite,
+  ProposalListQuery,
   TaskInput,
   TaskMove,
   TaskPatch,
@@ -30,12 +41,37 @@ export type BuilderServices = Pick<
   | 'listBoardColumns'
   | 'listInbox'
   | 'startShape'
+  | 'listKnowledge'
+  | 'recordDecision'
+  | 'supersedeDecision'
+  | 'withdrawDecision'
+  | 'createPrinciple'
+  | 'supersedePrinciple'
+  | 'retirePrinciple'
+  | 'withdrawPrinciple'
+  | 'listProposals'
 > &
   TaskRemovalServices &
   TaskLookupServices;
 
 function taskSummary(task: TaskDto) {
   return { id: task.id, title: task.title, boardStatus: task.boardStatus };
+}
+
+/**
+ * The builder source every knowledge write here carries. The server is stateless and sees no
+ * client session, so the tool and the builder's own words are all it can say.
+ */
+function builderSource(quote: string | undefined): KnowledgeSource {
+  return KnowledgeSource.parse({ via: BUILDER_MCP_VIA, ...(quote === undefined ? {} : { quote }) });
+}
+
+/** Whether an id names a decision; the input schema has already refused any other than a principle's. */
+const isDecision = (id: string): boolean => DecisionId.safeParse(id).success;
+
+/** The fields given, with the absent ones left out rather than undefined, as the API's schemas expect. */
+function defined(args: object): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(args).filter(([, value]) => value !== undefined));
 }
 
 /** Every handler takes a tool's raw arguments, parses them and answers the JSON the client reads. */
@@ -201,6 +237,81 @@ export function createBuilderTools(
         title: card.title,
         createdAt: card.createdAt,
       }));
+    },
+    // Knowledge: the same services as the knowledge routes, parsed by the same schemas, so a
+    // refusal is the API's. The builder's MCP server and the quote are the source of every write.
+    [BuilderToolName.SearchKnowledge]: (args) => {
+      const { projectId, history, ...query } = BuilderToolInputs.search_knowledge.parse(args);
+      return services.listKnowledge(
+        projectId,
+        KnowledgeListQuery.parse({ ...defined(query), history: history === true ? '1' : '0' }),
+      );
+    },
+    [BuilderToolName.SaveDecision]: (args) => {
+      const { projectId, quote, ...fields } = BuilderToolInputs.save_decision.parse(args);
+      return services.recordDecision(
+        projectId,
+        DecisionWrite.parse({ ...fields, source: builderSource(quote) }),
+      );
+    },
+    [BuilderToolName.SavePrinciple]: (args) => {
+      const { projectId, quote, ...fields } = BuilderToolInputs.save_principle.parse(args);
+      return services.createPrinciple(
+        projectId,
+        PrincipleWrite.parse({ ...fields, source: builderSource(quote) }),
+      );
+    },
+    [BuilderToolName.SupersedeKnowledge]: (args) => {
+      const { id, quote, ...fields } = BuilderToolInputs.supersede_knowledge.parse(args);
+      const edit = { ...defined(fields), source: builderSource(quote) };
+      return isDecision(id)
+        ? services.supersedeDecision(DecisionId.parse(id), DecisionEdit.parse(edit))
+        : services.supersedePrinciple(PrincipleId.parse(id), PrincipleEdit.parse(edit));
+    },
+    [BuilderToolName.RetireKnowledge]: (args) => {
+      const { id, reason, quote } = BuilderToolInputs.retire_knowledge.parse(args);
+      if (isDecision(id)) {
+        throw new DomainError(
+          'invalid',
+          'id: Only a principle can be retired; supersede a decision to change it, or withdraw it if it was a mistake',
+        );
+      }
+      return services.retirePrinciple(
+        PrincipleId.parse(id),
+        KnowledgeReason.parse({ reason, source: builderSource(quote) }),
+      );
+    },
+    [BuilderToolName.WithdrawKnowledge]: (args) => {
+      const { id, reason, quote } = BuilderToolInputs.withdraw_knowledge.parse(args);
+      const body = KnowledgeReason.parse({ reason, source: builderSource(quote) });
+      return isDecision(id)
+        ? services.withdrawDecision(DecisionId.parse(id), body)
+        : services.withdrawPrinciple(PrincipleId.parse(id), body);
+    },
+    // A proposal's text is written by a managed session, so the builder's clients get the proposed
+    // rule and its title, not the card body.
+    [BuilderToolName.ListProposals]: (args) => {
+      const { projectId, status } = BuilderToolInputs.list_proposals.parse(args);
+      return services
+        .listProposals(projectId, ProposalListQuery.parse(status === undefined ? {} : { status }))
+        .map((proposal) => ({
+          id: proposal.id,
+          status: proposal.status,
+          title: proposal.title,
+          rationale: proposal.rationale,
+          principle:
+            proposal.principle === null
+              ? null
+              : {
+                  id: proposal.principle.id,
+                  scope: proposal.principle.scope,
+                  area: proposal.principle.area,
+                  statement: proposal.principle.statement,
+                  kind: proposal.principle.kind,
+                  topicKey: proposal.principle.topicKey,
+                },
+          createdAt: proposal.createdAt,
+        }));
     },
   };
 }

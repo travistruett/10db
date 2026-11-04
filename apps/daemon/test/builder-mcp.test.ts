@@ -789,6 +789,131 @@ describe('the builder MCP endpoint', () => {
     });
   });
 
+  describe('knowledge', () => {
+    const get = async (path: string) =>
+      z.record(z.string(), z.unknown()).parse(
+        await (
+          await fetch(`${daemon.url}${path}`, {
+            headers: { Authorization: `Bearer ${daemon.token}` },
+          })
+        ).json(),
+      );
+    const Item = z.object({ id: z.string() }).loose();
+    const List = z.object({ items: z.array(Item) }).loose();
+    const found = async (projectId: string, args: Record<string, unknown> = {}) =>
+      List.parse(await callJson('search_knowledge', { projectId, ...args }));
+
+    it('finds what the knowledge route lists for the same words', async () => {
+      const project = await seedProject();
+      await callJson('save_decision', {
+        projectId: project.id,
+        question: 'Which queue library?',
+        choice: 'BullMQ',
+        rationale: 'Redis is already there',
+      });
+      await callJson('save_principle', {
+        projectId: project.id,
+        statement: 'Tests never sleep; they wait on a condition.',
+        topicKey: 'testing.no-sleeps',
+      });
+      for (const query of ['q=queue', 'q=sleep', 'kind=principle', 'history=1', '']) {
+        const args = Object.fromEntries(new URLSearchParams(query));
+        const viaTool = await found(project.id, {
+          ...args,
+          ...(args['history'] === undefined ? {} : { history: args['history'] === '1' }),
+        });
+        expect(viaTool, query).toEqual(await get(`/projects/${project.id}/knowledge?${query}`));
+      }
+      expect((await found(project.id, { q: 'queue' })).items).toHaveLength(1);
+    });
+
+    it('writes, replaces, retires and withdraws, each showing the MCP server and the quote', async () => {
+      const project = await seedProject();
+      const first = Item.parse(
+        await callJson('save_decision', {
+          projectId: project.id,
+          question: 'Which queue library?',
+          choice: 'BullMQ',
+          rationale: 'Redis is already there',
+          quote: 'use BullMQ',
+        }),
+      );
+      const second = Item.parse(
+        await callJson('supersede_knowledge', {
+          id: first.id,
+          choice: 'pg-boss',
+          quote: 'actually pg-boss',
+        }),
+      );
+      expect((await found(project.id)).items.map((i) => i.id)).toEqual([second.id]);
+      const rule = Item.parse(
+        await callJson('save_principle', {
+          projectId: project.id,
+          statement: 'Tests never sleep',
+          quote: 'never sleep in a test',
+        }),
+      );
+      await callJson('retire_knowledge', {
+        id: rule.id,
+        reason: 'No more tests.',
+        quote: 'drop it',
+      });
+      await callJson('withdraw_knowledge', {
+        id: second.id,
+        reason: 'Wrong project.',
+        quote: 'that was the wrong repo',
+      });
+      expect((await found(project.id)).items.map((i) => i.id)).toEqual([first.id]);
+      expect(
+        (await found(project.id, { history: true })).items.map((i) => i.id).toSorted(),
+      ).toEqual([first.id, second.id, rule.id].toSorted());
+      expect(await get(`/decisions/${first.id}/provenance`)).toMatchObject({
+        origin: { via: 'builder_mcp' },
+        quote: 'use BullMQ',
+      });
+      expect(await get(`/decisions/${second.id}/provenance`)).toMatchObject({
+        origin: { via: 'builder_mcp' },
+        quote: 'actually pg-boss',
+        withdrawn: { source: { via: 'builder_mcp', quote: 'that was the wrong repo' } },
+      });
+      expect(await get(`/principles/${rule.id}/provenance`)).toMatchObject({
+        origin: { via: 'builder_mcp' },
+        quote: 'never sleep in a test',
+        retired: { source: { via: 'builder_mcp', quote: 'drop it' } },
+      });
+    });
+
+    it('answers a refusal with the words the API gives', async () => {
+      const project = await seedProject();
+      const rest = await restRefusal(`/projects/${project.id}/decisions`, {
+        scope: 'area',
+        area: 'billing',
+        question: 'q',
+        choice: 'c',
+        rationale: 'r',
+      });
+      expect(rest.status).toBe(400);
+      const tool = await call('save_decision', {
+        projectId: project.id,
+        scope: 'area',
+        area: 'billing',
+        question: 'q',
+        choice: 'c',
+        rationale: 'r',
+      });
+      expect(tool.isError).toBe(true);
+      expect(tool.text).toBe(restText(rest.body));
+      expect(tool.text).toContain('has no area named billing');
+      const search = await call('search_knowledge', { projectId: project.id, area: 'billing' });
+      expect(search).toEqual({ isError: true, text: tool.text });
+    });
+
+    it('lists no proposal when none waits', async () => {
+      const project = await seedProject();
+      expect(await callJson('list_proposals', { projectId: project.id })).toEqual([]);
+    });
+  });
+
   describe('start_shape', () => {
     const view = async (id: string) => {
       const res = await fetch(`${daemon.url}/shapes/${id}`, {

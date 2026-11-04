@@ -32,6 +32,7 @@ const ID_SCHEMAS = {
   Person: idSchema('psn', 'PersonId'),
   RoutingRule: idSchema('rtr', 'RoutingRuleId'),
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
+  Principle: idSchema('pri', 'PrincipleId'),
   Batch: idSchema('bat', 'BatchId'),
   BoardColumn: idSchema('bcl', 'BoardColumnId'),
   Goal: idSchema('gol', 'GoalId'),
@@ -42,6 +43,7 @@ const ID_SCHEMAS = {
   ShapeProposal: idSchema('spp', 'ShapeProposalId'),
   ShapeLink: idSchema('slk', 'ShapeLinkId'),
   ShapeFinding: idSchema('shf', 'ShapeFindingId'),
+  ShapeQuestion: idSchema('sqn', 'ShapeQuestionId'),
   ShapeFile: idSchema('sfl', 'ShapeFileId'),
   ShapeAttachment: idSchema('sat', 'ShapeAttachmentId'),
   LandingGroup: idSchema('lgp', 'LandingGroupId'),
@@ -68,6 +70,7 @@ const ID_PREFIX = {
   Person: 'psn',
   RoutingRule: 'rtr',
   ModelProfile: 'mpf',
+  Principle: 'pri',
   Batch: 'bat',
   BoardColumn: 'bcl',
   Goal: 'gol',
@@ -78,6 +81,7 @@ const ID_PREFIX = {
   ShapeProposal: 'spp',
   ShapeLink: 'slk',
   ShapeFinding: 'shf',
+  ShapeQuestion: 'sqn',
   ShapeFile: 'sfl',
   ShapeAttachment: 'sat',
   LandingGroup: 'lgp',
@@ -133,6 +137,8 @@ export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
 export type RoutingRuleId = IdOf<'RoutingRule'>;
 export const ModelProfileId = ID_SCHEMAS.ModelProfile;
 export type ModelProfileId = IdOf<'ModelProfile'>;
+export const PrincipleId = ID_SCHEMAS.Principle;
+export type PrincipleId = IdOf<'Principle'>;
 export const BatchId = ID_SCHEMAS.Batch;
 export type BatchId = IdOf<'Batch'>;
 export const BoardColumnId = ID_SCHEMAS.BoardColumn;
@@ -153,6 +159,8 @@ export const ShapeLinkId = ID_SCHEMAS.ShapeLink;
 export type ShapeLinkId = IdOf<'ShapeLink'>;
 export const ShapeFindingId = ID_SCHEMAS.ShapeFinding;
 export type ShapeFindingId = IdOf<'ShapeFinding'>;
+export const ShapeQuestionId = ID_SCHEMAS.ShapeQuestion;
+export type ShapeQuestionId = IdOf<'ShapeQuestion'>;
 export const ShapeFileId = ID_SCHEMAS.ShapeFile;
 export type ShapeFileId = IdOf<'ShapeFile'>;
 export const ShapeAttachmentId = ID_SCHEMAS.ShapeAttachment;
