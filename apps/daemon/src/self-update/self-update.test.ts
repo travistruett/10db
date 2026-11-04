@@ -435,6 +435,21 @@ describe('tick', () => {
     expect(update.status().problem).toBeNull();
   });
 
+  it('does not call the machine offline for a certificate failure, and quotes gh', async () => {
+    for (const text of [
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r": tls: failed to verify certificate: x509: certificate signed by unknown authority',
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r": x509: certificate has expired or is not yet valid',
+    ]) {
+      world.head = new GhError(GhFailure.Unreachable, text);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      const message = update.status().problem?.message ?? '';
+      expect(message).toMatch(/could not reach GitHub securely/i);
+      expect(message).toContain(text);
+      expect(message).not.toMatch(/offline/i);
+    }
+  });
+
   it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
     const reasons: string[] = [];
     for (const error of [

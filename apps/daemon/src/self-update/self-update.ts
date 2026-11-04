@@ -273,6 +273,11 @@ const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']
 /** gh's words for a rate limit or a 5xx from GitHub: errors that are not about the repository. */
 const GITHUB_SIDE_ERROR = /rate limit|abuse detection|\bHTTP 5\d\d\b/i;
 
+/** gh's words for a certificate it would not trust: the network answered, so the machine is online. */
+const CERTIFICATE_ERROR = /tls: failed to verify certificate|x509:/i;
+/** gh's words for a connection that ended without an answer. */
+const CUT_OFF = /\bEOF$/i;
+
 /**
  * What Settings says when GitHub could not be asked, by what went wrong: gh signed out, the machine
  * offline, gh missing or hung, or an error GitHub answered with (a renamed or closed repository, a
@@ -289,6 +294,13 @@ function unreachableMessage(cause: unknown): string {
       case GhFailure.SignedOut:
         return `gh is signed out, so 10db cannot see new builds. Run gh auth login in a terminal; ${again}`;
       case GhFailure.Unreachable:
+        // The network works but the certificate does not check out (a TLS-inspecting proxy, a captive
+        // portal, a wrong clock): the machine is not offline, and gh's text names the cause.
+        if (CERTIFICATE_ERROR.test(detail))
+          return `gh could not reach GitHub securely, so 10db cannot see new builds (${detail}). Check the system clock and any proxy or VPN that inspects traffic; ${again}`;
+        // A connection cut off mid-answer says nothing about being offline; quote what gh said.
+        if (CUT_OFF.test(detail))
+          return `gh lost its connection to GitHub, so 10db cannot see new builds (${detail}). ${again}`;
         return `This machine looks offline: gh could not reach GitHub, so 10db cannot see new builds. ${again}`;
       case GhFailure.NotInstalled:
         return `gh is not installed any more, so 10db cannot see new builds. Install it (brew install gh) and sign in with gh auth login; ${again}`;
