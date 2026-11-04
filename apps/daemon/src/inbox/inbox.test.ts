@@ -320,6 +320,50 @@ describe('inbox questions', () => {
     expect(openItemsForWorkstream(clocked.db, ws.workstream.id)).toEqual([]);
   });
 
+  it('keeps the minutes a lane waited on its only card after the lane is cancelled with it', () => {
+    let now = Date.parse('2026-11-03T00:30:00.000Z');
+    const test = createTestStore(() => new Date(now));
+    onTestFinished(test.close);
+    const clocked = createStateStore(test.store, createEventBus());
+    const service = createInboxService({ state: clocked, onParkedAnswer: () => undefined });
+    const ws = seedWorkstream(test.store);
+    const move = (to: WorkstreamState): void => {
+      clocked.write((ctx) => transitionWorkstream(ctx, ws.workstream.id, { to, fence: null }));
+    };
+    move(WorkstreamState.Starting);
+    move(WorkstreamState.Running);
+
+    // The lane asks at 01:00 and parks on the card.
+    now = Date.parse('2026-11-03T01:00:00.000Z');
+    const { item } = service.ask({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      sessionId: mintId('Session'),
+      kind: 'question',
+      title: 'Which color?',
+      body: 'For the badge',
+      options: [{ label: 'Teal', description: '' }],
+      recommendation: null,
+      category: 'design',
+      urgency: 'normal',
+      detail: null,
+      signal: new AbortController().signal,
+    });
+    move(WorkstreamState.WaitingHuman);
+
+    // Cancelled at 08:00 while it waited, as the runner and a shipped batch do.
+    now = Date.parse('2026-11-03T08:00:00.000Z');
+    service.cancelForWorkstream(ws.workstream.id);
+    move(WorkstreamState.Cancelled);
+
+    expect(getInboxItem(clocked.db, item.id)).toMatchObject({
+      state: 'CANCELLED',
+      targets: [{ workstreamId: ws.workstream.id }],
+    });
+    now = Date.parse('2026-11-03T12:00:00.000Z');
+    expect(humanTouchDays(clocked.db, ws.project.id, new Date(now))[0]?.waitingMinutes).toBe(420);
+  });
+
   it('keeps the minutes a lane waited on a folded card after that lane is cancelled', () => {
     let now = Date.parse('2026-11-03T00:30:00.000Z');
     const test = createTestStore(() => new Date(now));
