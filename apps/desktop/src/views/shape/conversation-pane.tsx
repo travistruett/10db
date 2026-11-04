@@ -92,12 +92,15 @@ export function ConversationPane({
   // text: a drop that opens it afterwards replaces the input, and this is what it would lose.
   const failedSend = useRef<{ readonly text: string; readonly message: string } | null>(null);
   const open = (id: ShapeId): void => {
-    if (opened.current !== null || !here.current) return;
-    opened.current = id;
+    if (opened.current !== null) return;
+    // A send that failed first, with the screen still here, waits for a conversation to be left to.
+    // Left too, it must still go: nothing else will, and opening the conversation later shows it.
     if (failedSend.current !== null) {
       leaveLate(id, { failure: failedSend.current.message, draft: failedSend.current.text });
       failedSend.current = null;
     }
+    if (!here.current) return;
+    opened.current = id;
     onOpened(id);
   };
 
@@ -232,20 +235,25 @@ export function ConversationPane({
           const before = latest.current;
           failedSend.current = null;
           let id: ShapeId;
+          // Set once the conversation exists, even if the send into it then fails.
+          let made: ShapeId | null = null;
           try {
             id = await ensureId();
+            made = id;
             await send.mutateAsync({ shapeId: id, text });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             if (shapeId !== null) throw error;
-            if (opened.current === null) {
+            // Where the input went: the conversation a drop opened, or, when the builder left this
+            // screen first, the one this send made, so opening it later still shows why.
+            const gone = opened.current ?? (here.current ? null : made);
+            if (gone === null) {
               // The drop may still open the conversation and take this input with it.
               failedSend.current = { text, message };
               throw error;
             }
-            // The drop opened it while this was on its way: its input is gone, so the new one
-            // gets the reason and the text.
-            leaveLate(opened.current, { failure: message, draft: text });
+            // Its input is gone, so the conversation's new one gets the reason and the text.
+            leaveLate(gone, { failure: message, draft: text });
             return;
           }
           // The daemon took the message, so a refusal of Propose or Stop from before the send is out

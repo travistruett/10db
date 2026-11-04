@@ -401,6 +401,35 @@ describe('Shape: the conversation across a layout change', () => {
     expect(kept.value).toBe(text);
   });
 
+  it('keeps the reason and the text of a send that failed after the builder left /shape', async () => {
+    const message = waiting();
+    serve(
+      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+        await message.held;
+        return restarting();
+      }),
+    );
+    const { router } = renderApp('/shape');
+    const input = await onNewConversation();
+    send(input);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading')).toBe(true);
+    });
+    await router.navigate({ to: '/' });
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+    });
+    message.release();
+    await waitFor(() => {
+      expect(screen.queryByRole('textbox', { name: 'Message' })).toBeNull();
+    });
+    await router.navigate({ to: '/shape/$shapeId', params: { shapeId: shape.id } });
+    await openedInTheDrawerLayout();
+    expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+    const kept = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+    expect(kept.value).toBe(text);
+  });
+
   it('keeps the reason of a dropped file the daemon refused', async () => {
     serve(
       http.post(daemonUrl('/shapes/:shapeId/files'), () =>
