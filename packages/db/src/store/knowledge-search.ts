@@ -82,9 +82,10 @@ export function searchDecisions(
 }
 
 /**
- * Shape's `find_records` (spec §5.5): the current decisions that apply to the project (its own and
- * the builder-wide `you` ones) matching the query, each with its scope and the date it was made, so
- * the conversation can cite it ("Decided 2026-10-30: …"). Withdrawn and superseded ones are left out.
+ * Shape's `find_records` (spec §5.5): the current decisions and principles that apply to the project
+ * (its own and the builder-wide `you` ones) matching the query, best match first, each with its scope
+ * and the date it was made, so the conversation can cite it ("Decided 2026-10-30: …"). Withdrawn,
+ * superseded, retired and proposed ones are left out.
  */
 export function findRecords(
   db: DbReader,
@@ -94,13 +95,27 @@ export function findRecords(
 ): RecordHit[] {
   const match = ftsQuery(query);
   if (match === null) return [];
+  // One column list for both legs, so the union ranks them together; each leg's own columns are
+  // NULL in the other's.
   const rows = db.all(sql`
-    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice,
-      d.rationale AS rationale, d.scope AS scope, d.created_at AS createdAt
-    FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
-    WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
-      AND ${currentDecisionSql}
-    ORDER BY bm25(decisions_fts), d.id
+    SELECT * FROM (
+      SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice,
+        d.rationale AS rationale, d.scope AS scope, NULL AS area, NULL AS statement,
+        NULL AS principleKind, NULL AS topicKey, d.created_at AS createdAt,
+        bm25(decisions_fts) AS rank
+      FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
+      WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
+        AND ${currentDecisionSql}
+      UNION ALL
+      SELECT 'principle' AS kind, p.id AS id, NULL AS question, NULL AS choice,
+        p.rationale AS rationale, p.scope AS scope, p.area AS area, p.statement AS statement,
+        p.kind AS principleKind, p.topic_key AS topicKey, p.created_at AS createdAt,
+        bm25(principles_fts) AS rank
+      FROM principles_fts f JOIN principles p ON p.rowid = f.rowid
+      WHERE principles_fts MATCH ${match} AND (p.project_id = ${projectId} OR p.project_id IS NULL)
+        AND ${currentPrincipleSql}
+    )
+    ORDER BY rank, id
     LIMIT ${limit}
   `);
   return RecordHit.array().parse(rows);

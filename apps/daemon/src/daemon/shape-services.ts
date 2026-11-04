@@ -24,6 +24,7 @@ export type ShapeApiServices = Pick<
   | 'convertShape'
   | 'removeDraftGoal'
   | 'withdrawShapeDecision'
+  | 'withdrawShapePrinciple'
   | 'resumeShape'
   | 'getGoalShape'
   | 'getTaskShape'
@@ -90,6 +91,9 @@ export function createShapeServices(deps: {
     }),
     withdrawShapeDecision: (shapeId, decisionId, reason) => {
       shape.withdrawDecision(shapeId, decisionId, reason);
+    },
+    withdrawShapePrinciple: (shapeId, principleId, reason) => {
+      shape.withdrawPrinciple(shapeId, principleId, reason);
     },
     editShapeProposal: (shapeId, id, fields) => {
       shape.editProposal(shapeId, id, fields);

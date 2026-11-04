@@ -52,6 +52,34 @@ describe('buildDigest', () => {
     expect(digest).toMatch(/a → task tsk_/);
   });
 
+  it('says what a converted principle and question became', () => {
+    const m = c.say('Never sleep in tests.');
+    c.store.write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          records: [
+            {
+              key: 'no-sleeps',
+              kind: 'principle',
+              scope: 'project',
+              statement: 'Never sleep in tests',
+              rationale: 'Flaky.',
+              sourceMessageIds: [m],
+            },
+          ],
+          questions: [{ key: 'who', text: 'Who pays?', for: 'finance', sourceMessageIds: [m] }],
+        }),
+      ),
+    );
+    const ids = listShapeProposals(c.store.db, c.shape.id).map((r) => r.id);
+    c.store.write((ctx) => convertProposals(ctx, c.shape.id, ids));
+    const digest = buildDigest(c.store.db, c.shape.id);
+    expect(digest).toMatch(/no-sleeps → principle pri_[\w-]+ "Never sleep in tests" — current/);
+    expect(digest).toMatch(/who → question sqn_[\w-]+ "Who pays\?" for finance — stored/);
+  });
+
   it('says so when nothing has been proposed yet', () => {
     c.say('Hello');
     expect(buildDigest(c.store.db, c.shape.id)).toContain('Nothing is proposed yet.');

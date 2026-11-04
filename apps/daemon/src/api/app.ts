@@ -496,6 +496,18 @@ export function createApp(deps: ApiDeps) {
         return c.body(null, 204);
       },
     )
+    .post(
+      '/shapes/:shapeId/principles/:principleId/withdraw',
+      validator('json', (value): ShapeWithdrawInput => ShapeWithdrawInput.parse(value)),
+      (c) => {
+        deps.services.withdrawShapePrinciple(
+          ShapeId.parse(c.req.param('shapeId')),
+          PrincipleId.parse(c.req.param('principleId')),
+          c.req.valid('json').reason,
+        );
+        return c.body(null, 204);
+      },
+    )
     .patch(
       '/shapes/:shapeId/proposals/:proposalId',
       validator('json', (value): ShapeEditInput => ShapeEditInput.parse(value)),

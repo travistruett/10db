@@ -292,7 +292,7 @@ not by the token.
 | `write_spec(effortKey, markdown)`              | session            | an effort's spec (§7)                                                                                                                                                                                                                                                                                                                                            |
 | `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                                          |
 | `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                                                    |
-| `find_records(query)`                          | session            | read-only search over the decisions that apply to this project (`searchDecisions`: the project's and the builder-wide `you` ones), principles once they exist, and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
+| `find_records(query)`                          | session            | read-only search over the decisions and current principles that apply to this project (the project's and the builder-wide `you` ones), and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
 
 **Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
 touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You
@@ -709,9 +709,13 @@ All in scope; this is build order. Each slice ships something usable.
    Decisions › Sizing; `find_records` with dated hits cited in the chat, and supersede through Convert; the
    per-project opt-in (Settings › General), the three decisions in shadow (`shape_shadow_answers`, judge outcome
    `shadow`), their scoring and agreement rows. `similar_tasks` ranks by shared words, not an FTS5 index (finished
-   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. Not built yet, and
-   filed as follow-ups: the `principles` table and converting principles and questions (`shape_questions`); the
-   actual in the task drawer; telling a reopened conversation which of its tasks mis-sized.*
+   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. Also built: Convert
+   writes principles (confirmed, replacing the current one with the same topic key and scope) and stores questions in
+   `shape_questions` under the goal or task they are about (migrations 0039, 0040; `decisions/2026-11-03-convert-writes-principles-confirmed-and-stores-questions-under-their-goal-or-task.md`);
+   Withdraw Principle… beside Withdraw Decision…; `find_records` returns principles beside decisions; and a
+   conversation's session starts with the builder-wide and project policies and heuristics, again after a 70%
+   re-seed. Not built yet, and filed as follow-ups: the actual in the task drawer; telling a reopened conversation
+   which of its tasks mis-sized.*
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.

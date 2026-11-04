@@ -3,8 +3,14 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import { findOpenProposalCard, insertInboxItem, updateInboxItem } from './inbox';
+import { insertDecision } from './decisions';
 import { getProposalDto, insertProposal, insertSource, listProposals } from './knowledge';
-import { checkKnowledgeIndex, searchPrincipleIds, searchPrinciples } from './knowledge-search';
+import {
+  checkKnowledgeIndex,
+  findRecords,
+  searchPrincipleIds,
+  searchPrinciples,
+} from './knowledge-search';
 import {
   confirmPrinciple,
   getPrinciple,
@@ -309,6 +315,50 @@ describe('principles', () => {
     expect(keys({ scope: 'you' })).toEqual(['mine']);
     expect(keys({ scope: 'area', area: 'api' })).toEqual(['api-only']);
     expect(keys({ kind: 'policy' })).toEqual(['ours']);
+  });
+
+  it('finds current principles in find_records beside decisions, each with its kind, key, scope and date', () => {
+    const p = seedProject(store);
+    const other = seedProject(store, { name: 'other' });
+    const old = principle(project(p.id), { topicKey: 'tests.no-sleeps' });
+    const current = principle(project(p.id), {
+      topicKey: 'tests.no-sleeps',
+      statement: 'Never sleep in tests, wait on a condition',
+      rationale: 'Sleeps make the suite flaky',
+    });
+    principle(project(other.id), { statement: 'Never sleep elsewhere', topicKey: 'elsewhere' });
+    principle({ scope: 'you' }, { statement: 'Always sleep on it', topicKey: 'mine' });
+    store.write((ctx) =>
+      insertDecision(ctx, {
+        projectId: p.id,
+        question: 'Sleep in tests?',
+        choice: 'Never',
+        rationale: 'Flaky',
+        decidedBy: 'me',
+        scope: 'project',
+        area: null,
+        sourceId: insertSource(ctx, 'builder', {}),
+      }),
+    );
+    const hits = findRecords(store.db, p.id, 'sleep', 10);
+    expect(hits.map((h) => h.kind).sort()).toEqual(['decision', 'principle', 'principle']);
+    expect(hits.filter((h) => h.kind === 'principle')).toEqual(
+      expect.arrayContaining([
+        {
+          kind: 'principle',
+          id: current.id,
+          statement: 'Never sleep in tests, wait on a condition',
+          rationale: 'Sleeps make the suite flaky',
+          principleKind: 'policy',
+          topicKey: 'tests.no-sleeps',
+          scope: 'project',
+          area: null,
+          createdAt: current.createdAt,
+        },
+      ]),
+    );
+    expect(hits.some((h) => h.id === old.id)).toBe(false);
+    expect(hits.some((h) => h.kind === 'principle' && h.scope === 'you')).toBe(true);
   });
 
   it('never throws on hostile search text for principles', () => {

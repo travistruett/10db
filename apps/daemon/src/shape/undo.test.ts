@@ -11,20 +11,23 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  findRecords,
   getDecision,
+  getPrinciple,
   getShape,
   insertWorkstream,
   listShapeLinks,
   listShapeProposals,
   listTasks,
   searchDecisions,
+  searchPrinciples,
   type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { convertProposals } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { reconcileDraft } from './rounds';
-import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
+import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 
 // Shape spec §11, Undo: Remove Draft Goal and Withdraw Decision, from the Proposed sidebar.
 
@@ -124,6 +127,77 @@ describe('Remove Draft Goal', () => {
         removeDraftGoalOf(ctx, c.shape.id, mintId('Goal'));
       });
     }).toThrow(InvalidError);
+  });
+});
+
+describe('Withdraw Principle', () => {
+  const convertPrinciple = (key: string, statement: string, topicKey = 'tests.no-sleeps') => {
+    const m = c.say('Never sleep in tests.');
+    write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          records: [
+            {
+              key,
+              kind: 'principle',
+              scope: 'project',
+              statement,
+              topicKey,
+              rationale: 'Sleeps make the suite flaky.',
+              sourceMessageIds: [m],
+            },
+          ],
+        }),
+      ),
+    );
+    const row = must(
+      listShapeProposals(c.store.db, c.shape.id).find((r) => r.key === key),
+      'the proposal',
+    );
+    const out = write((ctx) => convertProposals(ctx, c.shape.id, [row.id]));
+    if (!out.ok) throw new Error(out.errors.join('; '));
+    return must(out.results[0]?.principleId, 'the principle');
+  };
+
+  it('withdraws the converted principle with a reason, and search forgets it', () => {
+    const principleId = convertPrinciple('no-sleeps', 'Never sleep in tests');
+    expect(searchPrinciples(c.store.db, c.project.id, 'sleep', 5)).toHaveLength(1);
+    write((ctx) => {
+      withdrawConvertedPrinciple(ctx, c.shape.id, principleId, 'We allow it now');
+    });
+    expect(getPrinciple(c.store.db, principleId)).toMatchObject({
+      state: 'withdrawn',
+      withdrawnReason: 'We allow it now',
+    });
+    expect(searchPrinciples(c.store.db, c.project.id, 'sleep', 5)).toEqual([]);
+    expect(findRecords(c.store.db, c.project.id, 'sleep', 5)).toEqual([]);
+  });
+
+  it('needs a reason, and refuses a principle this conversation did not write', () => {
+    const principleId = convertPrinciple('no-sleeps', 'Never sleep in tests');
+    expect(() => {
+      write((ctx) => {
+        withdrawConvertedPrinciple(ctx, c.shape.id, principleId, ' ');
+      });
+    }).toThrow(InvalidError);
+    expect(() => {
+      write((ctx) => {
+        withdrawConvertedPrinciple(ctx, c.shape.id, mintId('Principle'), 'why');
+      });
+    }).toThrow(InvalidError);
+  });
+
+  it('refuses a principle a later one replaced', () => {
+    const first = convertPrinciple('first', 'Never sleep in tests');
+    convertPrinciple('second', 'Never sleep in tests, wait on a condition');
+    expect(getPrinciple(c.store.db, first).state).toBe('superseded');
+    expect(() => {
+      write((ctx) => {
+        withdrawConvertedPrinciple(ctx, c.shape.id, first, 'because');
+      });
+    }).toThrow(ConflictError);
   });
 });
 

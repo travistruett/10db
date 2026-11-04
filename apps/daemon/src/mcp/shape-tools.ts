@@ -33,5 +33,5 @@ export const SHAPE_TOOL_DESCRIPTIONS: Record<ShapeToolName, string> = {
   resolve_finding:
     'Mark a finding resolved once a propose_plan call has answered it, with a one-line how. The builder dismisses the ones you leave.',
   find_records:
-    'Search the decisions that apply to this project and its earlier conversations. Cite what you find, with its date.',
+    'Search the decisions and principles that apply to this project, and its earlier conversations. Each hit carries its date and, for a principle, its kind, topic key and scope. Cite what you find, with its date.',
 };

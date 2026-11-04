@@ -10,7 +10,8 @@ import {
   ShapeMessageId,
   TaskId,
 } from './ids';
-import { KnowledgeScope } from './states';
+import { TopicKey } from './knowledge';
+import { KnowledgeScope, PrincipleKind } from './states';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
 // Contracts only; the daemon module that runs a conversation comes in later tasks.
@@ -197,8 +198,13 @@ export const PlanPrincipleRecord = z
     kind: z.literal('principle'),
     statement: z.string().min(1),
     rationale: z.string().min(1),
+    /** `policy`, `heuristic` or `belief`; Convert gives a record that names none `policy`. */
+    principleKind: z.enum(PrincipleKind).optional(),
+    /** The key the principle replaces the current one by; Convert makes one from the statement when absent. */
+    topicKey: TopicKey.optional(),
   })
   .refine(areaMatchesScope, AREA_SCOPE);
+export type PlanPrincipleRecord = z.infer<typeof PlanPrincipleRecord>;
 
 export const PlanRecord = z.discriminatedUnion('kind', [PlanDecisionRecord, PlanPrincipleRecord]);
 export type PlanRecord = z.infer<typeof PlanRecord>;
@@ -208,6 +214,8 @@ export const PlanQuestion = z.object({
   text: z.string().min(1),
   /** A role or a person. */
   for: z.string().min(1),
+  /** The key of the goal or task the question belongs to; Convert stores it under that goal or task. */
+  about: BriefKey.optional(),
   sourceMessageIds: SourceMessageIds,
 });
 export type PlanQuestion = z.infer<typeof PlanQuestion>;

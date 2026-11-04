@@ -89,9 +89,11 @@ describe('decisions with derived state', () => {
       ['BullMQ', 'superseded'],
       ['pg-boss', 'current'],
     ]);
-    expect(findRecords(store.db, project.id, 'queue', 10).map((r) => r.choice)).toEqual([
-      'pg-boss',
-    ]);
+    expect(
+      findRecords(store.db, project.id, 'queue', 10).flatMap((r) =>
+        r.kind === 'decision' ? [r.choice] : [],
+      ),
+    ).toEqual(['pg-boss']);
   });
 
   it.each([

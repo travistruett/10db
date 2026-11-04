@@ -266,6 +266,8 @@ export interface ApiServices {
   getTaskShape(taskId: TaskId): ShapeOfDto;
   /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
+  /** Withdraw Principle…: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */
+  withdrawShapePrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
    * The builder's actions on a proposal row: edit sets fields and pins them, unpin lets a field (or the
    * whole row) go, restore brings a row back from Earlier pinned, drop tombstones its key. Throws

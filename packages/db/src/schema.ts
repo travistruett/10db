@@ -93,6 +93,7 @@ import type {
   ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
+  ShapeQuestionId,
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalId,
@@ -1216,6 +1217,12 @@ export const shapeLinks = sqliteTable(
     decisionId: text('decision_id')
       .$type<DecisionId>()
       .references(() => decisions.id),
+    principleId: text('principle_id')
+      .$type<PrincipleId>()
+      .references(() => principles.id),
+    questionId: text('question_id')
+      .$type<ShapeQuestionId>()
+      .references(() => shapeQuestions.id),
     createdAt: createdAt(),
   },
   (t) => [
@@ -1223,9 +1230,44 @@ export const shapeLinks = sqliteTable(
     index('shape_links_task_idx').on(t.taskId),
     check(
       'shape_links_one_target',
-      sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) = 1`,
+      sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) + (${t.principleId} IS NOT NULL) + (${t.questionId} IS NOT NULL) = 1`,
     ),
   ],
+);
+
+/**
+ * A question a conversation's plan holds for a role or a person (Shape spec §13), stored when Convert
+ * writes it and linked to the goal or task it belongs to. Nothing is sent: goals phase 3 sends them.
+ */
+export const shapeQuestions = sqliteTable(
+  'shape_questions',
+  {
+    id: text('id').$type<ShapeQuestionId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    proposalId: text('proposal_id')
+      .$type<ShapeProposalId>()
+      .notNull()
+      .references(() => shapeProposals.id),
+    key: text('key').notNull(),
+    text: text('text').notNull(),
+    /** The role or person the question is for. */
+    forWho: text('for_who').notNull(),
+    sourceMessageIds: text('source_message_ids', { mode: 'json' })
+      .$type<ShapeMessageId[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shape_questions_shape_idx').on(t.shapeId, t.key)],
 );
 
 /**

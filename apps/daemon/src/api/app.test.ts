@@ -105,6 +105,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
+    withdrawShapePrinciple: track('withdrawShapePrinciple'),
     resumeShape: track('resumeShape'),
     getGoalShape: track('getGoalShape'),
     getTaskShape: track('getTaskShape'),
@@ -1349,6 +1350,22 @@ describe('shape routes', () => {
         )
       ).status,
     ).toBe(400);
+  });
+
+  it('Withdraw Principle answers 204, and refuses a blank reason', async () => {
+    const principleId = mintId('Principle');
+    const calls: string[] = [];
+    const services = stubServices({
+      withdrawShapePrinciple: (shape, id, reason) => {
+        calls.push(`withdraw ${shape} ${id} ${reason}`);
+      },
+    });
+    const path = `/shapes/${shapeId}/principles/${principleId}/withdraw`;
+    expect((await app(services).request(path, post({ reason: 'We allow it now' }))).status).toBe(
+      204,
+    );
+    expect(calls).toEqual([`withdraw ${shapeId} ${principleId} We allow it now`]);
+    expect((await app(services).request(path, post({ reason: '' }))).status).toBe(400);
   });
 
   describe('editing a row', () => {

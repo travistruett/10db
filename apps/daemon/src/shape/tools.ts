@@ -92,7 +92,11 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
         records.length === 0
           ? 'find_records · nothing recorded'
           : `find_records · ${records
-              .map((r) => `Decided ${r.createdAt.slice(0, 10)}: ${r.question} ${r.choice}`)
+              .map((r) =>
+                r.kind === 'decision'
+                  ? `Decided ${r.createdAt.slice(0, 10)}: ${r.question} ${r.choice}`
+                  : `Principle ${r.createdAt.slice(0, 10)} (${r.principleKind}, ${r.topicKey}): ${r.statement}`,
+              )
               .join(' · ')}`,
       );
       return Promise.resolve({ records });

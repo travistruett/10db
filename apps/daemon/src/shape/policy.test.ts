@@ -123,6 +123,13 @@ describe('remembering and sizing (§5.5, §8)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/supersedes/);
   });
 
+  it('tells the session to propose a principle when the builder states a rule with always or never, after looking for one', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/always" or "never"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/principle record/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/call find_records first/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/topicKey/);
+  });
+
   it('tells the session to size from similar finished tasks as a basis', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/similar_tasks/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/basis/);

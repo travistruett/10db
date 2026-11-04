@@ -205,7 +205,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -668,7 +693,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -901,7 +951,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -1082,7 +1157,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -1238,7 +1338,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -1426,7 +1551,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -1497,6 +1647,19 @@
                   "rationale": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "principleKind": {
+                    "type": "string",
+                    "enum": [
+                      "policy",
+                      "heuristic",
+                      "belief"
+                    ]
+                  },
+                  "topicKey": {
+                    "type": "string",
+                    "maxLength": 80,
+                    "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
                   }
                 },
                 "required": [
@@ -1609,7 +1772,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },
@@ -1652,6 +1840,10 @@
                   "for": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "about": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
                   },
                   "sourceMessageIds": {
                     "minItems": 1,
@@ -1770,7 +1962,32 @@
                           }
                         ]
                       },
+                      "principleId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "questionId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^sqn_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
                       "withdrawn": {
+                        "type": "boolean"
+                      },
+                      "superseded": {
                         "type": "boolean"
                       }
                     },

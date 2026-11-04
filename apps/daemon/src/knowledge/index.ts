@@ -1,4 +1,5 @@
 export { workstreamAreas } from './areas';
+export { principlesBrief } from './brief';
 export { proposeStandingRules, recordAnswerDecision } from './capture';
 export { decisionHit, principleHit } from './hits';
 export { repairKnowledgeIndex } from './index-health';

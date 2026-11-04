@@ -823,3 +823,106 @@ describe('migrating to principles (M3 knowledge)', () => {
     ).toEqual(['decisions_supersedes_idx']);
   });
 });
+
+describe('migrating to principle and question links (Shape spec §13)', () => {
+  const AT = '2026-11-03T12:00:00.000Z';
+  const run = (sql: string, ...args: (string | number | null)[]): void => {
+    db.$client.prepare(sql).run(...args);
+  };
+  const link = (id: string, target: Record<string, string>): void => {
+    const columns = Object.keys(target);
+    run(
+      `INSERT INTO shape_links (id, shape_id, proposal_id, key, ${columns.map((c) => `${c}, `).join('')}created_at)
+       VALUES (?, 'shp_a', 'shq_a', 'k', ${columns.map(() => '?, ').join('')}?)`,
+      id,
+      ...Object.values(target),
+      AT,
+    );
+  };
+
+  beforeEach(() => {
+    // The last migration before shape_links could name a principle or a question.
+    migrateDatabase(db, migrationsThrough('0038_green_sauron'));
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO tasks (id, project_id, title, description, acceptance_criteria, areas, status, board_order,
+         workspace_mode, created_at, updated_at)
+       VALUES ('tsk_a', 'prj_a', 't', '', '[]', '[]', 'open', 1, 'shared', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(`INSERT INTO sources (id, kind, ref, created_at) VALUES ('src_a', 'builder', '{}', ?)`, AT);
+    run(
+      `INSERT INTO decisions (id, project_id, question, choice, rationale, decided_by, scope, source_id,
+         created_at, updated_at)
+       VALUES ('dec_a', 'prj_a', 'Which queue library?', 'BullMQ', 'Redis', 'me', 'project', 'src_a', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO shapes (id, project_id, title, state, origin, propose_unlocked, round, created_at, updated_at)
+       VALUES ('shp_a', 'prj_a', 'Density', 'proposed', 'app', 1, 1, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO shape_proposals (id, shape_id, key, kind, state, round, body, created_at, updated_at)
+       VALUES ('shq_a', 'shp_a', 'k', 'task', 'accepted', 1, '{}', ?, ?)`,
+      AT,
+      AT,
+    );
+    link('slk_task', { task_id: 'tsk_a' });
+    link('slk_decision', { decision_id: 'dec_a' });
+    migrateDatabase(db);
+  });
+
+  it('keeps every existing link and leaves no dangling reference', () => {
+    expect(
+      db.$client.prepare('SELECT id, task_id, decision_id FROM shape_links ORDER BY id').all(),
+    ).toEqual([
+      { id: 'slk_decision', task_id: null, decision_id: 'dec_a' },
+      { id: 'slk_task', task_id: 'tsk_a', decision_id: null },
+    ]);
+    expect(db.$client.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('links a principle or a question, and still demands exactly one target', () => {
+    run(
+      `INSERT INTO principles (id, project_id, scope, statement, kind, topic_key, status, source_id,
+         created_at, updated_at)
+       VALUES ('pri_a', 'prj_a', 'project', 'Never sleep in tests', 'policy', 'testing.no-sleeps',
+         'confirmed', 'src_a', ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO shape_questions (id, shape_id, proposal_id, key, text, for_who, task_id, created_at)
+       VALUES ('squ_a', 'shp_a', 'shq_a', 'q', 'Who pays?', 'finance', 'tsk_a', ?)`,
+      AT,
+    );
+    expect(() => {
+      link('slk_principle', { principle_id: 'pri_a' });
+    }).not.toThrow();
+    expect(() => {
+      link('slk_question', { question_id: 'squ_a' });
+    }).not.toThrow();
+    expect(() => {
+      link('slk_none', {});
+    }).toThrow(/CHECK constraint failed/);
+    expect(() => {
+      link('slk_two', { principle_id: 'pri_a', task_id: 'tsk_a' });
+    }).toThrow(/CHECK constraint failed/);
+  });
+});

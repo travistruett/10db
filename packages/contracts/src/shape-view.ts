@@ -2,10 +2,12 @@ import { z } from 'zod';
 import {
   DecisionId,
   GoalId,
+  PrincipleId,
   ShapeAttachmentId,
   ShapeId,
   ShapeMessageId,
   ShapeProposalId,
+  ShapeQuestionId,
   TaskId,
 } from './ids';
 import {
@@ -35,8 +37,14 @@ export const ShapeConvertedDto = z.object({
   goalId: GoalId.nullable(),
   taskIds: z.array(TaskId),
   decisionId: DecisionId.nullable(),
-  /** The converted decision was withdrawn (Withdraw Decision…); absent for every other kind. */
+  /** The principle Convert wrote; absent for every other kind. */
+  principleId: PrincipleId.nullable().optional(),
+  /** The question Convert stored; absent for every other kind. */
+  questionId: ShapeQuestionId.nullable().optional(),
+  /** The converted decision or principle was withdrawn (Withdraw Decision…, Withdraw Principle…); absent for every other kind. */
   withdrawn: z.boolean().optional(),
+  /** The converted principle was replaced by a later one with its topic key and scope; absent for every other kind. */
+  superseded: z.boolean().optional(),
 });
 export type ShapeConvertedDto = z.infer<typeof ShapeConvertedDto>;
 
@@ -183,6 +191,8 @@ export const ShapeConvertedRow = z.object({
   goalId: GoalId.optional(),
   taskIds: z.array(TaskId),
   decisionId: DecisionId.optional(),
+  principleId: PrincipleId.optional(),
+  questionId: ShapeQuestionId.optional(),
 });
 export type ShapeConvertedRow = z.infer<typeof ShapeConvertedRow>;
 

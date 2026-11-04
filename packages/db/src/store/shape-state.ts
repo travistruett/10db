@@ -4,6 +4,7 @@ import {
   NotFoundError,
   type DecisionId,
   type GoalId,
+  type PrincipleId,
   type ShapeDto,
   type ShapeFileId,
   type ShapeId,
@@ -15,6 +16,7 @@ import {
   type ShapeProposalId,
   type ShapeProposalKind,
   type ShapeProposalState,
+  type ShapeQuestionId,
   type ShapeState,
   type TaskId,
 } from '@10db/contracts';
@@ -285,9 +287,13 @@ export function countShapeFiles(db: DbReader, shapeId: ShapeId): number {
 
 export type ShapeLinkRow = typeof schema.shapeLinks.$inferSelect;
 
-/** What Convert made from a proposal: exactly one of a goal, a task and a decision. */
+/** What Convert made from a proposal: exactly one of a goal, a task, a decision, a principle and a question. */
 export type ShapeLinkTarget =
-  { readonly goalId: GoalId } | { readonly taskId: TaskId } | { readonly decisionId: DecisionId };
+  | { readonly goalId: GoalId }
+  | { readonly taskId: TaskId }
+  | { readonly decisionId: DecisionId }
+  | { readonly principleId: PrincipleId }
+  | { readonly questionId: ShapeQuestionId };
 
 export function insertShapeLink(
   ctx: WriteContext,
@@ -305,10 +311,53 @@ export function insertShapeLink(
     goalId: 'goalId' in input ? input.goalId : null,
     taskId: 'taskId' in input ? input.taskId : null,
     decisionId: 'decisionId' in input ? input.decisionId : null,
+    principleId: 'principleId' in input ? input.principleId : null,
+    questionId: 'questionId' in input ? input.questionId : null,
     createdAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeLinks).values(row).run();
   return row;
+}
+
+export type ShapeQuestionRow = typeof schema.shapeQuestions.$inferSelect;
+
+/** A question Convert stores for goals phase 3 to send; it belongs to a goal or a task, or to neither. */
+export function insertShapeQuestion(
+  ctx: WriteContext,
+  input: {
+    readonly shapeId: ShapeId;
+    readonly proposalId: ShapeProposalId;
+    readonly key: string;
+    readonly text: string;
+    readonly forWho: string;
+    readonly sourceMessageIds: readonly ShapeMessageId[];
+    readonly goalId?: GoalId;
+    readonly taskId?: TaskId;
+  },
+): ShapeQuestionRow {
+  const row: ShapeQuestionRow = {
+    id: mintId('ShapeQuestion') satisfies ShapeQuestionId,
+    shapeId: input.shapeId,
+    proposalId: input.proposalId,
+    key: input.key,
+    text: input.text,
+    forWho: input.forWho,
+    sourceMessageIds: [...input.sourceMessageIds],
+    goalId: input.goalId ?? null,
+    taskId: input.taskId ?? null,
+    createdAt: ctx.now,
+  };
+  ctx.tx.insert(schema.shapeQuestions).values(row).run();
+  return row;
+}
+
+export function listShapeQuestions(db: DbReader, shapeId: ShapeId): ShapeQuestionRow[] {
+  return db
+    .select()
+    .from(schema.shapeQuestions)
+    .where(eq(schema.shapeQuestions.shapeId, shapeId))
+    .orderBy(asc(schema.shapeQuestions.id))
+    .all();
 }
 
 export function listShapeLinks(db: DbReader, shapeId: ShapeId): ShapeLinkRow[] {

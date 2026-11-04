@@ -13,10 +13,16 @@ import {
   createTestStore,
   getShape,
   getSession,
+  insertPrinciple,
   insertSession,
   insertShape,
+  insertShapeLink,
+  insertShapeQuestion,
+  insertSource,
   insertTask,
   insertWorkstream,
+  listShapeLinks,
+  listShapeQuestions,
   listShapes,
   seedProject,
   updateSessionUsage,
@@ -197,6 +203,77 @@ describe('the Shape tables', () => {
         .run();
     expect(() => link({})).toThrow(/CHECK/);
     expect(() => link({ taskId: task.id })).not.toThrow();
+  });
+
+  it('stores a question under its task and links a question and a principle through shape_links', () => {
+    const shape = newShape().value;
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['api'] }),
+    ).value;
+    const proposal = (key: string, kind: 'question' | 'principle') => {
+      const id = mintId('ShapeProposal');
+      store.db
+        .insert(schema.shapeProposals)
+        .values({
+          id,
+          shapeId: shape.id,
+          key,
+          kind,
+          state: 'accepted',
+          round: 1,
+          body: {},
+          createdAt: now.toISOString(),
+          updatedAt: now.toISOString(),
+        })
+        .run();
+      return id;
+    };
+    const questionProposal = proposal('who-pays', 'question');
+    const principleProposal = proposal('never-sleep', 'principle');
+    const { question, principle } = store.write((ctx) => {
+      const q = insertShapeQuestion(ctx, {
+        shapeId: shape.id,
+        proposalId: questionProposal,
+        key: 'who-pays',
+        text: 'Who pays for the extra seats?',
+        forWho: 'finance',
+        sourceMessageIds: [],
+        taskId: task.id,
+      });
+      insertShapeLink(ctx, {
+        shapeId: shape.id,
+        proposalId: questionProposal,
+        key: 'who-pays',
+        questionId: q.id,
+      });
+      const p = insertPrinciple(ctx, {
+        target: { scope: 'project', projectId: project.id },
+        statement: 'Never sleep in tests',
+        kind: 'policy',
+        topicKey: 'testing.no-sleeps',
+        status: 'confirmed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote: null,
+        speaker: 'me',
+        confirmedBy: 'me',
+      });
+      insertShapeLink(ctx, {
+        shapeId: shape.id,
+        proposalId: principleProposal,
+        key: 'never-sleep',
+        principleId: p.id,
+      });
+      return { question: q, principle: p };
+    }).value;
+    expect(listShapeQuestions(store.db, shape.id)).toMatchObject([
+      { id: question.id, forWho: 'finance', taskId: task.id, goalId: null },
+    ]);
+    expect(
+      listShapeLinks(store.db, shape.id).map((l) => [l.key, l.questionId, l.principleId]),
+    ).toEqual([
+      ['who-pays', question.id, null],
+      ['never-sleep', null, principle.id],
+    ]);
   });
 });
 
