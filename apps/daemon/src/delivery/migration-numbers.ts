@@ -39,6 +39,31 @@ function entriesOf(text: string | null): { idx: number; tag: string }[] | null {
   }
 }
 
+/** The tags of a drizzle journal in its order; null when it is missing or not one drizzle-kit wrote. */
+export function journalTags(text: string | null): string[] | null {
+  const entries = entriesOf(text);
+  return entries === null ? null : [...entries].sort((a, b) => a.idx - b.idx).map((e) => e.tag);
+}
+
+/**
+ * The tags only the branch added: on neither the base nor their common ancestor, so a baseline the
+ * base regenerated doesn't make the branch's older migrations look like its own.
+ */
+export function ownTags(
+  ours: readonly string[],
+  theirs: readonly string[],
+  ancestor: readonly string[],
+): string[] {
+  const shared = new Set([...theirs, ...ancestor]);
+  return ours.filter((tag) => !shared.has(tag));
+}
+
+/** A migration's number and `--name` as its tag spells them; null for a tag drizzle-kit wouldn't write. */
+export function parseTag(tag: string): { readonly number: string; readonly name: string } | null {
+  const [, number, name] = /^(\d+)_([A-Za-z0-9_][A-Za-z0-9_-]*)$/.exec(tag) ?? [];
+  return number === undefined || name === undefined ? null : { number, name };
+}
+
 /** A migration's number as its tag spells it (`0009` of `0009_add_x`), else its index, padded. */
 function numberOf(entry: { idx: number; tag: string }): string {
   return /^(\d+)_/.exec(entry.tag)?.[1] ?? String(entry.idx).padStart(4, '0');
