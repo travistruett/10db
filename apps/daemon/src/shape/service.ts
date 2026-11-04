@@ -89,6 +89,8 @@ import {
   readMeasuredLine,
   readPictureLine,
   readPictureRefusal,
+  unreadableImages,
+  unreadableImagesNotice,
 } from './read-budget';
 import { buildDigest } from './digest';
 import {
@@ -592,6 +594,29 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     ].join('\n');
   };
 
+  /**
+   * Tells the builder which images this turn points Claude at as a path that a Read would refuse, because the
+   * pictures the session already carries leave no room in the pool (§5.4). `shown` are the files the message
+   * names, `intake.files` the ones it sends, and a `fresh` session carries no earlier picture or Read.
+   */
+  const warnUnreadable = (
+    shapeId: ShapeId,
+    intake: Intake,
+    shown: readonly ShapeFileRow[],
+    sentInline: ReadonlySet<ShapeFileRow['id']>,
+    fresh: boolean,
+  ): void => {
+    const byPath = pathImageIds(shown, intake.files, fresh ? 0 : intake.spent);
+    const paths = shown.filter((file) => byPath.has(file.id));
+    if (paths.length === 0) return;
+    const inline =
+      (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
+      intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
+    const reads = fresh ? 0 : readPictureBytesSpent(listShapeMessages(state.db, shapeId));
+    const names = unreadableImages(paths, readCeiling(inline) - reads);
+    if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
+  };
+
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
   const imagesOf = (files: readonly ShapeFileRow[], spent: number): SentImages => {
     const inline = inlineImageIds(files, spent);
@@ -717,6 +742,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
     const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
+    warnUnreadable(shapeId, intake, files, new Set(inlineIds), resumeId === null);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -887,6 +913,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       else {
         const lines = intakeText(intake);
         const { images, ids } = imagesOf(intake.files, intake.spent);
+        warnUnreadable(shapeId, intake, intake.files, new Set(ids), false);
         rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
         told(shapeId, intake.files, intake.missized, ids, false);
       }

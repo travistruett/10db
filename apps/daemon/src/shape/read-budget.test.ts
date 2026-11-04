@@ -346,6 +346,69 @@ describe('the pictures a Shape session pulls in with Read', () => {
     });
   });
 
+  describe('dropped Retina screenshots, which go as paths', () => {
+    // 2880 x 1800 is over the 2000 px side cap, so each goes as a path line, and each is over 1 MiB, so a
+    // Read is charged the whole allowance for it.
+    const retina = (bytes: number): Buffer => {
+      const base = pngOfSize(2880, 1800);
+      return pngOfSize(2880, 1800, bytes - base.length - 12);
+    };
+    const notices = (): string[] =>
+      listShapeMessages(f.c.store.db, shapeId())
+        .filter((m) => m.kind === ShapeMessageKind.Notice)
+        .map((m) => m.body);
+    const fillInline = async (): Promise<void> => {
+      // Nine 2 MiB pictures, three to a message, fill the 18 MiB inline budget.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`i${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn(`Fill ${String(turnNo)}`)).images).toHaveLength(3);
+      }
+    };
+
+    it('can all be Read, four of them over 1 MiB each, with nothing said to the builder', async () => {
+      const files = Array.from({ length: 4 }, (_, i) =>
+        drop(`shot${String(i)}.png`, retina(MB + 200_000)),
+      );
+      const turn = await nextTurn('Look at these');
+      expect(turn.images).toHaveLength(0);
+      expect(turn.message.match(/too large to show inline; Read it/g)).toHaveLength(4);
+      for (const file of files) expect(read(file.storedPath)).toEqual({ decision: 'allow' });
+      expect(notices()).toEqual([]);
+    });
+
+    it('name to the builder the ones past what a session can Read, when the inline budget is full', async () => {
+      await fillInline();
+      const files = Array.from({ length: 4 }, (_, i) =>
+        drop(`shot${String(i)}.png`, retina(MB + 200_000)),
+      );
+      await nextTurn('Look at these');
+      // A full inline budget leaves the 3 MiB reserve: three of the four.
+      const answers = files.map((file) => read(file.storedPath));
+      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'allow', 'deny']);
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toContain('shot3.png');
+      expect(told[0]).not.toMatch(/shot[012]\.png/);
+      expect(told[0]).toMatch(/won't be able to Read/);
+    });
+
+    it('count the pictures already Read against what a session can Read', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      for (let i = 0; i < EMPTY_ROOM - 2; i += 1) read(big.storedPath);
+      const files = Array.from({ length: 3 }, (_, i) =>
+        drop(`shot${String(i)}.png`, retina(MB + 200_000)),
+      );
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toContain('shot2.png');
+      expect(told[0]).not.toMatch(/shot[01]\.png/);
+      expect(files).toHaveLength(3);
+    });
+  });
+
   describe('once the session has measured what a Read returned', () => {
     const measure = (path: string, response: unknown, n = 0, agentId?: string): void => {
       const after = must(f.adapter.shapeSessions[n], 'a session').spec.postToolUse;

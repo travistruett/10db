@@ -121,6 +121,32 @@ export function readCharge(
 }
 
 /**
+ * The names of the images, among those that went to Claude as a path to Read, that a Read would be refused
+ * for: each is charged as a Read charges it (its size, at most the allowance) in order against `room`, the
+ * bytes the live session's Reads have left (`readCeiling` less what they spent). An image that doesn't fit
+ * is skipped, so a smaller one after it still counts as readable.
+ */
+export function unreadableImages(
+  files: readonly { readonly name: string; readonly size: number }[],
+  room: number,
+): string[] {
+  let left = room;
+  const names: string[] = [];
+  for (const file of files) {
+    const charge = Math.min(file.size, READ_PICTURE_CHARGE_MAX_BYTES);
+    if (charge <= left) left -= charge;
+    else names.push(file.name);
+  }
+  return names;
+}
+
+/** What the builder is told about images Claude was pointed at but a Read would refuse. */
+export const unreadableImagesNotice = (names: readonly string[]): string =>
+  `Claude won't be able to Read ${names.join(', ')}: ${names.length === 1 ? 'it is' : 'they are'} too large to ` +
+  `show inline and a conversation can only carry so many pictures it Reads. Send a smaller copy to have ` +
+  `${names.length === 1 ? 'it' : 'them'} seen.`;
+
+/**
  * The bytes of Read pictures the live session carries: the counted lines after the latest digest or
  * fresh-start line, which mark where the session began (§5.5).
  */
