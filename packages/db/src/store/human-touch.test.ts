@@ -168,6 +168,7 @@ describe('humanTouchDays', () => {
       tasksRan: 2,
       cardsPerTask: 2.5,
       waitingMinutes: 30,
+      failedMinutes: 0,
     });
     expect(by('2026-11-01')).toMatchObject({
       question: 1,
@@ -188,5 +189,48 @@ describe('humanTouchDays', () => {
       cardsPerTask: null,
       waitingMinutes: 0,
     });
+  });
+
+  it('counts the time a failure card sat open on a FAILED workstream apart from waitingMinutes', () => {
+    const project = seedProject(store);
+
+    // Fails at 22:00 on Nov 1 and is retried at 08:00 on Nov 2: 2 h on Nov 1, 8 h on Nov 2.
+    at('2026-11-01T21:00:00.000Z');
+    const overnight = startRun(project.id, 'overnight');
+    at('2026-11-01T22:00:00.000Z');
+    move(overnight.workstreamId, S.Failed);
+    const failure = card(
+      project.id,
+      'flag',
+      `${WORKSTREAM_FAILED_TITLE_PREFIX}overnight`,
+      overnight.workstreamId,
+    );
+    at('2026-11-02T08:00:00.000Z');
+    answer(failure);
+    move(overnight.workstreamId, S.Queued);
+
+    // Another card kind open on a FAILED workstream is not a failure card: it adds nothing.
+    at('2026-11-02T09:00:00.000Z');
+    const other = startRun(project.id, 'other');
+    at('2026-11-02T09:10:00.000Z');
+    move(other.workstreamId, S.Failed);
+    const question = card(project.id, 'question', 'Which?', other.workstreamId);
+    at('2026-11-02T09:40:00.000Z');
+    answer(question);
+
+    // Still failed with its card open: runs to now.
+    at('2026-11-03T01:00:00.000Z');
+    const still = startRun(project.id, 'still');
+    move(still.workstreamId, S.Failed);
+    card(project.id, 'flag', `${WORKSTREAM_FAILED_TITLE_PREFIX}still`, still.workstreamId);
+
+    at('2026-11-03T03:30:00.000Z');
+    const days = humanTouchDays(store.db, project.id, new Date(nowMs));
+    const by = (day: string) => days.find((d) => d.day === day);
+
+    expect(by('2026-11-01')).toMatchObject({ failedMinutes: 120, waitingMinutes: 0 });
+    expect(by('2026-11-02')).toMatchObject({ failedMinutes: 480, waitingMinutes: 0 });
+    expect(by('2026-11-03')).toMatchObject({ failedMinutes: 150, waitingMinutes: 0 });
+    expect(by('2026-10-25')).toMatchObject({ failedMinutes: 0 });
   });
 });

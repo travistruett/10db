@@ -18,6 +18,14 @@ stored. For each day:
   open); a workstream is blocked from a `workstream.changed` event into `WAITING_HUMAN` to the next change. The
   overlap is cut at UTC midnight and added to each day. Cards open together on one workstream count once. A card
   answered while the task stayed `RUNNING` overlaps no blocked time and adds nothing.
+- **Failed minutes** (`failedMinutes`) are the same overlap for a failed run: the time a workstream-failure card (a
+  flag with the `WORKSTREAM_FAILED_TITLE_PREFIX` title) was open while the workstream it targets was in `FAILED`,
+  from its `workstream.changed` event into `FAILED` to the next change (now, while it is still failed). A run that
+  fails at 01:00 and is retried at 08:00 adds 7 hours. Other cards open on a failed workstream add nothing here. The
+  builder decided this on 2026-11-03 (a failed run waiting for Retry is waiting on a person) and chose a figure apart
+  from `waitingMinutes`, so each number says one thing: `waitingMinutes` stays `WAITING_HUMAN` time only, the panel
+  shows the two as "Waited on an answer" and "Waited on a retry", and the two never overlap because a workstream is
+  in one state at a time.
 
 ## Why
 

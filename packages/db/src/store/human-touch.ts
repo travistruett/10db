@@ -57,8 +57,13 @@ function intersect(a: readonly Span[], b: readonly Span[]): Span[] {
 
 type CardRow = Pick<
   typeof schema.inboxItems.$inferSelect,
-  'id' | 'state' | 'createdAt' | 'updatedAt' | 'targets'
+  'id' | 'kind' | 'title' | 'state' | 'createdAt' | 'updatedAt' | 'targets'
 >;
+
+/** A flag raised for a failed workstream: the runner and recovery title it with the failure prefix. */
+function isFailureCard(card: CardRow): boolean {
+  return card.kind === InboxKind.Flag && card.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX);
+}
 
 /**
  * When each card stopped being open: its first change away from OPEN. A card that is still open
@@ -99,8 +104,13 @@ function openSpans(db: DbReader, cards: readonly CardRow[], nowMs: number): Map<
   return out;
 }
 
-/** The spans each workstream spent waiting on a person, from its state changes in order. */
-function blockedSpans(db: DbReader, ids: readonly string[], nowMs: number): Map<string, Span[]> {
+/** The spans each workstream spent in `state`, from its state changes in order. */
+function stateSpans(
+  db: DbReader,
+  ids: readonly string[],
+  state: WorkstreamState,
+  nowMs: number,
+): Map<string, Span[]> {
   const out = new Map<string, Span[]>();
   if (ids.length === 0) return out;
   const events = db
@@ -119,7 +129,7 @@ function blockedSpans(db: DbReader, ids: readonly string[], nowMs: number): Map<
   for (const event of events) {
     const at = Date.parse(event.at);
     const start = since.get(event.entityId);
-    if (event.data['to'] === WorkstreamState.WaitingHuman) {
+    if (event.data['to'] === state) {
       if (start === undefined) since.set(event.entityId, at);
     } else if (start !== undefined) {
       since.delete(event.entityId);
@@ -131,10 +141,11 @@ function blockedSpans(db: DbReader, ids: readonly string[], nowMs: number): Map<
   return out;
 }
 
-/** Minutes of waiting per day: card time that fell inside a stretch the card's workstream was blocked. */
-function waitingByDay(
+/** Minutes per day of card time that fell inside a stretch the card's workstream was in `state`. */
+function minutesInState(
   db: DbReader,
   cards: readonly CardRow[],
+  state: WorkstreamState,
   windowStart: number,
   nowMs: number,
 ): Map<string, number> {
@@ -149,7 +160,7 @@ function waitingByDay(
         span,
       ]);
   }
-  const blocked = blockedSpans(db, [...byWorkstream.keys()], nowMs);
+  const blocked = stateSpans(db, [...byWorkstream.keys()], state, nowMs);
   const minutes = new Map<string, number>();
   for (const [workstreamId, open] of byWorkstream) {
     // Cards open together on one workstream count once.
@@ -211,7 +222,8 @@ function tasksRanByDay(
  * The project's last {@link HUMAN_TOUCH_DAYS} UTC days, today first: the cards raised that day by kind
  * (a flag for a failed workstream counted apart from other flags), the cards per task that ran, and the
  * minutes work waited on an answer. A card adds waiting time only while the workstream it targets is
- * waiting on a person; one answered while the task kept running adds none.
+ * waiting on a person; one answered while the task kept running adds none. The time a failure card
+ * sat open while its workstream was FAILED, waiting for a retry, is counted apart as `failedMinutes`.
  */
 export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): HumanTouchDayDto[] {
   const nowMs = now.getTime();
@@ -233,7 +245,15 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
     )
     .all();
 
-  const waiting = waitingByDay(db, cards, windowStart, nowMs);
+  const waiting = minutesInState(db, cards, WorkstreamState.WaitingHuman, windowStart, nowMs);
+  // A failure card is the only card that says a failed run is waiting for someone to retry it.
+  const failed = minutesInState(
+    db,
+    cards.filter((c) => isFailureCard(c)),
+    WorkstreamState.Failed,
+    windowStart,
+    nowMs,
+  );
   const ran = tasksRanByDay(db, projectId, windowStart, windowEnd, nowMs);
 
   const days: HumanTouchDayDto[] = [];
@@ -241,11 +261,8 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
     const day = dayKey(windowEnd - (i + 1) * DAY_MS);
     const raised = cards.filter((c) => dayKey(Date.parse(c.createdAt)) === day);
     const count = (kind: InboxKind, failed?: boolean): number =>
-      raised.filter(
-        (c) =>
-          c.kind === kind &&
-          (failed === undefined || c.title.startsWith(WORKSTREAM_FAILED_TITLE_PREFIX) === failed),
-      ).length;
+      raised.filter((c) => c.kind === kind && (failed === undefined || isFailureCard(c) === failed))
+        .length;
     const tasksRan = ran.get(day)?.size ?? 0;
     const total = raised.length;
     days.push({
@@ -261,6 +278,7 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
       tasksRan,
       cardsPerTask: tasksRan === 0 ? null : total / tasksRan,
       waitingMinutes: waiting.get(day) ?? 0,
+      failedMinutes: failed.get(day) ?? 0,
     });
   }
   return days;
