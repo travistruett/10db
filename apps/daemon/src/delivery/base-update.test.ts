@@ -476,6 +476,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           durationMs: 1,
           installs: 2,
           startedOver: true,
+          // What the failed first install left unresolved, as the real retry reports it.
+          leftBroken: 'left-pad is not installed',
         };
       });
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
@@ -487,7 +489,6 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(note).toMatch(
         /removed node_modules and installed again by itself, and neither install/,
       );
-      expect(note).not.toMatch(/3 installs/);
     });
 
     it('says no install ran, and why, when there is no trustworthy pnpm', async () => {

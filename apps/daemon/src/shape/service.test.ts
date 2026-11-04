@@ -573,6 +573,33 @@ describe('idle and resume', () => {
     expect(adapter.shapeSessions).toHaveLength(2);
   });
 
+  it('starts no session for a turn waiting on a closing one when the service closes, and reports it', async () => {
+    service.send(shapeId, 'one');
+    await service.settled(shapeId);
+    const closing = gate();
+    onTestFinished(() => {
+      closing.open();
+    });
+    adapter.shapeStopGate = closing.wait;
+    clock.advance(10 * 60_000);
+    await tick();
+    service.send(shapeId, 'two');
+    await tick();
+    expect(adapter.shapeSessions).toHaveLength(1);
+
+    const closed = service.close();
+    await tick();
+    closing.open();
+    await closed;
+    await service.settled(shapeId);
+    await tick();
+
+    expect(adapter.shapeSessions).toHaveLength(1);
+    expect(notices()).toEqual([
+      '10db quit before Claude read “two”, so it went unanswered. Send it again.',
+    ]);
+  });
+
   it('ends the running turn when the service closes', async () => {
     adapter.shapeBehaviour = () => new Promise(() => undefined);
     service.send(shapeId, 'one');
