@@ -519,6 +519,15 @@ export function createToolHandlers(
           const refused = await migrationsFirst(settled.claim.id, slice);
           if (refused) return refused;
         }
+        // A parked holder is a fact about now, not the call's answer: a retry with the same opId asks again.
+        if (!settled.granted && settled.parked)
+          return {
+            granted: false,
+            waiting: false,
+            heldBy: settled.heldBy,
+            inboxId: settled.inboxId,
+            instruction: settled.instruction,
+          };
         return recordClaim(input.opId, settled);
       } finally {
         clearTimeout(timer);

@@ -48,8 +48,12 @@ one quit instead of two. While lanes are busy and the head has not moved, it doe
 `SHIPPING` (`countMidSession`, `packages/db`), and no delivery job queued or running (`DeliveryJobs.pending()`: a
 ship, checkout return or cleanup is a job before it is a row), and no shaping conversation with a turn running or
 queued (`ShapeService.turnsInProgress()`, counted once per conversation). A shape session is no workstream, and a
-quit mid-turn would cut off the answer the builder is waiting on; the drain does not park it, so it ends with the
-turn. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
+quit mid-turn would cut off the answer the builder is waiting on. A turn running finishes. A turn that has not
+started waits at the drain, or at a hold of its own from the moment an install takes over, since an install at an
+idle moment has no drain and a shape turn does not go through the scheduler. Waiting there it has begun nothing, so
+it stops counting, or it would keep the drain up for ever. Shape's queue is in memory and no recovery restores it:
+if the quit comes first, the service writes a notice in the conversation naming each turn that never ran, for the
+builder to send again. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
@@ -71,7 +75,9 @@ factory (`self-update/drain.ts`) until the app has installed:
   (`ShipperDeps.holdShips`; a batch whose work is done stays OPEN and is shipped by `checkOpenBatches` when the drain
   ends or after the relaunch), a ship the builder asks for (Ship anyway, Retry, a failed task's card) is refused with
   a `ConflictError` that says why, and no catch-up begins, since it runs the shipping gate (the pull request watch
-  asks again on a later round). The runner's hold is the load guard _and_ the drain (`holdBoth`): work starts only
+  asks again on a later round: `catchUp` every round, and `restartCi`, asked once per head, returns false when held,
+  so the watch keeps it unasked, starts no count and raises no notice, and asks it on the first round after the
+  drain). The runner's hold is the load guard _and_ the drain (`holdBoth`): work starts only
   when neither holds.
 - **Why a held gate keeps neither its batch's turn nor a slot:** a sibling's gate, a running session's
   `install_dependencies` and its migrations claim all queue behind the turn without being parked at the drain, so a
@@ -84,6 +90,15 @@ factory (`self-update/drain.ts`) until the app has installed:
   (`Drain.parked()`): a lane parked before its next session or its gate has begun nothing a quit would cut off, and
   counting it would hold the update up for ever. A stop at the quit leaves such a lane's saved next action, as any
   stop before a session did, and recovery queues it again, so lanes resume after the relaunch with no card.
+- **A lane waiting on a card stops counting once the drain begins.** A `WAITING_HUMAN` lane with a live session
+  (an unanswered permission or ask card) counts before the drain, so the builder has the wait limit to answer it, but
+  not during it (`countMidSession(db, { waitingOnCard: false })`). It runs nothing; the quit ends its session and
+  recovery parks the lane on the same card (`nextAction: answer`, with the provider session to resume), so it
+  resumes with the answer after the relaunch. Counting it for the drain would let one card left overnight hold the
+  install and, behind the drain, every other lane until the builder came back, with nothing to say so. A lane that
+  also runs a gate still counts for the gate. Turned down: not counting it at all (the builder would lose the wait
+  limit's chance to answer it before the app restarts), and ending the drain at a card (the update would never
+  install while the card stays).
 - **Ends:** the check installs as soon as the count is 0 (the drain stays on until the relaunch, so nothing starts in
   the gap). It ends, and lanes start again, when the builder turns the switch off, the install does not start or
   its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
@@ -98,7 +113,10 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
-  `draining` and `drainingSince`. Settings > Updates shows an update status line, the wait limit and Install Now;
+  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard }`, what the update waits for now
+  (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which hold it only
+  until the drain begins). Both notes say it: "waiting for N running steps", "Lanes waiting on a card (K) do not
+  hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShapeId } from './ids';
 
 /** A full git commit SHA, as GitHub and `git rev-parse` print it. */
 export const CommitSha = z
@@ -68,6 +69,20 @@ export const SelfUpdateStatusDto = z.object({
   /** When new work stopped starting; null while it is not held. */
   drainingSince: z.iso.datetime().nullable(),
   /**
+   * What the update waits for now, as counts. `working` is what a quit would cut off and the
+   * update always waits for: lanes and gates that run, batches being cut or shipped, delivery jobs
+   * and shaping turns. `waitingOnCard` is lanes parked on an unanswered permission or ask card with
+   * a session still live: they hold the update only until the drain begins, because a restart ends
+   * the session and recovery parks the lane on its card again, to resume with the answer.
+   * `shapes` names the shaping conversations whose turn is under way and counted in `working`: a
+   * builder with no lane running can then tell a conversation is what the update waits for.
+   */
+  midSession: z.object({
+    working: z.number().int().min(0),
+    waitingOnCard: z.number().int().min(0),
+    shapes: z.array(z.object({ id: ShapeId, title: z.string() })),
+  }),
+  /**
    * Why this app will not update itself, whatever the switch says; null when nothing stops it. The
    * ones that last (a source run, a copy outside Applications, no repository, no gh) show even with
    * the switch off; a GitHub that can't be reached and a failed update show only while it is on.
@@ -79,6 +94,16 @@ export type SelfUpdateStatusDto = z.infer<typeof SelfUpdateStatusDto>;
 /** `PUT /settings/self-update`: on, off, or null to go back to the default. */
 export const SelfUpdateInput = z.object({ enabled: z.boolean().nullable() });
 export type SelfUpdateInput = z.infer<typeof SelfUpdateInput>;
+
+/** The switch's label in Settings; cards and messages name it exactly. */
+export const SELF_UPDATE_SWITCH = 'Update 10db by itself';
+
+/**
+ * What the builder can do about a shaping turn that holds the update, for the card and for Settings
+ * alike. Stop only interrupts, and a hung session may not answer that; the switch ends the drain and
+ * quitting ends the session whatever the session does.
+ */
+export const SHAPE_HOLD_WAY_OUT = `If it is stuck, open the conversation and press Stop. If that does not end it, turn ${SELF_UPDATE_SWITCH} off in Settings, which starts lanes again without the update, or quit 10db.`;
 
 /** The longest wait limit: a day. */
 export const MAX_SELF_UPDATE_WAIT_MINUTES = 1440;

@@ -1,4 +1,10 @@
-import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from '@10db/contracts';
+import {
+  SELF_UPDATE_SWITCH,
+  SelfUpdateInput,
+  SelfUpdateStatusDto,
+  SelfUpdateWaitInput,
+  ShapeId,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -7,6 +13,9 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 const RUNNING = '1a2b3c4d5e6f708192a3b4c5d6e7f80910111213';
 const NEWER = '9f8e7d6c5b4a39281706f5e4d3c2b1a009182736';
 const PATH = '/settings/self-update';
+const SHAPE_A = ShapeId.parse('shp_01a1a4f2-5934-70f4-b48f-d5f50a92e844');
+const SHAPE_B = ShapeId.parse('shp_01a1a4f2-5934-70f4-b48f-d5f50a92e845');
+const DENSER = { id: SHAPE_A, title: 'Denser board' };
 
 function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
   return SelfUpdateStatusDto.parse({
@@ -19,6 +28,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
     blocker: null,
     ...over,
   });
@@ -193,6 +203,94 @@ describe('a waiting update in Settings', () => {
     expect(draining.textContent).toMatch(/running steps finish/i);
     // Drained already: Install Now has nothing left to do.
     expect(screen.queryByRole('button', { name: 'Install Now' })).toBeNull();
+  });
+
+  it('names what the drain waits for, and what it does not wait for', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { working: 1, waitingOnCard: 2, shapes: [] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(/waiting for 1 running step to finish/);
+    expect(draining.textContent).toMatch(/Lanes waiting on a card \(2\) do not hold it/);
+  });
+
+  it('names the shaping conversation a drain waits for when no lane is running', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { working: 1, waitingOnCard: 0, shapes: [DENSER] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(
+      /waiting only for a turn in the shaping conversation “Denser board”/,
+    );
+    expect(draining.textContent).toMatch(/No lane is running/);
+    expect(draining.textContent).toMatch(/press Stop/);
+    // The switch this section shows, by its label: Stop can't end a session that ignores it.
+    expect(draining.textContent).toContain(`turn ${SELF_UPDATE_SWITCH} off`);
+    expect(draining.textContent).toMatch(/quit 10db/);
+    expect(draining.textContent).not.toMatch(/waiting for 1 running step/);
+  });
+
+  it('names a conversation among the steps a drain waits for', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { working: 2, waitingOnCard: 0, shapes: [DENSER] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(
+      /waiting for 2 running steps to finish, among them a turn in the shaping conversation “Denser board”/,
+    );
+  });
+
+  it('names what holds an update that waits', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        midSession: { working: 0, waitingOnCard: 1, shapes: [] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const waiting = await screen.findByRole('status', { name: 'Update status' });
+    expect(waiting.textContent).toMatch(/Holding it now: 1 lane waiting on a card/);
+  });
+
+  it('names the shaping conversations that hold an update that waits', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        midSession: {
+          working: 3,
+          waitingOnCard: 0,
+          shapes: [DENSER, { id: SHAPE_B, title: 'Login flow' }],
+        },
+      }),
+    );
+    renderApp('/settings/updates');
+    const waiting = await screen.findByRole('status', { name: 'Update status' });
+    expect(waiting.textContent).toMatch(
+      /Holding it now: 1 running step and turns in 2 shaping conversations \(“Denser board”, “Login flow”\)/,
+    );
   });
 
   it('shows no update status when none is waiting', async () => {

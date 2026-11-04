@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CommitSha,
   HealthResponse,
+  mintId,
   SelfUpdateInput,
   SelfUpdateStatusDto,
   SelfUpdateWaitInput,
@@ -51,6 +52,7 @@ describe('SelfUpdateStatusDto blocker', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
   };
 
   it('is null or a kind with a message', () => {
@@ -97,6 +99,7 @@ describe('SelfUpdateStatusDto', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
     blocker: null,
   };
 
@@ -111,6 +114,33 @@ describe('SelfUpdateStatusDto', () => {
 
   it('refuses a reason it does not know', () => {
     expect(SelfUpdateStatusDto.safeParse({ ...status, notInstalling: 'sad' }).success).toBe(false);
+  });
+
+  it('says what the update waits for: running work, and lanes waiting on a card', () => {
+    const busy = { ...status, midSession: { working: 2, waitingOnCard: 1, shapes: [] } };
+    expect(SelfUpdateStatusDto.parse(busy).midSession).toEqual({
+      working: 2,
+      waitingOnCard: 1,
+      shapes: [],
+    });
+    expect(
+      SelfUpdateStatusDto.safeParse({
+        ...status,
+        midSession: { working: -1, waitingOnCard: 0, shapes: [] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('names the shaping conversations whose turn the update waits for', () => {
+    const shape = { id: mintId('Shape'), title: 'Denser board' };
+    const holding = { ...status, midSession: { working: 1, waitingOnCard: 0, shapes: [shape] } };
+    expect(SelfUpdateStatusDto.parse(holding).midSession.shapes).toEqual([shape]);
+    expect(
+      SelfUpdateStatusDto.safeParse({
+        ...status,
+        midSession: { working: 1, waitingOnCard: 0, shapes: [{ id: 'nope', title: 'x' }] },
+      }).success,
+    ).toBe(false);
   });
 
   it('says since when an update waits and drains', () => {

@@ -1,4 +1,8 @@
-import { MAX_SELF_UPDATE_WAIT_MINUTES, type SelfUpdateStatusDto } from '@10db/contracts';
+import {
+  MAX_SELF_UPDATE_WAIT_MINUTES,
+  SELF_UPDATE_SWITCH,
+  type SelfUpdateStatusDto,
+} from '@10db/contracts';
 import { Button, NumberInput, Switch, Text } from '@mantine/core';
 import { useState } from 'react';
 import {
@@ -9,6 +13,7 @@ import {
 } from '../../daemon/self-update-queries';
 import { absoluteTime } from '../../shell/relative';
 import { SettingRow, SettingsCard } from './setting-row';
+import { updateWaitsFor } from './update-waits-for';
 
 const SHORT = 7;
 const short = (commit: string): string => commit.slice(0, SHORT);
@@ -26,10 +31,11 @@ export function updateProgressText(data: SelfUpdateStatusDto): string | null {
     return `You rolled back from ${build}, so 10db is not installing it. It installs the next finished build, once main has a newer commit; to try ${build} again now, turn "Update 10db by itself" off and on.`;
   if (data.notInstalling === 'unbuilt')
     return `${build} has no finished build yet, so there is nothing to install. 10db looks again every minute and installs it when its build finishes.`;
+  const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
-    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after.`;
+    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
   const since = data.waitingSince === null ? '' : ` since ${absoluteTime(data.waitingSince)}`;
-  return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed.`;
+  return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed. ${waitsFor}`.trimEnd();
 }
 
 /**
@@ -62,11 +68,11 @@ export function SelfUpdateSection() {
   return (
     <SettingsCard>
       <SettingRow
-        label="Update 10db by itself"
+        label={SELF_UPDATE_SWITCH}
         description={`When main has new commits and no task is mid-session, install its newest finished build and restart. Queued and waiting tasks carry on. It follows the repository this app was built from, whatever your projects are. ${running ?? ''}`.trim()}
       >
         <Switch
-          aria-label="Update 10db by itself"
+          aria-label={SELF_UPDATE_SWITCH}
           checked={data?.enabled ?? false}
           disabled={data === undefined || set.isPending}
           onChange={(event) => {

@@ -111,6 +111,7 @@ import {
 } from './rounds';
 import type { ShapeJev } from './jev';
 import { inlineBytesSpent, type ScreenService } from '../screens';
+import type { Hold } from '../verify';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateNote } from './converted-state';
@@ -151,6 +152,15 @@ export interface ShapeServiceDeps {
   readonly trackedFiles?: TrackedFiles;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered to a session without it. */
   readonly screens?: Pick<ScreenService, 'see'>;
+  /**
+   * Holds new turns back, as a waiting update's drain does: while it holds, a queued turn waits
+   * before it starts a session or sends to one. A turn already running finishes. A turn that waits
+   * has begun nothing, so the install need not wait for it: it waits in `untilClear`, which the
+   * drain counts as parked, and the mid-session count takes the parked ones off
+   * `turnsInProgress`, which still counts the conversation. If the quit comes first, `close` tells
+   * the builder the turn never ran.
+   */
+  readonly hold?: Hold;
 }
 
 /** A file as the input hands it over: the name and type the browser reported, and its bytes. */
@@ -248,7 +258,13 @@ export interface ShapeService {
    * quit now would cut the answer off. A conversation counts once, however many turns it has queued.
    */
   turnsInProgress(): number;
-  /** Stops every session. */
+  /**
+   * The conversations whose turn has begun, by name: those `turnsInProgress` counts minus the ones
+   * a drain or the install holds back before they started anything. An update waits for exactly
+   * these, so it can say which conversation keeps it waiting.
+   */
+  runningTurns(): { id: ShapeId; title: string }[];
+  /** Stops every session, and tells each conversation which queued turns will not run. */
   close(): Promise<void>;
 }
 
@@ -275,6 +291,8 @@ interface Turn {
   readonly messageId: ShapeMessageId;
   /** A rehearsal turn: the tasks it was told to read, each at the hash it listed. */
   readonly rehearsing?: readonly Pick<RehearsalTask, 'taskKey' | 'hash'>[];
+  /** What the builder is told if 10db quits first: the queue is in memory and ends with the daemon. */
+  readonly neverRan: string;
 }
 
 /** What goes ahead of a turn's message: the builder's edits since the last turn and the files dropped. */
@@ -312,6 +330,8 @@ interface Runtime {
   waiting: ((end: TurnEnd) => void) | null;
   /** Set while Convert writes: no new turn starts. */
   held: boolean;
+  /** Set while the next turn waits for the hold (a drain) to clear: nothing of it has started. */
+  parked: boolean;
   pump: Promise<void> | null;
   idle: Timer | null;
   contextPct: number;
@@ -343,6 +363,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         live: null,
         waiting: null,
         held: false,
+        parked: false,
         pump: null,
         idle: null,
         contextPct: 0,
@@ -837,6 +858,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     run = (async () => {
       try {
         while (rt.queue.length > 0 && !rt.held) {
+          // A drain starts nothing new: wait, then look again, as the queue or Convert's hold may
+          // have changed meanwhile.
+          if (deps.hold?.holding() === true) {
+            rt.parked = true;
+            try {
+              await deps.hold.untilClear();
+            } finally {
+              rt.parked = false;
+            }
+            continue;
+          }
           const turn = rt.queue.shift();
           if (turn === undefined) break;
           rt.current = turn;
@@ -985,6 +1017,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         kind: 'message',
         prompt: `[m:${message.id}] ${text}`,
         messageId: message.id,
+        neverRan: `10db quit before Claude read “${title}”, so it went unanswered. Send it again.`,
       });
       pump(shapeId, rt);
       // Shadow only: nothing waits on it, and it never throws.
@@ -1010,6 +1043,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         kind: 'propose',
         prompt: `[m:${message.id}] ${instruction}`,
         messageId: message.id,
+        neverRan: '10db quit before Claude could propose. Press Propose again.',
       });
       pump(shapeId, rt);
       return { status: 'started' };
@@ -1029,6 +1063,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         prompt: `[m:${message.id}] ${instruction}`,
         messageId: message.id,
         rehearsing: tasks.map((t) => ({ taskKey: t.taskKey, hash: t.hash })),
+        neverRan: '10db quit before the rehearsal ran. Press Rehearse again.',
       });
       pump(shapeId, rt);
       return { status: 'started', tasks: tasks.length };
@@ -1167,17 +1202,27 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     turnsInProgress() {
       let count = 0;
       for (const rt of runtimes.values())
-        if (rt.current !== null || rt.queue.length > 0) count += 1;
+        if (rt.current !== null || rt.queue.length > 0 || rt.parked) count += 1;
       return count;
     },
 
+    runningTurns() {
+      const running: { id: ShapeId; title: string }[] = [];
+      for (const [shapeId, rt] of runtimes)
+        if ((rt.current !== null || rt.queue.length > 0) && !rt.parked)
+          running.push({ id: shapeId, title: getShape(state.db, shapeId).title });
+      return running;
+    },
+
     async close() {
-      for (const rt of runtimes.values()) {
+      // Every queue before any session: a session closing below must not let another conversation's
+      // turn start, and no write may wait on a session that is slow to stop.
+      for (const [shapeId, rt] of runtimes) {
         rt.idle?.cancel();
         rt.idle = null;
-        rt.queue.length = 0;
-        await closeLive(rt, 'stopped');
+        for (const turn of rt.queue.splice(0)) notice(shapeId, turn.neverRan);
       }
+      for (const rt of runtimes.values()) await closeLive(rt, 'stopped');
     },
   };
 }

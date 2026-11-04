@@ -470,8 +470,16 @@ export function countLanes(db: DbReader): LaneCounts {
  * How many things a restart would cut off: workstreams that hold a lane (as `countLanes` counts
  * them) or run a gate process, and batches being cut or shipped. Work that is queued, paused or
  * waiting for the builder is not counted: recovery keeps its place across a restart.
+ *
+ * A lane waiting on a card whose session is still live holds a lane, but runs nothing: a restart
+ * ends the session and recovery parks the lane on its card to resume with the answer. It counts
+ * unless `waitingOnCard` is false, which a drain passes so one unanswered card does not hold the
+ * install, and every lane behind it, until the builder comes back.
  */
-export function countMidSession(db: DbReader): number {
+export function countMidSession(
+  db: DbReader,
+  opts: { readonly waitingOnCard?: boolean } = {},
+): number {
   const rows = db
     .select({
       state: schema.workstreams.state,
@@ -481,11 +489,9 @@ export function countMidSession(db: DbReader): number {
     .from(schema.workstreams)
     .where(inArray(schema.workstreams.state, [...ACTIVE_STATES]))
     .all();
+  const withCards = opts.waitingOnCard ?? true;
   const live = rows.filter(
-    (r) =>
-      LANE_STATES.includes(r.state) ||
-      r.gatePid !== null ||
-      (r.state === WorkstreamState.WaitingHuman && r.currentSessionId !== null),
+    (r) => LANE_STATES.includes(r.state) || r.gatePid !== null || (withCards && isWaitingOnCard(r)),
   );
   const batches = db
     .select({ n: count() })
@@ -493,4 +499,28 @@ export function countMidSession(db: DbReader): number {
     .where(inArray(schema.batches.state, [BatchState.Cutting, BatchState.Shipping]))
     .get();
   return live.length + (batches?.n ?? 0);
+}
+
+function isWaitingOnCard(r: {
+  readonly state: WorkstreamState;
+  readonly currentSessionId: SessionId | null;
+}): boolean {
+  return r.state === WorkstreamState.WaitingHuman && r.currentSessionId !== null;
+}
+
+/**
+ * How many of `countMidSession`'s lanes are only waiting on a card: parked on a permission or ask
+ * with a live session and no gate process. These are the ones a drain stops waiting for.
+ */
+export function countWaitingOnCard(db: DbReader): number {
+  return db
+    .select({
+      state: schema.workstreams.state,
+      gatePid: schema.workstreams.gatePid,
+      currentSessionId: schema.workstreams.currentSessionId,
+    })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.state, WorkstreamState.WaitingHuman))
+    .all()
+    .filter((r) => r.gatePid === null && isWaitingOnCard(r)).length;
 }

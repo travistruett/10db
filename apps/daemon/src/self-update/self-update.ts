@@ -1,10 +1,39 @@
+<<<<<<< 0741551d3b9319882889e4e27f30f13f67a77bc9
 import type { ProjectId, SelfUpdateBlockerDto, SelfUpdateNotInstalling } from '@10db/contracts';
 import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
+||||||| 8e2d93e
+import type { ProjectId, SelfUpdateBlockerDto } from '@10db/contracts';
+import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
+=======
+import {
+  SELF_UPDATE_SWITCH,
+  SHAPE_HOLD_WAY_OUT,
+  type InboxItemId,
+  type ProjectId,
+  type SelfUpdateBlockerDto,
+  type ShapeId,
+} from '@10db/contracts';
+import {
+  deleteAppSetting,
+  findOpenByFoldKey,
+  getAppSetting,
+  listProjects,
+  setAppSetting,
+} from '@10db/db';
+>>>>>>> 12c93609224c3a2cb75e49657f2f111b03dce80b
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { SELF_UPDATE_SWITCH } from './blocker';
+
+/**
+ * How long a drain may be held by shaping conversations alone before the builder is told. A turn
+ * is Claude answering, which takes minutes at most; one that goes on past this is hung, or a run of
+ * turns that keeps the update waiting while every lane is paused.
+ */
+export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
+/** The card that says so. It outlives the run that raised it, so a new run looks for it by this. */
+export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -125,6 +154,11 @@ export interface SelfUpdateDeps {
    * Work that only waits is not counted.
    */
   midSession(): number;
+  /**
+   * The shaping conversations whose turn is under way, by name: the part of `midSession` that is no
+   * lane, gate or job. A drain that only these hold has no lane to blame, so the builder is told.
+   */
+  shapeTurns(): readonly { readonly id: ShapeId; readonly title: string }[];
   /** How long a staged build waits for an idle moment before the factory drains for it. */
   waitLimitMs(): number;
   /**
@@ -133,10 +167,12 @@ export interface SelfUpdateDeps {
    */
   readonly drain: { begin(since: Date): void; end(): void };
   /**
-   * Stops the scheduler starting new work and settles once the tick it was in has finished, so
-   * nothing begins between the last check and the quit.
+   * Stops new work starting (the scheduler, and a conversation's next turn, which the scheduler
+   * does not start) and settles once the tick it was in has finished, so nothing begins between the
+   * last check and the quit. An install at an idle moment has no drain, so this alone holds it.
    */
   pause(): Promise<void>;
+  /** Lets what `pause` stopped start again. */
   resume(): void;
   /** The install script's last status file, and its removal. */
   readonly outcome: { read(): ScriptStatus | null; clear(): void };
@@ -163,7 +199,7 @@ export type TickResult = (typeof TickResult)[keyof typeof TickResult];
 export interface SelfUpdate {
   /** One look at main: stage a newer build, and install it when no task is mid-session. */
   tick(): Promise<TickResult>;
-  /** At startup: reports how an install that was under way ended. */
+  /** At startup: closes the card an earlier run left, and reports how an install under way ended. */
   settle(): void;
   /** Looks again every interval until `stop`. */
   start(): void;
@@ -313,7 +349,73 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     deps.drain.begin(drainingSince);
   }
 
+  /**
+   * Since when only shaping conversations have held the drain, and the card that told the builder
+   * once they had for too long. Null while a lane, a gate or a job holds it too, or nothing does.
+   */
+  let shapeHold: { readonly since: Date; cardId: InboxItemId | null } | null = null;
+
+  function releaseShapeHold(reason: string): void {
+    if (shapeHold?.cardId) inbox.resolve(shapeHold.cardId, reason);
+    shapeHold = null;
+  }
+
+  /**
+   * A drain pauses every lane, so when the only thing it waits for is a shaping conversation's turn,
+   * Settings and the factory note name it, and past `SHAPE_HOLD_ALERT_MS` one card does too: the
+   * conversation is no lane, so nothing else would say why lanes are paused.
+   */
+  function watchShapeHold(): void {
+    const turns = deps.shapeTurns();
+    if (drainingSince === null || turns.length === 0 || turns.length < deps.midSession()) {
+      releaseShapeHold('A lane, a gate or a job holds the update now, or nothing does.');
+      return;
+    }
+    const now = deps.clock.now();
+    shapeHold ??= { since: now, cardId: null };
+    if (
+      shapeHold.cardId !== null ||
+      now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS
+    )
+      return;
+    const names = turns.map((turn) => `“${turn.title}”`).join(', ');
+    logger.warn(
+      { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
+      'only shaping conversations keep the update waiting, and lanes stay paused',
+    );
+    const projectId = deps.cardProject();
+    // A card needs a project to sit under; Settings and the factory note still name the conversation.
+    if (projectId === null) return;
+    shapeHold.cardId = inbox.flag({
+      projectId,
+      workstreamId: null,
+      title: 'A shaping conversation is holding the update, and lanes are paused',
+      body: [
+        `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${drainingSince.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
+        `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
+      ].join('\n\n'),
+      foldKey: SHAPE_HOLD_FOLD_KEY,
+    }).id;
+  }
+
+  /**
+   * The hold is only in memory but its card is a row, so a card from before a restart would say for
+   * good that lanes are paused. This run holds nothing yet, and raises one again if a hold recurs.
+   * Every project, because the one that places the cards can change.
+   */
+  function closeShapeHoldCards(): void {
+    for (const project of listProjects(state.db)) {
+      try {
+        const stale = findOpenByFoldKey(state.db, project.id, SHAPE_HOLD_FOLD_KEY);
+        if (stale) inbox.resolve(stale.id, '10db restarted, so that turn is over.');
+      } catch (error) {
+        logger.error({ err: error }, 'could not close a shaping card left from before a restart');
+      }
+    }
+  }
+
   function endDrain(): void {
+    releaseShapeHold('The update no longer waits, so lanes start again.');
     if (drainingSince === null) return;
     drainingSince = null;
     logger.info({}, 'the update no longer waits: lanes start again');
@@ -543,6 +645,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0) return waitOrDrain();
+    releaseShapeHold('Nothing is mid-session now, so the update installs.');
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 
@@ -554,6 +657,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     const waited = waitingSince === null ? 0 : deps.clock.now().getTime() - waitingSince.getTime();
     if (drainingSince === null && !forced && waited < deps.waitLimitMs()) return TickResult.Busy;
     startDrain();
+    watchShapeHold();
     return TickResult.Draining;
   }
 
@@ -723,6 +827,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   return {
     tick,
     settle() {
+      closeShapeHoldCards();
       takeInRollback();
       const status = deps.outcome.read();
       deps.outcome.clear();
