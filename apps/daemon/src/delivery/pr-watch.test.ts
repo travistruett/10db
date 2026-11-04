@@ -2346,6 +2346,49 @@ describe('a required check GitHub cancelled', () => {
         expect(body).not.toContain('as soon as GitHub allows');
       });
 
+      it('does not say 10db runs the other check once the run it waited for finishes by itself', async () => {
+        const { id, prUrl, w } = watching();
+        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+        w.start();
+        await w.idle();
+        h.gh.failRerunOf.set(
+          '88',
+          new GhError('failed', 'run 88 cannot be rerun; already running'),
+        );
+        await round(w);
+        expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
+
+        h.gh.setRequiredChecks(prUrl, running('desktop'));
+        await round(w);
+        expect(noticeOf(id)).toBeUndefined();
+        const body = rerunNoticeOf(id)?.body ?? '';
+        expect(body).toBeTruthy();
+        expect(body).not.toContain('as soon as GitHub allows');
+        expect(body).not.toContain('beside this one');
+      });
+
+      it('does the same when a restart came between', async () => {
+        const { id, prUrl, w } = watching();
+        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+        w.start();
+        await w.idle();
+        h.gh.failRerunOf.set(
+          '88',
+          new GhError('failed', 'run 88 cannot be rerun; already running'),
+        );
+        await round(w);
+        await w.stop();
+
+        const second = watcher();
+        h.gh.setRequiredChecks(prUrl, running('desktop'));
+        second.start();
+        await second.idle();
+        await round(second);
+        const body = rerunNoticeOf(id)?.body ?? '';
+        expect(body).toBeTruthy();
+        expect(body).not.toContain('as soon as GitHub allows');
+      });
+
       it('names no notice beside it and does not say it will not ask again once the refused check clears', async () => {
         const { id, prUrl, w } = watching();
         await rerunOfDesktopOnly(w, prUrl);

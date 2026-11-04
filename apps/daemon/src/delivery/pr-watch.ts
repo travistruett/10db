@@ -711,9 +711,9 @@ export function createPrWatch(input: {
         // Rerun: it took. Not rerun: the cancellation went away by itself (a newer run).
         if (seen.asked) seen.active = true;
         seen.streak = 0;
-        // The rerun notice named the notice beside it, which goes now.
-        if (seen.notice === 'stopped')
-          rewriteRerunNotice(root.id, read.headSha, seen.rerun, 'cleared');
+        // A rerun notice that still left a run to ask for named the notice beside it, or said 10db
+        // runs the rest as soon as GitHub allows (the run finished by itself): neither holds now.
+        rewriteRerunNotice(root.id, read.headSha, seen.rerun, 'cleared');
         seen.notice = null;
       } else cancelledRuns.delete(root.id);
       clearCancelledNotice(root.id);
