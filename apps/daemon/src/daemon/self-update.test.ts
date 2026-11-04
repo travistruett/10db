@@ -16,6 +16,7 @@ import {
   createTempRepo,
   createTempRepoWithOrigin,
   githubOrigin,
+  handoffArgs,
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
@@ -436,7 +437,7 @@ describe('self-update in the daemon', () => {
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
     });
 
-    it('installs though a running session asked for a claim a parked lane holds: the ask is refused and the session ends on its own', async () => {
+    it('installs though a running session asked for a claim a parked lane holds: the ask is refused, and the handoff the refusal asks for keeps the step open', async () => {
       head = RUNNING;
       const adapter = new FakeAdapter({
         Alpha: [[{ do: 'await_message', contains: 'alpha' }, { do: 'turn_complete' }]],
@@ -447,6 +448,11 @@ describe('self-update in the daemon', () => {
               do: 'mcp',
               tool: 'request_claim',
               args: { opId: 'op-src-claim', kind: 'area', name: 'src', reason: 'need it' },
+            },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-beta-handoff', 'Ask for src again and finish the work'),
             },
             { do: 'turn_complete' },
           ],
@@ -487,6 +493,10 @@ describe('self-update in the daemon', () => {
       sendAll('beta');
       await waitFor(() => applied.length > 0 && applied, 20_000);
       expect(applied).toEqual([NEW]);
+      // The step is not finished: its unfinished work did not go to the gate, and its next session
+      // waits at the hold for the update.
+      expect((await lanesOf(api)).get(beta.id)?.state).not.toBe('VERIFYING');
+      expect(started.mock.results).toHaveLength(2);
     }, 60_000);
 
     it('installs with two lanes of one batch held at their gates, neither waiting on the other', async () => {

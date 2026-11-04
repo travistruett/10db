@@ -52,6 +52,8 @@ export type ClaimResult =
       readonly instruction: string;
       /** The refusal tells the agent about claims the builder made its task yield (`ClaimWaits.yielded`). */
       readonly yielded: boolean;
+      /** The holder is parked for the update: true only now, so the answer is not kept under the opId. */
+      readonly parked: boolean;
     };
 
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
@@ -408,14 +410,18 @@ export function yieldRefusal(
     heldBy: null,
     inboxId: given.inboxId,
     yielded: true,
+    parked: false,
     instruction: `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on. You no longer hold ${list}: edit nothing there until request_claim grants it to you again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
   };
 }
 
 /**
- * The refusal for a claim held by a task the update drain has parked. Nothing is recorded as waiting:
- * the agent is told to save its work and end its turn, so no session is cut off by the update, and
- * the task asks again when its next session starts after the update.
+ * The refusal for a claim held by a task the update drain has parked. It shows no wait and raises no
+ * card, and request_claim answers it without recording it under the opId, because it holds only for now:
+ * a later call with the same opId asks again. The agent is told to write a handoff before it ends its
+ * turn, since a turn that ends without one finishes the step and sends unfinished work to the gate. The
+ * handoff's fresh session waits at the hold, so no session is cut off by the update, and the task asks
+ * again in that session after the update.
  */
 function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
   return {
@@ -423,7 +429,8 @@ function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
     heldBy,
     inboxId: null,
     yielded: false,
-    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. Commit what you have. End your turn: 10db continues this task after the update, and you can ask again then.`,
+    parked: true,
+    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. If you can finish without it, carry on. Otherwise commit any changes you have, call write_handoff naming what is left, and end your turn: a fresh session of this step continues after the update and can ask again then.`,
   };
 }
 

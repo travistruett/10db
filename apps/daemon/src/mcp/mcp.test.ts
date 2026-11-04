@@ -906,7 +906,7 @@ describe('MCP tools', () => {
   });
 
   describe('a holder the update drain has parked', () => {
-    it('ends the wait with a refusal telling the agent to end its turn, whether the holder was parked before the ask or during the wait', async () => {
+    it('ends the wait with a refusal telling the agent to hand off, whether the holder was parked before the ask or during the wait', async () => {
       const a = await seedSession(['api']);
       const beta = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
       holdClaim(a.project, beta, { kind: 'area', name: 'ui' });
@@ -930,7 +930,9 @@ describe('MCP tools', () => {
         inboxId: null,
       });
       const { instruction } = refused.json as { instruction: string };
-      expect(instruction).toContain('End your turn');
+      // Ending the turn alone would finish the step and send half-done work to the gate.
+      expect(instruction).toContain('write_handoff');
+      expect(instruction).toContain('end your turn');
       expect(instruction).toContain('update');
       expect(noticeOf(a)).toBeNull();
       expect(claimWaits.awaitedHolders()).toEqual(new Set());
@@ -946,6 +948,24 @@ describe('MCP tools', () => {
       expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).not.toContain('ui');
       expect(noticeOf(a)).toBeNull();
       expect(openCards()).toEqual([]);
+    });
+
+    it('records no refusal, so a retry with the same opId asks again once the drain is over', async () => {
+      const a = await seedSession(['api']);
+      const beta = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
+      holdClaim(a.project, beta, { kind: 'area', name: 'ui' });
+      parkedHolders.add(beta.workstream.id);
+      const ask = {
+        opId: 'op-parked-retry',
+        kind: 'area',
+        name: 'ui',
+        reason: 'badge',
+      };
+      expect((await a.call('request_claim', ask)).json).toMatchObject({ granted: false });
+
+      parkedHolders.clear();
+      releaseHolder(beta);
+      expect((await a.call('request_claim', ask)).json).toMatchObject({ granted: true });
     });
 
     it('keeps waiting for a holder that is not parked, and takes the claim when it frees', async () => {
