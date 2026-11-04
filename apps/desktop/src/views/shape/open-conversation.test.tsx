@@ -1,4 +1,4 @@
-import type { ShapeViewDto } from '@10db/contracts';
+import { mintId, type ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -45,6 +45,41 @@ describe('Open conversation, in a task’s drawer', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
     });
+  });
+
+  it('reads the task’s derived size and the lane time it took, flagged when mis-sized (§8)', async () => {
+    const task = taskDto({ projectId: project.id, title: 'Compact density', status: 'done' });
+    const base = conversation();
+    const view = shapeViewDto({
+      shape: base.shape,
+      sizes: [
+        {
+          proposalId: mintId('ShapeProposal'),
+          key: 'density',
+          size: 'M',
+          hours: 2,
+          from: 'basis',
+          taskId: task.id,
+          actualHours: 10,
+          missized: true,
+        },
+      ],
+    });
+    serve(
+      view,
+      http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
+      http.get(daemonUrl('/tasks/:taskId/shape'), () =>
+        HttpResponse.json({ shapeId: view.shape.id }),
+      ),
+    );
+    renderApp(`/board?task=${task.id}`);
+    const drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(
+      await within(drawer).findByText(/Sized M \(~2 h\) · took 10 h of lane time/),
+    ).toBeTruthy();
+    expect(
+      within(drawer).getByRole('img', { name: 'Outside its size by more than one bucket' }),
+    ).toBeTruthy();
   });
 
   it('is not offered for a task filed by hand', async () => {

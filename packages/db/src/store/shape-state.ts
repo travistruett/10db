@@ -313,10 +313,21 @@ export function insertShapeLink(
     decisionId: 'decisionId' in input ? input.decisionId : null,
     principleId: 'principleId' in input ? input.principleId : null,
     questionId: 'questionId' in input ? input.questionId : null,
+    sizeToldAt: null,
     createdAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeLinks).values(row).run();
   return row;
+}
+
+/** Records that a turn told Claude these tasks mis-sized; one already told keeps its first time. */
+export function markShapeLinksSizeTold(ctx: WriteContext, ids: readonly ShapeLinkId[]): void {
+  if (ids.length === 0) return;
+  ctx.tx
+    .update(schema.shapeLinks)
+    .set({ sizeToldAt: ctx.now })
+    .where(and(inArray(schema.shapeLinks.id, [...ids]), isNull(schema.shapeLinks.sizeToldAt)))
+    .run();
 }
 
 export type ShapeQuestionRow = typeof schema.shapeQuestions.$inferSelect;

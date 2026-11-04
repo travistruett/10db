@@ -34,6 +34,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { OpenConversation } from '../shape/open-conversation';
+import { TaskSizeLine } from '../shape/task-size-line';
 import {
   useCloseTask,
   useHoldTask,
@@ -400,6 +401,7 @@ export function TaskDrawer({
                   </Anchor>
                 </Group>
               ) : null}
+              <TaskSizeLine taskId={task.id} />
               {onOpenConversation ? (
                 <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />
               ) : null}

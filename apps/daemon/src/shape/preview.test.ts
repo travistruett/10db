@@ -3,12 +3,18 @@ import {
   Effort,
   Provider,
   SessionMode,
+  ShapeMessageAuthor,
+  ShapeMessageKind,
+  ShapeOrigin,
   TaskStatus,
   WorkstreamState,
+  type ShapeId,
   type TaskId,
 } from '@10db/contracts';
 import {
   insertSession,
+  insertShape,
+  insertShapeMessage,
   insertTask,
   insertWorkstream,
   listShapeProposals,
@@ -17,11 +23,19 @@ import {
   transitionWorkstream,
   type WriteContext,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { convertProposals } from './convert';
 import { buildPreview } from './preview';
 import { dropProposal, reconcileDraft } from './rounds';
+import { buildSizes } from './sizing';
+import type * as Sizing from './sizing';
+
+// A spy over the real sizing, to see which conversations a view build reads sizes for.
+vi.mock('./sizing', async (importOriginal) => {
+  const actual = await importOriginal<typeof Sizing>();
+  return { ...actual, buildSizes: vi.fn(actual.buildSizes) };
+});
 
 // Shape spec §10.2 and §15: two tasks clashing on an area, work already queued holding a lane, and
 // unsized running work.
@@ -250,6 +264,78 @@ describe('the factory preview', () => {
     const before = events();
     expect(previewAt().tasks).toBe(1);
     expect(events()).toEqual(before);
+  });
+});
+
+describe('reading sizes for a preview', () => {
+  /** Another conversation of the project that proposed one loose task and converted it. */
+  function convertedConversation(title: string): { shapeId: ShapeId; taskId: TaskId } {
+    const shape = write((ctx) =>
+      insertShape(ctx, c.project.id, { title, origin: ShapeOrigin.App }),
+    );
+    const m = write((ctx) =>
+      insertShapeMessage(ctx, shape.id, {
+        author: ShapeMessageAuthor.Builder,
+        kind: ShapeMessageKind.Text,
+        body: 'Plan it.',
+      }),
+    ).id;
+    write((ctx) => {
+      const out = reconcileDraft(
+        ctx,
+        shape.id,
+        PlanDraft.parse({
+          looseTasks: [{ ...loose('sized', { size: 'L', areas: ['api'] }), sourceMessageIds: [m] }],
+        }),
+      );
+      if (!out.ok) throw new Error(out.errors.join('; '));
+    });
+    const converted = write((ctx) =>
+      convertProposals(
+        ctx,
+        shape.id,
+        listShapeProposals(ctx.tx, shape.id).map((r) => r.id),
+      ),
+    );
+    const [taskId] = must(converted.ok ? converted : null, 'converted').results.flatMap(
+      (r) => r.taskIds,
+    );
+    return { shapeId: shape.id, taskId: must(taskId, 'task') };
+  }
+
+  function run(taskId: TaskId): void {
+    write((ctx) => {
+      const ws = insertWorkstream(ctx, taskId);
+      transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Starting, fence: null });
+      transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Running, fence: null });
+      insertSession(ctx, {
+        workstreamId: ws.id,
+        provider: Provider.Claude,
+        model: 'sonnet',
+        effort: Effort.Medium,
+        mode: SessionMode.Managed,
+        mcpTokenHash: 'hash',
+      });
+    });
+  }
+
+  it("reads sizes only for the conversations of the project's running and queued tasks, and the preview is the same", () => {
+    const active = convertedConversation('active');
+    run(active.taskId);
+    propose(loose('new', { areas: ['api'], size: 'S' }));
+    const now = new Date(Date.now() + HOUR_MS);
+    const alone = buildPreview(c.store.db, c.shape.id, now);
+    // L is 5.5 hours; an hour in, 4.5 are left, and the draft shares the task's area.
+    expect(startOf(alone, 'new')).toBeCloseTo(4.5, 1);
+
+    const idle = Array.from({ length: 6 }, (_, i) => convertedConversation(`idle ${String(i)}`));
+    vi.mocked(buildSizes).mockClear();
+    const crowded = buildPreview(c.store.db, c.shape.id, now);
+
+    expect(crowded).toEqual(alone);
+    const read = new Set(vi.mocked(buildSizes).mock.calls.map(([, shapeId]) => shapeId));
+    expect(read).toEqual(new Set([c.shape.id, active.shapeId]));
+    for (const { shapeId } of idle) expect(read.has(shapeId)).toBe(false);
   });
 });
 

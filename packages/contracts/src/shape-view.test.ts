@@ -225,7 +225,9 @@ describe('ShapeViewDto', () => {
           attachment: { kind: 'mermaid', source: 'flowchart LR\n  a --> b' },
         },
       ],
+      tokens: 88_000,
     });
+    expect(view.tokens).toBe(88_000);
     expect(view.attachments[0]?.attachment.kind).toBe('mermaid');
     expect(view.preview.criticalPath).toEqual(['thin-scrollbars']);
     expect(view.proposals).toHaveLength(1);

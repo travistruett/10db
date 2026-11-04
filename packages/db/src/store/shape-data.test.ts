@@ -3,6 +3,8 @@ import {
   mintId,
   ProposalKind,
   ShapeOrigin,
+  ShapeProposalKind,
+  ShapeProposalState,
   ShapeState,
   type ProjectDto,
 } from '@10db/contracts';
@@ -17,6 +19,7 @@ import {
   insertSession,
   insertShape,
   insertShapeLink,
+  insertShapeProposal,
   insertShapeQuestion,
   insertSource,
   insertTask,
@@ -24,7 +27,9 @@ import {
   listShapeLinks,
   listShapeQuestions,
   listShapes,
+  markShapeLinksSizeTold,
   seedProject,
+  shapeTokens,
   updateSessionUsage,
   type Store,
 } from './index';
@@ -205,6 +210,50 @@ describe('the Shape tables', () => {
     expect(() => link({ taskId: task.id })).not.toThrow();
   });
 
+  it('marks a link told once, keeping its first time, and leaves the others alone', () => {
+    const shape = newShape().value;
+    const taskInput = { acceptanceCriteria: ['x'], areas: ['api'] };
+    const links = store.write((ctx) => {
+      const row = insertShapeProposal(ctx, {
+        shapeId: shape.id,
+        key: 'a',
+        kind: ShapeProposalKind.Task,
+        state: ShapeProposalState.Accepted,
+        round: 1,
+        createdRound: 1,
+        pinned: [],
+        body: {},
+        taskHashes: {},
+        sourceMessageIds: [],
+      });
+      return ['a', 'b'].map((key) =>
+        insertShapeLink(ctx, {
+          shapeId: shape.id,
+          proposalId: row.id,
+          key,
+          taskId: insertTask(ctx, project.id, { ...taskInput, title: key }).id,
+        }),
+      );
+    }).value;
+    const told = () => listShapeLinks(store.db, shape.id).map((l) => l.sizeToldAt);
+    const first = links[0]?.id;
+    if (first === undefined) throw new Error('no link');
+    expect(told()).toEqual([null, null]);
+
+    store.write((ctx) => {
+      markShapeLinksSizeTold(ctx, []);
+      markShapeLinksSizeTold(ctx, [first]);
+    });
+    const at = now.toISOString();
+    expect(told()).toEqual([at, null]);
+
+    now = new Date(now.getTime() + 60_000);
+    store.write((ctx) => {
+      markShapeLinksSizeTold(ctx, [first]);
+    });
+    expect(told()).toEqual([at, null]);
+  });
+
   it('stores a question under its task and links a question and a principle through shape_links', () => {
     const shape = newShape().value;
     const task = store.write((ctx) =>
@@ -315,6 +364,26 @@ describe('a Shape session', () => {
       }),
     ]);
     expect(usage.total.tokensIn).toBe(140);
+  });
+
+  it('adds up the input and output tokens of every session of its conversation, and no other', () => {
+    const lane = laneSession();
+    const shape = newShape().value;
+    const other = newShape().value;
+    expect(shapeTokens(store.db, shape.id)).toBe(0);
+    store.write((ctx) => {
+      const session = (shapeId: typeof shape.id, hash: string) =>
+        insertSession(ctx, { ...sessionInput, shapeId, mcpTokenHash: hash });
+      const first = session(shape.id, 'hash-tokens-1');
+      const second = session(shape.id, 'hash-tokens-2');
+      const elsewhere = session(other.id, 'hash-tokens-3');
+      updateSessionUsage(ctx, lane.id, { inputTokens: 1000, outputTokens: 100 });
+      updateSessionUsage(ctx, first.id, { inputTokens: 40, outputTokens: 4, cachedTokens: 9 });
+      updateSessionUsage(ctx, second.id, { inputTokens: 60, outputTokens: 6 });
+      updateSessionUsage(ctx, elsewhere.id, { inputTokens: 7, outputTokens: 7 });
+    });
+    expect(shapeTokens(store.db, shape.id)).toBe(110);
+    expect(shapeTokens(store.db, other.id)).toBe(14);
   });
 
   it.each([
