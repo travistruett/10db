@@ -54,7 +54,14 @@ started waits at the drain, or at a hold of its own from the moment an install t
 idle moment has no drain and a shape turn does not go through the scheduler. Waiting there it has begun nothing, so
 it stops counting, or it would keep the drain up for ever. Shape's queue is in memory and no recovery restores it:
 if the quit comes first, the service writes a notice in the conversation naming each turn that never ran, for the
-builder to send again. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
+builder to send again. That covers a message sent after the install is asked for (between the final look and the
+quit, while the script does its checksum and lock): the hold is up before that look, so the message is queued, not
+started, and the quit's `close` refuses it with the notice. It is refused, not answered after the relaunch, because
+the queue is memory and a resumed session is never given earlier messages; the message stays in the transcript and
+the notice says to send it again. A message that reaches the service after `close` (the HTTP server still takes
+requests while the daemon stops) gets the same notice at once and no session, as the hold letting go on the way out
+must not start one. If the app is killed rather than quit (a SIGKILL, a crash) no notice is written; that is the one
+way a message goes unanswered without a word. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
