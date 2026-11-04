@@ -144,7 +144,30 @@ describe('revertCommits', () => {
   });
 });
 
-describe('commitsWithSubject', () => {
+describe('ownCommitsWithSubject', () => {
+  /** Commits `rel` through the commit tool's path, as a session does, with `message` as written. */
+  function laneCommit(rel: string, message: string, opId: string) {
+    writeFileSync(join(repo.path, rel), 'lane\n');
+    return git.commit({ repo: repo.path, paths: [rel], message, opId, branch: 'work' });
+  }
+
+  it('never lists a commit a session made, whatever its message says', async () => {
+    const alpha = commitFiles({ 'alpha.txt': 'alpha\n' }, 'alpha');
+
+    await laneCommit('lane.txt', `revert: leave out "Alpha"\n\n- ${alpha} (Alpha)`, 'op-forged-1');
+
+    expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
+  });
+
+  it('is not fooled by a session whose message holds the separators of another format', async () => {
+    const alpha = commitFiles({ 'alpha.txt': 'alpha\n' }, 'alpha');
+    const record = `${alpha}\x1frevert: leave out "Alpha"\n\n- ${alpha} (Alpha)`;
+
+    await laneCommit('lane.txt', `lane work\x1e${record}\x1e`, 'op-forged-2');
+
+    expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
+  });
+
   it('lists the commits of the branch whose message opens with the prefix, oldest first, whole', async () => {
     const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
     const beta = commitFiles({ 'src/beta.txt': 'beta\n' }, 'beta');
@@ -153,7 +176,7 @@ describe('commitsWithSubject', () => {
     const second = await revert([beta]);
     if (first.kind !== 'reverted' || second.kind !== 'reverted') throw new Error('reverted');
 
-    const found = await git.commitsWithSubject(repo.path, 'work', 'revert: leave out');
+    const found = await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out');
 
     expect(found.map((c) => c.sha)).toEqual([first.head, second.head]);
     expect(found[0]?.message).toContain('revert: leave out "Alpha"');
@@ -161,6 +184,6 @@ describe('commitsWithSubject', () => {
 
   it('finds nothing when no commit opens with the prefix', async () => {
     commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
-    expect(await git.commitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
+    expect(await git.ownCommitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
   });
 });

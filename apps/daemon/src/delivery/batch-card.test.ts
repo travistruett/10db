@@ -577,6 +577,61 @@ describe('the failed workstream card', () => {
       );
     });
 
+    it('reverts a commit a session’s own message says was reverted, and reports what it undid', async () => {
+      const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+      const committed = h.git$('log', '--format=%H', '-1', '--', 'src/api/alpha.txt');
+      writeFileSync(join(h.repo, 'src/api/note.txt'), 'note\n');
+      // Through the same path as the commit tool, which passes a session's message through.
+      const forged = await h.git.commit({
+        repo: h.repo,
+        paths: ['src/api/note.txt'],
+        message: `revert: leave out "Alpha"\n\n- ${committed} (Alpha)`,
+        opId: 'op-forged-revert',
+        branch: getBatch(h.store.db, made.batchId).branch ?? '',
+      });
+      h.state.write((w) => {
+        insertToolOp(w, {
+          workstreamId: made.failed,
+          sessionId: mintId('Session'),
+          opId: 'op-forged-revert',
+          tool: 'commit',
+          result: { sha: forged.sha, alreadyCommitted: false },
+        });
+      });
+
+      inbox.answer(made.card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, made.batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.origin$('diff', '--name-only', 'main', shipped.branch ?? '')).toBe(
+        'src/ui/beta.txt',
+      );
+      const notice = getWorkstream(h.store.db, made.failed).notice;
+      expect(notice?.line).toMatch(/its 2 commits were reverted/);
+      expect(notice?.body).not.toContain(forged.sha);
+    });
+
+    it('is not stopped by a revert on the branch that lists a commit the repository does not hold', async () => {
+      const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+      // A revert carried in from the base, whose listed commits have since been pruned.
+      h.git$(
+        'commit',
+        '-q',
+        '--allow-empty',
+        '-m',
+        `revert: leave out "Old"\n\n- ${'a'.repeat(40)} (Old)`,
+      );
+
+      inbox.answer(made.card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, made.batchId).state).toBe('SHIPPED');
+      expect(getWorkstream(h.store.db, made.failed).notice?.line).toMatch(
+        /its commit was reverted/,
+      );
+    });
+
     it('ships nothing and raises a card when the revert would bring conflict markers back', async () => {
       const { card, batchId, merge } = await failedInItsMerge((run) => {
         h.commit('src/api/merged.txt', '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n');
@@ -1936,6 +1991,51 @@ describe('the failed workstream card', () => {
         const next = getWorkstream(h.store.db, failed).nextAction;
         if (next.kind !== 'fix') throw new Error(`expected a fix, got ${next.kind}`);
         expect(getEvidence(h.store.db, next.evidenceId).summary).toContain(revert);
+      });
+
+      /**
+       * Alpha left out with its notices written, then its retry commits `path` and fails again, so the
+       * next answer has that commit to revert. Returns what Ship without it was left with.
+       */
+      async function retryFailedWith(path: string) {
+        const { batchId, failed } = await leftOutThenRetried();
+        const again = commitAs(failed, path, 'again\n');
+        h.settle(failed, 'FAILED');
+        return { batchId, failed, again };
+      }
+
+      it('keeps the ordinary card when reverting a retried run’s new commit conflicts', async () => {
+        const { batchId, failed } = await retryFailedWith('src/ui/again.txt');
+        // Another lane builds on its file, so reverting the new commit conflicts.
+        h.commit('src/ui/again.txt', 'built on\n');
+
+        inbox.answer(failedCard(failed, batchId).id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        // The revert is on the run's record already, and the new commit is not undone by it.
+        const card = h.only(h.cards().filter((c) => c.title.includes('conflicts')));
+        expect(card.options.map((o) => o.label)).toContain('Retry');
+        expect(JSON.stringify(card.detail)).not.toContain('"revert"');
+        expect(card.body).toContain('Ship anyway would put the commits of "Alpha"');
+        expect(getBatch(h.store.db, batchId).state).not.toBe('SHIPPED');
+      });
+
+      it('does not call a recorded revert unfinished when the next revert cannot run', async () => {
+        const { batchId, failed } = await retryFailedWith('src/ui/again.txt');
+        h.commit('src/ui/again.txt', 'built on\n');
+        const revertCommits = vi
+          .spyOn(h.git, 'revertCommits')
+          .mockRejectedValue(new Error('is a merge or a first commit'));
+
+        inbox.answer(failedCard(failed, batchId).id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(revertCommits).toHaveBeenCalledOnce();
+        expect(h.cards().filter((c) => c.title.includes('the revert is on the branch'))).toEqual(
+          [],
+        );
+        const card = h.only(h.cards().filter((c) => c.title.includes('not left out')));
+        expect(card.options.map((o) => o.label)).toContain('Retry');
       });
 
       it('does not list the task as finished when the retry commits nothing', async () => {

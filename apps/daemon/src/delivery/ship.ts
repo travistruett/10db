@@ -1435,7 +1435,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * lists what it undid as `- <sha> (<title>)`. A card or a notice can be missing after a failed write,
    * and an ancestor of a revert is not a commit it undid, so the branch itself is what says. Where
    * several reverts list a commit the newest is kept, and `order` ranks the reverts oldest first.
-   * A listed commit that is not in the revert's own history is ignored.
+   * A listed commit that is not in the revert's own history, or not in the repository at all, is
+   * ignored, and so is any commit a session made: only a revert 10db wrote counts, so a message saying
+   * a commit was reverted cannot get it shipped under a notice saying the same.
    */
   async function undoneOnBranch(
     checkout: string,
@@ -1443,12 +1445,16 @@ export function createShipper(deps: ShipperDeps): Shipper {
   ): Promise<{ readonly by: Map<string, string>; readonly order: Map<string, number> }> {
     const by = new Map<string, string>();
     const order = new Map<string, number>();
-    const reverts = await deps.git.commitsWithSubject(checkout, branch, LEFT_OUT_SUBJECT);
+    const reverts = await deps.git.ownCommitsWithSubject(checkout, branch, LEFT_OUT_SUBJECT);
     for (const [index, revert] of reverts.entries()) {
       order.set(revert.sha, index);
       for (const line of revert.message.split('\n')) {
         const sha = /^- ([0-9a-f]{40}) \(/.exec(line)?.[1];
-        if (sha !== undefined && (await deps.git.isAncestor(checkout, sha, revert.sha)))
+        if (
+          sha !== undefined &&
+          (await deps.git.hasCommit(checkout, sha)) &&
+          (await deps.git.isAncestor(checkout, sha, revert.sha))
+        )
           by.set(sha, revert.sha);
       }
     }
@@ -1472,7 +1478,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * commits that built on each other once more conflicts with the tip that no longer has them. They
    * count as this answer's, under the revert that undid them, and a run's notice counts all of them.
    * A commit no revert listed is reverted as usual, whether or not it is an ancestor of a revert.
-   * A card's revert still only decides what the cards this answer raises say it left on the branch.
+   * A card's revert still only decides what the cards this answer raises say it left on the branch,
+   * and with none, so does a revert on the branch whose notices no run's record names. A revert a
+   * record names is finished business: the cards stay the ordinary ones, because this answer's own
+   * commits are not in it.
    */
   async function leaveOut(
     batchId: BatchId,
@@ -1619,6 +1628,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         readonly covered: number;
         /** The newest earlier revert that undid one of them. */
         readonly coveredBy: string | null;
+        /** The reverts its run records name. */
+        readonly recorded: readonly string[];
         /** The revert of an earlier answer that its record names and the branch still holds. */
         readonly prior: string | null;
       }[] = [];
@@ -1642,24 +1653,29 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // A run left out before and retried keeps its revert on the branch. If this answer reverts
         // nothing of it, as when the retry committed nothing, its notice still names that revert, so
         // the next Retry tells the session.
-        const record = runsOf(batchId, run)
-          .flatMap((r) => {
-            const found = revertOfRun({ notice: r.notice, evidence: listEvidence(db, r.id) });
-            return found === null ? [] : [found.revert];
-          })
-          .at(-1);
+        const recorded = runsOf(batchId, run).flatMap((r) => {
+          const found = revertOfRun({ notice: r.notice, evidence: listEvidence(db, r.id) });
+          return found === null ? [] : [found.revert];
+        });
+        const record = recorded.at(-1);
         const prior =
           record !== undefined &&
           (await deps.git.hasCommit(checkout, record)) &&
           (await deps.git.isAncestor(checkout, record, `refs/heads/${branch}`))
             ? record
             : null;
-        commits.push({ run, shas: left, covered, coveredBy, prior });
+        commits.push({ run, shas: left, covered, coveredBy, recorded, prior });
       }
-      // A revert on the branch that no card named still stands for the cards this answer raises.
+      // A revert on the branch that no card and no run's record names lost its notices, so it stands
+      // for the cards this answer raises. A run's newest revert is the one to ask about: a record holds
+      // the latest only, and a notice for it counted what the reverts before it undid.
       if (standing === null) {
+        const recorded = new Set(commits.flatMap((c) => c.recorded));
+        const unrecorded = commits.filter(
+          (c) => c.coveredBy !== null && !recorded.has(c.coveredBy),
+        );
         let newest: string | null = null;
-        for (const { coveredBy } of commits)
+        for (const { coveredBy } of unrecorded)
           if (
             coveredBy !== null &&
             (newest === null ||
@@ -1667,11 +1683,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           )
             newest = coveredBy;
         if (newest !== null)
-          attempt = {
-            ...attempt,
-            revert: newest,
-            covers: commits.filter((c) => c.covered > 0).map((c) => c.run.id),
-          };
+          attempt = { ...attempt, revert: newest, covers: unrecorded.map((c) => c.run.id) };
       }
       const shas = commits.flatMap((c) => c.shas);
       if (shas.length > 0) {

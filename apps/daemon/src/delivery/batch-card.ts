@@ -89,8 +89,9 @@ const REVERTED_OPTIONS: readonly InboxOption[] = [
 
 /**
  * The failed-workstream card's options and detail when the workstream runs in a batch (spec §4).
- * `revert` is the revert commit an earlier Ship without it left on the branch: the answer needs it,
- * because reverting those commits again can conflict. `covers` is the runs it undid.
+ * `revert` is the revert commit an earlier Ship without it left on the branch: the answer reads what
+ * it undid from the branch, and needs this only so the cards it raises keep saying the revert is
+ * there. `covers` is the runs it undid.
  */
 export function batchCardFields(
   row: { readonly id: WorkstreamId; readonly batchId: BatchId | null },
