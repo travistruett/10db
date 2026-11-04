@@ -572,6 +572,64 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(told[0]).not.toMatch(/shot0\.png/);
     });
 
+    describe('refused when the send-time notice could not predict it', () => {
+      const shots = (n: number, from = 0) =>
+        Array.from({ length: n }, (_, i) =>
+          drop(`shot${String(from + i)}.png`, retina(MB + 200_000)),
+        );
+      const shotNotices = () => notices().filter((body) => /shot\d\.png/.test(body));
+
+      it('names an image of an earlier turn that no Read had yet made room for', async () => {
+        await fillInline();
+        // Turn one drops two (2.4 of the 3 MiB fit) and Claude Reads none; turn two drops one, and the
+        // send-time notice sees all the room still free for it.
+        const first = shots(2);
+        await nextTurn('Two');
+        const [third] = shots(1, 2);
+        await nextTurn('One more');
+        expect(shotNotices()).toEqual([]);
+        expect(read(must(first[0], 'a file').storedPath)).toEqual({ decision: 'allow' });
+        expect(read(must(first[1], 'a file').storedPath)).toEqual({ decision: 'allow' });
+        expect(read(must(third, 'a file').storedPath)).toMatchObject({ decision: 'deny' });
+        const told = shotNotices();
+        expect(told).toHaveLength(1);
+        expect(told[0]).toContain('shot2.png');
+        expect(told[0]).toMatch(/refused|couldn't Read/);
+        expect(told[0]).toMatch(/out of room for pictures/);
+        // Refused again: the builder was told already.
+        read(must(third, 'a file').storedPath);
+        expect(shotNotices()).toHaveLength(1);
+      });
+
+      it('names the image actually refused when Claude Reads out of the order the notice assumed', async () => {
+        await fillInline();
+        const files = shots(4);
+        await nextTurn('Look at these');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+        // Claude takes shot2, then shot0, which fill the room; shot1 is refused though the notice never named it.
+        const order = [files[2], files[0], files[1]].map((file) =>
+          read(must(file, 'a file').storedPath),
+        );
+        expect(order.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        const told = shotNotices();
+        expect(told).toHaveLength(2);
+        expect(told[1]).toContain('shot1.png');
+        expect(told[1]).not.toMatch(/shot[023]\.png/);
+      });
+
+      it('says nothing for a refused picture that is not a dropped file, or a subagent’s Read', async () => {
+        await fillInline();
+        const files = shots(3);
+        await nextTurn('Look at these');
+        const before = notices().length;
+        const outside = read('/nowhere/else.png');
+        expect(outside.decision).toBe('deny');
+        for (const file of files) read(file.storedPath, 0, 'agent-1');
+        expect(notices()).toHaveLength(before);
+      });
+    });
+
     it('count at the allowance in the notice once a large Read has been measured', async () => {
       await fillInline();
       const shot = drop('first.png', retina(MB + 200_000));

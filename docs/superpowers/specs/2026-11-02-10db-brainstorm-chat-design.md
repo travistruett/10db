@@ -370,6 +370,18 @@ pool. A smaller copy is no remedy once the inline budget is full: it goes as a p
 left. The notice is an estimate, for the same reason as the counts: it charges an image as a Read would be at that
 moment, so a measurement can get an image the notice didn't name refused, and can leave room for one it did name.
 
+**What the send-time notice can't predict.** It sees only this turn's images and the Reads already spent, so it misses
+three cases. (a) Path images of earlier turns that Claude has not Read yet hold no room: with the inline budget full,
+a turn that drops 3 and a Read of none, then a turn that drops 1, send no notice, and the fourth Read is refused.
+(b) Room that shrinks after the check: `see_screen` in the same turn, Claude's Reads of checkout pictures, and a second
+Read of the same file. (c) Order: it charges the images in message order, so when Claude Reads in another order the
+refused image can be one the notice didn't name. For these the hook that refuses a Read of a picture under the
+conversation's files directory also tells the builder: `Claude couldn't Read <name>: this conversation is out of room
+for pictures` (the same advice as the send-time notice, stated as fact, not "probably"). It is sent once for an image:
+none if an earlier notice of either kind already names it. A refused Read of a PDF, of a file outside the conversation's
+files directory, or by a subagent gets no notice, only the dimmed `Read · refused` line. An image stays named for the
+whole conversation, so a later session that refuses it again does not repeat the notice.
+
 A Read of a `.pdf` (a dropped one is up to 20 MB, 20 a conversation) is charged to the same total, by the page and
 not by the file: Read returns either the whole file as a document block or pages rendered to pictures, the SDK's types
 show pictures can come back with no range too, and a small text PDF renders to pictures far larger than itself. So

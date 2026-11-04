@@ -165,6 +165,27 @@ export const unreadableImagesNotice = (names: readonly string[]): string =>
   `Tell Claude which picture matters most so it Reads that one first, or send ` +
   `${names.length === 1 ? 'it' : 'them'} in a new conversation.`;
 
+const OUT_OF_ROOM = 'this conversation is out of room for pictures.';
+
+/**
+ * What the builder is told when a Read of a dropped image was refused and no earlier notice named it: the
+ * send-time notice is a prediction that misses images of earlier turns no Read had made room for, room taken
+ * after it by `see_screen` or by other Reads, and Reads in an order it did not assume. Unlike that notice it
+ * states what happened, so it does not say "probably".
+ */
+export const refusedImageNotice = (name: string): string =>
+  `Claude couldn't Read ${name}: ${OUT_OF_ROOM} ` +
+  `Tell Claude which picture matters most so it Reads that one first, or send it in a new conversation.`;
+
+/** The image names a notice from `unreadableImagesNotice` or `refusedImageNotice` names; none for any other. */
+export function namedUnreadable(body: string): string[] {
+  const named =
+    /^Claude (?:probably won't be able to|couldn't) Read (.+?): this conversation is out of room/.exec(
+      body,
+    );
+  return named?.[1] === undefined ? [] : named[1].split(', ');
+}
+
 /** The line that corrects a Read's counted charge to what its result measured. */
 export { readMeasuredLine };
 

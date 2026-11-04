@@ -1,5 +1,5 @@
 import { readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import {
   ConflictError,
   EventType,
@@ -61,6 +61,7 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
+import { expandHome } from '../sandbox';
 import { stringField } from '../guard';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
@@ -84,6 +85,7 @@ import { convertProposals, type ConvertOutcome, type JoiningProblem } from './co
 import {
   isFileUnchanged,
   measuredMediaBytes,
+  namedUnreadable,
   pagesCharged,
   readAllowance,
   readBytesSpent,
@@ -93,6 +95,7 @@ import {
   readCountedLine,
   readMeasuredLine,
   readRefusal,
+  refusedImageNotice,
   unmeasuredRead,
   unreadableImages,
   unreadableImagesNotice,
@@ -627,6 +630,28 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
   };
 
+  /**
+   * Tells the builder a Read of one of the conversation's dropped images was refused, unless an earlier notice
+   * already named that image (§5.4). `warnUnreadable` only predicts, so this covers what it can't: images of
+   * earlier turns no Read had made room for, room spent after the send, and Reads out of the assumed order.
+   */
+  const noticeRefusedImage = (
+    shapeId: ShapeId,
+    readPath: string,
+    access: Pick<ShapeAccess, 'checkout' | 'home'>,
+    messages: readonly ShapeMessageDto[],
+  ): void => {
+    const target = resolvePath(access.checkout, expandHome(readPath, access.home));
+    const file = listShapeFiles(state.db, shapeId).find(
+      (f) => resolvePath(f.storedPath) === target,
+    );
+    if (file === undefined) return;
+    const named = messages
+      .filter((m) => m.kind === ShapeMessageKind.Notice)
+      .some((m) => namedUnreadable(m.body).includes(file.name));
+    if (!named) notice(shapeId, refusedImageNotice(file.name));
+  };
+
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
   const imagesOf = (files: readonly ShapeFileRow[], spent: number): SentImages => {
     const inline = inlineImageIds(files, spent);
@@ -821,8 +846,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             charged.kind,
             allowance,
           );
-          if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
-          else
+          if (refusal !== null) {
+            verdict = { decision: 'deny', reason: refusal };
+            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access, messages);
+          } else
             say(
               shapeId,
               ShapeMessageAuthor.Claude,
