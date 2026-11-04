@@ -99,6 +99,7 @@ export function baseHandlers(
           isDefault: true,
           runningCommit: null,
           availableCommit: null,
+          notInstalling: null,
           waitMinutes: 15,
           waitingSince: null,
           draining: false,

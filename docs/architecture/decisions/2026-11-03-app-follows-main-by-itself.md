@@ -102,6 +102,10 @@ factory (`self-update/drain.ts`) until the app has installed:
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.
+- **Not installing:** an available head can also be one that will not install: its update failed, the builder rolled
+  back from it, or it has no finished build newer than the running one. `notInstalling` (`failed`, `rolled-back`,
+  `unbuilt`, else null) says which, taken from the last check's result. Settings then says why instead of
+  "waiting for a moment when nothing is mid-session" and offers no Install Now, which would do nothing.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.

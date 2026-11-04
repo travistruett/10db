@@ -1278,6 +1278,7 @@ function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusD
     isDefault: true,
     runningCommit: '1'.repeat(40),
     availableCommit: '2'.repeat(40),
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: '2026-11-03T12:00:00.000Z',
     draining: false,

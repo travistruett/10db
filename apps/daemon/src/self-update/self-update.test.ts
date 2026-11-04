@@ -1526,3 +1526,57 @@ describe('start', () => {
     expect(heads).toBe(2);
   });
 });
+
+describe('why an available update is not installing', () => {
+  it('says nothing is held back while the update waits or installs', async () => {
+    const update = make();
+    expect(update.status().notInstalling).toBeNull();
+    world.busy = 1;
+    expect(await update.tick()).toBe('busy');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('says the update failed, also after a restart and with no project for a card', async () => {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+    const update = make({ cardProject: null });
+    expect(await update.tick()).toBe('failed');
+    expect(update.status().notInstalling).toBe('failed');
+    expect(await update.tick()).toBe('failed-before');
+    expect(update.status().notInstalling).toBe('failed');
+    const restarted = make();
+    expect(await restarted.tick()).toBe('failed-before');
+    expect(restarted.status().notInstalling).toBe('failed');
+  });
+
+  it('says the builder rolled back from the head, until main moves on', async () => {
+    world.rolledBackFrom = NEW;
+    const update = make();
+    update.settle();
+    expect(await update.tick()).toBe('rolled-back');
+    expect(update.status().notInstalling).toBe('rolled-back');
+    world.head = NEWER;
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('says the head has no finished build newer than the running one', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    expect(await update.tick()).toBe('no-newer-build');
+    expect(update.status().notInstalling).toBe('unbuilt');
+    world.stage = () => Promise.resolve(STAGED_OK);
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('forgets it once the builder asks again or main is the running commit', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    await update.tick();
+    world.head = RUNNING;
+    expect(await update.tick()).toBe('current');
+    expect(update.status().notInstalling).toBeNull();
+  });
+});

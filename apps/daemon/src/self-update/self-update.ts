@@ -1,4 +1,4 @@
-import type { ProjectId, SelfUpdateBlockerDto } from '@10db/contracts';
+import type { ProjectId, SelfUpdateBlockerDto, SelfUpdateNotInstalling } from '@10db/contracts';
 import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
@@ -203,7 +203,21 @@ export interface SelfUpdateProgress {
    * head failed. Null while the switch is off and while nothing is wrong.
    */
   readonly problem: SelfUpdateBlockerDto | null;
+  /**
+   * Why the available update is not waiting to install: its update failed, the builder rolled back
+   * from it, or it has no finished build newer than the running one. Null while it waits, installs
+   * or none is available.
+   */
+  readonly notInstalling: SelfUpdateNotInstalling | null;
 }
+
+/** What a check's result says about an available update that will not install. */
+const NOT_INSTALLING: Readonly<Partial<Record<TickResult, SelfUpdateNotInstalling>>> = {
+  [TickResult.Failed]: 'failed',
+  [TickResult.FailedBefore]: 'failed',
+  [TickResult.RolledBack]: 'rolled-back',
+  [TickResult.NoNewerBuild]: 'unbuilt',
+};
 
 const STEP_LABELS: Readonly<Record<string, string>> = {
   'find-commit': 'asking GitHub for the head of main',
@@ -334,6 +348,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   let failure: { readonly head: string; readonly message: string } | null = null;
   /** The last check could not ask GitHub. */
   let unreachable = false;
+  /** Why the last check found nothing to install for the available head, when it did. */
+  let notInstalling: SelfUpdateNotInstalling | null = null;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -667,7 +683,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     try {
       const result = await check(deps.runningCommit);
       // Working means the check ended early because the daemon is stopping: it learned nothing.
-      if (result !== TickResult.Working) unreachable = result === TickResult.Unreachable;
+      if (result !== TickResult.Working) {
+        unreachable = result === TickResult.Unreachable;
+        notInstalling = NOT_INSTALLING[result] ?? null;
+      }
       return result;
     } finally {
       working = false;
@@ -771,6 +790,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       draining: drainingSince !== null,
       drainingSince,
       problem: !deps.enabled() ? null : problem(),
+      notInstalling:
+        available === null || !deps.enabled()
+          ? null
+          : // A failure outside a check (an install that ended, a start that settled it) counts too.
+            failure !== null
+            ? 'failed'
+            : notInstalling,
     }),
   };
 }

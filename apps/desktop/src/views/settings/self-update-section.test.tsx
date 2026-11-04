@@ -14,6 +14,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     isDefault: true,
     runningCommit: RUNNING,
     availableCommit: null,
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: null,
     draining: false,
@@ -213,6 +214,22 @@ describe('a waiting update in Settings', () => {
       /draining since/i,
     );
   });
+
+  it.each([
+    ['failed', /update to 9f8e7d6 failed.*off and on/i],
+    ['rolled-back', /rolled back from 9f8e7d6.*once main has a newer commit/i],
+    ['unbuilt', /9f8e7d6 has no finished build yet/i],
+  ] as const)(
+    'says why a head that is %s is not installing, and offers no Install Now',
+    async (notInstalling, text) => {
+      serving(status({ availableCommit: NEWER, notInstalling }));
+      renderApp('/settings/updates');
+      const note = await screen.findByRole('status', { name: 'Update status' });
+      expect(note.textContent).toMatch(text);
+      expect(note.textContent).not.toMatch(/is waiting/);
+      expect(screen.queryByRole('button', { name: 'Install Now' })).toBeNull();
+    },
+  );
 
   it('offers no Install Now with the switch off', async () => {
     serving(status({ enabled: false, isDefault: false, availableCommit: NEWER }));
