@@ -1,5 +1,6 @@
 import {
   BatchDto,
+  LEFT_OUT_NOTICE_KEY,
   NOTICE_BODY_MAX,
   NOTICE_LINE_MAX,
   WorkstreamDto,
@@ -135,6 +136,20 @@ describe('workstream notices', () => {
     const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
     expect(value).toEqual([workstream.id]);
     expect(getWorkstream(store.db, workstream.id).notice).toBeNull();
+  });
+
+  it('keeps the notice of a run left out of its batch’s pull request through a restart', () => {
+    const { workstream } = seed();
+    const leftOut: Notice = {
+      key: LEFT_OUT_NOTICE_KEY,
+      tone: 'info',
+      line: 'Left out of the pull request: its commit was reverted',
+      body: 'x',
+    };
+    store.write((ctx) => setWorkstreamNotice(ctx, workstream.id, leftOut));
+    const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
+    expect(value).toEqual([]);
+    expect(getWorkstream(store.db, workstream.id).notice).toEqual(leftOut);
   });
 });
 

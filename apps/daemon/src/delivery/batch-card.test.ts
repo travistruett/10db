@@ -1,5 +1,14 @@
-import { ConflictError, InboxKind } from '@10db/contracts';
-import { getBatch, getInboxItem, getWorkstream, listWorkstreams, transitionBatch } from '@10db/db';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { ConflictError, InboxKind, mintId } from '@10db/contracts';
+import {
+  getBatch,
+  getInboxItem,
+  getWorkstream,
+  insertToolOp,
+  listWorkstreams,
+  transitionBatch,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
@@ -28,8 +37,14 @@ afterEach(() => {
   h.close();
 });
 
-/** A batch of Alpha (failed, with its card) and Beta (left in `beta`), with one commit on its branch. */
-async function failedInBatch(beta: 'WAITING_HUMAN' | 'DONE') {
+/**
+ * A batch of Alpha (failed, with its card) and Beta (left in `beta`), with one commit on its branch.
+ * `alphaFiles` are commits Alpha made through the commit tool, before Beta's.
+ */
+async function failedInBatch(
+  beta: 'WAITING_HUMAN' | 'DONE' | 'CANCELLED',
+  alphaFiles: Record<string, string> = {},
+) {
   const alpha = h.addTask('Alpha');
   const other = h.addTask('Beta', { areas: ['ui'] });
   const started = h.only(
@@ -39,9 +54,21 @@ async function failedInBatch(beta: 'WAITING_HUMAN' | 'DONE') {
     }),
   );
   await h.jobs.idle();
-  h.commit('src/ui/beta.txt');
   const [a, b] = listWorkstreams(h.store.db, { batchId: started.id });
   if (!a || !b) throw new Error('two workstreams expected');
+  for (const [path, content] of Object.entries(alphaFiles)) {
+    const sha = h.commit(path, content);
+    h.state.write((w) => {
+      insertToolOp(w, {
+        workstreamId: a.id,
+        sessionId: mintId('Session'),
+        opId: `op-${path}`,
+        tool: 'commit',
+        result: { sha, alreadyCommitted: false },
+      });
+    });
+  }
+  h.commit('src/ui/beta.txt');
   h.settle(b.id, beta);
   h.settle(a.id, 'FAILED');
   const fields = batchCardFields({ id: a.id, batchId: started.id });
@@ -59,9 +86,21 @@ async function failedInBatch(beta: 'WAITING_HUMAN' | 'DONE') {
 describe('the failed workstream card', () => {
   it('offers Retry, Ship anyway and Later only for a workstream in a batch', async () => {
     const { card, batchId, failed } = await failedInBatch('DONE');
-    expect(card.options.map((o) => o.label)).toEqual(['Retry', 'Ship anyway', 'Later']);
+    expect(card.options.map((o) => o.label)).toEqual([
+      'Retry',
+      'Ship anyway',
+      'Ship without it',
+      'Later',
+    ]);
     expect(card.detail).toEqual({ batchCard: { batchId, workstreamId: failed } });
     expect(batchCardFields({ id: failed, batchId: null })).toBeNull();
+  });
+
+  it('says beside Ship anyway that the failed task’s commits will be in the pull request', async () => {
+    const { card } = await failedInBatch('DONE');
+    const describe = (label: string) => card.options.find((o) => o.label === label)?.description;
+    expect(describe('Ship anyway')).toMatch(/its commits will be in the pull request/i);
+    expect(describe('Ship without it')).toMatch(/reverts its commits on the batch branch/i);
   });
 
   it('retries the workstream, reopening a failed batch', async () => {
@@ -119,6 +158,105 @@ describe('the failed workstream card', () => {
     expect(inbox.answer(card.id, { choice: 'Ship anyway' }).state).toBe('RESOLVED');
     await h.jobs.idle();
     expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+  });
+
+  describe('Ship without it', () => {
+    it('opens a pull request with every other task’s changes and none of the failed one’s, from one revert commit naming it', async () => {
+      const { card, batchId, failed } = await failedInBatch('DONE', {
+        'src/api/alpha-1.txt': 'one\n',
+        'src/api/alpha-2.txt': 'two\n',
+      });
+      expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      const branch = shipped.branch ?? '';
+      expect(h.origin$('diff', '--name-only', 'main', branch)).toBe('src/ui/beta.txt');
+      const subjects = h
+        .origin$('log', '--format=%s', `main..${branch}`)
+        .split('\n')
+        .filter((s) => s.startsWith('revert'));
+      expect(subjects).toEqual(['revert: leave out "Alpha"']);
+      expect(h.git$('status', '--porcelain', '--untracked-files=all')).toBe('');
+
+      // The task's drawer says so; the pull request's body leaves its work out of "What and why".
+      const alpha = getWorkstream(h.store.db, failed);
+      expect(alpha.notice).toMatchObject({
+        key: 'left-out',
+        line: 'Left out of the pull request: its 2 commits were reverted',
+      });
+      const body = h.gh.body(shipped.prUrl ?? '');
+      expect(body).toContain('- Alpha (failed, left out of this pull request)');
+      expect(body).not.toContain('### Alpha');
+    });
+
+    it('ships the rest, with no revert commit, when the failed task committed nothing', async () => {
+      const { card, batchId, failed } = await failedInBatch('DONE');
+      expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.origin$('log', '--format=%s', `main..${shipped.branch ?? ''}`)).toBe(
+        'Add src/ui/beta.txt',
+      );
+      expect(getWorkstream(h.store.db, failed).notice?.line).toBe(
+        'Left out of the pull request: it had no commits to revert',
+      );
+    });
+
+    it('ships nothing and raises a card naming the files when the revert conflicts', async () => {
+      const { card, batchId, failed } = await failedInBatch('DONE', {
+        'src/api/shared.txt': 'alpha\n',
+      });
+      // Beta built on Alpha's file, so undoing Alpha's commit can't be done cleanly.
+      h.commit('src/api/shared.txt', 'alpha\nbeta\n');
+      const tip = h.git$('rev-parse', 'HEAD');
+
+      expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+      expect(h.gh.prCreates()).toEqual([]);
+      expect(h.git$('rev-parse', 'HEAD')).toBe(tip);
+      expect(getWorkstream(h.store.db, failed).notice).toBeNull();
+      const conflict = h.only(h.cards().filter((c) => c.title.includes('conflict')));
+      expect(conflict.title).toBe('Alpha was not left out: reverting its commits conflicts');
+      expect(conflict.body).toContain('- src/api/shared.txt');
+      expect(conflict.body).toMatch(/Nothing was shipped/);
+    });
+
+    it('ships nothing and says so when uncommitted changes are in a file the revert writes', async () => {
+      const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+      writeFileSync(join(h.repo, 'src/api/alpha.txt'), 'edited\n');
+
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+      expect(h.gh.prCreates()).toEqual([]);
+      const blocked = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+      expect(blocked.body).toContain('- src/api/alpha.txt');
+      expect(blocked.body).toMatch(/uncommitted/i);
+    });
+
+    it('refuses while other work is unfinished, keeping the card open', async () => {
+      const { card } = await failedInBatch('WAITING_HUMAN');
+      expect(() => inbox.answer(card.id, { choice: 'Ship without it' })).toThrow(
+        /still has unfinished work: Beta \(waiting_human\)/,
+      );
+      expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    });
+
+    it('refuses when no other task finished, since nothing would be left to ship', async () => {
+      const { card } = await failedInBatch('CANCELLED');
+      expect(() => inbox.answer(card.id, { choice: 'Ship without it' })).toThrow(ConflictError);
+      expect(() => inbox.answer(card.id, { choice: 'Ship without it' })).toThrow(
+        /no other task in batch "Greetings" finished/,
+      );
+      expect(getInboxItem(h.store.db, card.id).state).toBe('OPEN');
+    });
   });
 
   it('does nothing for Later, and leaves other flag cards alone', async () => {

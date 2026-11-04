@@ -15,6 +15,7 @@ export const BATCH_CARD_DETAIL = 'batchCard';
 export const BatchCardChoice = {
   Retry: 'Retry',
   ShipAnyway: 'Ship anyway',
+  ShipWithout: 'Ship without it',
   Later: 'Later',
 } as const;
 export type BatchCardChoice = (typeof BatchCardChoice)[keyof typeof BatchCardChoice];
@@ -25,7 +26,13 @@ const OPTIONS: readonly InboxOption[] = [
   { label: BatchCardChoice.Retry, description: 'Run this workstream again in its batch' },
   {
     label: BatchCardChoice.ShipAnyway,
-    description: 'Ship the batch without it, once the rest is done or cancelled',
+    description:
+      'Ship the batch once the rest is done or cancelled. This task failed, but its commits will be in the pull request',
+  },
+  {
+    label: BatchCardChoice.ShipWithout,
+    description:
+      'Reverts its commits on the batch branch in one revert commit, then ships the rest. If the revert conflicts, nothing ships and a card names the files. Needs another finished task',
   },
   {
     label: BatchCardChoice.Later,
@@ -49,12 +56,14 @@ export function batchCardFields(row: {
  * Acts on a batch card's answer before the inbox records it. A refusal (Ship anyway while work is
  * unfinished, in an open or a failed batch, or Retry in a batch that shipped) throws, so the card
  * stays open and the builder sees why. Ship anyway never reopens a failed batch: the option
- * promises a ship, and reopening is the strip's Retry.
+ * promises a ship, and reopening is the strip's Retry. Ship anyway puts the failed task's commits
+ * in the pull request; Ship without it reverts them first and refuses on the same grounds
+ * (`Shipper.shipWithout`).
  */
 export function createBatchCardAnswers(deps: {
   /** Retries the workstream; `note` is the builder's, for the session the retry sends the work to. */
   readonly retry: (id: WorkstreamId, note?: string) => void;
-  readonly shipper: Pick<Shipper, 'shipAnyway'>;
+  readonly shipper: Pick<Shipper, 'shipAnyway' | 'shipWithout'>;
 }): (item: InboxItemDto, answer: InboxAnswer) => void {
   return (item, answer) => {
     // The detail is JSON read back from the database: a boundary, so parse it.
@@ -66,6 +75,8 @@ export function createBatchCardAnswers(deps: {
       else deps.retry(card.data.workstreamId);
     } else if (answer.choice === BatchCardChoice.ShipAnyway)
       deps.shipper.shipAnyway(card.data.batchId);
+    else if (answer.choice === BatchCardChoice.ShipWithout)
+      deps.shipper.shipWithout(card.data.batchId, card.data.workstreamId);
     // Later, or a label the inbox's own option check refuses next: nothing to do.
   };
 }

@@ -1225,3 +1225,31 @@ export const branchCards = {
     refresh: true,
   }),
 };
+
+/** What Ship without it tells the builder when it could not revert a failed task's commits. */
+export const leftOutCards = {
+  /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
+  conflict: (batch: BatchDto, title: string, paths: readonly string[]): Card => ({
+    title: `${title} was not left out: reverting its commits conflicts`,
+    body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and later commits changed these files in ways that conflict with that:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Resolve it on the branch (revert the commits by hand, or start a fix task in the batch), then ship again from the task's drawer. Ship anyway would put "${title}"'s commits in the pull request.`,
+    foldKey: `left-out:${batch.id}`,
+    refresh: true,
+    resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+  }),
+  /** Something else stopped the revert: `why` is git's or 10db's own words. */
+  failed: (batch: BatchDto, title: string, why: string): Card => ({
+    title: `${title} was not left out: ${why.split('\n')[0]?.slice(0, 200) ?? why}`,
+    body: `Ship without it could not revert the commits of "${title}" on the batch's branch:\n\n${why.slice(0, 1500)}\n\nNothing was shipped and the branch is unchanged. Fix what it names, then ship again from the task's drawer.`,
+    foldKey: `left-out:${batch.id}`,
+    refresh: true,
+    resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+  }),
+  /** Uncommitted changes are in `paths`, which the revert writes. */
+  blocked: (batch: BatchDto, title: string, paths: readonly string[]): Card => ({
+    title: `${title} was not left out: uncommitted changes are in the way`,
+    body: `Ship without it reverts a failed task's commits on the batch's branch, which writes these files, and they have uncommitted changes:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Commit or discard the changes, then ship again.`,
+    foldKey: `left-out:${batch.id}`,
+    refresh: true,
+    resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+  }),
+};

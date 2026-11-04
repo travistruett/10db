@@ -9,7 +9,9 @@ import {
   isTerminal,
   LANE_STATES,
   latestPerTask,
+  LEFT_OUT_NOTICE_KEY,
   McpToolName,
+  McpToolOutputs,
   shipReadiness,
   ShipReadiness,
   StepRole,
@@ -34,12 +36,14 @@ import {
   listBatches,
   listEvidence,
   listPermissionRules,
+  listToolOpResults,
   listWorkstreams,
   patchBatch,
   patchWorkstream,
   releaseClaims,
   setBatchNotice,
   setTaskStatus,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   type DbReader,
@@ -65,6 +69,7 @@ import {
   autoMergeOffKey,
   autoMergeRefusedKey,
   detailOf,
+  leftOutCards,
   nothingToWaitFor,
   preCheckOnlyKey,
   prCardKey,
@@ -94,7 +99,14 @@ import { fileFlakyTests, rerunFlaky, type FlakyTest } from './flaky-tests';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
-import { gateNotices, mergeNotices, NOTICE_KEY, supersededNotices, updateNotices } from './notices';
+import {
+  gateNotices,
+  leftOutNotices,
+  mergeNotices,
+  NOTICE_KEY,
+  supersededNotices,
+  updateNotices,
+} from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
 import { prBody, prTitle, titlePrefix } from './pr-text';
@@ -171,6 +183,14 @@ export interface Shipper {
   ship(batchId: BatchId): BatchDto;
   /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
   shipAnyway(batchId: BatchId): BatchDto;
+  /**
+   * A failed member's card: reverts that run's commits on the batch's branch in one commit that names
+   * its task, marks the run as left out of the pull request, and ships the rest. Refused like
+   * `shipAnyway` while work is unfinished, and when no other task finished. The revert runs in the
+   * ship queue: one that conflicts, or meets uncommitted changes, ships nothing, leaves the branch
+   * and the batch as they were, and raises a card naming the files.
+   */
+  shipWithout(batchId: BatchId, workstreamId: WorkstreamId): BatchDto;
   abandon(batchId: BatchId): BatchDto;
   /**
    * The open pull request of a shipped batch that merges by itself conflicts with its base: merges the
@@ -699,6 +719,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         description: task.description,
         acceptanceCriteria: task.acceptanceCriteria,
         state: w.state,
+        leftOut: w.notice?.key === LEFT_OUT_NOTICE_KEY,
       };
     });
     const sha = await deps.git.head(target.checkout);
@@ -722,7 +743,16 @@ export function createShipper(deps: ShipperDeps): Shipper {
         repo: target.repo,
         base: batch.baseBranch,
         head: target.branch,
-        title: prTitle(await prefixFor(batch, project, tasks, target, sha), batch.title),
+        title: prTitle(
+          await prefixFor(
+            batch,
+            project,
+            tasks.filter((t) => !t.leftOut),
+            target,
+            sha,
+          ),
+          batch.title,
+        ),
         bodyFile: file,
       },
       ghCall(deps, signal),
@@ -1248,6 +1278,127 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * The commits a run made through the commit tool that are still on the batch's branch, oldest
+   * first. Commits on a shared branch mix in other lanes', so the run's own tool-op records are what
+   * say which are its.
+   */
+  async function commitsOf(
+    member: WorkstreamDto,
+    checkout: string,
+    branch: string,
+  ): Promise<string[]> {
+    const made: string[] = [];
+    for (const result of listToolOpResults(db, member.id, McpToolName.Commit)) {
+      const parsed = McpToolOutputs.commit.safeParse(result);
+      if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
+    }
+    const kept: string[] = [];
+    for (const sha of made)
+      if (
+        (await deps.git.hasCommit(checkout, sha)) &&
+        (await deps.git.isAncestor(checkout, sha, `refs/heads/${branch}`))
+      )
+        kept.push(sha);
+    return kept;
+  }
+
+  /**
+   * Ship without a failed run (`Shipper.shipWithout`), in the ship queue: its commits are undone in
+   * one commit, the run gets its notice and the batch moves to shipping in one write, and the ship
+   * then runs as any other. Nothing moves until the revert has worked; a revert that cannot is a card
+   * and the batch stays as it was.
+   */
+  async function leaveOut(
+    batchId: BatchId,
+    workstreamId: WorkstreamId,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const batch = getBatch(db, batchId);
+    const member = getWorkstream(db, workstreamId);
+    // A function, so a check after an await is not narrowed away by the one before it.
+    const stopped = (): boolean => signal.aborted;
+    // Whatever changed since the card was answered, the answer no longer fits: do nothing.
+    if (
+      stopped() ||
+      (batch.state !== BatchState.Open && batch.state !== BatchState.Failed) ||
+      member.state !== WorkstreamState.Failed ||
+      unfinishedWork(batch) !== null ||
+      deps.holdShips?.()
+    )
+      return;
+    const title = member.taskTitle;
+    const stopWith = (card: Card): void => {
+      deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
+      raise(deps.inbox, batch.projectId, card);
+    };
+    try {
+      const { branch } = batch;
+      const checkout = batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
+      if (batch.worktreePath !== null) {
+        const whole = await ensureWorktreeWhole(deps, batch, signal);
+        if (stopped()) return;
+        if (whole === 'refused') {
+          stopWith(
+            leftOutCards.failed(batch, title, "the batch's worktree could not be made whole"),
+          );
+          return;
+        }
+      }
+      const current = await deps.git.currentBranch(checkout);
+      if (branch === null || current !== branch) {
+        stopWith(
+          leftOutCards.failed(
+            batch,
+            title,
+            `The checkout is on ${current ?? 'a detached HEAD'}, the batch branch is ${branch ?? '(not cut)'}`,
+          ),
+        );
+        return;
+      }
+      const shas = await commitsOf(member, checkout, branch);
+      let notice = leftOutNotices.nothingToRevert();
+      if (shas.length > 0) {
+        const reverted = await deps.git.revertCommits({
+          repo: checkout,
+          branch,
+          shas,
+          message: [
+            `revert: leave out "${title}"`,
+            `10db reverted ${String(shas.length)} commit${shas.length === 1 ? '' : 's'} of the task "${title}", which failed in this batch, because the builder chose Ship without it:`,
+            shas.map((sha) => `- ${sha}`).join('\n'),
+          ].join('\n\n'),
+        });
+        if (stopped()) return;
+        if (reverted.kind === 'conflict') {
+          stopWith(leftOutCards.conflict(batch, title, reverted.paths));
+          return;
+        }
+        if (reverted.kind === 'blocked') {
+          stopWith(leftOutCards.blocked(batch, title, reverted.changed));
+          return;
+        }
+        if (reverted.kind === 'reverted')
+          notice = leftOutNotices.reverted(shas.length, reverted.head);
+      }
+      const moved = deps.state.write((w) => {
+        const now = getBatch(w.tx, batchId);
+        if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
+        setWorkstreamNotice(w, workstreamId, notice);
+        transitionBatch(w, batchId, {
+          to: BatchState.Shipping,
+          patch: { failure: null },
+          reason: `shipped without "${title}" by the builder`,
+        });
+        return true;
+      });
+      if (moved) resume(batchId);
+    } catch (error) {
+      if (stopped()) return;
+      stopWith(leftOutCards.failed(batch, title, detailOf(error)));
+    }
+  }
+
+  /**
    * A shipped batch whose pull request 10db keeps landing: the one that opened it (not a CI fix), set
    * to merge by itself. A pull request held for the builder is the builder's to update.
    */
@@ -1658,6 +1809,28 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const unfinished = unfinishedWork(getBatch(db, batchId));
       if (unfinished) throw unfinished;
       return ship(batchId);
+    },
+    shipWithout(batchId, workstreamId) {
+      const batch = getBatch(db, batchId);
+      if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
+        throw new ConflictError(
+          `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch ships`,
+        );
+      const all = members(db, batchId);
+      const left = all.find((m) => m.id === workstreamId);
+      if (left?.state !== WorkstreamState.Failed)
+        throw new ConflictError(`That run did not fail in batch "${batch.title}"`);
+      const unfinished = unfinishedWork(batch);
+      if (unfinished) throw unfinished;
+      if (!all.some((m) => m.id !== workstreamId && m.state === WorkstreamState.Done))
+        throw new ConflictError(
+          `Nothing would be left to ship: no other task in batch "${batch.title}" finished`,
+        );
+      refuseWhileHeld(batch);
+      deps.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
+        deps.git.operation(() => leaveOut(batchId, workstreamId, signal)),
+      );
+      return batch;
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);
