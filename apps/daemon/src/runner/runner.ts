@@ -37,6 +37,7 @@ import {
   type SessionId,
   type WorkstreamId,
   type WorkstreamStep,
+  MIGRATIONS_RENUMBERED_NOTICE_KEY,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -1429,9 +1430,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         checkout,
         worktreeRoot: opts.worktreeRoot,
       });
+    const renumbered =
+      row.batchId === null
+        ? undefined
+        : getBatch(db, row.batchId).notices.find((n) => n.key === MIGRATIONS_RENUMBERED_NOTICE_KEY);
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
+      renumbered: renumbered?.body ?? null,
       task,
       claims: claims(),
       action,

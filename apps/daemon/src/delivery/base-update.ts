@@ -23,10 +23,18 @@ import {
 import { checkInstall, describeBroken } from './install-health';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
-import { baseNotices, installNotices, NOTICE_KEY } from './notices';
+import { carriedSoFar, copyCustomSql, ownMigrations } from './migration-carry';
+import {
+  baseNotices,
+  installNotices,
+  migrationNotices,
+  NOTICE_KEY,
+  renumberedLines,
+  type RenumberedMigration,
+} from './notices';
 import { mergeRef, startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
-import { generatedIn } from './worktree-generated';
+import { generatedIn, MIGRATIONS_DIR } from './worktree-generated';
 
 /**
  * What 10db keeps (`Git.keepNote`, at `mergeRef`) while a base merge's conflict markers wait for a
@@ -54,6 +62,11 @@ export type BaseUpdate =
       readonly note: string | null;
       /** The conflicts the merge settled; only when asked for a pull request (`forPullRequest`). */
       readonly resolved?: readonly ResolvedConflict[];
+      /**
+       * Asked for a pull request, what kept a migration of the batch's from being carried over: the
+       * merge lacks it, so it must not be pushed, and the caller raises the one card.
+       */
+      readonly uncarried?: string;
     }
   /**
    * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard or
@@ -236,10 +249,17 @@ interface Unregenerated {
   readonly logPath: string | null;
   /** 10db removed what a failed run wrote there. */
   readonly restored: boolean;
+  /** A migration of the batch's is what could not be made again, and `why` names it. */
+  readonly uncarried?: true;
 }
 
 type Regenerated =
-  | { readonly kind: 'done'; readonly head: string; readonly problem: Unregenerated | null }
+  | {
+      readonly kind: 'done';
+      readonly head: string;
+      readonly problem: Unregenerated | null;
+      readonly renumbered: readonly RenumberedMigration[];
+    }
   | { readonly kind: 'aborted' };
 
 /**
@@ -396,6 +416,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
    * them. The worktree must be clean first: the generators read its sources, and 10db commits only
    * what they make. A failed run's files are removed again.
    *
+   * The migrations the branch added are re-created after the base's, in their order and under their
+   * names: the generator numbers them, and a custom one gets its SQL back unchanged. All of them are
+   * made or nothing is committed, and the problem names the first that wasn't.
+   *
    * `wrote.head` is the head the merge step answered with, read before the install: the merge
    * commit, or the session's last commit resolving its markers. A head that has moved past it since
    * holds a commit the builder made in the worktree meanwhile, and nothing is committed on top of it:
@@ -418,7 +442,21 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       kind: 'done',
       head: current,
       problem,
+      renumbered: [],
     });
+    const tip = `${merged.head}^1`;
+    const notCarried = (
+      tag: string,
+      reason: string,
+      logPath: string | null,
+      restored: boolean,
+    ): Regenerated =>
+      unchanged({
+        why: `the batch's migration ${tag} could not be carried over after ${batch.baseBranch}'s (${reason}). Its file is in ${merged.head.slice(0, 12)}^1: re-create it under the same name, after ${batch.baseBranch}'s`,
+        logPath,
+        restored,
+        uncarried: true,
+      });
     /** The problem when HEAD is no longer the head 10db wrote; null while it is. */
     const moved = async (): Promise<string | null> => {
       const now = await ctx.git.head(path);
@@ -436,7 +474,20 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         logPath: null,
         restored: false,
       });
-    const generated = await ctx.generators.regenerate({ batch, project, path, dirs, signal });
+    const own = regenerating.some((r) => r.dir === MIGRATIONS_DIR)
+      ? await ownMigrations(ctx.git, path, tip, merged.from)
+      : null;
+    if (own?.kind === 'unreadable') return notCarried(own.tag, own.why, null, false);
+    const migrations = own?.migrations ?? [];
+    const baseTags = own?.baseTags ?? [];
+    const generated = await ctx.generators.regenerate({
+      batch,
+      project,
+      path,
+      dirs,
+      signal,
+      ...(migrations.length > 0 ? { migrations } : {}),
+    });
     if (generated.kind === 'aborted') {
       // What a stopped run wrote would be in the next merge's way.
       await ctx.git.restoreDirs(path, dirs).catch(() => []);
@@ -444,7 +495,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     if (generated.kind === 'failed') {
       const how = generated.timedOut ? 'timed out' : `exit ${String(generated.exitCode)}`;
+      // Read before the restore: the journal says how far the run got.
+      const stuck = carriedSoFar(path, baseTags, migrations).missing ?? migrations[0];
       const restored = (await ctx.git.restoreDirs(path, dirs)).length > 0;
+      if (stuck !== undefined)
+        return notCarried(stuck.tag, `generating it failed, ${how}`, generated.logPath, restored);
       return unchanged({
         why: `regenerating them failed (${how})`,
         logPath: generated.logPath,
@@ -457,6 +512,20 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       // way. The card's "as the merge left them" would not hold, since the builder's commit is on top.
       await ctx.git.restoreDirs(path, dirs);
       return unchanged({ why: movedDuring, logPath: generated.logPath, restored: false });
+    }
+    const carried = carriedSoFar(path, baseTags, migrations);
+    const uncopied =
+      carried.missing === null ? await copyCustomSql(ctx.git, path, tip, carried.made) : null;
+    if (carried.missing !== null || uncopied !== null) {
+      const restored = (await ctx.git.restoreDirs(path, dirs)).length > 0;
+      const tag = carried.missing?.tag ?? uncopied?.tag ?? '';
+      const reason =
+        uncopied !== null
+          ? uncopied.why
+          : carried.missing?.custom === true
+            ? 'the generator wrote no file for it'
+            : 'generating it made no migration: the schema holds nothing it adds, so an earlier migration of the batch took its changes, or the base made them';
+      return notCarried(tag, reason, generated.logPath, restored);
     }
     const changed = (await ctx.git.changedPaths(path)).filter((file) =>
       dirs.some((dir) => file.startsWith(dir)),
@@ -473,7 +542,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       head = sha;
       wrote.head = sha;
     }
-    const done = (problem: Unregenerated | null): Regenerated => ({ kind: 'done', head, problem });
+    const done = (problem: Unregenerated | null): Regenerated => ({
+      kind: 'done',
+      head,
+      problem,
+      renumbered: carried.renumbered,
+    });
     // Each directory conflicted, so the branch's version of it differs from the base's, which the
     // merge took: one the generators left as it was has lost the branch's changes there.
     const same = dirs.filter((dir) => !changed.some((file) => file.startsWith(dir)));
@@ -491,8 +565,13 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       if (oid !== null) made.add(oid);
     }
     const missing: string[] = [];
-    for (const file of regenerating.flatMap((r) => r.dropped).filter((f) => f.endsWith('.sql'))) {
-      const was = await ctx.git.blobAt(path, `${merged.head}^1`, file);
+    // A migration carried over is made again, though its SQL may differ on the base's schema.
+    const carriedFiles = new Set(migrations.map((m) => `${MIGRATIONS_DIR}${m.tag}.sql`));
+    const lost = regenerating
+      .flatMap((r) => r.dropped)
+      .filter((f) => f.endsWith('.sql') && !carriedFiles.has(f));
+    for (const file of lost) {
+      const was = await ctx.git.blobAt(path, tip, file);
       const is = await ctx.git.blobAt(path, 'HEAD', file);
       if (was !== null && was !== is && !made.has(was)) missing.push(file);
     }
@@ -510,6 +589,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
    * What kept them from it is one card. Never throws. Resolves with the head 10db wrote (`start`, the
    * head the merge step answered with, or the generators' commit on it; never one read back from the
    * worktree, where the builder may have committed meanwhile) and the note to add, or with a stop.
+   * For a pull request, a migration that could not be carried over is `uncarried` rather than a card:
+   * its caller doesn't push the merge, and raises the one card of a catch-up that stopped.
    */
   async function regenerate(
     batch: BatchDto,
@@ -519,9 +600,15 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     merged: SettledMerge,
     start: string,
     installed: boolean,
+    forPullRequest: boolean,
     signal: AbortSignal,
   ): Promise<
-    | { readonly kind: 'done'; readonly head: string; readonly note: string | null }
+    | {
+        readonly kind: 'done';
+        readonly head: string;
+        readonly note: string | null;
+        readonly uncarried?: string;
+      }
     | { readonly kind: 'aborted' }
   > {
     const dirs = (merged.regenerate ?? []).map((r) => r.dir);
@@ -538,6 +625,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
               logPath: null,
               restored: false,
             },
+            renumbered: [],
           };
     } catch (error) {
       const restored = await ctx.git.restoreDirs(path, dirs).then(
@@ -554,15 +642,42 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
               logPath: null,
               restored,
             },
+            renumbered: [],
           };
     }
     if (outcome.kind === 'aborted') {
       unregenerated(batch, path, merged, STOPPED);
       return outcome;
     }
-    const { head, problem } = outcome;
-    if (problem === null) return { kind: 'done', head, note: null };
-    return { kind: 'done', head, note: unregenerated(batch, path, merged, problem) };
+    const { head, problem, renumbered } = outcome;
+    const told = renumberedNote(batch, renumbered);
+    if (problem === null) return { kind: 'done', head, note: told };
+    if (problem.uncarried === true && forPullRequest)
+      return { kind: 'done', head, note: null, uncarried: problem.why };
+    return {
+      kind: 'done',
+      head,
+      note: joined(told, unregenerated(batch, path, merged, problem)),
+    };
+  }
+
+  /**
+   * Keeps what `renumbered` moved on the batch, where every later step's brief reads it. Resolves with
+   * what the gate's note says of it; null when nothing moved.
+   */
+  function renumberedNote(
+    batch: BatchDto,
+    renumbered: readonly RenumberedMigration[],
+  ): string | null {
+    if (renumbered.length === 0) return null;
+    ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
+    tell(batch, () => {
+      const earlier = getBatch(db, batch.id).notices.find(
+        (n) => n.key === NOTICE_KEY.migrationsRenumbered,
+      );
+      showNotice(ctx.state, batch.id, migrationNotices.renumbered(earlier, renumbered));
+    });
+    return `10db re-created this batch's migrations after origin/${batch.baseBranch}'s. These changed number:\n${renumberedLines(renumbered)}`;
   }
 
   /**
@@ -580,10 +695,21 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       { batchId: batch.id, dirs, reason: problem.why, logPath: problem.logPath },
       'generated files not regenerated after the base merged',
     );
+    // A plain regeneration would make these again under a random name, or not at all.
+    const dropped = (merged.regenerate ?? [])
+      .flatMap((r) => r.dropped)
+      .filter((f) => f.endsWith('.sql'));
+    const told: Unregenerated =
+      problem.uncarried === true || dropped.length === 0
+        ? problem
+        : {
+            ...problem,
+            why: `${problem.why}, and the merge took ${named(dropped)} off the branch, to re-create under the same name after ${batch.baseBranch}'s`,
+          };
     tell(batch, () => {
-      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
+      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, told));
     });
-    return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${problem.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
+    return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${told.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
   }
 
   /**
@@ -1153,6 +1279,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           // Read by the merge step, before the install: the head 10db's merge (or the session) left.
           merged.head,
           installed.ok,
+          options.forPullRequest === true,
           signal,
         );
         if (regenerated.kind === 'aborted' || stopped()) return { kind: 'aborted' };
@@ -1160,6 +1287,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           ...merged,
           head: regenerated.head,
           note: joined(merged.note, regenerated.note, installed.note),
+          ...(regenerated.uncarried === undefined ? {} : { uncarried: regenerated.uncarried }),
         };
       }
     }

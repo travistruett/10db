@@ -1,9 +1,11 @@
 import {
   INSTALL_REPAIRED_NOTICE_KEY,
   LEFT_OUT_NOTICE_KEY,
+  MIGRATIONS_RENUMBERED_NOTICE_KEY,
   type BatchDto,
   type Notice,
 } from '@10db/contracts';
+import { z } from 'zod';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
 import { revertCommitLine } from '../team';
 import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
@@ -58,7 +60,53 @@ export const NOTICE_KEY = {
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
   installRepaired: INSTALL_REPAIRED_NOTICE_KEY,
+  /** A merge of the base re-created the batch's migrations under new numbers. */
+  migrationsRenumbered: MIGRATIONS_RENUMBERED_NOTICE_KEY,
 } as const;
+
+/** A migration of the batch's that moved: its tag before the base came in, and now. */
+const RenumberedMigration = z.object({ from: z.string().min(1), to: z.string().min(1) });
+export type RenumberedMigration = z.infer<typeof RenumberedMigration>;
+
+/** The migrations `notice` lists, read from what it keeps; none when it is absent or unreadable. */
+function renumberedIn(notice: Notice | undefined): RenumberedMigration[] {
+  if (notice?.record === undefined) return [];
+  try {
+    const parsed = z.array(RenumberedMigration).safeParse(JSON.parse(notice.record));
+    return parsed.success ? parsed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+/** One line per migration, saying where it went. */
+export const renumberedLines = (moved: readonly RenumberedMigration[]): string =>
+  moved.map(({ from, to }) => `- ${from} → ${to}`).join('\n');
+
+/** What a batch's tasks, and every later step's brief, are told about its renumbered migrations. */
+export const migrationNotices = {
+  /**
+   * `moved` joins what `earlier`, the batch's notice so far, already lists: a migration renumbered
+   * again keeps its first tag, so the list runs from the names the batch's work knows to the names
+   * that hold now.
+   */
+  renumbered: (earlier: Notice | undefined, moved: readonly RenumberedMigration[]): Notice => {
+    const all = renumberedIn(earlier);
+    for (const { from, to } of moved) {
+      const at = all.findIndex((m) => m.to === from);
+      const first = all[at];
+      if (first === undefined) all.push({ from, to });
+      else all[at] = { from: first.from, to };
+    }
+    return {
+      key: NOTICE_KEY.migrationsRenumbered,
+      tone: 'info',
+      line: `${String(all.length)} of this batch's migrations ${all.length === 1 ? 'was' : 'were'} renumbered after the base's`,
+      body: `10db merged the base into this batch's branch, and both had added migrations, so it re-created the batch's after the base's. These changed number:\n${renumberedLines(all)}\n\nDocs that name a renumbered migration are the lane's to fix: 10db changed only the migrations directory, so any doc, comment or test that names an old tag must be made to say the new one.`,
+      record: JSON.stringify(all),
+    };
+  },
+};
 
 /** What a batch's tasks are told about an install 10db repaired by itself. */
 export const installNotices = {

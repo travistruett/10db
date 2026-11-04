@@ -57,6 +57,8 @@ export interface PromptInput {
   readonly sandboxed?: boolean;
   /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
   readonly denials?: readonly Denial[];
+  /** What the batch's notice says of migrations a merge of its base renumbered, when any were. */
+  readonly renumbered?: string | null;
 }
 
 /** A call the builder denied, and the note they gave. */
@@ -478,6 +480,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Context pack:',
     renderKnowledge(input.contextPack),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
+    ...(input.renumbered ? ['', input.renumbered] : []),
     '',
     actionSection(input),
   ].join('\n');

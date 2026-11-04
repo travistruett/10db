@@ -427,6 +427,45 @@ describe('a shipped pull request that conflicts with its base', () => {
       builderKept(batch.branch ?? '');
     });
 
+    it("pushes nothing and raises the one card, naming the migration, when the branch's can't be carried over", async () => {
+      const journal = (...tags: string[]): string =>
+        `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;
+      const snapshot = (id: string, table: string): string =>
+        `${JSON.stringify({ id, prevId: 'p', tables: [table] })}\n`;
+      h.commit(
+        'packages/db/package.json',
+        `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+      );
+      h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
+      h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
+      h.git$('push', '-q', 'origin', 'main');
+      const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
+        keepWorktree: true,
+      });
+      await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
+      h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
+      h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
+      conflicts(batch);
+      vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(({ path }) =>
+        Promise.resolve({
+          kind: 'failed',
+          exitCode: 1,
+          timedOut: false,
+          tail: '',
+          logPath: join(path, 'generate.log'),
+        }),
+      );
+      const pushed = h.origin$('rev-parse', onOrigin(batch.branch));
+
+      await catchUp(batch);
+
+      expect(h.origin$('rev-parse', onOrigin(batch.branch))).toBe(pushed);
+      // The fixture keeps the worktree, which has a card of its own.
+      const cards = h.cards().filter((c) => !c.title.includes('kept the worktree'));
+      expect(h.only(cards).title).toContain("couldn't update it");
+      expect(h.only(cards).body).toContain('0001_mine');
+    });
+
     it("keeps a builder's commit made while the generators run, when the check then fails", async () => {
       const batch = await migrationsCollide();
       const run = { ran: 0 };

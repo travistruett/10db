@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { journalDirs, takenNumbers } from './migration-numbers';
+import { journalDirs, journalTags, ownTags, parseTag, takenNumbers } from './migration-numbers';
 
 /** A drizzle journal holding `tags`, numbered in order as drizzle-kit writes it. */
 function journal(...tags: string[]): string {
@@ -9,6 +9,42 @@ function journal(...tags: string[]): string {
     entries: tags.map((tag, idx) => ({ idx, version: '6', when: idx, tag, breakpoints: true })),
   });
 }
+
+describe("a branch's own migrations", () => {
+  it('are those on neither the base nor the common ancestor', () => {
+    expect(
+      ownTags(
+        ['0000_init', '0001_old', '0002_mine'],
+        ['0000_init', '0001_theirs'],
+        ['0000_init', '0001_old'],
+      ),
+    ).toEqual(['0002_mine']);
+  });
+
+  it('come in the order of their journal', () => {
+    const text = JSON.stringify({
+      entries: [
+        { idx: 1, tag: '0001_b' },
+        { idx: 0, tag: '0000_a' },
+      ],
+    });
+    expect(journalTags(text)).toEqual(['0000_a', '0001_b']);
+  });
+
+  it.each([null, 'not json', '["0000"]'])('are unknown from the journal %s', (text) => {
+    expect(journalTags(text)).toBeNull();
+  });
+
+  it.each([
+    ['0042_add_x', { number: '0042', name: 'add_x' }],
+    ['0043_it-works', { number: '0043', name: 'it-works' }],
+    ['add_x', null],
+    ['0042_../up', null],
+    ['0042_-flag', null],
+  ])('tag %s reads as %j', (tag, parsed) => {
+    expect(parseTag(tag)).toEqual(parsed);
+  });
+});
 
 describe('the drizzle directories a conflict touches', () => {
   it('are the ones whose journal conflicts, once each and sorted', () => {

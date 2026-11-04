@@ -1759,7 +1759,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
         // since the install and the generators run long enough for the builder to commit meanwhile.
         if (update.kind === 'merged') wrote = update.head;
-        return update.kind === 'merged';
+        return update.kind === 'merged' && update.uncarried === undefined;
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
         if (check === null) {
@@ -1787,6 +1787,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
           { batchId, prUrl },
           'pull request conflicts but its branch holds the base',
         );
+        return;
+      }
+      if (brought.kind === 'merged' && brought.uncarried !== undefined) {
+        stop({
+          kind: 'other',
+          why: `10db pushed nothing, because ${brought.uncarried}.`,
+        });
         return;
       }
       if (check !== null) {
