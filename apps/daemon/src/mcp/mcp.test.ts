@@ -1496,6 +1496,50 @@ describe('MCP tools', () => {
       await Promise.all([alpha, beta]);
     });
 
+    it('shows the new holder in its title, answers and detail when the claim changes hands and the deadlock comes back', async () => {
+      const { a, b, alpha, beta, card } = await deadlocked();
+      const g = await seedSession(['migrations'], undefined, {
+        project: a.project,
+        title: 'Gamma',
+      });
+      const gamma = g.call('request_claim', {
+        opId: 'op-deadlock-g',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(g)).not.toBeNull();
+      });
+      // Gamma takes api from Alpha in one write, before Beta's wait looks again.
+      state.write((ctx) => {
+        releaseClaims(ctx, a.workstream.id);
+        acquireClaims(ctx, {
+          projectId: a.project.id,
+          workstreamId: g.workstream.id,
+          requests: [{ kind: 'area', name: 'api' }],
+          leaseExpiresAt: ctx.now,
+        });
+      });
+      const refreshed = await vi.waitFor(() => {
+        const found = getInboxItem(state.db, card.id);
+        if (!found.options.some((o) => o.label === 'Gamma yields area api'))
+          throw new Error('card not refreshed');
+        return found;
+      });
+      expect(openCards().filter((c) => c.title === 'Claim deadlock: area api')).toHaveLength(1);
+      const labels = refreshed.options.map((o) => o.label);
+      expect(labels).toEqual(
+        expect.arrayContaining(['Gamma yields area api', 'Cancel Beta', 'Cancel Gamma']),
+      );
+      expect(labels.filter((l) => l.includes('Alpha'))).toEqual([]);
+      expect(refreshed.detail?.['heldBy']).toBe(g.workstream.id);
+      expect(refreshed.body).toContain('Task "Gamma" holds area api');
+      expect(b.workstream.id).not.toBe(g.workstream.id);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta, gamma]);
+    });
+
     it('keeps the refused call waiting on the card, and says so when a slice ends', async () => {
       claimWaitSliceMs = 50;
       const { a, alpha, beta, card } = await deadlocked();
