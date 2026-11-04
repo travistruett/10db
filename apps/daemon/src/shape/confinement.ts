@@ -95,6 +95,15 @@ function judgeRead(call: ShapeCall, access: ShapeAccess): GuardVerdict {
 
 function judgeAgent(call: ShapeCall): GuardVerdict {
   if (call.agentId !== undefined) return deny('A subagent cannot launch another agent.');
+  // `isolation` makes a git worktree of the checkout (a write) or runs the agent in a cloud
+  // environment where this hook never sees its calls; either breaks the confinement below.
+  const input = call.toolInput;
+  if (
+    typeof input === 'object' &&
+    input !== null &&
+    (input as Record<string, unknown>)['isolation'] !== undefined
+  )
+    return deny('A Shape session launches its agents in place, with no isolation set.');
   const type = stringField(call.toolInput, 'subagent_type');
   if (type === SHAPE_RESEARCHER) {
     // The question is the only thing that reaches the researcher, and the researcher can send

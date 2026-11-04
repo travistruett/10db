@@ -32,6 +32,8 @@ export interface DrawOptions {
   ): Promise<DrawnScreen>;
   /** How long the app has to say it is ready. */
   readonly timeoutMs: number;
+  /** How long the whole draw has, from its start. The capture has whatever the load left of it. */
+  readonly budgetMs: number;
 }
 
 /** The name of a screen, as a refusal says it. */
@@ -65,8 +67,22 @@ function frameMessage(data: unknown): FrameMessage | null {
 }
 
 const seconds = (ms: number): string => String(Math.round(ms / 100) / 10).replace(/\.0$/, '');
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+
+/**
+ * Why a capture failed, in words. html-to-image rejects with the DOM `Event` of an image that would not
+ * load (`img.onerror = reject`), which has no message and prints as `[object Event]`.
+ */
+export function messageOf(error: unknown): string {
+  if (error instanceof Error && error.message !== '') return error.message;
+  if (typeof error === 'string' && error !== '') return error;
+  if (typeof error === 'object' && error !== null) {
+    const { message } = error as { message?: unknown };
+    if (typeof message === 'string' && message !== '') return message;
+    if (typeof Event !== 'undefined' && error instanceof Event)
+      return 'an image the screen shows could not be loaded into the drawing';
+  }
+  return 'the browser gave no reason';
+}
 
 /** Draws one screen: resolves with its picture, or the reason there is none. Never rejects. */
 export function drawScreen(options: DrawOptions): Promise<DrawResult> {
@@ -97,11 +113,15 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
 
   return new Promise<DrawResult>((resolve) => {
     const win = doc.defaultView;
+    const startedAt = performance.now();
     let settled = false;
+    let capturing = false;
+    let captureTimer: ReturnType<typeof setTimeout> | undefined;
     const finish = (result: DrawResult): void => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(captureTimer);
       win?.removeEventListener('message', onMessage);
       frame.remove();
       resolve(result);
@@ -115,6 +135,20 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
         finish({ ok: false, reason: message.reason });
         return;
       }
+      if (capturing) return;
+      capturing = true;
+      // The app has answered, so the load is over: the capture has what is left of the draw.
+      clearTimeout(timer);
+      const captureMs = Math.max(0, options.budgetMs - (performance.now() - startedAt));
+      captureTimer = setTimeout(() => {
+        finish({
+          ok: false,
+          reason:
+            doc.visibilityState === 'visible'
+              ? `${label} finished loading, but making it into a picture took longer than ${seconds(captureMs)} s, so it was not drawn.`
+              : WINDOW_HIDDEN,
+        });
+      }, captureMs);
       options.capture(frame, size).then(
         (image) => {
           finish({ ok: true, image });

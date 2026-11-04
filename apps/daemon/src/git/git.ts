@@ -186,6 +186,19 @@ export type BranchMerge =
       readonly kept: readonly string[];
     };
 
+/** What `revertCommits` did. */
+type CommitsReverted =
+  /** One commit on the branch, `head`, undoes the commits; `paths` are the files it changed. */
+  | { readonly kind: 'reverted'; readonly head: string; readonly paths: readonly string[] }
+  /** Undoing the commits changes nothing the branch still has; nothing moved. */
+  | { readonly kind: 'nothing' }
+  /** Later commits changed these files in ways that can't be undone cleanly; nothing was written. */
+  | { readonly kind: 'conflict'; readonly paths: readonly string[] }
+  /** Undoing the commits would put conflict markers back in these files; nothing was written. */
+  | { readonly kind: 'markers'; readonly paths: readonly string[] }
+  /** Uncommitted changes are in these files, which the revert writes; nothing was written. */
+  | { readonly kind: 'blocked'; readonly changed: readonly string[] };
+
 /** Where `mergedCommit` keeps the commits it makes reachable. */
 const KEPT_REF_PREFIX = 'refs/10db/';
 
@@ -368,6 +381,21 @@ export interface Git {
    * tree asks for a filter is refused, as a push of it would be.
    */
   mergeIntoBranch(input: MergeIntoBranchInput): Promise<BranchMerge>;
+  /**
+   * Undoes `shas`, commits on `branch`, in one commit on it with `message`: each is reverted with a
+   * three-way merge of its parent, newest first, so a later commit that built on one conflicts instead
+   * of being overwritten. `repo` must have `branch` checked out. The files follow through
+   * `read-tree -m -u`, which keeps uncommitted changes elsewhere. A conflict, a file that would hold
+   * conflict markers it doesn't hold now (a merge session's commit resolved them), or an uncommitted
+   * change in a file the revert writes, writes nothing. A commit not on the branch, or a merge, is
+   * refused.
+   */
+  revertCommits(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly shas: readonly string[];
+    readonly message: string;
+  }): Promise<CommitsReverted>;
   /**
    * The commit that merges `theirs` into `ours`, as `mergeIntoBranch` would make it but unsigned and
    * kept reachable at `ref` alone: no file, index, HEAD or branch is touched. `ours` when it already
@@ -1550,14 +1578,28 @@ export function createGit(opts: GitOptions = {}): Git {
     c: Pinned,
     ours: string,
     theirs: string,
+    /** The common ancestor to merge from instead of the merge base: a revert merges from the reverted commit. */
+    base?: string,
   ): Promise<{ tree: string; conflicted: string[]; entries: ConflictEntry[] }> {
     // diff3 style shows the common ancestor's lines in each conflict, which is how a conflict of two
     // insertions is told from two edits of the same line.
     const [tree = '', ...rest] = (
-      await git(c, ['merge-tree', '--write-tree', '--no-messages', '-z', ours, theirs], {
-        answerExitCodes: [1],
-        config: ['-c', 'merge.conflictStyle=diff3'],
-      })
+      await git(
+        c,
+        [
+          'merge-tree',
+          '--write-tree',
+          '--no-messages',
+          '-z',
+          ...(base === undefined ? [] : [`--merge-base=${base}`]),
+          ours,
+          theirs,
+        ],
+        {
+          answerExitCodes: [1],
+          config: ['-c', 'merge.conflictStyle=diff3'],
+        },
+      )
     ).split('\0');
     if (!OBJECT_ID.test(tree)) throw new GitError(['merge-tree'], 'merge-tree named no tree', null);
     const entries: ConflictEntry[] = [];
@@ -1980,6 +2022,107 @@ export function createGit(opts: GitOptions = {}): Git {
         ...(resolved.length === 0 ? {} : { resolved, regenerate }),
         ...(marked.length === 0 ? {} : { marked }),
       };
+    });
+  }
+
+  async function revertCommits(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly shas: readonly string[];
+    readonly message: string;
+  }): Promise<CommitsReverted> {
+    // Inside the checkout's lock, so no commit of the daemon's moves the branch meanwhile.
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const current = await currentBranch(c);
+      if (current !== input.branch)
+        throw new InvalidError(
+          `${c.real} is on ${current ?? 'a detached HEAD'}, not ${input.branch}, so 10db reverts nothing on it`,
+        );
+      // Each commit's parent, newest first: a later commit is undone before the ones it built on.
+      const named: { readonly sha: string; readonly parent: string; readonly at: number }[] = [];
+      for (const given of input.shas) {
+        const sha = await revParse(c, `${given}^{commit}`);
+        if (sha === null || !(await isAncestor(c, sha, tip)))
+          throw new InvalidError(`${given} is not a commit of ${input.branch}`);
+        const [, ...parents] = (await git(c, ['rev-list', '--parents', '-n', '1', sha]))
+          .trim()
+          .split(' ');
+        if (parents.length !== 1 || parents[0] === undefined)
+          throw new InvalidError(
+            `${given} is a merge or a first commit, which 10db does not revert`,
+          );
+        const at = Number((await git(c, ['rev-list', '--count', sha])).trim());
+        named.push({ sha, parent: parents[0], at });
+      }
+      named.sort((a, b) => b.at - a.at);
+      const sign = signing(c, await configEntries(c));
+      let top = tip;
+      for (const { sha, parent } of named) {
+        const reverting = await mergeTree(c, top, parent, sha);
+        if (reverting.conflicted.length > 0)
+          return { kind: 'conflict', paths: reverting.conflicted };
+        // Each step is a commit only so the next merge has one to start from; the branch never names it.
+        top = (
+          await git(c, ['commit-tree', ...sign.flags, reverting.tree, '-p', top], {
+            input: `Revert ${sha}\n`,
+            config: sign.config,
+          })
+        ).trim();
+      }
+      if ((await revParse(c, `${top}^{tree}`)) === (await revParse(c, `${tip}^{tree}`)))
+        return { kind: 'nothing' };
+      const head = (
+        await git(c, ['commit-tree', ...sign.flags, `${top}^{tree}`, '-p', tip], {
+          input: `${input.message}\n`,
+          config: sign.config,
+        })
+      ).trim();
+      const needed = await filters(c, head);
+      if (needed.length > 0) throw refusal(c.real, { kind: GitTrustFailure.Filter, paths: needed });
+      const paths = (
+        await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', tip, head])
+      )
+        .split('\0')
+        .filter(Boolean)
+        .sort();
+      const marked: string[] = [];
+      for (const path of paths) {
+        const after = await mergeableText(c, head, path).catch(() => null);
+        if (after === null || !hasConflictMarkers(after)) continue;
+        const before = await mergeableText(c, tip, path).catch(() => null);
+        if (before === null || !hasConflictMarkers(before)) marked.push(path);
+      }
+      if (marked.length > 0) return { kind: 'markers', paths: marked };
+      const written = new Set(paths);
+      const changed = (await changes(c)).filter((path) => written.has(path));
+      if (changed.length > 0) return { kind: 'blocked', changed };
+      // Fresh stat data, so read-tree doesn't take an unchanged file for an edited one and refuse.
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      try {
+        // Files first, then the branch: a crash between the two leaves the revert as uncommitted
+        // edits, never the branch claiming files the checkout doesn't hold.
+        await git(c, ['read-tree', '-m', '-u', tip, head]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`10db could not write the revert into ${c.real}: ${error.message}`);
+      }
+      try {
+        // Compare and swap on the branch itself, never through HEAD or a symbolic ref.
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: revert', ref, head, tip]);
+      } catch (error) {
+        await git(c, ['read-tree', '-m', '-u', head, tip]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'reverted', head, paths };
     });
   }
 
@@ -2583,6 +2726,7 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     commit,
     mergeIntoBranch,
+    revertCommits,
     mergedCommit,
     async conflictMarkers(repo, paths) {
       const c = await pinned(repo);

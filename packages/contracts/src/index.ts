@@ -15,6 +15,7 @@ export * from './folders';
 export * from './git-names';
 export * from './goals';
 export * from './handoff';
+export * from './human-touch';
 export { HealthResponse } from './health';
 export * from './ids';
 export * from './judge';

@@ -1,10 +1,11 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BatchDto } from '@10db/contracts';
-import { getBatch, insertEvidence, listWorkstreams } from '@10db/db';
+import { getBatch, insertEvidence, listTasks, listWorkstreams } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
+import type { GateRunner } from '../verify';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -191,6 +192,68 @@ describe('a shipping gate that fails while the Mac is overloaded', () => {
     const batch = await openBatch();
     expect((await finish(batch, 0)).state).toBe('SHIPPED');
     expect(h.cards().every((c) => !c.body.includes('overloaded'))).toBe(true);
+  });
+});
+
+describe('a shipping gate that fails only in tests that pass when their files are rerun', () => {
+  /** Answers the rerun of test files (`pnpm exec vitest run …`) as `exitCode` says; the gate itself runs for real. */
+  function rerunning(exitCode: number, commands: string[]) {
+    return {
+      shipGate: (gate: GateRunner): GateRunner => ({
+        run: (request) => {
+          if (!request.command.startsWith('pnpm exec vitest run')) return gate.run(request);
+          commands.push(request.command);
+          return Promise.resolve({
+            exitCode,
+            durationMs: 1,
+            tail: exitCode === 0 ? 'ok' : 'still red',
+            logPath: request.logPath,
+            timedOut: false,
+            aborted: false,
+            blockedHosts: [],
+          });
+        },
+      }),
+    };
+  }
+
+  it("ships with no card even for a test in a file the batch changed, names the flake on the batch's tasks and files one Icebox task", async () => {
+    const commands: string[] = [];
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(1, ['src/api/alpha.test.ts > works']) },
+      rerunning(0, commands),
+    );
+    const batch = await openBatch();
+    h.commit('src/api/alpha.test.ts');
+    const ended = await finish(batch, 0);
+    expect(ended.state).toBe('SHIPPED');
+    expect(commands).toEqual(['pnpm exec vitest run src/api/alpha.test.ts']);
+    // The gate itself ran once: the rerun is of the failing file, not of the gate.
+    expect(gateRuns()).toBe(1);
+    expect(h.cards()).toEqual([]);
+    const notice = h.only(ended.notices.filter((n) => n.key === 'gate-flaky'));
+    expect(notice.body).toContain('src/api/alpha.test.ts > works');
+    const filed = listTasks(h.store.db, h.project.id).filter(
+      (t) => t.title === 'Fix flaky test file src/api/alpha.test.ts',
+    );
+    expect(h.only(filed).description).toContain('works');
+  });
+
+  it('is the failure it was when the rerun fails too: the card is raised as before', async () => {
+    const commands: string[] = [];
+    h = createDeliveryHarness(
+      { gateCommand: fakeGate(1, ['src/api/alpha.test.ts > works']) },
+      rerunning(1, commands),
+    );
+    const batch = await openBatch();
+    h.commit('src/api/alpha.test.ts');
+    const ended = await finish(batch, 0);
+    expect(ended).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
+    expect(commands).toHaveLength(1);
+    expect(h.only(h.cards()).body).toContain('Start a fix task');
+    expect(
+      listTasks(h.store.db, h.project.id).filter((t) => t.title.startsWith('Fix flaky')),
+    ).toEqual([]);
   });
 });
 

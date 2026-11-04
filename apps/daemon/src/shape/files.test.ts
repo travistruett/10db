@@ -14,6 +14,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
 import { createScreens, INLINE_CONVERSATION_MAX_BYTES, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
+import { jpegOfSize } from '../../test/jpeg';
+import { pngOfSize } from '../../test/png';
+import { webpImage } from '../../test/webp';
+import { readImageSize } from '../screens';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
@@ -28,9 +32,10 @@ afterEach(async () => {
 });
 
 const shapeId = () => f.c.shape.id;
-const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0, 0x10]);
-const WEBP = Buffer.concat([Buffer.from('RIFF'), Buffer.from([0, 0, 0, 0]), Buffer.from('WEBP')]);
+// Whole images with a real size: the daemon reads it to know which can be sent as a block.
+const PNG = pngOfSize(100, 80);
+const JPEG = jpegOfSize(100, 80);
+const WEBP = webpImage('lossy', 100, 80);
 const PDF = Buffer.from('%PDF-1.7\n%%EOF');
 
 const drop = (name: string, bytes: Uint8Array, mediaType = ''): ShapeFileDto =>
@@ -163,6 +168,8 @@ describe('a large dropped image', () => {
   const MB = 1024 * 1024;
   const sized = (head: Buffer, bytes: number): Buffer =>
     Buffer.concat([head, Buffer.alloc(bytes - head.length)]);
+  /** A whole 100×80 PNG of exactly this many bytes, which the daemon can read the size of. */
+  const wholePng = (bytes: number): Buffer => pngOfSize(100, 80, bytes - PNG.length - 12);
 
   it('goes as a path to Read, not an image block, so the turn can end', async () => {
     const stored = drop('big.png', sized(PNG, 12 * MB));
@@ -236,17 +243,7 @@ describe('a large dropped image', () => {
       expect(turn.message).toMatch(/too large to show.*Read/);
     });
 
-    it.each([
-      { name: 'a PNG at 8000', file: 'edge.png', bytes: png(8000, 8000) },
-      { name: 'a tall JPEG at 8000', file: 'edge.jpg', bytes: jpeg(1200, 8000) },
-      { name: 'a lossy WebP at 8000', file: 'edge.webp', bytes: webpLossy(8000, 600) },
-    ])('is still sent inline at the limit: $name', async ({ file, bytes }) => {
-      drop(file, bytes);
-      const turn = await nextTurn('Fits');
-      expect(turn.images).toHaveLength(1);
-      expect(turn.message).not.toMatch(/too large to show/);
-    });
-
+    // What the API takes up to 8000 px a side goes inline only within 2000 px: see the next describe.
     it('is named as a path while a normal image beside it is still sent inline', async () => {
       drop('long.png', png(1200, 9000));
       drop('small.png', PNG);
@@ -276,7 +273,7 @@ describe('a large dropped image', () => {
   });
 
   it('keeps one turn’s inline images under a total, the rest going as paths', async () => {
-    for (let i = 0; i < 4; i += 1) drop(`shot${String(i)}.png`, sized(PNG, 2 * MB));
+    for (let i = 0; i < 4; i += 1) drop(`shot${String(i)}.png`, pngOfSize(100, 80, 2 * MB - 200));
     const turn = await nextTurn('Four');
     expect(turn.images).toHaveLength(3);
     expect(turn.message.match(/too large to show/g)).toHaveLength(1);
@@ -288,8 +285,7 @@ describe('a large dropped image', () => {
     const sent: number[] = [];
     const marked: number[] = [];
     for (let turnNo = 0; turnNo < 5; turnNo += 1) {
-      for (let i = 0; i < 3; i += 1)
-        drop(`t${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`t${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
       const turn = await nextTurn(`Turn ${String(turnNo)}`);
       sent.push(turn.images.length);
       marked.push(turn.message.match(/too large to show/g)?.length ?? 0);
@@ -306,7 +302,7 @@ describe('a large dropped image', () => {
   it('spends what is left of the conversation total on a smaller image, then stops', async () => {
     for (let turnNo = 0; turnNo < 3; turnNo += 1)
       for (let i = 0; i < 3; i += 1) {
-        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+        drop(`a${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
         if (i === 2) await nextTurn(`Turn ${String(turnNo)}`);
       }
     // 18 MiB spent: nothing more fits, not even a tiny image.
@@ -319,8 +315,7 @@ describe('a large dropped image', () => {
   /** Spends the whole conversation total: nine 2 MiB images over three turns, each told. */
   const spendTheTotal = async (): Promise<void> => {
     for (let turnNo = 0; turnNo < 3; turnNo += 1) {
-      for (let i = 0; i < 3; i += 1)
-        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`a${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
       await nextTurn(`Turn ${String(turnNo)}`);
     }
   };
@@ -394,8 +389,8 @@ describe('a large dropped image', () => {
       for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
       expect(kept()).toHaveLength(12);
       // 16.8 MB of screens leaves about 2 MB: one more image fits, and a second does not.
-      drop('fits.png', sized(PNG, MB));
-      drop('over.png', sized(PNG, 1.5 * MB));
+      drop('fits.png', wholePng(MB));
+      drop('over.png', wholePng(1.5 * MB));
       const turn = await nextTurn('Both');
       expect(turn.images).toHaveLength(1);
       expect(turn.message).toMatch(/over\.png\) — too large to show inline; Read it/);
@@ -403,11 +398,11 @@ describe('a large dropped image', () => {
     });
 
     it('refuses a screen that would pass the total the dropped images left, saying why', async () => {
-      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('One');
-      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('Two');
-      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('Three');
       // 16 MiB told: a 1.5 MB screen fits once.
       const screens = screensOf(drawn(1_500_000));
@@ -438,6 +433,53 @@ describe('a large dropped image', () => {
       const images = told.reduce((sum, file) => sum + file.size, 0);
       expect(images + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
     });
+
+    it('keeps twelve screens beside twenty dropped images of any size, across turns and a restart', async () => {
+      const sent: Buffer[] = [];
+      const turnSent = async (text: string): Promise<FakeShapeTurn> => {
+        const turn = await nextTurn(text);
+        for (const image of turn.images) sent.push(Buffer.from(image.data, 'base64'));
+        return turn;
+      };
+      for (let round = 0; round < 4; round += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`r${String(round)}-${String(i)}.png`, pngOfSize(2880, 1800, 1.9 * MB));
+        drop(`s${String(round)}.png`, PNG);
+        await turnSent(`Round ${String(round)}`);
+        if (round === 1) await f.restart();
+      }
+      drop('small.webp', WEBP);
+      drop('more.jpg', JPEG);
+      drop('other.png', pngOfSize(120, 80));
+      await turnSent('Three more');
+      expect(f.service.view(shapeId()).files).toHaveLength(19);
+
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+
+      // The Retina images went as paths, so they use none of the total: a small image still fits.
+      drop('late.png', PNG);
+      const turn = await turnSent('The twentieth');
+      expect(turn.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+      expect(turn.message).not.toMatch(/late\.png\) — too large/);
+      await turnSent('And still going');
+
+      expect(f.service.view(shapeId()).files).toHaveLength(20);
+      expect(sent).toHaveLength(8);
+      expect(sent.every((bytes) => (readImageSize(bytes)?.width ?? Infinity) <= 2000)).toBe(true);
+      const carried = sent.reduce((sum, bytes) => sum + bytes.length, 0) + keptBytes();
+      expect(carried).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
+
+    it('does not charge an image whose size cannot be read, which went as a path', async () => {
+      const whole = pngOfSize(100, 80, 1.9 * MB);
+      for (let i = 0; i < 9; i += 1) drop(`cut${String(i)}.png`, whole.subarray(0, -1));
+      await nextTurn('Nine');
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+    });
   });
 
   it('is sent as a path to a session that has not started, and not as an image', async () => {
@@ -448,6 +490,79 @@ describe('a large dropped image', () => {
     const session = must(f.adapter.shapeSessions[0], 'a session');
     expect(session.spec.images ?? []).toEqual([]);
     expect(session.spec.prompt).toMatch(/too large to show.*Read/);
+  });
+});
+
+// The API takes at most 2000 px a side when a request holds more than 20 images, and a resumed session
+// resends every earlier image: a conversation's screens (up to 12) and its dropped images (up to 20) can
+// together pass 20. So a dropped image never goes as a block past 2000 px, however few bytes it takes.
+describe('a dropped image over 2000 px a side', () => {
+  const retina = {
+    png: pngOfSize(2880, 1800),
+    jpg: jpegOfSize(2880, 1800),
+    webp: webpImage('lossy', 2880, 1800),
+  };
+
+  it.each(Object.entries(retina))('goes as a path to Read, not a block: %s', async (ext, bytes) => {
+    const stored = drop(`retina.${ext}`, bytes);
+    const turn = await nextTurn('Look');
+    expect(turn.images).toEqual([]);
+    expect(turn.message).toContain(`[file] ${stored.storedPath} (retina.${ext}) `);
+    expect(turn.message).toMatch(/too large to show.*Read/);
+  });
+
+  it('goes as a block at exactly 2000 px, and as a path at 2001, on either side', async () => {
+    drop('edge.png', pngOfSize(2000, 2000));
+    drop('wide.png', pngOfSize(2001, 100));
+    drop('tall.jpg', jpegOfSize(100, 2001));
+    const turn = await nextTurn('Edges');
+    expect(turn.images).toEqual([
+      { mediaType: 'image/png', data: pngOfSize(2000, 2000).toString('base64') },
+    ]);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+  });
+
+  it('goes as a path when its size cannot be read, since a model would be sent it blind', async () => {
+    drop('cut.png', PNG.subarray(0, PNG.length - 1));
+    const turn = await nextTurn('Look');
+    expect(turn.images).toEqual([]);
+    expect(turn.message).toMatch(/cut\.png\) .*too large to show/);
+  });
+
+  it('is sent as a path to a session that has not started', async () => {
+    drop('retina.png', retina.png);
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok' });
+    f.service.send(shapeId(), 'Look');
+    await f.service.settled(shapeId());
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.spec.images ?? []).toEqual([]);
+    expect(session.spec.prompt).toMatch(/too large to show.*Read/);
+  });
+
+  it('keeps twenty dropped images of any size to blocks within 2000 px, across turns and a restart', async () => {
+    const sent: Buffer[] = [];
+    const lines: string[] = [];
+    const turnWith = async (names: string[]): Promise<void> => {
+      const turn = await nextTurn('More');
+      for (const image of turn.images) sent.push(Buffer.from(image.data, 'base64'));
+      lines.push(...turn.message.split('\n').filter((line) => names.some((n) => line.includes(n))));
+    };
+    for (let round = 0; round < 4; round += 1) {
+      const names: string[] = [];
+      for (let i = 0; i < 5; i += 1) {
+        const name = `r${String(round)}-${String(i)}`;
+        names.push(name);
+        if (i % 2 === 0) drop(`${name}.png`, pngOfSize(2880, 1800, 1_000_000));
+        else drop(`${name}.webp`, webpImage('lossless', 1200, 800));
+      }
+      await turnWith(names);
+      if (round === 1) await f.restart();
+    }
+    expect(f.service.view(shapeId()).files).toHaveLength(20);
+    // Eight of the twenty are small enough to be blocks, and twelve Retina ones go as paths.
+    expect(sent).toHaveLength(8);
+    expect(sent.every((bytes) => (readImageSize(bytes)?.width ?? Infinity) <= 2000)).toBe(true);
+    expect(lines.filter((line) => line.includes('too large to show'))).toHaveLength(12);
   });
 });
 

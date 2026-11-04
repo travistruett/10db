@@ -57,6 +57,7 @@ import {
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
+  SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
   ShapeConvertInput,
@@ -311,6 +312,20 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.setOneWayPaths(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/small-proposal-limit', (c) =>
+      c.json(deps.services.getSmallProposalLimit(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/small-proposal-limit',
+      validator('json', (value): SmallProposalLimitDto => SmallProposalLimitDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setSmallProposalLimit(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),
@@ -634,6 +649,9 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/projects/:projectId/goals', (c) =>
       c.json(deps.services.listGoals(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/projects/:projectId/human-touch', (c) =>
+      c.json(deps.services.humanTouch(ProjectId.parse(c.req.param('projectId')))),
     )
     .get('/goals/:goalId/digest', (c) =>
       c.json(deps.services.openGoalDigest(GoalId.parse(c.req.param('goalId')))),

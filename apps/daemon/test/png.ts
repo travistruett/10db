@@ -14,6 +14,23 @@ function chunk(type: string, data: Buffer): Buffer {
 }
 
 /**
+ * A PNG that claims this size, and has no picture: a header, `pad` bytes of text, the end. The daemon
+ * reads its size and keeps it whole; a decoder cannot draw it, so it is cheap at any size.
+ */
+export function pngOfSize(width: number, height: number, pad = 0): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([
+    SIGNATURE,
+    chunk('IHDR', header),
+    ...(pad === 0 ? [] : [chunk('tEXt', Buffer.alloc(pad, 0x20))]),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/**
  * A real PNG any decoder opens: the left half red, the right half blue. `pad` adds that many bytes of
  * ancillary text, for a picture too big to keep.
  */
