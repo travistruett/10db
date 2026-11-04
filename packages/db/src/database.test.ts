@@ -926,3 +926,56 @@ describe('migrating to principle and question links (Shape spec §13)', () => {
     }).toThrow(/CHECK constraint failed/);
   });
 });
+
+describe('migrating to the inline image count (Shape spec §5.4)', () => {
+  const AT = '2026-11-03T12:00:00.000Z';
+
+  beforeEach(() => {
+    // The last migration before shape_files recorded which files went inline.
+    migrateDatabase(db, migrationsThrough('0042_solid_sasquatch'));
+    const run = (sql: string, ...args: (string | number | null)[]): void => {
+      db.$client.prepare(sql).run(...args);
+    };
+    run(
+      `INSERT INTO accounts (id, kind, label, payer, settings, lane_cap, created_at, updated_at)
+       VALUES ('acc_x', 'subscription', 'main', 'me', '{}', 2, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO projects (id, name, repo_path, gate_command, areas, hazards, max_lanes, provider, account_id,
+         handoff_pct, nudge_pct, human_wait_minutes, created_at, updated_at)
+       VALUES ('prj_a', 'a', '/tmp/a', 'make gate', '[]', '[]', 2, 'claude', 'acc_x', 40, 50, 10, ?, ?)`,
+      AT,
+      AT,
+    );
+    run(
+      `INSERT INTO shapes (id, project_id, title, state, origin, propose_unlocked, round, created_at, updated_at)
+       VALUES ('shp_a', 'prj_a', 'Density', 'proposed', 'app', 1, 1, ?, ?)`,
+      AT,
+      AT,
+    );
+    for (const [id, toldAt] of [
+      ['sfl_told', AT],
+      ['sfl_untold', null],
+    ] as const) {
+      run(
+        `INSERT INTO shape_files (id, shape_id, name, media_type, size, stored_path, told_at, created_at)
+         VALUES (?, 'shp_a', 'a.png', 'image/png', 1024, '/tmp/a.png', ?, ?)`,
+        id,
+        toldAt,
+        AT,
+      );
+    }
+    migrateDatabase(db);
+  });
+
+  it('marks every told file as inline, so a resumed session keeps the old safe count', () => {
+    expect(db.$client.prepare('SELECT id, inline_sent FROM shape_files ORDER BY id').all()).toEqual(
+      [
+        { id: 'sfl_told', inline_sent: 1 },
+        { id: 'sfl_untold', inline_sent: 0 },
+      ],
+    );
+  });
+});
