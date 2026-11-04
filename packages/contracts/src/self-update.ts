@@ -54,7 +54,8 @@ export const SelfUpdateStatusDto = z.object({
   availableCommit: CommitSha.nullable(),
   /**
    * Why `availableCommit` is not going to install: null while it waits, drains or installs, and with
-   * none available. Install Now does nothing when this is set.
+   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt` the daemon
+   * remembers it, and drains the moment a build is staged.
    */
   notInstalling: SelfUpdateNotInstalling.nullable(),
   /** Minutes a staged build waits for an idle moment before the factory drains for it. */

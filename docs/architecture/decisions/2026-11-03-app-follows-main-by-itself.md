@@ -133,7 +133,8 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Not installing:** an available head can also be one that will not install: its update failed, the builder rolled
   back from it, or it has no finished build newer than the running one. `notInstalling` (`failed`, `rolled-back`,
   `unbuilt`, else null) says which, taken from the last check's result. Settings then says why instead of
-  "waiting for a moment when nothing is mid-session" and offers no Install Now, which would do nothing.
+  "waiting for a moment when nothing is mid-session". It offers no Install Now for `failed` or `rolled-back`, where it
+  would do nothing; for `unbuilt` it still does, because Install Now is remembered until a build is staged.
   `rolled-back` is only ever the head the builder rolled back from: a newer head whose newest finished build is
   that rolled-back one is `unbuilt`, because it installs by itself when its own build finishes. A check that could
   not ask GitHub learned nothing, so the reason stays; a different head, or the switch turned off and on, clears it

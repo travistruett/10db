@@ -59,11 +59,14 @@ export function SelfUpdateSection() {
         : `Running ${short(data.runningCommit)}.`;
   const blocker = data?.blocker ?? null;
   const progress = data === undefined ? null : updateProgressText(data);
+  const notInstalling = data?.notInstalling ?? null;
+  // Unlike these, a head with no build yet takes Install Now: the daemon drains once it is staged.
+  const refused = notInstalling === 'failed' || notInstalling === 'rolled-back';
   const canInstallNow =
     data !== undefined &&
     data.enabled &&
     data.availableCommit !== null &&
-    data.notInstalling === null &&
+    !refused &&
     !data.draining;
   return (
     <SettingsCard>
@@ -102,7 +105,13 @@ export function SelfUpdateSection() {
       ) : null}
       {progress !== null ? (
         <SettingRow
-          label={data?.notInstalling == null ? 'Update waiting' : 'Update not installing'}
+          label={
+            refused
+              ? 'Update not installing'
+              : notInstalling === 'unbuilt'
+                ? 'Update has no build yet'
+                : 'Update waiting'
+          }
           description={
             <Text size="sm" c="dimmed" role="status" aria-label="Update status">
               {progress}
