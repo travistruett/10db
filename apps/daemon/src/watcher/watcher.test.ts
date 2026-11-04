@@ -2084,7 +2084,7 @@ describe('worktree checkouts', () => {
       expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
     });
 
-    it('does not use a card for a path stamped inline after the reads when its lane ended during that stamp', async () => {
+    it('uses no card of a lane that ended during the second round of reads, for the first round’s path too', async () => {
       const lane = inWorktree('Alpha', 'ui');
       watcher.sync();
       // Only the first path (decided first: the paths go in order) has a card before the batch reads, so only
@@ -2110,7 +2110,7 @@ describe('worktree checkouts', () => {
       // The builder answers the lane's card for the second path while the batch reads are held.
       editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
       releases[0]?.({ stamp: 'first-stamp' });
-      // The second path is now stamped inline, in the decision loop; the lane ends while that read is held.
+      // The second path is read in a second round, before any decision; the lane ends while that read is held.
       await vi.waitFor(() => {
         expect(stamp).toHaveBeenCalledTimes(2);
       });
@@ -2122,8 +2122,52 @@ describe('worktree checkouts', () => {
       );
       releases[1]?.({ stamp: 'second-stamp' });
       await flushing;
-      // The lane is over, so its card for the second path is not used up and the write is carded.
-      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+      // The lane is over before any path is decided, so its cards are used for neither path: both are carded.
+      expect(flags().map((f) => f.body)).toEqual([
+        `${lane.path}: .env.local`,
+        `${lane.path}: ${SENSITIVE_FILE}`,
+      ]);
+    });
+
+    it('reads together the paths whose cards were answered during the batch reads, and reads no path a third time over', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      // Only the first path has a card before the batch reads; the paths are decided in order.
+      editCard(lane, '.env.local', 'allow_once', lane.path);
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      const releases: ((r: { stamp: string }) => void)[] = [];
+      for (let i = 0; i < 3; i += 1) {
+        stamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              releases.push(resolve);
+            }),
+        );
+      }
+      writeAt(lane.path, '.env.local');
+      writeAt(lane.path, SENSITIVE_FILE);
+      writeAt(lane.path, '.env');
+      writeAt(lane.path, '.env.test');
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      // Cards for two more paths are answered while the first read is held.
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      editCard(lane, '.env', 'allow_once', lane.path);
+      releases[0]?.({ stamp: 'first-stamp' });
+      // Both are read at once, before either read finishes: the wait is one more budget, not one each.
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(3);
+      });
+      // A card answered during that second round gets no third round: its path fails closed unread.
+      editCard(lane, '.env.test', 'allow_once', lane.path);
+      releases[1]?.({ stamp: 'second-stamp' });
+      releases[2]?.({ stamp: 'third-stamp' });
+      await flushing;
+      expect(stamp).toHaveBeenCalledTimes(3);
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: .env.test`]);
     });
 
     it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
@@ -2976,6 +3020,51 @@ describe('worktree checkouts', () => {
         editCard(lane, FILE, 'allow_once');
         touch(FILE);
         emit('.codex/rules');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
+      it('reads the files of several directories together, so a batch waits no longer for more directories', async () => {
+        const OTHER = '.claude/hooks/new.sh';
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        editCard(lane, OTHER, 'allow_once');
+        const stamp = vi.mocked(stampOrReason);
+        stamp.mockClear();
+        const releases: ((r: { stamp: string }) => void)[] = [];
+        for (let i = 0; i < 2; i += 1) {
+          stamp.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                releases.push(resolve);
+              }),
+          );
+        }
+        touch(FILE);
+        touch(OTHER);
+        emit('.codex/rules');
+        emit('.claude/hooks');
+        const flushing = watcher.flush();
+        // Both are read before either read finishes: one directory's slow file does not hold up the other's.
+        await vi.waitFor(() => {
+          expect(stamp).toHaveBeenCalledTimes(2);
+        });
+        releases[0]?.({ stamp: 'first-stamp' });
+        releases[1]?.({ stamp: 'second-stamp' });
+        await flushing;
+        expect(stamp).toHaveBeenCalledTimes(2);
+        expect(flags()).toEqual([]);
+      });
+
+      it('allows two reported directories, one inside the other, on one card for the file they share', async () => {
+        const NESTED = '.codex/rules/deep/new.rules';
+        const lane = running();
+        watcher.sync();
+        editCard(lane, NESTED, 'allow_once');
+        touch(NESTED);
+        emit('.codex/rules');
+        emit('.codex/rules/deep');
         await watcher.flush();
         expect(flags()).toEqual([]);
       });
