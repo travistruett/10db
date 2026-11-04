@@ -1146,6 +1146,25 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(state(path).status).toBe('');
     });
 
+    it('raises no card for a catch-up stopped after its merge, and names the head its merge wrote', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: () => {
+            writeFileSync(join(path, DB, '0002_half.sql'), 'alter table');
+            return Promise.resolve({ kind: 'aborted' });
+          },
+        },
+      }).beforeGate(batch.id, signal, { forPullRequest: true });
+      // The catch-up's worktree goes and its merge is put back: a card would name both.
+      expect(h.cards()).toEqual([]);
+      expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      expect(state(path).status).toBe('');
+    });
+
     it('leaves a conflict in a migration directory to the builder when the project has no package that generates it', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged({ generator: false });

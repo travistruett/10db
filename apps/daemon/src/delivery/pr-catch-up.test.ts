@@ -726,6 +726,20 @@ describe('a shipped pull request that conflicts with its base', () => {
       builderKept(batch.branch ?? '');
     });
 
+    it('raises no regenerate card, and puts its merge back, when it is stopped after the merge', async () => {
+      const batch = await migrationsCollide();
+      vi.spyOn(h.ctx.generators, 'regenerate').mockResolvedValue({ kind: 'aborted' });
+      const pushed = onOrigin(batch.branch);
+
+      await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(pushed);
+      // The merge is not left for the next catch-up to take for a commit 10db did not write.
+      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
+      // The fixture keeps the worktree, which has a card of its own.
+      expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
+    });
+
     it("pushes nothing and raises the one card, naming the migration, when the branch's can't be carried over", async () => {
       const journal = (...tags: string[]): string =>
         `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;

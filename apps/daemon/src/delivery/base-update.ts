@@ -151,8 +151,12 @@ export type BaseUpdate =
        */
       readonly noPnpm?: true;
     }
-  /** Shutdown or a cancel stopped it: no gate runs. */
-  | { readonly kind: 'aborted' };
+  /**
+   * Shutdown or a cancel stopped it: no gate runs. Asked for a pull request, `head` is the head the
+   * update had written when it stopped, when it had made a merge: the caller puts that merge back
+   * like any other it does not push, and no regenerate card is raised for it.
+   */
+  | { readonly kind: 'aborted'; readonly head?: string };
 
 /** What in a worktree batch's branch kept its base out. */
 export interface BaseHeld {
@@ -745,7 +749,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
         readonly renumbered?: readonly RenumberedMigration[];
       }
-    | { readonly kind: 'aborted' }
+    | { readonly kind: 'aborted'; readonly head?: string }
   > {
     const forPullRequest = options.forPullRequest === true;
     const dirs = (merged.regenerate ?? []).map((r) => r.dir);
@@ -784,8 +788,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     if (outcome.kind === 'aborted') {
       await keepLost(batch, path, merged, forPullRequest);
-      unregenerated(batch, path, merged, STOPPED);
-      return outcome;
+      // A catch-up's merge goes back and its worktree goes: a card would name both.
+      unregenerated(batch, path, merged, STOPPED, { card: !forPullRequest });
+      return forPullRequest ? { kind: 'aborted', head: wrote.head } : outcome;
     }
     const { head, problem, renumbered } = outcome;
     // The merge stands, whatever else is said of it. A catch-up's may still be put back, though: its
@@ -1532,9 +1537,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const stop = async (): Promise<BaseUpdate> => {
       if (pending !== null && path !== null) {
         await keepLost(batch, path, pending, forPullRequest);
-        unregenerated(batch, path, pending, STOPPED);
+        // A catch-up's merge goes back and its worktree goes: a card would name both.
+        unregenerated(batch, path, pending, STOPPED, { card: !forPullRequest });
       }
-      return { kind: 'aborted' };
+      // A merge made before the stop, for the caller to put back (a catch-up's).
+      const head = merged.kind === 'merged' ? merged.head : pending?.head;
+      return forPullRequest && head !== undefined ? { kind: 'aborted', head } : { kind: 'aborted' };
     };
     if (merged.kind === 'aborted' || stopped()) return stop();
     // Asked for the migrations hazard, the task's session waits on it: the next gate installs. Its
@@ -1607,7 +1615,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           options,
           signal,
         );
-        if (regenerated.kind === 'aborted' || stopped()) return { kind: 'aborted' };
+        if (regenerated.kind === 'aborted') return regenerated;
+        if (stopped())
+          return forPullRequest ? { kind: 'aborted', head: regenerated.head } : { kind: 'aborted' };
         // The merge's note says its generated directories were regenerated only once they were.
         const settled =
           regenerated.made === true ? (merging.regeneratedNote ?? merged.note) : merged.note;
