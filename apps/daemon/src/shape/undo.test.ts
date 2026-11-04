@@ -274,6 +274,16 @@ describe('Remove Draft Goal', () => {
           'on-extra is about extra, which was converted and then taken back, so it cannot hold a question',
         ],
       });
+
+      // Propose judges it the same way, a new question or the old one restated.
+      for (const key of ['late', 'on-extra']) {
+        const refused = write((ctx) =>
+          reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ questions: [{ ...question, key }] })),
+        );
+        expect(refused.ok ? [] : refused.errors).toEqual([
+          expect.stringMatching(/Question 1, about: extra is not a goal or task/),
+        ]);
+      }
     });
 
     it('leaves the question where it was when the removal is refused', () => {

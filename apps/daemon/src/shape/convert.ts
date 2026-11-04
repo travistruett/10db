@@ -46,7 +46,7 @@ import {
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
-import { buildPlanWorld } from './world';
+import { buildPlanWorld, tasksInside } from './world';
 
 // Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
 // questions in the caller's transaction, so a refusal or a failure leaves nothing behind, and it
@@ -266,10 +266,13 @@ export function convertProposals(
       if (owner === undefined) {
         // A row may hold the key and still be unable to hold a question: say which way.
         const held = rows.find((r) => r.key === about);
+        const goalOf = rows.find((r) => tasksInside(r).includes(about));
         errors.push(
-          held === undefined
-            ? `${row.key} is about ${about}, and no proposal has that key`
-            : `${row.key} is about ${about}, which ${unfitForQuestion(held)}`,
+          held !== undefined
+            ? `${row.key} is about ${about}, which ${unfitForQuestion(held)}`
+            : goalOf !== undefined
+              ? `${row.key} is about ${about}, whose goal ${goalOf.key} ${unfitForQuestion(goalOf)}`
+              : `${row.key} is about ${about}, and no proposal has that key`,
         );
       } else if (!selectedIds.has(owner.row.id))
         errors.push(`${row.key} is about ${owner.title}, which isn't selected`);

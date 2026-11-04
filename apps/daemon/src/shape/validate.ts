@@ -48,7 +48,12 @@ export interface PlanWorld {
   unstartedProblem(id: TaskId): string | null;
   /** Keys of the rows that already hold source ids, which a draft may leave out. */
   readonly storedSources: ReadonlySet<string>;
-  /** Keys of the stored goal and task rows still live (pending or converted), which a question may be about. */
+  /** Every key a stored row answers to, in any state: its own, and a goal's tasks' keys. */
+  readonly storedKeys: ReadonlySet<string>;
+  /**
+   * Stored goals and tasks a draft may leave out and a question still be about: converted goals and
+   * pinned pending rows, which this round keeps. Converted tasks are in `convertedTasks`.
+   */
   readonly storedEfforts: ReadonlySet<string>;
   /** The place and landing a task still in the draft gets when converted: the project's defaults. */
   readonly draftPlace: TaskPlace;
@@ -253,13 +258,13 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     sources(`Removal ${String(i + 1)}`, `remove:${r.taskId}`, r.sourceMessageIds);
   });
 
-  // Questions: the goal or task one is about must be in this plan or already stored.
+  // Questions: the goal or task one is about must be in this plan, converted, or kept by this round.
   const goalKeys = new Set(draft.goals.map((g) => g.key));
   draft.questions.forEach((q, i) => {
     if (q.about === undefined) return;
     if (knownTask(q.about) || goalKeys.has(q.about) || world.storedEfforts.has(q.about)) return;
     errors.push(
-      world.storedSources.has(q.about)
+      world.storedKeys.has(q.about)
         ? `Question ${String(i + 1)}, about: ${q.about} is not a goal or task that is still in the plan; a question can only be about a goal or task`
         : `Question ${String(i + 1)}, about: no proposal has the key ${q.about}`,
     );

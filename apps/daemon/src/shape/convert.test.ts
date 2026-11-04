@@ -38,7 +38,7 @@ import { createKnowledgeServices } from '../daemon';
 import { createEventBus, createStateStore } from '../events';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
-import { dropProposal, reconcileDraft } from './rounds';
+import { dropProposal, editProposal, reconcileDraft } from './rounds';
 
 // Shape spec §11: Convert is one transaction, refuses a partial selection by name, is idempotent,
 // and starts nothing.
@@ -573,6 +573,89 @@ describe('question records', () => {
     const out = askAbout(m, about);
     expect(out.ok ? [] : out.errors).toEqual([
       expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+  });
+
+  it('refuses to propose a question about a task inside a dropped goal, naming what is wrong', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = askAbout(m, 'g1');
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
+  });
+
+  // A round replaces every unpinned pending row its draft leaves out, so those rows will be gone.
+  it.each([
+    ['goal', 'g', (m: string) => ({ goals: [goalOf(m, 'g', ['g1'])] })],
+    ['task', 't', (m: string) => ({ looseTasks: [loose(m, 't')] })],
+  ])('refuses to propose a question about a %s the draft leaves out', (_, about, draftOf) => {
+    const m = c.say();
+    propose(draftOf(m));
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+    expect(rowOf(about).state).toBe(ShapeProposalState.Pending);
+  });
+
+  it.each([
+    ['a pinned goal', 'g', 'g'],
+    ['a task inside a pinned goal', 'g', 'g1'],
+    ['a pinned task', 't', 't'],
+  ])('takes a question about %s the draft leaves out', (_, pinned, about) => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])], looseTasks: [loose(m, 't')] });
+    write((ctx) => {
+      editProposal(ctx, rowOf(pinned).id, { title: 'Pinned title' });
+    });
+    expect(askAbout(m, about)).toMatchObject({ ok: true });
+    expect(rowOf(pinned).state).toBe(ShapeProposalState.Pending);
+    converted(pinned, 'who-pays');
+    expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['who-pays']);
+  });
+
+  it('takes a question about a goal or a task already converted', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    converted('g');
+    expect(askAbout(m, 'g')).toMatchObject({ ok: true });
+    expect(askAbout(m, 'g1')).toMatchObject({ ok: true });
+  });
+
+  it('says why Convert refuses a question about a task inside a goal that was dropped', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g1' })],
+    });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g1, whose goal g was dropped, so it cannot hold a question',
+    ]);
+  });
+
+  it('says why Convert refuses a question about a task inside a goal a later plan replaced', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g1' })],
+    });
+    // The pin keeps the question through the round that replaces its goal.
+    write((ctx) => {
+      editProposal(ctx, rowOf('who-pays').id, { text: 'Who pays now?' });
+    });
+    propose({ looseTasks: [loose(m, 'next')] });
+    expect(rowOf('g').state).toBe(ShapeProposalState.Superseded);
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g1, whose goal g was replaced by a later plan, so it cannot hold a question',
     ]);
   });
 

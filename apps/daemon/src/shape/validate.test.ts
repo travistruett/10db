@@ -44,6 +44,7 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
         ? `${id} has started`
         : `${id} was not created by this conversation`,
   storedSources: new Set(),
+  storedKeys: new Set(),
   storedEfforts: new Set(),
   draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
   placeOf: (id) =>
@@ -372,9 +373,9 @@ describe('a plan that breaks a rule', () => {
       sourceMessageIds: [message],
     };
     // A decision, principle, question, or a dropped goal or task: stored, but no live effort.
-    expect(check({ questions: [question] }, world({ storedSources: new Set(['stored']) }))).toEqual(
-      [expect.stringMatching(/Question 1, about: stored is not a goal or task/)],
-    );
+    expect(check({ questions: [question] }, world({ storedKeys: new Set(['stored']) }))).toEqual([
+      expect.stringMatching(/Question 1, about: stored is not a goal or task/),
+    ]);
   });
 
   it('accepts a question about a stored goal or task that is still live', () => {
@@ -391,7 +392,7 @@ describe('a plan that breaks a rule', () => {
             },
           ],
         },
-        world({ storedSources: new Set(['stored']), storedEfforts: new Set(['stored']) }),
+        world({ storedKeys: new Set(['stored']), storedEfforts: new Set(['stored']) }),
       ),
     ).toEqual([]);
   });
