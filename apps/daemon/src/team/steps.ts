@@ -24,7 +24,9 @@ import {
   insertEvidence,
   insertWorkstream,
   latestHandoffForStep,
+  listEvidence,
   listSessions,
+  listWorkstreams,
   getAccount,
   listModelProfiles,
   listPersonas,
@@ -37,7 +39,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
-import { revertCommitOf, revertedWorkNote, revertedWorkNotice } from './reverted-work';
+import { revertCommitOf, revertOfRun, revertedWorkNote, revertedWorkNotice } from './reverted-work';
 import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
 
 /** What starting this task would run: its flow resolved against the project's team and the catalogue. */
@@ -112,6 +114,40 @@ export function insertPlannedWorkstream(
     ),
     stepIndex: 0,
   });
+  return getWorkstream(ctx.tx, ws.id);
+}
+
+/**
+ * Inserts the run a task started again gets when it joins a batch that already holds earlier runs of
+ * it. When an earlier run was left out by Ship without it, or was retried after it, the revert is
+ * still on the batch's branch, so the new run's session is told as a retry would tell it: the same
+ * builder note, as the step's fix. The new run is then one that was told, and a commit it makes after
+ * the revert brings the task's work back in the pull request. Only a start puts a run here: a merge
+ * run the shipping gate sends to a finished task goes through `insertPlannedWorkstream` and is not told.
+ */
+export function insertJoinedWorkstream(
+  ctx: WriteContext,
+  taskId: TaskId,
+  plan: StepPlanDto,
+  batchId: BatchId,
+): WorkstreamDto {
+  const earlier = listWorkstreams(ctx.tx, { batchId }).filter((run) => run.taskId === taskId);
+  const ws = insertPlannedWorkstream(ctx, taskId, plan, batchId);
+  let revert: string | null = null;
+  for (const run of earlier)
+    revert =
+      revertOfRun({ notice: run.notice, evidence: listEvidence(ctx.tx, run.id) })?.revert ?? revert;
+  if (revert === null) return ws;
+  const note = insertEvidence(ctx, {
+    workstreamId: ws.id,
+    kind: 'builder',
+    command: null,
+    exitCode: null,
+    summary: revertedWorkNote(revert),
+    logPath: null,
+    commitShas: [],
+  });
+  patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: note.id } });
   return getWorkstream(ctx.tx, ws.id);
 }
 
