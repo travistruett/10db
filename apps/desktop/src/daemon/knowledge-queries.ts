@@ -1,5 +1,6 @@
 import {
   DecisionItem,
+  KnowledgeDryRunDto,
   KnowledgeItemKind,
   KnowledgeListDto,
   KnowledgeState,
@@ -169,6 +170,31 @@ export function useNewestVersion(record: TracedRecord | null) {
         at = next;
       }
       return newest;
+    },
+  });
+}
+
+/** Stands in for the builder's reason in a dry run, which the route needs and writes nowhere. */
+const PREVIEW_REASON = 'preview';
+
+/**
+ * Asks the daemon what withdrawing a record would do, by a dry run that writes nothing: `restores` is
+ * the older version that would become current again, or null when there is none. Read fresh each time
+ * the dialog opens, since the chain may have changed. A refusal is left to the real withdrawal to say.
+ */
+export function useWithdrawPreview(record: RecordRef) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['knowledge', 'withdraw-preview', record.id],
+    gcTime: 0,
+    retry: false,
+    queryFn: async () => {
+      const json = { reason: PREVIEW_REASON, dryRun: true } as const;
+      const res =
+        record.kind === KnowledgeItemKind.Decision
+          ? await client.decisions[':id'].withdraw.$post({ param: { id: record.id }, json })
+          : await client.principles[':id'].withdraw.$post({ param: { id: record.id }, json });
+      return readJson(res, KnowledgeDryRunDto);
     },
   });
 }

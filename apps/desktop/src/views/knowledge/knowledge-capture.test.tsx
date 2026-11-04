@@ -37,6 +37,7 @@ type Reply = (body: unknown) => { status: number; json: JsonBodyType };
 
 const DecisionBody = z.object({ question: z.string(), choice: z.string(), rationale: z.string() });
 const PrincipleBody = z.object({ statement: z.string(), topicKey: z.string() });
+const DryRunBody = z.object({ dryRun: z.literal(true) });
 
 /** Serves one project's knowledge; every write is noted, and answered by `replies[route]` or a refusal-free default. */
 function serve(data: Partial<Served> = {}, replies: Record<string, Reply> = {}) {
@@ -48,12 +49,22 @@ function serve(data: Partial<Served> = {}, replies: Record<string, Reply> = {}) 
     ...data,
   };
   const posted: Posted[] = [];
+  const dryRuns: Posted[] = [];
   const inboxReads = { count: 0 };
   const write =
     (route: string, fallback: Reply) =>
     async ({ request }: { request: Request }) => {
       const body: unknown = await request.json();
-      posted.push({ path: new URL(request.url).pathname, body });
+      const path = new URL(request.url).pathname;
+      if (DryRunBody.safeParse(body).success) {
+        // A dry run writes nothing: it is noted apart, and answered by `replies[`${route}-dry-run`]`.
+        dryRuns.push({ path, body });
+        const dry = (replies[`${route}-dry-run`] ?? (() => ({ status: 200, json: noRestore })))(
+          body,
+        );
+        return HttpResponse.json(dry.json, { status: dry.status });
+      }
+      posted.push({ path, body });
       const out = (replies[route] ?? fallback)(body);
       return HttpResponse.json(out.json, { status: out.status });
     };
@@ -130,8 +141,29 @@ function serve(data: Partial<Served> = {}, replies: Record<string, Reply> = {}) 
     ),
     ...baseHandlers(),
   );
-  return { served, posted, inboxReads };
+  return { served, posted, dryRuns, inboxReads };
 }
+
+/** What a withdrawal's dry run answers when no older version would become current again. */
+const noRestore = {
+  dryRun: true,
+  wouldWrite: decisionItem({ state: 'withdrawn' }),
+  replaces: decisionItem(),
+  restores: null,
+};
+
+/** A dry run's answer: the withdrawal would make `restores` current again. */
+const restoring =
+  (restores: DecisionItem | PrincipleItem): Reply =>
+  () => ({
+    status: 200,
+    json: {
+      dryRun: true,
+      wouldWrite: { ...restores, state: 'withdrawn' },
+      replaces: restores,
+      restores,
+    },
+  });
 
 /** Opens a Select inside `scope` by its label and picks an option. */
 async function choose(scope: HTMLElement, label: string, option: string) {
@@ -373,6 +405,73 @@ describe('retiring and withdrawing', () => {
       expect(posted).toEqual([
         { path: `/decisions/${decision.id}/withdraw`, body: { reason: 'Recorded by mistake' } },
       ]);
+    });
+  });
+
+  it('names the older decision a withdrawal makes current again, before the builder confirms', async () => {
+    const older = decisionItem({ question: 'Which queue?', choice: 'Graphile' });
+    const decision = decisionItem({
+      projectId: project.id,
+      question: 'Which queue?',
+      choice: 'pg-boss',
+      supersedesId: older.id,
+    });
+    const { posted, dryRuns } = serve(
+      { decisions: [decision] },
+      { 'decision-withdraw-dry-run': restoring(older) },
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    expect(
+      await within(dialog).findByText(
+        /“Which queue\? → Graphile” becomes current again, and returns to briefings and search\./,
+      ),
+    ).toBeTruthy();
+    expect(dryRuns).toHaveLength(1);
+    expect(dryRuns[0]?.path).toBe(`/decisions/${decision.id}/withdraw`);
+    expect(posted).toEqual([]);
+  });
+
+  it('names the older principle a withdrawal makes current again', async () => {
+    const older = principleItem({ statement: 'Sleep sparingly in tests' });
+    const principle = principleItem({ projectId: project.id, supersedesId: older.id });
+    serve({ principles: [principle] }, { 'principle-withdraw-dry-run': restoring(older) });
+    renderApp('/knowledge');
+    await openRowMenu('Actions for testing.no-sleeps', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Principle' });
+    expect(
+      await within(dialog).findByText(/“Sleep sparingly in tests” becomes current again/),
+    ).toBeTruthy();
+  });
+
+  it('says nothing of an older version when a withdrawal restores none', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    const { dryRuns } = serve({ decisions: [decision] });
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    await waitFor(() => {
+      expect(dryRuns).toHaveLength(1);
+    });
+    expect(within(dialog).getByText(/leaves briefings and search\./)).toBeTruthy();
+    expect(within(dialog).queryByText(/current again/)).toBeNull();
+  });
+
+  it('still lets the builder withdraw when the preview is refused', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    const message = 'Decision dec_x is already withdrawn (none is current)';
+    const { posted } = serve(
+      { decisions: [decision] },
+      { 'decision-withdraw-dry-run': refusal(409, message) },
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
     });
   });
 
