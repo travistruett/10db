@@ -1,4 +1,5 @@
 import {
+  SELF_UPDATE_SWITCH,
   SelfUpdateInput,
   SelfUpdateStatusDto,
   SelfUpdateWaitInput,
@@ -235,7 +236,10 @@ describe('a waiting update in Settings', () => {
       /waiting only for a turn in the shaping conversation “Denser board”/,
     );
     expect(draining.textContent).toMatch(/No lane is running/);
-    expect(draining.textContent).toMatch(/Stop/);
+    expect(draining.textContent).toMatch(/press Stop/);
+    // The switch this section shows, by its label: Stop can't end a session that ignores it.
+    expect(draining.textContent).toContain(`turn ${SELF_UPDATE_SWITCH} off`);
+    expect(draining.textContent).toMatch(/quit 10db/);
     expect(draining.textContent).not.toMatch(/waiting for 1 running step/);
   });
 

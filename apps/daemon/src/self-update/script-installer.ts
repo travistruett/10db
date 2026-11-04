@@ -2,11 +2,10 @@ import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Readable } from 'node:stream';
-import { CommitSha } from '@10db/contracts';
+import { CommitSha, SELF_UPDATE_SWITCH } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock, type Timer } from '../clock';
 import type { Logger } from '../log';
-import { SELF_UPDATE_SWITCH } from './blocker';
 import type {
   ApplyResult,
   ScriptStatus,

@@ -82,6 +82,16 @@ export type SelfUpdateStatusDto = z.infer<typeof SelfUpdateStatusDto>;
 export const SelfUpdateInput = z.object({ enabled: z.boolean().nullable() });
 export type SelfUpdateInput = z.infer<typeof SelfUpdateInput>;
 
+/** The switch's label in Settings; cards and messages name it exactly. */
+export const SELF_UPDATE_SWITCH = 'Update 10db by itself';
+
+/**
+ * What the builder can do about a shaping turn that holds the update, for the card and for Settings
+ * alike. Stop only interrupts, and a hung session may not answer that; the switch ends the drain and
+ * quitting ends the session whatever the session does.
+ */
+export const SHAPE_HOLD_WAY_OUT = `If it is stuck, open the conversation and press Stop. If that does not end it, turn ${SELF_UPDATE_SWITCH} off in Settings, which starts lanes again without the update, or quit 10db.`;
+
 /** The longest wait limit: a day. */
 export const MAX_SELF_UPDATE_WAIT_MINUTES = 1440;
 

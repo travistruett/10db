@@ -1,4 +1,8 @@
-import { MAX_SELF_UPDATE_WAIT_MINUTES, type SelfUpdateStatusDto } from '@10db/contracts';
+import {
+  MAX_SELF_UPDATE_WAIT_MINUTES,
+  SELF_UPDATE_SWITCH,
+  type SelfUpdateStatusDto,
+} from '@10db/contracts';
 import { Button, NumberInput, Switch, Text } from '@mantine/core';
 import { useState } from 'react';
 import {
@@ -54,11 +58,11 @@ export function SelfUpdateSection() {
   return (
     <SettingsCard>
       <SettingRow
-        label="Update 10db by itself"
+        label={SELF_UPDATE_SWITCH}
         description={`When main has new commits and no task is mid-session, install its newest finished build and restart. Queued and waiting tasks carry on. It follows the repository this app was built from, whatever your projects are. ${running ?? ''}`.trim()}
       >
         <Switch
-          aria-label="Update 10db by itself"
+          aria-label={SELF_UPDATE_SWITCH}
           checked={data?.enabled ?? false}
           disabled={data === undefined || set.isPending}
           onChange={(event) => {

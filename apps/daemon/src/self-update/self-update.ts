@@ -1,10 +1,22 @@
-import type { InboxItemId, ProjectId, SelfUpdateBlockerDto, ShapeId } from '@10db/contracts';
-import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
+import {
+  SELF_UPDATE_SWITCH,
+  SHAPE_HOLD_WAY_OUT,
+  type InboxItemId,
+  type ProjectId,
+  type SelfUpdateBlockerDto,
+  type ShapeId,
+} from '@10db/contracts';
+import {
+  deleteAppSetting,
+  findOpenByFoldKey,
+  getAppSetting,
+  listProjects,
+  setAppSetting,
+} from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { SELF_UPDATE_SWITCH } from './blocker';
 
 /**
  * How long a drain may be held by shaping conversations alone before the builder is told. A turn
@@ -12,6 +24,8 @@ import { SELF_UPDATE_SWITCH } from './blocker';
  * turns that keeps the update waiting while every lane is paused.
  */
 export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
+/** The card that says so. It outlives the run that raised it, so a new run looks for it by this. */
+export const SHAPE_HOLD_FOLD_KEY = 'self-update-shape-turn';
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -177,7 +191,7 @@ export type TickResult = (typeof TickResult)[keyof typeof TickResult];
 export interface SelfUpdate {
   /** One look at main: stage a newer build, and install it when no task is mid-session. */
   tick(): Promise<TickResult>;
-  /** At startup: reports how an install that was under way ended. */
+  /** At startup: closes the card an earlier run left, and reports how an install under way ended. */
   settle(): void;
   /** Looks again every interval until `stop`. */
   start(): void;
@@ -356,10 +370,26 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       title: 'A shaping conversation is holding the update, and lanes are paused',
       body: [
         `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${drainingSince.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
-        'Claude may still be answering, or the session may be hung. Open the conversation and press Stop to end the turn. Lanes start again once it ends and the app has installed and restarted.',
+        `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
       ].join('\n\n'),
-      foldKey: 'self-update-shape-turn',
+      foldKey: SHAPE_HOLD_FOLD_KEY,
     }).id;
+  }
+
+  /**
+   * The hold is only in memory but its card is a row, so a card from before a restart would say for
+   * good that lanes are paused. This run holds nothing yet, and raises one again if a hold recurs.
+   * Every project, because the one that places the cards can change.
+   */
+  function closeShapeHoldCards(): void {
+    for (const project of listProjects(state.db)) {
+      try {
+        const stale = findOpenByFoldKey(state.db, project.id, SHAPE_HOLD_FOLD_KEY);
+        if (stale) inbox.resolve(stale.id, '10db restarted, so that turn is over.');
+      } catch (error) {
+        logger.error({ err: error }, 'could not close a shaping card left from before a restart');
+      }
+    }
   }
 
   function endDrain(): void {
@@ -770,6 +800,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   return {
     tick,
     settle() {
+      closeShapeHoldCards();
       takeInRollback();
       const status = deps.outcome.read();
       deps.outcome.clear();

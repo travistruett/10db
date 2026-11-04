@@ -1,4 +1,4 @@
-import type { SelfUpdateStatusDto } from '@10db/contracts';
+import { SHAPE_HOLD_WAY_OUT, type SelfUpdateStatusDto } from '@10db/contracts';
 
 const count = (n: number, one: string, many: string): string =>
   `${String(n)} ${n === 1 ? one : many}`;
@@ -26,7 +26,7 @@ export function updateWaitsFor(data: SelfUpdateStatusDto): string {
     let running: string;
     if (working === 0) running = 'Nothing is left running, so it installs on the next check.';
     else if (steps === 0 && shapes.length > 0)
-      running = `It is waiting only for ${turnsIn(shapes)} to finish. No lane is running: lanes stay paused until it ends. If it is stuck, open the conversation and press Stop.`;
+      running = `It is waiting only for ${turnsIn(shapes)} to finish. No lane is running: lanes stay paused until it ends. ${SHAPE_HOLD_WAY_OUT}`;
     else
       running = `It is waiting for ${count(working, 'running step', 'running steps')} to finish${shapes.length > 0 ? `, among them ${turnsIn(shapes)}` : ''}.`;
     if (waitingOnCard === 0) return running;

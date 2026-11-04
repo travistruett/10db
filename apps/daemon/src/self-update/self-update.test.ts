@@ -1,16 +1,23 @@
-import { InboxState, mintId, type ProjectId, type ShapeId } from '@10db/contracts';
-import { createTestStore, getAppSetting, listInbox, seedProject } from '@10db/db';
+import {
+  InboxState,
+  mintId,
+  SELF_UPDATE_SWITCH,
+  type ProjectId,
+  type ShapeId,
+} from '@10db/contracts';
+import { createTestStore, getAppSetting, listInbox, seedProject, setAppSetting } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createInboxService } from '../inbox';
+import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import {
   createSelfUpdate,
   SELF_UPDATE_APPLYING_KEY,
   SELF_UPDATE_FAILED_KEY,
   SHAPE_HOLD_ALERT_MS,
+  SHAPE_HOLD_FOLD_KEY,
   type ApplyResult,
   type ScriptStatus,
   type SelfUpdate,
@@ -83,11 +90,12 @@ function make(
     cardProject?: ProjectId | null;
     headOf?: () => Promise<string>;
     logger?: Logger;
+    inbox?: InboxService;
   } = {},
 ): SelfUpdate {
   return createSelfUpdate({
     state,
-    inbox: createInboxService({ state, onParkedAnswer: () => undefined }),
+    inbox: overrides.inbox ?? createInboxService({ state, onParkedAnswer: () => undefined }),
     clock,
     logger: overrides.logger ?? silentLogger,
     runningCommit: overrides.runningCommit === undefined ? RUNNING : overrides.runningCommit,
@@ -557,7 +565,10 @@ describe('a drain that only shaping conversations hold', () => {
     expect(rest).toEqual([]);
     expect(card?.title).toBe('A shaping conversation is holding the update, and lanes are paused');
     expect(card?.body).toContain('“Denser board”');
-    expect(card?.body).toContain('Stop');
+    expect(card?.body).toContain('press Stop');
+    // Stop only interrupts: a session that ignores it needs a way out that does not depend on it.
+    expect(card?.body).toContain(`turn ${SELF_UPDATE_SWITCH} off`);
+    expect(card?.body).toContain('quit 10db');
     clock.advance(SHAPE_HOLD_ALERT_MS);
     await update.tick();
     expect(shapeCards()).toHaveLength(1);
@@ -624,6 +635,62 @@ describe('a drain that only shaping conversations hold', () => {
     clock.advance(SHAPE_HOLD_ALERT_MS);
     await update.tick();
     expect(shapeCards().filter((item) => item.state === InboxState.Open)).toHaveLength(1);
+  });
+
+  describe('after a restart', () => {
+    /** A card a run before this one left open, on `project`: nothing in this run holds it. */
+    function cardLeftOpen(project: ProjectId) {
+      createInboxService({ state, onParkedAnswer: () => undefined }).flag({
+        projectId: project,
+        workstreamId: null,
+        title: 'A shaping conversation is holding the update, and lanes are paused',
+        body: 'Left by an earlier run.',
+        foldKey: SHAPE_HOLD_FOLD_KEY,
+      });
+    }
+
+    it('closes a card an earlier run left open: nothing holds the update now', () => {
+      cardLeftOpen(projectId);
+      make().settle();
+      expect(shapeCards().map((card) => card.state)).toEqual([InboxState.Resolved]);
+    });
+
+    it('closes it under a project that no longer places the cards', () => {
+      cardLeftOpen(projectId);
+      make({ cardProject: null }).settle();
+      expect(shapeCards().map((card) => card.state)).toEqual([InboxState.Resolved]);
+    });
+
+    it('closes it when no install was under way and in a run with no commit', () => {
+      cardLeftOpen(projectId);
+      make({ runningCommit: null }).settle();
+      expect(shapeCards().map((card) => card.state)).toEqual([InboxState.Resolved]);
+    });
+
+    it('still reports how an install ended when a card can not be closed', () => {
+      cardLeftOpen(projectId);
+      state.write((ctx) => {
+        setAppSetting(ctx, SELF_UPDATE_APPLYING_KEY, { head: NEW, commit: NEW });
+      });
+      const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
+      const refusing: InboxService = {
+        ...inbox,
+        resolve: () => {
+          throw new Error('the database is busy');
+        },
+      };
+      make({ inbox: refusing }).settle();
+      expect(cards()).toHaveLength(1);
+    });
+
+    it('raises a card again if a hold really recurs', async () => {
+      cardLeftOpen(projectId);
+      make().settle();
+      const update = await drainingForShapes(DENSER);
+      clock.advance(SHAPE_HOLD_ALERT_MS);
+      await update.tick();
+      expect(shapeCards().filter((item) => item.state === InboxState.Open)).toHaveLength(1);
+    });
   });
 });
 
