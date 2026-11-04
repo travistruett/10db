@@ -210,6 +210,14 @@ type Installed =
       readonly note: string | null;
       /** Set when the packages still do not resolve after the install: what is missing, in a sentence. */
       readonly broken?: string;
+      /**
+       * Set when the install failed: starting over again would not help. `refresh` already started
+       * over after a failure that left the copy broken, and does not after a timeout (it would only
+       * wait again) or a refused host (the same refusal would come back).
+       */
+      readonly final?: true;
+      /** The install failed after a start over, by `refresh` itself or the second pass. */
+      readonly startedOver?: true;
     }
   | { readonly kind: 'aborted' };
 
@@ -913,6 +921,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Installed> {
     const first = await installOnce(batch, project, path, signal, false);
     if (first.kind !== 'done' || first.broken === undefined) return first;
+    // A failed install was already started over by `refresh`, or was a timeout or a refused host
+    // that a repeat would only meet again: it is reported as it is. An install that exited zero gets
+    // the second pass, and `refresh` adds no retry to a start over it was asked for, so one gate
+    // runs an install twice at most.
+    if (first.final === true) return first;
     // The first recovery is automatic: remove node_modules, install from nothing, and let the step
     // run if that resolves. Only a second broken install in a row is reported
     // (`decisions/2026-11-03-a-broken-install-repairs-itself-once.md`).
@@ -1005,6 +1018,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             kind: 'done',
             ok: false,
             note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
+            final: true as const,
+            ...(again || (!installed.timedOut && installed.blockedHosts.length === 0)
+              ? { startedOver: true as const }
+              : {}),
             ...(broken === undefined ? {} : { broken }),
           };
         }
@@ -1109,7 +1126,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note:
           joined(
             merged.note,
-            `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile, then removed node_modules and installed again by itself, and neither install brought them back${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
+            `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile${installed.final === true && installed.startedOver !== true ? ' and that install did not bring them back' : ', then removed node_modules and installed again by itself, and neither install brought them back'}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
       };
     }
