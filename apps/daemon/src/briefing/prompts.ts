@@ -13,6 +13,7 @@ import {
   type TaskDto,
   Verdict,
 } from '@10db/contracts';
+import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 
 interface StepBrief {
@@ -62,6 +63,20 @@ export interface Denial {
   readonly toolName: string;
   readonly summary: string;
   readonly note: string | null;
+}
+
+/** The tools whose denial's summary is the real path they asked for. */
+const PATH_DENIALS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob', 'LS']);
+
+/**
+ * The denials a lane is told about. A read denied before such a path was refused with no card names a
+ * path outside the lane's copy, and repeating that path to the lane would hand it the wrong root.
+ */
+export function denialsForLane<D extends Denial>(
+  denials: readonly D[],
+  scope: { readonly checkout: string; readonly worktreeRoot: string },
+): D[] {
+  return denials.filter((d) => !(PATH_DENIALS.has(d.toolName) && isOutsideCopy(d.summary, scope)));
 }
 
 /** The longest call or note a prompt repeats; a denial is a pointer, not a transcript. */

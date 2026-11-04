@@ -1,5 +1,6 @@
 import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { serve } from '@hono/node-server';
 import { mintId } from '@10db/contracts';
 import type {
@@ -142,6 +143,7 @@ export async function createTestEngine(
       | 'migrationsBase'
       | 'judge'
       | 'git'
+      | 'worktreeRoot'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -283,6 +285,7 @@ export async function createTestEngine(
     clock,
     logger: silentLogger,
     dataDir: data.path,
+    worktreeRoot: join(data.path, 'worktrees'),
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
