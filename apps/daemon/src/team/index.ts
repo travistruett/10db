@@ -10,6 +10,7 @@ export {
   startTaskWithPlan,
 } from './steps';
 export {
+  commitCoveredByRevert,
   commitResolvedMarkers,
   commitResultAsStored,
   revertCommitLine,

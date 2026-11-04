@@ -17,6 +17,7 @@ import {
   getWorkstream,
   insertBatch,
   insertDecision,
+  insertEvidence,
   insertPrinciple,
   insertSession,
   insertShape,
@@ -57,7 +58,7 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { commitResolvedMarkers } from '../team';
+import { commitCoveredByRevert, commitResolvedMarkers, revertCommitLine } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -944,6 +945,76 @@ describe('MCP tools', () => {
         message: 'R',
       });
       expect(replay.json).toEqual(viaTool.json);
+    });
+  });
+
+  describe('a commit result that made no new commit under a revert', () => {
+    const headOf = () =>
+      execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim();
+    /** Tells the run of a revert at `revert`, as a Retry or a joined start does. */
+    const toldOf = (s: Awaited<ReturnType<typeof seedSession>>, revert: string) =>
+      state.write((ctx) =>
+        insertEvidence(ctx, {
+          workstreamId: s.workstream.id,
+          kind: 'builder',
+          command: null,
+          exitCode: null,
+          summary: `Your commits were reverted.\n\n${revertCommitLine(revert)}`,
+          logPath: null,
+          commitShas: [],
+        }),
+      );
+    const covered = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitCoveredByRevert);
+
+    it('is recorded when the sha is in the revert the run was told of', async () => {
+      const s = await seedSession();
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      const direct = await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-reused-01',
+        branch: 'main',
+      });
+      toldOf(s, headOf());
+      const viaTool = await s.call('commit', {
+        opId: 'op-reused-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toEqual({ sha: direct.sha, alreadyCommitted: true });
+      expect(covered(s)).toEqual([true]);
+    });
+
+    it('is not recorded for a commit the revert does not cover', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-after-01',
+        branch: 'main',
+      });
+      const viaTool = await s.call('commit', {
+        opId: 'op-after-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toMatchObject({ alreadyCommitted: true });
+      expect(covered(s)).toEqual([false]);
+    });
+
+    it('is not recorded for a new commit', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await s.call('commit', { opId: 'op-new-01', paths: ['src/api/b.ts'], message: 'Add b' });
+      expect(covered(s)).toEqual([false]);
     });
   });
 

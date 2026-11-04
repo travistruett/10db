@@ -40,6 +40,7 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  listEvidence,
   listStepToolOpResults,
   replaceToolOp,
   patchWorkstream,
@@ -70,7 +71,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { commitResultAsStored } from '../team';
+import { commitResultAsStored, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -647,7 +648,12 @@ export function createToolHandlers(
       });
       // The record says when this commit resolved conflict markers of a base merge: it is on the branch
       // but brings none of a reverted task's work back. The session's answer is unchanged.
-      const stored = await commitResultAsStored(deps.git, checkout, result);
+      // It also says when the tool made no new commit and handed the session one the run's revert
+      // covers (an opId reused from the reverted commits): that brought no work back either.
+      const told = result.alreadyCommitted
+        ? revertOfRun({ notice: row.notice, evidence: listEvidence(db, workstreamId) })
+        : null;
+      const stored = await commitResultAsStored(deps.git, checkout, result, told?.revert ?? null);
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,

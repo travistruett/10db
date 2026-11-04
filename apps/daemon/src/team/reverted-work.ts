@@ -24,24 +24,54 @@ const REVERT_LINE = REVERT_COMMIT_LINE;
  */
 const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 
-/** A commit tool op's result as it is stored, marked when the commit resolved conflict markers. */
+/**
+ * The key a commit tool op's stored result carries when it made no new commit (the opId was already on
+ * the branch) and the sha is one the run's revert covers: the session was handed a commit the revert
+ * undid, so no work came back. A retry reads it, and it needs no git to do so.
+ */
+const COVERED_BY_REVERT_KEY = 'coveredByRevert';
+
+/**
+ * A commit tool op's result as it is stored, marked when the commit resolved conflict markers, and
+ * when it made no new commit and `revert` (the one the run was told of; null when none) covers its sha.
+ */
 export async function commitResultAsStored<T extends { readonly sha: string }>(
-  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween'>,
+  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween' | 'hasCommit' | 'isAncestor'>,
   repo: string,
-  result: T,
-): Promise<T & { readonly [RESOLVED_MARKERS_KEY]?: true }> {
+  result: T & { readonly alreadyCommitted?: boolean },
+  revert: string | null = null,
+): Promise<
+  T & { readonly [RESOLVED_MARKERS_KEY]?: true; readonly [COVERED_BY_REVERT_KEY]?: true }
+> {
   const parent = `${result.sha}^`;
   const changed = await git.filesChangedBetween(repo, parent, result.sha);
   const marked = await git.conflictMarkers(repo, changed, parent);
-  return marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true } : result;
+  const resolved =
+    marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true as const } : result;
+  // A named revert no longer on the branch covers nothing, as `revertedAway` reads it.
+  const covered =
+    result.alreadyCommitted === true &&
+    revert !== null &&
+    (await git.hasCommit(repo, revert)) &&
+    (await git.isAncestor(repo, result.sha, revert));
+  return covered ? { ...resolved, [COVERED_BY_REVERT_KEY]: true } : resolved;
 }
 
 /** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
 export function commitResolvedMarkers(result: unknown): boolean {
+  return storedMark(result, RESOLVED_MARKERS_KEY);
+}
+
+/** Whether a stored commit result made no new commit, and its sha is one the run's revert covers. */
+export function commitCoveredByRevert(result: unknown): boolean {
+  return storedMark(result, COVERED_BY_REVERT_KEY);
+}
+
+function storedMark(result: unknown, key: string): boolean {
   return (
     typeof result === 'object' &&
     result !== null &&
-    (result as Record<string, unknown>)[RESOLVED_MARKERS_KEY] === true
+    (result as Record<string, unknown>)[key] === true
   );
 }
 

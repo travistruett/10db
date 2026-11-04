@@ -454,6 +454,43 @@ describe('retryWorkstream', () => {
       expect(builderNotes(ws.id)).toHaveLength(1);
     });
 
+    it('tells a run again whose only commit result since was no new commit, one the revert covers', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        insertToolOp(ctx, {
+          workstreamId: ws.id,
+          sessionId: mintId('Session'),
+          opId: 'op-reused',
+          tool: 'commit',
+          result: { sha: 'd'.repeat(40), alreadyCommitted: true, coveredByRevert: true },
+        });
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      const retried = retryWorkstream(state, ws.id);
+      expect(builderNotes(ws.id)).toHaveLength(2);
+      expect(retried.notice?.key).toBe('reverted-work');
+    });
+
+    it('does not tell a run again that was handed a commit already on the branch the revert does not cover', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        insertToolOp(ctx, {
+          workstreamId: ws.id,
+          sessionId: mintId('Session'),
+          opId: 'op-after',
+          tool: 'commit',
+          result: { sha: 'd'.repeat(40), alreadyCommitted: true },
+        });
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      retryWorkstream(state, ws.id);
+      expect(builderNotes(ws.id)).toHaveLength(1);
+    });
+
     it('names the later revert when the run was left out again', () => {
       const ws = failedAt(0, leftOut(REVERT));
       retryWorkstream(state, ws.id);
