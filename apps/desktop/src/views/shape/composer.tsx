@@ -2,7 +2,7 @@ import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@m
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { FILE_PICKER_ACCEPT } from './dropped-files';
-import type { LateOutcome } from './late-outcome';
+import { keepBoth, type LateOutcome } from './late-outcome';
 import { isSendKey } from './use-shape-keys';
 
 export interface ComposerProps {
@@ -27,11 +27,7 @@ export interface ComposerProps {
   readonly late: LateOutcome | null;
   /** This input has taken `late`. */
   readonly onLateTaken: () => void;
-  /**
-   * Told what the input holds each time it changes, so a screen that is about to replace this input
-   * can carry the text over. It is empty while a send of the text is in flight: that text is already
-   * on its way, and carrying it too would put it back after the send succeeds.
-   */
+  /** Told what the input holds each time it changes, so a screen replacing it can carry the text. */
   readonly onDraft: (text: string) => void;
 }
 
@@ -61,16 +57,15 @@ export function Composer(props: ComposerProps) {
     if (late.failure !== null) setFailure(late.failure);
     const text = late.draft;
     // Whatever was typed since stays, with the text that failed ahead of it.
-    if (text !== null)
-      setDraft((typed) => (typed.includes(text) ? typed : `${text}\n\n${typed}`.trim()));
+    if (text !== null) setDraft((typed) => keepBoth(typed, text));
   }
   useEffect(() => {
     if (late !== null) onLateTaken();
   }, [late, onLateTaken]);
   const { onDraft } = props;
   useEffect(() => {
-    onDraft(sending ? '' : draft);
-  }, [draft, sending, onDraft]);
+    onDraft(draft);
+  }, [draft, onDraft]);
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return;

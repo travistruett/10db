@@ -13,8 +13,15 @@ export interface LateOutcome {
   readonly refused: readonly string[];
   /** Why a send failed. */
   readonly failure: string | null;
-  /** The text of the send that failed, to put back in the input. */
+  /** What goes in the input: what it held when it left, the text of a send that failed, or both. */
   readonly draft: string | null;
+}
+
+/** One text holding both: the first when it has the second already, otherwise the second ahead. */
+export function keepBoth(typed: string, failed: string): string {
+  if (typed.includes(failed)) return typed;
+  if (failed.includes(typed)) return failed;
+  return `${failed}\n\n${typed}`;
 }
 
 const waiting = new Map<ShapeId, LateOutcome>();
@@ -24,13 +31,14 @@ const changed = (): void => {
   for (const listener of listeners) listener();
 };
 
-/** Adds `more` to what waits for `shapeId`; a later failure or draft replaces an earlier one. */
+/** Adds `more` to what waits for `shapeId`: a later failure replaces an earlier one, a draft joins it. */
 export function leaveLate(shapeId: ShapeId, more: Partial<LateOutcome>): void {
   const base = waiting.get(shapeId);
+  const { draft = null } = more;
   waiting.set(shapeId, {
     refused: [...(base?.refused ?? []), ...(more.refused ?? [])],
     failure: more.failure ?? base?.failure ?? null,
-    draft: more.draft ?? base?.draft ?? null,
+    draft: draft === null ? (base?.draft ?? null) : keepBoth(base?.draft ?? '', draft),
   });
   changed();
 }

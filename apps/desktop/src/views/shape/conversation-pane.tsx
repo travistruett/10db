@@ -88,23 +88,30 @@ export function ConversationPane({
     };
   }, []);
   const opened = useRef<ShapeId | null>(null);
-  // The last send on this screen that failed before anything opened the conversation, with its
-  // text: a drop that opens it afterwards replaces the input, and this is what it would lose.
-  const failedSend = useRef<{ readonly text: string; readonly message: string } | null>(null);
+  // Why the last send on this screen failed, if it failed before anything opened the conversation:
+  // a drop that opens it afterwards replaces the input, and this is what it would lose.
+  const failedSend = useRef<string | null>(null);
   // What the input holds now. The input unmounts when the conversation opens, so this is what its
   // replacement is given, whatever the builder has typed, edited or cleared since a send failed.
   const typed = useRef('');
+  // The text of the last send, unless it failed. The input still shows it during the send, but it is
+  // on its way, so carrying it too would put it back after the send succeeds. Edited, it is the
+  // builder's again and is carried as it stands, since nothing can tell which part they meant to
+  // keep. A failure clears this at once, so the input's text counts from that moment.
+  const sent = useRef<string | null>(null);
   const open = (id: ShapeId): void => {
     if (opened.current !== null) return;
+    // Taken once: after the builder has left, every later finish comes through here again.
+    const input = typed.current.trim() === sent.current ? '' : typed.current;
+    typed.current = '';
     // A send that failed first, with the screen still here, waits for a conversation to be left to.
     // Left too, it must still go: nothing else will, and opening the conversation later shows it.
     // Its text is not put back, since the input may have been edited since; and a builder who
     // cleared the input has dealt with the failure, so it stays behind with the text.
-    const hasText = typed.current.trim() !== '';
-    if (failedSend.current !== null && hasText)
-      leaveLate(id, { failure: failedSend.current.message });
+    const hasText = input.trim() !== '';
+    if (failedSend.current !== null && hasText) leaveLate(id, { failure: failedSend.current });
     failedSend.current = null;
-    if (hasText) leaveLate(id, { draft: typed.current });
+    if (hasText) leaveLate(id, { draft: input });
     if (!here.current) return;
     opened.current = id;
     onOpened(id);
@@ -243,6 +250,7 @@ export function ConversationPane({
         onSend={async (text) => {
           const before = latest.current;
           failedSend.current = null;
+          sent.current = text;
           let id: ShapeId;
           // Set once the conversation exists, even if the send into it then fails.
           let made: ShapeId | null = null;
@@ -252,16 +260,18 @@ export function ConversationPane({
             await send.mutateAsync({ shapeId: id, text });
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
+            sent.current = null;
             if (shapeId !== null) throw error;
             // Where the input went: the conversation a drop opened, or, when the builder left this
             // screen first, the one this send made, so opening it later still shows why.
             const gone = opened.current ?? (here.current ? null : made);
             if (gone === null) {
               // The drop may still open the conversation and take this input with it.
-              failedSend.current = { text, message };
+              failedSend.current = message;
               throw error;
             }
-            // Its input is gone, so the conversation's new one gets the reason and the text.
+            // Its input is gone, so the conversation's new one gets the reason and the text, beside
+            // whatever the builder's edits left there.
             leaveLate(gone, { failure: message, draft: text });
             return;
           }
