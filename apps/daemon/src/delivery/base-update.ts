@@ -21,7 +21,7 @@ import {
   type DeliveryContext,
 } from './context';
 import { checkInstall, describeBroken } from './install-health';
-import { installedLockfile, recordInstall } from './installed-lockfile';
+import { installedLockfile, noticeRepaired, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import {
   absentFrom,
@@ -32,7 +32,6 @@ import {
 } from './migration-carry';
 import {
   baseNotices,
-  installNotices,
   migrationNotices,
   NOTICE_KEY,
   renumberedLines,
@@ -265,11 +264,6 @@ type Installed =
       readonly installs?: number;
       /** Some install removed the copy's `node_modules` first, in `refresh` or the second pass. */
       readonly startedOver?: true;
-      /**
-       * Set when `refresh`'s own start over, after a failed install left the copy broken, brought it
-       * back: what that install left unresolved. The copy is whole, so `broken` is absent.
-       */
-      readonly repaired?: string;
     }
   | { readonly kind: 'aborted' };
 
@@ -1213,12 +1207,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   ): Promise<Installed> {
     const first = await installOnce(batch, project, path, signal, false);
     if (first.kind !== 'done') return first;
-    if (first.broken === undefined) {
-      // `refresh` started over by itself after a failed install left the copy broken, and the copy is
-      // whole now, whether that retry exited zero or not: that is a repair too.
-      if (first.repaired !== undefined) noteRepaired(batch, first.repaired);
-      return first;
-    }
+    if (first.broken === undefined) return first;
     // A failed install was already started over by `refresh`, or was a timeout or a refused host
     // that a repeat would only meet again: it is reported as it is. An install that exited zero gets
     // the second pass, and `refresh` adds no retry to a start over it was asked for, so one gate
@@ -1253,17 +1242,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         broken: after.kind === 'broken' ? describeBroken(after) : first.broken,
       };
     }
-    noteRepaired(batch, first.broken);
+    noticeRepaired(ctx, batch.id, first.broken);
     return second;
-  }
-
-  /** Leaves the `install-repaired` notice; a notice that can't be written is logged, not a stop. */
-  function noteRepaired(batch: BatchDto, unresolved: string): void {
-    try {
-      showNotice(ctx.state, batch.id, installNotices.repaired(unresolved, ctx.clock.now()));
-    } catch (error) {
-      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'install notice not written');
-    }
   }
 
   /** One install, and the check after it; `again` removes `node_modules` first whatever it holds. */
@@ -1300,7 +1280,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         ...(before.kind === 'broken' || again ? { seeded: false } : {}),
         ...(again ? { startOver: true as const } : {}),
       });
-      await recordInstall(ctx, batch.id, path, installed);
+      // A failed install with every package resolved goes on to the gate, with the failure in its note.
+      await recordInstall(ctx, batch.id, path, installed, { goesOnAfterFailure: true });
       const after = expected && installed.kind !== 'aborted' ? checkInstall(path) : null;
       const broken = after?.kind === 'broken' ? describeBroken(after) : undefined;
       switch (installed.kind) {
@@ -1337,11 +1318,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             final: true as const,
             installs: installed.installs,
             ...(installed.startedOver ? { startedOver: true as const } : {}),
-            ...(broken === undefined
-              ? installed.leftBroken === undefined
-                ? {}
-                : { repaired: installed.leftBroken }
-              : { broken }),
+            ...(broken === undefined ? {} : { broken }),
           };
         }
         case 'installed':
@@ -1355,11 +1332,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             note: null,
             installs: installed.installs,
             ...(installed.startedOver ? { startedOver: true as const } : {}),
-            ...(broken === undefined
-              ? installed.leftBroken === undefined
-                ? {}
-                : { repaired: installed.leftBroken }
-              : { broken }),
+            ...(broken === undefined ? {} : { broken }),
           };
         case 'skipped':
           return {

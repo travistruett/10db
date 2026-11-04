@@ -30,11 +30,16 @@
   over happened.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. Both repairs
-  leave it: the gate's second pass, and `refresh`'s own start over after a failed install left the copy broken
-  (`refresh` reports what that install left as `leftBroken`, and `install` writes the notice when the copy is whole
-  afterwards, whether the retry exited zero or not). A copy `refresh` starts over before its first install, because
-  it was already broken, leaves no notice when that install brings it back: nothing failed. The next
-  repair replaces it with its own time. The time is the delivery context's clock. The notice is history, not a
+  leave it: the gate's second pass, and `refresh`'s own start over after a failed install left the copy broken.
+  `refresh` reports what that install left as `leftBroken`, and `recordInstall`, which every caller of `refresh`
+  runs, writes the notice when the copy is whole afterwards, so a repair at the cut, in Retry's repair and in
+  `install_dependencies` leaves it as the install before a gate does. A retry that exits non-zero with every
+  package resolved leaves it only before a gate, the one caller that goes on then (`goesOnAfterFailure`), with the
+  failure in the gate's note. The others stop on that failure, so no repair reached anything: the cut refuses and
+  its batch is gone, Retry's repair drops the copy, and `install_dependencies` tells the lane the install failed.
+  A copy `refresh` starts over before its first install, because it was already broken, leaves no notice when that
+  install brings it back: nothing failed. The next repair replaces it with its own time. The time is the delivery
+  context's clock. The notice is history, not a
   wait: the desktop's `taskHistory` (`task-state.ts`) keeps listing it in the drawer after the run failed or
   the batch closed, was abandoned or had its pull request merged, when `taskNotices` drops the batch's notices.
   The card's state line does not show it then.

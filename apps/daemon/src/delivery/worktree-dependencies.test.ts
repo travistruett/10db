@@ -588,6 +588,17 @@ describe('refreshing a worktree’s dependencies', () => {
       installedCopy('packageManager: pnpm@12.9.1\n');
       const result = await refresh(dependencies({ FAKE_PNPM_EXIT: '7' }));
       expect(result).toMatchObject({ kind: 'failed', installs: 1, startedOver: false });
+      expect(result).not.toHaveProperty('leftBroken');
+    });
+
+    it('names what the failed install left broken on a retry that failed too', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      failingPnpm('true');
+      expect(await refresh(dependencies())).toMatchObject({
+        kind: 'failed',
+        installs: 2,
+        leftBroken: expect.stringContaining('left-pad') as string,
+      });
     });
 
     it('counts two installs and a start over when the start over times out', async () => {
@@ -682,6 +693,7 @@ describe('refreshing a worktree’s dependencies', () => {
         kind: 'installed',
         installs: 2,
         startedOver: true,
+        leftBroken: expect.stringContaining('left-pad') as string,
       });
     });
   });
