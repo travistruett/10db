@@ -1,9 +1,16 @@
-import { DecisionId, KnowledgeItemKind, KnowledgeState, PrincipleId } from '@10db/contracts';
+import {
+  DecisionId,
+  KnowledgeItemKind,
+  KnowledgeState,
+  PrincipleId,
+  type KnowledgeItemDto,
+} from '@10db/contracts';
 import { Button, Loader, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import {
   useNewestVersion,
   useWithdrawDecision,
+  useWithdrawPreview,
   useWithdrawPrinciple,
   type NewestVersion,
   type TracedRecord,
@@ -73,36 +80,41 @@ function NewerVersion({
   );
 }
 
+/** A record in words: a decision as its question and choice, a principle as its statement. */
+function wordsOf(item: KnowledgeItemDto): string {
+  return item.kind === KnowledgeItemKind.Decision
+    ? `${item.question} → ${item.choice}`
+    : item.statement;
+}
+
 /**
- * Withdraw…: the record leaves briefings and search and stays under History with the reason. Asked
- * of an older version, it says which record to withdraw instead and offers it.
+ * The reason step. Before the builder confirms it asks the daemon, by a dry run, which older version a
+ * withdrawal would make current again, and names it: that text goes back into briefings.
  */
-export function WithdrawDialog({
-  record,
+function WithdrawReason({
+  target,
   onClose,
 }: {
-  readonly record: Withdrawable;
+  readonly target: Withdrawable;
   readonly onClose: () => void;
 }) {
-  const [target, setTarget] = useState<Withdrawable>(record);
   const decision = useWithdrawDecision();
   const principle = useWithdrawPrinciple();
-  if (target.state === KnowledgeState.Superseded)
-    return (
-      <NewerVersion
-        record={target}
-        onClose={onClose}
-        onPick={(newest) => {
-          setTarget(newest);
-        }}
-      />
-    );
+  const preview = useWithdrawPreview(target);
+  const restores = preview.data?.restores ?? null;
   const isDecision = target.kind === KnowledgeItemKind.Decision;
   const withdraw = isDecision ? decision : principle;
   return (
     <ReasonDialog
       title={isDecision ? 'Withdraw Decision' : 'Withdraw Principle'}
-      intro={`“${target.label}” leaves briefings and search. It stays under History with your reason.`}
+      intro={
+        <>
+          {`“${target.label}” leaves briefings and search. It stays under History with your reason.`}
+          {restores
+            ? ` “${wordsOf(restores)}” becomes current again, and returns to briefings and search.`
+            : null}
+        </>
+      }
       submitLabel="Withdraw"
       required
       pending={withdraw.isPending}
@@ -115,4 +127,29 @@ export function WithdrawDialog({
       onClose={onClose}
     />
   );
+}
+
+/**
+ * Withdraw…: the record leaves briefings and search and stays under History with the reason. Asked
+ * of an older version, it says which record to withdraw instead and offers it.
+ */
+export function WithdrawDialog({
+  record,
+  onClose,
+}: {
+  readonly record: Withdrawable;
+  readonly onClose: () => void;
+}) {
+  const [target, setTarget] = useState<Withdrawable>(record);
+  if (target.state === KnowledgeState.Superseded)
+    return (
+      <NewerVersion
+        record={target}
+        onClose={onClose}
+        onPick={(newest) => {
+          setTarget(newest);
+        }}
+      />
+    );
+  return <WithdrawReason key={target.id} target={target} onClose={onClose} />;
 }

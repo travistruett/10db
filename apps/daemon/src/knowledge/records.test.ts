@@ -120,6 +120,31 @@ describe('the combined list', () => {
     expect(ids(list({ scope: 'you' }))).toEqual([]);
   });
 
+  it('matches partly typed words, and each added word narrows', () => {
+    const d = decide();
+    const p = principle();
+    expect(ids(list({ q: 'que' }))).toEqual([d.id]);
+    expect(ids(list({ q: 'slee' }))).toEqual([p.id]);
+    expect(ids(list({ q: 'que lib' }))).toEqual([d.id]);
+    expect(ids(list({ q: 'que zebra' }))).toEqual([]);
+    expect(ids(list({ q: 'slee zebra' }))).toEqual([]);
+  });
+
+  it('matches any whole word when asked to, for free text', () => {
+    const d = decide();
+    expect(ids(list({ q: 'which queue should we use', match: 'any_word' }))).toEqual([d.id]);
+    expect(ids(list({ q: 'which queue should we use' }))).toEqual([]);
+  });
+
+  it.each(['-', '***', '"'])('reads %s, which holds no word, as no search', (q) => {
+    const d = decide();
+    const p = principle();
+    expect(ids(list({ q }))).toEqual(ids(list()));
+    expect(ids(list({ q })).toSorted()).toEqual([d.id, p.id].toSorted());
+    const unavailable = { available: false, message: 'Search is unavailable' };
+    expect(list({ q }, unavailable).items).toHaveLength(2);
+  });
+
   it('truncates at the limit and says so', () => {
     for (let i = 0; i < 3; i += 1) decide({ question: `Question ${String(i)}?` });
     const result = list({ limit: '2' });
