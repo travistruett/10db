@@ -812,24 +812,31 @@ describe('additions, changes and removals', () => {
     ]);
   });
 
-  it('refuses Convert of a question about a task a converted removal cancelled, saying it was removed', () => {
+  const whoPays = (m: string, about: string) => ({
+    key: 'who-pays',
+    text: 'Who pays for the extra seats?',
+    for: 'finance',
+    about,
+    sourceMessageIds: [m],
+  });
+  /** A converted task, with a pinned question about it and its removal both pending. */
+  const removalBesideQuestion = () => {
     const m = c.say();
     propose({ looseTasks: [loose(m, 'seats')] });
     converted('seats');
     const task = taskTitled('Task seats');
-    const m2 = c.say('Drop it, and who pays?');
-    propose({
-      removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }],
-      questions: [
-        {
-          key: 'who-pays',
-          text: 'Who pays for the extra seats?',
-          for: 'finance',
-          about: 'seats',
-          sourceMessageIds: [m2],
-        },
-      ],
+    const m2 = c.say('Who pays?');
+    propose({ questions: [whoPays(m2, 'seats')] });
+    write((ctx) => {
+      editProposal(ctx, rowOf('who-pays').id, { text: 'Who pays now?' });
     });
+    const m3 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m3] }] });
+    return task;
+  };
+
+  it('refuses Convert of a question about a task a converted removal cancelled, saying it was removed', () => {
+    const task = removalBesideQuestion();
     converted(`remove:${task.id}`);
     const out = convert('who-pays');
     expect(out.ok ? [] : out.errors).toEqual([
@@ -837,6 +844,87 @@ describe('additions, changes and removals', () => {
     ]);
     expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
     expect(rowOf('who-pays').state).toBe(ShapeProposalState.Pending);
+  });
+
+  it('refuses a question about a task whose removal converts in the same call', () => {
+    const task = removalBesideQuestion();
+    const out = convert(`remove:${task.id}`, 'who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/who-pays is about seats, which was removed/),
+    ]);
+    expect(getTask(c.store.db, task.id).status).not.toBe(TaskStatus.Cancelled);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+  });
+
+  it('refuses at propose a question about a task the same draft removes', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'seats')] });
+    converted('seats');
+    const task = taskTitled('Task seats');
+    const m2 = c.say('Drop it, and who pays?');
+    const out = write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }],
+          questions: [whoPays(m2, 'seats')],
+        }),
+      ),
+    );
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: seats was removed/),
+    ]);
+  });
+
+  /** Goal g's task g1, converted and removed, so a later round can take the key g1 again. */
+  const removedGoalTask = () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    converted('g');
+    const task = taskTitled('Task g1');
+    const m2 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }] });
+    converted(`remove:${task.id}`);
+    return task;
+  };
+
+  it('holds a question about a removed key to the new task, which must be selected', () => {
+    const removed = removedGoalTask();
+    const m = c.say('Bring it back, and who pays?');
+    propose({ looseTasks: [loose(m, 'g1')], questions: [whoPays(m, 'g1')] });
+
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual(["who-pays is about Task g1, which isn't selected"]);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+
+    converted('g1', 'who-pays');
+    const [stored] = listShapeQuestions(c.store.db, c.shape.id);
+    expect(stored?.taskId).toEqual(expect.any(String));
+    expect(stored?.taskId).not.toBe(removed.id);
+  });
+
+  it('keeps a pinned task under a removed key when the draft restates only its question', () => {
+    removedGoalTask();
+    const m = c.say('Bring it back.');
+    propose({ looseTasks: [loose(m, 'g1')] });
+    write((ctx) => {
+      editProposal(ctx, rowOf('g1').id, { title: 'Pinned task' });
+    });
+    const m2 = c.say('Who pays?');
+    propose({ questions: [whoPays(m2, 'g1')] });
+    expect(rowOf('g1').state).toBe(ShapeProposalState.Pending);
+    expect(rowOf('who-pays').state).toBe(ShapeProposalState.Pending);
+  });
+
+  it('puts a question on a goal that took a removed task’s key, not on the cancelled task', () => {
+    removedGoalTask();
+    const m = c.say('A goal for it, and who pays?');
+    propose({ goals: [goalOf(m, 'g1', ['g2'])], questions: [whoPays(m, 'g1')] });
+
+    const out = converted('g1', 'who-pays');
+    const goalId = must(out.results.find((r) => r.key === 'g1')?.goalId, 'the goal');
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toMatchObject([{ goalId, taskId: null }]);
   });
 
   it('leaves nothing behind when a write fails part-way', () => {

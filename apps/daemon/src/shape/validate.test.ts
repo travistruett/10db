@@ -394,6 +394,43 @@ describe('a plan that breaks a rule', () => {
     ).toEqual([expect.stringMatching(/Question 1, about: earlier-task was removed/)]);
   });
 
+  it('refuses a question about a task the same draft removes', () => {
+    const question = {
+      key: 'q',
+      text: 'Who pays?',
+      for: 'finance',
+      about: 'earlier-task',
+      sourceMessageIds: [message],
+    };
+    const removals = [{ taskId: converted, why: 'Not needed', sourceMessageIds: [message] }];
+    expect(check({ questions: [question], removals })).toEqual([
+      expect.stringMatching(/Question 1, about: earlier-task was removed/),
+    ]);
+  });
+
+  it.each<[string, { draft: Record<string, unknown>; over: Partial<PlanWorld> }]>([
+    ['the draft proposes it again', { draft: { looseTasks: [loose('earlier-task')] }, over: {} }],
+    ['a pinned row keeps it', { draft: {}, over: { storedEfforts: new Set(['earlier-task']) } }],
+    [
+      'a pinned goal the draft leaves out keeps it',
+      { draft: {}, over: { pinnedGoalTasks: new Map([['g', ['earlier-task']]]) } },
+    ],
+  ])('accepts a question about a removed key when %s', (_name, { draft, over }) => {
+    const question = {
+      key: 'q',
+      text: 'Who pays?',
+      for: 'finance',
+      about: 'earlier-task',
+      sourceMessageIds: [message],
+    };
+    expect(
+      check(
+        { ...draft, questions: [question] },
+        world({ removedTasks: new Set(['earlier-task']), ...over }),
+      ),
+    ).toEqual([]);
+  });
+
   it('accepts a question about a stored goal or task that is still live', () => {
     expect(
       check(

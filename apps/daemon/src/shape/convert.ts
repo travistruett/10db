@@ -49,6 +49,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { proposePlacement } from '../placement';
+import { removedKeys } from './validate';
 import { buildPlanWorld, tasksInside } from './world';
 
 // Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
@@ -246,6 +247,19 @@ export function convertProposals(
   for (const link of listShapeLinks(ctx.tx, shapeId))
     if (link.goalId !== null) goalIds.set(link.key, link.goalId);
 
+  // Keys whose task is cancelled, or is by this call: the same refusal in either order of selecting.
+  const removed = new Set([
+    ...world.removedTasks,
+    ...removedKeys(
+      world.convertedTasks,
+      new Set(
+        pending
+          .filter((r) => r.kind === 'remove_task')
+          .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
+      ),
+    ),
+  ]);
+
   // Records, questions, changes and removals are judged again as they stand now.
   for (const row of pending) {
     if (row.kind === 'decision') {
@@ -263,13 +277,9 @@ export function convertProposals(
     } else if (row.kind === 'question') {
       const about = ShapeProposalBody.question.parse(row.body).about;
       // A question belongs to a goal or task that is converted already or is converted with it.
-      if (about !== undefined && world.removedTasks.has(about) && !owners.has(about)) {
-        errors.push(
-          `${row.key} is about ${about}, which was removed, so it cannot hold a question`,
-        );
-        continue;
-      }
-      if (about === undefined || world.convertedTasks.has(about) || goalIds.has(about)) continue;
+      if (about === undefined || goalIds.has(about)) continue;
+      // A removed task's key stays converted; only a pending row that reuses it can hold the question.
+      if (world.convertedTasks.has(about) && !removed.has(about)) continue;
       const goal = rows.find((r) => r.kind === 'goal' && r.key === about && r.state === 'pending');
       const owner =
         owners.get(about) ??
@@ -281,11 +291,13 @@ export function convertProposals(
         const held = rows.find((r) => r.key === about);
         const goalOf = rows.find((r) => tasksInside(r).includes(about));
         errors.push(
-          held !== undefined
-            ? `${row.key} is about ${about}, which ${unfitForQuestion(held)}`
-            : goalOf !== undefined
-              ? `${row.key} is about ${about}, whose goal ${goalOf.key} ${unfitForQuestion(goalOf)}`
-              : `${row.key} is about ${about}, and no proposal has that key`,
+          removed.has(about)
+            ? `${row.key} is about ${about}, which was removed, so it cannot hold a question`
+            : held !== undefined
+              ? `${row.key} is about ${about}, which ${unfitForQuestion(held)}`
+              : goalOf !== undefined
+                ? `${row.key} is about ${about}, whose goal ${goalOf.key} ${unfitForQuestion(goalOf)}`
+                : `${row.key} is about ${about}, and no proposal has that key`,
         );
       } else if (!selectedIds.has(owner.row.id))
         errors.push(`${row.key} is about ${owner.title}, which isn't selected`);
@@ -432,10 +444,16 @@ export function convertProposals(
   }
 
   // A question is only stored, under the goal or task it is about; nothing is sent.
+  // A goal may take a removed task's key: `taskIds` still maps it to the cancelled task, unless this
+  // call made a new one under it.
+  const liveTask = (key: string): TaskId | undefined => {
+    const id = taskIds.get(key);
+    return removed.has(key) && id === world.convertedTasks.get(key) ? undefined : id;
+  };
   for (const row of pending.filter((r) => r.kind === 'question')) {
     const question = ShapeProposalBody.question.parse(row.body);
     const goalId = question.about === undefined ? undefined : goalIds.get(question.about);
-    const taskId = question.about === undefined ? undefined : taskIds.get(question.about);
+    const taskId = question.about === undefined ? undefined : liveTask(question.about);
     const stored = insertShapeQuestion(ctx, {
       shapeId,
       proposalId: row.id,

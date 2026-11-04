@@ -28,7 +28,7 @@ import {
   type DbReader,
   type ShapeProposalRow,
 } from '@10db/db';
-import type { PlanWorld } from './validate';
+import { removedKeys, type PlanWorld } from './validate';
 
 /** How a landing target reads in a refusal: "merges into main when checks pass". */
 const landsText = (target: LandingTarget): string =>
@@ -74,9 +74,7 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       .filter((r) => r.kind === 'remove_task' && r.state === ShapeProposalState.Accepted)
       .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
   );
-  const removedTasks = new Set(
-    [...convertedTasks].filter(([, id]) => removedIds.has(id)).map(([key]) => key),
-  );
+  const removedTasks = new Set(removedKeys(convertedTasks, removedIds));
   const pinned = proposals.filter(
     (r) => r.state === ShapeProposalState.Pending && r.pinned.length > 0,
   );
