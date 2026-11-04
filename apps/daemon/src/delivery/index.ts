@@ -40,6 +40,7 @@ export {
   LaunchVerdict,
 } from './launch-rule';
 export { recoverBatches } from './recover';
+export { moveRetiredLandings } from './retired-landings';
 export { workstreamChanges } from './workstream-changes';
 export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
 export { createWorktreeDependencies } from './worktree-dependencies';

@@ -277,9 +277,36 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
     });
 
-    it('says the install is broken, and runs no gate, when the install does not bring the packages back', async () => {
+    it('starts over once more by itself when the install leaves the copy broken, and the gate runs with a notice that says so', async () => {
+      const { batch, path } = await pruned();
+      h.pnpm.makes({ 'node_modules/.pnpm/leftover2/x.js': '1\n' });
+      // Call 1 was the cut's, 2 the install before the gate (it brings nothing back), 3 the repair.
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
+        kind: 'up_to_date',
+        note: null,
+      });
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
+      expect(existsSync(join(path, 'node_modules', '.pnpm', 'leftover2'))).toBe(true);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.line).toMatch(/install in this copy was repaired at /i);
+      expect(notice.line).toContain(h.ctx.clock.now().toISOString().slice(0, 16).replace('T', ' '));
+    });
+
+    it('raises no notice when the first install brings the packages back', async () => {
+      const { batch } = await pruned();
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+    });
+
+    it('says the install is broken, and runs no gate, when two installs in a row do not bring the packages back', async () => {
       const { batch } = await pruned();
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
       expect(update.kind).toBe('install_broken');
       expect(update.kind === 'install_broken' && update.note).toMatch(
         /install in this copy is broken: 1 of 1 dependencies.*\(\.: left-pad\).*no fix attempt was counted/s,
@@ -287,6 +314,50 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       // The next gate tries again: nothing recorded this install as good.
       h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
       expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    });
+
+    it('says the install is broken, with no notice, when both installs fail and leave no node_modules', async () => {
+      const { batch, path } = await pruned();
+      h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(existsSync(join(path, 'node_modules'))).toBe(false);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(
+        /install in this copy is broken: 1 of 1 dependencies.*\(\.: left-pad\).*install this branch's lockfile needs failed \(exit 1/s,
+      );
+    });
+
+    it('says the install is broken, with no notice, when the second pass throws before it installs', async () => {
+      const { batch } = await pruned();
+      const read = h.git.blobAt.bind(h.git);
+      let reads = 0;
+      vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+        if (rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+          reads += 1;
+          // The first pass reads it before its install and to record it; the third read is the second pass's.
+          if (reads === 3) throw new Error('git is gone');
+        }
+        return read(repo, rev, file);
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(reads).toBe(3);
+      expect(h.pnpm.calls()).toHaveLength(2);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/git is gone/);
+    });
+
+    it('lets the gate run with the failure in its note when the second install exits non-zero but every package resolves', async () => {
+      const { batch } = await pruned();
+      h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+      // Calls 2 and 3 are the first install and refresh's own retry; call 4 is the start over.
+      h.pnpm.makesOnCall(4, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(h.pnpm.calls()).toHaveLength(4);
+      expect(update.kind).toBe('up_to_date');
+      expect(update.kind === 'up_to_date' && update.note).toMatch(/needs failed \(exit 1/);
+      expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('install-repaired');
     });
 
     it('leaves a project whose gate never needed node_modules alone', async () => {

@@ -907,6 +907,24 @@ export function patchTask(
 }
 
 /**
+ * Sets where a task lands, started or not. `patchTask` refuses a task that has run, because its
+ * batch's branch and pull request are already cut; the daemon calls this for a task whose landing
+ * names a branch that no longer exists and that no open batch uses, which `patchTask` could never
+ * move off it.
+ */
+export function resetTaskLanding(ctx: WriteContext, id: TaskId, landing: TaskLanding): TaskDto {
+  if (getTask(ctx.tx, id).status === TaskStatus.Cancelled)
+    throw new ConflictError('A removed task can no longer be edited');
+  ctx.tx
+    .update(schema.tasks)
+    .set({ ...landingColumns(landing), updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
+}
+
+/**
  * A task's areas change only while it has never started: its lane takes the areas as claims when it
  * starts, and a finished task's are history. Every area must be one the project has.
  */

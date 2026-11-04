@@ -37,6 +37,42 @@ describe('the sessions-refused card', () => {
   });
 });
 
+describe('the sessions-refused card for a start that kept timing out', () => {
+  function subscription() {
+    const test = createTestStore();
+    close = test.close;
+    return getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind: 'claude_subscription', label: 'Claude plan' }).id,
+    );
+  }
+
+  it('says the starts timed out, not that the account is signed out, and still names the sign-in command', () => {
+    const account = subscription();
+    const card = refusedCard(account, {
+      problem: AccountProblem.StartTimeout,
+      message:
+        'Claude Code reported no account within 30 s on each of 2 starts for account "Claude plan", but claude auth status says it is signed in, so its starts kept timing out',
+      seenIdentity: null,
+    });
+    expect(card.body).toContain('its starts kept timing out');
+    expect(card.body).toMatch(/load/i);
+    expect(card.body).toContain('claude /login');
+    expect(card.body).not.toContain('Sign in again with');
+    expect(card.foldKey).toContain('start_timeout');
+  });
+
+  it('names the sign-in command for a signed-out account', () => {
+    const card = refusedCard(subscription(), {
+      problem: AccountProblem.SignedOut,
+      message: 'it looks signed out',
+      seenIdentity: null,
+    });
+    expect(card.body).toContain('Sign in again with:');
+    expect(card.body).toContain('claude /login');
+  });
+});
+
 describe('the cards that used to hold nothing', () => {
   type Made = ReturnType<typeof accounts>;
   function accounts() {

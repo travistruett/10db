@@ -80,6 +80,7 @@ import {
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
+  moveRetiredLandings,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
@@ -647,6 +648,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
+    clock,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
       gateTimeoutMs: limits.gateTimeoutMs,
@@ -984,6 +986,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
+  // Tasks made for a branch that is gone from origin land in their project's default now. It asks
+  // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
+  const retiredLandingsAbort = new AbortController();
+  const retiredLandings = moveRetiredLandings(delivery, retiredLandingsAbort.signal).catch(
+    (error: unknown) => {
+      logger.warn({ err: error }, 'tasks on retired landing branches not moved');
+    },
+  );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
@@ -1273,6 +1283,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeShip();
       unsubscribePrWatch();
       await prWatch.stop();
+      retiredLandingsAbort.abort();
+      await retiredLandings;
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
