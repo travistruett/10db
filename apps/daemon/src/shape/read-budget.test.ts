@@ -621,6 +621,25 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(spent()).toBe(big.size);
     });
 
+    it('charges 0 for a Read Claude Code answered with file_unchanged, which added no bytes', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      expect(spent()).toBe(big.size);
+      measure(big.storedPath, { type: 'file_unchanged', file: { filePath: big.storedPath } });
+      expect(spent()).toBe(0);
+    });
+
+    it('keeps the allowance of a parts result, whose bytes stayed on disk, while file_unchanged gives it back', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, { type: 'parts', file: { filePath: big.storedPath, count: 3 } });
+      expect(spent()).toBe(big.size);
+      measure(big.storedPath, { type: 'file_unchanged', file: { filePath: big.storedPath } });
+      expect(spent()).toBe(0);
+    });
+
     it('is counted after a restart', async () => {
       const big = dropBig();
       await nextTurn('Hello');

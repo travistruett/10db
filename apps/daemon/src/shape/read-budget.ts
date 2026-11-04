@@ -63,6 +63,18 @@ export function measuredMediaBytes(response: unknown, depth = 0): number {
   return total;
 }
 
+/**
+ * Whether a Read's result is Claude Code's `file_unchanged` (`SdkFileReadOutput`): the file is the one an
+ * earlier tool result already carries, so this Read adds nothing to the request.
+ */
+export function isFileUnchanged(response: unknown): boolean {
+  return (
+    typeof response === 'object' &&
+    response !== null &&
+    (response as Record<string, unknown>)['type'] === 'file_unchanged'
+  );
+}
+
 /** The pictures Claude Code's `Read` turns into an image block. */
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
