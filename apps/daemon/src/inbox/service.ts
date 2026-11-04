@@ -46,6 +46,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
+import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
@@ -316,6 +317,8 @@ export function createInboxService(deps: {
    * it is stopped, not told. It must not throw; it logs what it could not do.
    */
   onParkAnswer?(item: InboxItemDto): void;
+  /** Where a failure that must not fail the builder's answer is logged. */
+  readonly log?: Logger;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -390,7 +393,10 @@ export function createInboxService(deps: {
           note: 'Covered by the project rule just allowed on another lane’s card',
         });
       } catch (error) {
-        if (!(error instanceof ConflictError)) throw error;
+        // Answered meanwhile: nothing to release. Any other failure leaves that card open for the builder;
+        // it must not fail the answer they already gave, which is stored and delivered.
+        if (error instanceof ConflictError) continue;
+        deps.log?.warn({ err: error, cardId: card.id }, 'could not release a covered edit card');
       }
     }
   }

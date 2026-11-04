@@ -2240,6 +2240,46 @@ describe('permission broker in a sandboxed lane', () => {
         expect(listPermissionRules(state.db, a.project.id, a.workstream.id)).toHaveLength(1);
       });
 
+      it("still returns the builder's answered card when releasing the other lane's card fails, leaving it open and logging it", async () => {
+        const warnings: { fields: unknown; message: unknown }[] = [];
+        const logger = {
+          ...silentLogger,
+          warn: (fields: unknown, message?: unknown) => warnings.push({ fields, message }),
+        };
+        const failing: { id?: string } = {};
+        inbox = createInboxService({
+          state: {
+            db: state.db,
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx);
+                // A write failure that lands as the other lane's card is answered rolls it back.
+                if (
+                  failing.id !== undefined &&
+                  (result as { id?: string } | null)?.id === failing.id
+                ) {
+                  throw new Error('disk full');
+                }
+                return result;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: logger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.id = betaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'OPEN' });
+        expect(openCards().map((c) => c.id)).toEqual([betaCard.id]);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]?.fields).toMatchObject({ cardId: betaCard.id });
+      });
+
       it('leaves another lane’s card for a different file open', () => {
         const a = seedWorkstream(base);
         const b = seedWorkstream(base, { project: a.project, title: 'Beta' });

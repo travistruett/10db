@@ -479,6 +479,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       runner?.deliverParkedAnswer(target, item);
     },
     onParkAnswer: parkAnswers,
+    log: logger,
     onCheckAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer);
