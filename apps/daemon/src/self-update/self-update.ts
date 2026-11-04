@@ -374,7 +374,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * Since when only shaping conversations have held the drain, and the card that told the builder
    * once they had for too long. Null while a lane, a gate or a job holds it too, or nothing does.
    */
-  let shapeHold: { readonly since: Date; cardId: InboxItemId | null } | null = null;
+  let shapeHold: {
+    readonly since: Date;
+    cardId: InboxItemId | null;
+    /** The conversations the card names, to reword it when they change. */
+    names: string;
+  } | null = null;
 
   function releaseShapeHold(reason: string): void {
     if (shapeHold?.cardId) inbox.resolve(shapeHold.cardId, reason);
@@ -393,13 +398,18 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return;
     }
     const now = deps.clock.now();
-    shapeHold ??= { since: now, cardId: null };
-    if (
-      shapeHold.cardId !== null ||
-      now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS
-    )
-      return;
+    shapeHold ??= { since: now, cardId: null, names: '' };
     const names = turns.map((turn) => `“${turn.title}”`).join(', ');
+    if (shapeHold.cardId !== null) {
+      // New turns are parked during a drain, so the set only shrinks: say who still holds it.
+      if (names !== shapeHold.names) {
+        shapeHold.names = names;
+        inbox.reword(shapeHold.cardId, shapeHoldBody(names, drainingSince));
+      }
+      return;
+    }
+    if (now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS) return;
+    shapeHold.names = names;
     logger.warn(
       { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
       'only shaping conversations keep the update waiting, and lanes stay paused',
@@ -411,12 +421,16 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       projectId,
       workstreamId: null,
       title: 'A shaping conversation is holding the update, and lanes are paused',
-      body: [
-        `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${drainingSince.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
-        `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
-      ].join('\n\n'),
+      body: shapeHoldBody(names, drainingSince),
       foldKey: SHAPE_HOLD_FOLD_KEY,
     }).id;
+  }
+
+  function shapeHoldBody(names: string, since: Date): string {
+    return [
+      `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${since.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
+      `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
+    ].join('\n\n');
   }
 
   /**

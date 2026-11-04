@@ -626,6 +626,20 @@ describe('a drain that only shaping conversations hold', () => {
     expect(shapeCards()[0]?.body).toMatch(/“Denser board”.*“Login flow”/);
   });
 
+  it('names only the conversations still holding it once one of them ends', async () => {
+    const login = { id: mintId('Shape'), title: 'Login flow' };
+    const update = await drainingForShapes(DENSER, login);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    world.busy = 1;
+    world.shapes = [login];
+    await update.tick();
+    const open = shapeCards().filter((item) => item.state === InboxState.Open);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.body).toContain('“Login flow”');
+    expect(open[0]?.body).not.toContain('“Denser board”');
+  });
+
   it('raises none while a lane or gate also holds the drain', async () => {
     const update = await drainingForShapes(DENSER);
     world.busy = 2;
