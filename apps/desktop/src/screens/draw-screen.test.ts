@@ -37,6 +37,13 @@ afterEach(() => {
   for (const f of frames()) f.remove();
 });
 
+/** A capture that fails with something that is not an Error, as html-to-image's `img.onerror = reject` does. */
+const failWith = (reason: unknown): Promise<never> =>
+  new Promise((_resolve, reject) => {
+    // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors
+    reject(reason);
+  });
+
 const draw = (capture: () => Promise<DrawnScreen> = () => Promise.resolve(picture)) =>
   drawScreen({
     request,
@@ -149,6 +156,71 @@ describe('drawing a screen', () => {
       reason: 'The Board could not be made into a picture: the canvas is tainted',
     });
     expect(frames()).toEqual([]);
+  });
+
+  it('names a readable cause when the capture rejects with a DOM event, as html-to-image does for an image', async () => {
+    const drawing = draw(() => failWith(new Event('error')));
+    say(ready);
+    const result = await drawing;
+    expect(result.ok).toBe(false);
+    const reason = !result.ok ? result.reason : '';
+    expect(reason).not.toContain('[object');
+    expect(reason).toMatch(/^The Board could not be made into a picture: .*image/);
+  });
+
+  it('names the message of an error event, and of any object that carries one', async () => {
+    const reasonOf = async (cause: unknown): Promise<string> => {
+      const drawing = draw(() => failWith(cause));
+      say(ready);
+      const result = await drawing;
+      return result.ok ? '' : result.reason;
+    };
+    expect(await reasonOf(new ErrorEvent('error', { message: 'font failed' }))).toContain(
+      'font failed',
+    );
+    expect(await reasonOf({ message: 'no canvas' })).toContain('no canvas');
+    expect(await reasonOf({})).not.toContain('[object');
+  });
+
+  it('tells a slow capture from a slow load', async () => {
+    const drawing = draw(() => new Promise(() => undefined));
+    await vi.advanceTimersByTimeAsync(5_000);
+    say(ready);
+    expect(frames()).toHaveLength(1);
+    // The load timer no longer runs: the app had said it was ready.
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(frames()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    const result = await drawing;
+    expect(result.ok).toBe(false);
+    const reason = !result.ok ? result.reason : '';
+    expect(reason).toBe(
+      'The Board finished loading, but making it into a picture took longer than 15 s, so it was not drawn.',
+    );
+    expect(reason).not.toContain('finish loading');
+    expect(frames()).toEqual([]);
+  });
+
+  it('gives a capture its own time, after the load has used its own', async () => {
+    const drawing = drawScreen({
+      request,
+      daemon: 'http://127.0.0.1:4999',
+      origin: ORIGIN,
+      doc: document,
+      capture: () => new Promise(() => undefined),
+      timeoutMs: 15_000,
+      captureTimeoutMs: 4_000,
+    });
+    await vi.advanceTimersByTimeAsync(14_000);
+    say(ready);
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(frames()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(drawing).resolves.toEqual({
+      ok: false,
+      reason:
+        'The Board finished loading, but making it into a picture took longer than 4 s, so it was not drawn.',
+    });
   });
 
   it('names the task’s drawer and Plan for what they are', async () => {
