@@ -573,6 +573,23 @@ describe('a large dropped image', () => {
       expect(late.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
     });
 
+    it('charges only the images that went as blocks when the message cap left some out', async () => {
+      // Twenty images of 1.9 MiB at 1000 px, each within the per-image caps, dropped in one turn: only
+      // three fit the 6 MiB message cap, and the other seventeen go as paths and are not carried.
+      for (let i = 0; i < 20; i += 1) drop(`m${String(i)}.png`, pngOfSize(1000, 800, 1.9 * MB));
+      const turn = await nextTurn('Twenty');
+      expect(turn.images).toHaveLength(3);
+      expect(turn.message.match(/too large to show/g)).toHaveLength(17);
+      const sentBytes = turn.images.reduce((sum, image) => sum + image.data.length * 0.75, 0);
+      // 5.7 MiB is carried, so 12.3 MiB remain: nine 1.4 MB (1.34 MiB) screens fit, the tenth does not.
+      // Charging all twenty (38 MiB) would have refused the first.
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 9; n += 1) await screens.see(shapeId(), window);
+      await expect(screens.see(shapeId(), window)).rejects.toThrow(/no room for another picture/);
+      expect(kept()).toHaveLength(9);
+      expect(sentBytes + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
+
     it('does not charge an image whose size cannot be read, which went as a path', async () => {
       const whole = pngOfSize(100, 80, 1.9 * MB);
       for (let i = 0; i < 9; i += 1) drop(`cut${String(i)}.png`, whole.subarray(0, -1));
