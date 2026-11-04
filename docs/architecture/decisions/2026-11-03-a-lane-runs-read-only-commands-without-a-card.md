@@ -32,9 +32,9 @@ options are judged in two places (`gitRunsOrWritesReason` in `guard/read-only.ts
   text) is **not** `--textconv`: it is a different option and is allowed, though it is a prefix of `--textconv`.
 
 `gitRunsOrWritesReason` returns the refusal's message, not a yes or no. A read-only step (`readOnlyShellRefusal`)
-refused for one of these git options is given that option's own message (what the option does and how to
-rephrase), where any other refusal gets the generic one. A lane gets no message from it: such a line is simply
-not settled, and keeps today's judgement.
+refused for one of these git options is given that option's own message (what the option does, and for
+`git grep -O` how to rephrase), where any other refusal gets the generic one. A lane gets no message from it:
+such a line is simply not settled, and keeps today's judgement.
 
 Two differences from a read-only step's grammar, both for lanes only:
 
