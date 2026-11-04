@@ -65,6 +65,10 @@
     "waitingMinutes": {
       "type": "number",
       "minimum": 0
+    },
+    "failedMinutes": {
+      "type": "number",
+      "minimum": 0
     }
   },
   "required": [
@@ -79,6 +83,7 @@
     "cards",
     "tasksRan",
     "cardsPerTask",
-    "waitingMinutes"
+    "waitingMinutes",
+    "failedMinutes"
   ]
 }
