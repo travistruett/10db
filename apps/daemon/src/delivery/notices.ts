@@ -586,9 +586,17 @@ export const rerunNotices = {
    * no one sees. It names only the checks of runs GitHub took. `state` says what is left: `asking`
    * is a run GitHub refused as still running, which 10db asks for again; `refused` is a run GitHub
    * refused outright, which 10db never asks for again (the record still says it is not done, so a
-   * restart does not read the head as fully asked); `done` is no run left to ask for.
+   * restart does not read the head as fully asked); `done` is no run left to ask for. `stopped` is
+   * 10db stopping at a check with no Actions run: it asks for no other run, and says nothing of
+   * which notice it is beside. `cleared` is the check that stopped 10db (refused, or with no run)
+   * having cleared, so no notice is beside this one; 10db may ask again if one is cancelled again.
+   * Both keep the record as not done.
    */
-  ran: (head: string, runs: RerunRuns, state: 'asking' | 'refused' | 'done'): Notice => {
+  ran: (
+    head: string,
+    runs: RerunRuns,
+    state: 'asking' | 'refused' | 'stopped' | 'cleared' | 'done',
+  ): Notice => {
     const checks = [...runs.values()].flat();
     const names = checks.map((c) => `"${c.name}"`).join(', ');
     const one = checks.length === 1;
@@ -596,12 +604,16 @@ export const rerunNotices = {
       runs: Object.fromEntries([...runs].map(([runId, c]) => [runId, c.map((x) => x.name)])),
       done: state === 'done',
     });
-    const rest =
-      state === 'asking'
-        ? 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows. '
-        : state === 'refused'
-          ? 'GitHub refused to run another cancelled check, so 10db will not ask again; a notice beside this one says which. '
-          : '';
+    const rest = {
+      asking: 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows. ',
+      refused:
+        'GitHub refused to run another cancelled check, so 10db will not ask again; a notice beside this one says which. ',
+      stopped:
+        'Another cancelled check is not a GitHub Actions job, so 10db will not run another check; a notice beside this one says which. ',
+      cleared:
+        'Another cancelled check was not run by 10db; if it is cancelled again, 10db decides then whether it can run it. ',
+      done: '',
+    }[state];
     return {
       key: rerunNoticeKey(head),
       tone: 'info',
