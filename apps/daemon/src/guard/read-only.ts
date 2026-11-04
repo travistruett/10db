@@ -1,4 +1,4 @@
-import { abbreviates } from './git-rules';
+import { abbreviates, gitVerdict } from './git-rules';
 import { plainCommandWords } from './plain-command';
 
 /** Commands a read-only step may run: they read or print, and change nothing. */
@@ -56,9 +56,22 @@ const WRITING_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   sort: ['-o', '--output', '--compress-program'],
   tree: ['-o', '-R'],
   rg: ['--pre', '--pre-glob', '--hostname-bin'],
-  // Read-only subcommands that still write a file (`--output`) or run a program (`--ext-diff`, `-O`).
-  git: ['--output', '--ext-diff', '--textconv', '--open-files-in-pager', '-O'],
 };
+
+/**
+ * Whether a read-only git call writes a file or runs a program. `--output` and `git grep -O` are
+ * gitVerdict's to judge (it knows `-O` only means a pager for grep, so `git log -SOption` passes).
+ * `--ext-diff` and `--textconv` are checked here; `--text` is a different option (treat as text) and
+ * passes, while any other abbreviation of `--textconv` is refused.
+ */
+function gitRunsOrWrites(args: readonly string[]): boolean {
+  if (gitVerdict(['git', ...args]) !== null) return true;
+  return args.some(
+    (a) =>
+      abbreviates(a, '--ext-diff') ||
+      (a.split('=')[0] !== '--text' && abbreviates(a, '--textconv')),
+  );
+}
 
 /**
  * Whether an argument is the option. Long options match by unambiguous prefix (`--out=x`),
@@ -68,6 +81,18 @@ function usesOption(arg: string, option: string): boolean {
   if (option.startsWith('--')) return abbreviates(arg, option);
   if (option.length === 2) return new RegExp(`^-[^-]*${option.slice(1)}`).test(arg);
   return arg === option;
+}
+
+/**
+ * Whether `ps` may print the environment of the processes it lists: `-E` in a dash bundle, or the
+ * BSD form with no dash (`eww`, `Eww`, `aux e`), which ps takes as options. Any dashless word holding
+ * an `e` or `E` counts, even one that is an option's value (`-o pid,etime`): reading the grammar
+ * to tell them apart would be a guess, and the call then keeps today's judgement. Claude Code's own
+ * process runs outside the sandbox, so what the sandbox returns for another process's environment
+ * is not what the lane's Bash sees.
+ */
+function psShowsEnvironment(args: readonly string[]): boolean {
+  return args.some((a) => (a.startsWith('-') ? /^-[^-]*E/.test(a) : /[eE]/.test(a)));
 }
 
 const REFUSAL =
@@ -88,10 +113,11 @@ function readOnlySegments(
     // Only a bare command: no assignment, wrapper or path (those run something else).
     if (cmd.includes('/')) return null;
     if (cmd === 'git') {
-      if (!READ_GIT.has(args[0] ?? '')) return null;
+      if (!READ_GIT.has(args[0] ?? '') || gitRunsOrWrites(args)) return null;
     } else if (!commands.has(cmd)) {
       return null;
     }
+    if (cmd === 'ps' && psShowsEnvironment(args)) return null;
     const writing = WRITING_OPTIONS[cmd] ?? [];
     if (args.some((a) => writing.some((o) => usesOption(a, o)))) return null;
   }

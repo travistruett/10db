@@ -25,7 +25,13 @@ for git `--output --ext-diff --textconv --open-files-in-pager -O`.
 Two differences from a read-only step's grammar, both for lanes only:
 
 - `ps` is allowed. It prints the process table and has no writing option. It is not added to `READ_COMMANDS`,
-  which would also add `Bash(ps:*)` to the read-only steps' allow rules.
+  which would also add `Bash(ps:*)` to the read-only steps' allow rules. It is not settled when it may print
+  the processes' environment: `-E` in a dash bundle (`-Eww`), or a word with no dash holding an `e` or `E`
+  (`ps Eww`, `ps eww`, `ps -x eww`), which ps reads as BSD options. The word check is deliberately broad: it
+  also catches an option's value (`-o pid,etime`), and such a call keeps today's judgement. Claude Code's own
+  process runs outside the sandbox, so the lane's env denial does not cover it. srt's policy looks like it
+  returns no other process's environment (`process-info*` is same-sandbox only, no `kern.procargs` sysctl), but
+  that was read, not run, so the guard does not rely on it.
 - A glob is plain in an **option's value**: `*`, `?`, `[`, `]` after the `=` of a word that starts with `-`
   (`--include=*.ts`). A match must begin with the literal text before the glob, so it can only be a file named
   `--include=…`, never another option. A glob in any other word (`cat .e*`) stays refused: the shell would fill
@@ -33,9 +39,16 @@ Two differences from a read-only step's grammar, both for lanes only:
 
 **Paths.** A settled call must also name no path a lane may never read. Every word that is not a bare option
 is judged as a path by the lane's file-access judge (`fileAccess.read('LS', { path })`, the stricter tree
-reading), an option's `=value` by its value. A protected path, a secret file, a directory that holds protected
-paths, a path that cannot be resolved, or one starting with `~` leaves the call to today's judgement. So does
-any `cd`, after which a relative path means another directory. A path merely outside the paths a lane may read
+reading). A long option (`--file=/x`) is judged by its value after the `=`. A short option's value may be
+attached (`-f/x`, `-nf/x`), and the guard knows no program's options, so every tail of a single-dash word is
+judged as a path (`-f/x` gives `f/x` and `/x`); a letter or two read as a relative path is harmless. A
+single-dash word over 256 characters is not split and leaves the call to today's judgement. A protected path,
+a secret file, a directory that holds protected paths, a path that cannot be resolved, or one starting with
+`~` leaves the call to today's judgement. So does any `cd`, after which a relative path means another
+directory. So does a path that names a device with no end (`/dev/zero`, `/dev/urandom`, `/dev/random`,
+`ENDLESS_FILES` in `guard/background-loops.ts`, compared after normalising `//` and `.`), whichever command
+reads it and wherever it appears: a foreground read of one (`cat /dev/zero | wc -c`, `sort /dev/urandom`) spins
+until the Bash timeout, and the endless-loop ask looks only at background calls. A path merely outside the paths a lane may read
 without asking (`readAsk`) does not: see below.
 
 **Hazards.** A line of read-only commands names no program outside that closed set, so none can be a hazard.
@@ -66,7 +79,8 @@ classifier's own escalation also reaches a card no stored rule answers.
   the guard's refusals run before it.
 - What the call gives up is the classifier's second look, including its `hard_deny` for CPU load and the
   full gate. None of these commands can run the gate or a build, and a read-only line is as light as the
-  commands it names; `tail -f` and the like in the background still meet the endless-loop ask.
+  commands it names, except one that reads an endless device, which is not settled (above); `tail -f` and the
+  like in the background still meet the endless-loop ask.
 
 Turned down: adding `ps` to `READ_COMMANDS` (widens the read-only steps' allow rules); judging every glob word by
 expanding it (the guard would have to read the file system as the shell will, and the shell can differ);

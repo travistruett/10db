@@ -2743,6 +2743,91 @@ describe('permission broker in a sandboxed lane', () => {
         expect(warnings[0]?.fields).toMatchObject({ cardId: betaCard.id });
       });
 
+      it("raises a card for the builder when delivering the other lane's answer fails after it committed, and retries delivery when they answer it", async () => {
+        const failing: { id?: string } = {};
+        inbox = createInboxService({
+          state: {
+            db: state.db,
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx) as { id?: string; state?: string } | null;
+                // The write that closes the other lane's card after its answer was handed on.
+                if (
+                  failing.id !== undefined &&
+                  result?.id === failing.id &&
+                  result.state === 'RESOLVED'
+                )
+                  throw new Error('disk full');
+                return result as never;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: silentLogger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.id = betaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        await first;
+        // Its answer is stored but it never closed: it is no longer open, so a flag says so.
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'DELIVERING' });
+        const flags = openCards().filter((c) => c.kind === 'flag');
+        expect(flags).toHaveLength(1);
+        expect(flags[0]).toMatchObject({ projectId: b.project.id });
+        expect(flags[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+        // The cause is gone: answering the flag delivers the answer again.
+        delete failing.id;
+        const flag = flags[0];
+        if (flag === undefined) throw new Error('no flag');
+        inbox.answer(flag.id, { choice: flag.options[0]?.label ?? '' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'RESOLVED' });
+        expect(openCards()).toEqual([]);
+      });
+
+      it("still returns the builder's answered card when listing the covered cards fails, leaving them open and logging it", async () => {
+        const warnings: { fields: unknown; message: unknown }[] = [];
+        const logger = {
+          ...silentLogger,
+          warn: (fields: unknown, message?: unknown) => warnings.push({ fields, message }),
+        };
+        const failing: { afterId?: string; reading: boolean } = { reading: false };
+        inbox = createInboxService({
+          state: {
+            // The listing is the first read after the builder's answer is stored.
+            get db() {
+              if (failing.reading) throw new Error('database is locked');
+              return state.db;
+            },
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx);
+                if ((result as { id?: string } | null)?.id === failing.afterId) {
+                  failing.reading = true;
+                }
+                return result;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: logger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.afterId = alphaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        failing.reading = false;
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'OPEN' });
+        expect(openCards().map((c) => c.id)).toEqual([betaCard.id]);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]?.fields).toMatchObject({ cardId: alphaCard.id });
+      });
+
       it('leaves another lane’s card for a different file open', () => {
         const a = seedWorkstream(base);
         const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
