@@ -82,27 +82,19 @@ import { adoptGoal } from '../goals';
 import type { Git } from '../git';
 import { requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
-import type { Logger } from '../log';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
 import { ProjectMcpError, readRepoMcp, type RepoMcp } from '../sessions';
 import {
-  addWebHost,
   allowFoundHosts,
   allowNetworkHost,
   laneAutoMode,
   listNetworkHosts,
-  listWebHosts,
   removeNetworkHost,
-  removeWebHost,
   setLaneAutoMode,
-  setWebSearch,
-  startWebHosts,
   unallowedFoundHosts,
-  unlistedWebHosts,
-  webSearchOn,
 } from '../permissions';
-import { findDocsHosts, findRegistryHosts, takeWebHostsStart } from '../registries';
+import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
 import type { ShapeApiServices } from './shape-services';
@@ -137,7 +129,6 @@ export function createServices(deps: {
   readonly areaNamer: AreaNamer | null;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
-  readonly logger: Logger;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
@@ -215,8 +206,6 @@ export function createServices(deps: {
       deps.pinCheckout(project.repoPath);
       // The registries the project's own files name are allowed from the start; reading them runs nothing.
       allowFoundHosts(deps.state, project.id, await findRegistryHosts(project.repoPath));
-      // Read before any lane has run here. After this the list takes a host only by the builder's word.
-      startWebHosts(deps.state, project.id, await findDocsHosts(project.repoPath));
       return project;
     },
     listTasks: (projectId) => listTasks(db, projectId),
@@ -351,30 +340,6 @@ export function createServices(deps: {
       const project = getProject(db, projectId);
       // Only listed: a lane may have written these files, so the builder allows each host by name.
       return unallowedFoundHosts(db, projectId, await findRegistryHosts(project.repoPath));
-    },
-    async listWebHosts(projectId) {
-      getProject(db, projectId);
-      await takeWebHostsStart({ state: deps.state, git: deps.git, logger: deps.logger }, projectId);
-      return listWebHosts(db, projectId);
-    },
-    addWebHost: (projectId, host) => addWebHost(deps.state, projectId, host),
-    removeWebHost: (projectId, host) => removeWebHost(deps.state, projectId, host),
-    async scanWebHosts(projectId) {
-      const project = getProject(db, projectId);
-      await takeWebHostsStart({ state: deps.state, git: deps.git, logger: deps.logger }, projectId);
-      // Only listed: a lane may have written these files, so the builder adds each host by name.
-      return unlistedWebHosts(db, projectId, await findDocsHosts(project.repoPath));
-    },
-    webSearch(projectId) {
-      getProject(db, projectId);
-      return { enabled: webSearchOn(db, projectId) };
-    },
-    setWebSearch(projectId, enabled) {
-      deps.state.write((ctx) => {
-        getProject(ctx.tx, projectId);
-        setWebSearch(ctx, projectId, enabled);
-      });
-      return { enabled };
     },
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),

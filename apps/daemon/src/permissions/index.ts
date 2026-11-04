@@ -29,17 +29,4 @@ export {
   matchesAllowedTool,
   matchPermissionRule,
   storableRule,
-  WEB_HOST_TOOL,
 } from './rules';
-export {
-  addWebHost,
-  checkWebHost,
-  listWebHosts,
-  removeWebHost,
-  setWebSearch,
-  startWebHosts,
-  unlistedWebHosts,
-  webHostsStarted,
-  webPageHost,
-  webSearchOn,
-} from './web-hosts';

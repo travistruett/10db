@@ -33,11 +33,8 @@ import {
   foundHostFile,
   matchPermissionRule,
   storableRule,
-  WEB_HOST_TOOL,
-  webPageHost,
-  webSearchOn,
 } from '../permissions';
-import { takeFoundHostsReading, takeWebHostsStart } from '../registries';
+import { takeFoundHostsReading } from '../registries';
 import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
@@ -123,30 +120,6 @@ const EDIT_FAMILY: ReadonlySet<string> = new Set(['Edit', 'Write', 'MultiEdit', 
 /** The Monitor input keys a card-free call may carry; any other (`ws`, or one added later) cards. */
 const MONITOR_INPUT_KEYS: ReadonlySet<string> = new Set(['command', 'description', 'timeout_ms']);
 
-/** Longer than this a search query says more than a question needs, so the builder sees it. */
-const MAX_FREE_QUERY = 300;
-
-const SEARCH_OFF_BODY =
-  'This project asks you about each web search (Settings › Web access). A search query is text the lane chose, and it leaves this Mac for the search provider. Allowing covers this call only.';
-const SEARCH_LONG_BODY =
-  'This search query is long enough to carry more than a question, and it leaves this Mac for the search provider. Allowing covers this call only.';
-const WEB_URL_BODY =
-  "This address can't go on the read list: only an https page on port 443 of a public host, with no login in it and no more than 2,000 characters, can. WebFetch runs from Claude Code itself, outside the sandbox, so this reaches whatever the address names. Allowing covers this call only.";
-
-function webHostOptions(host: string): InboxOption[] {
-  return [
-    { label: PermissionChoice.AllowOnce, description: 'Allow this one read' },
-    {
-      label: PermissionChoice.AllowProject,
-      description: `Add ${host} to this project's read list, so lanes read its pages with no card`,
-    },
-    { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
-  ];
-}
-
-const webHostBody = (host: string, call: string): string =>
-  `A lane wants to read a page of ${host}, which isn't on this project's read list. The address and the prompt below leave this Mac; other calls to ${host} wait on this card too.\n\n${call}`;
-
 const HOST_CARD_BODY =
   'The command was refused. Allow the host for the project and the next session gets it; allow once only reaches a session that is still running.';
 // pnpm 12 locks its store in a fixed `/tmp/pnpm-store-operation-locks-<uid>`, whatever its settings say.
@@ -193,8 +166,6 @@ interface Ask {
    * next such call is asked about again (an endless background loop).
    */
   readonly onceOnly?: boolean;
-  /** Set when the card and its rules are about one host of the read list, not about the call itself. */
-  readonly webHost?: string;
 }
 
 /**
@@ -325,46 +296,37 @@ export function createPermissionBroker(
     const rules = listPermissionRules(deps.state.db, ctx.projectId, ctx.workstreamId);
     const paths = ask?.realPaths === undefined ? undefined : { realPaths: ask.realPaths };
     const onceOnly = ask?.onceOnly === true;
-    const webHost = ask?.webHost;
-    // A read of a host is judged, stored and allowed once as the host's own rule, never as a WebFetch.
-    const asked =
-      webHost === undefined ? req : { toolName: WEB_HOST_TOOL, input: { host: webHost } };
     // A call the classifier handed to a person is answered by a person, never by a stored grant.
     if (
       !req.escalated &&
       !onceOnly &&
-      unlessTooDeep(() => matchPermissionRule(asked, rules, paths), undefined)
+      unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)
     ) {
       return { behavior: 'allow' };
     }
     const summary = ask?.summary ?? summarize(req);
-    if (!req.escalated && allowOnce?.toolName === asked.toolName && allowOnce.summary === summary) {
+    if (!req.escalated && allowOnce?.toolName === req.toolName && allowOnce.summary === summary) {
       const { cardId } = allowOnce;
       allowOnce = null;
       if (cardId !== undefined) recordAllowedWrite(cardId, req, ask);
       return { behavior: 'allow' };
     }
     const storable =
-      unlessTooDeep(() => storableRule(asked.toolName, summary), undefined) !== undefined;
+      unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       workstreamId: ctx.workstreamId,
       sessionId: ctx.sessionId,
       kind: 'permission',
-      title:
-        webHost === undefined ? `Allow ${req.toolName}?` : `Allow ${req.toolName} of ${webHost}?`,
+      title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
-      options: onceOnly
-        ? ONCE_OPTIONS
-        : webHost === undefined
-          ? permissionOptions(storable)
-          : webHostOptions(webHost),
+      options: onceOnly ? ONCE_OPTIONS : permissionOptions(storable),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
       detail: {
-        toolName: asked.toolName,
+        toolName: req.toolName,
         summary,
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
@@ -374,8 +336,6 @@ export function createPermissionBroker(
       // file on the one answer, before either writes, and the second write would match neither record.
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
-      // A card about a host is one card, whichever pages of it the lanes asked for.
-      ...(webHost === undefined ? {} : { foldOn: webHost }),
     });
     const result = await wait(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
@@ -552,62 +512,6 @@ export function createPermissionBroker(
     }
   }
 
-  /**
-   * A search runs with no card while the project allows it, unless the classifier escalated it or the
-   * query runs long. No stored rule answers it: the project's switch is the only standing grant.
-   */
-  function judgeWebSearch(req: ToolRequest): ToolDecision | Ask {
-    const summary = summarize(req);
-    const query = stringField(req.input, 'query');
-    if (query === null || query.length > MAX_FREE_QUERY) {
-      return { summary, body: `${SEARCH_LONG_BODY}\n\n${summary}`, onceOnly: true };
-    }
-    if (!webSearchOn(deps.state.db, ctx.projectId)) {
-      return { summary, body: `${SEARCH_OFF_BODY}\n\n${summary}`, onceOnly: true };
-    }
-    if (req.escalated) return { summary, onceOnly: true };
-    deps.logger.info({ projectId: ctx.projectId, query }, 'a lane searched the web');
-    return { behavior: 'allow' };
-  }
-
-  /** Asks about each host one call at a time: the service keeps one waiter per session on a card. */
-  const hostAsks = new Map<string, Promise<ToolDecision>>();
-
-  /**
-   * A read of a page runs with no card when its host is on the read list. Another public host raises
-   * one card, whichever pages and however many calls; an address that isn't plainly a page of a public
-   * host can only be allowed once, and no answer lists anything for it.
-   *
-   * A call that finds its host being asked about waits for that answer. A refusal covers it too; any
-   * other answer sends it through again, so a host now listed runs and an allow-once, which covers the
-   * one call the builder read, asks again with this call's own address.
-   */
-  async function judgeWebFetch(req: ToolRequest): Promise<ToolDecision> {
-    const summary = summarize(req);
-    const host = webPageHost(req.input['url']);
-    if (host === null) {
-      return askPermission(req, {
-        summary,
-        body: `${WEB_URL_BODY}\n\n${summary}`,
-        onceOnly: true,
-      });
-    }
-    await takeWebHostsStart(deps, ctx.projectId);
-    for (let open = hostAsks.get(host); open !== undefined; open = hostAsks.get(host)) {
-      const answered = await open;
-      if (answered.behavior === 'deny') return answered;
-    }
-    const decision = askPermission(req, {
-      summary: host,
-      body: webHostBody(host, summary),
-      webHost: host,
-    }).finally(() => {
-      hostAsks.delete(host);
-    });
-    hostAsks.set(host, decision);
-    return decision;
-  }
-
   function isDecision(verdict: ToolDecision | Ask): verdict is ToolDecision {
     return 'behavior' in verdict;
   }
@@ -617,10 +521,8 @@ export function createPermissionBroker(
     const { sandbox } = ctx;
     if (sandbox === undefined) return askPermission(req);
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);
-    if (req.toolName === 'WebFetch') return judgeWebFetch(req);
     let verdict: ToolDecision | Ask | null = null;
-    if (req.toolName === 'WebSearch') verdict = judgeWebSearch(req);
-    else if (req.toolName === 'Bash') verdict = judgeBash(req, sandbox);
+    if (req.toolName === 'Bash') verdict = judgeBash(req, sandbox);
     else if (req.toolName === 'Monitor') verdict = judgeMonitor(req, sandbox);
     else if (READ_FAMILY.has(req.toolName)) verdict = judgeRead(req, sandbox);
     else if (EDIT_FAMILY.has(req.toolName)) verdict = judgeEdit(req, sandbox);

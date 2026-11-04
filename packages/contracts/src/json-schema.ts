@@ -39,9 +39,6 @@ import {
   ProjectPatch,
   TaskDto,
   TaskPatch,
-  WebHostDto,
-  WebHostInput,
-  WebSearchDto,
   WorkstreamDto,
 } from './entities';
 import { DaemonEvent } from './events';
@@ -166,9 +163,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'self-update-input': SelfUpdateInput,
   'self-update-status-dto': SelfUpdateStatusDto,
   'lane-permissions-dto': LanePermissionsDto,
-  'web-host-dto': WebHostDto,
-  'web-host-input': WebHostInput,
-  'web-search-dto': WebSearchDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,
   'aa-model-dto': AaModelDto,

@@ -29,8 +29,6 @@ import {
   LanePermissionsDto,
   ModelProfileId,
   NetworkHostInput,
-  WebHostInput,
-  WebSearchDto,
   Month,
   ModelProfilePatch,
   PersonaId,
@@ -562,42 +560,6 @@ export function createApp(deps: ApiDeps) {
           c.req.param('host'),
         ),
       ),
-    )
-    .get('/projects/:projectId/web-hosts', async (c) =>
-      c.json(await deps.services.listWebHosts(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .post(
-      '/projects/:projectId/web-hosts',
-      validator('json', (value): WebHostInput => WebHostInput.parse(value)),
-      (c) => {
-        const { host, created } = deps.services.addWebHost(
-          ProjectId.parse(c.req.param('projectId')),
-          c.req.valid('json').host,
-        );
-        return c.json(host, created ? 201 : 200);
-      },
-    )
-    .post('/projects/:projectId/web-hosts/scan', async (c) =>
-      c.json(await deps.services.scanWebHosts(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .delete('/projects/:projectId/web-hosts/:host', (c) =>
-      c.json(
-        deps.services.removeWebHost(ProjectId.parse(c.req.param('projectId')), c.req.param('host')),
-      ),
-    )
-    .get('/projects/:projectId/web-search', (c) =>
-      c.json(deps.services.webSearch(ProjectId.parse(c.req.param('projectId')))),
-    )
-    .put(
-      '/projects/:projectId/web-search',
-      validator('json', (value): WebSearchDto => WebSearchDto.parse(value)),
-      (c) =>
-        c.json(
-          deps.services.setWebSearch(
-            ProjectId.parse(c.req.param('projectId')),
-            c.req.valid('json').enabled,
-          ),
-        ),
     )
     .get('/accounts', (c) => c.json(deps.services.listAccounts()))
     .post(

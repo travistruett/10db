@@ -15,7 +15,6 @@ import {
   IconRoute,
   IconSettings,
   IconUsers,
-  IconWorld,
 } from '@tabler/icons-react';
 import { Link, useRouterState } from '@tanstack/react-router';
 import { ProjectSwitcher } from '../../shell/project-switcher';
@@ -31,7 +30,6 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.BoardColumns]: IconColumns,
   [SettingsSectionKey.Areas]: IconMap,
   [SettingsSectionKey.NetworkHosts]: IconNetwork,
-  [SettingsSectionKey.WebAccess]: IconWorld,
   [SettingsSectionKey.Billing]: IconCoin,
   [SettingsSectionKey.Team]: IconUsers,
   [SettingsSectionKey.RoutingRules]: IconRoute,

@@ -75,11 +75,6 @@ interface AskInput {
   readonly signal: AbortSignal;
   /** The card folds only with the same lane's identical asks, never with another lane's. */
   readonly foldPerLane?: boolean;
-  /**
-   * What the card is about, when that is less than its body: asks that name the same thing fold
-   * though each would show the builder a different body. The open card keeps the first one's.
-   */
-  readonly foldOn?: string;
 }
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
@@ -197,7 +192,7 @@ function optionsForTargets(
 function foldKeyFor(
   input: Pick<
     AskInput,
-    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane' | 'foldOn'
+    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane'
   >,
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
@@ -206,7 +201,7 @@ function foldKeyFor(
     ...(input.foldPerLane === true ? [input.workstreamId] : []),
     input.kind,
     norm(input.title),
-    norm(input.foldOn ?? input.body),
+    norm(input.body),
     ...input.options.map((o) => norm(o.label)),
   ];
   return createHash('sha256').update(parts.join('\u0000')).digest('hex');

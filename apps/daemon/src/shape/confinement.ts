@@ -1,13 +1,7 @@
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 import { ShapeToolName } from '@10db/contracts';
-import {
-  isOverLongPath,
-  namesPrivateHost,
-  OVER_LONG_PATH_REFUSAL,
-  stringField,
-  type GuardVerdict,
-} from '../guard';
+import { isOverLongPath, OVER_LONG_PATH_REFUSAL, stringField, type GuardVerdict } from '../guard';
 import { readAccess, readPathsOf, type FileAccessContext } from '../sandbox';
 import type { ShapeVerdict } from '../sessions';
 
@@ -124,6 +118,9 @@ function judgeAgent(call: ShapeCall): GuardVerdict {
 const isResearcher = (call: ShapeCall): boolean =>
   call.agentId !== undefined && call.agentType === SHAPE_RESEARCHER;
 
+/** Hosts that name a machine of the builder's own network, not the public web. */
+const LOCAL_SUFFIXES = ['.localhost', '.local', '.internal', '.lan', '.home.arpa', '.intranet'];
+
 /** Why a URL is not a public web page the researcher may fetch, or null when it is one. */
 function publicPageProblem(raw: string): string | null {
   if (raw.length > RESEARCH_URL_LIMIT)
@@ -140,7 +137,7 @@ function publicPageProblem(raw: string): string | null {
   const host = url.hostname.toLowerCase().replace(/\.$/, '');
   if (isIP(host.replace(/^\[|\]$/g, '')) !== 0)
     return 'The researcher fetches a named host, not an address.';
-  if (namesPrivateHost(host))
+  if (!host.includes('.') || host === 'localhost' || LOCAL_SUFFIXES.some((s) => host.endsWith(s)))
     return `${host} is not on the public web; the daemon and the builder's network are out of reach.`;
   return null;
 }

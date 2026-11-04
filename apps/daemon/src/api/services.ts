@@ -49,8 +49,6 @@ import type {
   McpServerStatusDto,
   ModelProfileDto,
   NetworkHostDto,
-  WebHostDto,
-  WebSearchDto,
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
@@ -343,23 +341,6 @@ export interface ApiServices {
    * file. Allows nothing: the builder allows a host by name, after seeing it.
    */
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
-  /** The hosts whose pages the project's lanes read with no card; a project with no list gets its start. */
-  listWebHosts(projectId: ProjectId): Promise<WebHostDto[]>;
-  /** Adds a host to the read list; throws InvalidError with the reason for one it may not hold. */
-  addWebHost(
-    projectId: ProjectId,
-    host: string,
-  ): { readonly host: WebHostDto; readonly created: boolean };
-  /** Takes a host off the read list; throws NotFoundError when it is not on it. */
-  removeWebHost(projectId: ProjectId, host: string): WebHostDto;
-  /**
-   * Reads the project's manifests again and answers the documentation hosts of their dependencies that
-   * are not on the read list. Adds nothing: the builder adds a host by name, after seeing it.
-   */
-  scanWebHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
-  /** Whether the project's lanes search the web with no card. */
-  webSearch(projectId: ProjectId): WebSearchDto;
-  setWebSearch(projectId: ProjectId, enabled: boolean): WebSearchDto;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

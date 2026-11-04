@@ -9,7 +9,6 @@ import { goalKeys } from './goal-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
-import { WEB_HOSTS_KEY, WEB_SEARCH_KEY } from './web-access-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -34,8 +33,6 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   shape: [shapeKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
-  web_hosts: [WEB_HOSTS_KEY],
-  web_search: [WEB_SEARCH_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
   // Lanes changing can switch keep-awake on or off.
@@ -46,8 +43,7 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
   account: [accountKeys.all],
-  // A card's answer can add a host to the read list.
-  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, WEB_HOSTS_KEY],
+  inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all],
   app_setting: [queryKeys.keepAwake],
   // Step plans, which only the batch sheet shows, follow these; no view reads `person`.
   persona: [CANDIDATES],

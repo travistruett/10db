@@ -1,7 +1,6 @@
 import { join } from 'node:path';
 import type { FolderAt, Git } from '../git';
 import { checkConcreteHost } from '../permissions';
-import { DOCS_FORMATS } from './docs-hosts';
 import {
   CONFIG_FORMATS,
   LOCK_FORMATS,
@@ -18,7 +17,6 @@ export interface FoundHost {
   readonly file: string;
 }
 
-const REGISTRY_FORMATS: readonly PackageFileFormat[] = [...CONFIG_FORMATS, ...LOCK_FORMATS];
 /** Folders are read this deep from the root: the root and three levels below it, as in `apps/desktop/src-tauri`. */
 const MAX_DEPTH = 3;
 const MAX_FOLDERS = 400;
@@ -79,10 +77,7 @@ async function registryNamed(files: ProjectFiles, folder: string): Promise<boole
   return false;
 }
 
-async function readHosts(
-  files: ProjectFiles,
-  formats: readonly PackageFileFormat[],
-): Promise<FoundHost[]> {
+async function readHosts(files: ProjectFiles): Promise<FoundHost[]> {
   const hosts = new Map<string, string>();
   let folders = 0;
   // The root's settings hold for every folder, so they are read once, not once per folder.
@@ -95,7 +90,11 @@ async function readHosts(
       npmRegistryNamed:
         rootNamed || (next.folder !== '' && (await registryNamed(files, next.folder))),
     };
-    for (const { host, file } of await readFormats(files, next.folder, formats, context)) {
+    const named = [
+      ...(await readFormats(files, next.folder, CONFIG_FORMATS, context)),
+      ...(await readFormats(files, next.folder, LOCK_FORMATS, context)),
+    ];
+    for (const { host, file } of named) {
       if (hosts.size >= MAX_HOSTS) break;
       const allowed = allowable(host);
       if (allowed !== null && !hosts.has(allowed)) hosts.set(allowed, file);
@@ -112,13 +111,6 @@ async function readHosts(
   return [...hosts].map(([host, file]) => ({ host, file }));
 }
 
-function filesIn(root: string): ProjectFiles {
-  return {
-    read: (file) => readRegularFile(root, file),
-    subfolders: (folder) => realSubfolders(root, folder),
-  };
-}
-
 /**
  * The hosts a project's own package files name: lockfiles, package manager settings and toolchain
  * files, in the project root and its package folders. The files are only read as text (never
@@ -128,15 +120,10 @@ function filesIn(root: string): ProjectFiles {
  * names it, root first.
  */
 export function findRegistryHosts(root: string): Promise<FoundHost[]> {
-  return readHosts(filesIn(root), REGISTRY_FORMATS);
-}
-
-/**
- * The documentation hosts of the dependencies a project's manifests name, read as
- * `findRegistryHosts` reads a folder. Each host comes from 10db's own table (`docs-hosts.ts`).
- */
-export function findDocsHosts(root: string): Promise<FoundHost[]> {
-  return readHosts(filesIn(root), DOCS_FORMATS);
+  return readHosts({
+    read: (file) => readRegularFile(root, file),
+    subfolders: (folder) => realSubfolders(root, folder),
+  });
 }
 
 /**
@@ -152,23 +139,6 @@ export async function findRegistryHostsAt(
   repo: string,
   rev: string,
 ): Promise<FoundHost[]> {
-  return readHosts(await filesAt(git, repo, rev), REGISTRY_FORMATS);
-}
-
-/** The documentation hosts the manifests committed at `rev` name; see `findRegistryHostsAt`. */
-export async function findDocsHostsAt(
-  git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>,
-  repo: string,
-  rev: string,
-): Promise<FoundHost[]> {
-  return readHosts(await filesAt(git, repo, rev), DOCS_FORMATS);
-}
-
-async function filesAt(
-  git: Pick<Git, 'commitAt' | 'folderAt' | 'fileAt'>,
-  repo: string,
-  rev: string,
-): Promise<ProjectFiles> {
   const commit = await git.commitAt(repo, rev);
   // Each folder is listed once, when the walk first reaches it, so the work stays within the walk's
   // depth and folder limits however big the tree is.
@@ -193,7 +163,7 @@ async function filesAt(
     }
     return listing;
   };
-  return {
+  return readHosts({
     async read(file) {
       const slash = file.lastIndexOf('/');
       const folder = slash < 0 ? '' : file.slice(0, slash);
@@ -204,7 +174,7 @@ async function filesAt(
       return found.kind === 'file' ? found.text : null;
     },
     subfolders: async (folder) => [...(await folderAt(folder)).folders],
-  };
+  });
 }
 
 /** The host as a project may be given it, or null when the project may not. */
