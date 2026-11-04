@@ -1071,6 +1071,126 @@ describe('the failed workstream card', () => {
           const folded = h.only(h.cards().filter((c) => c.title.includes('revert')));
           expect(folded.detail).toMatchObject({ batchCard: { revert } });
         });
+
+        /** A task started into the batch after the revert, failed with a commit on the branch. */
+        function laterRunFailed(batchId: BatchId, path: string): WorkstreamId {
+          const task = h.addTask('Gamma', { areas: ['ui'] });
+          const run = h.state.write((w) =>
+            insertPlannedWorkstream(w, task.id, planForStart(w.tx, task.id), batchId),
+          );
+          commitAs(run.id, path, 'gamma\n');
+          h.settle(run.id, 'FAILED');
+          return run.id;
+        }
+
+        const builderNotes = (run: WorkstreamId) =>
+          listEvidence(h.store.db, run).filter((e) => e.kind === 'builder');
+
+        it('tells only the runs the revert covers after a stop on a run it does not cover', async () => {
+          const { failed, batchId, revert } = await openRevertCard();
+          const later = laterRunFailed(batchId, 'src/ui/gamma.txt');
+          // Another lane builds on its file, so reverting its commit conflicts and the answer stops.
+          h.commit('src/ui/gamma.txt', 'built on\n');
+          inbox.answer(failedCard(later, batchId).id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('conflicts')));
+          expect(stopped.detail).toMatchObject({ batchCard: { revert, workstreamId: later } });
+
+          const retried = h.starter.retry(later);
+
+          // Its commit is on the branch and the revert holds none of it.
+          expect(retried.notice).toBeNull();
+          expect(builderNotes(later)).toEqual([]);
+          expect(h.starter.retry(failed).notice?.body).toContain(`Revert commit: ${revert}`);
+          expect(builderNotes(failed)).toHaveLength(1);
+        });
+
+        it('tells the run it covers after a second answer on the revert card itself stops', async () => {
+          const { failJobWrite } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          const open = h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+          failJobWrite();
+          inbox.answer(open.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+          expect(h.starter.retry(made.failed).notice?.body).toContain(`Revert commit: ${revert}`);
+        });
+
+        it('tells a run of a newer revert that undid the work it redid', async () => {
+          const { failJobWrite } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const first = h.git$('rev-parse', 'HEAD');
+          h.starter.retry(made.failed);
+          commitAs(made.failed, 'src/api/redo.txt', 'redo\n');
+          h.settle(made.failed, 'FAILED');
+
+          const open = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          failJobWrite();
+          inbox.answer(open.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const second = h.git$('rev-parse', 'HEAD');
+          expect(second).not.toBe(first);
+          h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+          const retried = h.starter.retry(made.failed);
+
+          expect(retried.notice?.key).toBe('reverted-work');
+          expect(retried.notice?.body).toContain(`Revert commit: ${second}`);
+          expect(builderNotes(made.failed).at(-1)?.summary).toContain(second);
+        });
+
+        it('does not tell a run again of the revert it was told of once it committed', async () => {
+          const { failed } = await openRevertCard();
+          h.starter.retry(failed);
+          commitAs(failed, 'src/api/redo.txt', 'redo\n');
+          h.settle(failed, 'FAILED');
+
+          h.starter.retry(failed);
+
+          expect(builderNotes(failed)).toHaveLength(1);
+        });
+
+        it('tells each covered run of a revert that a later answer extended', async () => {
+          const { failJobWrite } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const later = laterRunFailed(made.batchId, 'src/ui/gamma.txt');
+
+          failJobWrite();
+          inbox.answer(failedCard(later, made.batchId).id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const second = h.git$('rev-parse', 'HEAD');
+          h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+          expect(h.starter.retry(later).notice?.body).toContain(`Revert commit: ${second}`);
+          expect(h.starter.retry(made.failed).notice?.body).toContain(`Revert commit: ${second}`);
+        });
+
+        it('closes the card when an answer on another card writes the notices', async () => {
+          revertsWithFailedWrite({
+            shipGate: (gate) => ({
+              run: async (request) => ({ ...(await gate.run(request)), exitCode: 1 }),
+            }),
+          });
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const open = h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+          inbox.answer(failedCard(made.failed, made.batchId).id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          expect(getBatch(h.store.db, made.batchId).state).toBe('FAILED');
+          expect(getInboxItem(h.store.db, open.id).state).not.toBe('OPEN');
+        });
       });
 
       it('reverts as usual when the revert the card names is no longer on the branch', async () => {

@@ -217,7 +217,9 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * revert brings work back, and 10db never undoes a revert. A commit that resolved conflict markers of
  * a base merge brings none back, as the pull request reads it too. `kept` is a revert Ship without it
  * left on the branch without writing the run's notice (its write failed, and the batch's left-out
- * card holds it): a run with no record of its own is told of that one.
+ * card holds it). It covers this run, and it is told of that one unless it is the revert the run was
+ * told of already: a different revert undid what the run had by then. The card is never older than
+ * the run's record, because the answer that writes the notices closes it.
  */
 function revertStillOn(
   db: DbReader,
@@ -230,7 +232,7 @@ function revertStillOn(
   }
   const evidence = listEvidence(db, row.id);
   const record = revertOfRun({ notice: row.notice, evidence });
-  if (record === null) return kept;
+  if (record === null || (kept !== null && kept !== record.revert)) return kept;
   const since = lastRevertNoteAt(evidence);
   if (since !== null)
     for (const result of listToolOpResults(db, row.id, McpToolName.Commit, since))

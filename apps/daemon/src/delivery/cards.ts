@@ -1252,12 +1252,15 @@ export const branchCards = {
 
 /**
  * The tasks a stopped Ship without it meant to leave out, the failed run it was answered on, and the
- * revert commit an earlier answer left on the branch, if one did.
+ * revert commit an earlier answer left on the branch, if one did. `titles` is what this answer tried
+ * and `covers` the runs that revert undid: a task named in `titles` may still have its commits on the
+ * branch, so only `covers` says whose commits are gone.
  */
 export interface LeftOutAttempt {
   readonly workstreamId: WorkstreamId;
   readonly titles: readonly string[];
   readonly revert?: string | null;
+  readonly covers?: readonly WorkstreamId[];
 }
 
 /**
@@ -1271,6 +1274,8 @@ export const LeftOutKept = z.object({
   workstreamId: WorkstreamId,
   titles: z.array(z.string()),
   revert: z.string().min(1),
+  // A card raised before this field existed still parses.
+  covers: z.array(WorkstreamId).default([]),
   why: z.string(),
 });
 export type LeftOutKept = z.infer<typeof LeftOutKept>;
@@ -1297,7 +1302,7 @@ function leftOutCard(
     ...batchCardFields(
       { id: attempt.workstreamId, batchId: batch.id },
       attempt.revert,
-      attempt.titles,
+      attempt.covers,
     ),
   };
 }
@@ -1396,6 +1401,7 @@ export const leftOutCards = {
       workstreamId: attempt.workstreamId,
       titles: [...attempt.titles],
       revert,
+      covers: [...(attempt.covers ?? [])],
       why: why.slice(0, 1500),
     };
     return {

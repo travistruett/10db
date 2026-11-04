@@ -54,7 +54,7 @@ import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from '
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
-import { coversRun, keptRevertOf } from './left-out-settle';
+import { keptRevertOf } from './left-out-settle';
 import { batchPlacement, placementWords, refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
@@ -755,7 +755,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         ctx.state,
         id,
         note,
-        kept !== null && coversRun(kept, run) ? kept.revert : null,
+        kept?.covers.includes(id) ? kept.revert : null,
       );
       if (retried.batchId !== null) reopen(retried.batchId);
       return retried;
