@@ -69,7 +69,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { commitResultUnderMerge } from '../team';
+import { commitResultAsStored } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -640,10 +640,9 @@ export function createToolHandlers(
         opId: input.opId,
         branch,
       });
-      // A run whose gate's base merge left conflict markers is queued again with a `merge` next action,
-      // and a commit made then resolves them. The record says so, for the pull request: the commit is on
-      // the branch but brings none of a reverted task's work back. The session's answer is unchanged.
-      const underMerge = row.nextAction.kind === 'merge';
+      // The record says when this commit resolved conflict markers of a base merge: it is on the branch
+      // but brings none of a reverted task's work back. The session's answer is unchanged.
+      const stored = await commitResultAsStored(deps.git, checkout, result);
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,
@@ -660,7 +659,7 @@ export function createToolHandlers(
           sessionId,
           opId: input.opId,
           tool: McpToolName.Commit,
-          result: commitResultUnderMerge(result, underMerge),
+          result: stored,
         });
         return result;
       });

@@ -10,8 +10,8 @@ export {
   startTaskWithPlan,
 } from './steps';
 export {
-  commitResultUnderMerge,
-  commitUnderMerge,
+  commitResolvedMarkers,
+  commitResultAsStored,
   revertCommitLine,
   revertOfRun,
 } from './reverted-work';

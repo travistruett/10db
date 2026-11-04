@@ -6,6 +6,7 @@ import {
   type Notice,
   type WorkstreamStep,
 } from '@10db/contracts';
+import type { Git } from '../git';
 
 /**
  * What a run keeps once its batch shipped without it (Ship without it) and the builder retried it: its
@@ -16,27 +17,31 @@ import {
 const REVERT_LINE = REVERT_COMMIT_LINE;
 
 /**
- * The key a commit tool op's stored result carries when the commit was made while the run resolved
- * conflict markers its own gate's base merge left (its `merge` next action). The session's answer does
- * not carry it. The pull request reads it: such a commit resolves the base's conflicts and brings none
- * of a reverted task's work back.
+ * The key a commit tool op's stored result carries when the commit changed a file that held conflict
+ * markers at its parent: 10db commits a base merge with its markers for a session to resolve, so such a
+ * commit is that resolution, whichever session made it. The session's answer does not carry the key.
+ * Whether a run brought reverted work back reads it: a resolution brings none back.
  */
-const UNDER_MERGE_KEY = 'underMerge';
+const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 
-/** A commit tool op's result as it is stored, marked when the commit was made under a `merge` action. */
-export function commitResultUnderMerge<T extends object>(
+/** A commit tool op's result as it is stored, marked when the commit resolved conflict markers. */
+export async function commitResultAsStored<T extends { readonly sha: string }>(
+  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween'>,
+  repo: string,
   result: T,
-  underMerge: boolean,
-): T & { readonly [UNDER_MERGE_KEY]?: true } {
-  return underMerge ? { ...result, [UNDER_MERGE_KEY]: true } : result;
+): Promise<T & { readonly [RESOLVED_MARKERS_KEY]?: true }> {
+  const parent = `${result.sha}^`;
+  const changed = await git.filesChangedBetween(repo, parent, result.sha);
+  const marked = await git.conflictMarkers(repo, changed, parent);
+  return marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true } : result;
 }
 
-/** Whether a stored commit result was recorded under a `merge` next action. */
-export function commitUnderMerge(result: unknown): boolean {
+/** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
+export function commitResolvedMarkers(result: unknown): boolean {
   return (
     typeof result === 'object' &&
     result !== null &&
-    (result as Record<string, unknown>)[UNDER_MERGE_KEY] === true
+    (result as Record<string, unknown>)[RESOLVED_MARKERS_KEY] === true
   );
 }
 

@@ -7,6 +7,7 @@ import {
   getInboxItem,
   getWorkstream,
   insertToolOp,
+  listEvidence,
   listWorkstreams,
   setTaskStatus,
   setWorkstreamNotice,
@@ -15,7 +16,12 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
-import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
+import {
+  commitResultAsStored,
+  insertPlannedWorkstream,
+  planForStart,
+  retryWorkstream,
+} from '../team';
 import { leftOutCards } from './cards';
 import { raise } from './context';
 import { batchCardFields, createBatchCardAnswers } from './index';
@@ -49,17 +55,8 @@ afterEach(() => {
   h.close();
 });
 
-/**
- * Records `path` as a commit `workstreamId` made through the commit tool; `underMerge` is a commit
- * made while the run resolved conflict markers of its own gate's base merge (its `merge` next action),
- * which the tool records as it does in the real session.
- */
-function commitAs(
-  workstreamId: WorkstreamId,
-  path: string,
-  content: string,
-  options: { readonly underMerge?: boolean } = {},
-): string {
+/** Records `path` as a commit `workstreamId` made through the commit tool. */
+function commitAs(workstreamId: WorkstreamId, path: string, content: string): string {
   const sha = h.commit(path, content);
   h.state.write((w) => {
     insertToolOp(w, {
@@ -67,15 +64,34 @@ function commitAs(
       sessionId: mintId('Session'),
       opId: `op-${path}-${sha}`,
       tool: 'commit',
-      result: {
-        sha,
-        alreadyCommitted: false,
-        ...(options.underMerge === true ? { underMerge: true } : {}),
-      },
+      result: { sha, alreadyCommitted: false },
     });
   });
   return sha;
 }
+
+/** Commits `path` for `workstreamId` and stores the result as the commit tool does, from the branch. */
+async function commitAsTheToolRecords(
+  workstreamId: WorkstreamId,
+  path: string,
+  content: string,
+): Promise<string> {
+  const sha = h.commit(path, content);
+  const result = await commitResultAsStored(h.git, h.repo, { sha, alreadyCommitted: false });
+  h.state.write((w) => {
+    insertToolOp(w, {
+      workstreamId,
+      sessionId: mintId('Session'),
+      opId: `op-${path}-${sha}`,
+      tool: 'commit',
+      result,
+    });
+  });
+  return sha;
+}
+
+/** What 10db's base merge commits to the branch for a session to resolve. */
+const MARKED_README = '<<<<<<< HEAD\n# ours\n||||||| base\n=======\n# theirs\n>>>>>>> main\n';
 
 /** The failed card the runner raises for a run in a batch. */
 function failedCard(workstreamId: WorkstreamId, batchId: BatchId) {
@@ -1406,7 +1422,8 @@ describe('the failed workstream card', () => {
         const { batchId, failed } = await leftOutThenRetried();
 
         // The same run, not a new one, is queued to merge when its gate's base merge leaves markers.
-        commitAs(failed, 'README.md', '# ours and theirs\n', { underMerge: true });
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
         h.settle(failed, 'DONE');
         h.shipper.checkBatch(batchId);
         await h.jobs.idle();
@@ -1423,8 +1440,9 @@ describe('the failed workstream card', () => {
 
       it('lists the task as finished when it redoes the work after resolving conflict markers', async () => {
         const { batchId, failed } = await leftOutThenRetried();
-        commitAs(failed, 'README.md', '# ours and theirs\n', { underMerge: true });
-        commitAs(failed, 'src/api/alpha.txt', 'alpha again\n');
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/alpha.txt', 'alpha again\n');
 
         h.settle(failed, 'DONE');
         h.shipper.checkBatch(batchId);
@@ -1436,6 +1454,33 @@ describe('the failed workstream card', () => {
         const body = h.gh.body(shipped.prUrl ?? '');
         expect(body).toContain('### Alpha');
         expect(body).not.toMatch(/reverted/);
+      });
+
+      it('tells a run again on Retry when its only commit since the note resolved conflict markers', async () => {
+        const { failed } = await leftOutThenRetried();
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        h.settle(failed, 'FAILED');
+
+        const retried = retryWorkstream(h.state, failed);
+
+        const notes = listEvidence(h.store.db, failed).filter((e) => e.kind === 'builder');
+        expect(notes).toHaveLength(2);
+        expect(notes[1]?.summary).toContain('Redo the work');
+        expect(retried.notice?.key).toBe('reverted-work');
+      });
+
+      it('does not tell a run again on Retry when it committed work besides the resolution', async () => {
+        const { failed } = await leftOutThenRetried();
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/alpha.txt', 'alpha again\n');
+        h.settle(failed, 'FAILED');
+
+        retryWorkstream(h.state, failed);
+
+        const notes = listEvidence(h.store.db, failed).filter((e) => e.kind === 'builder');
+        expect(notes).toHaveLength(1);
       });
 
       it('still lists the task as finished when it committed again before it was sent to merge', async () => {

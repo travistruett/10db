@@ -49,6 +49,7 @@ import {
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
 import {
+  commitResolvedMarkers,
   lastRevertNoteAt,
   lastRevertTold,
   revertCommitOf,
@@ -213,7 +214,8 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * The revert commit a retry must tell its session about: the run's commits are still reverted on the
  * batch's branch. A run left out holds a revert on its notice. A run retried before holds it in the
  * note its session was given, and is told again unless it has committed since: a commit after the
- * revert brings work back, and 10db never undoes a revert.
+ * revert brings work back, and 10db never undoes a revert. A commit that resolved conflict markers of
+ * a base merge brings none back, as the pull request reads it too.
  */
 function revertStillOn(
   db: DbReader,
@@ -229,7 +231,8 @@ function revertStillOn(
   const since = lastRevertNoteAt(evidence);
   if (since !== null)
     for (const result of listToolOpResults(db, row.id, McpToolName.Commit, since))
-      if (McpToolOutputs.commit.safeParse(result).success) return null;
+      if (McpToolOutputs.commit.safeParse(result).success && !commitResolvedMarkers(result))
+        return null;
   return record.revert;
 }
 
