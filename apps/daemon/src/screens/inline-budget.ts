@@ -123,9 +123,10 @@ export function unmeasuredRead(
  * (`readAllowance`). Claude Code resizes a picture it reads to at most about 2000 px a side and re-encodes
  * it, so what it returns is not the file's size; this is the allowance for it, and a smaller file is charged
  * its own size, which resizing does not make larger. The PostToolUse hook replaces the charge with the
- * measured size of what came back (`measuredMediaBytes`); a result it can't measure stays charged what it
- * was counted. The live test (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up
- * task tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
+ * measured size of what came back (`measuredMediaBytes`); a result whose bytes stayed on disk stays charged
+ * what it was counted, and a failed or `file_unchanged` Read, which added nothing, gives its charge back. The
+ * live test (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up task
+ * tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
  */
 export const READ_CHARGE_MAX_BYTES = 1 * MIB;
 
@@ -158,7 +159,8 @@ export const readAllowance = (messages: readonly ShapeMessageDto[]): number =>
 
 /**
  * Whether the live session has measured what a picture over the allowance came back as. A smaller one says
- * nothing about that: it is only charged its own size, and a failed Read (0 bytes) measured nothing.
+ * nothing about that: it is only charged its own size, and a failed or `file_unchanged` Read (0 bytes)
+ * measured nothing.
  */
 const largePictureMeasured = (messages: readonly ShapeMessageDto[]): boolean =>
   liveMessages(messages).some((message) => {

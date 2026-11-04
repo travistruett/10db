@@ -335,8 +335,9 @@ since resizing does not make a picture larger than its file. Once the live sessi
 over 1 MiB, Claude Code's resizing is known, so the charge is capped at a 1 MiB allowance, or the largest Read measured
 when that is more (see below); a file that isn't there is charged nothing. Once the
 Read has returned, the PostToolUse hook measures its result (every `base64` string it carries) and the measured size
-replaces the charge, so it comes from what came back; a result with no bytes in it, such as a set of page
-files on disk, stays charged what it was counted, and a Read that failed (the PostToolUseFailure hook) gives its charge
+replaces the charge, so it comes from what came back; a result with no bytes in it because they stayed on disk, such
+as a set of page files, stays charged what it was counted, and a Read that failed (the PostToolUseFailure hook), or that
+Claude Code answered with `file_unchanged` because an earlier tool result still stands, gives its charge
 back, as a measurement of 0. A Read that would take the live session's total past what the inline pictures
 leave of the pool is refused with a reason that says to work from the pictures already read or ask for a smaller one;
 if the picture was charged its file's size for want of a measurement, the reason says instead to wait for the ones
