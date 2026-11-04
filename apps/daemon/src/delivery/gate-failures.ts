@@ -47,6 +47,31 @@ export function failingTests(log: string): FailingTest[] {
   return [...found.values()];
 }
 
+/** The key a failing test has in `failureReasons`. */
+export function failureKey(test: FailingTest): string {
+  return `${test.file}\0${test.name ?? ''}`;
+}
+
+const REASON_MAX = 300;
+
+/**
+ * What a vitest log says of each failing test, keyed by `failureKey`: the first line after its first
+ * ` FAIL ` line that is not blank and not another ` FAIL ` line (`Error: Test timed out in 30000ms.`,
+ * `AssertionError: expected 1 to be 2`). A test with no such line has no entry.
+ */
+export function failureReasons(log: string): Map<string, string> {
+  const lines = plain(log).split('\n');
+  const reasons = new Map<string, string>();
+  lines.forEach((line, at) => {
+    const [test] = failingTests(line);
+    if (!test || reasons.has(failureKey(test))) return;
+    const reason = lines.slice(at + 1).find((next) => next.trim() !== '');
+    if (reason === undefined || /^\s*FAIL\s/.test(reason)) return;
+    reasons.set(failureKey(test), reason.trim().slice(0, REASON_MAX));
+  });
+  return reasons;
+}
+
 /** The steps the gate's summary line names (`GATE FAIL: lint test — logs in .gate/; …`), each log at `<dir>/<step>.log`. */
 function summarySteps(output: string): { name: string; log: string }[] {
   const match = /^GATE FAIL: (.+?) — logs in (\S+?)\/?(?:;|\s|$)/m.exec(output);

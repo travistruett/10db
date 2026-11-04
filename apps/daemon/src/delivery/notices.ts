@@ -1,6 +1,7 @@
 import type { BatchDto, Notice } from '@10db/contracts';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
 import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
+import { flakeNote, type FlakyTest } from './flaky-tests';
 import type { GateStepFailure } from './gate-failures';
 import type { TakenNumber } from './migration-numbers';
 
@@ -24,6 +25,8 @@ export const NOTICE_KEY = {
   merge: 'pull-request-merge',
   /** The shipping gate failed once, in tests the batch didn't change, and passed when run again. */
   gateRerun: 'gate-rerun',
+  /** The shipping gate failed only in tests that passed when 10db ran just their files again. */
+  gateFlaky: 'gate-flaky',
   /** 10db merged the base into the open pull request's branch. */
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
@@ -298,6 +301,13 @@ export const gateNotices = {
     tone: 'info',
     line: 'The gate passed when 10db ran it again',
     body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
+  }),
+  /** The failing test files passed when 10db ran just them again, and the batch went on to ship. */
+  flakyPassed: (tests: readonly FlakyTest[]): Notice => ({
+    key: NOTICE_KEY.gateFlaky,
+    tone: 'info',
+    line: 'The gate passed when 10db ran its failing test files again',
+    body: `${flakeNote(tests)}\n\nEach test file has a task in the Icebox.`,
   }),
 };
 

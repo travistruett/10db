@@ -90,6 +90,7 @@ import {
   type DeliveryContext,
   type DeliveryLimits,
 } from './context';
+import { fileFlakyTests, rerunFlaky, type FlakyTest } from './flaky-tests';
 import { readGateFailures, touchedBy, type GateStepFailure } from './gate-failures';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
@@ -436,6 +437,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * A gate that failed only in tests which passed when their files were rerun: the flakes are a notice
+   * on the batch's tasks and one Icebox task per test file (a file with an open task gets the flake
+   * added to it), filed against the batch's newest task.
+   */
+  function recordFlakes(batch: BatchDto, tests: readonly FlakyTest[]): void {
+    deps.logger.info(
+      { batchId: batch.id, tests: tests.map((t) => `${t.file} > ${t.name ?? ''}`) },
+      'ship gate failed only in tests that passed when rerun; going on',
+    );
+    deps.state.write((w) => {
+      const [newest] = members(w.tx, batch.id).sort((a, b) =>
+        a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0,
+      );
+      if (newest) fileFlakyTests(w, newest.taskId, tests);
+    });
+    showNotice(deps.state, batch.id, gateNotices.flakyPassed(tests));
+  }
+
+  /**
    * Runs the check before the push (the pre-check or the gate) on the batch branch, recording its
    * process group for recovery. `beforeStart` runs once it holds its gate slot; a false answer stops
    * it as an abort would.
@@ -445,8 +465,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
     project: ProjectDto,
     signal: AbortSignal,
     beforeStart: () => Promise<boolean>,
+    /** Run this instead of the project's check: the rerun of a failed check's failing test files. */
+    command?: string,
   ): Promise<GateResult | null> {
-    const gateCommand = shipCheck(project)?.command;
+    const gateCommand = command ?? shipCheck(project)?.command;
     // The caller skips the gate step for a project without a gate.
     if (gateCommand === undefined)
       throw new InvalidError('This project has no gate command to run');
@@ -952,7 +974,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         const name: ShipCheckName = check.kind === 'precheck' ? 'pre-check' : 'gate';
         step = `the ${name}`;
         // A notice from an earlier ship attempt's rerun says nothing of this one's gate.
-        hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun]);
+        hideNotices(deps.state, batchId, [NOTICE_KEY.gateRerun, NOTICE_KEY.gateFlaky]);
         // Once the gate holds its slot and no other gate of the batch runs, so no other gate's
         // merge changes the tree under it.
         const gateOnce = async (): Promise<{
@@ -1016,7 +1038,31 @@ export function createShipper(deps: ShipperDeps): Shipper {
           );
           return;
         }
+        // A check that failed only in tests is run again on just the failing files, once, before any
+        // card. A pass lets the batch ship with the flakes on record; a fail is the failure it was.
+        let flakesPassed = false;
         if (first.gate.exitCode !== 0) {
+          const flaky = await rerunFlaky({
+            checkout,
+            output: first.gate.tail,
+            run: async (rerun) =>
+              deps.baseUpdates.gate(batchId, signal, () =>
+                runGate(
+                  batch,
+                  projectAtCheckout(project, checkout),
+                  signal,
+                  () => Promise.resolve(true),
+                  rerun,
+                ),
+              ),
+          });
+          if (flaky.kind === 'stopped') return;
+          if (flaky.kind === 'flaky') {
+            flakesPassed = true;
+            recordFlakes(batch, flaky.tests);
+          }
+        }
+        if (first.gate.exitCode !== 0 && !flakesPassed) {
           const steps = await readGateFailures(checkout, first.gate.tail);
           if (!(await outsideTheBatch(batchId, checkout, steps))) {
             fail(

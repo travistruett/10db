@@ -112,12 +112,16 @@ import {
   allCheckouts,
   batchCardFields,
   checkoutOf,
+  fileFlakyTests,
+  flakeNote,
   gateNote,
   MIGRATIONS_HAZARD,
   projectAtCheckout,
+  rerunFlaky,
   stepCheck,
   type BaseUpdate,
   type BaseUpdates,
+  type FlakyTest,
   type MigrationsBase,
 } from '../delivery';
 import type { StateStore } from '../events';
@@ -2385,6 +2389,39 @@ export function createRunner(opts: RunnerOptions): Runner {
               opts.gate.run(request),
             )) ?? stoppedWaiting(logPath));
     } while (wasHeldAgain());
+    // A check that failed only in tests is run once more, on just the failing files, before it counts
+    // as a failure: a loaded Mac makes tests time out, and a fix session cannot repair that. A rerun
+    // that passes lets the step go on with no attempt used; one that fails is the failure it was.
+    let flaky: readonly FlakyTest[] = [];
+    if (result.exitCode !== 0 && !result.timedOut && !result.aborted && !gateAbort.signal.aborted) {
+      const outcome = await rerunFlaky({
+        checkout,
+        output: result.tail,
+        run: async (command) => {
+          await opts.hold?.untilClear(gateAbort.signal);
+          const again: GateRequest = {
+            ...request,
+            command,
+            logPath: join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}-rerun.log`),
+            // The tree is the one the first run tested: no base update, no second gate-started event.
+            beforeStart: () => Promise.resolve(!gateAbort.signal.aborted),
+            onStarted: () => undefined,
+          };
+          opts.logger.info(
+            { workstreamId: id, command },
+            'check failed only in tests; rerunning them',
+          );
+          return batchId === null
+            ? opts.gate.run(again)
+            : opts.baseUpdates.gate(batchId, gateAbort.signal, () => opts.gate.run(again));
+        },
+      });
+      if (outcome.kind === 'stopped') result = { ...result, aborted: true };
+      else if (outcome.kind === 'flaky') {
+        flaky = outcome.tests;
+        result = outcome.rerun;
+      }
+    }
     ctl.gateAbort = null;
     opts.logger.info(
       {
@@ -2450,15 +2487,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       cancelNow(id, ctl.fence);
       return;
     }
+    // The step's record names each test that failed once and passed on rerun.
+    const notes = [
+      before.update === null ? null : gateNote(before.update),
+      flaky.length > 0 ? flakeNote(flaky) : null,
+    ].filter((n): n is string => n !== null);
     const evidence = {
       workstreamId: id,
       kind: 'gate' as const,
       command: gateCommand,
       exitCode: result.exitCode,
-      summary: gateSummary(before.update === null ? null : gateNote(before.update), result.tail),
+      summary: gateSummary(notes.length > 0 ? notes.join('\n\n') : null, result.tail),
       logPath: result.logPath,
       commitShas,
     };
+    if (flaky.length > 0)
+      opts.state.write((ctx) => {
+        fileFlakyTests(ctx, row.taskId, flaky);
+      });
     if (result.exitCode === 0) {
       const step = currentStep(row);
       const move = moveAfter(row.steps, row.stepIndex);

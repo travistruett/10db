@@ -568,6 +568,101 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain('MISSING-FIXED-FILE');
   });
 
+  describe('a check that fails only in tests', () => {
+    const failedTail = 'FAILED test: pnpm test (log .gate/test.log)';
+    const testLog = [
+      ' FAIL  daemon  src/a.test.ts > suite > slow one',
+      'Error: Test timed out in 30000ms.',
+    ].join('\n');
+    const gateResult = (exitCode: number, tail: string): GateResult => ({
+      exitCode,
+      durationMs: 1,
+      tail,
+      logPath: '/dev/null',
+      timedOut: false,
+      aborted: false,
+      blockedHosts: [],
+    });
+
+    /** An engine whose check fails on its first run with a timed out test and answers the rerun as `rerunExit` says. */
+    async function flakyEngine(rerunExit: number): Promise<{ commands: string[] }> {
+      const commands: string[] = [];
+      engine = await createTestEngine(
+        { Alpha: [[turn]], Beta: [[turn]] },
+        { gateCommand: 'make check-changed' },
+        {
+          gate: {
+            run: (request: GateRequest) => {
+              commands.push(request.command);
+              if (request.command === 'make check-changed')
+                return Promise.resolve(gateResult(2, failedTail));
+              return Promise.resolve(gateResult(rerunExit, rerunExit === 0 ? 'ok' : 'still red'));
+            },
+          },
+        },
+      );
+      mkdirSync(join(engine.repoPath, '.gate'), { recursive: true });
+      writeFileSync(join(engine.repoPath, '.gate', 'test.log'), testLog);
+      return { commands };
+    }
+
+    it('goes on when the failing test files pass on one rerun: no fix session, no attempt used, the flake on the evidence, one Icebox task', async () => {
+      const { commands } = await flakyEngine(0);
+      const { workstream, task } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(commands).toEqual(['make check-changed', 'pnpm exec vitest run src/a.test.ts']);
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', attempt: 0 });
+      const evidence = listEvidence(engine.store.db, workstream.id);
+      expect(evidence).toHaveLength(1);
+      expect(evidence[0]).toMatchObject({ exitCode: 0 });
+      expect(evidence[0]?.summary).toContain('src/a.test.ts > suite > slow one');
+      expect(evidence[0]?.summary).toContain('Test timed out in 30000ms');
+      const filed = listTasks(engine.store.db, engine.project.id).filter(
+        (t) => t.title === 'Fix flaky test file src/a.test.ts',
+      );
+      expect(filed).toHaveLength(1);
+      expect(filed[0]?.description).toContain('suite > slow one');
+      expect(filed[0]?.description).toContain(task.title);
+      expect(listInbox(engine.store.db, { states: ['OPEN'] })).toEqual([]);
+    });
+
+    it('adds a second task’s flake of the same file to the open Icebox task instead of filing another', async () => {
+      await flakyEngine(0);
+      const alpha = engine.addTask('Alpha');
+      const beta = engine.addTask('Beta', ['ui']);
+      engine.launch(alpha.workstream.id);
+      await engine.runner.idle();
+      engine.launch(beta.workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(beta.workstream.id)).toMatchObject({ state: 'DONE', attempt: 0 });
+      const filed = listTasks(engine.store.db, engine.project.id).filter((t) =>
+        t.title.startsWith('Fix flaky'),
+      );
+      expect(filed).toHaveLength(1);
+      expect(filed[0]?.description).toContain('Flaked again');
+      expect(filed[0]?.description).toContain('Beta');
+    });
+
+    it('is a real failure when the rerun fails too: the attempt is counted, a fix is queued, and no task is filed', async () => {
+      const { commands } = await flakyEngine(1);
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(commands).toEqual(['make check-changed', 'pnpm exec vitest run src/a.test.ts']);
+      expect(ws(workstream.id)).toMatchObject({ state: 'QUEUED', attempt: 1 });
+      expect(ws(workstream.id).nextAction.kind).toBe('fix');
+      expect(
+        listTasks(engine.store.db, engine.project.id).filter((t) =>
+          t.title.startsWith('Fix flaky'),
+        ),
+      ).toEqual([]);
+    });
+  });
+
   it('fails as gate_failed once the gate fails past the retry limit, and a retry clears the kind', async () => {
     engine = await createTestEngine(
       { Alpha: [[turn], [turn]] },
