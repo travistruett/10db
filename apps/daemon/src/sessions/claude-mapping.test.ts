@@ -292,6 +292,16 @@ describe('permission and hook translation', () => {
     });
   });
 
+  it('turns a settled allow into a PreToolUse allow, so neither the classifier nor a card follows', () => {
+    expect(toHookOutput({ decision: 'allow', settled: 'Every part only reads.' })).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: 'Every part only reads.',
+      },
+    });
+  });
+
   it('builds a user message, with a priority when given', () => {
     expect(userMessage('hi')).toEqual({
       type: 'user',
