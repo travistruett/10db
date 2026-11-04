@@ -1,6 +1,6 @@
 import type { ShapeProposalDto, ShapeViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, ScrollArea, Skeleton, Stack, Text } from '@mantine/core';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   useConvertShape,
   useDismissFinding,
@@ -34,10 +34,25 @@ export interface ProposedPaneProps {
   readonly summaryHere: boolean;
   /** Why?: scrolls the conversation to the messages a row came from and highlights them. */
   readonly onWhy: (row: ShapeProposalDto) => void;
+  /**
+   * A count in the bar's summary line asked for this section while the pane was a drawer. The pane
+   * focuses the section's first row once it has the rows (a drawer mounts it on open) and calls
+   * `onJumped`, so a later open starts at the top.
+   */
+  readonly jumpRequest?: { readonly section: SectionKey; readonly nonce: number } | null;
+  readonly onJumped?: () => void;
 }
 
 /** The sidebar: a header, a pinned summary line and the list of proposals, each editable in place. */
-export function ProposedPane({ view, loading, error, summaryHere, onWhy }: ProposedPaneProps) {
+export function ProposedPane({
+  view,
+  loading,
+  error,
+  summaryHere,
+  onWhy,
+  jumpRequest = null,
+  onJumped,
+}: ProposedPaneProps) {
   const now = useNow();
   const listRef = useRef<HTMLDivElement>(null);
   const [converting, setConverting] = useState(false);
@@ -75,6 +90,16 @@ export function ProposedPane({ view, loading, error, summaryHere, onWhy }: Propo
     target?.focus();
     target?.scrollIntoView({ block: 'nearest' });
   };
+
+  // The rows exist once the view has loaded; until then the request waits.
+  const ready = view !== undefined && !loading && error === null;
+  useEffect(() => {
+    if (jumpRequest === null || !ready) return;
+    jump(jumpRequest.section);
+    onJumped?.();
+    // `jump` reads only the list ref; a request is handled once, by its nonce.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpRequest?.nonce, ready]);
 
   const actionsFor = (row: ShapeProposalDto): RowAction[] => {
     if (row.state !== 'accepted') return [];
