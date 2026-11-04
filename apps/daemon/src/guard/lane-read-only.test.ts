@@ -8,6 +8,36 @@ import { laneReadOnlyWords, readOnlyShellRefusal } from './read-only';
 const TASKS = '/private/tmp/10db-abc123/claude-501/-Users-x-worktrees-lane/9f2e/tasks';
 const GREP = `grep -rnE 'pattern|other' apps/daemon/src --include=*.ts | grep -v '\\.test\\.' | head -150`;
 
+const GROUPED = String.raw`find apps/desktop/node_modules/.pnpm/ node_modules/.pnpm -maxdepth 1 \( -name "@tanstack+router-core*" -o -name "@tanstack+history*" \)`;
+const NOT_GROUPED = String.raw`find . -maxdepth 2 ! -name '*.ts' -a \( -not -name x -or -name y -and -type f \)`;
+
+describe('find with grouped tests', () => {
+  it.each<[string, string]>([
+    ['escaped parentheses', GROUPED],
+    ['quoted parentheses', `find . -maxdepth 1 '(' -name "a*" -o -name b ')'`],
+    ['!, -a, -not, -or and -and', NOT_GROUPED],
+  ])('%s read only, for a lane and a read-only step', (_name, command) => {
+    expect(laneReadOnlyWords(command)).not.toBeNull();
+    expect(readOnlyShellRefusal(command)).toBeNull();
+  });
+
+  it.each<[string, string]>([
+    ['-exec', String.raw`find . \( -name a -o -name b \) -exec rm '{}' ';'`],
+    ['-execdir', String.raw`find . \( -name a \) -execdir rm '{}' ';'`],
+    ['-ok', String.raw`find . \( -name a \) -ok rm '{}' ';'`],
+    ['-okdir', String.raw`find . \( -name a \) -okdir rm '{}' ';'`],
+    ['-delete', String.raw`find . \( -name a -o -name b \) -delete`],
+    ['-fprint', String.raw`find . \( -name a \) -fprint out.txt`],
+    ['-fprint0', String.raw`find . \( -name a \) -fprint0 out.txt`],
+    ['-fprintf', String.raw`find . \( -name a \) -fprintf out.txt x`],
+    ['-fls', String.raw`find . \( -name a \) -fls out.txt`],
+    ['-exec after !', String.raw`find . ! -name a -exec rm '{}' ';'`],
+  ])('with %s does not', (_name, command) => {
+    expect(laneReadOnlyWords(command)).toBeNull();
+    expect(readOnlyShellRefusal(command)).not.toBeNull();
+  });
+});
+
 describe('laneReadOnlyWords', () => {
   it.each<[string, string]>([
     ['a listing and a process count', `ls -la ${TASKS}; ps aux | grep -c "[v]itest"`],
@@ -94,7 +124,7 @@ function pre(command: string, fileAccess: FileAccessJudge | null = access(), too
 }
 
 describe('a lane Bash call made only of read-only commands', () => {
-  it.each<[string]>([[`ls -la ${TASKS}; ps aux | grep -c "[v]itest"`], [GREP]])(
+  it.each<[string]>([[`ls -la ${TASKS}; ps aux | grep -c "[v]itest"`], [GREP], [GROUPED]])(
     'is settled by the hook, so no card follows: %s',
     (command) => {
       expect(pre(command)).toEqual({ decision: 'allow', settled: expect.any(String) as string });
@@ -104,6 +134,7 @@ describe('a lane Bash call made only of read-only commands', () => {
   it.each<[string, 'allow' | 'ask' | 'deny']>([
     ['grep x a | head -5 > out.txt', 'allow'],
     ['find . -delete', 'allow'],
+    [String.raw`find . \( -name a -o -name b \) -exec rm '{}' ';'`, 'allow'],
     ['ls $(rm -rf x)', 'allow'],
     ['cat a; rm b', 'allow'],
     ['rm -rf /', 'deny'],
