@@ -21,9 +21,9 @@ export const READ_PICTURES_MAX_BYTES = 3 * MIB;
 /**
  * The most one Read picture is charged. Claude Code resizes a picture it reads to at most about 2000 px
  * a side and re-encodes it, so what it returns is not the file's size; this is the allowance for it, and a
- * smaller file is charged its own size, which resizing does not make larger. No live session has measured
- * it yet (`test/shape-session.live.test.ts` does, with `TENDB_LIVE_CLAUDE=1`): if one returns more than
- * this, the total above is not a promise.
+ * smaller file is charged its own size, which resizing does not make larger. UNMEASURED: no live session
+ * has run `test/shape-session.live.test.ts` (`TENDB_LIVE_CLAUDE=1`), and the builder chose to ship this with
+ * a follow-up task that runs it. If a Read returns more than this, the total above is not a promise.
  */
 export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
 

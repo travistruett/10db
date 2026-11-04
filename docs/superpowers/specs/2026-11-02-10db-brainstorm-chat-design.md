@@ -331,11 +331,14 @@ that says to work from the pictures already read or ask for a smaller one. Each 
 `Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
 it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
 session as text. A Read of a PDF is not counted (a separate task).
-**Not measured:** the 1 MiB is an allowance, not a measurement. `test/shape-session.live.test.ts` reads a 6 MB
-noise picture, a small one and a 4000 px one with a real session, finds the pictures Claude Code kept in the session's
-transcript and fails if one is over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run,
-and nothing yet shows whether Claude Code drops an old tool result's picture when it resends, which the budget
-assumes it does not.
+**Not measured:** the 1 MiB is an allowance, not a measurement, and the builder chose to ship it that way with a
+follow-up task, since a lane can't run a live session. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
+small one and a 4000 px one with a real session, finds the three pictures Claude Code kept in the session's transcript
+and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
+So the 3 MiB total is a promise only if a Read returns at most 1 MiB: at 2 MiB each, the three Reads it allows carry
+8 MB as base64 against the 6.8 MB left, and a request can pass 32 MB. The test also leaves one question open. It reads a
+fresh session's stored transcript, which gives an upper bound but doesn't show whether Claude Code drops an old tool
+result's picture when it resends. The budget assumes it doesn't, which is the safe side.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 
