@@ -2,7 +2,7 @@ import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@m
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { FILE_PICKER_ACCEPT } from './dropped-files';
-import type { LateOutcome } from './late-outcome';
+import { keepBoth, withoutSent, type LateOutcome } from './late-outcome';
 import { isSendKey } from './use-shape-keys';
 
 export interface ComposerProps {
@@ -27,6 +27,8 @@ export interface ComposerProps {
   readonly late: LateOutcome | null;
   /** This input has taken `late`. */
   readonly onLateTaken: () => void;
+  /** Told what the input holds each time it changes, so a screen replacing it can carry the text. */
+  readonly onDraft: (text: string) => void;
 }
 
 const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
@@ -55,12 +57,15 @@ export function Composer(props: ComposerProps) {
     if (late.failure !== null) setFailure(late.failure);
     const text = late.draft;
     // Whatever was typed since stays, with the text that failed ahead of it.
-    if (text !== null)
-      setDraft((typed) => (typed.includes(text) ? typed : `${text}\n\n${typed}`.trim()));
+    if (text !== null) setDraft((typed) => keepBoth(typed, text));
   }
   useEffect(() => {
     if (late !== null) onLateTaken();
   }, [late, onLateTaken]);
+  const { onDraft } = props;
+  useEffect(() => {
+    onDraft(draft);
+  }, [draft, onDraft]);
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return;
@@ -92,7 +97,8 @@ export function Composer(props: ComposerProps) {
     setFailure(null);
     try {
       await props.onSend(text);
-      setDraft('');
+      // Only the text sent goes: a failed text restored while it was on its way stays.
+      setDraft((typed) => withoutSent(typed, text));
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
     } finally {

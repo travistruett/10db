@@ -304,7 +304,10 @@ The API refuses an image over about 5 MB, an image over 8000 px on a side howeve
 request over 32 MB, and a resumed session resends every earlier image, so one oversize block would end every
 later turn. An image over 2 MiB, over 2000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
 pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request about 6 MB), therefore goes
-as a path line marked "too large to show inline; Read it", which `Read` resizes itself. The 2000 px is the
+as a path line, which `Read` resizes itself. The line says why: an image over 2 MiB or 2000 px is marked "too
+large to show inline; Read it", while one within those caps that the message or conversation total left out is
+marked "left out to keep this message within the image limit; Read it" or "left out to keep the conversation
+within the image limit; Read it", so Claude is never told a small image is too large. The 2000 px is the
 API's limit once a request holds more than 20 images: a conversation's screens (up to 12, §5.5) and dropped
 images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent as a block could fail that turn
 and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the
@@ -322,22 +325,62 @@ images that session sent. Screens count the same way: only those whose transcrip
 so the picture is not charged where it is not carried, and `see_screen` is not refused on a screen the digest
 told Claude to take again.
 A picture Claude pulls in with `Read` is a tool result the daemon never sees, and a resumed session resends it too,
-so it has a budget of its own in the session's PreToolUse hook (`shape/read-budget.ts`), sized to the 6.8 MB the
-18 MiB leaves. The hook charges each of the session's own Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`
-file (a dropped image or one in the checkout) the file's size, at most 1 MiB, since Claude Code resizes what it
-reads; a file that isn't there is charged nothing. A Read that would take the live session's total past 3 MiB
-(4 MiB as base64, which leaves about 2.6 MB of the 32 MB for the conversation's text) is refused with a reason
-that says to work from the pictures already read or ask for a smaller one. Each counted Read is a dimmed
-`Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
-it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
-session as text. A Read of a PDF is not counted (a separate task).
+so the session's PreToolUse hook counts it (`shape/read-budget.ts`). Reads and inline pictures share one pool of
+21 MiB (the 18 MiB inline budget and a 3 MiB reserve; 28 MiB as base64 is about 29.4 MB, which leaves about 2.6 MB of
+the 32 MB for the conversation's text): Reads may use whatever the inline pictures leave of it, never less than the
+reserve, and Reads past the reserve are charged to the inline budget in turn, so a conversation with few inline
+pictures can Read many large ones and the sum still stays under the limit. The hook charges each of the session's own
+Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp` file (a dropped image or one in the checkout) the file's size, at
+most a 1 MiB allowance, since Claude Code resizes what it reads; a file that isn't there is charged nothing. Once the
+Read has returned, the PostToolUse hook measures its result (every `base64` string it carries) and the measured size
+replaces the allowance, so the charge comes from what came back; a result with no bytes in it, such as a set of page
+files on disk, stays at the allowance. A Read that would take the live session's total past what the inline pictures
+leave of the pool is refused with a reason that says to work from the pictures already read or ask for a smaller one.
+Each counted Read is a dimmed `Read · <path> · picture · <n> bytes counted` transcript line, a measurement is a
+`Read · <path> · picture · <m> bytes measured in place of <n>` line, and the total is the lines after the session's
+start: the latest digest, or the `Session · started fresh` line a start with nothing to resume and no digest (Claude
+never spoke) writes when the transcript holds screens or Reads. So it survives a restart and a fresh session starts at
+zero. A subagent's Read is not counted: its result reaches the session as text.
+
+**How many path-sent images a session can Read.** An image over 1 MiB (a Retina screenshot over 2000 px is the usual
+one) is charged the 1 MiB allowance until its Read is measured. Before any Read is measured, a session can Read as many
+of them as whole MiB are left in the 21 MiB pool: **21 with no inline picture, and 3 once the 18 MiB inline budget is
+full**, one fewer for each MiB the inline pictures and earlier Reads have taken. Four dropped 2880 x 1800 PNGs of over
+1 MiB each can all be Read in a conversation that has not filled the inline budget, if each Read returns at most 1 MiB.
+Those counts are what the allowance gives, not a promise: a measurement replaces the charge in either direction, and
+what a resized Retina picture weighs is unmeasured (follow-up tsk_01a1a578-91d9-7591-beb2-36336144c589).
+
+Where a path image would be refused, the builder is told as the turn is sent, not when Claude's Read is refused: a
+notice (`Claude probably won't be able to Read <names>`) names the images that, charged in order against what the pool
+leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures, and to tell Claude
+which picture matters most so it Reads that one first, or to send them in a new conversation, which starts its own
+pool. A smaller copy is no remedy once the inline budget is full: it goes as a path too and is refused with no room
+left. The notice is an estimate, for the same reason as the counts: a Read that measures over the allowance can get an
+image the notice didn't name refused, and one that measures under it can leave room for one it did name.
+
+A Read of a `.pdf` (a dropped one is up to 20 MB, 20 a conversation) is charged to the same total, by the page and
+not by the file: Read returns either the whole file as a document block or pages rendered to pictures, the SDK's types
+show pictures can come back with no range too, and a small text PDF renders to pictures far larger than itself. So
+a Read that names its pages with `pages` (one number or one range) is charged 1 MiB a page, the allowance for one
+picture, whatever the file's size, and is recorded as `Read · <path> · PDF · <n> bytes counted`. A Read with no `pages`,
+or with a value that isn't one number or one range (or names more than the 20 pages a Read can return), can't be
+bounded, so it is charged without limit and refused. The refusal says how many pages still fit (at most 20) and to name
+them, or that none do, and either way to ask the builder for the PDF's text. A conversation that Reads all 20 dropped
+PDFs stays under the request limit if a page picture is at most 1 MiB. **Not measured:** a live session has not shown what Read returns for a PDF. This ships unmeasured with
+the builder's acceptance (inbox card inb_01a1a613-db5c-74d6-9bc8-f779db7f360d). The live run is follow-up task
+tsk_01a1a613-b481-766b-b60e-ec76fecb12ca, which runs beside the picture one below: two PDF cases in
+`test/shape-session.live.test.ts` print what a 3-page range of a 40-page text PDF and a whole 3-page PDF add to the
+session's transcript, and fail if a page passes the charge or a whole Read passes 1 MiB a page. Their result sets
+the charge, and says whether a Read with no pages could be charged instead of refused. They have not been run.
+
 **Not measured:** the 1 MiB is an allowance, not a measurement, and it ships that way with the orchestrator's
 acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-7131-b2f7-0a24df988ba6), since a lane
 can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
 small one and a 4000 px one with a real session, finds the three pictures Claude Code kept in the session's transcript
 and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
-So the 3 MiB total is a promise only if a Read returns at most 1 MiB: at 2 MiB each, the three Reads it allows carry
-8 MB as base64 against the 6.8 MB left, and a request can pass 32 MB. The test also leaves one question open. It reads a
+The PostToolUse measurement corrects a Read after it has run, not before: a Read is let in on the allowance, so a
+result larger than it can take the total past the pool by that one Read, which the 2.6 MB for text only partly
+covers. The test also leaves one question open. It reads a
 fresh session's stored transcript, which gives an upper bound but doesn't show whether Claude Code drops an old tool
 result's picture when it resends. The budget assumes it doesn't, which is the safe side.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks

@@ -6,6 +6,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import type { AddressInfo } from 'node:net';
@@ -41,6 +42,7 @@ import {
 } from '../src/shape';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
 import { createTempRepo } from './fixtures';
+import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
@@ -440,11 +442,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
   // the session's own transcript file, which is what it resends, and fails if it is larger. It prints the
   // sizes it found so the allowance can be set from them.
   it('returns a read picture within the size the hook charges for it', async () => {
-    const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = findClaude();
-    if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
     const repo = createTempRepo();
-    const checkout = realpathSync(repo.path);
     const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
     // A 6 MB picture that cannot be compressed, a small one, and a 4000 px wide one.
     const big = join(filesDir, 'big.png');
@@ -454,81 +452,13 @@ describe.skipIf(!live)('a Shape session, live', () => {
     writeFileSync(small, pngImage(600, 400));
     writeFileSync(wide, noisePng(4000, 600));
 
-    const adapter = createClaudeAdapter({
-      claudePath,
-      pluginDir: HARNESS_PLUGIN_DIR,
-      logger: createLogger({ level: 'info', destination: { write: () => undefined } }),
-    });
-    const launcher = createLauncher({
-      base: login.vars,
-      clientApp: '10db/live-test',
-      keychain: systemKeychain,
-    });
-    const account: AccountRow = {
-      id: mintId('Account'),
-      kind: 'claude_subscription',
-      label: 'Claude plan',
-      payer: '',
-      expectedIdentity: null,
-      configDir: launcher.loginConfigDir(),
-      secretRef: null,
-      secretFingerprint: null,
-      settings: {},
-      laneCap: 4,
-      monthlyCapUsd: null,
-      archived: false,
-      createdAt: new Date(0).toISOString(),
-      updatedAt: new Date(0).toISOString(),
-    };
-    const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
-    const access = {
-      checkout,
-      home: homedir(),
-      protectedReads: [],
-      filesDir,
-      tempRoot: realpathSync(tmpdir()),
-    };
-
-    let providerSessionId = '';
-    const handle = adapter.startShape({
-      sessionId: mintId('Session'),
-      shapeId: mintId('Shape'),
-      cwd: checkout,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
-      prompt: `Use the Read tool on each of these in turn, then say "done": ${big}, ${small}, ${wide}`,
-      model: launch.model,
-      effort: 'low',
-      resumeProviderSessionId: null,
-      env: launch.env,
-      account: launch.expect,
-      tools: [...SHAPE_BUILT_IN_TOOLS],
-      allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: {},
-      mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
-      preToolUse: (req) =>
-        judgeShapeCall(
-          {
-            toolName: req.toolName,
-            toolInput: req.input,
-            agentId: req.agentId,
-            agentType: req.agentType,
-          },
-          access,
-        ),
-    });
-    for await (const event of handle.events) {
-      if (event.type === 'started') providerSessionId = event.providerSessionId;
-      if (event.type === 'turn_complete') await handle.stop();
-    }
-
     try {
-      expect(providerSessionId).not.toBe('');
-      // Null is the ordinary case: Claude Code then keeps its config in ~/.claude.
-      const configDir = launcher.loginConfigDir() ?? join(homedir(), '.claude');
-      const transcript = findTranscript(configDir, providerSessionId);
-      const sizes = imageBlockBytes(readFileSync(transcript, 'utf8'));
+      const { transcript } = await readInSession(
+        repo.path,
+        filesDir,
+        `Use the Read tool on each of these in turn, then say "done": ${big}, ${small}, ${wide}`,
+      );
+      const sizes = imageBlockBytes(transcript);
       console.log(
         `Read pictures in the session's transcript, bytes before base64: ${JSON.stringify(sizes)}`,
       );
@@ -540,7 +470,154 @@ describe.skipIf(!live)('a Shape session, live', () => {
       rmSync(filesDir, { recursive: true, force: true });
     }
   }, 240_000);
+
+  // Shape spec §5.4: what a PDF Read adds to a request the session resends. The hook charges a page
+  // READ_PICTURE_CHARGE_MAX_BYTES and refuses a Read that names no pages (read-budget.ts). These find what
+  // Claude Code stored for the Read and print it, so the charge can be set from it.
+  it('returns the pages of a many-page PDF within the charge for each page', async () => {
+    const repo = createTempRepo();
+    const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
+    const long = join(filesDir, 'long.pdf');
+    writeFileSync(long, textPdf(40));
+
+    try {
+      const { transcript, reads } = await readInSession(
+        repo.path,
+        filesDir,
+        `Use the Read tool once on ${long} with its pages parameter set to "2-4", then say "done".`,
+      );
+      const blocks = mediaBlocks(transcript);
+      console.log(
+        `A 3-page Read of a ${String(statSync(long).size)} byte, 40-page PDF, bytes before base64: ${JSON.stringify(blocks)}`,
+      );
+      expect(reads.map((read) => read.input)).toEqual([{ file_path: long, pages: '2-4' }]);
+      expect(blocks).toHaveLength(3);
+      for (const block of blocks) {
+        expect(block.type).toBe('image');
+        expect(block.bytes).toBeLessThanOrEqual(READ_PICTURE_CHARGE_MAX_BYTES);
+      }
+    } finally {
+      repo.cleanup();
+      rmSync(filesDir, { recursive: true, force: true });
+    }
+  }, 240_000);
+
+  it('returns a small PDF read whole within the charge for its pages', async () => {
+    // The hook refuses this Read today; what it returns says whether a whole Read could be charged instead.
+    const repo = createTempRepo();
+    const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
+    const short = join(filesDir, 'short.pdf');
+    writeFileSync(short, textPdf(3));
+
+    try {
+      const { transcript } = await readInSession(
+        repo.path,
+        filesDir,
+        `Use the Read tool once on ${short}, with no pages parameter, then say "done".`,
+      );
+      const blocks = mediaBlocks(transcript);
+      console.log(
+        `A whole Read of a ${String(statSync(short).size)} byte, 3-page PDF, bytes before base64: ${JSON.stringify(blocks)}`,
+      );
+      expect(blocks).not.toHaveLength(0);
+      const gained = blocks.reduce((sum, block) => sum + block.bytes, 0);
+      expect(gained).toBeLessThanOrEqual(3 * READ_PICTURE_CHARGE_MAX_BYTES);
+    } finally {
+      repo.cleanup();
+      rmSync(filesDir, { recursive: true, force: true });
+    }
+  }, 240_000);
 });
+
+/** Runs one turn of a real Shape session and gives back its stored transcript and the Reads it made. */
+async function readInSession(
+  repoPath: string,
+  filesDir: string,
+  prompt: string,
+): Promise<{ transcript: string; reads: readonly ShapeToolRequest[] }> {
+  const login = await captureLoginEnv({ inherited: process.env });
+  const claudePath = findClaude();
+  if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+  const checkout = realpathSync(repoPath);
+  const adapter = createClaudeAdapter({
+    claudePath,
+    pluginDir: HARNESS_PLUGIN_DIR,
+    logger: createLogger({ level: 'info', destination: { write: () => undefined } }),
+  });
+  const launcher = createLauncher({
+    base: login.vars,
+    clientApp: '10db/live-test',
+    keychain: systemKeychain,
+  });
+  const account: AccountRow = {
+    id: mintId('Account'),
+    kind: 'claude_subscription',
+    label: 'Claude plan',
+    payer: '',
+    expectedIdentity: null,
+    configDir: launcher.loginConfigDir(),
+    secretRef: null,
+    secretFingerprint: null,
+    settings: {},
+    laneCap: 4,
+    monthlyCapUsd: null,
+    archived: false,
+    createdAt: new Date(0).toISOString(),
+    updatedAt: new Date(0).toISOString(),
+  };
+  const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
+  const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+  const access = {
+    checkout,
+    home: homedir(),
+    protectedReads: [],
+    filesDir,
+    tempRoot: realpathSync(tmpdir()),
+  };
+
+  let providerSessionId = '';
+  const reads: ShapeToolRequest[] = [];
+  const handle = adapter.startShape({
+    sessionId: mintId('Session'),
+    shapeId: mintId('Shape'),
+    cwd: checkout,
+    systemPrompt: SHAPE_SYSTEM_PROMPT,
+    prompt,
+    model: launch.model,
+    effort: 'low',
+    resumeProviderSessionId: null,
+    env: launch.env,
+    account: launch.expect,
+    tools: [...SHAPE_BUILT_IN_TOOLS],
+    allowedTools: SHAPE_ALLOWED_TOOLS,
+    disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+    agents: {},
+    mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+    preToolUse: (req) => {
+      if (req.toolName === 'Read') reads.push(req);
+      return judgeShapeCall(
+        {
+          toolName: req.toolName,
+          toolInput: req.input,
+          agentId: req.agentId,
+          agentType: req.agentType,
+        },
+        access,
+      );
+    },
+  });
+  for await (const event of handle.events) {
+    if (event.type === 'started') providerSessionId = event.providerSessionId;
+    if (event.type === 'turn_complete') await handle.stop();
+  }
+  expect(providerSessionId).not.toBe('');
+  // Null is the ordinary case: Claude Code then keeps its config in ~/.claude.
+  const configDir = launcher.loginConfigDir() ?? join(homedir(), '.claude');
+  return {
+    transcript: readFileSync(findTranscript(configDir, providerSessionId), 'utf8'),
+    reads,
+  };
+}
 
 /** The session's transcript file under Claude Code's config dir: `projects/<project>/<id>.jsonl`. */
 function findTranscript(configDir: string, providerSessionId: string): string {
@@ -552,25 +629,50 @@ function findTranscript(configDir: string, providerSessionId: string): string {
   throw new Error(`no transcript for session ${providerSessionId} under ${projects}`);
 }
 
-/** The decoded size of each image in a tool result in a transcript's lines. */
+interface MediaBlock {
+  readonly type: 'image' | 'document';
+  readonly bytes: number;
+}
+
+/** The decoded size of each image or document block in a value from a transcript. */
+function blocksIn(value: unknown): MediaBlock[] {
+  if (Array.isArray(value)) return value.flatMap(blocksIn);
+  if (typeof value !== 'object' || value === null) return [];
+  const block = value as { type?: unknown; source?: { data?: unknown } };
+  if (
+    (block.type === 'image' || block.type === 'document') &&
+    typeof block.source?.data === 'string'
+  )
+    return [{ type: block.type, bytes: Buffer.from(block.source.data, 'base64').length }];
+  return Object.values(value).flatMap(blocksIn);
+}
+
+/** The content parts of a transcript's user entries. */
+function userContent(jsonl: string): { type?: unknown; content?: unknown }[] {
+  return jsonl
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as { type?: unknown; message?: { content?: unknown } })
+    .flatMap((entry) =>
+      entry.type === 'user' && Array.isArray(entry.message?.content)
+        ? (entry.message.content as { type?: unknown; content?: unknown }[])
+        : [],
+    );
+}
+
+/** The decoded size of each image in a tool result: an image the user sent in a message is not a Read. */
 function imageBlockBytes(jsonl: string): number[] {
-  const sizes: number[] = [];
-  const visit = (value: unknown): void => {
-    if (Array.isArray(value)) value.forEach(visit);
-    else if (typeof value === 'object' && value !== null) {
-      const block = value as { type?: unknown; source?: { data?: unknown } };
-      if (block.type === 'image' && typeof block.source?.data === 'string')
-        sizes.push(Buffer.from(block.source.data, 'base64').length);
-      else Object.values(value).forEach(visit);
-    }
-  };
-  for (const line of jsonl.split('\n')) {
-    if (line.trim() === '') continue;
-    const entry = JSON.parse(line) as { type?: unknown; message?: { content?: unknown } };
-    // Only a user entry's tool results: an image the user sent in a message is not a Read.
-    if (entry.type === 'user' && Array.isArray(entry.message?.content))
-      for (const part of entry.message.content as { type?: unknown; content?: unknown }[])
-        if (part.type === 'tool_result') visit(part.content);
-  }
-  return sizes;
+  return userContent(jsonl)
+    .filter((part) => part.type === 'tool_result')
+    .flatMap((part) => blocksIn(part.content))
+    .filter((block) => block.type === 'image')
+    .map((block) => block.bytes);
+}
+
+/**
+ * Every image or document block in the user entries, tool results or not, since a PDF's block may arrive
+ * beside its tool result. The prompts these tests send carry none, so all of them come from the Read.
+ */
+function mediaBlocks(jsonl: string): MediaBlock[] {
+  return blocksIn(userContent(jsonl));
 }

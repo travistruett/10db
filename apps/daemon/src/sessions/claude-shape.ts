@@ -117,6 +117,28 @@ function shapeOptions(
           ],
         },
       ],
+      PostToolUse: [
+        {
+          hooks: [
+            (hookInput) => {
+              if (hookInput.hook_event_name !== 'PostToolUse') return Promise.resolve({});
+              try {
+                spec.postToolUse?.({
+                  toolName: hookInput.tool_name,
+                  input: hookInput.tool_input,
+                  response: hookInput.tool_response,
+                  agentId: hookInput.agent_id,
+                  agentType: hookInput.agent_type,
+                });
+              } catch (error) {
+                // A measurement that fails leaves the Read counted at its allowance, which is the safe side.
+                deps.logger.warn({ err: String(error) }, 'a tool result could not be measured');
+              }
+              return Promise.resolve({});
+            },
+          ],
+        },
+      ],
     },
     abortController,
   };

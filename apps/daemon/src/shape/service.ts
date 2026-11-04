@@ -82,17 +82,23 @@ import {
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
+  measuredMediaBytes,
   readPictureBytesSpent,
-  readPictureCharge,
+  readCharge,
+  readCeiling,
+  readMeasuredLine,
   readPictureLine,
   readPictureRefusal,
+  unreadableImages,
+  unreadableImagesNotice,
 } from './read-budget';
 import { buildDigest } from './digest';
 import {
   asImage,
   checkDroppedFile,
   inlineImageIds,
-  pathImageIds,
+  PATH_REASON,
+  pathImageReasons,
   shapeFilesDir,
   storeFile,
 } from './dropped-files';
@@ -119,7 +125,12 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import { inlineBytesSpent, type ScreenService } from '../screens';
+import {
+  FRESH_START_LINE,
+  inlineBytesSpent,
+  inlinePictureBytes,
+  type ScreenService,
+} from '../screens';
 import type { Hold } from '../verify';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
@@ -571,17 +582,40 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     sizes: readonly string[] = intake.missized.lines,
     converted: string | null = intake.converted,
   ): string => {
-    // An image too large to send as a block is named as a path, with the way to read it.
-    const byPath = pathImageIds(shown, intake.files, intake.spent);
+    // An image not sent as a block is named as a path, with the reason and the way to read it.
+    const byPath = pathImageReasons(shown, intake.files, intake.spent);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
       ...(converted === null ? [] : [`[note] ${converted}`]),
       ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
-      ...shown.map(
-        (file) =>
-          `[file] ${file.storedPath} (${file.name})${byPath.has(file.id) ? ' — too large to show inline; Read it' : ''}`,
-      ),
+      ...shown.map((file) => {
+        const reason = byPath.get(file.id);
+        return `[file] ${file.storedPath} (${file.name})${reason === undefined ? '' : ` — ${PATH_REASON[reason]}; Read it`}`;
+      }),
     ].join('\n');
+  };
+
+  /**
+   * Tells the builder which images this turn points Claude at as a path that a Read would refuse, because the
+   * pictures the session already carries leave no room in the pool (§5.4). `shown` are the files the message
+   * names, `intake.files` the ones it sends, and a `fresh` session carries no earlier picture or Read.
+   */
+  const warnUnreadable = (
+    shapeId: ShapeId,
+    intake: Intake,
+    shown: readonly ShapeFileRow[],
+    sentInline: ReadonlySet<ShapeFileRow['id']>,
+    fresh: boolean,
+  ): void => {
+    const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
+    const paths = shown.filter((file) => byPath.has(file.id));
+    if (paths.length === 0) return;
+    const inline =
+      (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
+      intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
+    const reads = fresh ? 0 : readPictureBytesSpent(listShapeMessages(state.db, shapeId));
+    const names = unreadableImages(paths, readCeiling(inline) - reads);
+    if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
@@ -667,6 +701,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       const digest = buildDigest(state.db, shapeId);
       say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Digest, digest);
       parts.push(digest);
+    } else if (
+      resumeId === null &&
+      transcript.some(
+        (m) =>
+          m.kind === ShapeMessageKind.Screen ||
+          (m.kind === ShapeMessageKind.Tool && m.body.startsWith('Read · ')),
+      )
+    ) {
+      // No digest row marks this session's start (Claude never spoke), so the screens and Reads of the
+      // lost one, still in the transcript, would be charged to this one. This line marks it instead.
+      say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Tool, FRESH_START_LINE);
     }
     // A session that never heard the conversation (a start_shape summary, or earlier messages whose
     // session never started) is told what the builder has said so far, and about every file.
@@ -698,6 +743,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
     const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
+    warnUnreadable(shapeId, intake, files, new Set(inlineIds), resumeId === null);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -742,12 +788,16 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
-        const charge = picture === null ? 0 : readPictureCharge(picture, access);
-        if (picture !== null && charge > 0) {
+        const charged =
+          picture === null ? null : readCharge(picture, stringField(req.input, 'pages'), access);
+        if (picture !== null && charged !== null && charged.bytes > 0) {
           const refusal = readPictureRefusal(
             picture,
-            charge,
+            charged.bytes,
             readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+            // Reads get whatever the inline pictures leave of the pool they share.
+            readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
+            charged.kind,
           );
           if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
           else
@@ -755,7 +805,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               shapeId,
               ShapeMessageAuthor.Claude,
               ShapeMessageKind.Tool,
-              readPictureLine(picture, charge),
+              readPictureLine(picture, charged.bytes, charged.kind),
             );
         }
         if (verdict.decision === 'deny')
@@ -772,6 +822,21 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           if (line !== null) say(shapeId, ShapeMessageAuthor.Claude, ShapeMessageKind.Tool, line);
         }
         return verdict;
+      },
+      postToolUse: (req) => {
+        // The result of a Read the hook counted: what came back replaces the allowance it was charged.
+        if (req.toolName !== 'Read' || req.agentId !== undefined) return;
+        const path = stringField(req.input, 'file_path');
+        if (path === null) return;
+        const charged = readCharge(path, stringField(req.input, 'pages'), access);
+        const measured = measuredMediaBytes(req.response);
+        if (charged === null || !Number.isFinite(charged.bytes) || measured === 0) return;
+        say(
+          shapeId,
+          ShapeMessageAuthor.Claude,
+          ShapeMessageKind.Tool,
+          readMeasuredLine(path, measured, charged.bytes, charged.kind),
+        );
       },
     };
     let handle: ShapeSessionHandle;
@@ -849,6 +914,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       else {
         const lines = intakeText(intake);
         const { images, ids } = imagesOf(intake.files, intake.spent);
+        warnUnreadable(shapeId, intake, intake.files, new Set(ids), false);
         rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
         told(shapeId, intake.files, intake.missized, ids, false);
       }
