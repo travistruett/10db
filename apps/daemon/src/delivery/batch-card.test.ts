@@ -246,6 +246,42 @@ describe('the failed workstream card', () => {
     expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
   });
 
+  describe('the title of a batch named after a task that left it', () => {
+    it('is not the name of a superseded attempt that committed nothing', async () => {
+      const { batchId, failed } = await failedInBatch('DONE', {}, 'Alpha');
+      const alphaTask = getWorkstream(h.store.db, failed).taskId;
+      // Alpha starts over fresh: the old attempt drops out of the batch, which ships by itself.
+      h.state.write((w) => {
+        insertPlannedWorkstream(w, alphaTask, planForStart(w.tx, alphaTask), null);
+      });
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+    });
+
+    it('is not the name of a cancelled task whose work is not in it', async () => {
+      const { batchId } = await failedInBatch('DONE', {}, 'Alpha');
+      const alpha = listWorkstreams(h.store.db, { batchId }).find((w) => w.taskTitle === 'Alpha');
+      if (!alpha) throw new Error('Alpha is a member');
+      h.settle(alpha.id, 'CANCELLED');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+    });
+
+    it('stays the name of a cancelled task whose commits are in the branch', async () => {
+      const { batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' }, 'Alpha');
+      const alpha = listWorkstreams(h.store.db, { batchId }).find((w) => w.taskTitle === 'Alpha');
+      if (!alpha) throw new Error('Alpha is a member');
+      h.settle(alpha.id, 'CANCELLED');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
+    });
+  });
+
   describe('Ship without it', () => {
     it('opens a pull request with every other task’s changes and none of the failed one’s, from one revert commit naming it', async () => {
       const { card, batchId, failed } = await failedInBatch('DONE', {

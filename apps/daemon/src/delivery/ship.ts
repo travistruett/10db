@@ -727,7 +727,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
   ): Promise<string> {
     const tasks = [];
-    for (const w of members(db, batch.id)) {
+    const current = members(db, batch.id);
+    // The tasks the title must not name: the pull request holds no work of theirs. A superseded
+    // attempt that committed nothing is no member, but the batch may still carry its name.
+    const noWork: { title: string; state: WorkstreamState; leftOut: true }[] = [];
+    for (const w of latestPerTask(listWorkstreams(db, { batchId: batch.id })))
+      if (!current.some((m) => m.taskId === w.taskId))
+        noWork.push({ title: w.taskTitle, state: w.state, leftOut: true });
+    for (const w of current) {
+      // A cancelled task's work is in the pull request only when its commits are on the branch.
+      if (
+        w.state === WorkstreamState.Cancelled &&
+        (await commitsOf(batch.id, w, target.checkout, target.branch)).length === 0
+      )
+        noWork.push({ title: w.taskTitle, state: w.state, leftOut: true });
       const task = getTask(db, w.taskId);
       tasks.push({
         title: w.taskTitle,
@@ -768,7 +781,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
             target,
             sha,
           ),
-          prSubject(batch.title, tasks),
+          prSubject(batch.title, [
+            ...tasks.filter((t) => !noWork.some((n) => n.title === t.title)),
+            ...noWork,
+          ]),
         ),
         bodyFile: file,
       },
