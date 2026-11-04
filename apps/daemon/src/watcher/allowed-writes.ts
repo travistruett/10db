@@ -182,6 +182,29 @@ function throughSymlink(root: string, path: string): boolean {
   return false;
 }
 
+/**
+ * Whether `path` still leads to the file an open descriptor (`fd`, its `fstat`) is on, checked after the open
+ * and the read. `throughSymlink` runs before the open, and the open runs on the thread pool, so a lane that
+ * flips a directory above the file between a real directory and a link can have the open follow the link.
+ * Looking at the ancestors again and comparing the descriptor's device and inode with an `lstat` of the path
+ * closes that window: a descriptor that was reached through a link is on another inode than the path now
+ * names, and a link still in place is seen. 'link': a directory above the file is a link. 'moved': the path
+ * is gone or names another file (a rename over it is a real write, so the read is tried again).
+ */
+function descriptorIsAtPath(
+  root: string,
+  path: string,
+  fd: { dev: bigint; ino: bigint },
+): 'yes' | 'link' | 'moved' {
+  if (throughSymlink(root, path)) return 'link';
+  try {
+    const at = lstatSync(path, { bigint: true });
+    return at.isFile() && at.dev === fd.dev && at.ino === fd.ino ? 'yes' : 'moved';
+  } catch {
+    return 'moved';
+  }
+}
+
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 export const STAMP_ATTEMPTS = 3;
 
@@ -199,7 +222,8 @@ export const STAMP_BUDGET_MS = 30_000;
 /**
  * One read of a regular file through a single descriptor: the file type and the metadata before and after
  * come from that descriptor (`fstat`), never from path lookups that another process could answer differently.
- * A link in a directory above the file is refused by `stampOrReason` (`throughSymlink`) before this opens it.
+ * A link in a directory above the file is refused by `stampOrReason` (`throughSymlink`) before this opens it,
+ * and a swap in the window between that check and the open is caught after the read (`descriptorIsAtPath`).
  * The open is non-blocking, so a FIFO can't block the daemon on the open, and it doesn't follow a link at the
  * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The read is
  * asynchronous, a chunk at a time, so the event loop turns between chunks, and it stops at the size the first
@@ -209,6 +233,7 @@ export const STAMP_BUDGET_MS = 30_000;
  * included, are thrown.
  */
 async function readStamp(
+  root: string,
   path: string,
   deadline: number,
 ): Promise<{ stamp: string } | { skip: 'not-a-file' | 'changing' | 'too-large' }> {
@@ -237,6 +262,9 @@ async function readStamp(
     // The file changed while it was read: the content may not be the one the time and size name.
     const after = await handle.stat({ bigint: true });
     if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return { skip: 'changing' };
+    // The path must still lead to this descriptor, through no link: see `descriptorIsAtPath`.
+    const at = descriptorIsAtPath(root, path, after);
+    if (at !== 'yes') return { skip: at === 'link' ? 'not-a-file' : 'changing' };
     return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}` };
   } finally {
     await handle.close();
@@ -288,7 +316,7 @@ export async function stampOrReason(
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
     if (throughSymlink(root, path)) return { reason: 'not-a-file' };
     try {
-      const read = await readStamp(path, deadline);
+      const read = await readStamp(root, path, deadline);
       if ('stamp' in read) return read;
       if (read.skip !== 'changing') return { reason: read.skip };
     } catch (error) {
