@@ -285,31 +285,14 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       const first = await install();
       // An install the sandbox stopped part way leaves packages missing. Once is enough to start
       // over: a copy with nothing in node_modules installs as a new one does. Not after a timeout
-<<<<<<< dd5098455fb0cc22bb07c80ce8a0b8eaf70b36d0
       // (it would only wait again) or a refused host (the same refusal would come back), and not
       // when the caller asked to start over: this install already was that.
       if (
         asked !== true &&
         first.kind === 'failed' &&
         !first.timedOut &&
-        first.blockedHosts.length === 0 &&
-        checkInstall(path).kind === 'broken'
+        first.blockedHosts.length === 0
       ) {
-        startOver();
-        return install();
-||||||| c9d321b
-      // (it would only wait again) or a refused host (the same refusal would come back).
-      if (
-        first.kind === 'failed' &&
-        !first.timedOut &&
-        first.blockedHosts.length === 0 &&
-        checkInstall(path).kind === 'broken'
-      ) {
-        startOver();
-        return install();
-=======
-      // (it would only wait again) or a refused host (the same refusal would come back).
-      if (first.kind === 'failed' && !first.timedOut && first.blockedHosts.length === 0) {
         const left = checkInstall(path);
         if (left.kind === 'broken') {
           startOver(
@@ -317,7 +300,6 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           );
           return install();
         }
->>>>>>> 385ee0a8dff3293a8948cabba4ad67dec431c826
       }
       return first;
     },
