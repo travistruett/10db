@@ -110,7 +110,7 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import type { ScreenService } from '../screens';
+import { inlineBytesSpent, type ScreenService } from '../screens';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateNote } from './converted-state';
@@ -280,6 +280,8 @@ interface Intake {
   readonly missized: UntoldMissized;
   /** What Convert made as it stands now, null when nothing was converted. */
   readonly converted: string | null;
+  /** Inline image bytes the conversation's earlier turns spent, which a resumed session resends. */
+  readonly spent: number;
 }
 
 type TurnEnd =
@@ -523,7 +525,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     converted: string | null = intake.converted,
   ): string => {
     // An image too large to send as a block is named as a path, with the way to read it.
-    const byPath = pathImageIds(shown, intake.files);
+    const byPath = pathImageIds(shown, intake.files, intake.spent);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
       ...(converted === null ? [] : [`[note] ${converted}`]),
@@ -536,8 +538,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[]): ShapeImage[] => {
-    const inline = inlineImageIds(files);
+  const imagesOf = (files: readonly ShapeFileRow[], spent: number): ShapeImage[] => {
+    const inline = inlineImageIds(files, spent);
     return files.flatMap((file) => {
       if (!inline.has(file.id)) return [];
       try {
@@ -563,6 +565,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     // What Convert made, as it stands as the turn starts. Whatever state the conversation is in: a
     // partial Convert or a re-plan round leaves it Proposed with converted rows.
     converted: convertedStateNote(state.db, shapeId),
+    spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
   /** Records that the turn just sent carried these files and these mis-sized tasks. */
@@ -622,9 +625,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       files = listShapeFiles(state.db, shapeId);
     }
+    // A fresh session resends no earlier block, so only a resumed one carries what the conversation spent.
+    const budgeted: Intake = resumeId === null ? { ...intake, spent: 0 } : intake;
     // The digest already names every mis-sized task and every converted row.
     const lines = intakeText(
-      intake,
+      budgeted,
       files,
       digested ? [] : intake.missized.lines,
       digested ? null : intake.converted,
@@ -632,7 +637,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
-    const images = imagesOf(intake.files);
+    const images = imagesOf(intake.files, budgeted.spent);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -763,7 +768,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         const lines = intakeText(intake);
         rt.live.handle.send(
           lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
-          imagesOf(intake.files),
+          imagesOf(intake.files, intake.spent),
         );
         told(intake.files, intake.missized);
       }
