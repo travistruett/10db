@@ -2389,6 +2389,32 @@ describe('a required check GitHub cancelled', () => {
         expect(body).not.toContain('as soon as GitHub allows');
       });
 
+      it('still asks for a run cancelled again on the head after the waiting check clears, also after a restart', async () => {
+        const { id, prUrl, w } = watching();
+        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+        w.start();
+        await w.idle();
+        h.gh.failRerunOf.set(
+          '88',
+          new GhError('failed', 'run 88 cannot be rerun; already running'),
+        );
+        await round(w);
+        expect(h.gh.reruns).toEqual(['77']);
+        h.gh.setRequiredChecks(prUrl, running('desktop'));
+        await round(w);
+        expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
+        await w.stop();
+
+        const second = watcher();
+        second.start();
+        await second.idle();
+        h.gh.failRerunOf.clear();
+        h.gh.setRequiredChecks(prUrl, lintCancelled);
+        await round(second);
+        await round(second);
+        expect(h.gh.reruns).toEqual(['77', '88']);
+      });
+
       it('names no notice beside it and does not say it will not ask again once the refused check clears', async () => {
         const { id, prUrl, w } = watching();
         await rerunOfDesktopOnly(w, prUrl);
