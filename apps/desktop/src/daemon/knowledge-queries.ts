@@ -49,6 +49,10 @@ function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
   const q = f.q.trim();
   return useQuery({
     queryKey: knowledgeKeys.list(kind, f),
+    // A new search, scope or History is a new key; the last answer stays up (and keeps its scroll) until
+    // the new one lands. Another project's rows never stand in: the view starts afresh on a switch.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[2].projectId === f.projectId ? previous : undefined,
     queryFn: async () =>
       readJson(
         await client.projects[':projectId'].knowledge.$get({

@@ -11,6 +11,9 @@ export interface FilterState {
 
 export const NO_FILTERS: FilterState = { scope: null, area: null, q: '', history: false };
 
+/** The most the list route accepts in `q` (KnowledgeListQuery); a longer search would get a 400. */
+const MAX_SEARCH_LENGTH = 200;
+
 const ALL = 'all';
 const AREA_PREFIX = 'area:';
 
@@ -48,6 +51,7 @@ export function KnowledgeFilters({
         placeholder="Search"
         size="sm"
         w={260}
+        maxLength={MAX_SEARCH_LENGTH}
         leftSection={<IconSearch size={16} stroke={1.5} />}
         value={value.q}
         onChange={(e) => {

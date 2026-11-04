@@ -123,6 +123,45 @@ describe('KnowledgeView', () => {
     });
   });
 
+  it('keeps the listed rows on screen while a changed filter loads', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
+        calls += 1;
+        if (new URL(request.url).searchParams.has('q')) await gate;
+        return HttpResponse.json(knowledgeList([principleItem({ statement: 'Prefer small PRs' })]));
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    await waitFor(() => {
+      expect(calls).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
+    expect(screen.queryByLabelText('Loading principles')).toBeNull();
+    release();
+    await waitFor(() => {
+      expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
+    });
+  });
+
+  it('stops the search box at the 200 characters the route accepts', async () => {
+    serve({ principles: [principleItem()] });
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    expect(screen.getByRole('textbox', { name: 'Search' }).getAttribute('maxlength')).toBe('200');
+  });
+
   it('says so when search is unavailable instead of reporting nothing found', async () => {
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
