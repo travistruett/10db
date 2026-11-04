@@ -21,7 +21,7 @@ import {
   type DeliveryContext,
 } from './context';
 import { checkInstall, describeBroken } from './install-health';
-import { installedLockfile, recordInstall } from './installed-lockfile';
+import { installedLockfile, noticeRepaired, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
 import {
   absentFrom,
@@ -37,7 +37,6 @@ import {
 } from './migration-carry';
 import {
   baseNotices,
-  installNotices,
   migrationNotices,
   NOTICE_KEY,
   renumberedLines,
@@ -266,10 +265,23 @@ type Installed =
        * wait again) or a refused host (the same refusal would come back).
        */
       readonly final?: true;
-      /** The install failed after a start over, by `refresh` itself or the second pass. */
+      /** How many installs ran, over every pass, as `refresh` reported them; none when absent. */
+      readonly installs?: number;
+      /** Some install removed the copy's `node_modules` first, in `refresh` or the second pass. */
       readonly startedOver?: true;
     }
   | { readonly kind: 'aborted' };
+
+/** What the install_broken card says the installs did, from how many ran and whether one removed node_modules. */
+function installsSaid(installs: number, startedOver: boolean): string {
+  if (installs === 0) return 'No install ran, so node_modules is as it was';
+  if (installs === 1)
+    return startedOver
+      ? '10db removed node_modules and installed from the lockfile, and that install did not bring them back'
+      : '10db installed from the lockfile and that install did not bring them back';
+  const count = installs === 2 ? 'neither install' : `none of the ${String(installs)} installs`;
+  return `10db installed from the lockfile${startedOver ? ', then removed node_modules and installed again by itself' : ' and then installed again by itself'}, and ${count} brought them back`;
+}
 
 /** A merge that settled conflicts by itself. */
 type SettledMerge = Extract<BranchMerge, { readonly kind: 'merged' }>;
@@ -1229,7 +1241,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     signal: AbortSignal,
   ): Promise<Installed> {
     const first = await installOnce(batch, project, path, signal, false);
-    if (first.kind !== 'done' || first.broken === undefined) return first;
+    if (first.kind !== 'done') return first;
+    if (first.broken === undefined) return first;
     // A failed install was already started over by `refresh`, or was a timeout or a refused host
     // that a repeat would only meet again: it is reported as it is. An install that exited zero gets
     // the second pass, and `refresh` adds no retry to a start over it was asked for, so one gate
@@ -1242,8 +1255,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       { batchId: batch.id, unresolved: first.broken },
       'worktree install left the copy broken; starting over once',
     );
-    const second = await installOnce(batch, project, path, signal, true);
-    if (second.kind !== 'done') return second;
+    const secondPass = await installOnce(batch, project, path, signal, true);
+    if (secondPass.kind !== 'done') return secondPass;
+    // What the card says ran is every install of both passes.
+    const installs = (first.installs ?? 0) + (secondPass.installs ?? 0);
+    const second: Extract<Installed, { readonly kind: 'done' }> = {
+      ...secondPass,
+      ...(installs === 0 ? {} : { installs }),
+      ...(first.startedOver === true || secondPass.startedOver === true
+        ? { startedOver: true as const }
+        : {}),
+    };
     // What the second pass answers can't say the copy is whole: it may have thrown, or found no
     // node_modules to expect anything of. So the copy itself is asked, and only a whole one goes on.
     // An install that exited non-zero with every link whole goes on too, with its failure in the note.
@@ -1255,11 +1277,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         broken: after.kind === 'broken' ? describeBroken(after) : first.broken,
       };
     }
-    try {
-      showNotice(ctx.state, batch.id, installNotices.repaired(first.broken, ctx.clock.now()));
-    } catch (error) {
-      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'install notice not written');
-    }
+    noticeRepaired(ctx, batch.id, first.broken);
     return second;
   }
 
@@ -1297,7 +1315,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         ...(before.kind === 'broken' || again ? { seeded: false } : {}),
         ...(again ? { startOver: true as const } : {}),
       });
-      await recordInstall(ctx, batch.id, path, installed);
+      // A failed install with every package resolved goes on to the gate, with the failure in its note.
+      await recordInstall(ctx, batch.id, path, installed, { goesOnAfterFailure: true });
       const after = expected && installed.kind !== 'aborted' ? checkInstall(path) : null;
       const broken = after?.kind === 'broken' ? describeBroken(after) : undefined;
       switch (installed.kind) {
@@ -1326,11 +1345,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           return {
             kind: 'done',
             ok: false,
-            note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
+            // With no install run (no trustworthy pnpm) the exit code is made up: the reason is the text.
+            note:
+              installed.installs === 0
+                ? `10db could not run the install this branch's lockfile needs (${installed.tail.trim()}; log: ${installed.logPath}), so its packages may not match it.`
+                : `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
             final: true as const,
-            ...(again || (!installed.timedOut && installed.blockedHosts.length === 0)
-              ? { startedOver: true as const }
-              : {}),
+            installs: installed.installs,
+            ...(installed.startedOver ? { startedOver: true as const } : {}),
             ...(broken === undefined ? {} : { broken }),
           };
         }
@@ -1343,6 +1365,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             kind: 'done',
             ok: broken === undefined,
             note: null,
+            installs: installed.installs,
+            ...(installed.startedOver ? { startedOver: true as const } : {}),
             ...(broken === undefined ? {} : { broken }),
           };
         case 'skipped':
@@ -1454,7 +1478,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note:
           joined(
             merged.note,
-            `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile${installed.final === true && installed.startedOver !== true ? ' and that install did not bring them back' : ', then removed node_modules and installed again by itself, and neither install brought them back'}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
+            `The install in this copy is broken: ${installed.broken}. ${installsSaid(installed.installs ?? 0, installed.startedOver === true)}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
         ...(merged.kind === 'merged' ? { head: merged.head } : {}),
         ...(left.length > 0 ? { unregenerated: left } : {}),

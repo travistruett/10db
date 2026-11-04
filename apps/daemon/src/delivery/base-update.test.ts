@@ -401,6 +401,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           kind: 'failed',
           exitCode: 124,
           timedOut: true,
+          installs: 1,
+          startedOver: false,
           tail: 'timed out',
           logPath: '/log',
           blockedHosts: [],
@@ -411,6 +413,77 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind).toBe('install_broken');
       expect(update.kind === 'install_broken' && update.note).toMatch(/timed out/);
       expect(update.kind === 'install_broken' && update.note).not.toMatch(/installed again/);
+    });
+
+    it('says two installs ran when refresh’s own start over timed out', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        await refresh(input);
+        return {
+          kind: 'failed',
+          exitCode: 124,
+          timedOut: true,
+          installs: 2,
+          startedOver: true,
+          tail: 'timed out',
+          logPath: '/log',
+          blockedHosts: [],
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(
+        /removed node_modules and installed again by itself, and neither install/,
+      );
+      expect(note).toMatch(/timed out/);
+    });
+
+    it('says two installs ran when the gate’s start over timed out after a first install that exited zero', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        const result = await refresh(input);
+        if (input.startOver !== true) return result;
+        return {
+          kind: 'failed',
+          exitCode: 124,
+          timedOut: true,
+          installs: 1,
+          startedOver: true,
+          tail: 'timed out',
+          logPath: '/log',
+          blockedHosts: [],
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(
+        /removed node_modules and installed again by itself, and neither install/,
+      );
+    });
+
+    it('says no install ran, and why, when there is no trustworthy pnpm', async () => {
+      const { batch } = await pruned();
+      const tail =
+        "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
+      const spy = vi.spyOn(h.ctx.dependencies, 'refresh').mockResolvedValue({
+        kind: 'failed',
+        exitCode: 127,
+        timedOut: false,
+        installs: 0,
+        startedOver: false,
+        tail,
+        logPath: '/log',
+        blockedHosts: [],
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(update.kind).toBe('install_broken');
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(/no install ran/i);
+      expect(note).toContain('No trustworthy pnpm was found');
+      expect(note).not.toMatch(/removed node_modules|installed again|did not bring them back/);
     });
 
     it('raises the card without starting over when the first install was refused a host', async () => {
@@ -452,6 +525,76 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.pnpm.calls()).toHaveLength(3);
       expect(update.kind).toBe('up_to_date');
       expect(update.kind === 'up_to_date' && update.note).toMatch(/needs failed \(exit 1/);
+      // The copy was broken after the failed install and whole after refresh's start over: that is a repair.
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.body).toContain('left-pad');
+    });
+
+    it('leaves the notice, naming what was unresolved, when refresh’s own start over exits zero and every package resolves', async () => {
+      const { batch } = await pruned();
+      h.pnpm.failsOnCall(2, 'ERR_PNPM_FETCH_403');
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
+        kind: 'up_to_date',
+        note: null,
+      });
+      expect(h.pnpm.calls()).toHaveLength(3);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.body).toContain('left-pad');
+    });
+
+    it('leaves no notice when refresh’s own start over exits zero and the copy stays broken', async () => {
+      const { batch } = await pruned();
+      h.pnpm.failsOnCall(2, 'ERR_PNPM_FETCH_403');
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+    });
+
+    it('leaves the notice when refresh’s own start over repairs the install at the cut', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      h.commit('.gitignore', 'node_modules/\n');
+      h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
+      h.git$('push', '-q', 'origin', 'main');
+      mkdirSync(join(h.repo, 'node_modules', 'other'), { recursive: true });
+      h.pnpm.failsOnCall(1, 'ERR_PNPM_FETCH_403');
+      h.pnpm.makesOnCall(2, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      const { batch } = await opened();
+      expect(h.pnpm.calls()).toHaveLength(2);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.body).toContain('left-pad');
+    });
+
+    /** A Retry's repair ahead: the copy is gone, and what it is seeded with from main lacks left-pad. */
+    async function toRepair(): Promise<BatchDto> {
+      const { batch, path } = await pruned();
+      rmSync(path, { recursive: true, force: true });
+      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      mkdirSync(join(h.repo, 'node_modules', 'other'), { recursive: true });
+      return batch;
+    }
+
+    it('leaves the notice when refresh’s own start over repairs the install in Retry’s repair', async () => {
+      const batch = await toRepair();
+      h.pnpm.failsOnCall(2, 'ERR_PNPM_FETCH_403');
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await ensureWorktreeWhole(h.ctx, batch, signal)).toBe('replaced');
+      expect(h.pnpm.calls()).toHaveLength(3);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.body).toContain('left-pad');
+    });
+
+    it('leaves no notice when Retry’s repair drops the copy because the start over exited non-zero, though every package resolved', async () => {
+      const batch = await toRepair();
+      h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await ensureWorktreeWhole(h.ctx, batch, signal)).toBe('refused');
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
     });
 
     it('leaves a project whose gate never needed node_modules alone', async () => {
