@@ -1,5 +1,6 @@
-import { KnowledgeItemKind } from '@10db/contracts';
+import { KnowledgeItemKind, type PrincipleItem } from '@10db/contracts';
 import { Code, Group, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useKnowledgePrinciples, type KnowledgeFilter } from '../../daemon/knowledge-queries';
 import type { TracedRecord } from '../../daemon/knowledge-queries';
 import {
@@ -14,9 +15,12 @@ import { ListStates, StateBadge, TraceButton } from './record-cells';
 export function PrincipleList({
   filter,
   onTrace,
+  actions,
 }: {
   readonly filter: KnowledgeFilter;
   readonly onTrace: (record: TracedRecord) => void;
+  /** The row's menu. */
+  readonly actions: (principle: PrincipleItem) => ReactNode;
 }) {
   const principles = useKnowledgePrinciples(filter);
   // A stable sort keeps the daemon's order (newest first, or best match first) within a kind. With a
@@ -47,6 +51,9 @@ export function PrincipleList({
             <Table.Th>State</Table.Th>
             <Table.Th>
               <VisuallyHidden>Provenance</VisuallyHidden>
+            </Table.Th>
+            <Table.Th>
+              <VisuallyHidden>Actions</VisuallyHidden>
             </Table.Th>
           </Table.Tr>
         </Table.Thead>
@@ -80,6 +87,7 @@ export function PrincipleList({
                   }}
                 />
               </Table.Td>
+              <Table.Td>{actions(p)}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

@@ -1,5 +1,6 @@
-import { KnowledgeItemKind } from '@10db/contracts';
+import { KnowledgeItemKind, type DecisionItem } from '@10db/contracts';
 import { Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import type { ReactNode } from 'react';
 import {
   useKnowledgeDecisions,
   type KnowledgeFilter,
@@ -12,9 +13,12 @@ import { ListStates, StateBadge, TraceButton } from './record-cells';
 export function DecisionList({
   filter,
   onTrace,
+  actions,
 }: {
   readonly filter: KnowledgeFilter;
   readonly onTrace: (record: TracedRecord) => void;
+  /** The row's menu. */
+  readonly actions: (decision: DecisionItem) => ReactNode;
 }) {
   const decisions = useKnowledgeDecisions(filter);
   const rows = (decisions.data?.items ?? []).filter((i) => i.kind === KnowledgeItemKind.Decision);
@@ -34,6 +38,9 @@ export function DecisionList({
             <Table.Th>State</Table.Th>
             <Table.Th>
               <VisuallyHidden>Provenance</VisuallyHidden>
+            </Table.Th>
+            <Table.Th>
+              <VisuallyHidden>Actions</VisuallyHidden>
             </Table.Th>
           </Table.Tr>
         </Table.Thead>
@@ -64,6 +71,7 @@ export function DecisionList({
                   }}
                 />
               </Table.Td>
+              <Table.Td>{actions(d)}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

@@ -4,7 +4,8 @@ import {
   type ProposalDto,
   type ProposalKind,
 } from '@10db/contracts';
-import { Alert, Loader, Stack, Table, Text } from '@mantine/core';
+import { Alert, Loader, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useProposals } from '../../daemon/knowledge-queries';
 import type { FilterState } from './knowledge-filters';
 import { dateText, PRINCIPLE_KIND_LABELS, scopeText } from './knowledge-labels';
@@ -38,9 +39,12 @@ function matches(p: ProposalDto, filter: FilterState): boolean {
 export function ProposalList({
   projectId,
   filter,
+  actions,
 }: {
   readonly projectId: ProposalDto['projectId'];
   readonly filter: FilterState;
+  /** Accept and Reject for a proposal. */
+  readonly actions: (proposal: ProposalDto) => ReactNode;
 }) {
   const proposals = useProposals(projectId);
   if (proposals.isError)
@@ -60,7 +64,7 @@ export function ProposalList({
   return (
     <Stack gap="xs">
       <Text size="xs" c="dimmed">
-        You decide a proposal in the Inbox.
+        Accept or reject a proposal here or in the Inbox; either closes its card.
       </Text>
       <Table aria-label="Proposals" verticalSpacing="xs">
         <Table.Thead>
@@ -70,6 +74,9 @@ export function ProposalList({
             <Table.Th>Scope</Table.Th>
             <Table.Th>Date</Table.Th>
             <Table.Th>State</Table.Th>
+            <Table.Th>
+              <VisuallyHidden>Actions</VisuallyHidden>
+            </Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -94,6 +101,7 @@ export function ProposalList({
               <Table.Td>
                 <StateBadge state={KnowledgeState.Proposed} />
               </Table.Td>
+              <Table.Td>{actions(p)}</Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>

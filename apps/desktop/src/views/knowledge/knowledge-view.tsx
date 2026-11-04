@@ -12,6 +12,13 @@ import { DecisionList } from './decision-list';
 import { KnowledgeFilters, NO_FILTERS, type FilterState } from './knowledge-filters';
 import { PrincipleList } from './principle-list';
 import { ProposalList } from './proposal-list';
+import {
+  DecisionActions,
+  NewDecisionButton,
+  NewPrincipleButton,
+  PrincipleActions,
+  ProposalActions,
+} from './record-actions';
 import { ProvenanceDrawer } from './provenance-drawer';
 
 /** Long enough to skip a request per keystroke, short enough to feel live. */
@@ -80,13 +87,35 @@ function ProjectKnowledge({ project }: { readonly project: ProjectViewDto }) {
           />
         </Group>
         <Tabs.Panel value="principles">
-          <PrincipleList filter={filter} onTrace={setTraced} />
+          <Stack>
+            <Group justify="flex-end">
+              <NewPrincipleButton project={project} />
+            </Group>
+            <PrincipleList
+              filter={filter}
+              onTrace={setTraced}
+              actions={(principle) => <PrincipleActions project={project} principle={principle} />}
+            />
+          </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="decisions">
-          <DecisionList filter={filter} onTrace={setTraced} />
+          <Stack>
+            <Group justify="flex-end">
+              <NewDecisionButton project={project} />
+            </Group>
+            <DecisionList
+              filter={filter}
+              onTrace={setTraced}
+              actions={(decision) => <DecisionActions project={project} decision={decision} />}
+            />
+          </Stack>
         </Tabs.Panel>
         <Tabs.Panel value="proposals">
-          <ProposalList projectId={project.id} filter={{ ...filters, q }} />
+          <ProposalList
+            projectId={project.id}
+            filter={{ ...filters, q }}
+            actions={(proposal) => <ProposalActions project={project} proposal={proposal} />}
+          />
         </Tabs.Panel>
       </Tabs>
       <ProvenanceDrawer
