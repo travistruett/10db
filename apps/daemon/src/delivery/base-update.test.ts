@@ -1165,6 +1165,88 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(state(path).status).toBe('');
     });
 
+    describe('when it is stopped during the install, after the merge', () => {
+      /** The install reads the lockfile at HEAD after the merge: the stop comes in that window. */
+      function stopsInInstall(): AbortSignal {
+        const stop = new AbortController();
+        const read = h.git.blobAt.bind(h.git);
+        vi.spyOn(h.git, 'blobAt').mockImplementation((repo, rev, file) => {
+          if (rev === 'HEAD' && file === 'pnpm-lock.yaml') stop.abort();
+          return read(repo, rev, file);
+        });
+        return stop.signal;
+      }
+
+      it('raises no card for a catch-up with a directory to regenerate, and names its merge', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, stopsInInstall(), { forPullRequest: true });
+        expect(run.ran).toBe(0);
+        expect(h.cards()).toEqual([]);
+        expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        );
+        expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      });
+
+      it('names the merge of a catch-up with nothing to regenerate', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'src/mine.ts');
+        h.teammatePush('main', 'src/theirs.ts', 'theirs\n');
+        const path = pathOf(batch);
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, stopsInInstall(), {
+          forPullRequest: true,
+        });
+        expect(h.cards()).toEqual([]);
+        expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        );
+        expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      });
+
+      it('still says so on the card, and answers no head, for a batch that is not catching up', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}),
+        }).beforeGate(batch.id, stopsInInstall());
+        expect(update).toEqual({ kind: 'aborted' });
+        expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
+      });
+    });
+
+    it("names the generators' commit, not the merge, for a catch-up stopped while they ran", async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      const stop = new AbortController();
+      const generator = generating({
+        [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+        [`${DB}/0002_mine.sql`]: MINE,
+      });
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: (input) => {
+            stop.abort();
+            return generator.regenerate(input);
+          },
+        },
+      }).beforeGate(batch.id, stop.signal, { forPullRequest: true });
+      expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD^')).toBe(
+        `Merge origin/main into ${batch.branch ?? ''}`,
+      );
+      expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      expect(h.cards()).toEqual([]);
+    });
+
     it('leaves a conflict in a migration directory to the builder when the project has no package that generates it', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged({ generator: false });

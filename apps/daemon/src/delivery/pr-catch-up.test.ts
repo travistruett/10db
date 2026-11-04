@@ -740,6 +740,31 @@ describe('a shipped pull request that conflicts with its base', () => {
       expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
     });
 
+    it('raises no regenerate card, and puts its merge back, when the daemon stops during the install', async () => {
+      const batch = await migrationsCollide();
+      const run = { ran: 0 };
+      generating(run);
+      const pushed = onOrigin(batch.branch);
+      // The install reads the lockfile at HEAD after the merge: the stop comes in that window.
+      const read = h.git.blobAt.bind(h.git);
+      let stopped = false;
+      vi.spyOn(h.git, 'blobAt').mockImplementation((repo, rev, file) => {
+        if (!stopped && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+          stopped = true;
+          void h.jobs.stop();
+        }
+        return read(repo, rev, file);
+      });
+
+      await catchUp(batch);
+
+      expect(stopped).toBe(true);
+      expect(run.ran).toBe(0);
+      expect(onOrigin(batch.branch)).toBe(pushed);
+      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
+      expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
+    });
+
     it("pushes nothing and raises the one card, naming the migration, when the branch's can't be carried over", async () => {
       const journal = (...tags: string[]): string =>
         `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;
