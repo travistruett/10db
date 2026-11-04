@@ -456,6 +456,33 @@ describe('tick', () => {
     expect(new Set(reasons).size).toBe(3);
   });
 
+  it('points at the repository only for an error that fits it, and always reads as a sentence', async () => {
+    const reasons: string[] = [];
+    for (const message of [
+      'gh api failed (exit 1): gh: API rate limit exceeded (HTTP 403)',
+      'gh api failed (exit 1): gh: secondary rate limit (HTTP 403)',
+      'gh api failed (exit 1): gh: Bad Gateway (HTTP 502)',
+      'gh api failed (exit 1): gh: Not Found (HTTP 404)',
+      'gh api failed (exit 1): ',
+    ]) {
+      world.head = new GhError(GhFailure.Failed, message);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      reasons.push(update.status().problem?.message ?? '');
+    }
+    for (const reason of reasons.slice(0, 3)) {
+      expect(reason).not.toMatch(/repository|account/i);
+      expect(reason).toMatch(/tries again/);
+    }
+    expect(reasons[0]).toMatch(/rate limit/i);
+    expect(reasons[2]).toMatch(/HTTP 502/);
+    expect(reasons[3]).toMatch(/repository/);
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/:\s*\.|:\s*$/);
+    }
+    expect(reasons[4]).toMatch(/exit 1\)/);
+  });
+
   it('names the error GitHub answered when the comparison is what failed, and when gh is not installed or times out', async () => {
     world.ahead = new GhError(GhFailure.Failed, 'gh api failed (exit 1): HTTP 403 rate limit');
     const update = make();

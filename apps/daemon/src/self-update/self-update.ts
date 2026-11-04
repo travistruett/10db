@@ -270,6 +270,9 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
 /** The steps of a stage that come before it knows which build is newest. */
 const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
 
+/** gh's words for a rate limit or a 5xx from GitHub: errors that are not about the repository. */
+const GITHUB_SIDE_ERROR = /rate limit|abuse detection|\bHTTP 5\d\d\b/i;
+
 /**
  * What Settings says when GitHub could not be asked, by what went wrong: gh signed out, the machine
  * offline, gh missing or hung, or an error GitHub answered with (a renamed or closed repository, a
@@ -277,7 +280,10 @@ const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']
  */
 function unreachableMessage(cause: unknown): string {
   const again = '10db tries again every minute.';
-  const detail = messageOf(cause).trim().replace(/\.$/, '');
+  // gh with nothing on stderr leaves "failed (exit 1):"; drop the dangling colon and full stop.
+  const detail = messageOf(cause)
+    .trim()
+    .replace(/[\s:.]+$/, '');
   if (cause instanceof GhError) {
     switch (cause.kind) {
       case GhFailure.SignedOut:
@@ -289,7 +295,10 @@ function unreachableMessage(cause: unknown): string {
       case GhFailure.Timeout:
         return `GitHub gave gh no answer in time, so 10db cannot see new builds (${detail}). ${again}`;
       case GhFailure.Failed:
-        return `GitHub answered with an error, so 10db cannot see new builds: ${detail}. GitHub was reached, so check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
+        // A rate limit or a server error says nothing about the repository or the account.
+        if (GITHUB_SIDE_ERROR.test(detail))
+          return `GitHub is limiting or failing requests, so 10db cannot see new builds: ${detail}. Nothing to fix on this machine; ${again}`;
+        return `gh failed, so 10db cannot see new builds: ${detail}. If GitHub answered, check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
       case GhFailure.Aborted:
         break;
     }
