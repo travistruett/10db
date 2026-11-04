@@ -471,6 +471,52 @@ describe('KnowledgeView', () => {
     ).toBeTruthy();
   });
 
+  describe('names the session that wrote a record', () => {
+    const shapeId = mintId('Shape');
+    const workstreamId = mintId('Workstream');
+    const shapeSession = { workstreamId: null, shapeId, taskTitle: null };
+    const laneSession = { workstreamId, shapeId: null, shapeTitle: null };
+
+    it.each([
+      [
+        'a Shape session by its title',
+        { ...shapeSession, shapeTitle: 'Density' },
+        'Plan conversation: Density',
+      ],
+      [
+        'a Shape session with no title by its id',
+        { ...shapeSession, shapeTitle: null },
+        `Plan conversation: ${shapeId}`,
+      ],
+      ['a lane session by its task', { ...laneSession, taskTitle: 'Add retries' }, 'Add retries'],
+      [
+        'a lane session with no task by its workstream',
+        { ...laneSession, taskTitle: null },
+        workstreamId,
+      ],
+    ])('%s', async (_name, session, label) => {
+      const principle = principleItem();
+      serve({ principles: [principle] });
+      server.use(
+        http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+          HttpResponse.json(
+            provenanceDto({
+              id: principle.id,
+              sourceKind: 'agent',
+              session: { id: mintId('Session'), ...session },
+            }),
+          ),
+        ),
+      );
+      renderApp('/knowledge');
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Where Never sleep in tests came from' }),
+      );
+      const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+      expect(await within(drawer).findByText(label)).toBeTruthy();
+    });
+  });
+
   it('shows a record written elsewhere without a reload', async () => {
     const { served, sockets } = serve({ principles: [principleItem()] });
     renderApp('/knowledge');
