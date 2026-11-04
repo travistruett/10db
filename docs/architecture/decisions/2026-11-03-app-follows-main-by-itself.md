@@ -202,8 +202,11 @@ nor is any step of the re-stage while main's head is unchanged since the build w
 above). Any later step (`wait-for-build`,
 `download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
-confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
-it fetches only if a newer build is still the newest. It does not retry every minute, because a checksum mismatch
+confirmed. It stays staged, so when main moves the next stage passes `--have`: it fetches only if a newer build is
+still the newest. The builder's retry is the switch, and turning it off forgets the staged build (the folder is
+removed), so off and then on starts the next stage with nothing to keep and passes no `--have`: the newer build is
+fetched as wanted, and the older one is downloaded again only if it turns out to be the newest. Only a head move
+keeps the staged build with `--have`. It does not retry every minute, because a checksum mismatch
 would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its

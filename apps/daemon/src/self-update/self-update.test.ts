@@ -1097,7 +1097,24 @@ describe('a waiting update drains the factory', () => {
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
     });
 
-    it('tries the build that failed to fetch again once the builder asks', async () => {
+    it('forgets the kept build when the builder retries through the switch, off and then on', async () => {
+      const update = await stagedThenNewerHeadFailsAt('download');
+      world.busy = 0;
+      expect(await update.tick()).toBe('failed');
+      // The route setSelfUpdate takes: retry() on every touch, then turnOff() when it goes off.
+      world.enabled = false;
+      update.retry();
+      await update.turnOff();
+      world.enabled = true;
+      update.retry();
+      world.stage = () =>
+        Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+      expect(await update.tick()).toBe('applying');
+      // Nothing is kept, so the next stage is not passed --have.
+      expect(world.stagedKeeping).toEqual([null, NEW, null]);
+    });
+
+    it('tries the build that failed to fetch again, keeping the staged one, on retry() alone', async () => {
       const update = await stagedThenNewerHeadFailsAt('download');
       world.busy = 0;
       await update.tick();
