@@ -60,8 +60,35 @@ The notice is the store because it needs no schema change, survives a restart, a
 drawer. It is not cleared: a review step is the usual next step and can't edit, so the implement step after it must
 still be told.
 
-**Not solved:** a branch with two or more generated migrations. `generate` diffs the schema as merged, so the first
-takes all of the branch's schema changes and the second has nothing left: drizzle-kit exits 0 and writes no file.
-That raises the card naming the second migration, and commits nothing. Folding them into one would be wrong as well
-as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028 of `packages/db/AGENTS.md`). Making each
-step would need the schema as it stood at each migration, merged with the base's.
+## Several generated migrations: one step each
+
+Built. `generate` diffs the schema as merged, so run plainly the first of two generated migrations would take all of
+the branch's schema changes and the second would have nothing left: drizzle-kit exits 0 and writes no file. Folding
+them into one would be wrong as well as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028 of
+`packages/db/AGENTS.md`; the rebuild's `INSERT … SELECT` fails on a column added in the same step). So with two or
+more generated migrations each is made from the schema as it stood at that migration, merged with the base's
+(`schemaSteps`, `stepRuns`, `stepSchema`):
+
+- **Which schema:** the branch's snapshot of that migration (`meta/NNNN_snapshot.json` at the tip), merged key by
+  key with the base's latest snapshot from the common ancestor's latest. The snapshots are the one record of every
+  step: `schema.ts` in the history can't tell two migrations made in one commit apart, as a pair generated and
+  committed together has it, and stops showing them once a `Regenerate` commit holds them all. The tip's snapshots
+  hold each step under any number of commits, so a second catch-up steps the same way and no schema is stored. The
+  merge is by key, not by line, so two sides adding columns at one spot of `schema.ts`, which the real merge settles
+  as `kept_both`, don't meet here. The last generated migration, and any custom one, is made from the schema file as
+  the merge left it, so the final state is always the merged file's.
+- **Why a schema file:** `drizzle-kit generate` diffs the latest snapshot against a schema file, and it is what must
+  write the SQL, the snapshot and the journal entry (a rebuild's SQL has to hold the base's columns, so the branch's
+  SQL can't be copied). So the merged snapshot is written out as a TypeScript schema (`snapshot-schema.ts`) that
+  `generate` reads back to the same snapshot. A test holds this against this repository's latest snapshot.
+- **How:** one run of the generator per stretch of migrations made from the same file. 10db writes the step's schema
+  over `schema.ts` before the run (the SQL copy's checks apply: no link in the path, a regular file with one link) and
+  puts the merged file back after the last run, a failed or stopped one included.
+- **When it fails:** a snapshot is missing or unreadable, both sides changed one key of a table two ways, or the
+  snapshot holds what `snapshot-schema.ts` doesn't write: the same `uncarried` card, naming the first generated
+  migration whose schema could not be told and why, with nothing committed.
+- **Limits:** views, generated columns and expression indexes aren't written as a schema file, so a branch of several
+  generated migrations stops with the card once a snapshot holds one (this repository's hold none); a parse refuses
+  them rather than leaving them out. A later migration whose change the base already made has nothing left to make, so
+  the card of "made no migration" names it. A rename still asks `drizzle-kit` its interactive question, as it does for
+  one migration. drizzle-kit exits 0 on a schema file it can't load, so what catches that is the journal check.

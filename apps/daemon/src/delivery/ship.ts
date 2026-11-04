@@ -105,6 +105,7 @@ import {
   gateNotices,
   leftOutNotices,
   mergeNotices,
+  migrationNotices,
   NOTICE_KEY,
   supersededNotices,
   updateNotices,
@@ -1839,6 +1840,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
       await pushBranch(getBatch(db, batchId), project, branch, signal);
       pushed = true;
       const resolved = brought.kind === 'merged' ? (brought.resolved ?? []) : [];
+      // The base update left this to the push: a merge put back renumbered nothing the batch holds.
+      const renumbered = brought.kind === 'merged' ? (brought.renumbered ?? []) : [];
+      if (renumbered.length > 0)
+        showNotice(
+          deps.state,
+          batchId,
+          migrationNotices.renumbered(
+            getBatch(db, batchId).notices.find((n) => n.key === NOTICE_KEY.migrationsRenumbered),
+            renumbered,
+          ),
+        );
       showNotice(
         deps.state,
         batchId,
