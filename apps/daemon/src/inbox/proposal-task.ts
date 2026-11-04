@@ -65,9 +65,14 @@ export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId):
 export type ProposalFiling =
   { readonly file: true } | { readonly file: false; readonly reason: string };
 
-/** The card's body: the proposal's own text, then a line saying why it reached the Inbox. */
+/** The line on a card saying why it reached the Inbox. */
+export function raisedAsCardLine(reason: string): string {
+  return `Raised as a card because ${reason}.`;
+}
+
+/** The card's body: the proposal's own text, then the line saying why it reached the Inbox. */
 export function proposalCardBody(body: string, reason: string): string {
-  return `${body}\n\nRaised as a card because ${reason}.`;
+  return `${body}\n\n${raisedAsCardLine(reason)}`;
 }
 
 const RiskTagSchema = z.enum(RiskTag);
@@ -105,13 +110,18 @@ export function proposalFiling(proposal: {
   readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
   const other = firstReasonNotToFile(proposal);
-  const declared = [...new Set(proposal.riskTags ?? [])];
-  if (declared.length === 0)
-    return other === null ? { file: true } : { file: false, reason: other };
+  const carries = carriesRiskTags(proposal.riskTags);
+  if (carries === null) return other === null ? { file: true } : { file: false, reason: other };
   // A declared tag is what the builder most needs to see, so the card names every one of them first,
   // whichever other rule also raised it.
-  const carries = `it carries the ${listWords(declared)} risk tag${declared.length === 1 ? '' : 's'}`;
   return { file: false, reason: other === null ? carries : `${carries}, and ${other}` };
+}
+
+/** The clause naming every risk tag a proposal declared; null when it declared none. */
+export function carriesRiskTags(riskTags: readonly RiskTag[] | undefined): string | null {
+  const declared = [...new Set(riskTags ?? [])];
+  if (declared.length === 0) return null;
+  return `it carries the ${listWords(declared)} risk tag${declared.length === 1 ? '' : 's'}`;
 }
 
 /** The first rule, other than a declared risk tag, that keeps a proposal from being filed; null when none does. */

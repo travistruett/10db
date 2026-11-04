@@ -91,7 +91,8 @@ describe('proposalFiling', () => {
     });
   });
 
-  it.each(['change_task', 'principle', 'note'] as const)(
+  // A principle proposal takes its own path to the card: mcp.test.ts covers its tags.
+  it.each(['change_task', 'note'] as const)(
     'names the declared risk tags of a %s proposal',
     (kind) => {
       expect(
