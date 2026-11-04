@@ -34,11 +34,13 @@ export function SmallProposalLimitSetting({ project }: { readonly project: Proje
             max={MAX_SMALL_PROPOSAL_LIMIT}
             allowDecimal={false}
             allowNegative={false}
+            allowLeadingZeros={false}
             clampBehavior="strict"
             value={value ?? ''}
             disabled={setting.data === undefined}
             onChange={(next) => {
-              setDraft(typeof next === 'number' ? next : '');
+              // Mantine can hand a number over as text; only '' means cleared.
+              setDraft(next === '' ? '' : Number(next));
             }}
           />
           <Button
