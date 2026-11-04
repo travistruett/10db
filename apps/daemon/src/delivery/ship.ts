@@ -60,7 +60,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { insertPlannedWorkstream, lastRevertTold } from '../team';
+import { insertPlannedWorkstream, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -1325,26 +1325,30 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Whether a task retried after Ship without it has none of its work on the branch: a retry told a
-   * session of a revert, and no run so told made a commit that revert does not cover. The revert undid
-   * every earlier commit of the task, and 10db never undoes a revert, so it is taken to be on the branch.
-   * Only a run that was told counts: the shipping gate sends a merge run to a task that finished, and
-   * its commit resolves the base's conflicts without bringing any of the work back.
+   * Whether a task run again after Ship without it has none of its work on the branch: one of its runs
+   * was left out or retried after that, and no run that was told of the revert made a commit it does
+   * not cover. The revert undid every earlier commit of the task, and 10db never undoes a revert, so it
+   * is taken to be on the branch. A retry tells its session, and so does a start that joins the batch
+   * (`insertJoinedWorkstream`). Only a run that was told counts: the shipping gate sends a merge run to
+   * a task that finished, and its commit resolves the base's conflicts without bringing any of the work
+   * back.
    */
   async function revertedAway(
     batchId: BatchId,
     member: WorkstreamDto,
     target: { readonly checkout: string; readonly branch: string },
   ): Promise<boolean> {
-    // The notes the retries gave the sessions are the record: a wait may have replaced a run's notice,
-    // and a merge run has neither. Only the task's latest run can be retried, so the last note is the
-    // latest revert.
-    const told = runsOf(batchId, member).flatMap((run) => {
-      const revert = lastRevertTold(listEvidence(db, run.id));
-      return revert === null ? [] : [{ run, revert }];
+    // The notes the sessions were given are the record: a wait may have replaced a run's notice, and a
+    // merge run has neither. A run left out and never retried has only its notice, which names the same
+    // revert. A run left out again holds a later revert than its own note, and `revertOfRun` reads that
+    // one. A later run started from the revert before it, so the last record is the latest.
+    const records = runsOf(batchId, member).flatMap((run) => {
+      const record = revertOfRun({ notice: run.notice, evidence: listEvidence(db, run.id) });
+      return record === null ? [] : [{ run, ...record }];
     });
-    const revert = told.at(-1)?.revert;
+    const revert = records.at(-1)?.revert;
     if (revert === undefined) return false;
+    const told = records.filter((r) => r.told);
     for (const sha of commitsMadeBy(told.map((t) => t.run)))
       if (
         (await deps.git.hasCommit(target.checkout, sha)) &&

@@ -1,13 +1,14 @@
 export { proposeCandidates } from './candidates';
 export { seedTeam } from './seed';
 export {
+  insertJoinedWorkstream,
   insertPlannedWorkstream,
   planForStart,
   resolveStepPlan,
   retryWorkstream,
   startTaskWithPlan,
 } from './steps';
-export { lastRevertTold, revertCommitLine } from './reverted-work';
+export { revertCommitLine, revertOfRun } from './reverted-work';
 export {
   advanceSteps,
   countSendBack,
