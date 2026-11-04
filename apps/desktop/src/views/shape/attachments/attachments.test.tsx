@@ -490,6 +490,12 @@ describe('a Mermaid diagram', () => {
       'stateDiagram-v2\n  classDef bad mask-image:image-set("https://evil.example/m.png" 1x)\n  [*] --> A:::bad',
     ],
     [
+      'a vendor-prefixed image-set()',
+      /style names a URL/,
+      'stateDiagram-v2\n  classDef bad mask-image:-webkit-image-set("https://evil.example/m.png" 1x)\n  [*] --> A:::bad',
+    ],
+    ['a label that is a bare url()', /style names a URL/, 'sequenceDiagram\n  A->>B: url(id)'],
+    [
       'a url() split by a directive Mermaid removes',
       /style names a URL/,
       'stateDiagram-v2\n  classDef bad mask-image:ur%%{init: {}}%%l(https://evil.example/m.png)\n  [*] --> A:::bad',
@@ -549,8 +555,92 @@ flowchart LR
     expect(reached).toEqual([]);
   });
 
+  // A browser with MathML gets KaTeX's real output, which jsdom can't reach without this stub: without
+  // it every case above draws "MathML is unsupported". The finished SVG is parsed as XML, as an <img>
+  // parses it, so the formula has to be MathML there, not just text in a string.
+  describe('with KaTeX in a browser that has MathML', () => {
+    beforeEach(() => {
+      // Mermaid only checks that the global exists.
+      vi.stubGlobal('MathMLElement', Element);
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const drawnMath = async (source: string): Promise<Document> => {
+      renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Math" />);
+      const img = await screen.findByRole('img', { name: 'Diagram: Math' });
+      const svg = decode(img.getAttribute('src') ?? '');
+      expect(svg).not.toMatch(/evil\.example/);
+      const parsed = new DOMParser().parseFromString(svg, 'image/svg+xml');
+      expect(parsed.querySelector('parsererror')).toBeNull();
+      return parsed;
+    };
+    const MATHML = 'http://www.w3.org/1998/Math/MathML';
+
+    it.each([
+      ['a class label', 'classDiagram\n  class A["$$x^2$$<img src=https://evil.example/p.png>"]'],
+      [
+        'a sequence message',
+        'sequenceDiagram\n  A->>B: $$x^2$$<img src=https://evil.example/p.png>',
+      ],
+    ])('%s draws the formula and loads nothing', async (_name, source) => {
+      const stop = watchLoaders();
+      const parsed = await drawnMath(source);
+      const power = parsed.getElementsByTagNameNS(MATHML, 'msup')[0];
+      expect(power?.textContent).toBe('x2');
+      expect(stop()).toEqual([]);
+      expect(reached).toEqual([]);
+    });
+
+    // With HTML labels off these kinds never reach KaTeX: the label is SVG text, so it shows the source.
+    it.each([
+      [
+        'a flowchart label',
+        'flowchart LR\n  A["$$x^2$$<img src=https://evil.example/p.png>"] --> B',
+      ],
+      ['a state description', 'stateDiagram-v2\n  A: $$x^2$$<img src=https://evil.example/p.png>'],
+    ])('%s shows the formula as text and loads nothing', async (_name, source) => {
+      const stop = watchLoaders();
+      const parsed = await drawnMath(source);
+      expect(parsed.querySelector('text')?.textContent).toContain('$$x^2$$');
+      expect(stop()).toEqual([]);
+      expect(reached).toEqual([]);
+    });
+
+    it('keeps what shapes a formula', async () => {
+      const parsed = await drawnMath(
+        String.raw`classDiagram
+  class A["$$\frac{a}{b} \sqrt{c} \begin{matrix}1 & 2\end{matrix}$$"]`,
+      );
+      for (const tag of ['mfrac', 'msqrt', 'mtable', 'mtr']) {
+        expect(parsed.getElementsByTagNameNS(MATHML, tag)).toHaveLength(1);
+      }
+      expect(parsed.getElementsByTagNameNS(MATHML, 'mtd')).toHaveLength(2);
+    });
+
+    it('leaves out the MathML that names a URL', async () => {
+      const stop = watchLoaders();
+      const parsed = await drawnMath(
+        'classDiagram\n  class A["$$x$$<math><mi href=https://evil.example/l style=color:red>y</mi><mglyph src=https://evil.example/p.png></mglyph></math>"]',
+      );
+      expect(parsed.getElementsByTagName('mglyph')).toHaveLength(0);
+      // By tag: a <math> written in a label has no xmlns, so it isn't in the MathML namespace here.
+      const named = Array.from(parsed.getElementsByTagName('mi'));
+      expect(named.map((el) => el.textContent)).toEqual(['x', 'y']);
+      expect(named.flatMap((el) => el.getAttributeNames())).toEqual(
+        expect.not.arrayContaining(['href', 'style']),
+      );
+      expect(stop()).toEqual([]);
+      expect(reached).toEqual([]);
+    });
+  });
+
   // Refusing is about what a diagram does, not what its words say.
   it.each([
+    ['a method named getUrl', 'classDiagram\n  class Api {\n    +getUrl() String\n  }'],
+    ['a message naming loadImage', 'sequenceDiagram\n  A->>B: loadImage(id)'],
+    ['a message naming resolveSrc', 'sequenceDiagram\n  A->>B: resolveSrc(id)'],
     ['a shape whose label says img', 'flowchart LR\n  A@{ label: "An img tag" }'],
     ['a shape from the shape list', 'flowchart LR\n  A@{ shape: rounded, label: "Hi" }'],
     ['a label that mentions an image', 'flowchart LR\n  A["Resize the image (large)"] --> B'],

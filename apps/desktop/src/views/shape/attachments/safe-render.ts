@@ -86,7 +86,9 @@ let diagrams = 0;
 // - In those kinds an image is a flowchart image shape or a sequence actor's icon. Both are looked for
 //   in the parsed diagram, not the text: an image shape's block is YAML, so its text can hide the key.
 // - Every string Mermaid writes as HTML passes its sanitizer, even with HTML labels off (KaTeX turns
-//   them back on for one label): LABEL_HTML keeps only tags and attributes that load nothing.
+//   them back on for a class label or a sequence message): LABEL_HTML keeps only tags and attributes
+//   that load nothing. Check its MathML against KaTeX's when either is bumped: a tag left out draws that
+//   formula blank, with no error.
 // - CSS from the diagram's text (classDef, style, linkStyle) reaches a <style> or a style attribute, and
 //   a kind has several routes to it, so the text itself may not hold a CSS function that loads.
 // - Config reaches the same places, so its keys are secured: see SECURE_KEYS.
@@ -122,7 +124,12 @@ const SECURE_KEYS = [
   'altFontFamily',
 ];
 
-/** What Mermaid's sanitizer lets into a label: text formatting, and no attribute that names a URL or CSS. */
+/**
+ * What Mermaid's sanitizer lets into a label: text formatting and the MathML KaTeX emits, with no
+ * attribute that names a URL or holds CSS. Left out of what KaTeX can emit: mglyph (its src loads),
+ * href and style. `xmlns` stays because the SVG is parsed as XML when shown, where a <math> without it
+ * is not MathML.
+ */
 const LABEL_HTML = {
   ALLOWED_TAGS: [
     'b',
@@ -138,12 +145,74 @@ const LABEL_HTML = {
     'sub',
     'sup',
     'u',
+    // KaTeX, as of 0.18.
+    'math',
+    'menclose',
+    'mfrac',
+    'mi',
+    'mn',
+    'mo',
+    'mover',
+    'mpadded',
+    'mphantom',
+    'mroot',
+    'mrow',
+    'mspace',
+    'msqrt',
+    'mstyle',
+    'msub',
+    'msubsup',
+    'msup',
+    'mtable',
+    'mtd',
+    'mtext',
+    'mtr',
+    'munder',
+    'munderover',
+    'semantics',
   ],
-  ALLOWED_ATTR: ['class'],
+  ALLOWED_ATTR: [
+    'class',
+    // KaTeX, as of 0.18.
+    'accent',
+    'accentunder',
+    'columnalign',
+    'columnlines',
+    'columnspacing',
+    'depth',
+    'display',
+    'displaystyle',
+    'fence',
+    'height',
+    'largeop',
+    'linebreak',
+    'linethickness',
+    'lspace',
+    'mathbackground',
+    'mathcolor',
+    'mathsize',
+    'mathvariant',
+    'maxsize',
+    'minsize',
+    'notation',
+    'rowlines',
+    'rowspacing',
+    'rspace',
+    'scriptlevel',
+    'separator',
+    'stretchy',
+    'voffset',
+    'width',
+    'xmlns',
+  ],
 };
 
-/** The CSS that fetches: the functions that take a URL (a function name has no space before its bracket), and two at-rules. */
-const CSS_LOAD = /(?:url|src|image|image-set|cross-fade)\(|@import|@font-face/i;
+/**
+ * The CSS that fetches: the functions that take a URL, and two at-rules. A function's name has no space
+ * before its bracket, and a letter, digit or underscore before it makes a longer name (`getUrl(`), which
+ * loads nothing. A hyphen is let through for `-webkit-image-set(`.
+ */
+const CSS_LOAD = /(?<![a-z0-9_])(?:url|src|image|image-set|cross-fade)\(|@import|@font-face/i;
 
 /** Text with CSS's backslash escapes undone: `\75 r\l(` is `url(` to a stylesheet. */
 function withoutCssEscapes(text: string): string {
