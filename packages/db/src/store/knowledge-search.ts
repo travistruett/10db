@@ -13,6 +13,7 @@ import {
 import { sql, type SQL } from 'drizzle-orm';
 import { z } from 'zod';
 import type { TendbDatabase } from '../database';
+import { composed } from './compose';
 import { currentDecisionSql } from './decisions';
 import { currentPrincipleSql, listPrinciples } from './principles';
 import type { DbReader } from './store';
@@ -192,6 +193,45 @@ export function checkKnowledgeIndex(db: TendbDatabase): KnowledgeIndex[] {
     }
   }
   return broken;
+}
+
+/** The indexed text columns of each table; writes compose them (`composed`), and this does the rest. */
+const INDEXED_TEXT = [
+  { table: 'decisions', columns: ['question', 'choice', 'rationale'] },
+  { table: 'principles', columns: ['statement', 'topic_key', 'source_quote'] },
+] as const;
+
+/**
+ * Composes (NFC) the indexed text of rows written before writes did, so a record stored decomposed is
+ * found by a composed query. Each update goes through the table's FTS triggers, which drop the old
+ * entry and add the new one. Answers the number of rows changed; run at start, it is cheap when the
+ * answer is 0.
+ */
+export function composeKnowledgeText(db: TendbDatabase): number {
+  const client = db.$client;
+  let changed = 0;
+  const run = client.transaction(() => {
+    for (const { table, columns } of INDEXED_TEXT) {
+      const rows = z
+        .array(z.object({ id: z.string() }).catchall(z.string().nullable()))
+        .parse(client.prepare(`SELECT id, ${columns.join(', ')} FROM ${table}`).all());
+      for (const row of rows) {
+        const stale = columns.flatMap((column) => {
+          const text = row[column];
+          return text != null && text !== composed(text) ? [{ column, text: composed(text) }] : [];
+        });
+        if (stale.length === 0) continue;
+        client
+          .prepare(
+            `UPDATE ${table} SET ${stale.map((s) => `${s.column} = ?`).join(', ')} WHERE id = ?`,
+          )
+          .run(...stale.map((s) => s.text), row.id);
+        changed += 1;
+      }
+    }
+  });
+  run();
+  return changed;
 }
 
 /** Rebuilds an FTS index from its content table. */

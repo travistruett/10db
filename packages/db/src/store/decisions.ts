@@ -14,6 +14,7 @@ import {
 } from '@10db/contracts';
 import { and, desc, eq, isNull, or, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
+import { composed } from './compose';
 import type { DbReader, WriteContext } from './store';
 
 export interface NewDecision {
@@ -50,11 +51,15 @@ const SELECT_DECISION = sql`
 
 export function insertDecision(ctx: WriteContext, input: NewDecision): DecisionId {
   const id = mintId('Decision');
+  const question = composed(input.question);
   ctx.tx
     .insert(schema.decisions)
     .values({
       id,
       ...input,
+      question,
+      choice: composed(input.choice),
+      rationale: composed(input.rationale),
       supersedesId: input.supersedesId ?? null,
       createdAt: ctx.now,
       updatedAt: ctx.now,
@@ -66,7 +71,7 @@ export function insertDecision(ctx: WriteContext, input: NewDecision): DecisionI
     entityId: id,
     data: {
       projectId: input.projectId,
-      question: input.question,
+      question,
       supersedesId: input.supersedesId ?? null,
     },
   });
