@@ -70,6 +70,7 @@ import {
   listSessions,
   listEvidence,
   markSessionStarted,
+  answeredCardsForTask,
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
   patchWorkstream,
@@ -1438,6 +1439,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
+      answeredCards: answeredCardsForTask(db, row.taskId),
       renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
       uncarried: noticeBody(MIGRATIONS_UNCARRIED_NOTICE_KEY),
       task,
@@ -1885,7 +1887,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
-            handle.send(compactionReinjection(pack, denialsToTell()));
+            handle.send(
+              compactionReinjection(pack, denialsToTell(), {
+                role: step.role,
+                answeredCards: answeredCardsForTask(db, row.taskId),
+              }),
+            );
             break;
           }
           case 'rate_limit':
