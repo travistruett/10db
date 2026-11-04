@@ -286,7 +286,11 @@ describe('what changed, and why', () => {
       const { view } = withSources();
       serve(...conversation(view));
       open(view);
-      await rowMenu('Thin scrollbars', 'Why?');
+      fireEvent.click(await screen.findByRole('button', { name: 'Actions for Thin scrollbars' }));
+      const why = await screen.findByRole('menuitem', { name: 'Why?' });
+      // Mounting already scrolled to the end through the same scrollTo; only the press counts.
+      scrolled.mockClear();
+      fireEvent.click(why);
       await waitFor(() => {
         expect(highlighted()).toEqual(['And thin the scrollbars.']);
       });
