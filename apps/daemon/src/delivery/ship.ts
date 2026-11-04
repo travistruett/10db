@@ -1293,10 +1293,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
-  /** Every commit the task of `member` made through the commit tool in the batch, in the order recorded. */
-  function commitsMadeBy(batchId: BatchId, member: WorkstreamDto): string[] {
+  /** Every run of the task of `member` in the batch, oldest first. */
+  function runsOf(batchId: BatchId, member: WorkstreamDto): WorkstreamDto[] {
+    return listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
+  }
+
+  /** Every commit `runs` made through the commit tool, in the order recorded. */
+  function commitsMadeBy(runs: readonly WorkstreamDto[]): string[] {
     const made: string[] = [];
-    const runs = listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
     for (const run of runs)
       for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
         const parsed = McpToolOutputs.commit.safeParse(result);
@@ -1306,19 +1310,27 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Whether a run that was retried after Ship without it has none of its work on the branch: the revert
-   * its notice names is still there and the task made no commit since. A task is in the pull request
-   * only through a commit the revert does not cover, because the revert undid every earlier one.
+   * Whether a task retried after Ship without it has none of its work on the branch: a retry told a
+   * session of a revert, and no run so told made a commit that revert does not cover. The revert undid
+   * every earlier commit of the task, and 10db never undoes a revert, so it is taken to be on the branch.
+   * Only a run that was told counts: the shipping gate sends a merge run to a task that finished, and
+   * its commit resolves the base's conflicts without bringing any of the work back.
    */
   async function revertedAway(
     batchId: BatchId,
     member: WorkstreamDto,
     target: { readonly checkout: string; readonly branch: string },
   ): Promise<boolean> {
-    // The note the retry gave the session is the record: the notice may have been replaced by a wait.
-    const revert = lastRevertTold(listEvidence(db, member.id));
-    if (revert === null) return false;
-    for (const sha of commitsMadeBy(batchId, member))
+    // The notes the retries gave the sessions are the record: a wait may have replaced a run's notice,
+    // and a merge run has neither. Only the task's latest run can be retried, so the last note is the
+    // latest revert.
+    const told = runsOf(batchId, member).flatMap((run) => {
+      const revert = lastRevertTold(listEvidence(db, run.id));
+      return revert === null ? [] : [{ run, revert }];
+    });
+    const revert = told.at(-1)?.revert;
+    if (revert === undefined) return false;
+    for (const sha of commitsMadeBy(told.map((t) => t.run)))
       if (
         (await deps.git.hasCommit(target.checkout, sha)) &&
         (await deps.git.isAncestor(target.checkout, sha, `refs/heads/${target.branch}`)) &&
@@ -1341,7 +1353,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     checkout: string,
     branch: string,
   ): Promise<string[]> {
-    const made = commitsMadeBy(batchId, member);
+    const made = commitsMadeBy(runsOf(batchId, member));
     const kept: string[] = [];
     for (const sha of made)
       if (

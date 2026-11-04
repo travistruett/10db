@@ -381,8 +381,8 @@ export function setWorkstreamNotice(
 /**
  * Clears every run's notice, as a daemon start does: the waits they describe ended with the last one.
  * A parked run keeps its own: it records what the builder answered, not a wait. So does a run left
- * out of its batch's pull request, and so does a retried run whose commits are still reverted: the
- * pull request is built from that notice.
+ * out of its batch's pull request, because the body reads that notice, and so does a retried run
+ * whose commits are still reverted, because its drawer says so across a restart.
  */
 export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
   const rows = ctx.tx

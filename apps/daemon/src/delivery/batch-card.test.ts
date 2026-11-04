@@ -736,8 +736,17 @@ describe('the failed workstream card', () => {
     });
 
     describe('a left-out run that is retried after its commits were reverted', () => {
-      /** Ships without Alpha, then retries it with the batch's gate passing; returns what the retry left. */
-      async function leftOutThenRetried() {
+      /** While set, the ship's base update answers that the merge left markers. */
+      let baseConflicts = false;
+
+      /**
+       * Ships without Alpha, then retries it with the batch's gate passing; returns what the retry left.
+       * `failing` makes the failed run, Alpha's first by default.
+       */
+      async function leftOutThenRetried(
+        failing: () => ReturnType<typeof failedInBatch> = () =>
+          failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' }),
+      ) {
         let gateFails = true;
         h.close();
         h = createDeliveryHarness(
@@ -749,12 +758,24 @@ describe('the failed workstream card', () => {
                 return gateFails ? { ...result, exitCode: 1 } : result;
               },
             }),
+            // Only a batch in its own copy merges its base, and these commits are in the shared
+            // checkout, so the update's answer stands in for that merge.
+            shipBaseUpdates: (real) => ({
+              ...real,
+              beforeGate: (id, signal, options) =>
+                baseConflicts
+                  ? Promise.resolve({
+                      kind: 'conflicted',
+                      base: 'origin/main',
+                      paths: ['README.md'],
+                      note: 'Conflict markers in README.md',
+                    })
+                  : real.beforeGate(id, signal, options),
+            }),
           },
         );
         inbox = answering();
-        const { card, batchId, failed } = await failedInBatch('DONE', {
-          'src/api/alpha.txt': 'alpha\n',
-        });
+        const { card, batchId, failed } = await failing();
         inbox.answer(card.id, { choice: 'Ship without it' });
         await h.jobs.idle();
         expect(getWorkstream(h.store.db, failed).notice?.key).toBe('left-out');
@@ -768,6 +789,36 @@ describe('the failed workstream card', () => {
         const branch = getBatch(h.store.db, batchId).branch;
         if (branch === null) throw new Error('the batch has a branch');
         return h.git$('ls-tree', '-r', '--name-only', branch).split('\n');
+      }
+
+      /**
+       * Finishes the retried run with the branch and the base changing one line, so the ship's base
+       * merge leaves markers and sends the task that just finished to merge; returns that new run.
+       */
+      async function finishedThenSentToMerge(batchId: BatchId, retried: WorkstreamId) {
+        baseConflicts = true;
+        h.settle(retried, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+        baseConflicts = false;
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        const merge = listWorkstreams(h.store.db, { batchId }).at(-1);
+        if (!merge) throw new Error('the batch has runs');
+        expect(merge.id).not.toBe(retried);
+        expect(merge.taskTitle).toBe('Alpha');
+        expect(merge.nextAction.kind).toBe('merge');
+        return merge.id;
+      }
+
+      /** The merge run commits the resolution and finishes, and the batch ships; returns the pull request body. */
+      async function resolvedAndShipped(batchId: BatchId, merge: WorkstreamId) {
+        commitAs(merge, 'README.md', '# ours and theirs\n');
+        h.settle(merge, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        return h.gh.body(shipped.prUrl ?? '');
       }
 
       it('tells the session its commits were reverted', async () => {
@@ -821,6 +872,56 @@ describe('the failed workstream card', () => {
 
       it('lists the task as finished when the retry commits again', async () => {
         const { batchId, failed } = await leftOutThenRetried();
+        commitAs(failed, 'src/api/alpha.txt', 'alpha again\n');
+
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).toContain('### Alpha');
+        expect(body).not.toMatch(/reverted/);
+      });
+
+      it('does not list the task as finished when its only new commit is a merge run’s resolution', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+
+        const merge = await finishedThenSentToMerge(batchId, failed);
+        const body = await resolvedAndShipped(batchId, merge);
+
+        // The branch has the resolution, and none of Alpha's own work.
+        expect(branchFiles(batchId)).not.toContain('src/api/alpha.txt');
+        expect(body).not.toContain('### Alpha');
+        expect(body).toMatch(/Alpha \(done, .*reverted/);
+        expect(body).toContain('### Beta');
+      });
+
+      it('still lists the task as finished when it committed again before it was sent to merge', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+        commitAs(failed, 'src/api/alpha.txt', 'alpha again\n');
+
+        const merge = await finishedThenSentToMerge(batchId, failed);
+        const body = await resolvedAndShipped(batchId, merge);
+
+        expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+        expect(body).toContain('### Alpha');
+        expect(body).not.toMatch(/reverted/);
+      });
+
+      it('counts a merge run’s commit when that run was the one left out, retried and told to redo the work', async () => {
+        const { batchId, failed } = await leftOutThenRetried(async () => {
+          const {
+            batchId: id,
+            merge,
+            card,
+          } = await failedInItsMerge((run) => {
+            commitAs(run, 'src/api/alpha.txt', 'alpha merged\n');
+          });
+          return { batchId: id, failed: merge, card };
+        });
         commitAs(failed, 'src/api/alpha.txt', 'alpha again\n');
 
         h.settle(failed, 'DONE');
