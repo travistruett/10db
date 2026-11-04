@@ -11,6 +11,7 @@ import {
   READ_CHARGE_MAX_BYTES,
   READ_RESERVE_BYTES,
   measuredMediaBytes,
+  largestReadMeasured,
   readBytesSpent,
   readCountedLine,
 } from './read-budget';
@@ -491,6 +492,116 @@ describe('the pictures a Shape session pulls in with Read', () => {
       await f.restart();
       await nextTurn('Again');
       expect(spent()).toBe(300_000);
+    });
+  });
+
+  describe('once the session has measured a Read over 1 MiB', () => {
+    // Reads issued in one message all pass PreToolUse before any result is measured, so an unmeasured Read
+    // is charged at the largest size this session has measured, never under the allowance.
+    const BIG = 2.5 * MB;
+    const measure = (path: string, bytes: number, pages?: string): void => {
+      must(
+        must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+        'a PostToolUse hook',
+      )({
+        toolName: 'Read',
+        input: pages === undefined ? { file_path: path } : { file_path: path, pages },
+        response: imageResult(bytes),
+      });
+    };
+
+    it('charges a later unmeasured Read at least that size', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      expect(spent()).toBe(BIG);
+      expect(read(big.storedPath)).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(2 * BIG);
+    });
+
+    it('does not lower the charge when a later Read measures less', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      read(big.storedPath);
+      measure(big.storedPath, 300_000);
+      expect(spent()).toBe(BIG + 300_000);
+      read(big.storedPath);
+      expect(spent()).toBe(2 * BIG + 300_000);
+    });
+
+    it('still charges a file smaller than that by its own size', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      const small = drop('small.png', wholePng(20_000));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      read(small.storedPath);
+      expect(spent()).toBe(BIG + 20_000);
+    });
+
+    it('keeps a batch admitted before any of its results is measured within the pool', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      // Twenty Reads in one message: all pass PreToolUse, then their results come back.
+      const admitted = Array.from({ length: 20 }, () => read(big.storedPath)).filter(
+        (a) => a.decision === 'allow',
+      ).length;
+      expect(admitted).toBe(Math.floor((POOL - BIG) / BIG));
+      for (let i = 0; i < admitted; i += 1) measure(big.storedPath, BIG);
+      expect(spent()).toBe((admitted + 1) * BIG);
+      expect(spent()).toBeLessThanOrEqual(POOL);
+      expect(onTheWire(spent())).toBeLessThan(REQUEST_LIMIT - 1_500_000);
+    });
+
+    it('replaces what each Read of a first batch was counted, though the allowance has grown by then', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      // Nothing measured yet: three Reads of one message are each counted at the 1 MiB allowance.
+      for (let i = 0; i < 3; i += 1) read(big.storedPath);
+      expect(spent()).toBe(3 * READ_CHARGE_MAX_BYTES);
+      for (let i = 0; i < 3; i += 1) measure(big.storedPath, BIG);
+      expect(spent()).toBe(3 * BIG);
+    });
+
+    it('charges a PDF page at the largest page measured, and measures a PDF by its pages', async () => {
+      const doc = drop(
+        'two.pdf',
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(100_000)]),
+      );
+      await nextTurn('Hello');
+      expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+      measure(doc.storedPath, 9 * MB, '1-3');
+      expect(spent()).toBe(9 * MB);
+      expect(readPages(doc.storedPath, '4-5')).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(9 * MB + 6 * MB);
+    });
+
+    it('reads a measurement of a PDF written before the page count was recorded as 1 MiB a page', () => {
+      const body = 'Read · /a.pdf · PDF · 6291456 bytes measured in place of 3145728';
+      expect(readBytesSpent([{ kind: ShapeMessageKind.Tool, body } as ShapeMessageDto])).toBe(
+        6291456 - 3145728,
+      );
+      expect(largestReadMeasured([{ kind: ShapeMessageKind.Tool, body } as ShapeMessageDto])).toBe(
+        2 * MB,
+      );
+    });
+
+    it('is forgotten with a fresh session, which carries none of those results', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+      f.service.send(shapeId(), 'Full');
+      await f.service.settled(shapeId());
+      await nextTurn('Fresh');
+      expect(read(big.storedPath, 1)).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(READ_CHARGE_MAX_BYTES);
     });
   });
 

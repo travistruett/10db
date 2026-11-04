@@ -3,10 +3,14 @@ import { resolve } from 'node:path';
 import { expandHome } from '../sandbox';
 import {
   PICTURE_POOL_BYTES,
+  READ_CHARGE_MAX_BYTES,
   READ_RESERVE_BYTES,
+  largestReadMeasured,
+  readAllowance,
   readBytesSpent,
   readCountedLine,
   readMeasuredLine,
+  unmeasuredRead,
   type ReadKind,
 } from '../screens';
 import type { ShapeAccess } from './confinement';
@@ -19,9 +23,16 @@ import type { ShapeAccess } from './confinement';
 // of the pool; the PostToolUse hook then replaces the allowance with the size the result really had.
 // Everything here counts Reads of pictures and of PDFs alike; a name that says "read" means either kind.
 
-export { READ_RESERVE_BYTES, readBytesSpent, readCountedLine, type ReadKind };
-
-const MIB = 1024 * 1024;
+export {
+  READ_CHARGE_MAX_BYTES,
+  READ_RESERVE_BYTES,
+  largestReadMeasured,
+  readAllowance,
+  readBytesSpent,
+  readCountedLine,
+  unmeasuredRead,
+  type ReadKind,
+};
 
 /**
  * What Reads may add to a request, in bytes before base64, once the live session carries `inlineSpent` bytes
@@ -29,17 +40,6 @@ const MIB = 1024 * 1024;
  */
 export const readCeiling = (inlineSpent: number): number =>
   Math.max(READ_RESERVE_BYTES, PICTURE_POOL_BYTES - inlineSpent);
-
-/**
- * The most one Read picture, or one page of a Read PDF, is charged before its result is measured. Claude Code resizes a picture it
- * reads to at most about 2000 px a side and re-encodes it, so what it returns is not the file's size; this
- * is the allowance for it, and a smaller file is charged its own size, which resizing does not make larger.
- * The PostToolUse hook replaces it with the measured size of what came back (`measuredMediaBytes`); a
- * result it can't measure stays charged this. The live test
- * (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up task
- * tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
- */
-export const READ_CHARGE_MAX_BYTES = 1 * MIB;
 
 /**
  * The bytes before base64 of the pictures and documents a Read's result carries: every `base64` string in
@@ -81,7 +81,7 @@ const PDF_NAME = /\.pdf$/i;
 const PAGE_RANGE = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/;
 
 /** How many pages a Read's `pages` names: infinite when it names none, can't be read or is past the most. */
-function pagesCharged(pages: string | null): number {
+export function pagesCharged(pages: string | null): number {
   const range = pages === null ? null : PAGE_RANGE.exec(pages);
   if (range === null) return Number.POSITIVE_INFINITY;
   const first = Number(range[1]);
@@ -91,12 +91,14 @@ function pagesCharged(pages: string | null): number {
 
 /**
  * What a Read of this path is charged: null for anything but a picture or PDF that exists. `pages` is the
- * Read's own `pages` value, which only a PDF uses.
+ * Read's own `pages` value, which only a PDF uses. `allowance` is the most a picture or a page is charged
+ * (`readAllowance` of the live session's transcript).
  */
 export function readCharge(
   path: string,
   pages: string | null,
   access: Pick<ShapeAccess, 'checkout' | 'home'>,
+  allowance: number = READ_CHARGE_MAX_BYTES,
 ): { kind: ReadKind; bytes: number } | null {
   const kind: ReadKind | null = PICTURE_NAME.test(path)
     ? 'picture'
@@ -109,10 +111,7 @@ export function readCharge(
     if (!stat.isFile()) return null;
     return {
       kind,
-      bytes:
-        kind === 'PDF'
-          ? pagesCharged(pages) * READ_CHARGE_MAX_BYTES
-          : Math.min(stat.size, READ_CHARGE_MAX_BYTES),
+      bytes: kind === 'PDF' ? pagesCharged(pages) * allowance : Math.min(stat.size, allowance),
     };
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
@@ -129,11 +128,12 @@ export function readCharge(
 export function unreadableImages(
   files: readonly { readonly name: string; readonly size: number }[],
   room: number,
+  allowance: number = READ_CHARGE_MAX_BYTES,
 ): string[] {
   let left = room;
   const names: string[] = [];
   for (const file of files) {
-    const charge = Math.min(file.size, READ_CHARGE_MAX_BYTES);
+    const charge = Math.min(file.size, allowance);
     if (charge <= left) left -= charge;
     else names.push(file.name);
   }
@@ -163,10 +163,11 @@ export function readRefusal(
   spent: number,
   ceiling: number,
   kind: ReadKind = 'picture',
+  allowance: number = READ_CHARGE_MAX_BYTES,
 ): string | null {
   if (spent + charge <= ceiling) return null;
   if (kind === 'PDF') {
-    const room = Math.min(PDF_PAGES_MAX, Math.floor((ceiling - spent) / READ_CHARGE_MAX_BYTES));
+    const room = Math.min(PDF_PAGES_MAX, Math.floor((ceiling - spent) / allowance));
     const next =
       room > 0
         ? `Read it again with \`pages\` naming one page or range, such as "1-${String(room)}": up to ${String(room)} pages fit`

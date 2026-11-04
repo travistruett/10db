@@ -331,7 +331,8 @@ the 32 MB for the conversation's text): Reads may use whatever the inline pictur
 reserve, and Reads past the reserve are charged to the inline budget in turn, so a conversation with few inline
 pictures can Read many large ones and the sum still stays under the limit. The hook charges each of the session's own
 Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp` file (a dropped image or one in the checkout) the file's size, at
-most a 1 MiB allowance, since Claude Code resizes what it reads; a file that isn't there is charged nothing. Once the
+most a 1 MiB allowance (or the largest Read the live session has measured, when that is more; see below), since
+Claude Code resizes what it reads; a file that isn't there is charged nothing. Once the
 Read has returned, the PostToolUse hook measures its result (every `base64` string it carries) and the measured size
 replaces the allowance, so the charge comes from what came back; a result with no bytes in it, such as a set of page
 files on disk, stays at the allowance. A Read that would take the live session's total past what the inline pictures
@@ -347,7 +348,8 @@ one) is charged the 1 MiB allowance until its Read is measured. Before any Read 
 of them as whole MiB are left in the 21 MiB pool: **21 with no inline picture, and 3 once the 18 MiB inline budget is
 full**, one fewer for each MiB the inline pictures and earlier Reads have taken. Four dropped 2880 x 1800 PNGs of over
 1 MiB each can all be Read in a conversation that has not filled the inline budget, if each Read returns at most 1 MiB.
-Those counts are what the allowance gives, not a promise: a measurement replaces the charge in either direction, and
+Those counts are what the allowance gives, not a promise: a measurement replaces the charge in either direction, a
+session that has measured a Read over 1 MiB can Read fewer (each later one is charged at that size), and
 what a resized Retina picture weighs is unmeasured (follow-up tsk_01a1a578-91d9-7591-beb2-36336144c589).
 
 Where a path image would be refused, the builder is told as the turn is sent, not when Claude's Read is refused: a
@@ -378,9 +380,20 @@ acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-
 can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
 small one and a 4000 px one with a real session, finds the three pictures Claude Code kept in the session's transcript
 and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
-The PostToolUse measurement corrects a Read after it has run, not before: a Read is let in on the allowance, so a
-result larger than it can take the total past the pool by that one Read, which the 2.6 MB for text only partly
-covers. The test also leaves one question open. It reads a
+The PostToolUse measurement corrects a Read after it has run, not before. Reads that Claude issues in one message
+all pass the PreToolUse hook before any result is measured, so what a Read is charged there is a bound on a result
+only once the session has seen one. Until a Read has been measured, each Read is let in on the 1 MiB allowance, and a
+batch of *n* Reads whose results each exceed it passes the pool by up to *n* times the excess, with nothing in the
+hook to stop it: seven Reads let in at 1 MiB with 14 MiB spent that each return 2.5 MiB carry 31.5 MiB, about 42 MB as
+base64, past the 32 MB limit. The 2.6 MB left for text does not cover that. Once the live session has measured a
+Read (or a PDF page) over the allowance, the hook charges every later unmeasured Read at the largest size measured
+in the live session, at least the allowance (a file smaller than that is still charged its own size), so a batch
+admitted after that stays within the pool if its results are no larger than the largest measured. It does not stay
+within it if one result is larger than any measured before: that Read, and any of its batch let in beside it, can
+still pass the pool by the excess. A measured line replaces the charge its own Read was counted at, read back from
+the transcript, not recomputed, since the allowance can have grown between a batch's counting and its results;
+a PDF's line also records its page count (`… bytes measured in place of <n> over <p> pages`) so the size of one
+page can be told. The test also leaves one question open. It reads a
 fresh session's stored transcript, which gives an upper bound but doesn't show whether Claude Code drops an old tool
 result's picture when it resends. The budget assumes it doesn't, which is the safe side.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks

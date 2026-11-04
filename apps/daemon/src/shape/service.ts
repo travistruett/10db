@@ -83,12 +83,15 @@ import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   measuredMediaBytes,
+  pagesCharged,
+  readAllowance,
   readBytesSpent,
   readCharge,
   readCeiling,
   readCountedLine,
   readMeasuredLine,
   readRefusal,
+  unmeasuredRead,
   unreadableImages,
   unreadableImagesNotice,
 } from './read-budget';
@@ -613,8 +616,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
-    const reads = fresh ? 0 : readBytesSpent(listShapeMessages(state.db, shapeId));
-    const names = unreadableImages(paths, readCeiling(inline) - reads);
+    const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
+    const names = unreadableImages(
+      paths,
+      readCeiling(inline) - readBytesSpent(messages),
+      readAllowance(messages),
+    );
     if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
   };
 
@@ -788,16 +795,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
+        const messages = readPath === null ? [] : listShapeMessages(state.db, shapeId);
+        // Reads in one message all pass here before any result is measured, so one not yet measured is
+        // charged at the largest size this session has measured, not at the allowance alone.
+        const allowance = readAllowance(messages);
         const charged =
-          readPath === null ? null : readCharge(readPath, stringField(req.input, 'pages'), access);
+          readPath === null
+            ? null
+            : readCharge(readPath, stringField(req.input, 'pages'), access, allowance);
         if (readPath !== null && charged !== null && charged.bytes > 0) {
           const refusal = readRefusal(
             readPath,
             charged.bytes,
-            readBytesSpent(listShapeMessages(state.db, shapeId)),
+            readBytesSpent(messages),
             // Reads get whatever the inline pictures leave of the pool they share.
             readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
             charged.kind,
+            allowance,
           );
           if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
           else
@@ -828,14 +842,24 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         if (req.toolName !== 'Read' || req.agentId !== undefined) return;
         const path = stringField(req.input, 'file_path');
         if (path === null) return;
-        const charged = readCharge(path, stringField(req.input, 'pages'), access);
         const measured = measuredMediaBytes(req.response);
-        if (charged === null || !Number.isFinite(charged.bytes) || measured === 0) return;
+        if (measured === 0) return;
+        // What the hook counted for this Read, from the transcript: the allowance can have grown since,
+        // when another Read of the same message was measured first.
+        const counted = unmeasuredRead(listShapeMessages(state.db, shapeId), path);
+        if (counted === null) return;
+        const pages = pagesCharged(stringField(req.input, 'pages'));
         say(
           shapeId,
           ShapeMessageAuthor.Claude,
           ShapeMessageKind.Tool,
-          readMeasuredLine(path, measured, charged.bytes, charged.kind),
+          readMeasuredLine(
+            path,
+            measured,
+            counted.counted,
+            counted.kind,
+            Number.isFinite(pages) ? pages : undefined,
+          ),
         );
       },
     };
