@@ -34,7 +34,6 @@ import {
   insertLandingGroup,
   insertPrinciple,
   insertShapeLink,
-  detachShapeQuestionsOfTask,
   insertShapeQuestion,
   insertSource,
   insertTask,
@@ -197,14 +196,32 @@ export function convertProposals(
   const selectedIds = new Set(pending.map((r) => r.id));
   const efforts = pending.filter((r) => r.kind === 'goal' || r.kind === 'task');
 
-  // Dependencies: each must be a converted task or one that is selected too.
+  // Keys whose task is cancelled, or is by this call: the same refusal in either order of selecting.
+  const removed = new Set([
+    ...world.removedTasks,
+    ...removedKeys(
+      world.convertedTasks,
+      new Set(
+        pending
+          .filter((r) => r.kind === 'remove_task')
+          .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
+      ),
+    ),
+  ]);
+
+  // Dependencies: each must be a converted task or one that is selected too. A removed task's key
+  // stays converted, so only a pending row that reuses it can be depended on.
   const wait = new Map<ShapeProposalId, Set<ShapeProposalId>>();
   const needs = (row: ShapeProposalRow, from: string, keys: readonly string[]): void => {
     for (const key of keys) {
-      if (world.convertedTasks.has(key)) continue;
+      if (world.convertedTasks.has(key) && !removed.has(key)) continue;
       const owner = owners.get(key);
       if (owner === undefined) {
-        errors.push(`${from} depends on ${key}, and no proposal has that key`);
+        errors.push(
+          removed.has(key)
+            ? `${from} depends on ${key}, which was removed, so nothing can depend on it`
+            : `${from} depends on ${key}, and no proposal has that key`,
+        );
       } else if (!selectedIds.has(owner.row.id)) {
         errors.push(`${from} depends on ${owner.title}, which isn't selected`);
       } else if (owner.row.id !== row.id) {
@@ -228,7 +245,7 @@ export function convertProposals(
   for (const row of pending.filter((r) => r.kind === 'landing')) {
     const landing = ShapeProposalBody.landing.parse(row.body);
     for (const key of landing.keys) {
-      const converted = world.convertedTasks.get(key);
+      const converted = removed.has(key) ? undefined : world.convertedTasks.get(key);
       if (converted !== undefined) {
         if (world.placeOf(converted)?.landingGroup)
           errors.push(`${landing.title} includes ${key}, which is already in a landing`);
@@ -236,7 +253,11 @@ export function convertProposals(
       }
       const owner = owners.get(key);
       if (owner === undefined)
-        errors.push(`${landing.title} includes ${key}, and no proposal has that key`);
+        errors.push(
+          removed.has(key)
+            ? `${landing.title} includes ${key}, which was removed, so it cannot be in a landing`
+            : `${landing.title} includes ${key}, and no proposal has that key`,
+        );
       else if (!selectedIds.has(owner.row.id))
         errors.push(`${landing.title} includes ${owner.title}, which isn't selected`);
     }
@@ -246,19 +267,6 @@ export function convertProposals(
   const goalIds = new Map<string, GoalId>();
   for (const link of listShapeLinks(ctx.tx, shapeId))
     if (link.goalId !== null) goalIds.set(link.key, link.goalId);
-
-  // Keys whose task is cancelled, or is by this call: the same refusal in either order of selecting.
-  const removed = new Set([
-    ...world.removedTasks,
-    ...removedKeys(
-      world.convertedTasks,
-      new Set(
-        pending
-          .filter((r) => r.kind === 'remove_task')
-          .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
-      ),
-    ),
-  ]);
 
   // Records, questions, changes and removals are judged again as they stand now.
   for (const row of pending) {
@@ -500,9 +508,8 @@ export function convertProposals(
   }
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {
     const removal: PlanRemoval = ShapeProposalBody.remove_task.parse(row.body);
+    // Cancelling detaches the questions stored under the task, so none points at it.
     cancelTask(ctx, removal.taskId);
-    // A question stored under the task must not keep pointing at it once it is cancelled.
-    detachShapeQuestionsOfTask(ctx, removal.taskId);
     made.set(row.id, { taskIds: [removal.taskId] });
   }
 
