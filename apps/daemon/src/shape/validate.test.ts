@@ -44,6 +44,9 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
         ? `${id} has started`
         : `${id} was not created by this conversation`,
   storedSources: new Set(),
+  storedKeys: new Set(),
+  storedEfforts: new Set(),
+  pinnedGoalTasks: new Map(),
   draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
   placeOf: (id) =>
     id === converted
@@ -360,6 +363,54 @@ describe('a plan that breaks a rule', () => {
       looseTasks: [loose('a', { dependsOn: ['typo'], size: 'XL' })],
     });
     expect(errors.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('refuses a question about a stored proposal that is not a live goal or task', () => {
+    const question = {
+      key: 'q',
+      text: 'Who pays?',
+      for: 'finance',
+      about: 'stored',
+      sourceMessageIds: [message],
+    };
+    // A decision, principle, question, or a dropped goal or task: stored, but no live effort.
+    expect(check({ questions: [question] }, world({ storedKeys: new Set(['stored']) }))).toEqual([
+      expect.stringMatching(/Question 1, about: stored is not a goal or task/),
+    ]);
+  });
+
+  it('accepts a question about a stored goal or task that is still live', () => {
+    expect(
+      check(
+        {
+          questions: [
+            {
+              key: 'q',
+              text: 'Who pays?',
+              for: 'finance',
+              about: 'stored',
+              sourceMessageIds: [message],
+            },
+          ],
+        },
+        world({ storedKeys: new Set(['stored']), storedEfforts: new Set(['stored']) }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('counts a pinned goal’s stored tasks only when the draft leaves that goal out', () => {
+    const questions = [
+      { key: 'q', text: 'Who pays?', for: 'finance', about: 'g1', sourceMessageIds: [message] },
+    ];
+    const stored = world({
+      storedKeys: new Set(['g', 'g1']),
+      storedEfforts: new Set(['g']),
+      pinnedGoalTasks: new Map([['g', ['g1']]]),
+    });
+    expect(check({ questions }, stored)).toEqual([]);
+    expect(check({ goals: [goal('g', [task('g2')])], questions }, stored)).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
   });
 
   it('lets a row without sources keep the ones it has stored', () => {

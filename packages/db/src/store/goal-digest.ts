@@ -32,7 +32,7 @@ import * as schema from '../schema';
 import { getGoal, lastGoalView, markGoalViewed } from './goals';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { dependenciesDone, mergedDespiteFailure } from './tasks';
+import { dependenciesDone, mergedDespiteFailure, startedRun } from './tasks';
 import { findPersonByHandle, BUILDER_HANDLE } from './team';
 
 // Goals spec docs/superpowers/specs/2026-10-29-10db-goals-design.md §8: the digest is computed
@@ -334,29 +334,15 @@ function nextEntry(task: TaskRow, waitsOn: DigestNext['waitsOn']): DigestNext {
 }
 
 /**
- * Whether any task of the goal has ever run: one is done, a workstream got past the queue (a run
- * that is only queued, held or cancelled before it began has not run), or a cancelled run made a session.
+ * Whether any task of the goal has ever run: one is done, or one of its runs began (`startedRun`,
+ * which Remove Draft Goal's refusal shares, so the UI's offer and the daemon agree). Only tasks that
+ * are not removed count, as in Remove Draft Goal, which ignores a removed task however far it got.
  */
-function hasRun(db: DbReader, all: readonly TaskRow[], facts: Facts): boolean {
-  if (all.some((t) => t.status === TaskStatus.Done)) return true;
-  const notRun: readonly WorkstreamState[] = [
-    WorkstreamState.Queued,
-    WorkstreamState.Held,
-    WorkstreamState.Cancelled,
-  ];
-  if (facts.workstreams.some((w) => !notRun.includes(w.state))) return true;
-  const cancelled = facts.workstreams
-    .filter((w) => w.state === WorkstreamState.Cancelled)
-    .map((w) => w.id);
-  if (cancelled.length === 0) return false;
-  return (
-    db
-      .select({ id: schema.sessions.id })
-      .from(schema.sessions)
-      .where(inArray(schema.sessions.workstreamId, cancelled))
-      .limit(1)
-      .get() !== undefined
-  );
+function hasRun(db: DbReader, tasks: readonly TaskRow[], facts: Facts): boolean {
+  if (tasks.some((t) => t.status === TaskStatus.Done)) return true;
+  const live = new Set(tasks.map((t) => t.id));
+  const runs = facts.workstreams.filter((w) => live.has(w.taskId));
+  return startedRun(db, runs) !== undefined;
 }
 
 function goalTasks(db: DbReader, goalId: GoalId): TaskRow[] {
@@ -402,7 +388,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
     status = merged.length === done.length ? GoalStatus.Done : GoalStatus.Shipping;
-  } else status = hasRun(db, all, facts) ? GoalStatus.Idle : GoalStatus.NotStarted;
+  } else status = hasRun(db, tasks, facts) ? GoalStatus.Idle : GoalStatus.NotStarted;
 
   const openBatches = new Set<string>();
   for (const task of tasks) {

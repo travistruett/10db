@@ -642,6 +642,61 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
 }
 
 /**
+ * The first of a task's runs that really began: it got past the queue, or it was cancelled after a
+ * session. A run only queued, held or cancelled before any session has not begun. Pass every run, not
+ * the latest, since a task can start again after a run that ended. This one rule is the goal digest's
+ * reading of a goal as not started and Remove Draft Goal's refusal, so the offer and the refusal agree.
+ */
+export function startedRun<Run extends { readonly id: WorkstreamId; readonly state: string }>(
+  db: DbReader,
+  runs: readonly Run[],
+): Run | undefined {
+  const notBegun: readonly string[] = [
+    WorkstreamState.Queued,
+    WorkstreamState.Held,
+    WorkstreamState.Cancelled,
+  ];
+  const begun = runs.find((run) => !notBegun.includes(run.state));
+  if (begun) return begun;
+  const cancelled = runs.filter((run) => run.state === WorkstreamState.Cancelled);
+  if (cancelled.length === 0) return undefined;
+  const session = db
+    .select({ workstreamId: schema.sessions.workstreamId })
+    .from(schema.sessions)
+    .where(
+      inArray(
+        schema.sessions.workstreamId,
+        cancelled.map((run) => run.id),
+      ),
+    )
+    .limit(1)
+    .get();
+  return cancelled.find((run) => run.id === session?.workstreamId);
+}
+
+/**
+ * Removes a task of a draft goal that never started: as `removeUnstarted`, except that the rule is
+ * `startedRun` over all the task's runs, so a run that began refuses it even behind a later run held
+ * or cancelled while queued. A latest run still queued is refused as `cancelTask` refuses it.
+ */
+export function cancelNeverStartedTask(ctx: WriteContext, id: TaskId): TaskDto {
+  const task = getTask(ctx.tx, id);
+  if (task.status === TaskStatus.Cancelled) return task;
+  const runs = ctx.tx
+    .select({ id: schema.workstreams.id, state: schema.workstreams.state })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, id))
+    .all();
+  const started = startedRun(ctx.tx, runs);
+  if (started)
+    throw new TaskStartedError(task.title, {
+      id: started.id,
+      live: !isTerminal(started.state),
+    });
+  return removeUnstarted(ctx, id, true);
+}
+
+/**
  * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
  * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
  * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran. A task
