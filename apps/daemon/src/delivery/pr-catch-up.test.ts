@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { BatchDto, WorkstreamDto } from '@10db/contracts';
@@ -6,6 +6,7 @@ import { getBatch, listWorkstreams, patchBatch, patchProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { GhError, PrMergeable } from '../github';
+import { NOTICE_KEY } from './notices';
 
 // Each case builds a real repository, a worktree, a push and a teammate's push.
 vi.setConfig({ testTimeout: 120_000 });
@@ -676,6 +677,127 @@ describe('a shipped pull request that conflicts with its base', () => {
         mkdirSync(join(batch.worktreePath ?? '', 'node_modules'), { recursive: true });
 
         await pushedNothing(batch, 'install');
+      });
+    });
+
+    describe('the notice of migrations it renumbered', () => {
+      const journal = (...tags: string[]): string =>
+        `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;
+      const snapshot = (id: string, ...tables: string[]): string =>
+        `${JSON.stringify({ id, prevId: 'p', tables })}\n`;
+
+      const SCHEMAS = 'packages/contracts/generated';
+
+      /**
+       * Main holds 0000_init and 0001_theirs; the shipped batch's 0001_mine collides with it. With
+       * `otherDirectory` both also changed a generated directory the generators then leave as it is,
+       * a problem that loses no migration.
+       */
+      async function renumbering(
+        gate: string | null,
+        { otherDirectory = false } = {},
+      ): Promise<BatchDto> {
+        h.commit(
+          'packages/db/package.json',
+          `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+        );
+        h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
+        h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
+        h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
+        if (otherDirectory) {
+          h.commit(
+            'packages/contracts/package.json',
+            `${JSON.stringify({ name: '@10db/contracts', scripts: { generate: 'tsx generate.ts' } })}\n`,
+          );
+          h.commit(`${SCHEMAS}/a.schema.json`, '{"v":0}\n');
+        }
+        h.git$('push', '-q', 'origin', 'main');
+        const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
+          keepWorktree: true,
+        });
+        await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'a', 'b'));
+        await commitIn(batch, `${DB}/0001_mine.sql`, 'alter table a add b;\n');
+        if (otherDirectory) {
+          await commitIn(batch, `${SCHEMAS}/a.schema.json`, '{"v":"mine"}\n');
+          h.teammatePush('main', `${SCHEMAS}/a.schema.json`, '{"v":"theirs"}\n');
+        }
+        h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
+        h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
+        h.teammatePush('main', `${DB}/meta/0001_snapshot.json`, snapshot('theirs', 'a', 'c'));
+        h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
+        conflicts(batch);
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand: gate }));
+        // What the package's generate does: the next free number after main's.
+        vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(({ path, migrations = [] }) => {
+          const file = join(path, DB, 'meta/_journal.json');
+          const tags = (
+            JSON.parse(readFileSync(file, 'utf8')) as { entries: { tag: string }[] }
+          ).entries.map((e) => e.tag);
+          for (const { name } of migrations) {
+            const number = String(tags.length).padStart(4, '0');
+            tags.push(`${number}_${name}`);
+            writeFileSync(join(path, DB, `${number}_${name}.sql`), 'alter table a add b;\n');
+            writeFileSync(
+              join(path, DB, `meta/${number}_snapshot.json`),
+              snapshot('mine', 'a', 'b', 'c'),
+            );
+          }
+          writeFileSync(file, journal(...tags));
+          return Promise.resolve({ kind: 'done', logPath: join(path, 'generate.log') });
+        });
+        return batch;
+      }
+
+      const renumbered = (batch: BatchDto): readonly unknown[] =>
+        getBatch(h.store.db, batch.id).notices.filter(
+          (n) => n.key === NOTICE_KEY.migrationsRenumbered,
+        );
+
+      it('is left as it was when the check fails and the merge is put back', async () => {
+        const batch = await renumbering('false');
+
+        await catchUp(batch);
+
+        expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
+        expect(renumbered(batch)).toEqual([]);
+      });
+
+      it('lists the migration once when a catch-up starts over from the same branch', async () => {
+        const batch = await renumbering('false');
+        await catchUp(batch);
+        // The catch-up waits out its retry time before it tries the same head again.
+        h.shipClock.advance(31 * 60_000);
+        await catchUp(getBatch(h.store.db, batch.id));
+        expect(renumbered(batch)).toEqual([]);
+
+        h.shipClock.advance(31 * 60_000);
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
+        const now = await catchUp(getBatch(h.store.db, batch.id));
+
+        const notice = h.only(now.notices.filter((n) => n.key === NOTICE_KEY.migrationsRenumbered));
+        expect(notice.line).toContain('1 of this batch');
+        expect(notice.body).toContain('0001_mine → 0002_mine');
+      });
+
+      it('lists what was pushed when another generated directory came back unchanged', async () => {
+        const batch = await renumbering(null, { otherDirectory: true });
+
+        const now = await catchUp(batch);
+
+        expect(h.origin$('ls-tree', '--name-only', batch.branch ?? '', `${DB}/`)).toContain(
+          '0002_mine.sql',
+        );
+        const notice = h.only(now.notices.filter((n) => n.key === NOTICE_KEY.migrationsRenumbered));
+        expect(notice.body).toContain('0001_mine → 0002_mine');
+      });
+
+      it('is left as it was when such a merge fails its check and is put back', async () => {
+        const batch = await renumbering('false', { otherDirectory: true });
+
+        await catchUp(batch);
+
+        expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
+        expect(renumbered(batch)).toEqual([]);
       });
     });
 
