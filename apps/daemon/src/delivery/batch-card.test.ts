@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
 import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
+import { leftOutCards } from './cards';
+import { raise } from './context';
 import { batchCardFields, createBatchCardAnswers } from './index';
 import { leftOutNotices } from './notices';
 
@@ -678,6 +680,38 @@ describe('the failed workstream card', () => {
         const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
         expect(stopped.title).toMatch(/revert is on the branch/i);
         expect(stopped.body).not.toMatch(/branch is unchanged/);
+      });
+
+      it('shows its own title and offers no answer when a left-out card was open already', async () => {
+        revertThen(() => {
+          vi.spyOn(h.state, 'write').mockImplementationOnce(() => {
+            throw new Error('database is locked');
+          });
+        });
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'alpha\n',
+        });
+        // Another failed task's Ship without it stopped on a conflict and left its card open.
+        raise(
+          inbox,
+          h.project.id,
+          leftOutCards.conflict(
+            getBatch(h.store.db, batchId),
+            { workstreamId: failed, titles: ['Gamma'] },
+            ['src/api/gamma.txt'],
+          ),
+        );
+        const open = h.only(h.cards().filter((c) => c.title.includes('conflicts')));
+        expect(open.options.map((o) => o.label)).toContain('Ship without it');
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(stopped.id).toBe(open.id);
+        expect(stopped.title).toMatch(/revert is on the branch/i);
+        expect(stopped.options).toEqual([]);
+        expect(h.cards().filter((c) => c.title.includes('conflicts'))).toEqual([]);
       });
     });
 

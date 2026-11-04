@@ -3224,6 +3224,19 @@ describe('a flag with a fold key', () => {
     expect(inboxEvents(first.id)).toHaveLength(before + 1);
   });
 
+  it('gives a refreshed card the repeat title and answers, and none when it offers none', () => {
+    const input = { ...refusal(), refresh: true };
+    const first = inbox.flag({
+      ...input,
+      options: [{ label: 'Try again', description: 'Run it again' }],
+    });
+    expect(first.options).toHaveLength(1);
+    const second = inbox.flag({ ...input, title: 'Another cause', body: 'Different now.' });
+    expect(second.id).toBe(first.id);
+    expect(second.title).toBe('Another cause');
+    expect(second.options).toEqual([]);
+  });
+
   it('opens a new card once the first was dismissed', () => {
     const input = refusal();
     const first = inbox.flag(input);
