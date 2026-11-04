@@ -2299,6 +2299,93 @@ describe('complete_step', () => {
       expect(tasksOf(s.project.id)).toHaveLength(1 + followUps.length + MAX_FOLLOW_UPS);
     });
 
+    describe('across several complete_step calls in one step', () => {
+      const more = (from: number, count: number) =>
+        Array.from({ length: count }, (_, i) => ({
+          title: `Later finding ${String(from + i)}`,
+          description: 'Found on a later call.',
+        }));
+      const resultOf = (s: { workstream: { id: WorkstreamId } }) =>
+        getWorkstream(base.db, s.workstream.id).steps[1]?.result;
+
+      it("keeps the earlier call's follow-ups named when a second call files more", async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
+          opId: 'op-step-multi-a',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps,
+        });
+        const second = await s.call('complete_step', {
+          opId: 'op-step-multi-b',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(0, 1),
+        });
+        expect(second.isError).toBe(false);
+        const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        expect(filed).toHaveLength(3);
+        const summary = resultOf(s)?.summary ?? '';
+        expect(summary.startsWith('Second notes.')).toBe(true);
+        expect(summary.match(/Follow-up tasks filed:/g)).toHaveLength(1);
+        for (const task of filed) expect(summary).toContain(`${task.id} ${task.title}`);
+      });
+
+      it('refuses a call that would take the step past MAX_FOLLOW_UPS, files nothing and keeps the result', async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
+          opId: 'op-step-multi-c',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps: more(0, MAX_FOLLOW_UPS - 1),
+        });
+        const before = resultOf(s);
+        const over = await s.call('complete_step', {
+          opId: 'op-step-multi-d',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(100, 2),
+        });
+        expect(over.isError).toBe(true);
+        expect(over.text).toContain(String(MAX_FOLLOW_UPS));
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS - 1);
+        expect(resultOf(s)).toEqual(before);
+        // One more fits exactly, and a call with no follow-ups is never refused.
+        const fits = await s.call('complete_step', {
+          opId: 'op-step-multi-e',
+          summary: 'Third notes.',
+          verdict: 'approve',
+          followUps: more(200, 1),
+        });
+        expect(fits.isError).toBe(false);
+        const none = await s.call('complete_step', {
+          opId: 'op-step-multi-f',
+          summary: 'Fourth notes.',
+          verdict: 'approve',
+        });
+        expect(none.isError).toBe(false);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+        const summary = resultOf(s)?.summary ?? '';
+        for (const task of tasksOf(s.project.id).filter((t) => t.id !== s.task.id))
+          expect(summary).toContain(`${task.id} ${task.title}`);
+      });
+
+      it('counts what an earlier session of the step filed when a rerun reuses its opId', async () => {
+        const s = await onStep('review');
+        const args = {
+          opId: 'op-step-multi-g',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps: more(0, MAX_FOLLOW_UPS),
+        };
+        await s.call('complete_step', args);
+        const rerun = await connectSession(s.workstream.id);
+        const again = await rerun.call('complete_step', args);
+        expect(again.isError).toBe(true);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+      });
+    });
+
     it('files them once on an opId replay', async () => {
       const s = await onStep('review');
       const args = { opId: 'op-step-0011', summary: 'Fine.', verdict: 'approve', followUps };
