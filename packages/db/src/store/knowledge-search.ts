@@ -3,6 +3,7 @@ import {
   KnowledgeHit,
   PrincipleId,
   RecordHit,
+  searchTerms,
   type KnowledgeScope,
   type PrincipleDto,
   type PrincipleKind,
@@ -17,10 +18,14 @@ import type { DbReader } from './store';
 
 // Every full-text query lives here, so the storage engine can change later (packages/db/AGENTS.md).
 
-/** Turns free text into an FTS5 query of quoted terms joined by OR, so user text is never parsed as syntax. */
+/**
+ * Turns free text into an FTS5 query of quoted prefix terms, all of which must match, so user text is
+ * never parsed as syntax, a word still being typed finds its record, and each added word narrows.
+ * The Proposals tab filters with the same rule (`matchesSearch` in @10db/contracts).
+ */
 function ftsQuery(text: string): string | null {
-  const terms = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return terms.length === 0 ? null : terms.map((t) => `"${t}"`).join(' OR ');
+  const terms = searchTerms(text);
+  return terms.length === 0 ? null : terms.map((t) => `"${t}"*`).join(' AND ');
 }
 
 export interface SearchQuery {

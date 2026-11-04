@@ -330,6 +330,22 @@ describe('KnowledgeView', () => {
       expect(await screen.findByText('No proposal matches.')).toBeTruthy();
     });
 
+    it('finds a proposal from a partly typed word, but not from the middle of one', async () => {
+      serve({ proposals });
+      renderApp('/knowledge');
+      await openProposals();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'dep free' },
+      });
+      await waitFor(() => {
+        expect(shown()).toEqual(['Whole project']);
+      });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'eeze' },
+      });
+      expect(await screen.findByText('No proposal matches.')).toBeTruthy();
+    });
+
     it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
       serve({ proposals });
       renderApp('/knowledge');

@@ -376,7 +376,9 @@ describe('principles', () => {
   it('never throws on hostile search text for principles', () => {
     const p = seedProject(store);
     principle(project(p.id), { statement: "What's the deal with quotes?", topicKey: 'quotes' });
-    expect(found(p.id, `what's -the "deal" (NEAR OR`)).toEqual(["What's the deal with quotes?"]);
+    expect(found(p.id, `what's -the "deal" (quotes`)).toEqual(["What's the deal with quotes?"]);
+    expect(found(p.id, 'quo NEAR OR')).toEqual([]);
+    expect(found(p.id, 'quo')).toEqual(["What's the deal with quotes?"]);
     expect(found(p.id, '***')).toEqual([]);
     expect(checkKnowledgeIndex(store.db)).toEqual([]);
   });
