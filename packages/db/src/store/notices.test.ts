@@ -3,6 +3,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   NOTICE_BODY_MAX,
   NOTICE_LINE_MAX,
+  REVERTED_NOTICE_KEY,
   WorkstreamDto,
   type Notice,
 } from '@10db/contracts';
@@ -150,6 +151,20 @@ describe('workstream notices', () => {
     const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
     expect(value).toEqual([]);
     expect(getWorkstream(store.db, workstream.id).notice).toEqual(leftOut);
+  });
+
+  it('keeps the notice of a retried run whose commits are still reverted through a restart', () => {
+    const { workstream } = seed();
+    const reverted: Notice = {
+      key: REVERTED_NOTICE_KEY,
+      tone: 'warning',
+      line: 'Its earlier commits were reverted',
+      body: 'x',
+    };
+    store.write((ctx) => setWorkstreamNotice(ctx, workstream.id, reverted));
+    const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
+    expect(value).toEqual([]);
+    expect(getWorkstream(store.db, workstream.id).notice).toEqual(reverted);
   });
 });
 
