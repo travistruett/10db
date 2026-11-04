@@ -124,6 +124,8 @@ export const DecisionDto = z.object({
   state: DecisionState,
   sourceId: SourceId,
   withdrawnAt: Timestamp.nullable(),
+  /** Who withdrew it; null until it is withdrawn. */
+  withdrawnBy: z.string().nullable(),
   withdrawnReason: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -188,8 +190,12 @@ export const PrincipleDto = z.object({
   confirmedBy: z.string().nullable(),
   confirmedAt: Timestamp.nullable(),
   retiredAt: Timestamp.nullable(),
+  /** Who retired it; null until it is retired. */
+  retiredBy: z.string().nullable(),
   retiredReason: z.string().nullable(),
   withdrawnAt: Timestamp.nullable(),
+  /** Who withdrew it; null until it is withdrawn. */
+  withdrawnBy: z.string().nullable(),
   withdrawnReason: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,

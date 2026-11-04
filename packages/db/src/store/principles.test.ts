@@ -201,7 +201,13 @@ describe('principles', () => {
     const retired = store.write((ctx) =>
       retirePrinciple(ctx, next.id, 'me', 'we use fake timers now'),
     ).value;
-    expect(retired).toMatchObject({ state: 'retired', retiredReason: 'we use fake timers now' });
+    expect(retired).toMatchObject({
+      state: 'retired',
+      retiredBy: 'me',
+      retiredReason: 'we use fake timers now',
+      withdrawnBy: null,
+    });
+    expect(getPrinciple(store.db, next.id)).toMatchObject({ retiredBy: 'me' });
     expect(row(next.id)).toMatchObject({
       retiredBy: 'me',
       retiredReason: 'we use fake timers now',
@@ -241,7 +247,13 @@ describe('principles', () => {
     const p = seedProject(store);
     const one = principle(project(p.id));
     const withdrawn = store.write((ctx) => withdrawPrinciple(ctx, one.id, 'me', 'typo')).value;
-    expect(withdrawn).toMatchObject({ state: 'withdrawn', withdrawnReason: 'typo' });
+    expect(withdrawn).toMatchObject({
+      state: 'withdrawn',
+      withdrawnBy: 'me',
+      withdrawnReason: 'typo',
+      retiredBy: null,
+    });
+    expect(getPrinciple(store.db, one.id).withdrawnBy).toBe('me');
     expect(withdrawn.withdrawnAt).not.toBeNull();
     expect(row(one.id)).toMatchObject({ withdrawnBy: 'me', withdrawnReason: 'typo' });
     expect(row(one.id)?.withdrawnAt).toBeTruthy();

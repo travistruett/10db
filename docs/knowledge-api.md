@@ -113,8 +113,10 @@ Without `q` the newest come first; with `q` the best matches of each kind altern
       "confirmedBy": "me",
       "confirmedAt": "2026-11-03T10:00:00.000Z",
       "retiredAt": null,
+      "retiredBy": null,
       "retiredReason": null,
       "withdrawnAt": null,
+      "withdrawnBy": null,
       "withdrawnReason": null,
       "createdAt": "2026-11-03T10:00:00.000Z",
       "updatedAt": "2026-11-03T10:00:00.000Z"
@@ -134,6 +136,7 @@ Without `q` the newest come first; with `q` the best matches of each kind altern
       "state": "current",
       "sourceId": "src_…",
       "withdrawnAt": null,
+      "withdrawnBy": null,
       "withdrawnReason": null,
       "createdAt": "2026-11-03T09:00:00.000Z",
       "updatedAt": "2026-11-03T09:00:00.000Z"
@@ -186,8 +189,8 @@ be superseded (the current one is dec_b)`. A withdrawn decision says the same of
 
 ### Withdraw a decision
 
-`POST /decisions/:id/withdraw` → **200** with the decision item, now `withdrawn`, with `withdrawnAt` and
-`withdrawnReason`. Nothing is deleted: the tombstone shows with `history=1`.
+`POST /decisions/:id/withdraw` → **200** with the decision item, now `withdrawn`, with `withdrawnAt`,
+`withdrawnBy` (who) and `withdrawnReason`. Nothing is deleted: the tombstone shows with `history=1`.
 
 | Field    | Required | Meaning                                                                   |
 | -------- | -------- | ------------------------------------------------------------------------- |
@@ -244,7 +247,7 @@ testing.no-sleeps at that scope; supersede or retire it first`. Edit or retire `
 
 ### Retire a principle
 
-`POST /principles/:id/retire` → **200** with the principle, now `retired` (`retiredAt`, `retiredReason`). A retired
+`POST /principles/:id/retire` → **200** with the principle, now `retired` (`retiredAt`, `retiredBy`, `retiredReason`). A retired
 principle is no longer injected anywhere, and stays in history. The principle it replaced stays `superseded`:
 retiring ends a chain, where withdrawing rolls it back.
 

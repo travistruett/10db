@@ -90,6 +90,12 @@
                 }
               ]
             },
+            "withdrawnBy": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "withdrawnReason": {
               "type": [
                 "string",
@@ -123,6 +129,7 @@
             "supersededById",
             "state",
             "withdrawnAt",
+            "withdrawnBy",
             "withdrawnReason",
             "createdAt",
             "updatedAt",
@@ -251,6 +258,12 @@
                 }
               ]
             },
+            "retiredBy": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "retiredReason": {
               "type": [
                 "string",
@@ -267,6 +280,12 @@
                 {
                   "type": "null"
                 }
+              ]
+            },
+            "withdrawnBy": {
+              "type": [
+                "string",
+                "null"
               ]
             },
             "withdrawnReason": {
@@ -314,8 +333,10 @@
             "confirmedBy",
             "confirmedAt",
             "retiredAt",
+            "retiredBy",
             "retiredReason",
             "withdrawnAt",
+            "withdrawnBy",
             "withdrawnReason",
             "createdAt",
             "updatedAt",
@@ -419,6 +440,12 @@
                     }
                   ]
                 },
+                "withdrawnBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "withdrawnReason": {
                   "type": [
                     "string",
@@ -454,6 +481,7 @@
                 "state",
                 "sourceId",
                 "withdrawnAt",
+                "withdrawnBy",
                 "withdrawnReason",
                 "createdAt",
                 "updatedAt",
@@ -590,6 +618,12 @@
                     }
                   ]
                 },
+                "retiredBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "retiredReason": {
                   "type": [
                     "string",
@@ -606,6 +640,12 @@
                     {
                       "type": "null"
                     }
+                  ]
+                },
+                "withdrawnBy": {
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 },
                 "withdrawnReason": {
@@ -655,8 +695,10 @@
                 "confirmedBy",
                 "confirmedAt",
                 "retiredAt",
+                "retiredBy",
                 "retiredReason",
                 "withdrawnAt",
+                "withdrawnBy",
                 "withdrawnReason",
                 "createdAt",
                 "updatedAt",
@@ -765,6 +807,12 @@
                     }
                   ]
                 },
+                "withdrawnBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "withdrawnReason": {
                   "type": [
                     "string",
@@ -800,6 +848,7 @@
                 "state",
                 "sourceId",
                 "withdrawnAt",
+                "withdrawnBy",
                 "withdrawnReason",
                 "createdAt",
                 "updatedAt",
@@ -936,6 +985,12 @@
                     }
                   ]
                 },
+                "retiredBy": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "retiredReason": {
                   "type": [
                     "string",
@@ -952,6 +1007,12 @@
                     {
                       "type": "null"
                     }
+                  ]
+                },
+                "withdrawnBy": {
+                  "type": [
+                    "string",
+                    "null"
                   ]
                 },
                 "withdrawnReason": {
@@ -1001,8 +1062,10 @@
                 "confirmedBy",
                 "confirmedAt",
                 "retiredAt",
+                "retiredBy",
                 "retiredReason",
                 "withdrawnAt",
+                "withdrawnBy",
                 "withdrawnReason",
                 "createdAt",
                 "updatedAt",

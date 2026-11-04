@@ -471,6 +471,32 @@ describe('KnowledgeView', () => {
     ).toBeTruthy();
   });
 
+  it('shows who retired a principle, when and why', async () => {
+    const principle = principleItem({ state: 'retired', statement: 'Retired rule' });
+    serve({ principles: [principle] });
+    server.use(
+      http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+        HttpResponse.json(
+          provenanceDto({
+            id: principle.id,
+            state: 'retired',
+            retired: {
+              at: '2026-10-16T09:30:00.000Z',
+              by: 'agent:claude',
+              reason: 'We use fake timers now',
+              source: null,
+            },
+          }),
+        ),
+      ),
+    );
+    renderApp('/knowledge');
+    fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
+    const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+    expect(await within(drawer).findByText(/Retired by an agent on 16 Oct 2026/)).toBeTruthy();
+    expect(within(drawer).getByText('We use fake timers now')).toBeTruthy();
+  });
+
   describe('names the session that wrote a record', () => {
     const shapeId = mintId('Shape');
     const workstreamId = mintId('Workstream');

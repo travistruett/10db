@@ -65,6 +65,7 @@ describe('decisions with derived state', () => {
       state: 'current',
       supersededById: null,
       withdrawnAt: null,
+      withdrawnBy: null,
     });
   });
 

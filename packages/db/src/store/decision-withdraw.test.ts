@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTestStore,
   getDecision,
+  getDecisionDto,
   insertDecision,
   insertSource,
   listRecentDecisions,
@@ -65,6 +66,11 @@ describe('withdrawDecision', () => {
     expect(getDecision(store.db, id)).toMatchObject({
       choice: 'BullMQ',
       withdrawnAt: AT.toISOString(),
+      withdrawnBy: 'me',
+      withdrawnReason: 'We never adopted it',
+    });
+    expect(getDecisionDto(store.db, id)).toMatchObject({
+      state: 'withdrawn',
       withdrawnBy: 'me',
       withdrawnReason: 'We never adopted it',
     });
