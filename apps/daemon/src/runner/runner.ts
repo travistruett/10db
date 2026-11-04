@@ -1885,7 +1885,12 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
-            handle.send(compactionReinjection(pack, denialsToTell()));
+            handle.send(
+              compactionReinjection(pack, denialsToTell(), {
+                role: step.role,
+                answeredCards: answeredCardsForTask(db, row.taskId),
+              }),
+            );
             break;
           }
           case 'rate_limit':

@@ -80,14 +80,16 @@ export interface AnsweredCard {
 /**
  * What a review step is told of the cards the builder already answered on its task: each with its
  * id, question, choice and note. A decision one of them covers is not asked again; a decision none
- * covers is still the reviewer's to raise.
+ * covers is still the reviewer's to raise. Empty for any other step, and when there are none.
  */
-function renderAnsweredCards(cards: readonly AnsweredCard[]): string[] {
+function renderAnsweredCards(role: StepRole, cards: readonly AnsweredCard[] = []): string[] {
+  if (cards.length === 0 || !REVIEW_ROLES.includes(role)) return [];
   const lines = cards.map(
     (c) =>
       `- ${c.id} (${c.kind}): ${c.question} -> ${c.choice}${c.note ? ` (note: ${c.note})` : ''}`,
   );
   return [
+    '',
     'Inbox cards the builder already answered on this task:',
     ...lines,
     'Check a decision you are about to raise against these. When an answer here covers it (an acceptance criterion shipped unmeasured, an option chosen), the builder has decided: cite the card id, do not raise a card asking again, and do not reject for what the answer accepted. When no answer here covers it, raise the card as usual.',
@@ -513,11 +515,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Context pack:',
     renderKnowledge(input.contextPack),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
-    ...(input.answeredCards &&
-    input.answeredCards.length > 0 &&
-    REVIEW_ROLES.includes(input.step.role)
-      ? ['', ...renderAnsweredCards(input.answeredCards)]
-      : []),
+    ...renderAnsweredCards(input.step.role, input.answeredCards),
     ...(input.renumbered ? ['', input.renumbered] : []),
     ...(input.uncarried ? ['', input.uncarried] : []),
     '',
@@ -526,9 +524,13 @@ export function buildSessionPrompt(input: PromptInput): string {
 }
 
 /** The pack again after an emergency compaction (spec §5.3), with the knowledge text the session started with. */
-export function compactionReinjection(pack: ContextPack, denials: readonly Denial[] = []): string {
+export function compactionReinjection(
+  pack: ContextPack,
+  denials: readonly Denial[] = [],
+  answered?: { readonly role: StepRole; readonly answeredCards: readonly AnsweredCard[] },
+): string {
   const claims = pack.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
-  const again = [
+  return [
     '10db: your conversation was compacted. Here is your context pack again:',
     '',
     `Task: ${pack.task.title}`,
@@ -541,6 +543,7 @@ export function compactionReinjection(pack: ContextPack, denials: readonly Denia
     '',
     renderKnowledge(pack),
     ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),
+    ...(denials.length > 0 ? ['', ...renderDenials(denials)] : []),
+    ...(answered ? renderAnsweredCards(answered.role, answered.answeredCards) : []),
   ].join('\n');
-  return denials.length === 0 ? again : [again, '', ...renderDenials(denials)].join('\n');
 }

@@ -3185,6 +3185,59 @@ describe('flows', () => {
     }
   };
 
+  it('shows the review step the card the builder answered in the implement step, and again after a compaction', async () => {
+    const compacted = [
+      { do: 'compact' as const },
+      { do: 'await_message' as const, contains: 'context pack' },
+    ];
+    const ask = {
+      do: 'mcp' as const,
+      tool: 'ask_human',
+      args: {
+        opId: 'op-flow-ask-01',
+        category: 'product',
+        question: 'Ship with criterion 1 unmeasured?',
+        options: [
+          { label: 'Ship unmeasured', description: 'no live run' },
+          { label: 'Hold it', description: 'wait for a live run' },
+        ],
+      },
+    };
+    engine = await createTestEngine({
+      Alpha: [
+        [ask, ...compacted, ...implement('op-flow-ask-02')],
+        [...compacted, approve('op-flow-ask-03'), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'standard' });
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    engine.inbox.answer(card.id, {
+      choice: 'Ship unmeasured',
+      note: 'The live run is a follow-up',
+    });
+    await engine.runner.idle();
+    await until(workstream.id, (s) => s === 'DONE');
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(listInbox(engine.store.db, {})).toHaveLength(1);
+    const reinjections = engine.adapter.sent
+      .map((message) => message.text)
+      .filter((text) => text.includes('context pack'));
+    expect(reinjections).toHaveLength(2);
+    const [implementBrief, reviewBrief] = engine.adapter.prompts.map((p) => p.prompt);
+    const [implementAgain, reviewAgain] = reinjections;
+    for (const told of [reviewBrief, reviewAgain]) {
+      expect(told).toContain(card.id);
+      expect(told).toContain('Ship with criterion 1 unmeasured?');
+      expect(told).toContain('Ship unmeasured');
+      expect(told).toContain('The live run is a follow-up');
+    }
+    for (const told of [implementBrief, implementAgain]) {
+      expect(told).not.toContain('already answered');
+    }
+  });
+
   it('runs implement then review to DONE when the reviewer approves', async () => {
     engine = await createTestEngine({
       Alpha: [implement('op-flow-0001'), [approve('op-flow-0002'), turn]],

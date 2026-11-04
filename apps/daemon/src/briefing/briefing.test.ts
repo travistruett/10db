@@ -290,6 +290,41 @@ describe('buildSessionPrompt', () => {
         buildSessionPrompt({ ...base, action: { kind: 'start' }, answeredCards }),
       ).not.toContain('already answered');
     });
+
+    it('repeats the list after a compaction of a review step, as the brief words it', () => {
+      const text = compactionReinjection(packWithDecision, [], { role: 'review', answeredCards });
+      const brief = buildSessionPrompt({
+        ...base,
+        step: reviewStep,
+        action: { kind: 'start' },
+        answeredCards,
+      });
+      const list = text.slice(text.indexOf('Inbox cards the builder already answered'));
+      expect(list).toContain(inboxId);
+      expect(list).toContain('Ship with criterion 1 unmeasured?');
+      expect(list).toContain('Ship unmeasured');
+      expect(list).toContain('The live run is a follow-up.');
+      expect(brief).toContain(list);
+    });
+
+    it('sits beside the denials after a compaction', () => {
+      const denials = [{ toolName: 'Bash', summary: 'pnpm lint', note: null }];
+      const text = compactionReinjection(packWithDecision, denials, {
+        role: 'review',
+        answeredCards,
+      });
+      expect(text).toContain('Bash: pnpm lint');
+      expect(text).toContain(inboxId);
+    });
+
+    it('leaves the list out of the compaction of an implement step, and when there is none', () => {
+      expect(
+        compactionReinjection(packWithDecision, [], { role: 'implement', answeredCards }),
+      ).not.toContain('already answered');
+      expect(
+        compactionReinjection(packWithDecision, [], { role: 'review', answeredCards: [] }),
+      ).toBe(compactionReinjection(packWithDecision));
+    });
   });
 
   it('carries the handoff when continuing', () => {
