@@ -180,6 +180,93 @@ describe('a large dropped image', () => {
     expect(turn.message.match(/too large to show/g)).toHaveLength(2);
   });
 
+  // The API refuses an image over 8000 px on a side however few bytes it takes, and a resumed session
+  // resends it with every request, so a tall full-page screenshot goes as a path too.
+  describe('over 8000 px on a side', () => {
+    const png = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(33);
+      PNG.copy(head);
+      head.writeUInt32BE(13, 8);
+      head.write('IHDR', 12, 'ascii');
+      head.writeUInt32BE(width, 16);
+      head.writeUInt32BE(height, 20);
+      return sized(head, 100_000);
+    };
+    const jpeg = (width: number, height: number): Buffer => {
+      const sof = Buffer.from([
+        0xff, 0xc0, 0, 17, 8, 0, 0, 0, 0, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1,
+      ]);
+      sof.writeUInt16BE(height, 5);
+      sof.writeUInt16BE(width, 7);
+      // An APP0 segment first, so the frame header is not at a fixed offset.
+      const app0 = Buffer.from([0xff, 0xe0, 0, 6, 0x4a, 0x46, 0x49, 0x46]);
+      return sized(Buffer.concat([Buffer.from([0xff, 0xd8]), app0, sof]), 100_000);
+    };
+    const webpLossy = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(30);
+      head.write('RIFF', 0, 'ascii');
+      head.write('WEBP', 8, 'ascii');
+      head.write('VP8 ', 12, 'ascii');
+      head.set([0x9d, 0x01, 0x2a], 23);
+      head.writeUInt16LE(width, 26);
+      head.writeUInt16LE(height, 28);
+      return sized(head, 100_000);
+    };
+    const webpExtended = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(30);
+      head.write('RIFF', 0, 'ascii');
+      head.write('WEBP', 8, 'ascii');
+      head.write('VP8X', 12, 'ascii');
+      head.writeUIntLE(width - 1, 24, 3);
+      head.writeUIntLE(height - 1, 27, 3);
+      return sized(head, 100_000);
+    };
+
+    it.each([
+      { name: 'a tall PNG', file: 'long.png', bytes: png(1200, 8001) },
+      { name: 'a wide PNG', file: 'wide.png', bytes: png(8001, 1200) },
+      { name: 'a tall JPEG', file: 'long.jpg', bytes: jpeg(1200, 12_000) },
+      { name: 'a wide lossy WebP', file: 'wide.webp', bytes: webpLossy(9000, 600) },
+      { name: 'an extended WebP', file: 'long.webp', bytes: webpExtended(800, 16_000) },
+    ])('goes as a path to Read, not an image block: $name', async ({ file, bytes }) => {
+      const stored = drop(file, bytes);
+      const turn = await nextTurn('The whole page');
+      expect(turn.images).toEqual([]);
+      expect(turn.message).toContain(`[file] ${stored.storedPath} (${file})`);
+      expect(turn.message).toMatch(/too large to show.*Read/);
+    });
+
+    it.each([
+      { name: 'a PNG at 8000', file: 'edge.png', bytes: png(8000, 8000) },
+      { name: 'a tall JPEG at 8000', file: 'edge.jpg', bytes: jpeg(1200, 8000) },
+      { name: 'a lossy WebP at 8000', file: 'edge.webp', bytes: webpLossy(8000, 600) },
+    ])('is still sent inline at the limit: $name', async ({ file, bytes }) => {
+      drop(file, bytes);
+      const turn = await nextTurn('Fits');
+      expect(turn.images).toHaveLength(1);
+      expect(turn.message).not.toMatch(/too large to show/);
+    });
+
+    it('is named as a path while a normal image beside it is still sent inline', async () => {
+      drop('long.png', png(1200, 9000));
+      drop('small.png', PNG);
+      const turn = await nextTurn('Both');
+      expect(turn.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+      expect(turn.message).toMatch(/long\.png\) — too large to show inline; Read it/);
+      expect(turn.message).not.toMatch(/small\.png\) — too large/);
+    });
+
+    it('is named as a path in a session that has not started, and not sent as an image', async () => {
+      drop('long.png', png(1200, 9000));
+      f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok' });
+      f.service.send(shapeId(), 'Look');
+      await f.service.settled(shapeId());
+      const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+      expect(spec.images ?? []).toEqual([]);
+      expect(spec.prompt).toMatch(/long\.png\) — too large to show inline; Read it/);
+    });
+  });
+
   it('is not marked on a small image beside it, which is still sent inline', async () => {
     drop('big.png', sized(PNG, 6 * MB));
     drop('small.png', PNG);
