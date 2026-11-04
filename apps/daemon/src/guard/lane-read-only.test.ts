@@ -151,11 +151,17 @@ function access(refuse: readonly string[] = []): FileAccessJudge {
   };
 }
 
-function pre(command: string, fileAccess: FileAccessJudge | null = access(), tool = 'Bash') {
+function pre(
+  command: string,
+  fileAccess: FileAccessJudge | null = access(),
+  tool = 'Bash',
+  cwd?: string,
+) {
   return judgePreToolUse({
     toolName: tool,
     toolInput: { command },
     repoPath: repo.path,
+    ...(cwd === undefined ? {} : { cwd }),
     areas: [{ name: 'all', globs: ['**'] }],
     hazards: DEFAULT_HAZARDS,
     claims: AREA,
@@ -279,6 +285,71 @@ describe('a lane Bash call made only of read-only commands', () => {
 
     it('is not settled for a path with no single real path (`..` past a missing part)', () => {
       expect('settled' in pre('cat missing/../../dev/zero')).toBe(false);
+    });
+  });
+
+  describe('after an earlier Bash call changed directory', () => {
+    // Claude Code carries a `cd` into the next call, and the hook's `cwd` is where the call runs.
+    const sub = () => join(repo.path, 'apps');
+
+    function withLinks(run: () => void): void {
+      mkdirSync(sub(), { recursive: true });
+      symlinkSync('/dev/zero', join(sub(), 'zero-link'));
+      symlinkSync('/dev', join(sub(), 'dev-link'));
+      try {
+        run();
+      } finally {
+        for (const name of ['zero-link', 'dev-link']) rmSync(join(sub(), name), { force: true });
+      }
+    }
+
+    it.each<[string]>([
+      ['cat zero-link | wc -c'],
+      ['cat ./zero-link'],
+      ['cat dev-link/zero'],
+      ['grep -r x dev-link'],
+      ['grep -fzero-link x a'],
+      ['grep --file=zero-link x a'],
+    ])('is not settled when a relative path names a link there to a device: %s', (command) => {
+      withLinks(() => {
+        expect('settled' in pre(command, access(), 'Bash', sub())).toBe(false);
+      });
+    });
+
+    it('was settled when the link is read from the copy root, where it does not exist', () => {
+      withLinks(() => {
+        expect(pre('cat zero-link')).toEqual({
+          decision: 'allow',
+          settled: expect.any(String) as string,
+        });
+      });
+    });
+
+    it('still settles an ordinary relative path there', () => {
+      withLinks(() => {
+        expect(pre('cat notes.txt', access(), 'Bash', sub())).toEqual({
+          decision: 'allow',
+          settled: expect.any(String) as string,
+        });
+      });
+    });
+
+    it('judges a relative path from that directory for the file-access judge too', () => {
+      const seen: string[] = [];
+      const judge: FileAccessJudge = {
+        ...access(),
+        read: (_tool, input) => {
+          seen.push(JSON.stringify(input));
+          return 'ok';
+        },
+      };
+      pre('cat notes.txt', judge, 'Bash', sub());
+      expect(seen).toEqual([JSON.stringify({ path: join(sub(), 'notes.txt') })]);
+    });
+
+    it('is not settled when the directory is not an absolute path', () => {
+      expect('settled' in pre('cat notes.txt', access(), 'Bash', 'apps')).toBe(false);
+      expect('settled' in pre('cat notes.txt', access(), 'Bash', '')).toBe(false);
     });
   });
 

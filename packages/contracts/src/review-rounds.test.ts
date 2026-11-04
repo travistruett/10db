@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mintId } from './ids';
 import {
+  filedFollowUpLines,
   findingBody,
   findingNotes,
   parseFindings,
@@ -16,6 +17,17 @@ describe('findingNotes', () => {
       notes,
     );
     expect(findingNotes(notes)).toBe(notes);
+  });
+});
+
+describe('filedFollowUpLines', () => {
+  it('returns the lines 10db listed after the notes, and none for notes without a list', () => {
+    expect(
+      filedFollowUpLines(
+        `Notes.\n\n${FOLLOW_UPS_HEADING}\n- tsk_a Fix a.ts:1\n- tsk_b Cover the badge`,
+      ),
+    ).toEqual(['- tsk_a Fix a.ts:1', '- tsk_b Cover the badge']);
+    expect(filedFollowUpLines('1. BLOCKING a.ts:1 still broken.')).toEqual([]);
   });
 });
 

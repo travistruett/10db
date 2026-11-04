@@ -21,15 +21,20 @@ other than `2>&1`, `>/dev/null` and `2>/dev/null`. The command word is a bare na
 assignment. Writing options are refused whatever the command: `find -delete -exec -execdir -ok -okdir
 -fprint* -fls`, `sort -o --output --compress-program`, `tree -o -R`, `rg --pre --pre-glob --hostname-bin`, and
 for git `--output --ext-diff --textconv`, plus `--open-files-in-pager` and `-O` for `git grep` only. The git
-options are judged in two places (`gitRunsOrWrites` in `guard/read-only.ts` calls `gitVerdict` first):
+options are judged in two places (`gitRunsOrWritesReason` in `guard/read-only.ts` calls `gitVerdict` first):
 
 - `gitVerdict` (`guard/git-rules.ts`) refuses `--output` for every verb, and `-O` and `--open-files-in-pager` for
   `git grep` only. `-O` means "open files in pager" only for grep, so `git log -SOption` is not refused, and
   neither is `git diff -O<orderfile>`. For grep, any short bundle holding an `O` is refused (`-n1Osh`),
   not just `-O`; pass a pattern that starts with `O` as `-e O`.
-- `gitRunsOrWrites` itself refuses `--ext-diff` and `--textconv`. Git accepts any unambiguous abbreviation of a
+- `gitRunsOrWritesReason` itself refuses `--ext-diff` and `--textconv`. Git accepts any unambiguous abbreviation of a
   long option, so abbreviations of these two are refused as well (`--ext=…`, `--textc`). `--text` (treat files as
   text) is **not** `--textconv`: it is a different option and is allowed, though it is a prefix of `--textconv`.
+
+`gitRunsOrWritesReason` returns the refusal's message, not a yes or no. A read-only step (`readOnlyShellRefusal`)
+refused for one of these git options is given that option's own message (what the option does, and for
+`git grep -O` how to rephrase), where any other refusal gets the generic one. A lane gets no message from it:
+such a line is simply not settled, and keeps today's judgement.
 
 Two differences from a read-only step's grammar, both for lanes only:
 
@@ -59,13 +64,23 @@ directory. So does a path that names a device with no end (`/dev/zero`, `/dev/ur
 whichever command reads it and wherever it appears: a foreground read of one (`cat /dev/zero | wc -c`,
 `sort /dev/urandom`, `grep -r x /dev`) spins until the Bash timeout, and the endless-loop ask looks only at
 background calls. The comparison is on the path as the kernel opens it, not as it is spelled: each word is
-resolved from the lane's copy (the hook's `repoPath`, the command's working directory, which a settled line
-never changes because it has no `cd`), links followed, and with `..` collapsed as text first, and either reading
-counts. So `../../../../dev/zero`, `dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
-a chain of links all stay unsettled. A word with no single real path (`..` past a missing part, a link loop, a
-part that cannot be examined) stays unsettled too. `ls /dev` and `ls /` are unsettled as a result: the guard
-knows no program's options, so it cannot tell a listing from a recursive read. A path merely outside the paths a
-lane may read without asking (`readAsk`) does not leave the call unsettled: see below.
+resolved from the command's working directory, links followed, and with `..` collapsed as text first, and either
+reading counts. That directory is the `cwd` of the PreToolUse hook's request, not the lane's copy: a settled line
+has no `cd` of its own, but Claude Code carries a `cd` from an earlier Bash call into the next, so after
+`cd apps` the line `cat zero-link` reads `apps/zero-link`. The adapter passes the hook's `cwd` to the guard
+(`GuardInput.cwd`), and the same directory is joined to a relative word before the file-access judge sees it
+(that judge reads a relative path from the copy's root). A hook `cwd` that is not an absolute path leaves the
+call unsettled; with no `cwd` at all (a test double, the fake adapter) the copy's root is used. The hook's `cwd`
+is the field `BaseHookInput.cwd` of the SDK's hook input. That Claude Code updates it after a `cd` in an earlier
+call is taken from its documented meaning (the session's current directory), not proven live; if it stayed the
+start directory, a `cd`-then-read pair would still be judged from the copy's root. So a `../` chain that climbs
+to the root and on to `dev/zero`, `/dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
+a chain of links all stay unsettled. (A relative `dev/./zero` is not among them: it resolves to `dev/zero` inside
+the copy, which is not a device. Nor is `../../../../dev/zero` from a copy deeper than four levels: it stops
+short of the root and lands on a path that is not a device.) A word with no single real path (`..` past a missing
+part, a link loop, a part that cannot be examined) stays unsettled too. `ls /dev` and `ls /` are unsettled as a
+result: the guard knows no program's options, so it cannot tell a listing from a recursive read. A path merely
+outside the paths a lane may read without asking (`readAsk`) does not leave the call unsettled: see below.
 
 What this does not see: a link met only while a command walks a directory it was given (`grep -R x .` follows a
 link inside the copy that points at `/dev/zero`, where `.` itself is no device), and a name the shell would
