@@ -632,7 +632,8 @@ describe('tick', () => {
     expect(status.availableCommit).toBe(NEW);
     expect(status.problem?.kind).toBe('unreachable');
     expect(status.waitingSince).toBeNull();
-    expect(status.notInstalling).not.toBeNull();
+    // No check runs, so nothing is being fetched: nothing is staged and GitHub has to answer first.
+    expect(status.notInstalling).toBe('unreachable');
   });
 
   it('says the same when GitHub then stops answering for the head too', async () => {
@@ -642,7 +643,7 @@ describe('tick', () => {
     expect(await update.tick()).toBe('unreachable');
     world.head = new Error('offline');
     expect(await update.tick()).toBe('unreachable');
-    expect(update.status().notInstalling).not.toBeNull();
+    expect(update.status().notInstalling).toBe('unreachable');
   });
 });
 
@@ -2112,7 +2113,7 @@ describe('why an available update is not installing', () => {
         expect(status.availableCommit).toBe(NEW);
         expect(status.waitingSince).toBeNull();
         expect(status.problem?.kind).toBe('unreachable');
-        expect(status.notInstalling).not.toBeNull();
+        expect(status.notInstalling).toBe('unreachable');
       },
     );
 
@@ -2130,7 +2131,7 @@ describe('why an available update is not installing', () => {
       world.head = offline;
       expect(await update.tick()).toBe('unreachable');
       expect(update.status().availableCommit).toBe(NEWER);
-      expect(update.status().notInstalling).not.toBeNull();
+      expect(update.status().notInstalling).toBe('unreachable');
     });
 
     it('still says the update waits while a staged build goes on waiting', async () => {

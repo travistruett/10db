@@ -35,9 +35,16 @@ export type SelfUpdateBlockerDto = z.infer<typeof SelfUpdateBlockerDto>;
  * tried again until main moves on or the builder touches the switch), `rolled-back` (the builder
  * rolled back from it), `unbuilt` (it has no finished build newer than the running one yet),
  * `fetching` (nothing is staged yet: its build is being fetched, or waited for while GitHub builds
- * it, which can take many minutes).
+ * it, which can take many minutes), `unreachable` (nothing is staged and no check is fetching: GitHub
+ * could not be asked, so the build is fetched once it answers).
  */
-export const SelfUpdateNotInstalling = z.enum(['failed', 'rolled-back', 'unbuilt', 'fetching']);
+export const SelfUpdateNotInstalling = z.enum([
+  'failed',
+  'rolled-back',
+  'unbuilt',
+  'fetching',
+  'unreachable',
+]);
 export type SelfUpdateNotInstalling = z.infer<typeof SelfUpdateNotInstalling>;
 
 /**
@@ -56,8 +63,8 @@ export const SelfUpdateStatusDto = z.object({
   availableCommit: CommitSha.nullable(),
   /**
    * Why `availableCommit` is not going to install: null while it waits, drains or installs, and with
-   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt` and
-   * `fetching` the daemon remembers it, and drains the moment a build is staged.
+   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt`,
+   * `fetching` and `unreachable` the daemon remembers it, and drains the moment a build is staged.
    */
   notInstalling: SelfUpdateNotInstalling.nullable(),
   /** Minutes a staged build waits for an idle moment before the factory drains for it. */
