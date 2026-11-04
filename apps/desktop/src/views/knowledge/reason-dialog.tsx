@@ -13,6 +13,7 @@ export function ReasonDialog({
   submitLabel,
   required,
   pending,
+  blocked = false,
   error,
   onSubmit,
   onClose,
@@ -23,6 +24,8 @@ export function ReasonDialog({
   readonly submitLabel: string;
   readonly required: boolean;
   readonly pending: boolean;
+  /** The act can't be sent yet (something it must show the builder first is still loading). */
+  readonly blocked?: boolean;
   readonly error: string | null;
   readonly onSubmit: (reason: string) => void;
   readonly onClose: () => void;
@@ -32,6 +35,7 @@ export function ReasonDialog({
   const [missing, setMissing] = useState(false);
   const submit = (event: SyntheticEvent<HTMLFormElement>): void => {
     event.preventDefault();
+    if (blocked) return;
     if (required && !reason.trim()) {
       setMissing(true);
       return;
@@ -51,7 +55,7 @@ export function ReasonDialog({
           <Button variant="default" onClick={onClose}>
             Cancel
           </Button>
-          <Button type="submit" form={formId} color="red" loading={pending}>
+          <Button type="submit" form={formId} color="red" loading={pending} disabled={blocked}>
             {submitLabel}
           </Button>
         </>
