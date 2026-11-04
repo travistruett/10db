@@ -67,10 +67,12 @@ export interface FileAccessJudge {
 
 /**
  * `ask` sends the call to the permission broker even where an allow rule or the permission mode
- * would approve it.
+ * would approve it. An `allow` with `settled` (why) is approved by the hook itself, so neither the
+ * classifier nor a card follows; a bare `allow` leaves the permission mode to decide.
  */
 export type GuardVerdict =
-  { readonly decision: 'allow' } | { readonly decision: 'deny' | 'ask'; readonly reason: string };
+  | { readonly decision: 'allow'; readonly settled?: string }
+  | { readonly decision: 'deny' | 'ask'; readonly reason: string };
 
 const ALLOW: GuardVerdict = { decision: 'allow' };
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });

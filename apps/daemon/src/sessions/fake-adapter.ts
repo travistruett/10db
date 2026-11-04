@@ -369,11 +369,13 @@ export class FakeAdapter implements SessionAdapter {
             return 'continue';
           }
           let decision: ToolDecision = { behavior: 'allow' };
-          // A guard `ask` reaches canUseTool past any allow rule, as Claude Code's hook ask does.
+          // A guard `ask` reaches canUseTool past any allow rule, as Claude Code's hook ask does; a
+          // settled allow never does, as with the hook's allow.
+          const settled = verdict.decision === 'allow' && verdict.settled !== undefined;
           if (
             verdict.decision === 'ask' ||
             step.toolName === 'AskUserQuestion' ||
-            !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd)
+            (!settled && !matchesAllowedTool(step.toolName, input, spec.allowedTools, spec.cwd))
           ) {
             const asked = await Promise.race([
               spec.canUseTool({

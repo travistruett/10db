@@ -114,6 +114,11 @@ export interface WorktreeDependencies {
     readonly seeded?: boolean;
     /** Default `frozen`. */
     readonly mode?: InstallMode;
+    /**
+     * Removes `node_modules` before installing whatever its state: the caller found the install
+     * before this one left the copy broken (`decisions/2026-11-03-a-broken-install-repairs-itself-once.md`).
+     */
+    readonly startOver?: true;
   }): Promise<DependencyRefresh>;
 }
 
@@ -154,7 +159,15 @@ export interface WorktreeDependenciesDeps {
  */
 export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): WorktreeDependencies {
   return {
-    async refresh({ batch, project, path, signal, seeded = true, mode = 'frozen' }) {
+    async refresh({
+      batch,
+      project,
+      path,
+      signal,
+      seeded = true,
+      mode = 'frozen',
+      startOver: asked,
+    }) {
       // Not pnpm's, or (seeded) the main checkout had no install to bring in line.
       if (!existsSync(join(path, PNPM_LOCKFILE))) return { kind: 'skipped' };
       if (seeded && !existsSync(join(path, 'node_modules'))) return { kind: 'skipped' };
@@ -189,6 +202,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // the first install of a copy does, which works. Sources are not touched.
       const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
       if (
+        asked === true ||
         madeByAnotherPnpm(path, version) ||
         madeFromAnotherStore(path, env['pnpm_config_store_dir']) ||
         checkInstall(path).kind === 'broken'
