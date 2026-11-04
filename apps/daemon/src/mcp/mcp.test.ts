@@ -599,6 +599,83 @@ describe('MCP tools', () => {
       expect(openCards()).toEqual([]);
       expect(listTasks(state.db, s.project.id).some((t) => t.title === small.title)).toBe(true);
     });
+
+    const proposeSmall = (s: Pick<Awaited<ReturnType<typeof onStep>>, 'call'>, i: number) =>
+      s.call('propose', {
+        opId: `op-prop-cap-${String(i).padStart(2, '0')}`,
+        ...small,
+        title: `${small.title} ${String(i)}`,
+      });
+
+    it('raises a card instead of filing once a step has filed the cap by itself, and a replayed opId still answers', async () => {
+      const s = await onStep('implement');
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1) {
+        const ok = await proposeSmall(s, i);
+        expect(typeof ok.json?.['taskId']).toBe('string');
+      }
+      expect(openCards()).toEqual([]);
+      const over = await proposeSmall(s, MAX_FOLLOW_UPS);
+      expect(over.isError).toBe(false);
+      expect(over.json).toMatchObject({ taskId: null });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]?.body).toContain('Raised as a card because');
+      expect(openCards()[0]?.body).toContain('this step has already filed');
+      expect(listTasks(state.db, s.project.id).filter((t) => t.id !== s.task.id)).toHaveLength(
+        MAX_FOLLOW_UPS,
+      );
+      const replay = await proposeSmall(s, 0);
+      expect(typeof replay.json?.['taskId']).toBe('string');
+      // Accepting the card is still a person's call, and files the task.
+      const card = openCards()[0];
+      if (!card) throw new Error('no card opened');
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(
+        listTasks(state.db, s.project.id).some((t) =>
+          t.title.endsWith(` ${String(MAX_FOLLOW_UPS)}`),
+        ),
+      ).toBe(true);
+    });
+
+    it('shares the cap with file_follow_up, in both directions', async () => {
+      const filed = await onStep('implement');
+      for (let i = 0; i < MAX_FOLLOW_UPS - 1; i += 1) await proposeSmall(filed, i);
+      const follow = await filed.call('file_follow_up', {
+        opId: 'op-prop-share-fu',
+        title: 'Left over',
+        description: 'Not done.',
+        acceptanceCriteria: ['Done'],
+      });
+      expect(follow.isError).toBe(false);
+      const over = await proposeSmall(filed, 99);
+      expect(over.json).toMatchObject({ taskId: null });
+      expect(openCards()).toHaveLength(1);
+      const refused = await filed.call('file_follow_up', {
+        opId: 'op-prop-share-fu2',
+        title: 'Left over too',
+        description: 'Not done.',
+        acceptanceCriteria: ['Done'],
+      });
+      expect(refused.isError).toBe(true);
+    });
+
+    it('counts the cap across the sessions of a step, and a later step starts again', async () => {
+      const s = await onStep('implement');
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1) await proposeSmall(s, i);
+      await proposeSmall(s, 50);
+      const next = await connectSession(s.workstream.id);
+      expect((await proposeSmall(next, 51)).json).toMatchObject({ taskId: null });
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          steps: [
+            { ...stepAt('implement'), status: 'done' },
+            { ...stepAt('review'), sessionFloor: 2 },
+          ],
+          stepIndex: 1,
+        });
+      });
+      const third = await connectSession(s.workstream.id);
+      expect(typeof (await proposeSmall(third, 52)).json?.['taskId']).toBe('string');
+    });
   });
 
   describe('install_dependencies', () => {

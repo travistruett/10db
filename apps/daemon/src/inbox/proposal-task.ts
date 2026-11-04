@@ -100,9 +100,16 @@ export function proposalFiling(proposal: {
   readonly riskTags?: readonly RiskTag[] | undefined;
   readonly joinsRunningBatch?: boolean | undefined;
   readonly limit: number;
+  /** Set when the step the lane is in has already filed as many tasks as a step may. */
+  readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
   if (proposal.kind !== ProposalKind.NewTask)
     return { file: false, reason: 'it is not a new task' };
+  if (proposal.stepCapReached === true)
+    return {
+      file: false,
+      reason: 'this step has already filed as many tasks as a step may, so a person decides',
+    };
   if (proposal.limit <= 0)
     return { file: false, reason: 'filing small proposals by itself is off for this project' };
   const [declared] = proposal.riskTags ?? [];
