@@ -1188,6 +1188,25 @@ describe('a waiting update drains the factory', () => {
       });
     });
 
+    it.each(['download', 'verify-checksum', 'stage'])(
+      'does not install the older build when the build for the same head fails again at %s after retry()',
+      async (step) => {
+        const update = await stagedThenNewerHeadFailsAt('download');
+        world.busy = 0;
+        expect(await update.tick()).toBe('failed');
+        update.retry();
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('failed');
+        expect(world.calls).not.toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe('e'.repeat(40));
+        expect(cards()).toHaveLength(1);
+        expect(update.status().notInstalling).toBe('failed');
+        expect(await update.tick()).toBe('failed-before');
+        expect(world.calls).not.toContain('apply');
+      },
+    );
+
     it('does not fall back on the older build when GitHub goes away after a newer one failed', async () => {
       // The head moved first, so the staged build was found for an earlier head than the failure.
       world.busy = 1;

@@ -340,7 +340,17 @@ function isApplying(value: unknown): value is Attempt {
 export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   const { state, inbox, logger } = deps;
   let available: string | null = null;
-  let staged: (StagedBuild & { readonly head: string }) | null = null;
+  let staged:
+    | (StagedBuild & {
+        readonly head: string;
+        /**
+         * The build for `head` failed to fetch while this older one stayed staged. `head` alone can't
+         * say it: it equals main's head both when nothing moved since staging and after that failure,
+         * and only the first lets the staged build install when its re-stage fails.
+         */
+        readonly newerFailed?: true;
+      })
+    | null = null;
   let working = false;
   /** From the moment the install is asked to start: the app is about to quit. */
   let applying = false;
@@ -623,7 +633,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           // nothing is mid-session, to see whether a newer build had finished. The staged build was
           // checked when it was fetched and installs with no network, as with GitHub away, so a
           // failed second look is no failed update: nothing is recorded, and it installs.
-          if (staged.head === head) {
+          if (staged.head === head && staged.newerFailed !== true) {
             logger.warn(
               { step: result.step, message: result.message, staged: staged.commit },
               'could not fetch a newer build than the staged one again: installing the staged one',
@@ -631,8 +641,9 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
             return installWhenIdle(runningCommit, staged);
           }
           // Main moved on and its build did not arrive. The staged one stays for the next try, as
-          // the failed head's: it does not install, not even with GitHub away.
-          staged = { ...staged, head };
+          // the failed head's: it does not install, not even with GitHub away, and not after the
+          // builder asks again and the fetch fails once more.
+          staged = { ...staged, head, newerFailed: true };
         } else {
           staged = null;
         }
@@ -687,7 +698,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * as long as GitHub stays away.
    */
   async function withoutGitHub(runningCommit: string): Promise<TickResult> {
-    if (staged === null || staged.head === failedHead()) {
+    if (staged === null || staged.head === failedHead() || staged.newerFailed === true) {
       endDrain();
       return TickResult.Unreachable;
     }

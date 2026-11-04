@@ -215,12 +215,22 @@ nor is any step of the re-stage while main's head is unchanged since the build w
 above). Any later step (`wait-for-build`,
 `download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
-confirmed. It stays staged, so when main moves the next stage passes `--have`: it fetches only if a newer build is
-still the newest. The builder's retry is the switch, and turning it off forgets the staged build (the folder is
-removed), so off and then on starts the next stage with nothing to keep and passes no `--have`: the newer build is
-fetched as wanted, and the older one is downloaded again only if it turns out to be the newest. Only a head move
-keeps the staged build with `--have`. It does not retry every minute, because a checksum mismatch
-would then download the same DMG each minute and hold the drain for ever.
+confirmed. It stays staged, marked as one whose newer build failed to fetch, so when main moves the next stage
+passes `--have`: it fetches only if a newer build is still the newest. The builder asks to try again with the
+switch, which `PUT /settings/self-update` takes as a retry on every touch, and what happens to the staged build
+depends on how:
+
+- Turning the switch off and on forgets the staged build (the folder is removed), so the next stage has nothing to
+  keep and passes no `--have`: the newer build is fetched as wanted, and the older one is downloaded again only if
+  it turns out to be the newest.
+- Saving the switch on while it is already on clears `self_update.failed_commit` and keeps the staged build, so the
+  next stage for the same head passes `--have` again. If that fetch fails too, at any step, it is a failure again,
+  with its card and `self_update.failed_commit`, and the older build still does not install, not even once nothing
+  is mid-session and not with GitHub away: the mark that the newer build failed outlives the retry, and only a
+  fetch that succeeds, or the switch going off, ends it.
+
+A head move also keeps the staged build with `--have`. None of this retries every minute, because a checksum
+mismatch would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its
 first check and installs the build the builder just rolled back from. `rollback-app.sh` reads the commit from the
