@@ -5324,7 +5324,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
           () => [[write('src/api/a.txt'), commit('op-wt-base-6b', ['src/api/a.txt']), turn]],
           {
             baseUpdates: recordingBaseUpdates(
-              { kind: 'install_broken', note, noPnpm: true, installs: 0 },
+              { kind: 'install_broken', note, noPnpm: true },
               order,
             ),
           },
