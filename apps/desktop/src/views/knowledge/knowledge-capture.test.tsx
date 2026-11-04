@@ -502,6 +502,31 @@ describe('retiring and withdrawing', () => {
     });
   });
 
+  it('says it is checking for an older version while the dry run is outstanding', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    serve({ decisions: [decision] });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(daemonUrl('/decisions/:id/withdraw'), async ({ request }) => {
+        const body: unknown = await request.clone().json();
+        if (!DryRunBody.safeParse(body).success) return undefined;
+        await gate;
+        return HttpResponse.json(noRestore);
+      }),
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    const checking = /Checking whether an older version would become current again/;
+    expect(within(dialog).getByText(checking)).toBeTruthy();
+    release();
+    await dryRunAnswered(dialog);
+    expect(within(dialog).queryByText(checking)).toBeNull();
+  });
+
   it('still lets the builder withdraw when the preview is refused', async () => {
     const decision = decisionItem({ projectId: project.id });
     const message = 'Decision dec_x is already withdrawn (none is current)';
