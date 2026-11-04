@@ -404,11 +404,12 @@ export interface Git {
    */
   mergedCommit(input: MergedCommitInput): Promise<string | null>;
   /**
-   * The files among `paths` whose committed content at HEAD holds conflict markers (a line opening
-   * with seven `<` and one with seven `>`): those a merge left with `resolve.leaveMarkers` that
-   * nobody has resolved. A path HEAD lacks, or that isn't small text, holds none.
+   * The files among `paths` whose committed content at `rev` (HEAD unless named) holds conflict
+   * markers (a line opening with seven `<` and one with seven `>`): those a merge left with
+   * `resolve.leaveMarkers` that nobody had resolved by then. A path `rev` lacks, or that isn't small
+   * text, holds none.
    */
-  conflictMarkers(repo: string, paths: readonly string[]): Promise<string[]>;
+  conflictMarkers(repo: string, paths: readonly string[], rev?: string): Promise<string[]>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -2735,11 +2736,11 @@ export function createGit(opts: GitOptions = {}): Git {
     mergeIntoBranch,
     revertCommits,
     mergedCommit,
-    async conflictMarkers(repo, paths) {
+    async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];
       for (const path of paths) {
-        const text = await mergeableText(c, 'HEAD', path).catch(() => null);
+        const text = await mergeableText(c, rev, path).catch(() => null);
         if (text !== null && hasConflictMarkers(text)) found.push(path);
       }
       return found;

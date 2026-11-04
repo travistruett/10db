@@ -1,4 +1,12 @@
-import { LEFT_OUT_NOTICE_KEY, REVERTED_NOTICE_KEY, type Notice } from '@10db/contracts';
+import {
+  LEFT_OUT_NOTICE_KEY,
+  REVERT_COMMIT_LINE,
+  REVERTED_NOTICE_KEY,
+  ToolAccess,
+  type Notice,
+  type WorkstreamStep,
+} from '@10db/contracts';
+import type { Git } from '../git';
 
 /**
  * What a run keeps once its batch shipped without it (Ship without it) and the builder retried it: its
@@ -6,7 +14,36 @@ import { LEFT_OUT_NOTICE_KEY, REVERTED_NOTICE_KEY, type Notice } from '@10db/con
  * brings the work back. The notices carry the revert commit's id on a line of their own, and this
  * module is the one place that writes and reads it.
  */
-const REVERT_LINE = 'Revert commit: ';
+const REVERT_LINE = REVERT_COMMIT_LINE;
+
+/**
+ * The key a commit tool op's stored result carries when the commit changed a file that held conflict
+ * markers at its parent: 10db commits a base merge with its markers for a session to resolve, so such a
+ * commit is that resolution, whichever session made it. The session's answer does not carry the key.
+ * Whether a run brought reverted work back reads it: a resolution brings none back.
+ */
+const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
+
+/** A commit tool op's result as it is stored, marked when the commit resolved conflict markers. */
+export async function commitResultAsStored<T extends { readonly sha: string }>(
+  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween'>,
+  repo: string,
+  result: T,
+): Promise<T & { readonly [RESOLVED_MARKERS_KEY]?: true }> {
+  const parent = `${result.sha}^`;
+  const changed = await git.filesChangedBetween(repo, parent, result.sha);
+  const marked = await git.conflictMarkers(repo, changed, parent);
+  return marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true } : result;
+}
+
+/** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
+export function commitResolvedMarkers(result: unknown): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    (result as Record<string, unknown>)[RESOLVED_MARKERS_KEY] === true
+  );
+}
 
 /** The line a notice's body carries to name the revert commit. */
 export function revertCommitLine(sha: string): string {
@@ -36,6 +73,20 @@ export function lastRevertTold(
   let found: string | null = null;
   for (const row of evidence)
     if (row.kind === 'builder') found = revertCommitIn(row.summary) ?? found;
+  return found;
+}
+
+/** When the last retry of a run told its session of a revert; null when none did. */
+export function lastRevertNoteAt(
+  evidence: readonly {
+    readonly kind: string;
+    readonly summary: string;
+    readonly createdAt: string;
+  }[],
+): string | null {
+  let found: string | null = null;
+  for (const row of evidence)
+    if (row.kind === 'builder' && revertCommitIn(row.summary) !== null) found = row.createdAt;
   return found;
 }
 
@@ -70,11 +121,16 @@ export function revertedWorkNotice(revert: string): Notice {
   };
 }
 
-/** What the retried run's session is told, in the builder's note slot, so it knows its commits are gone. */
-export function revertedWorkNote(revert: string): string {
-  return [
-    `Your earlier commits on this batch's branch were reverted: the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`,
-    `Redo the work and commit it with the commit tool; the reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed. A run that commits nothing new is left out of the pull request as not done.`,
-    revertCommitLine(revert),
-  ].join('\n\n');
+/**
+ * What a session is told, in the builder's note slot, so it knows the run's commits are gone. A step
+ * that can commit is asked to redo the work; a read-only step can't, so it is told only what happened,
+ * and the implement step gets the full note when the run enters it (`actionEntering`).
+ */
+export function revertedWorkNote(revert: string, step: Pick<WorkstreamStep, 'tools'>): string {
+  const undone = `Your earlier commits on this batch's branch were reverted: the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`;
+  const next =
+    step.tools === ToolAccess.ReadOnly
+      ? `This work still has to be done again, and the step that can commit is told so when it runs. The reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed.`
+      : `Redo the work and commit it with the commit tool; the reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed. A run that commits nothing new is left out of the pull request as not done.`;
+  return [undone, next, revertCommitLine(revert)].join('\n\n');
 }

@@ -8,6 +8,8 @@ import {
   PullRequestState,
   rejectionsSentBack,
   retryTargetAfterRejection,
+  REVERT_COMMIT_LINE,
+  REVERTED_NOTICE_KEY,
   StepRole,
   TaskStatus,
   WorkstreamFailure,
@@ -86,12 +88,27 @@ function whatRetryDoes(
   steps: readonly WorkstreamStep[],
   stepIndex: number,
   step: string | null,
+  notice: Notice | null,
 ): string {
   const target = retryTargetAfterRejection(steps, stepIndex);
   const rework = target === null ? undefined : steps[target];
   if (step && rework)
     return `Retry sends the work back to the ${STEP_NAME[rework.role]} step with the ${step} findings, and the ${step} runs after it.`;
   if (!step) return 'Retry runs it again.';
+  // A run whose commits were reverted is told so at the step that can commit, so Retry goes there
+  // before a read-only step (`retryWorkstream`). A retried run is told again only if it has not
+  // committed since, which the notice does not say.
+  const revertNamed = notice?.body.includes(REVERT_COMMIT_LINE) ?? false;
+  const failed = steps[stepIndex];
+  const canRedo =
+    failed !== undefined &&
+    failed.role !== StepRole.Implement &&
+    failed.role !== StepRole.Plan &&
+    steps.slice(0, stepIndex).some((s) => s.role === StepRole.Implement);
+  if (canRedo && revertNamed && notice?.key === LEFT_OUT_NOTICE_KEY)
+    return `Retry sends the work back to the build step and tells it its commits were reverted, and the ${step} runs after it.`;
+  if (canRedo && revertNamed && notice?.key === REVERTED_NOTICE_KEY)
+    return `Retry sends the work back to the build step and tells it its commits were reverted, unless the run has committed since: then it runs the ${step} step again.`;
   switch (kind) {
     case WorkstreamFailure.GateFailed:
     case WorkstreamFailure.RetryLimit:
@@ -113,14 +130,17 @@ function whatRetryDoes(
  * only what happened and never promises a Retry.
  */
 export function failureLine(
-  workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & { readonly failureKind: string | null },
+  workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & {
+    readonly failureKind: string | null;
+    readonly notice?: Notice | null;
+  },
   retryable: boolean,
 ): string {
   const failed = workstream.steps[workstream.stepIndex];
   const step = failed ? STEP_NAME[failed.role] : null;
   const happened = whatHappened(workstream.failureKind, step);
   if (!retryable) return happened;
-  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step)}`;
+  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null)}`;
 }
 
 function building(workstream: WorkstreamDto): string {
@@ -313,9 +333,13 @@ export function taskNotices(
   if (!workstream) return [];
   if (workstream.state === S.Cancelled)
     return workstream.notice?.key === PARKED_NOTICE_KEY ? [workstream.notice] : [];
-  // A failed run has its own say, except where the builder shipped the batch without it.
+  // A failed run has its own say, except where the builder shipped the batch without it, and the
+  // warning a retried run keeps while its commits stay reverted, which a second failure does not undo.
   if (workstream.state === S.Failed)
-    return workstream.notice?.key === LEFT_OUT_NOTICE_KEY ? [workstream.notice] : [];
+    return workstream.notice?.key === LEFT_OUT_NOTICE_KEY ||
+      workstream.notice?.key === REVERTED_NOTICE_KEY
+      ? [workstream.notice]
+      : [];
   return [
     ...(workstream.notice ? [workstream.notice] : []),
     ...(batch && batchStands(batch) ? batch.notices : []),
