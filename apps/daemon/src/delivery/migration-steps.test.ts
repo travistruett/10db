@@ -20,6 +20,7 @@ import { DRIZZLE_CONFIG, drizzleGenerate } from '../../test/drizzle-kit';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates } from './index';
+import { NOTICE_KEY, uncarriedIn } from './notices';
 
 vi.setConfig({ testTimeout: 120_000 });
 
@@ -519,6 +520,47 @@ describe('carrying a branch with several generated migrations over, each as its 
       );
 
       expect((await update(batch)).kind).toBe('up_to_date');
+    });
+  });
+
+  describe('a carry that fails on a later migration than a contested one', () => {
+    const ADD_SHAPE_COLUMN: Step = { name: 'owner', schema: schemaFile({ columns: [SHAPE] }) };
+    const ownerThenNote: readonly Step[] = [
+      { name: 'owner', schema: schemaFile({ columns: [OWNER] }) },
+      { name: 'note', schema: schemaFile({ columns: [OWNER, NOTE] }) },
+    ];
+    const lostTags = (batch: BatchDto): string[] =>
+      uncarriedIn(
+        getBatch(h.store.db, batch.id).notices.find(
+          (n) => n.key === NOTICE_KEY.migrationsUncarried,
+        ),
+      )?.map((m) => m.tag) ?? [];
+
+    it('names the contested migration too, not only the one it stopped at', async () => {
+      const batch = await bothSidesAdded(ownerThenNote, ADD_SHAPE_COLUMN);
+
+      expect((await update(batch, 'note')).kind).toBe('uncarried');
+
+      expect(lostTags(batch)).toEqual(['0001_owner', '0002_note']);
+    });
+
+    it("clears only once the journal holds the contested migration beyond the base's", async () => {
+      const batch = await bothSidesAdded(ownerThenNote, ADD_SHAPE_COLUMN);
+      await update(batch, 'note');
+
+      // The stopped one is made, but the contested name is still only the base's.
+      drizzleGenerate(join(pathOf(batch), PACKAGE), 'note', false);
+      await commitOnBatch(
+        batch,
+        new Map(
+          [JOURNAL, `${DB}/0002_note.sql`, `${DB}/meta/0002_snapshot.json`].map((path) => [
+            path,
+            readFileSync(join(pathOf(batch), path), 'utf8'),
+          ]),
+        ),
+      );
+      expect((await update(batch)).kind).toBe('uncarried');
+      expect(lostTags(batch)).toEqual(['0001_owner']);
     });
   });
 

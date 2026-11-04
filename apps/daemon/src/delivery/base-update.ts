@@ -853,7 +853,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     getBatch(db, batch.id).notices.find((n) => n.key === NOTICE_KEY.migrationsUncarried);
 
   /**
-   * The migrations the branch added that `merged` dropped and the journal at HEAD doesn't hold, with
+   * The migrations the branch added that `merged` dropped, or that it shares a tag with the base as a
+   * different migration (the merge took the base's file), and the journal at HEAD doesn't hold, with
    * `named`, which the carry stopped at, among them whatever the journal says; null when there are
    * none. They go on the batch's notice, which later gates read (`standing`), unless the caller puts
    * the merge back. Answers with the notice in any case, for what it says. Never throws: a journal or
@@ -869,8 +870,19 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const dropped = (merged.regenerate ?? []).flatMap((r) => r.dropped);
     let tags: readonly string[];
     try {
-      const added = await addedTags(ctx.git, path, `${merged.head}^1`, merged.from, dropped);
-      tags = await absentFrom(ctx.git, path, 'HEAD', added, merged.from);
+      const tip = `${merged.head}^1`;
+      const added = await addedTags(ctx.git, path, tip, merged.from, dropped);
+      // A tag both sides added as different migrations is in no `dropped`: the merge took the base's
+      // file. It is the branch's still, lost until the journal holds it beyond the base's.
+      const own = await ownMigrations(ctx.git, path, tip, merged.from);
+      const contested = own.kind === 'found' ? own.contested : [];
+      tags = await absentFrom(
+        ctx.git,
+        path,
+        'HEAD',
+        [...new Set([...added, ...contested])],
+        merged.from,
+      );
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations not read');
       tags = dropped.filter((f) => f.endsWith('.sql')).map((f) => basename(f, '.sql'));

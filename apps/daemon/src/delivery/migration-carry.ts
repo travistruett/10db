@@ -29,11 +29,16 @@ export type OwnMigrations =
       readonly kind: 'found';
       readonly migrations: readonly CarriedMigration[];
       readonly baseTags: readonly string[];
+      /**
+       * The tags both sides added as different migrations: the merge took the base's file and lists
+       * nothing in `dropped`, but the branch's is among `migrations`, to be made again after the base's.
+       */
+      readonly contested: readonly string[];
     }
   /** The branch's migration `tag` can't be told apart, so it can't be re-created. */
   | { readonly kind: 'unreadable'; readonly tag: string; readonly why: string };
 
-const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [] };
+const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [], contested: [] };
 
 /**
  * The migrations `tip` added under the migrations directory that the base at `from` lacks. `--custom`
@@ -94,7 +99,7 @@ export async function ownMigrations(
     const custom = previous !== null && schemaOf(previous) === schema;
     migrations.push({ tag, name: parsed.name, custom });
   }
-  return { kind: 'found', migrations, baseTags: theirs };
+  return { kind: 'found', migrations, baseTags: theirs, contested: [...contested] };
 }
 
 /** The file `drizzle-kit generate` reads the schema from, in the package that makes the migrations. */
