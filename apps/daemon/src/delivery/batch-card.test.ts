@@ -423,10 +423,17 @@ describe('the failed workstream card', () => {
     });
 
     it('keeps a batch named after the failed task when Ship anyway puts its commits in', async () => {
-      const { card } = await failedInBatch('DONE', {}, 'Alpha');
+      const { card } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' }, 'Alpha');
       inbox.answer(card.id, { choice: 'Ship anyway' });
       await h.jobs.idle();
       expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
+    });
+
+    it('does not name the batch after the failed task when Ship anyway has none of its commits', async () => {
+      const { card } = await failedInBatch('DONE', {}, 'Alpha');
+      inbox.answer(card.id, { choice: 'Ship anyway' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
     });
 
     it('ships the rest, with no revert commit, when the failed task committed nothing', async () => {

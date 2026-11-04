@@ -750,9 +750,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const out = leftOut(w) || (await revertedAway(batch.id, w, target));
       // A task that left the batch may still name it, whether or not its run stayed a member (a
       // superseded attempt stays one until its replacement is cut, and closing a task leaves its failed
-      // run in place). Its work is in the pull request only if a run of it has commits on the branch.
+      // run in place). A failed run that is still a member ships only through Ship anyway, which puts
+      // in the commits it made, so one with none has no work in the pull request either. Its work is
+      // in the pull request only if a run of it has commits on the branch.
       const left =
         !member ||
+        w.state === WorkstreamState.Failed ||
         superseded(db, w) ||
         w.state === WorkstreamState.Cancelled ||
         task.status === TaskStatus.Cancelled;
