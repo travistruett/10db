@@ -5316,6 +5316,28 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(cards.map((card) => card.body)).toEqual([expect.stringContaining('(.: tsx)')]);
       });
 
+      it('stops a broken install with no trustworthy pnpm under its own kind, so the failure line does not promise a Retry that installs', async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
+        const note = 'The install in this copy is broken: no trustworthy pnpm was found';
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-6b', ['src/api/a.txt']), turn]],
+          {
+            baseUpdates: recordingBaseUpdates(
+              { kind: 'install_broken', note, noPnpm: true },
+              order,
+            ),
+          },
+        ).finally(restore);
+        expect(order).not.toContain('gate spawned');
+        expect(ws(workstream.id)).toMatchObject({
+          state: 'FAILED',
+          failureKind: 'no_pnpm',
+          attempt: 0,
+        });
+        expect(ws(workstream.id).failureReason).toContain(note);
+      });
+
       it('counts a migration the base merge lost as a failed gate, so a fix session re-creates it, with no gate run', async () => {
         const order: string[] = [];
         const restore = watchGates(order);

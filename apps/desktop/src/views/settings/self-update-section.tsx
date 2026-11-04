@@ -33,6 +33,8 @@ export function updateProgressText(data: SelfUpdateStatusDto): string | null {
     return `${build} has no finished build yet, so there is nothing to install. 10db looks again every minute and installs it when its build finishes.`;
   if (data.notInstalling === 'fetching')
     return `10db is fetching the build of ${build}, or waiting for GitHub to finish it, which can take a few minutes. Nothing is staged yet, so there is nothing to wait for an idle moment with. 10db installs it once the build arrives and nothing is running.`;
+  if (data.notInstalling === 'unreachable')
+    return `Nothing is staged for ${build} and GitHub cannot be reached, so 10db is not fetching it now. 10db looks again every minute and fetches the build of ${build} once GitHub answers, then installs it when nothing is running.`;
   const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
     return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while what is running finishes, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
@@ -114,7 +116,9 @@ export function SelfUpdateSection() {
                 ? 'Update has no build yet'
                 : notInstalling === 'fetching'
                   ? 'Update being fetched'
-                  : 'Update waiting'
+                  : notInstalling === 'unreachable'
+                    ? 'Update not staged'
+                    : 'Update waiting'
           }
           description={
             <Text size="sm" c="dimmed" role="status" aria-label="Update status">

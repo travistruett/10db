@@ -38,7 +38,8 @@
             "failed",
             "rolled-back",
             "unbuilt",
-            "fetching"
+            "fetching",
+            "unreachable"
           ]
         },
         {

@@ -107,7 +107,7 @@ describe('SelfUpdateStatusDto', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
   });
 
-  it.each(['failed', 'rolled-back', 'unbuilt', 'fetching'])(
+  it.each(['failed', 'rolled-back', 'unbuilt', 'fetching', 'unreachable'])(
     'says an update is not installing: %s',
     (why) => {
       const held = { ...status, availableCommit: SHA, notInstalling: why };

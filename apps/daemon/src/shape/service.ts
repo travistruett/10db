@@ -1021,6 +1021,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rt.interrupted = false;
     // The turn counts as running (rt.current) while the last session finishes closing.
     if (rt.live === null && rt.closing !== null) await rt.closing;
+    // close() ran while this turn waited: it emptied the queue before this turn was told, and no
+    // session may start now, for close() would not stop it. Notes and files stay unconsumed.
+    if (isClosed()) {
+      notice(shapeId, turn.neverRan);
+      return;
+    }
     const ended = new Promise<TurnEnd>((resolve) => {
       rt.waiting = resolve;
     });
