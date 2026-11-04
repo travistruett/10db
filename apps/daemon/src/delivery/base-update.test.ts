@@ -981,6 +981,62 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(notice.body).toContain('drizzle-kit generate');
     });
 
+    describe('when the install is broken after a merge that settled a generated directory', () => {
+      /** Both sides changed the migrations, the lockfile names left-pad, and the copy then loses it. */
+      async function brokenAfterBothSidesChanged(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        h.commit('.gitignore', 'node_modules/\n');
+        h.commit(
+          'pnpm-lock.yaml',
+          [
+            'importers:',
+            '  .:',
+            '    dependencies:',
+            '      left-pad:',
+            '        specifier: 1.3.0',
+            '        version: 1.3.0',
+            '',
+          ].join('\n'),
+        );
+        mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+        const batch = await bothSidesChanged();
+        rmSync(join(pathOf(batch), 'node_modules', 'left-pad'), { recursive: true, force: true });
+        return batch;
+      }
+
+      it('says nothing of a directory regenerated from its sources on the install_broken answer', async () => {
+        const batch = await brokenAfterBothSidesChanged();
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('install_broken');
+        expect(run.ran).toBe(0);
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain('install in this copy is broken');
+        expect(note).not.toContain('regenerated from its sources');
+        expect(note).toContain(`${DB}/ (taken from origin/main`);
+        expect(update).toMatchObject({ unregenerated: [`${DB}/`] });
+      });
+
+      it("says nothing of a directory regenerated from its sources on a catch-up's uncarried answer", async () => {
+        const batch = await brokenAfterBothSidesChanged();
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, signal, { forPullRequest: true });
+        expect(update.kind).toBe('uncarried');
+        expect(run.ran).toBe(0);
+        const note = update.kind === 'uncarried' ? update.note : '';
+        expect(note).toContain(`${DB}/`);
+        expect(note).not.toContain('regenerated from its sources');
+        // The merge goes back, and no card names a worktree the catch-up removes.
+        expect(h.cards()).toEqual([]);
+      });
+    });
+
     it('regenerates generated files from their sources and commits them after the merge', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();
