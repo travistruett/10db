@@ -124,6 +124,7 @@ import {
   projectAtCheckout,
   rerunFlaky,
   stepCheck,
+  uncarriedSaid,
   type BaseUpdate,
   type BaseUpdates,
   type FlakyTest,
@@ -1436,12 +1437,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
+    const uncarried = batchNotices.find((n) => n.key === MIGRATIONS_UNCARRIED_NOTICE_KEY);
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
       renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
-      uncarried: noticeBody(MIGRATIONS_UNCARRIED_NOTICE_KEY),
+      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
       task,
       claims: claims(),
       action,
@@ -2515,7 +2517,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     // A merge of the base lost a migration and the merge stands: no gate ran, and this counts as one
-    // that failed, so a fix session re-creates it, told how by the note and the batch's notice.
+    // that failed, so a fix session re-creates it, told how by the note and the batch's notice. With a
+    // notice whose list can't be read there is nothing to re-create, and the note says that instead.
     if (before.update?.kind === 'uncarried' && ctl.stopReason !== 'shutdown')
       result = { ...result, exitCode: 1, aborted: false };
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.

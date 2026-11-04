@@ -8,6 +8,8 @@ import {
   rerunNotices,
   rerunRecord,
   type RerunRuns,
+  uncarriedIn,
+  uncarriedSaid,
 } from './notices';
 
 const HEAD = 'a'.repeat(40);
@@ -38,6 +40,34 @@ describe('the renumbered migrations notice', () => {
     const again = migrationNotices.renumbered(first, [{ from: '0043_x', to: '0044_x' }]);
 
     expect(lines(again)).toEqual([{ from: '0042_x', to: '0044_x' }]);
+  });
+});
+
+describe('reading the lost-migrations notice', () => {
+  const stored = migrationNotices.uncarried([{ tag: '0001_x', at: 'abc' }]);
+
+  it('reads the list, and an empty one when there is no notice', () => {
+    expect(uncarriedIn(stored)).toEqual([{ tag: '0001_x', at: 'abc' }]);
+    expect(uncarriedIn(undefined)).toEqual([]);
+  });
+
+  it('answers null, not an empty list, when the notice has no list it can read', () => {
+    expect(
+      uncarriedIn({ key: stored.key, tone: stored.tone, line: stored.line, body: stored.body }),
+    ).toBeNull();
+    expect(uncarriedIn({ ...stored, record: 'not json' })).toBeNull();
+    expect(uncarriedIn({ ...stored, record: '{"tag":"0001_x"}' })).toBeNull();
+  });
+
+  it("says the notice's own text while its list reads, and no steps that can't clear it otherwise", () => {
+    expect(uncarriedSaid(stored)).toBe(stored.body);
+
+    const said = uncarriedSaid({ ...stored, record: 'not json' });
+    expect(said).toContain('could not be read');
+    expect(said).toContain('cut short');
+    expect(said).toContain("won't clear this notice");
+    expect(said).toContain('abandoning the batch');
+    expect(said).not.toContain(stored.body);
   });
 });
 

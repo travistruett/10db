@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { carriedSoFar, copyCustomSql } from './migration-carry';
+import { schemaOf as snapshotSchemaOf } from './snapshot-schema';
 import { MIGRATIONS_DIR, generateCommand, type CarriedMigration } from './worktree-generated';
 
 /**
@@ -25,7 +26,8 @@ import { MIGRATIONS_DIR, generateCommand, type CarriedMigration } from './worktr
  * `--name` through, that drizzle-kit writes the tag and stub the journal check expects, and that it
  * exits 0 with no file when the schema holds nothing new.
  */
-vi.setConfig({ testTimeout: 120_000 });
+const TEST_TIMEOUT = 120_000;
+vi.setConfig({ testTimeout: TEST_TIMEOUT });
 
 const DB_PACKAGE = join(import.meta.dirname, '../../../../packages/db');
 const JOURNAL = `${MIGRATIONS_DIR}meta/_journal.json`;
@@ -75,12 +77,26 @@ function workspace(schema: string): void {
   );
 }
 
-const run = (migrations: readonly CarriedMigration[]) =>
-  spawnSync('/bin/sh', ['-c', generateCommand(pnpm, [MIGRATIONS_DIR], migrations)], {
+/**
+ * spawnSync blocks the worker, so the test timeout cannot interrupt it: a hung pnpm or drizzle-kit (a
+ * new interactive prompt, say) would hold it until the gate's own timeout. This is below that.
+ */
+const COMMAND_TIMEOUT = TEST_TIMEOUT - 30_000;
+
+const run = (migrations: readonly CarriedMigration[]) => {
+  const result = spawnSync('/bin/sh', ['-c', generateCommand(pnpm, [MIGRATIONS_DIR], migrations)], {
     cwd: root,
     encoding: 'utf8',
     env: { ...process.env, CI: 'true' },
+    timeout: COMMAND_TIMEOUT,
   });
+  if (result.error !== undefined)
+    throw new Error(
+      `the generate command did not finish within ${String(COMMAND_TIMEOUT)} ms (a hung pnpm or drizzle-kit, ` +
+        `such as a prompt waiting for input): ${result.error.message}\n${result.stdout}${result.stderr}`,
+    );
+  return result;
+};
 
 const tagsOf = (): string[] =>
   (
@@ -130,6 +146,15 @@ describe('generateCommand, run with the real pnpm and drizzle-kit', () => {
       { from: '0001_add_note', to: '0000_add_note' },
       { from: '0002_backfill', to: '0001_backfill' },
     ]);
+
+    // ownMigrations calls a migration custom when its snapshot's schema equals the previous one's. That
+    // is drizzle-kit's behaviour: `--custom` must write a snapshot with the schema it started from.
+    const snapshot = (number: string): string | null =>
+      snapshotSchemaOf(
+        readFileSync(join(root, MIGRATIONS_DIR, `meta/${number}_snapshot.json`), 'utf8'),
+      );
+    expect(snapshot('0000')).not.toBeNull();
+    expect(snapshot('0001')).toBe(snapshot('0000'));
 
     // The custom stub is replaced by the branch's own SQL, byte for byte.
     const sql = Buffer.from('UPDATE sessions SET note = 1;\n');
