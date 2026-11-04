@@ -695,6 +695,81 @@ describe('fileAccessJudge in the guard', () => {
     expect(verdict.decision).toBe('deny');
   });
 
+  describe('after an earlier Bash call changed directory', () => {
+    // Claude Code carries a `cd` into the next call, and Grep, Glob and LS read a relative path from there.
+    const secret = () => join(checkout, 'apps', 'daemon', '.env.example');
+    const at = (fileAccess: FileAccessJudge, toolName: string, toolInput: unknown, cwd?: string) =>
+      judgeToolUse({
+        toolName,
+        toolInput,
+        repoPath: checkout,
+        ...(cwd === undefined ? {} : { cwd }),
+        areas: [{ name: 'all', globs: ['**'] }],
+        hazards: [],
+        claims: [{ kind: 'area', name: 'all' }],
+        readOnly: false,
+        protectedPaths: [],
+        fileAccess,
+      });
+    beforeEach(() => {
+      mkdirSync(join(checkout, 'apps', 'daemon'), { recursive: true });
+      writeFileSync(secret(), '');
+    });
+
+    it.each<[string, string, Record<string, unknown>]>([
+      ['Grep', 'a path naming the file', { pattern: 'x', path: '.env.example' }],
+      ['LS', 'a path naming the file', { path: '.env.example' }],
+      ['Glob', 'a pattern naming the file', { pattern: '.env.example' }],
+      ['Read', 'a relative file path', { file_path: '.env.example' }],
+    ])('refuses %s with %s there', (toolName, _what, input) => {
+      const judge = fileAccessJudge(context({ secretFiles: [secret()] }));
+      const cwd = join(checkout, 'apps', 'daemon');
+      expect(at(judge, toolName, input, cwd).decision).toBe('deny');
+    });
+
+    it('judged the same path from the copy root before, where it names no secret', () => {
+      const judge = fileAccessJudge(context({ secretFiles: [secret()] }));
+      expect(at(judge, 'Grep', { pattern: 'x', path: '.env.example' }).decision).toBe('allow');
+      expect(at(judge, 'Grep', { pattern: 'x', path: '.env.example' }, checkout).decision).toBe(
+        'allow',
+      );
+    });
+
+    it('refuses a protected path named relative to the directory, outside the copy', () => {
+      const judge = fileAccessJudge(context());
+      expect(at(judge, 'Grep', { pattern: 'x', path: '.claude.json' }, home).decision).toBe('deny');
+    });
+
+    it('leaves ~ and an absolute path to mean what they mean from any directory', () => {
+      const judge = fileAccessJudge(context());
+      const cwd = join(checkout, 'apps');
+      expect(at(judge, 'Read', { file_path: '~/.claude.json' }, cwd).decision).toBe('deny');
+      expect(at(judge, 'Read', { file_path: join(home, '.claude.json') }, cwd).decision).toBe(
+        'deny',
+      );
+    });
+
+    it('ignores a directory that is not absolute', () => {
+      const judge = fileAccessJudge(context({ secretFiles: [secret()] }));
+      expect(
+        at(judge, 'Grep', { pattern: 'x', path: '.env.example' }, 'apps/daemon').decision,
+      ).toBe('allow');
+    });
+
+    it('asks about a relative path from the directory the hook gave', () => {
+      const judge = fileAccessJudge(context());
+      expect(judge.readAsk('Grep', { pattern: 'x', path: 'secret' })).toBeNull();
+      expect(judge.readAsk('Grep', { pattern: 'x', path: 'secret' }, sibling)).toContain('outside');
+    });
+
+    it('resolves a relative path through the same function for the guard and the broker', () => {
+      const ctx = context({ secretFiles: [secret()] });
+      const cwd = join(checkout, 'apps', 'daemon');
+      expect(readAccess('.env.example', ctx, true).access).toBe('inside');
+      expect(readAccess('.env.example', ctx, true, cwd).access).toBe('protected');
+    });
+  });
+
   it('refuses an edit of .git internals', () => {
     const verdict = guard(fileAccessJudge(context()), 'Edit', { file_path: '.git/config' });
     expect(verdict).toEqual({

@@ -565,6 +565,42 @@ describe('buildQueryOptions', () => {
     expect(result).toEqual({ behavior: 'deny', message: 'Parked', interrupt: true });
   });
 
+  it('hands canUseTool the directory the hook gave for the same call', async () => {
+    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    const options = buildQueryOptions(
+      spec({ canUseTool, preToolUse: () => ({ decision: 'ask', reason: 'broker' }) }),
+      deps,
+    );
+    const hook = options.hooks?.PreToolUse?.[0]?.hooks[0];
+    const hookInput = (id: string, cwd: string) => ({
+      hook_event_name: 'PreToolUse' as const,
+      tool_name: 'Grep',
+      tool_input: { path: '.env.example' },
+      tool_use_id: id,
+      session_id: 's',
+      transcript_path: '/t',
+      cwd,
+    });
+    const signal = new AbortController().signal;
+    await hook?.(hookInput('toolu_a', '/repo/apps/daemon'), 'toolu_a', { signal });
+    await hook?.(hookInput('toolu_b', '/repo'), 'toolu_b', { signal });
+    for (const id of ['toolu_a', 'toolu_c']) {
+      await options.canUseTool?.(
+        'Grep',
+        { path: '.env.example' },
+        { signal, toolUseID: id, requestId: id },
+      );
+    }
+    expect(canUseTool).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ toolUseId: 'toolu_a', cwd: '/repo/apps/daemon' }),
+    );
+    // A call no hook named has no directory, so the broker reads it from the lane's copy.
+    expect(canUseTool.mock.calls[1]?.[0]).not.toHaveProperty('cwd');
+  });
+
   it.each<[string, Record<string, unknown>, boolean]>([
     ['no escalation fields', {}, false],
     ['a requires-user-interaction ask', { requiresUserInteraction: true }, true],

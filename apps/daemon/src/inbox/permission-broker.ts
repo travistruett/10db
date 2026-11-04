@@ -484,7 +484,12 @@ export function createPermissionBroker(
     const asking: string[] = [];
     try {
       for (const path of inputs) {
-        const { access, realPath } = readAccess(path, sandbox.fileAccess, req.toolName !== 'Read');
+        const { access, realPath } = readAccess(
+          path,
+          sandbox.fileAccess,
+          req.toolName !== 'Read',
+          req.cwd,
+        );
         if (access === 'protected' || access === 'contains-protected') {
           return {
             behavior: 'deny',
