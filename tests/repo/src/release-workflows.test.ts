@@ -198,3 +198,29 @@ describe('build-macos.sh', () => {
     expect(script).not.toContain('binaries[0]');
   });
 });
+
+describe('release-please workflow', () => {
+  const workflow = readWorkflow(releaseWorkflowPaths.releasePlease);
+  const steps = Object.values(workflow.jobs).flatMap(stepsOf);
+
+  it('restores lost release notes before release-please reads them', () => {
+    const restore = steps.findIndex((step) => step.run?.includes('restore-release-notes.mjs'));
+    const release = steps.findIndex((step) => step.uses?.includes('release-please-action'));
+    expect(restore).toBeGreaterThanOrEqual(0);
+    expect(release).toBeGreaterThan(restore);
+  });
+});
+
+describe('main-failures workflow', () => {
+  const workflow = readWorkflow('.github/workflows/main-failures.yml');
+
+  it('runs on a schedule and by hand, and no event of another workflow starts it', () => {
+    expect(Object.keys(workflow.on).sort()).toEqual(['schedule', 'workflow_dispatch']);
+  });
+
+  it('reads runs and writes issues, and nothing else', () => {
+    expect(Object.values(workflow.jobs).map((job) => job.permissions)).toEqual([
+      { actions: 'read', contents: 'read', issues: 'write' },
+    ]);
+  });
+});
