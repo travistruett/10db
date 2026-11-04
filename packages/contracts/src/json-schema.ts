@@ -62,7 +62,7 @@ import {
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
-import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
+import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
@@ -162,6 +162,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'keep-awake-input': KeepAwakeInput,
   'self-update-input': SelfUpdateInput,
   'self-update-status-dto': SelfUpdateStatusDto,
+  'self-update-wait-input': SelfUpdateWaitInput,
   'lane-permissions-dto': LanePermissionsDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,

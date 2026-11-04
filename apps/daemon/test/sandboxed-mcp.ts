@@ -33,6 +33,7 @@ export async function sandboxedMcpServer(
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
+      worktreeRoot: join(root, 'w'),
     }).forSession({
       project: {
         id: mintId('Project'),

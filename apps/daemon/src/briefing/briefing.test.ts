@@ -8,6 +8,7 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  denialsForLane,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
   HANDOFF_NUDGE_ACCOUNT,
@@ -132,6 +133,24 @@ describe('buildSessionPrompt', () => {
       expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, denials: [] })).not.toContain(
         'The builder denied',
       );
+    });
+
+    describe('of a path in the worktrees folder', () => {
+      const scope = { checkout: '/wt/project/copy', worktreeRoot: '/wt' };
+      const denial = (toolName: string, summary: string) => ({ toolName, summary, note: null });
+
+      it.each(['Read', 'Grep', 'Glob', 'LS'])('leaves out a %s outside the copy', (toolName) => {
+        expect(denialsForLane([denial(toolName, '/wt/project/src/a.ts')], scope)).toEqual([]);
+      });
+
+      it('keeps a read in the copy, a read elsewhere and every other tool', () => {
+        const kept = [
+          denial('Read', '/wt/project/copy/src/a.ts'),
+          denial('Read', '/etc/hosts'),
+          denial('Bash', '/wt/project/src/a.ts'),
+        ];
+        expect(denialsForLane(kept, scope)).toEqual(kept);
+      });
     });
 
     it('repeats them after a compaction', () => {

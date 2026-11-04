@@ -5,6 +5,7 @@ export {
   briefedFromHandoff,
   buildSessionPrompt,
   compactionReinjection,
+  denialsForLane,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,

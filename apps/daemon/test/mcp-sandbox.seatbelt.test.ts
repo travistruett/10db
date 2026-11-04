@@ -180,6 +180,7 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       gitDirs: (path) => git.gitDirs(path),
       tmpRoot: join(root, 't'),
       runtime: resolveSandboxRuntime(),
+      worktreeRoot: join(root, 'w'),
     }).forSession({
       // The project lets lane commands use localhost; its MCP servers still get none.
       project: {

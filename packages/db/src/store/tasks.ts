@@ -831,7 +831,7 @@ function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
  * `proposed` is the placement the daemon's rule gives the task as the patch leaves it. It is taken
  * only when the patch doesn't set the placement itself, the builder has not chosen this task's
  * placement, and the task could still be moved (see `placementRefusal`); a task with no reason takes it
- * only if it names a separate copy, one whose reason the rule proposed follows the rule (see
+ * only if the rule matched, one whose reason the rule proposed follows the rule (see
  * `movedByProposal`). Otherwise it is ignored, so a task that has started, or that the builder placed,
  * is never moved by an edit.
  */
@@ -924,7 +924,8 @@ function placementRefusal(db: DbReader, task: TaskDto): InvalidError | ConflictE
  * areas or risk tags changed after it was made). Null when the task stays as it is: the builder chose
  * its placement, or Start could no longer start it. Otherwise:
  *
- * - A task with no reason takes the proposal only when it names a separate copy.
+ * - A task with no reason takes the proposal only when the rule matched, so the proposal has a reason.
+ *   A proposal with none is just the project's default, which says nothing about this task.
  * - A task whose reason the rule proposed (anything but the builder's) follows the rule: the reason
  *   is refreshed to match the new tags and areas, and when the rule no longer matches, the task goes
  *   back to the proposed placement (the project's default) with no reason, since only the rule had
@@ -937,8 +938,7 @@ function movedByProposal(
   proposed: Placement,
 ): { workspaceMode: WorkspaceMode; placementReason: string | null } | null {
   if (task.placementReason === BUILDER_CHOSE_PLACEMENT) return null;
-  if (task.placementReason === null && proposed.workspaceMode !== WorkspaceMode.Worktree)
-    return null;
+  if (task.placementReason === null && proposed.reason === null) return null;
   if (placementRefusal(db, task) !== null) return null;
   return { workspaceMode: proposed.workspaceMode, placementReason: proposed.reason };
 }

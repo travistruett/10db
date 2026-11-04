@@ -1,18 +1,23 @@
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import {
+  BatchDto,
   HealthResponse,
   ProjectDto,
   SelfUpdateStatusDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { apiClient, quickFlowId } from '../../test/api-client';
+import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
+  createTempRepoWithOrigin,
+  githubOrigin,
   isolatedGitEnv,
+  NETWORK_ENV,
   tempDir,
   waitFor,
   waitForAsync,
@@ -111,6 +116,8 @@ async function start(
     intervalMs?: number;
     adapter?: FakeAdapter;
     caps?: { global: number };
+    /** What a batch's delivery reaches GitHub with: a project that ships needs both. */
+    delivery?: { gh: FakeGh; networkEnv: () => Readonly<Record<string, string>> };
   } = {},
 ): Promise<ReturnType<typeof apiClient>> {
   daemon = await startDaemon({
@@ -120,6 +127,7 @@ async function start(
     adapter: options.adapter ?? new FakeAdapter({}),
     logLevel: 'warn',
     ...(options.caps ? { caps: options.caps } : {}),
+    ...options.delivery,
     build: {
       commit: RUNNING,
       repository: options.repository === undefined ? BUILT_FOR : options.repository,
@@ -178,11 +186,12 @@ describe('self-update in the daemon', () => {
     // Not the project's origin: the repository was fixed when the app was built.
     expect(staged).toEqual([BUILT_FOR]);
     expect(applied).toEqual([NEW]);
-    expect(await selfUpdate(api)).toEqual({
+    expect(await selfUpdate(api)).toMatchObject({
       enabled: true,
       isDefault: true,
       runningCommit: RUNNING,
       availableCommit: NEW,
+      waitMinutes: 15,
     });
   });
 
@@ -273,6 +282,182 @@ describe('self-update in the daemon', () => {
     await afterChecks(5);
     expect(applied).toEqual([]);
     expect(staged).toEqual([BUILT_FOR]);
+  });
+
+  describe('a waiting update drains the factory', () => {
+    const lanesOf = async (api: ReturnType<typeof apiClient>) =>
+      new Map(
+        (await api.get('/workstreams?active=true', z.array(WorkstreamDto))).map((w) => [
+          w.taskId,
+          w,
+        ]),
+      );
+    const startTask = async (
+      api: ReturnType<typeof apiClient>,
+      projectId: string,
+      title: string,
+      area: string,
+    ) => {
+      const task = await api.post(`/projects/${projectId}/tasks`, TaskDto, {
+        title,
+        acceptanceCriteria: ['it works'],
+        areas: [area],
+      });
+      await api.post(`/tasks/${task.id}/start`, z.unknown());
+      return task;
+    };
+
+    /** A lane holds its session, an update waits past a limit of 0 minutes, and the factory drains. */
+    async function drained() {
+      head = RUNNING;
+      const api = await start({
+        caps: { global: 2 },
+        adapter: new FakeAdapter({ Alpha: [[{ do: 'hang' }]], Beta: [[{ do: 'hang' }]] }),
+      });
+      await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+      const project = await api.post('/projects', ProjectDto, {
+        name: '10db',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      const alpha = await startTask(api, project.id, 'Alpha', 'src');
+      // RUNNING: its session has begun. A lane still STARTING when the drain begins waits at the hold
+      // before it starts one, and the update does not count it.
+      await waitForAsync(async () => (await lanesOf(api)).get(alpha.id)?.state === 'RUNNING');
+      // Main moves on while the lane is mid-session.
+      head = NEW;
+      await waitForAsync(async () => (await selfUpdate(api)).draining);
+      return { api, project, alpha };
+    }
+
+    it('says since when it drains, holds a queued lane back, stops nothing, and installs once the running step is done', async () => {
+      const { api, project, alpha } = await drained();
+      const status = await selfUpdate(api);
+      expect(status).toMatchObject({ availableCommit: NEW, waitMinutes: 0, draining: true });
+      expect(status.drainingSince).not.toBeNull();
+      expect(status.waitingSince).not.toBeNull();
+
+      // A lane cap of 2 leaves room, yet the second task starts nothing while the factory drains.
+      const beta = await startTask(api, project.id, 'Beta', 'docs');
+      await afterChecks(5);
+      const lanes = await lanesOf(api);
+      expect(lanes.get(beta.id)?.state).toBe('QUEUED');
+      // The running lane was neither stopped nor finished.
+      expect(['STARTING', 'RUNNING']).toContain(lanes.get(alpha.id)?.state);
+      expect(applied).toEqual([]);
+
+      // The step ends (here the builder cancels the lane): the app installs, with Beta still queued.
+      await api.post(`/workstreams/${lanes.get(alpha.id)?.id ?? ''}/cancel`, z.unknown());
+      await waitFor(() => applied.length > 0 && applied);
+      expect(applied).toEqual([NEW]);
+      expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
+    });
+
+    it('lets lanes start again when the builder turns the switch off', async () => {
+      const { api, project } = await drained();
+      const beta = await startTask(api, project.id, 'Beta', 'docs');
+      await afterChecks(3);
+      expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
+      const off = await api.put('/settings/self-update', SelfUpdateStatusDto, { enabled: false });
+      expect(off).toMatchObject({ draining: false, drainingSince: null, waitingSince: null });
+      await waitForAsync(async () =>
+        ['STARTING', 'RUNNING'].includes((await lanesOf(api)).get(beta.id)?.state ?? ''),
+      );
+      expect(applied).toEqual([]);
+    });
+
+    it('drains at once at Install Now, though the update has waited no time', async () => {
+      head = RUNNING;
+      const api = await start({
+        caps: { global: 2 },
+        adapter: new FakeAdapter({ Alpha: [[{ do: 'hang' }]], Beta: [[{ do: 'hang' }]] }),
+      });
+      const project = await addProject(api);
+      const alpha = await startTask(api, project.id, 'Alpha', 'src');
+      await waitForAsync(async () => (await lanesOf(api)).get(alpha.id)?.state === 'RUNNING');
+      head = NEW;
+      // The default limit is 15 minutes: the update only waits.
+      await waitForAsync(async () => (await selfUpdate(api)).availableCommit === NEW);
+      expect(await selfUpdate(api)).toMatchObject({ draining: false, waitMinutes: 15 });
+      const now = await api.post('/settings/self-update/install-now', SelfUpdateStatusDto);
+      expect(now).toMatchObject({ draining: true });
+      expect(now.drainingSince).not.toBeNull();
+      const beta = await startTask(api, project.id, 'Beta', 'src');
+      await afterChecks(3);
+      expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
+    });
+
+    it('installs with two lanes of one batch held at their gates, neither waiting on the other', async () => {
+      const remote = createTempRepoWithOrigin();
+      const network = githubOrigin(remote.repo.path, remote.origin.path);
+      try {
+        head = RUNNING;
+        const sessionEnd = [
+          { do: 'await_message', contains: 'go' },
+          { do: 'turn_complete' },
+        ] as const;
+        const adapter = new FakeAdapter({ Alpha: [[...sessionEnd]], Beta: [[...sessionEnd]] });
+        const started = vi.spyOn(adapter, 'start');
+        const api = await start({
+          caps: { global: 2 },
+          adapter,
+          delivery: {
+            gh: new FakeGh(),
+            networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
+          },
+        });
+        await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'shop',
+          repoPath: remote.repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [
+            { name: 'api', globs: ['src/api/**'] },
+            { name: 'ui', globs: ['src/ui/**'] },
+          ],
+          delivery: 'pull_request',
+          prTitlePrefix: 'feat(app)',
+        });
+        const task = (title: string, area: string) =>
+          api.post(`/projects/${project.id}/tasks`, TaskDto, {
+            title,
+            acceptanceCriteria: ['it works'],
+            areas: [area],
+          });
+        const alpha = await task('Alpha', 'api');
+        const beta = await task('Beta', 'ui');
+        await api.post(`/projects/${project.id}/batches`, z.tuple([BatchDto]), {
+          title: 'Greetings',
+          taskIds: [alpha.id, beta.id],
+        });
+        // A real cut, which a loaded Mac can take seconds over.
+        await waitFor(() => started.mock.results.length === 2, 30_000);
+
+        head = NEW;
+        await waitForAsync(async () => (await selfUpdate(api)).draining);
+        expect(applied).toEqual([]);
+
+        // Both sessions end during the drain, so both lanes reach their gates.
+        for (const session of started.mock.results)
+          (session.value as { send(text: string): void }).send('go');
+        await waitFor(() => applied.length > 0 && applied, 20_000);
+        expect(applied).toEqual([NEW]);
+        const lanes = await lanesOf(api);
+        expect(lanes.get(alpha.id)?.state).toBe('VERIFYING');
+        expect(lanes.get(beta.id)?.state).toBe('VERIFYING');
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        network.cleanup();
+        remote.cleanup();
+      }
+    }, 60_000);
   });
 
   it('raises one card naming the failing step when the build fails, and installs nothing', async () => {
