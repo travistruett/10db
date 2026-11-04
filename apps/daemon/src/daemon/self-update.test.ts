@@ -5,6 +5,9 @@ import {
   HealthResponse,
   ProjectDto,
   SelfUpdateStatusDto,
+  ShapeDto,
+  ShapeMessageDto,
+  ShapeViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
@@ -705,6 +708,47 @@ describe('self-update in the daemon', () => {
     );
     // The failed commit is not tried again by itself.
     expect(applied).toEqual([NEW]);
+  });
+
+  describe('a Shape conversation while an install that needed no drain is under way', () => {
+    /** The app was idle, so the install began with no drain; the builder then sends a message. */
+    async function sendDuringTheInstall() {
+      const adapter = new FakeAdapter({});
+      const api = await start({ adapter });
+      const project = await addProject(api);
+      await waitFor(() => applied.length > 0 && applied);
+      const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+      await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'One more thing.' });
+      const view = () => api.get(`/shapes/${shape.id}`, ShapeViewDto);
+      await waitForAsync(async () => (await view()).turn.queued === 1);
+      return { adapter, api, view };
+    }
+
+    it('starts no session, so the quit cuts nothing off, and runs the turn when the install fails', async () => {
+      const { adapter, api, view } = await sendDuringTheInstall();
+      expect((await selfUpdate(api)).draining).toBe(false);
+      expect(adapter.shapeSessions).toHaveLength(0);
+
+      status = { ok: false, step: 'lock', message: 'the lock is held', commit: NEW };
+      endScript();
+      await waitFor(() => adapter.shapeSessions.length === 1);
+      await waitForAsync(async () => (await view()).turn.queued === 0);
+    });
+
+    it('says so in the conversation when the install quits the app first', async () => {
+      const { adapter } = await sendDuringTheInstall();
+      await daemon?.stop();
+      daemon = null;
+
+      head = RUNNING;
+      const next = await start({ adapter });
+      const [project] = await next.get('/projects', z.array(ProjectDto));
+      const [shape] = await next.get(`/projects/${project?.id ?? ''}/shapes`, z.array(ShapeDto));
+      const after = await next.get(`/shapes/${shape?.id ?? ''}`, ShapeViewDto);
+      expect(after.messages.at(-1)?.kind).toBe('notice');
+      expect(after.messages.at(-1)?.body).toContain('One more thing.');
+      expect(adapter.shapeSessions).toHaveLength(0);
+    });
   });
 
   it('lets work go on and raises one card when starting the install throws', async () => {

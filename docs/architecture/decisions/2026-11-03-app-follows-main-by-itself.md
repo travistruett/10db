@@ -48,8 +48,12 @@ one quit instead of two. While lanes are busy and the head has not moved, it doe
 `SHIPPING` (`countMidSession`, `packages/db`), and no delivery job queued or running (`DeliveryJobs.pending()`: a
 ship, checkout return or cleanup is a job before it is a row), and no shaping conversation with a turn running or
 queued (`ShapeService.turnsInProgress()`, counted once per conversation). A shape session is no workstream, and a
-quit mid-turn would cut off the answer the builder is waiting on; the drain does not park it, so it ends with the
-turn. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
+quit mid-turn would cut off the answer the builder is waiting on. A turn running finishes. A turn that has not
+started waits at the drain, or at a hold of its own from the moment an install takes over, since an install at an
+idle moment has no drain and a shape turn does not go through the scheduler. Waiting there it has begun nothing, so
+it stops counting, or it would keep the drain up for ever. Shape's queue is in memory and no recovery restores it:
+if the quit comes first, the service writes a notice in the conversation naming each turn that never ran, for the
+builder to send again. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that

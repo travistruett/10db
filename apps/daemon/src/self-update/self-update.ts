@@ -133,10 +133,12 @@ export interface SelfUpdateDeps {
    */
   readonly drain: { begin(since: Date): void; end(): void };
   /**
-   * Stops the scheduler starting new work and settles once the tick it was in has finished, so
-   * nothing begins between the last check and the quit.
+   * Stops new work starting (the scheduler, and a conversation's next turn, which the scheduler
+   * does not start) and settles once the tick it was in has finished, so nothing begins between the
+   * last check and the quit. An install at an idle moment has no drain, so this alone holds it.
    */
   pause(): Promise<void>;
+  /** Lets what `pause` stopped start again. */
   resume(): void;
   /** The install script's last status file, and its removal. */
   readonly outcome: { read(): ScriptStatus | null; clear(): void };

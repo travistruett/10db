@@ -450,6 +450,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let scheduler: Scheduler | null = null;
   // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
   const updateDrain = createDrain();
+  // Up from the moment an install takes over until the app quits or the install fails. An install at
+  // an idle moment has no drain, and a Shape turn does not go through the scheduler it pauses.
+  const installHold = createDrain();
   // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
   const claimWaits = new ClaimWaits({
     onWait: () => {
@@ -859,8 +862,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     filesDir: join(opts.dataDir, 'shapes'),
     screens,
     // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
-    // install would cut off one that began during the drain.
-    hold: updateDrain,
+    // install would cut off one that began during the drain, or while the install starts.
+    hold: holdBoth([updateDrain, installHold]),
     jev: createShapeJev({
       state,
       judge,
@@ -1111,9 +1114,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // before it is a row. A lane or gate parked by the drain has begun nothing: it is not cut off by
   // the quit (the stop leaves its saved action for recovery), and counting it would keep the drain
   // going for ever. A shaping conversation with a turn under way counts: it is no workstream, and
-  // the quit would cut off the answer in front of the builder. The drain parks a turn that has not
-  // started (it waits in the drain, so `parked()` takes it off the count); one running finishes. A lane
-  // waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
+  // the quit would cut off the answer in front of the builder. The drain and the install's hold park
+  // a turn that has not started (it waits in one of them, so `parked()` takes it off the count, and
+  // the quit tells the builder it went unanswered); one running finishes. A lane waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
   // its session and recovery parks it on its card again, so it must not hold the install, and every
   // lane behind it, for as long as the builder leaves the card.
   const midSessionWaits = (): { working: number; waitingOnCard: number } => {
@@ -1121,7 +1124,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     const working = Math.max(
       0,
       midSessionWork(state.db, deliveryJobs, shape, { waitingOnCard: false }) -
-        updateDrain.parked(),
+        updateDrain.parked() -
+        installHold.parked(),
     );
     return { working, waitingOnCard };
   };
@@ -1189,10 +1193,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         // New work waits from here on, and the tick the scheduler is in has finished: it may be
         // reading branches and about to launch a lane.
         pause: async () => {
+          installHold.begin(clock.now());
           createdScheduler.stop();
           await createdScheduler.idle();
         },
         resume: () => {
+          installHold.end();
           createdScheduler.start();
           createdScheduler.requestTick();
         },
@@ -1368,6 +1374,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
       updateDrain.stop();
+      installHold.stop();
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();

@@ -157,7 +157,8 @@ export interface ShapeServiceDeps {
    * before it starts a session or sends to one. A turn already running finishes. A turn that waits
    * has begun nothing, so the install need not wait for it: it waits in `untilClear`, which the
    * drain counts as parked, and the mid-session count takes the parked ones off
-   * `turnsInProgress`, which still counts the conversation.
+   * `turnsInProgress`, which still counts the conversation. If the quit comes first, `close` tells
+   * the builder the turn never ran.
    */
   readonly hold?: Hold;
 }
@@ -257,7 +258,7 @@ export interface ShapeService {
    * quit now would cut the answer off. A conversation counts once, however many turns it has queued.
    */
   turnsInProgress(): number;
-  /** Stops every session. */
+  /** Stops every session, and tells each conversation which queued turns will not run. */
   close(): Promise<void>;
 }
 
@@ -284,6 +285,8 @@ interface Turn {
   readonly messageId: ShapeMessageId;
   /** A rehearsal turn: the tasks it was told to read, each at the hash it listed. */
   readonly rehearsing?: readonly Pick<RehearsalTask, 'taskKey' | 'hash'>[];
+  /** What the builder is told if 10db quits first: the queue is in memory and ends with the daemon. */
+  readonly neverRan: string;
 }
 
 /** What goes ahead of a turn's message: the builder's edits since the last turn and the files dropped. */
@@ -1008,6 +1011,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         kind: 'message',
         prompt: `[m:${message.id}] ${text}`,
         messageId: message.id,
+        neverRan: `10db quit before Claude read “${title}”, so it went unanswered. Send it again.`,
       });
       pump(shapeId, rt);
       // Shadow only: nothing waits on it, and it never throws.
@@ -1033,6 +1037,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         kind: 'propose',
         prompt: `[m:${message.id}] ${instruction}`,
         messageId: message.id,
+        neverRan: '10db quit before Claude could propose. Press Propose again.',
       });
       pump(shapeId, rt);
       return { status: 'started' };
@@ -1052,6 +1057,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         prompt: `[m:${message.id}] ${instruction}`,
         messageId: message.id,
         rehearsing: tasks.map((t) => ({ taskKey: t.taskKey, hash: t.hash })),
+        neverRan: '10db quit before the rehearsal ran. Press Rehearse again.',
       });
       pump(shapeId, rt);
       return { status: 'started', tasks: tasks.length };
@@ -1195,12 +1201,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     async close() {
-      for (const rt of runtimes.values()) {
+      // Every queue before any session: a session closing below must not let another conversation's
+      // turn start, and no write may wait on a session that is slow to stop.
+      for (const [shapeId, rt] of runtimes) {
         rt.idle?.cancel();
         rt.idle = null;
-        rt.queue.length = 0;
-        await closeLive(rt, 'stopped');
+        for (const turn of rt.queue.splice(0)) notice(shapeId, turn.neverRan);
       }
+      for (const rt of runtimes.values()) await closeLive(rt, 'stopped');
     },
   };
 }
