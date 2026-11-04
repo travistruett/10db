@@ -99,7 +99,8 @@ describe('CI workflow', () => {
 
   it('runs on pull requests into main only, and re-runs every job when a PR title is edited', () => {
     // Each task's pull request goes to main and runs CI there, with no integration branch in
-    // between (decisions/2026-11-02-merge-queue.md).
+    // between (decisions/2026-11-02-merge-queue.md, which decisions/2026-11-02-main-has-no-merge-queue.md
+    // amends only by dropping the queue rule).
     const parsed = readWorkflow(CI);
     expect(parsed.on['pull_request']).toEqual({
       branches: ['main'],
@@ -113,7 +114,7 @@ describe('CI workflow', () => {
 
   it('runs on merge queue entries, where every required check must report', () => {
     // main has no merge queue (decisions/2026-11-02-main-has-no-merge-queue.md), so this trigger is
-    // inert today. It is kept on purpose, for when a queue returns: a queue tests each pull request
+    // inert until a queue returns. It is kept on purpose: a queue tests each pull request
     // combined with those ahead of it, and waits for the required checks on a
     // gh-readonly-queue/main/... branch, so a check that doesn't run on merge_group never reports
     // and the entry times out.
@@ -126,10 +127,11 @@ describe('CI workflow', () => {
     expect(limited).toEqual(['dependency-review']);
   });
 
-  it('skips dependency-review off pull_request, which the queue counts as passing', () => {
-    // The action diffs a pull request's base and head and has no pull request on a queue entry. A
-    // job skipped by its `if` reports as skipped, and a required check that is skipped counts as
-    // passing; dependency-review already ran on the pull request itself.
+  it('skips dependency-review off pull_request, which a merge queue would count as passing', () => {
+    // Inert while main has no queue (see above). The action diffs a pull request's base and head and
+    // has no pull request on a queue entry. A job skipped by its `if` reports as skipped, and a
+    // required check that is skipped counts as passing; dependency-review already ran on the pull
+    // request itself.
     expect(readWorkflow(CI).jobs['dependency-review']?.if).toBe(
       "github.event_name == 'pull_request'",
     );
