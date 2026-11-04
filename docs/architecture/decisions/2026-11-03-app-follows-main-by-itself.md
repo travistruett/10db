@@ -35,22 +35,14 @@ the folder stays as it is, so a head that moves while lanes are busy costs a loo
 fetched build must also be ahead of the running commit (the same comparison), else nothing is installed. The DMG
 is checked against `SHA256SUMS`, and the stage folder keeps the DMG, the checksum, the commit and a copy of the
 two install scripts, because the install replaces the app that holds them. A newer build replaces the staged one
-only once it is checked, and the commit file is removed first and written last, so a folder that names a commit
-holds all of that build.
+only once it is checked and whole: it is copied into a sibling folder (`stage.next`), its commit file written last,
+and swapped in by rename, so a folder that names a commit holds all of that build, and a copy that fails or is killed
+leaves the staged build as it was. The daemon removes whatever a killed copy left in the sibling.
 
 **What is staged is the newest finished build, not the head.** The daemon stages again, passing `--have`, when main's
 head moves, and, for a staged build that is not the head's own, once nothing is mid-session: it is about to install,
 and a newer build may have finished since. So an older build never installs while a newer one exists, and there is
 one quit instead of two. While lanes are busy and the head has not moved, it does not look.
-
-**The re-stage of a staged build older than the head.** When the staged build's commit is not the head's (the head's
-own build was still running when it was staged) and nothing is mid-session, the check stages once more before it
-installs, with `--have` naming the staged commit: it fetches only if a newer finished build exists, and otherwise
-the staged folder stays and installs. That second look is an optimisation (a newer build, one quit), not the update
-itself, so when it fails with the head unchanged since the build was staged (`download`, `verify-checksum`, `stage`,
-and the looking steps) and the staged folder is still whole (`kept`), the check installs the staged build as it
-would with GitHub away: no card, no `self_update.failed_commit`. It is a failure only when main's head has moved on
-since the build was staged, because then the newer build is the update that did not arrive (see Failure).
 
 **When it installs.** Only when nothing is mid-session: no lane holding a session (`countLanes`'s states, and a
 `WAITING_HUMAN` workstream with a live session), no workstream with a gate process, no batch `CUTTING` or
@@ -68,6 +60,14 @@ count, because startup recovery keeps its place across a restart. The daemon che
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
 was reading branches launch nothing, so no lane begins between the last check and the quit. It waits and checks
 again each minute while a batch is cutting or shipping or a lane runs.
+
+A staged build older than the head is looked at once more first. When its commit is not the head's (the head's own
+build was still running when it was staged) and nothing is mid-session, the check stages again before it installs,
+with `--have` naming the staged commit: it fetches only if a newer finished build exists, and otherwise the staged
+folder stays and installs. That second look is an optimisation (a newer build, one quit), not the update itself, so
+when it fails at any step with the head unchanged since the build was staged, the staged build installs as it would
+with GitHub away: no card, no `self_update.failed_commit`. It is a failure only when main's head has moved on since
+the build was staged, because then the newer build is the update that did not arrive (see Failure).
 
 **When it has waited too long: the factory drains.** On 2026-11-03 #466 merged and its build finished, yet the app
 was still on the previous commit 30 minutes later: three lanes ran back to back, each starting its next step as soon
@@ -173,7 +173,8 @@ does after a manual install. `--status-file` makes either half write `{ok, mode,
 `TENDB_INSTALL_GH` set to the gh it resolved from its fixed install prefixes, `GH_REPO` set to the pinned
 repository, and the login environment otherwise as gh's sign-in needs it, without `PATH`, `BASH_ENV`, `ENV`,
 `DYLD_*`, `LD_*` or `TENDB_INSTALL_*`. The stage half runs in its own process group with its own `TMPDIR`; a
-timeout or the app quitting kills the group and removes both folders, and starts no stage after.
+timeout kills the group and removes its folders but a build it was keeping, and the app quitting does the same, keeps
+nothing, and starts no stage after.
 
 **Failure.** A failure leaves the running app as it was, or restorable: `install-app.sh` puts the previous app
 back when a step after the quit fails, relaunches it, and `make rollback-app` still works. It raises one Inbox
@@ -195,9 +196,10 @@ checks and show only with it on: `unreachable` (the last finished check could no
 update failed). The reason text of a failure is held in memory, not stored: after a restart the check that finds
 `self_update.failed_commit` still at main's head reduces it to a generic line that names the commit.
 
-A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
-killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above), nor is any
-step of the re-stage while main's head is unchanged since the build was staged. Any later step (`wait-for-build`,
+A stage that fails with a build already staged leaves that folder in place, unless it was killed in the swap itself,
+two renames apart, or on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above),
+nor is any step of the re-stage while main's head is unchanged since the build was staged ("When it installs"
+above). Any later step (`wait-for-build`,
 `download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
 confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
