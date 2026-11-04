@@ -447,11 +447,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
+  const updateDrain = createDrain();
   // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
   const claimWaits = new ClaimWaits({
     onWait: () => {
       scheduler?.requestTick();
     },
+    // During the drain a holder that runs nothing (queued, or parked before its next session or gate)
+    // frees no claim until the update installs. A wait on it would keep its session running, and the
+    // update waits for that session to end, so the wait is refused and the session ends by itself.
+    parked: (id) =>
+      updateDrain.draining && runner !== null && (!runner.isRunning(id) || runner.isParked(id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -519,8 +526,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     ...opts.load,
   });
-  // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
-  const updateDrain = createDrain();
   // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain.
   const startHold = holdBoth([loadGuard, updateDrain]);
   const git = createGit({

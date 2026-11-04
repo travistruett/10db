@@ -436,6 +436,59 @@ describe('self-update in the daemon', () => {
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
     });
 
+    it('installs though a running session asked for a claim a parked lane holds: the ask is refused and the session ends on its own', async () => {
+      head = RUNNING;
+      const adapter = new FakeAdapter({
+        Alpha: [[{ do: 'await_message', contains: 'alpha' }, { do: 'turn_complete' }]],
+        Beta: [
+          [
+            { do: 'await_message', contains: 'beta' },
+            {
+              do: 'mcp',
+              tool: 'request_claim',
+              args: { opId: 'op-src-claim', kind: 'area', name: 'src', reason: 'need it' },
+            },
+            { do: 'turn_complete' },
+          ],
+        ],
+      });
+      const started = vi.spyOn(adapter, 'start');
+      const api = await start({ caps: { global: 2 }, adapter });
+      await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+      const project = await api.post('/projects', ProjectDto, {
+        name: '10db',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      const alpha = await startTask(api, project.id, 'Alpha', 'src');
+      const beta = await startTask(api, project.id, 'Beta', 'docs');
+      await waitFor(() => started.mock.results.length === 2, 30_000);
+      await waitForAsync(async () => {
+        const lanes = await lanesOf(api);
+        return lanes.get(alpha.id)?.state === 'RUNNING' && lanes.get(beta.id)?.state === 'RUNNING';
+      });
+      head = NEW;
+      await waitForAsync(async () => (await selfUpdate(api)).draining);
+      // Sessions start in no fixed order, so each message goes to both; only its lane's script waits for it.
+      const sendAll = (text: string) => {
+        for (const session of started.mock.results)
+          (session.value as { send(text: string): void }).send(text);
+      };
+
+      // Alpha's session ends during the drain: its gate waits at the hold, keeping the claim on src.
+      sendAll('alpha');
+      await waitForAsync(async () => (await lanesOf(api)).get(alpha.id)?.state === 'VERIFYING');
+      // Beta asks for src while Alpha is parked. Waiting would keep Beta's session, and so the drain, going.
+      sendAll('beta');
+      await waitFor(() => applied.length > 0 && applied, 20_000);
+      expect(applied).toEqual([NEW]);
+    }, 60_000);
+
     it('installs with two lanes of one batch held at their gates, neither waiting on the other', async () => {
       const remote = createTempRepoWithOrigin();
       const network = githubOrigin(remote.repo.path, remote.origin.path);

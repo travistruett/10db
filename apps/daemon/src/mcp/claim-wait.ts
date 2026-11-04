@@ -101,10 +101,28 @@ export class ClaimWaits {
   readonly #yields = new Map<WorkstreamId, Yielded>();
   readonly #cancelled = new Set<WorkstreamId>();
   readonly #onWait: () => void;
+  readonly #parked: (holder: WorkstreamId) => boolean;
 
-  /** `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again. */
-  constructor(opts: { readonly onWait?: () => void } = {}) {
+  /**
+   * `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again.
+   * `parked` says whether a holder is held back by the update drain (see `holderParked`).
+   */
+  constructor(
+    opts: {
+      readonly onWait?: () => void;
+      readonly parked?: (holder: WorkstreamId) => boolean;
+    } = {},
+  ) {
     this.#onWait = opts.onWait ?? (() => undefined);
+    this.#parked = opts.parked ?? (() => false);
+  }
+
+  /**
+   * Whether `holder` starts nothing until the update installs, so it frees no claim in time: a wait on
+   * it would keep its own session running, and the update waits for that session to end.
+   */
+  holderParked(holder: WorkstreamId): boolean {
+    return this.#parked(holder);
   }
 
   /** Joins the wait for this claim, or starts one; the returned wait's `done` never rejects unhandled. */
@@ -394,6 +412,21 @@ export function yieldRefusal(
   };
 }
 
+/**
+ * The refusal for a claim held by a task the update drain has parked. Nothing is recorded as waiting:
+ * the agent is told to save its work and end its turn, so no session is cut off by the update, and
+ * the task asks again when its next session starts after the update.
+ */
+function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
+  return {
+    granted: false,
+    heldBy,
+    inboxId: null,
+    yielded: false,
+    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. Commit what you have. End your turn: 10db continues this task after the update, and you can ask again then.`,
+  };
+}
+
 /** Whether the task reached a terminal state: it takes no part in a deadlock any more. */
 const taskEnded =
   (db: DbReader) =>
@@ -468,6 +501,9 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         return grantedFrom(a, outcome.claims);
       }
       const holder = outcome.conflict.heldBy;
+      // A holder the update drain parked frees nothing until the update has installed, and the update
+      // waits for this session to end: refuse instead of waiting, and the session ends by itself.
+      if (waits.holderParked(holder)) return parkedRefusal(a, holder);
       const changed = holder !== heldBy;
       if (changed || wait.inboxId !== null) {
         if (!waits.waitsOn(holder, a.workstreamId, ended)) {

@@ -2015,6 +2015,19 @@ describe('runner', () => {
       expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
     });
 
+    it('says a lane is parked while it waits for the hold, and not before or after', async () => {
+      const fake = fakeHold();
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const { workstream } = engine.addTask('Alpha');
+      expect(engine.runner.isParked(workstream.id)).toBe(false);
+      engine.launch(workstream.id);
+      await waitFor(() => fake.parked() === 1);
+      expect(engine.runner.isParked(workstream.id)).toBe(true);
+      fake.release();
+      await engine.runner.idle();
+      expect(engine.runner.isParked(workstream.id)).toBe(false);
+    });
+
     it('ends a held lane at once when it is cancelled, with no session started', async () => {
       const fake = fakeHold();
       engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });

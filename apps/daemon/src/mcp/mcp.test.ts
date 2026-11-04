@@ -105,6 +105,8 @@ let installDependencies: DependencyChanges['install'];
 let dependencyInstalls: BatchId[] = [];
 /** How many times a wait started and asked the scheduler to look again. */
 let waitsStarted = 0;
+/** Holders the update drain has parked, as far as the claim waits are told. */
+let parkedHolders = new Set<WorkstreamId>();
 
 interface LogEntry {
   readonly obj: object;
@@ -162,10 +164,12 @@ beforeEach(async () => {
   takeMigrationsBase = () => Promise.resolve({ kind: 'ready' });
   dependencyInstalls = [];
   installDependencies = () => Promise.resolve({ kind: 'installed', changed: [], logPath: 'x.log' });
+  parkedHolders = new Set();
   claimWaits = new ClaimWaits({
     onWait: () => {
       waitsStarted += 1;
     },
+    parked: (id) => parkedHolders.has(id),
   });
   stopForgetting = forgetEndedYields(bus, claimWaits);
   const handler = createMcpHandler({
@@ -839,6 +843,68 @@ describe('MCP tools', () => {
     releaseHolder(other);
     expect((await pending).json).toMatchObject({ granted: true });
     expect(claimWaits.awaitedHolders()).toEqual(new Set());
+  });
+
+  describe('a holder the update drain has parked', () => {
+    it('ends the wait with a refusal telling the agent to end its turn, whether the holder was parked before the ask or during the wait', async () => {
+      const a = await seedSession(['api']);
+      const beta = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
+      holdClaim(a.project, beta, { kind: 'area', name: 'ui' });
+
+      // Parked during the wait: the call waits, then is refused once the drain parks Beta.
+      const during = a.call('request_claim', {
+        opId: 'op-parked-during',
+        kind: 'area',
+        name: 'ui',
+        reason: 'badge',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(a)).not.toBeNull();
+      });
+      parkedHolders.add(beta.workstream.id);
+      const refused = await during;
+      expect(refused.json).toMatchObject({
+        granted: false,
+        waiting: false,
+        heldBy: beta.workstream.id,
+        inboxId: null,
+      });
+      const { instruction } = refused.json as { instruction: string };
+      expect(instruction).toContain('End your turn');
+      expect(instruction).toContain('update');
+      expect(noticeOf(a)).toBeNull();
+      expect(claimWaits.awaitedHolders()).toEqual(new Set());
+
+      // Parked before the ask: refused at once, with no wait left behind.
+      const before = await a.call('request_claim', {
+        opId: 'op-parked-before',
+        kind: 'area',
+        name: 'ui',
+        reason: 'badge again',
+      });
+      expect(before.json).toMatchObject({ granted: false, waiting: false });
+      expect(activeClaims(state.db, a.workstream.id).map((c) => c.name)).not.toContain('ui');
+      expect(noticeOf(a)).toBeNull();
+      expect(openCards()).toEqual([]);
+    });
+
+    it('keeps waiting for a holder that is not parked, and takes the claim when it frees', async () => {
+      const a = await seedSession(['api']);
+      const beta = seedWorkstream(base, { project: a.project, title: 'Beta', areas: ['ui'] });
+      holdClaim(a.project, beta, { kind: 'area', name: 'ui' });
+      const pending = a.call('request_claim', {
+        opId: 'op-not-parked',
+        kind: 'area',
+        name: 'ui',
+        reason: 'badge',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(a)).not.toBeNull();
+      });
+      await new Promise((r) => setTimeout(r, 40));
+      releaseHolder(beta);
+      expect((await pending).json).toMatchObject({ granted: true });
+    });
   });
 
   it('keeps one deadlock card per claim, and withdraws it once a later wait for the claim needs none', async () => {
