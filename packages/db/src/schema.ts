@@ -1223,6 +1223,8 @@ export const shapeLinks = sqliteTable(
     questionId: text('question_id')
       .$type<ShapeQuestionId>()
       .references(() => shapeQuestions.id),
+    /** When a turn told Claude this task finished outside its size; null until then. */
+    sizeToldAt: text('size_told_at'),
     createdAt: createdAt(),
   },
   (t) => [

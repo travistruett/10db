@@ -252,12 +252,15 @@ describe('what changed, and why', () => {
   });
 
   describe('Why?', () => {
+    // The transcript scrolls through its virtual list, which writes Element.scrollTo. jsdom has none.
     const scrolled = vi.fn();
     beforeEach(() => {
-      Element.prototype.scrollIntoView = scrolled;
+      Element.prototype.scrollTo = scrolled;
     });
     afterEach(() => {
       scrolled.mockClear();
+      // @ts-expect-error jsdom has none; put that back.
+      delete Element.prototype.scrollTo;
     });
 
     function withSources() {

@@ -7,7 +7,7 @@ import { useShapeView } from '../../daemon/shape-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { ConversationPane } from './conversation-pane';
 import { ProposedPane } from './proposed-pane';
-import { groupProposals } from './proposed-groups';
+import { groupProposals, type SectionKey } from './proposed-groups';
 import { RoundAnnouncer } from './round-announcer';
 import { SplitPane } from './split-pane';
 import { SummaryLine } from './summary-line';
@@ -28,6 +28,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
   const query = useShapeView(shapeId);
   const view = query.data;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [jump, setJump] = useState<{ section: SectionKey; nonce: number } | null>(null);
   const [why, setWhy] = useState<TranscriptProps['why']>(null);
   const error = query.isError ? query.error.message : null;
 
@@ -81,9 +82,14 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
               loading={query.isLoading}
               error={error}
               summaryHere={layout.mode === 'split'}
+              jumpRequest={jump}
+              onJumped={() => {
+                setJump(null);
+              }}
               onWhy={(row) => {
                 // A drawer would cover the messages it points at.
                 setDrawerOpen(false);
+                setJump(null);
                 setWhy((previous) => ({
                   ids: row.sourceMessageIds,
                   nonce: (previous?.nonce ?? 0) + 1,
@@ -95,7 +101,9 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
             <Group gap="sm" px="md" py={6} wrap="nowrap" justify="space-between">
               <SummaryLine
                 groups={groupProposals(view?.proposals ?? [])}
-                onJump={() => {
+                onJump={(section) => {
+                  // The drawer mounts the pane on open; the pane focuses the section's first row.
+                  setJump((previous) => ({ section, nonce: (previous?.nonce ?? 0) + 1 }));
                   setDrawerOpen(true);
                 }}
               />

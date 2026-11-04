@@ -674,7 +674,8 @@ network:
   token, the Tauri IPC or the network.
 - **Charts** are Vega-Lite with inline `data.values` only; the zod schema refuses `data.url` and every URL-bearing
   field, and the loader refuses network loads.
-- **Mermaid** runs at `securityLevel: 'strict'`.
+- **Mermaid** runs at `securityLevel: 'strict'`. It draws into a temporary element in the live document, so only
+  known kinds are drawn, and one that names an image or a style `url()` is refused (`safe-render.ts`).
 - **Chat and row text** render Markdown without images or raw HTML; a link shows its URL and opens in the system
   browser only on click.
 - **Tests:** a mockup with a `<script>` and a `fetch`, a chart with `data.url` and a Mermaid `click` directive
@@ -809,13 +810,18 @@ All in scope; this is build order. Each slice ships something usable.
    Decisions › Sizing; `find_records` with dated hits cited in the chat, and supersede through Convert; the
    per-project opt-in (Settings › General), the three decisions in shadow (`shape_shadow_answers`, judge outcome
    `shadow`), their scoring and agreement rows. `similar_tasks` ranks by shared words, not an FTS5 index (finished
-   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. Also built: Convert
-   writes principles (confirmed, replacing the current one with the same topic key and scope) and stores questions in
-   `shape_questions` under the goal or task they are about (migrations 0039, 0040; `decisions/2026-11-03-convert-writes-principles-confirmed-and-stores-questions-under-their-goal-or-task.md`);
+   tasks with lane time are few). A pending row the builder pinned counts as kept when scoring. The task drawer of a
+   converted task reads the same size line as the Proposed row. A conversation's next turn names each task that
+   finished more than one bucket from its size, however the conversation was opened (Open conversation, History, the
+   Plan list, a live session), because the service adds it at turn intake rather than on the resume route, which
+   nothing calls yet. `shape_links.size_told_at` (migration 0041), set once the turn is sent, keeps it from being lost
+   or repeated across a failed start or a restart; a fresh session reads the same lines in its digest. Also built:
+   Convert writes principles (confirmed, replacing the current one with the same topic key and scope) and stores
+   questions in `shape_questions` under the goal or task they are about (migrations 0039, 0040;
+   `decisions/2026-11-03-convert-writes-principles-confirmed-and-stores-questions-under-their-goal-or-task.md`);
    Withdraw Principle… beside Withdraw Decision…; `find_records` returns principles beside decisions; and a
    conversation's session starts with the builder-wide and project policies and heuristics, again after a 70%
-   re-seed. Not built yet, and filed as follow-ups: the actual in the task drawer; telling a reopened conversation
-   which of its tasks mis-sized.*
+   re-seed.*
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.

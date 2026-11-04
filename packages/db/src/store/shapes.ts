@@ -8,7 +8,7 @@ import {
   type ShapeId,
   type ShapeOrigin,
 } from '@10db/contracts';
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
@@ -63,6 +63,21 @@ export function getShape(db: DbReader, id: ShapeId): ShapeDto {
   const row = db.select().from(schema.shapes).where(eq(schema.shapes.id, id)).get();
   if (!row) throw new NotFoundError('shape', id);
   return toShapeDto(row);
+}
+
+/**
+ * The tokens a conversation has used so far (§4): input and output summed over every session it has
+ * run, the same rows per-project usage reads. Cached tokens are a subset of the input, so not added.
+ */
+export function shapeTokens(db: DbReader, id: ShapeId): number {
+  const row = db
+    .select({
+      total: sql<number>`coalesce(sum(${schema.sessions.inputTokens} + ${schema.sessions.outputTokens}), 0)`,
+    })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.shapeId, id))
+    .get();
+  return row?.total ?? 0;
 }
 
 /** The project's conversations, oldest first. */
