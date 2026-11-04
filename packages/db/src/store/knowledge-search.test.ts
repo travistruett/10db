@@ -82,9 +82,7 @@ describe('a typed search, the same in the daemon and on the Proposals tab', () =
     const codePoints = [
       ...Array.from({ length: 0x250 - 0xc0 }, (_, i) => 0xc0 + i),
       ...Array.from({ length: 0x1f00 - 0x1e00 }, (_, i) => 0x1e00 + i),
-    ]
-      // The tokenizer's table folds the long s, plain or dotted, to s; toLowerCase leaves it.
-      .filter((cp) => /\p{L}/u.test(String.fromCodePoint(cp)) && ![0x17f, 0x1e9b].includes(cp));
+    ].filter((cp) => /\p{L}/u.test(String.fromCodePoint(cp)));
     for (const cp of codePoints) insert.run(cp, String.fromCodePoint(cp));
     const indexed = z
       .array(z.object({ doc: z.number(), term: z.string() }))
