@@ -877,6 +877,20 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     getBatch(db, batch.id).notices.find((n) => n.key === NOTICE_KEY.migrationsUncarried);
 
   /**
+   * Puts the words for a notice whose list can't be read on the notice itself, where the app shows
+   * it: its own text names steps for a list that is gone, and re-creating migrations clears nothing.
+   * Only the body changes; the record stays as it is, so the gate stays stopped. Writing it again
+   * changes nothing.
+   */
+  function showUnreadable(batch: BatchDto, notice: Notice): void {
+    const body = uncarriedSaid(notice);
+    if (notice.body === body) return;
+    tell(batch, () => {
+      showNotice(ctx.state, batch.id, { ...notice, body });
+    });
+  }
+
+  /**
    * The migrations the branch added that `merged` dropped, or that it shares a tag with the base as a
    * different migration (the merge took the base's file), and the journal at HEAD doesn't hold, with
    * `named`, which the carry stopped at, among them whatever the journal says; null when there are
@@ -916,7 +930,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const earlier = uncarriedIn(stored);
     // A notice whose list can't be read stays as it is, and keeps the gate stopped: rewriting it with
     // only these migrations would forget the ones it lists, and the next gate would clear it.
-    if (earlier === null) return stored ?? null;
+    if (earlier === null) {
+      if (stored !== undefined) showUnreadable(batch, stored);
+      return stored ?? null;
+    }
     const at = `${merged.head.slice(0, 12)}^1`;
     const notice = migrationNotices.uncarried([
       ...earlier,
@@ -959,6 +976,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         options.standingOnly !== true
       )
         offerClear(batch, path);
+      showUnreadable(batch, notice);
       const said = uncarriedSaid(notice);
       return {
         kind: 'uncarried',
@@ -1038,12 +1056,16 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       { batchId: batch.id, dirs, reason: problem.why, logPath: problem.logPath },
       'generated files not regenerated after the base merged',
     );
-    // A plain regeneration would make these again under a random name, or not at all.
+    // A plain regeneration would make these again under a random name, or not at all. Not while a
+    // notice with no readable list stands: re-creating migrations clears nothing then, and the
+    // builder is told as much instead.
     const dropped = (merged.regenerate ?? [])
       .flatMap((r) => r.dropped)
       .filter((f) => f.endsWith('.sql'));
     const told: Unregenerated =
-      problem.uncarried !== undefined || dropped.length === 0
+      problem.uncarried !== undefined ||
+      dropped.length === 0 ||
+      uncarriedIn(uncarriedNotice(batch)) === null
         ? problem
         : {
             ...problem,
