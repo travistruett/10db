@@ -43,6 +43,7 @@ const race = vi.hoisted(() => ({
   path: null as string | null,
   beforeOpen: null as (() => void) | null,
   afterOpen: null as (() => void) | null,
+  afterFailedOpen: null as (() => void) | null,
   beforePathLstat: null as (() => void) | null,
   afterPathLstat: null as (() => void) | null,
 }));
@@ -76,7 +77,13 @@ vi.mock('node:fs/promises', async (importOriginal) => {
         }
       }
       if (path === race.path) race.beforeOpen?.();
-      const handle = await real.open(path, flags);
+      let handle: Awaited<ReturnType<typeof real.open>>;
+      try {
+        handle = await real.open(path, flags);
+      } catch (error) {
+        if (path === race.path) race.afterFailedOpen?.();
+        throw error;
+      }
       if (path === race.path) race.afterOpen?.();
       if (path !== moving.path) return handle;
       moving.opens++;
@@ -128,6 +135,7 @@ describe('stampOrReason', () => {
     race.path = null;
     race.beforeOpen = null;
     race.afterOpen = null;
+    race.afterFailedOpen = null;
     race.beforePathLstat = null;
     race.afterPathLstat = null;
   });
@@ -418,6 +426,54 @@ describe('stampOrReason', () => {
         putDir('secret through the link');
       };
       expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+  });
+
+  // The same swap, but to a directory that does not hold the file: the open fails ENOENT through the link while
+  // the file exists. The failure must not be taken for a deletion (`deletionStamp` follows the link and finds
+  // a directory that is there).
+  describe('a directory swapped for a link to one without the file, before the open', () => {
+    beforeEach(() => {
+      mkdirSync(join(root, 'empty'));
+      putDir();
+      race.path = join(root, 'sub/file.txt');
+      race.beforeOpen = () => {
+        rmSync(join(root, 'sub'), { recursive: true, force: true });
+        symlinkSync(join(root, 'empty'), join(root, 'sub'));
+      };
+    });
+
+    function putDir(): void {
+      rmSync(join(root, 'sub'), { recursive: true, force: true });
+      mkdirSync(join(root, 'sub'));
+      writeFileSync(join(root, 'sub/file.txt'), 'live');
+    }
+
+    it('gives no deletion stamp when the link is left in place', async () => {
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no deletion stamp when the directory is put back before the deletion stamp is taken', async () => {
+      race.afterFailedOpen = putDir;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+
+    it('stamps the file once the lane stops flipping', async () => {
+      let flips = 0;
+      const swap = race.beforeOpen;
+      race.beforeOpen = () => {
+        if (flips++ === 0) swap?.();
+      };
+      race.afterFailedOpen = putDir;
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result && !result.stamp.startsWith('gone:')).toBe(true);
+    });
+
+    it('still gives a deletion stamp for a file that is really gone', async () => {
+      race.beforeOpen = null;
+      rmSync(join(root, 'sub/file.txt'));
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result && result.stamp.startsWith('gone:sub:')).toBe(true);
     });
   });
 

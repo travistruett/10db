@@ -239,6 +239,16 @@ function descriptorIsAtPath(
   return at.isFile() && at.dev === fd.dev && at.ino === fd.ino ? 'yes' : 'moved';
 }
 
+/** Whether anything is at `path` (not following a link at the path itself). */
+function pathExists(path: string): boolean {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
 export const STAMP_ATTEMPTS = 3;
 
@@ -360,6 +370,11 @@ export async function stampOrReason(
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
+      // The open may have failed through a directory a lane swapped for a link (to a directory without the
+      // file) after the check above: the file is not gone, and `deletionStamp` follows links. A link still in
+      // place is a non-file; one put back means the path leads to something again, so read it again.
+      if (throughSymlink(root, path)) return { reason: 'not-a-file' };
+      if (pathExists(path)) continue;
       const stamp = deletionStamp(root, path);
       return stamp === null ? { reason: 'unreadable' } : { stamp };
     }
