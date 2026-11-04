@@ -43,7 +43,8 @@ const SELECT_DECISION = sql`
     CASE WHEN d.withdrawn_at IS NOT NULL THEN ${KnowledgeState.Withdrawn}
          WHEN ${SUCCESSOR} IS NOT NULL THEN ${KnowledgeState.Superseded}
          ELSE ${KnowledgeState.Current} END AS state,
-    d.source_id AS sourceId, d.withdrawn_at AS withdrawnAt, d.withdrawn_reason AS withdrawnReason,
+    d.source_id AS sourceId, d.withdrawn_at AS withdrawnAt, d.withdrawn_by AS withdrawnBy,
+    d.withdrawn_reason AS withdrawnReason,
     d.created_at AS createdAt, d.updated_at AS updatedAt
   FROM decisions d`;
 

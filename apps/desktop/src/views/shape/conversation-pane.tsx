@@ -52,21 +52,25 @@ export function ConversationPane({
   const stop = useStopShape();
   const upload = useUploadShapeFile();
 
-  // The conversation a first send or drop made. The screen opens it only once that succeeds, so a
-  // retry after a failure reuses it instead of leaving another empty conversation behind. It is
-  // remembered with its project: switching project stays on this screen, and a send there must
-  // start that project's conversation, not post into the old one.
-  const created = useRef<{ readonly projectId: ProjectId | null; readonly id: ShapeId } | null>(
-    null,
-  );
-  const createdHere = (): ShapeId | null =>
-    created.current?.projectId === projectId ? created.current.id : null;
-  const ensureId = async (): Promise<ShapeId> => {
-    if (shapeId !== null) return shapeId;
-    const remembered = createdHere();
-    if (remembered !== null) return remembered;
-    const id = (await create.mutateAsync()).id;
-    created.current = { projectId, id };
+  // The conversation a first send or drop made, held as the promise of its create so a send and a
+  // drop that overlap share one create instead of leaving an empty conversation behind. The screen
+  // opens it only once the send succeeds, so a retry after a failure reuses it. A failed create is
+  // forgotten, so the retry makes it again. It is remembered with its project: switching project
+  // stays on this screen, and a send there must start that project's conversation, not post into
+  // the old one.
+  const created = useRef<{
+    readonly projectId: ProjectId | null;
+    readonly id: Promise<ShapeId>;
+  } | null>(null);
+  const ensureId = (): Promise<ShapeId> => {
+    if (shapeId !== null) return Promise.resolve(shapeId);
+    if (created.current?.projectId === projectId) return created.current.id;
+    const id = create.mutateAsync().then((made) => made.id);
+    const entry = { projectId, id };
+    created.current = entry;
+    id.catch(() => {
+      if (created.current === entry) created.current = null;
+    });
     return id;
   };
 
@@ -150,7 +154,7 @@ export function ConversationPane({
         files={(view?.files ?? []).map((f) => f.name)}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
-          const made: { id: ShapeId | null } = { id: shapeId ?? createdHere() };
+          const made: { id: ShapeId | null } = { id: shapeId };
           const problems = await addFiles(dropped, view?.files.length ?? 0, {
             ensureConversation: async () => {
               made.id ??= await ensureId();
@@ -166,6 +170,9 @@ export function ConversationPane({
         onSend={async (text) => {
           const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
+          // The daemon took the message, so an earlier refusal of Propose or Stop is out of date.
+          propose.reset();
+          stop.reset();
           if (shapeId === null) onOpened(id);
         }}
         onPropose={doPropose}

@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProposalId,
   SessionId,
+  ShapeId,
   SourceId,
   WorkstreamId,
 } from './ids';
@@ -43,21 +44,27 @@ function shortHash(text: string): string {
 
 /**
  * A topic key made from free text, whole words up to the limit; the builder can change it before
- * confirming. Text with no Latin letters or digits gets `untitled-` and a hash of the text, so two such
- * statements never share a key and the second never silently supersedes the first.
+ * confirming. Text with no Latin letters or digits gets `untitled-` and a hash of the text. Text that
+ * also has letters or digits of another script keeps its Latin words and ends with that hash, so two
+ * statements that differ only in their non-Latin words never share a key and the second never silently
+ * supersedes the first. Text in the Latin script alone keeps just its words.
  */
 export function topicKeyFrom(text: string): TopicKey {
+  const hash = shortHash(text.trim());
+  const hasOtherScript = /[^\P{L}\p{Script=Latin}]|[^\P{Nd}0-9]/u.test(text);
+  const tag = hasOtherScript ? `-${hash}` : '';
+  const limit = TOPIC_KEY_MAX - tag.length;
   const words = text.toLowerCase().match(/[a-z0-9]+/g) ?? [];
   let key = '';
   for (const word of words) {
     const next = key === '' ? word : `${key}-${word}`;
-    if (next.length > TOPIC_KEY_MAX) {
-      if (key === '') key = word.slice(0, TOPIC_KEY_MAX);
+    if (next.length > limit) {
+      if (key === '') key = word.slice(0, limit);
       break;
     }
     key = next;
   }
-  return TopicKey.parse(key === '' ? `untitled-${shortHash(text.trim())}` : key);
+  return TopicKey.parse(key === '' ? `untitled-${hash}` : `${key}${tag}`);
 }
 
 /** Who a record applies to: the builder in every project, one project, or one area of a project. */
@@ -117,6 +124,8 @@ export const DecisionDto = z.object({
   state: DecisionState,
   sourceId: SourceId,
   withdrawnAt: Timestamp.nullable(),
+  /** Who withdrew it; null until it is withdrawn. */
+  withdrawnBy: z.string().nullable(),
   withdrawnReason: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -181,8 +190,12 @@ export const PrincipleDto = z.object({
   confirmedBy: z.string().nullable(),
   confirmedAt: Timestamp.nullable(),
   retiredAt: Timestamp.nullable(),
+  /** Who retired it; null until it is retired. */
+  retiredBy: z.string().nullable(),
   retiredReason: z.string().nullable(),
   withdrawnAt: Timestamp.nullable(),
+  /** Who withdrew it; null until it is withdrawn. */
+  withdrawnBy: z.string().nullable(),
   withdrawnReason: z.string().nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
@@ -276,8 +289,18 @@ export const ProvenanceDto = z.object({
       note: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * The 10db session that wrote the record. A session runs a workstream or a Shape conversation, exactly
+   * one: a lane session has `workstreamId` and `taskTitle`, a Shape session has `shapeId` and `shapeTitle`.
+   */
   session: z
-    .object({ id: SessionId, workstreamId: WorkstreamId, taskTitle: z.string().nullable() })
+    .object({
+      id: SessionId,
+      workstreamId: WorkstreamId.nullable(),
+      shapeId: ShapeId.nullable(),
+      taskTitle: z.string().nullable(),
+      shapeTitle: z.string().nullable(),
+    })
     .nullable(),
   quote: z.string().nullable(),
   speaker: z.string().nullable(),
