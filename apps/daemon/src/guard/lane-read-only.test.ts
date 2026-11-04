@@ -1,4 +1,6 @@
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -97,6 +99,26 @@ describe('laneReadOnlyWords', () => {
   ])('%s is refused for a lane and a read-only step', (_name, command) => {
     expect(laneReadOnlyWords(command)).toBeNull();
     expect(readOnlyShellRefusal(command)).not.toBeNull();
+  });
+
+  it.each<[string, string, string]>([
+    ['git grep -eOption', 'git grep -eOption', '-e O'],
+    ['git grep -O', 'git grep -O less x', 'git grep -O'],
+    ['git diff --output', 'git diff --output=x', '--output'],
+    ['git log --out (abbreviated)', 'git log --out=x', '--output'],
+    ['git diff --ext-diff', 'git diff --ext-diff', '--ext-diff'],
+    ['git diff --ext (abbreviated)', 'git diff --ext', '--ext-diff'],
+    ['git diff --textconv', 'git diff --textconv', '--textconv'],
+    ['git grep --textconv', 'git grep --textconv x', '--textconv'],
+  ])('%s is refused with a message that says why', (_name, command, mention) => {
+    expect(readOnlyShellRefusal(command)).toContain(mention);
+  });
+
+  it('keeps the generic message for a command that is not read-only git', () => {
+    expect(readOnlyShellRefusal('git checkout -- a.ts')).toContain(
+      'shell accepts only plain words',
+    );
+    expect(readOnlyShellRefusal('rm a')).toContain('shell accepts only plain words');
   });
 
   it('adds ps for lanes without widening the read-only steps', () => {
@@ -216,6 +238,50 @@ describe('a lane Bash call made only of read-only commands', () => {
     expect('settled' in pre(command)).toBe(false);
   });
 
+  describe('a device with no end, however the path is spelled', () => {
+    const UP = '../'.repeat(40);
+
+    it.each<[string]>([
+      [`cat ${UP}dev/zero | wc -c`],
+      [`head -c 5 ${UP}dev/urandom`],
+      [`grep -f${UP}dev/zero x a`],
+      [`grep --file=${UP}dev/urandom x a`],
+      ['cat a/../../../../../../../../../../../../../../dev/zero'],
+      ['cat zero-link | wc -c'],
+      ['cat ./zero-link | wc -c'],
+      ['cat dev-link/zero | wc -c'],
+      ['cat chain-link | wc -c'],
+      ['grep -r x /dev'],
+      ['grep -r x /dev/'],
+      ['grep -r x dev-link'],
+      [`grep -r x ${UP}dev`],
+      ['find /dev -name x'],
+    ])('is not settled: %s', (command) => {
+      symlinkSync('/dev/zero', join(repo.path, 'zero-link'));
+      symlinkSync('/dev', join(repo.path, 'dev-link'));
+      symlinkSync('zero-link', join(repo.path, 'chain-link'));
+      mkdirSync(join(repo.path, 'a'), { recursive: true });
+      try {
+        expect('settled' in pre(command)).toBe(false);
+      } finally {
+        for (const name of ['zero-link', 'dev-link', 'chain-link']) {
+          rmSync(join(repo.path, name), { force: true });
+        }
+      }
+    });
+
+    it.each<[string]>([['cat notes.txt'], ['grep -r x apps ../sibling'], ['ls /dev/null']])(
+      'still settles a path that is neither: %s',
+      (command) => {
+        expect(pre(command)).toEqual({ decision: 'allow', settled: expect.any(String) as string });
+      },
+    );
+
+    it('is not settled for a path with no single real path (`..` past a missing part)', () => {
+      expect('settled' in pre('cat missing/../../dev/zero')).toBe(false);
+    });
+  });
+
   it.each<[string]>([
     ['grep -f/protected/path x a'],
     ['grep -nf/protected/path x a'],
@@ -231,6 +297,20 @@ describe('a lane Bash call made only of read-only commands', () => {
       decision: 'allow',
       settled: expect.any(String) as string,
     });
+  });
+
+  it('is not settled for a single-dash word over 256 characters, which is not split into paths', () => {
+    // Short path parts and a last part that is a name, so no tail of the word fails on its own: a part
+    // over 255 characters has no real path, and a tail of just `/` holds /dev.
+    const word = (length: number): string => `-${'a/'.repeat(127)}${'a'.repeat(length - 255)}`;
+    expect(word(256)).toHaveLength(256);
+    expect('settled' in pre(`grep ${word(256)} x a`)).toBe(true);
+    expect('settled' in pre(`grep ${word(257)} x a`)).toBe(false);
+  });
+
+  it('is not settled for ps with a value holding an e, as `-o pid,etime` does', () => {
+    expect(laneReadOnlyWords('ps -o pid,etime')).toBeNull();
+    expect('settled' in pre('ps -o pid,etime')).toBe(false);
   });
 
   it('is not settled after a cd, which moves what a relative path means', () => {

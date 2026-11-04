@@ -59,18 +59,22 @@ const WRITING_OPTIONS: Readonly<Record<string, readonly string[]>> = {
 };
 
 /**
- * Whether a read-only git call writes a file or runs a program. `--output` and `git grep -O` are
- * gitVerdict's to judge (it knows `-O` only means a pager for grep, so `git log -SOption` passes).
- * `--ext-diff` and `--textconv` are checked here; `--text` is a different option (treat as text) and
- * passes, while any other abbreviation of `--textconv` is refused.
+ * Why a read-only git call is refused because it writes a file or runs a program, or null when it
+ * does neither. `--output` and `git grep -O` are gitVerdict's to judge (it knows `-O` only means a
+ * pager for grep, so `git log -SOption` passes), and its message says how to rephrase. `--ext-diff`
+ * and `--textconv` are checked here; `--text` is a different option (treat as text) and passes,
+ * while any other abbreviation of `--textconv` is refused.
  */
-function gitRunsOrWrites(args: readonly string[]): boolean {
-  if (gitVerdict(['git', ...args]) !== null) return true;
-  return args.some(
-    (a) =>
-      abbreviates(a, '--ext-diff') ||
-      (a.split('=')[0] !== '--text' && abbreviates(a, '--textconv')),
-  );
+function gitRunsOrWritesReason(args: readonly string[]): string | null {
+  const verdict = gitVerdict(['git', ...args]);
+  if (verdict !== null) return verdict.deny;
+  if (args.some((a) => abbreviates(a, '--ext-diff'))) {
+    return 'git --ext-diff runs an external diff program and is not allowed.';
+  }
+  if (args.some((a) => a.split('=')[0] !== '--text' && abbreviates(a, '--textconv'))) {
+    return 'git --textconv runs an external conversion program and is not allowed.';
+  }
+  return null;
 }
 
 /**
@@ -101,32 +105,44 @@ const REFUSAL =
 /** What a lane may run besides `READ_COMMANDS` without a card: `ps` prints the process table. */
 const LANE_EXTRA_COMMANDS: ReadonlySet<string> = new Set(['ps']);
 
-/** The segments' words when every one is a read-only command, else null. */
-function readOnlySegments(
+/**
+ * The segments' words when every one is a read-only command, else why not: `reason` is a specific
+ * message when a read-only git call has an option that writes or runs a program, otherwise null
+ * (the generic refusal applies).
+ */
+function readOnlyJudgement(
   command: string,
   commands: ReadonlySet<string>,
   optionGlobs: boolean,
-): string[][] | null {
+): { readonly segments: string[][] } | { readonly reason: string | null } {
   const segments = plainCommandWords(command, { optionGlobs });
-  if (segments === null) return null;
+  if (segments === null) return { reason: null };
   for (const [cmd = '', ...args] of segments) {
     // Only a bare command: no assignment, wrapper or path (those run something else).
-    if (cmd.includes('/')) return null;
+    if (cmd.includes('/')) return { reason: null };
     if (cmd === 'git') {
-      if (!READ_GIT.has(args[0] ?? '') || gitRunsOrWrites(args)) return null;
+      if (!READ_GIT.has(args[0] ?? '')) return { reason: null };
+      const reason = gitRunsOrWritesReason(args);
+      if (reason !== null) return { reason };
     } else if (!commands.has(cmd)) {
-      return null;
+      return { reason: null };
     }
-    if (cmd === 'ps' && psShowsEnvironment(args)) return null;
+    if (cmd === 'ps' && psShowsEnvironment(args)) return { reason: null };
     const writing = WRITING_OPTIONS[cmd] ?? [];
-    if (args.some((a) => writing.some((o) => usesOption(a, o)))) return null;
+    if (args.some((a) => writing.some((o) => usesOption(a, o)))) return { reason: null };
   }
-  return segments;
+  return { segments };
 }
 
-/** Why a read-only step may not run this command, or null when every segment only reads. */
+/**
+ * Why a read-only step may not run this command, or null when every segment only reads. A read-only
+ * git call refused for an option says which option and how to rephrase; any other refusal is the
+ * generic one.
+ */
 export function readOnlyShellRefusal(command: string): string | null {
-  return readOnlySegments(command, READ_COMMANDS, false) === null ? REFUSAL : null;
+  const judgement = readOnlyJudgement(command, READ_COMMANDS, false);
+  if ('segments' in judgement) return null;
+  return judgement.reason === null ? REFUSAL : `This step is read-only: ${judgement.reason}`;
 }
 
 /**
@@ -136,5 +152,10 @@ export function readOnlyShellRefusal(command: string): string | null {
  * file, a substitution, a variable, a background job, a writing option, another program.
  */
 export function laneReadOnlyWords(command: string): string[][] | null {
-  return readOnlySegments(command, new Set([...READ_COMMANDS, ...LANE_EXTRA_COMMANDS]), true);
+  const judgement = readOnlyJudgement(
+    command,
+    new Set([...READ_COMMANDS, ...LANE_EXTRA_COMMANDS]),
+    true,
+  );
+  return 'segments' in judgement ? judgement.segments : null;
 }
