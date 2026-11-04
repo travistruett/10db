@@ -1,6 +1,6 @@
 import {
   BatchState,
-  WorkspaceMode,
+  ConflictError,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -10,6 +10,8 @@ import {
 import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
+import { landingHold } from './landing-join';
+import { batchPlacement } from './placement';
 import type { BatchStarter } from './start';
 import type { Shipper } from './ship';
 
@@ -31,7 +33,9 @@ export interface FailedRestarts {
    * other tasks' work stays, and its id is returned: once the task has started again the batch no
    * longer waits on the superseded attempt, so the caller checks it for shipping (`Shipper.checkBatch`).
    * Refuses while a run in the batch is live, and, before it abandons anything, when the start that
-   * follows would be refused, so the attempt stays to be retried.
+   * follows would be refused, so the attempt stays to be retried. A task that moved is also refused
+   * when its landing holds it in a batch that works elsewhere (`landingHold`): the start would join
+   * that batch and undo the move.
    */
   supersede(taskId: TaskId): BatchId | null;
 }
@@ -55,10 +59,9 @@ export function createFailedRestarts(deps: {
     return { workstream, batch };
   }
 
-  /** Whether the task's placement is no longer the one the batch works in (a copy has a worktree path). */
+  /** Whether the task's placement is no longer the one the batch works in. */
   function placementMovedFrom(taskId: TaskId, batch: BatchDto): boolean {
-    const inBatch = batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
-    return getTask(db, taskId).workspaceMode !== inBatch;
+    return getTask(db, taskId).workspaceMode !== batchPlacement(batch);
   }
 
   return {
@@ -78,6 +81,10 @@ export function createFailedRestarts(deps: {
     supersede(taskId) {
       const failed = failedRun(taskId);
       if (!failed) return null;
+      if (placementMovedFrom(taskId, failed.batch)) {
+        const held = landingHold(db, getTask(db, taskId), failed.batch);
+        if (held !== null) throw new ConflictError(held);
+      }
       const members = listWorkstreams(db, { batchId: failed.batch.id });
       if (members.some((w) => w.taskId !== taskId)) return failed.batch.id;
       deps.starter.refuseStart(taskId, failed.batch.id);

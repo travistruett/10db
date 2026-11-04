@@ -156,6 +156,12 @@ batch is `OPEN`.
 **Ship, retry, abandon, recovery.** Unchanged: they already read the batch. The switch back counts only lanes in
 the main checkout (P6). A project with a shared batch and copies recovers each on its own.
 
+**A failed task that moved.** A failed task's placement can change, but a retry stays in its batch. So every Retry
+of a task whose batch works somewhere else is refused, naming both places and Start over. Start on such a task starts
+it over in its new placement. A landing can hold it: when the landing's unfinished batch works elsewhere and is not
+the attempt's own batch holding only that task, Start, Start over and Retry are refused before anything is written,
+naming the landing, because one pull request means one place. The builder sets the task back to run it there.
+
 **Fix tasks.** A fix task joins the batch it names and takes its placement (P4).
 
 ## 6. Does a copy ever write the main checkout?

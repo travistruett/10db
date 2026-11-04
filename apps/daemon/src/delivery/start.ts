@@ -10,6 +10,7 @@ import {
   TaskStatus,
   UNFINISHED_BATCH_STATES,
   WorkspaceMode,
+  WorkstreamState,
   type BatchDto,
   type BatchId,
   type LandingGroupId,
@@ -46,8 +47,8 @@ import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './
 import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from './deps';
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
-import { planLandings, shippedLandingNotice } from './landing-join';
-import { refuseCrossPlacementDependency } from './placement';
+import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
+import { batchPlacement, placementWords, refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
 import {
@@ -97,7 +98,8 @@ export interface BatchStarter {
   /**
    * Every Retry of a failed workstream, whichever screen asked: the run goes back to the queue and
    * its batch reopens (`reopen`). Refused while a join of its task is pending, since the join writes
-   * a new run for the task and one-active-workstream would then refuse the join.
+   * a new run for the task and one-active-workstream would then refuse the join. Refused too when the
+   * task moved to a placement its batch doesn't work in, saying why: a retry stays in the batch.
    */
   retry(id: WorkstreamId, note?: string): WorkstreamDto;
   /**
@@ -154,6 +156,26 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
 
   function joiningProblem(taskId: TaskId): string | null {
     return joining.has(taskId) ? joiningText(getTask(db, taskId)) : null;
+  }
+
+  /**
+   * A retry stays in its batch, so it can't run where a task that moved says it will. Only a retry the
+   * store would otherwise take is refused here; `retryWorkstream` answers the rest in its own words.
+   */
+  function refuseMovedRetry(id: WorkstreamId): void {
+    const row = getWorkstreamRow(db, id);
+    const task = getTask(db, row.taskId);
+    if (row.state !== WorkstreamState.Failed || row.batchId === null) return;
+    if (task.workstreamId !== id) return;
+    const batch = getBatch(db, row.batchId);
+    if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed) return;
+    if (batchPlacement(batch) === task.workspaceMode) return;
+    const from = placementWords(batchPlacement(batch));
+    const to = placementWords(task.workspaceMode);
+    throw new ConflictError(
+      landingHold(db, task, batch) ??
+        `${task.title} is set to work in ${to}, but its failed run is in batch "${batch.title}" in ${from}, and a retry stays in its batch. Start over to run it in ${to}, or set it back to ${from} to retry it there.`,
+    );
   }
 
   function reopen(batchId: BatchId): void {
@@ -230,10 +252,10 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       );
     });
     // A task of a landing whose batch is open joins it (Shape spec §10.4), where that batch works.
-    const landings = planLandings(db, tasks);
+    const landings = planLandings(db, tasks, ending);
     const joinedMode = new Map<TaskId, WorkspaceMode>();
     const joinSteps = landings.joins.map(({ batch, tasks: joining }): StartStep => {
-      const mode = batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
+      const mode = batchPlacement(batch);
       for (const task of joining) joinedMode.set(task.id, mode);
       return mode === WorkspaceMode.Worktree
         ? prepareJoinWorktree(project, batch, joining)
@@ -715,6 +737,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     },
     retry(id, note) {
       refuseIfJoining(getWorkstreamRow(db, id).taskId);
+      refuseMovedRetry(id);
       const retried = retryWorkstream(ctx.state, id, note);
       if (retried.batchId !== null) reopen(retried.batchId);
       return retried;
