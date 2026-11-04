@@ -8,10 +8,11 @@ import {
   realpathSync,
   writeFileSync,
 } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { Git } from '../git';
 import { journalTags, ownTags, parseTag } from './migration-numbers';
 import type { RenumberedMigration } from './notices';
+import { schemaOf, stepSchema } from './snapshot-schema';
 import { MIGRATIONS_DIR, type CarriedMigration } from './worktree-generated';
 
 const JOURNAL = `${MIGRATIONS_DIR}meta/_journal.json`;
@@ -33,32 +34,6 @@ export type OwnMigrations =
   | { readonly kind: 'unreadable'; readonly tag: string; readonly why: string };
 
 const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [] };
-
-/** What `generate` writes into every snapshot whatever the schema: never part of the comparison. */
-const SNAPSHOT_BOOKKEEPING: ReadonlySet<string> = new Set(['id', 'prevId', '_meta']);
-
-/** `value` with each object's keys sorted: `--custom` copies a snapshot in another key order. */
-function sortedKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortedKeys);
-  if (typeof value !== 'object' || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, field]) => [key, sortedKeys(field)]),
-  );
-}
-
-/** A snapshot's schema, comparable with another's; null when it is not a snapshot. */
-export function schemaOf(text: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const schema = Object.entries(parsed).filter(([key]) => !SNAPSHOT_BOOKKEEPING.has(key));
-    return JSON.stringify(sortedKeys(Object.fromEntries(schema)));
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The migrations `tip` added under the migrations directory that the base at `from` lacks. `--custom`
@@ -96,6 +71,86 @@ export async function ownMigrations(
     migrations.push({ tag, name: parsed.name, custom });
   }
   return { kind: 'found', migrations, baseTags: theirs };
+}
+
+/** The file `drizzle-kit generate` reads the schema from, in the package that makes the migrations. */
+export const SCHEMA_FILE = 'packages/db/src/schema.ts';
+
+/** A schema file past this is not read. */
+export const SCHEMA_MAX_BYTES = 16 * 1024 * 1024;
+
+export type SchemaSteps =
+  /**
+   * `before` holds, for each generated migration but the last, a schema file that stands for the
+   * schema at that migration, merged with the base's. The last one is made from the file as merged.
+   */
+  | { readonly kind: 'steps'; readonly before: ReadonlyMap<string, Buffer> }
+  /** The schema as of migration `tag` can't be told, so it can't be made as a step of its own. */
+  | { readonly kind: 'unknown'; readonly tag: string; readonly why: string };
+
+/**
+ * `generate` diffs the schema file as merged, so with two generated migrations the first would take
+ * the changes of both and the second would make nothing. Each step needs the schema as it stood
+ * at its migration, with the base's changes. The branch's snapshots at `tip` keep each step, whether
+ * its commits made one migration each, one commit made several, or an earlier catch-up's regenerate
+ * commit holds them all. Nothing to do for fewer than two generated migrations.
+ */
+export async function schemaSteps(
+  git: Pick<Git, 'fileAt' | 'mergeBase'>,
+  repo: string,
+  tip: string,
+  from: string,
+  migrations: readonly CarriedMigration[],
+): Promise<SchemaSteps> {
+  const generated = migrations.filter((m) => !m.custom);
+  const before = new Map<string, Buffer>();
+  if (generated.length < 2) return { kind: 'steps', before };
+  const text = async (rev: string, path: string): Promise<string | null> => {
+    const found = await git.fileAt(repo, rev, path, META_MAX_BYTES);
+    return found.kind === 'file' ? found.text : null;
+  };
+  const snapshotOf = (rev: string, number: string) =>
+    text(rev, `${MIGRATIONS_DIR}meta/${number}_snapshot.json`);
+  /** The snapshot of the last migration `rev` holds. */
+  const latest = async (rev: string): Promise<string | null> => {
+    const last = parseTag(journalTags(await text(rev, JOURNAL))?.at(-1) ?? '');
+    return last === null ? null : snapshotOf(rev, last.number);
+  };
+  const ancestor = await git.mergeBase(repo, tip, from);
+  const shared = ancestor === null ? null : await latest(ancestor);
+  const theirs = await latest(from);
+  for (const migration of generated.slice(0, -1)) {
+    const unknown = (why: string): SchemaSteps => ({ kind: 'unknown', tag: migration.tag, why });
+    const ours = await snapshotOf(tip, parseTag(migration.tag)?.number ?? '');
+    if (ours === null || shared === null || theirs === null)
+      return unknown('a snapshot it needs is not there');
+    const schema = stepSchema(shared, ours, theirs);
+    if (schema.kind === 'refused')
+      return unknown(`a schema for its step could not be made: ${schema.why}`);
+    before.set(migration.tag, Buffer.from(schema.text));
+  }
+  return { kind: 'steps', before };
+}
+
+/**
+ * The runs of the generator that make `migrations`: one run with all of them, or with steps, one
+ * for each stretch that is made from the same schema file. A `schema` is placed in the worktree for
+ * its run; none leaves the schema file as the merge made it.
+ */
+export function stepRuns(
+  migrations: readonly CarriedMigration[],
+  before: ReadonlyMap<string, Buffer>,
+): { readonly migrations: readonly CarriedMigration[]; readonly schema: Buffer | null }[] {
+  if (before.size === 0) return [{ migrations, schema: null }];
+  const runs: { migrations: CarriedMigration[]; schema: Buffer | null }[] = [];
+  for (const migration of migrations) {
+    const schema = before.get(migration.tag) ?? null;
+    const last = runs.at(-1);
+    if (last !== undefined && schema === null && last.schema === null)
+      last.migrations.push(migration);
+    else runs.push({ migrations: [migration], schema });
+  }
+  return runs;
 }
 
 /** How far the generators got: `missing` is the first migration they did not make. */
@@ -199,9 +254,23 @@ export async function absentFrom(
 }
 
 /**
- * Puts each custom migration's SQL from `tip`, byte for byte, over the stub `--custom` wrote. A link
- * in the path to the file, or anything but a plain file in its place (`withPlainFile`), refuses the
- * write. Resolves with the migration it could not write, and why.
+ * Replaces the content of the existing file `path` (relative to `repo`) with `bytes`. A link in the
+ * path to it, or anything but a plain file in its place (`withPlainFile`), refuses the write by
+ * throwing: what ran in the worktree may have left either there.
+ */
+export function overwriteFile(repo: string, path: string, bytes: Buffer): void {
+  const where = dirname(path);
+  if (realpathSync(join(repo, where)) !== join(realpathSync(repo), where))
+    throw new Error('a link lies in the path to its file');
+  withPlainFile(join(repo, path), constants.O_WRONLY, (fd) => {
+    ftruncateSync(fd);
+    writeFileSync(fd, bytes);
+  });
+}
+
+/**
+ * Puts each custom migration's SQL from `tip`, byte for byte, over the stub `--custom` wrote
+ * (`overwriteFile` refuses a link). Resolves with the migration it could not write, and why.
  */
 export async function copyCustomSql(
   git: Pick<Git, 'bytesAt'>,
@@ -211,7 +280,6 @@ export async function copyCustomSql(
 ): Promise<{ readonly tag: string; readonly why: string } | null> {
   for (const { migration, tag } of made) {
     if (!migration.custom) continue;
-    const dir = join(repo, MIGRATIONS_DIR);
     try {
       const sql = await git.bytesAt(
         repo,
@@ -220,12 +288,7 @@ export async function copyCustomSql(
         SQL_MAX_BYTES,
       );
       if (sql === null) return { tag: migration.tag, why: 'its SQL could not be read' };
-      if (`${realpathSync(dir)}/` !== join(realpathSync(repo), MIGRATIONS_DIR))
-        return { tag: migration.tag, why: 'a link lies in the path to its file' };
-      withPlainFile(join(dir, `${tag}.sql`), constants.O_WRONLY, (fd) => {
-        ftruncateSync(fd);
-        writeFileSync(fd, sql);
-      });
+      overwriteFile(repo, `${MIGRATIONS_DIR}${tag}.sql`, sql);
     } catch (error) {
       return {
         tag: migration.tag,

@@ -28,7 +28,12 @@ import {
   addedTags,
   carriedSoFar,
   copyCustomSql,
+  overwriteFile,
   ownMigrations,
+  SCHEMA_FILE,
+  SCHEMA_MAX_BYTES,
+  schemaSteps,
+  stepRuns,
 } from './migration-carry';
 import {
   baseNotices,
@@ -41,7 +46,7 @@ import {
 } from './notices';
 import { mergeRef, startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
-import { generatedIn, MIGRATIONS_DIR } from './worktree-generated';
+import { generatedIn, MIGRATIONS_DIR, type Regeneration } from './worktree-generated';
 
 /**
  * What 10db keeps (`Git.keepNote`, at `mergeRef`) while a base merge's conflict markers wait for a
@@ -69,6 +74,12 @@ export type BaseUpdate =
       readonly note: string | null;
       /** The conflicts the merge settled; only when asked for a pull request (`forPullRequest`). */
       readonly resolved?: readonly ResolvedConflict[];
+      /**
+       * The migrations the merge renumbered; only when asked for a pull request, whose catch-up may
+       * still be put back. The batch's notice is not written for it: the caller keeps it once the
+       * merge is pushed (`keepRenumbered`).
+       */
+      readonly renumbered?: readonly RenumberedMigration[];
     }
   /**
    * The branch lacks a migration of the batch's that a merge of the base lost, and that 10db could
@@ -524,14 +535,44 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (own?.kind === 'unreadable') return notCarried(own.tag, own.why, null, false);
     const migrations = own?.migrations ?? [];
     const baseTags = own?.baseTags ?? [];
-    const generated = await ctx.generators.regenerate({
-      batch,
-      project,
-      path,
-      dirs,
-      signal,
-      ...(migrations.length > 0 ? { migrations } : {}),
-    });
+    const steps = await schemaSteps(ctx.git, path, tip, merged.from, migrations);
+    if (steps.kind === 'unknown')
+      return notCarried(
+        steps.tag,
+        `it is one of several generated migrations, and ${steps.why}`,
+        null,
+        false,
+      );
+    // With several generated migrations each is made from a schema file that stands for that step, so
+    // the file is replaced between runs and is the merge's again after the last, whatever happens.
+    const mergedSchema =
+      steps.before.size > 0
+        ? await ctx.git.bytesAt(path, current, SCHEMA_FILE, SCHEMA_MAX_BYTES)
+        : null;
+    if (steps.before.size > 0 && mergedSchema === null)
+      return notCarried(migrations[0]?.tag ?? '', `${SCHEMA_FILE} could not be read`, null, false);
+    let replaced = false;
+    let generated: Regeneration = { kind: 'aborted' };
+    try {
+      for (const [i, run] of stepRuns(migrations, steps.before).entries()) {
+        const schema = run.schema ?? mergedSchema;
+        if (schema !== null && (run.schema !== null || replaced)) {
+          overwriteFile(path, SCHEMA_FILE, schema);
+          replaced = true;
+        }
+        generated = await ctx.generators.regenerate({
+          batch,
+          project,
+          path,
+          dirs: i === 0 ? dirs : dirs.filter((dir) => dir === MIGRATIONS_DIR),
+          signal,
+          ...(run.migrations.length > 0 ? { migrations: run.migrations } : {}),
+        });
+        if (generated.kind !== 'done') break;
+      }
+    } finally {
+      if (replaced && mergedSchema !== null) overwriteFile(path, SCHEMA_FILE, mergedSchema);
+    }
     if (generated.kind === 'aborted') {
       // What a stopped run wrote would be in the next merge's way.
       await ctx.git.restoreDirs(path, dirs).catch(() => []);
@@ -653,6 +694,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly head: string;
         readonly note: string | null;
         readonly uncarried?: true;
+        /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
+        readonly renumbered?: readonly RenumberedMigration[];
       }
     | { readonly kind: 'aborted' }
   > {
@@ -697,24 +740,25 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       return outcome;
     }
     const { head, problem, renumbered } = outcome;
-    if (problem === null) return { kind: 'done', head, note: renumberedNote(batch, renumbered) };
-    const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
-    if (lost === null)
-      return {
+    // The merge stands, whatever else is said of it. A catch-up's may still be put back, though: its
+    // caller keeps the notice once it is pushed.
+    const stands = (other: string | null) =>
+      ({
         kind: 'done',
         head,
-        note: joined(
-          renumberedNote(batch, renumbered),
-          unregenerated(batch, path, merged, problem),
-        ),
-      };
+        note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
+        ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
+      }) as const;
+    if (problem === null) return stands(null);
+    const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
+    if (lost === null) return stands(unregenerated(batch, path, merged, problem));
     return {
       kind: 'done',
       head,
       uncarried: true,
       note: joined(
         // A merge that goes back moved nothing.
-        forPullRequest ? null : renumberedNote(batch, renumbered),
+        forPullRequest ? null : renumberedNote(batch, renumbered, true),
         unregenerated(batch, path, merged, problem, {
           lost: true,
           card: !forPullRequest && options.raisesUncarried !== true,
@@ -812,22 +856,29 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
-  /**
-   * Keeps what `renumbered` moved on the batch, where every later step's brief reads it. Resolves with
-   * what the gate's note says of it; null when nothing moved.
-   */
-  function renumberedNote(
-    batch: BatchDto,
-    renumbered: readonly RenumberedMigration[],
-  ): string | null {
-    if (renumbered.length === 0) return null;
-    ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
+  /** Puts what `renumbered` moved on the batch's notice, with what it already lists. */
+  function keepRenumbered(batch: BatchDto, renumbered: readonly RenumberedMigration[]): void {
     tell(batch, () => {
       const earlier = getBatch(db, batch.id).notices.find(
         (n) => n.key === NOTICE_KEY.migrationsRenumbered,
       );
       showNotice(ctx.state, batch.id, migrationNotices.renumbered(earlier, renumbered));
     });
+  }
+
+  /**
+   * Keeps what `renumbered` moved on the batch (unless `keep` is false: a catch-up's caller keeps it
+   * itself once the merge is pushed), where every later step's brief reads it. Resolves
+   * with what the gate's note says of it; null when nothing moved.
+   */
+  function renumberedNote(
+    batch: BatchDto,
+    renumbered: readonly RenumberedMigration[],
+    keep: boolean,
+  ): string | null {
+    if (renumbered.length === 0) return null;
+    ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
+    if (keep) keepRenumbered(batch, renumbered);
     return `10db re-created this batch's migrations after origin/${batch.baseBranch}'s. These changed number:\n${renumberedLines(renumbered)}`;
   }
 
@@ -1480,7 +1531,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         const note = joined(merged.note, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
           return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
-        return { ...merged, head: regenerated.head, note };
+        return {
+          ...merged,
+          head: regenerated.head,
+          note,
+          ...(regenerated.renumbered === undefined ? {} : { renumbered: regenerated.renumbered }),
+        };
       }
     }
   }
