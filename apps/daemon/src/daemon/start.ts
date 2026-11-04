@@ -12,11 +12,13 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
+  type ShapeId,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  countWaitingOnCard,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -447,11 +449,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // references; they are set before anything can fire a callback.
   let runner: Runner | null = null;
   let scheduler: Scheduler | null = null;
+  // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
+  const updateDrain = createDrain();
+  // Up from the moment an install takes over until the app quits or the install fails. An install at
+  // an idle moment has no drain, and a Shape turn does not go through the scheduler it pauses.
+  const installHold = createDrain();
   // A task that starts waiting for a claim may be waiting on one that needs a lane to finish.
   const claimWaits = new ClaimWaits({
     onWait: () => {
       scheduler?.requestTick();
     },
+    // During the drain a holder that runs nothing (queued, or parked before its next session or gate)
+    // frees no claim until the update installs. A wait on it would keep its session running, and the
+    // update waits for that session to end, so the wait is refused and the session ends by itself.
+    parked: (id) =>
+      updateDrain.draining && runner !== null && (!runner.isRunning(id) || runner.isParked(id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -519,8 +531,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     ...opts.load,
   });
-  // A waiting update drains the factory: no lane, session, task gate or ship starts until it installs.
-  const updateDrain = createDrain();
   // What holds a lane's next session and a task's gate: an overloaded Mac, or the drain.
   const startHold = holdBoth([loadGuard, updateDrain]);
   const git = createGit({
@@ -852,6 +862,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     screens,
+    // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
+    // install would cut off one that began during the drain, or while the install starts.
+    hold: holdBoth([updateDrain, installHold]),
     jev: createShapeJev({
       state,
       judge,
@@ -1098,6 +1111,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const build = opts.build ?? null;
   let selfUpdate: SelfUpdate | null = null;
+  // What an update waits for, as counts. A queued ship, checkout return or cleanup is a delivery job
+  // before it is a row. A lane or gate parked by the drain has begun nothing: it is not cut off by
+  // the quit (the stop leaves its saved action for recovery), and counting it would keep the drain
+  // going for ever. A shaping conversation with a turn under way counts: it is no workstream, and
+  // the quit would cut off the answer in front of the builder. The drain and the install's hold park
+  // a turn that has not started (it waits in one of them, so `parked()` takes it off the count, and
+  // the quit tells the builder it went unanswered); one running finishes. A lane waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
+  // its session and recovery parks it on its card again, so it must not hold the install, and every
+  // lane behind it, for as long as the builder leaves the card.
+  // `shapes` names the conversations among `working`, so a drain only they hold can say so.
+  const midSessionWaits = (): {
+    working: number;
+    waitingOnCard: number;
+    shapes: { id: ShapeId; title: string }[];
+  } => {
+    const waitingOnCard = countWaitingOnCard(state.db);
+    const working = Math.max(
+      0,
+      midSessionWork(state.db, deliveryJobs, shape, { waitingOnCard: false }) -
+        updateDrain.parked() -
+        installHold.parked(),
+    );
+    return { working, waitingOnCard, shapes: shape.runningTurns() };
+  };
+  const midSessionCount = (): number => {
+    const { working, waitingOnCard } = midSessionWaits();
+    return updateDrain.draining ? working : working + waitingOnCard;
+  };
   // Only a bundle in Applications that knows the repository it was built for follows it; a project,
   // its checkout and its origin have no say in where an update comes from.
   const updateRepository = build?.updatable === true ? build.repository : null;
@@ -1142,13 +1183,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         apply: (staged) => installer.apply(staged),
         outcome: installer.outcome,
         rollback: installer.rollback,
-        // A queued ship, checkout return or cleanup is a delivery job before it is a row.
-        // A lane or gate parked by the drain has begun nothing: it is not cut off by the quit (the
-        // stop leaves its saved action for recovery), and counting it would keep the drain going for ever.
-        // A shaping conversation with a turn under way counts: it is no workstream, and the quit
-        // would cut off the answer in front of the builder. The drain does not park it.
-        midSession: () =>
-          Math.max(0, midSessionWork(state.db, deliveryJobs, shape) - updateDrain.parked()),
+        midSession: midSessionCount,
+        shapeTurns: () => shape.runningTurns(),
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {
           begin: (since) => {
@@ -1164,10 +1200,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         // New work waits from here on, and the tick the scheduler is in has finished: it may be
         // reading branches and about to launch a lane.
         pause: async () => {
+          installHold.begin(clock.now());
           createdScheduler.stop();
           await createdScheduler.idle();
         },
         resume: () => {
+          installHold.end();
           createdScheduler.start();
           createdScheduler.requestTick();
         },
@@ -1191,6 +1229,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         waitingSince: progress?.waitingSince?.toISOString() ?? null,
         draining: progress?.draining ?? false,
         drainingSince: progress?.drainingSince?.toISOString() ?? null,
+        midSession: midSessionWaits(),
       };
     },
     setSelfUpdateWait: (minutes) => {
@@ -1342,6 +1381,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // After the runner: a lane or gate held for load ends on its own stop, and nothing samples again.
       loadGuard.stop();
       updateDrain.stop();
+      installHold.stop();
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();

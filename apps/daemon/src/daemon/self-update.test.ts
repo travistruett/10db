@@ -5,6 +5,9 @@ import {
   HealthResponse,
   ProjectDto,
   SelfUpdateStatusDto,
+  ShapeDto,
+  ShapeMessageDto,
+  ShapeViewDto,
   TaskDto,
   WorkstreamDto,
 } from '@10db/contracts';
@@ -16,6 +19,7 @@ import {
   createTempRepo,
   createTempRepoWithOrigin,
   githubOrigin,
+  handoffArgs,
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
@@ -402,6 +406,55 @@ describe('self-update in the daemon', () => {
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
     });
 
+    describe('a lane waiting on a card the builder has not answered', () => {
+      const ask = {
+        do: 'mcp' as const,
+        tool: 'ask_human',
+        args: {
+          opId: 'op-drain-ask-01',
+          category: 'engineering',
+          question: 'May I rename the module?',
+          options: [
+            { label: 'Yes', description: 'rename it' },
+            { label: 'No', description: 'leave it' },
+          ],
+        },
+      };
+
+      async function waitingOnCard() {
+        head = RUNNING;
+        const api = await start({
+          caps: { global: 2 },
+          adapter: new FakeAdapter({ Alpha: [[ask, { do: 'turn_complete' }]] }),
+        });
+        const project = await addProject(api);
+        const alpha = await startTask(api, project.id, 'Alpha', 'src');
+        await waitForAsync(
+          async () => (await lanesOf(api)).get(alpha.id)?.state === 'WAITING_HUMAN',
+        );
+        return { api, project, alpha };
+      }
+
+      it('says it holds the update, as a lane waiting on a card and not as work running', async () => {
+        const { api } = await waitingOnCard();
+        expect((await selfUpdate(api)).midSession).toEqual({
+          working: 0,
+          waitingOnCard: 1,
+          shapes: [],
+        });
+      });
+
+      it('does not hold the install once the factory drains: the card stays open for the answer', async () => {
+        const { api, alpha } = await waitingOnCard();
+        await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+        head = NEW;
+        await waitFor(() => applied.length > 0 && applied);
+        expect(applied).toEqual([NEW]);
+        // Nothing stopped it from the builder's side: the lane still waits on its card.
+        expect((await lanesOf(api)).get(alpha.id)?.state).toBe('WAITING_HUMAN');
+      });
+    });
+
     it('lets lanes start again when the builder turns the switch off', async () => {
       const { api, project } = await drained();
       const beta = await startTask(api, project.id, 'Beta', 'docs');
@@ -435,6 +488,68 @@ describe('self-update in the daemon', () => {
       await afterChecks(3);
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
     });
+
+    it('installs though a running session asked for a claim a parked lane holds: the ask is refused, and the handoff the refusal asks for keeps the step open', async () => {
+      head = RUNNING;
+      const adapter = new FakeAdapter({
+        Alpha: [[{ do: 'await_message', contains: 'alpha' }, { do: 'turn_complete' }]],
+        Beta: [
+          [
+            { do: 'await_message', contains: 'beta' },
+            {
+              do: 'mcp',
+              tool: 'request_claim',
+              args: { opId: 'op-src-claim', kind: 'area', name: 'src', reason: 'need it' },
+            },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-beta-handoff', 'Ask for src again and finish the work'),
+            },
+            { do: 'turn_complete' },
+          ],
+        ],
+      });
+      const started = vi.spyOn(adapter, 'start');
+      const api = await start({ caps: { global: 2 }, adapter });
+      await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+      const project = await api.post('/projects', ProjectDto, {
+        name: '10db',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      const alpha = await startTask(api, project.id, 'Alpha', 'src');
+      const beta = await startTask(api, project.id, 'Beta', 'docs');
+      await waitFor(() => started.mock.results.length === 2, 30_000);
+      await waitForAsync(async () => {
+        const lanes = await lanesOf(api);
+        return lanes.get(alpha.id)?.state === 'RUNNING' && lanes.get(beta.id)?.state === 'RUNNING';
+      });
+      head = NEW;
+      await waitForAsync(async () => (await selfUpdate(api)).draining);
+      // Sessions start in no fixed order, so each message goes to both; only its lane's script waits for it.
+      const sendAll = (text: string) => {
+        for (const session of started.mock.results)
+          (session.value as { send(text: string): void }).send(text);
+      };
+
+      // Alpha's session ends during the drain: its gate waits at the hold, keeping the claim on src.
+      sendAll('alpha');
+      await waitForAsync(async () => (await lanesOf(api)).get(alpha.id)?.state === 'VERIFYING');
+      // Beta asks for src while Alpha is parked. Waiting would keep Beta's session, and so the drain, going.
+      sendAll('beta');
+      await waitFor(() => applied.length > 0 && applied, 20_000);
+      expect(applied).toEqual([NEW]);
+      // The step is not finished: its unfinished work did not go to the gate, and its next session
+      // waits at the hold for the update.
+      expect((await lanesOf(api)).get(beta.id)?.state).not.toBe('VERIFYING');
+      expect(started.mock.results).toHaveLength(2);
+    }, 60_000);
 
     it('installs with two lanes of one batch held at their gates, neither waiting on the other', async () => {
       const remote = createTempRepoWithOrigin();
@@ -597,6 +712,75 @@ describe('self-update in the daemon', () => {
     );
     // The failed commit is not tried again by itself.
     expect(applied).toEqual([NEW]);
+  });
+
+  describe('a Shape conversation while an install that needed no drain is under way', () => {
+    /** The app was idle, so the install began with no drain; the builder then sends a message. */
+    async function sendDuringTheInstall() {
+      const adapter = new FakeAdapter({});
+      const api = await start({ adapter });
+      const project = await addProject(api);
+      await waitFor(() => applied.length > 0 && applied);
+      const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+      await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'One more thing.' });
+      const view = () => api.get(`/shapes/${shape.id}`, ShapeViewDto);
+      await waitForAsync(async () => (await view()).turn.queued === 1);
+      return { adapter, api, view };
+    }
+
+    it('starts no session, so the quit cuts nothing off, and runs the turn when the install fails', async () => {
+      const { adapter, api, view } = await sendDuringTheInstall();
+      expect((await selfUpdate(api)).draining).toBe(false);
+      expect(adapter.shapeSessions).toHaveLength(0);
+
+      status = { ok: false, step: 'lock', message: 'the lock is held', commit: NEW };
+      endScript();
+      await waitFor(() => adapter.shapeSessions.length === 1);
+      await waitForAsync(async () => (await view()).turn.queued === 0);
+    });
+
+    it('says so in the conversation when the install quits the app first', async () => {
+      const { adapter } = await sendDuringTheInstall();
+      await daemon?.stop();
+      daemon = null;
+
+      head = RUNNING;
+      const next = await start({ adapter });
+      const [project] = await next.get('/projects', z.array(ProjectDto));
+      const [shape] = await next.get(`/projects/${project?.id ?? ''}/shapes`, z.array(ShapeDto));
+      const after = await next.get(`/shapes/${shape?.id ?? ''}`, ShapeViewDto);
+      expect(after.messages.at(-1)?.kind).toBe('notice');
+      expect(after.messages.at(-1)?.body).toContain('One more thing.');
+      expect(adapter.shapeSessions).toHaveLength(0);
+    });
+  });
+
+  it('names the conversation whose turn is all a drain waits for, with no lane running', async () => {
+    head = RUNNING;
+    const adapter = new FakeAdapter({});
+    let release: () => void = () => undefined;
+    adapter.shapeBehaviour = async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { text: 'Done.' };
+    };
+    const api = await start({ adapter });
+    await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+    const project = await addProject(api);
+    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Denser board.' });
+    await waitFor(() => adapter.shapeSessions.length === 1);
+    head = NEW;
+    await waitForAsync(async () => (await selfUpdate(api)).draining);
+    const { midSession } = await selfUpdate(api);
+    expect(midSession).toEqual({
+      working: 1,
+      waitingOnCard: 0,
+      shapes: [{ id: shape.id, title: 'Denser board.' }],
+    });
+    release();
+    await waitFor(() => applied.length > 0 && applied);
   });
 
   it('lets work go on and raises one card when starting the install throws', async () => {

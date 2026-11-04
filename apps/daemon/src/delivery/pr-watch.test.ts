@@ -379,7 +379,10 @@ describe('the pull request watch', () => {
         intervalMs: INTERVAL,
         landing: {
           catchUp: (id) => asked.push(`catch-up ${id}`),
-          restartCi: (id) => asked.push(`restart-ci ${id}`),
+          restartCi: (id) => {
+            asked.push(`restart-ci ${id}`);
+            return true;
+          },
           retryMerge: (id, opts) =>
             asked.push(opts?.catchUpCardWasOpen ? `retry ${id} after card` : `retry ${id}`),
         },
@@ -596,7 +599,7 @@ describe('a pull request whose head never got its required checks', () => {
   const HEAD_B = 'b'.repeat(40);
 
   /** A watch whose landing is a spy: what it was asked, in order. */
-  function spy(): { asked: string[]; watch: PrWatch } {
+  function spy(held: () => boolean = () => false): { asked: string[]; watch: PrWatch } {
     const asked: string[] = [];
     const watch = createPrWatch({
       ctx: h.ctx,
@@ -604,7 +607,11 @@ describe('a pull request whose head never got its required checks', () => {
       intervalMs: INTERVAL,
       landing: {
         catchUp: (id) => asked.push(`catch-up ${id}`),
-        restartCi: (id) => asked.push(`restart-ci ${id}`),
+        // A restart held by a drain is asked about and does nothing, as the shipper's is.
+        restartCi: (id) => {
+          asked.push(`restart-ci ${id}${held() ? ' (held)' : ''}`);
+          return !held();
+        },
         retryMerge: (id) => asked.push(`retry ${id}`),
       },
     });
@@ -642,6 +649,34 @@ describe('a pull request whose head never got its required checks', () => {
     expect(asked.filter((a) => a.startsWith('restart-ci'))).toEqual([`restart-ci ${id}`]);
     // 10db pushed or tried to: no notice yet, the new head gets its own minutes.
     expect(stuckNotice(id)).toBeUndefined();
+  });
+
+  it('keeps a restart a drain held unasked: no notice during the drain, and the first round after it asks', async () => {
+    const { id } = stuck();
+    let draining = true;
+    const { asked, watch } = spy(() => draining);
+    watch.start();
+    await watch.idle();
+    // The drain outlasts the minutes the head gets, twice over.
+    await rounds(watch, GRACE_ROUNDS * 2);
+    expect(stuckNotice(id)).toBeUndefined();
+    expect(asked.filter((a) => a.startsWith('restart-ci')).every((a) => a.endsWith('(held)'))).toBe(
+      true,
+    );
+
+    // The drain ends without a relaunch.
+    draining = false;
+    const before = asked.length;
+    await round(watch);
+    expect(asked.slice(before).filter((a) => a.startsWith('restart-ci'))).toEqual([
+      `restart-ci ${id}`,
+    ]);
+    expect(stuckNotice(id)).toBeUndefined();
+
+    // Asked once: the next minutes of the new head end in the notice, not a second ask.
+    await rounds(watch, GRACE_ROUNDS);
+    expect(asked.filter((a) => a === `restart-ci ${id}`)).toHaveLength(1);
+    expect(stuckNotice(id)).toBeDefined();
   });
 
   it('asks once per head, then says on the task that the checks never started, naming the pull request', async () => {
