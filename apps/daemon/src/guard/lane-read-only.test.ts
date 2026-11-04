@@ -74,6 +74,31 @@ describe('laneReadOnlyWords', () => {
     expect(laneReadOnlyWords(command)).toBeNull();
   });
 
+  it.each<[string, string]>([
+    ['git log -S with a value starting with O', 'git log -SOption -- a.ts'],
+    ['git log -G with a value starting with O', 'git log -GOAuth'],
+    ['git diff --text', 'git diff --text'],
+    ['git grep --text', 'git grep --text x'],
+    ['git diff -a', 'git diff -a'],
+  ])('%s reads only, for a lane and a read-only step', (_name, command) => {
+    expect(laneReadOnlyWords(command)).not.toBeNull();
+    expect(readOnlyShellRefusal(command)).toBeNull();
+  });
+
+  it.each<[string, string]>([
+    ['git grep -O', 'git grep -O less x'],
+    ['git grep -n1Osh', 'git grep -n1Osh x'],
+    ['git grep --open-files-in-pager', 'git grep --open-files-in-pager=less x'],
+    ['git diff --output', 'git diff --output=x'],
+    ['git log --out', 'git log --out=x'],
+    ['git diff --ext-diff', 'git diff --ext-diff'],
+    ['git diff --textconv', 'git diff --textconv'],
+    ['git grep --textconv', 'git grep --textconv x'],
+  ])('%s is refused for a lane and a read-only step', (_name, command) => {
+    expect(laneReadOnlyWords(command)).toBeNull();
+    expect(readOnlyShellRefusal(command)).not.toBeNull();
+  });
+
   it('adds ps for lanes without widening the read-only steps', () => {
     expect(laneReadOnlyWords('ps aux')).not.toBeNull();
     expect(readOnlyShellRefusal('ps aux')).not.toBeNull();
