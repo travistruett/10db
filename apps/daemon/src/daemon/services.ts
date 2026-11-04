@@ -95,7 +95,7 @@ import {
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
-import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
 import type { ShapeApiServices } from './shape-services';
 import { checkoutConflictsWithRoot } from './worktree-root';
@@ -285,8 +285,7 @@ export function createServices(deps: {
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
     retryWorkstream(id, note) {
-      const ws = retryWorkstream(deps.state, id, note);
-      if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
+      const ws = deps.starter.retry(id, note);
       deps.scheduler.requestTick();
       return ws;
     },

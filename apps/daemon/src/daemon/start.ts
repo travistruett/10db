@@ -160,7 +160,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { SessionAdapter } from '../sessions';
-import { retryWorkstream, seedTeam } from '../team';
+import { seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -690,8 +690,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   answerBatchCard = createBatchCardAnswers({
     retry: (id, note) => {
-      const retried = retryWorkstream(state, id, note);
-      if (retried.batchId !== null) starter.reopen(retried.batchId);
+      starter.retry(id, note);
       scheduler?.requestTick();
     },
     shipper,
