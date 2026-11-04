@@ -525,14 +525,15 @@ describe.skipIf(!live)('a Shape session, live', () => {
 
     try {
       expect(providerSessionId).not.toBe('');
-      const configDir = launcher.loginConfigDir();
-      if (configDir === null) throw new Error('the launcher has no login config dir');
+      // Null is the ordinary case: Claude Code then keeps its config in ~/.claude.
+      const configDir = launcher.loginConfigDir() ?? join(homedir(), '.claude');
       const transcript = findTranscript(configDir, providerSessionId);
       const sizes = imageBlockBytes(readFileSync(transcript, 'utf8'));
       console.log(
         `Read pictures in the session's transcript, bytes before base64: ${JSON.stringify(sizes)}`,
       );
-      expect(sizes.length).toBeGreaterThan(0);
+      // All three: the allowance is proven by the large pictures, not by the small one alone.
+      expect(sizes).toHaveLength(3);
       for (const size of sizes) expect(size).toBeLessThanOrEqual(READ_PICTURE_CHARGE_MAX_BYTES);
     } finally {
       repo.cleanup();

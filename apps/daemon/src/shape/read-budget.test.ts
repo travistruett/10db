@@ -1,9 +1,17 @@
+import { tmpdir } from 'node:os';
+import { relative } from 'node:path';
+import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngOfSize } from '../../test/png';
 import { INLINE_CONVERSATION_MAX_BYTES } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
-import { READ_PICTURE_CHARGE_MAX_BYTES, READ_PICTURES_MAX_BYTES } from './read-budget';
+import {
+  READ_PICTURE_CHARGE_MAX_BYTES,
+  READ_PICTURES_MAX_BYTES,
+  readPictureBytesSpent,
+  readPictureLine,
+} from './read-budget';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
 // Shape spec §5.4: a picture Claude pulls in with Read is a tool result a resumed session resends, beside
@@ -97,6 +105,26 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(read(big.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
     }
     expect(read(big.storedPath)).toEqual({ decision: 'allow' });
+  });
+
+  it('count a path spelled from ~ the way they count the absolute one', async () => {
+    // The judge and Claude Code both expand ~, so the charge must too. The dropped files are under the temp dir.
+    await f.close();
+    f = createServiceFixture({ home: tmpdir() });
+    const big = drop('big.png', wholePng(5 * MB));
+    await nextTurn('Hello');
+    const spelled = `~/${relative(tmpdir(), big.storedPath)}`;
+    const room = Math.floor(READ_PICTURES_MAX_BYTES / READ_PICTURE_CHARGE_MAX_BYTES);
+    for (let i = 0; i < room; i += 1) expect(read(spelled)).toEqual({ decision: 'allow' });
+    expect(read(spelled)).toMatchObject({ decision: 'deny' });
+    expect(read(big.storedPath)).toMatchObject({ decision: 'deny' });
+  });
+
+  it('count a path with a line break in it', () => {
+    // The transcript line carries the path as Claude spelled it; a break must not hide the count.
+    const line = readPictureLine('/repo/a\nb.png', 1_000);
+    const message = { kind: ShapeMessageKind.Tool, body: line } as ShapeMessageDto;
+    expect(readPictureBytesSpent([message])).toBe(1_000);
   });
 
   it('are still counted after the daemon restarts and the session is resumed', async () => {

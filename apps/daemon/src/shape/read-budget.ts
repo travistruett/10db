@@ -1,6 +1,8 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
+import { expandHome } from '../sandbox';
+import type { ShapeAccess } from './confinement';
 
 // Shape spec §5.4. A picture Claude pulls in with `Read` comes back as a tool result, and a resumed
 // session resends every earlier tool result with each request, beside the pictures the daemon sends
@@ -29,10 +31,13 @@ export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
 /** What a Read of this path is charged: 0 for anything but a picture that exists. */
-export function readPictureCharge(path: string, checkout: string): number {
+export function readPictureCharge(
+  path: string,
+  access: Pick<ShapeAccess, 'checkout' | 'home'>,
+): number {
   if (!PICTURE_NAME.test(path)) return 0;
   try {
-    const stat = statSync(resolve(checkout, path));
+    const stat = statSync(resolve(access.checkout, expandHome(path, access.home)));
     return stat.isFile() ? Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES) : 0;
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
@@ -44,7 +49,7 @@ export function readPictureCharge(path: string, checkout: string): number {
 export const readPictureLine = (path: string, charge: number): string =>
   `Read · ${path} · picture · ${String(charge)} bytes counted`;
 
-const COUNTED = /^Read · .* · picture · (\d+) bytes counted$/;
+const COUNTED = /^Read · .* · picture · (\d+) bytes counted$/s;
 
 /**
  * The bytes of Read pictures the live session carries: the counted lines after the latest digest, which

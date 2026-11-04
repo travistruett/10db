@@ -738,7 +738,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
-        const charge = picture === null ? 0 : readPictureCharge(picture, access.checkout);
+        const charge = picture === null ? 0 : readPictureCharge(picture, access);
         if (picture !== null && charge > 0) {
           const refusal = readPictureRefusal(
             picture,
