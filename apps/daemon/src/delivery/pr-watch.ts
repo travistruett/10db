@@ -636,8 +636,8 @@ export function createPrWatch(input: {
    * rerun) shows a notice naming the check and its link, as does a check with no Actions run to
    * start. A check whose run was not in the rerun gets its own, by the same rule, so a notice that
    * says 10db ran a check is only ever about a run GitHub took. The notice goes when no check is
-   * cancelled. A failing required check, a conflict and a pull request that is no longer open leave
-   * all of it alone.
+   * cancelled, also when a required check fails instead. A failing required check with a check still
+   * cancelled, a conflict and a pull request that is no longer open leave all of it alone.
    * Throws gh's failure only when gh itself is down, so the next round asks again.
    */
   async function followCancelled(
@@ -662,9 +662,11 @@ export function createPrWatch(input: {
     // A pull request in the merge queue (or one whose queue read gave no answer) is left as it is: a
     // rerun would start a run on its head while the queue holds it. The count resumes after the queue.
     if (queue !== false) return;
-    // A failing check starts a fix, which pushes a new head: the cancelled one is not the question.
-    if (required.state === 'failing') return;
     const cancelled = required.cancelled;
+    // A failing check starts a fix, which pushes a new head: a cancelled one beside it is not the
+    // question, and nothing is rerun or shown. With none cancelled the read carries on only to correct
+    // what is stored (the rerun notice, the cancelled-check notice): it returns before any rerun.
+    if (required.state === 'failing' && cancelled.length > 0) return;
     // A cancelled notice stored for another head names that head's checks: it is gone once the pull
     // request moves on, so it neither stops 10db nor stays up for the new head.
     const storedCancelled = getBatch(ctx.state.db, root.id).notices.find(
