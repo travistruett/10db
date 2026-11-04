@@ -2278,6 +2278,77 @@ describe('a required check GitHub cancelled', () => {
       expect(noticeOf(id)?.body).not.toContain('10db ran');
       expect(h.gh.reruns).toEqual(['77']);
     });
+
+    describe('the rerun notice beside a notice that 10db stopped', () => {
+      const status = { ...job('ci/other', null), jobId: null };
+      const statusCancelled = { ...lintCancelled, cancelled: [status] };
+
+      /** Run 77 is run and run 88 is refused as still running, then a check with no run is cancelled. */
+      async function stoppedAtNoRun(w: PrWatch, prUrl: string, id: BatchId): Promise<void> {
+        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+        w.start();
+        await w.idle();
+        h.gh.failRerunOf.set(
+          '88',
+          new GhError('failed', 'run 88 cannot be rerun; already running'),
+        );
+        await round(w);
+        expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
+        h.gh.setRequiredChecks(prUrl, statusCancelled);
+        await round(w);
+        await round(w);
+        expect(noticeOf(id)?.line).toContain("can't be run again");
+      }
+
+      it('does not say 10db runs another check once it stopped at a check with no run', async () => {
+        const { id, prUrl, w } = watching();
+        await stoppedAtNoRun(w, prUrl, id);
+        const body = rerunNoticeOf(id)?.body ?? '';
+        expect(body).not.toContain('as soon as GitHub allows');
+        expect(body).toContain('will not run another');
+        for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
+        expect(h.gh.reruns).toEqual(['77']);
+      });
+
+      it('names no notice beside it once the check with no run clears', async () => {
+        const { id, prUrl, w } = watching();
+        await stoppedAtNoRun(w, prUrl, id);
+        h.gh.setRequiredChecks(prUrl, running('desktop'));
+        await round(w);
+        expect(noticeOf(id)).toBeUndefined();
+        const body = rerunNoticeOf(id)?.body ?? '';
+        expect(body).toBeTruthy();
+        expect(body).not.toContain('beside this one');
+        expect(body).not.toContain('will not');
+        expect(body).not.toContain('as soon as GitHub allows');
+      });
+
+      it('names no notice beside it and does not say it will not ask again once the refused check clears', async () => {
+        const { id, prUrl, w } = watching();
+        await rerunOfDesktopOnly(w, prUrl);
+        h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+        await round(w);
+        h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
+        await round(w);
+        expect(noticeOf(id)?.line).toContain('could not run');
+        expect(rerunNoticeOf(id)?.body).toContain('will not ask again');
+
+        // The builder runs it by hand: the check clears.
+        h.gh.setRequiredChecks(prUrl, running('desktop'));
+        await round(w);
+        expect(noticeOf(id)).toBeUndefined();
+        const body = rerunNoticeOf(id)?.body ?? '';
+        expect(body).toBeTruthy();
+        expect(body).not.toContain('beside this one');
+        expect(body).not.toContain('will not ask again');
+
+        // Cancelled again on the same head, 10db does ask again.
+        h.gh.setRequiredChecks(prUrl, lintCancelled);
+        await round(w);
+        await round(w);
+        expect(h.gh.reruns).toEqual(['77', '88']);
+      });
+    });
   });
 
   it('does not run an old head again when its stored rerun notice carries no record', async () => {

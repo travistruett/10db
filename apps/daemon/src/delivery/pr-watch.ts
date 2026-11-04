@@ -49,6 +49,7 @@ import {
   rerunNotices,
   rerunRecord,
   type CancelledWhy,
+  type RerunRuns,
 } from './notices';
 
 /** How often the watch reads every followed pull request. */
@@ -603,6 +604,28 @@ export function createPrWatch(input: {
   }
 
   /**
+   * Rewrites the stored rerun notice of `head` to say `state`, when it records runs GitHub took and
+   * still leaves one to ask for (not done): the notice names a notice beside it or says what 10db
+   * will do, and that stops being true when 10db stops at a check it cannot run, or the check it
+   * stopped at clears. A head 10db finished asking for keeps its notice, which says neither.
+   */
+  function rewriteRerunNotice(
+    rootId: BatchId,
+    head: string | null,
+    runs: RerunRuns,
+    state: 'stopped' | 'cleared',
+  ): void {
+    if (head === null) return;
+    const stored = getBatch(ctx.state.db, rootId).notices.find(
+      (n) => rerunNoticeHead(n.key) === head,
+    );
+    if (stored === undefined || (rerunRecord(stored)?.done ?? true)) return;
+    ctx.state.write((write) => {
+      setBatchNotice(write, rootId, rerunNotices.ran(head, runs, state));
+    });
+  }
+
+  /**
    * Follows an open pull request's cancelled required checks (a runner problem, say, or a run
    * GitHub stopped). A cancelled check is its own state, never pending: nothing runs for it, and the
    * pull request cannot merge. The second read in a row that lists one (a newer push's run replaces
@@ -685,6 +708,9 @@ export function createPrWatch(input: {
         // Rerun: it took. Not rerun: the cancellation went away by itself (a newer run).
         if (seen.asked) seen.active = true;
         seen.streak = 0;
+        // The rerun notice named the notice beside it, which goes now.
+        if (seen.notice === 'stopped')
+          rewriteRerunNotice(root.id, read.headSha, seen.rerun, 'cleared');
         seen.notice = null;
       } else cancelledRuns.delete(root.id);
       clearCancelledNotice(root.id);
@@ -735,6 +761,8 @@ export function createPrWatch(input: {
     // A check with no Actions run (a commit status from another CI) has nothing 10db can run.
     if (repo === null || notRun.some((job) => job.runId === null)) {
       track.notice = 'stopped';
+      // A run refused as still running is not asked for now: the rerun notice stops saying it is.
+      rewriteRerunNotice(root.id, read.headSha, track.rerun, 'stopped');
       noticeCancelled(root, notRun, { kind: 'no_run' }, read.headSha);
       return;
     }
