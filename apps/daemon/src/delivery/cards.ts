@@ -1295,15 +1295,48 @@ export const leftOutCards = {
   },
   /**
    * The revert commit `revert` is on the batch's branch, but the notices and the move to shipping
-   * were not written. No answer is offered: Ship without it would revert the same commits again.
-   * Ship anyway ships the branch as it stands, which already lacks the task's changes.
+   * were not written. `state` is the batch's state now (null when it could not be read), and the
+   * next step follows it:
+   * - open or failed (or unknown): Ship without it is offered again. It finds the revert on the
+   *   tip, so `revertCommits` changes nothing, and it writes the notices and moves the batch. That
+   *   beats Ship anyway, which leaves the revert unexplained in the drawer and the pull request.
+   *   The card goes when the batch ships;
+   * - shipping or later: the ship goes on with the revert in the branch, so there is nothing to do;
+   *   the card goes when the batch ships;
+   * - abandoned: nothing ships, and no step is offered.
    */
-  revertKept: (batch: BatchDto, attempt: LeftOutAttempt, revert: string, why: string): Card => ({
-    title: `${leftOutNames(attempt)}: the revert is on the branch, but the batch did not move`,
-    body: `Ship without it reverted the commits of ${leftOutNames(attempt)} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\nThe revert stays on ${batch.branch ?? 'the branch'}, and nothing was shipped. ${leftOutNames(attempt)} ${attempt.titles.length === 1 ? 'is' : 'are'} still failed here, and ${attempt.titles.length === 1 ? 'its' : 'their'} drawer does not yet say the work was left out. Ship anyway from the Board ships the branch as it stands, without ${attempt.titles.length === 1 ? 'its' : 'their'} changes; do not answer Ship without it again, which would revert the same commits twice.`,
-    foldKey: `left-out:${batch.id}`,
-    refresh: true,
-  }),
+  revertKept: (
+    batch: BatchDto,
+    attempt: LeftOutAttempt,
+    revert: string,
+    why: string,
+    state: BatchState | null,
+  ): Card => {
+    const one = attempt.titles.length === 1;
+    const its = one ? 'its' : 'their';
+    const branch = batch.branch ?? 'the branch';
+    const names = leftOutNames(attempt);
+    const answerable = state === null || state === BatchState.Open || state === BatchState.Failed;
+    const lead = `Ship without it reverted the commits of ${names} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\n`;
+    const fold = { foldKey: `left-out:${batch.id}`, refresh: true } as const;
+    if (answerable)
+      return leftOutCard(batch, attempt, {
+        title: `${names}: the revert is on the branch, but the batch did not move`,
+        body: `${lead}The revert stays on ${branch}, and nothing was shipped. ${names} ${one ? 'is' : 'are'} still failed here, and ${its} drawer does not yet say the work was left out. When that is settled, answer Ship without it again on this card: the revert is on the branch already, so it reverts nothing more, writes the notices and moves the batch on to ship. Ship anyway also ships the branch without ${its} changes, but leaves the revert unexplained in the drawer and the pull request.`,
+      });
+    const title = `${names}: the revert is on the branch`;
+    if (state === BatchState.Abandoned)
+      return {
+        title,
+        body: `${lead}The batch was abandoned, so nothing will ship. The revert stays on ${branch}, with the branch's other commits.`,
+        ...fold,
+      };
+    const body = `${lead}The batch is ${state.toLowerCase()}, so it went or goes on without ${its} changes: the revert is in the branch. The notices on ${names} were not written, so ${its} drawer does not say the work was left out. There is nothing to answer here.`;
+    // A batch that shipped already will not ship again, so nothing would close the card.
+    return state === BatchState.Shipped || state === BatchState.Closed
+      ? { title, body, ...fold }
+      : { title, body, ...fold, resolvesWhen: { event: 'batch_shipped', batchId: batch.id } };
+  },
   /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
   conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
     leftOutCard(batch, attempt, {

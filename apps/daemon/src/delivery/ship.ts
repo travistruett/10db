@@ -1552,7 +1552,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
             batch,
             attempt,
             revert,
-            `The batch became ${state.toLowerCase()} while the revert ran, so its notices and its move to shipping were not written.`,
+            `The batch became ${state.toLowerCase()} while the revert ran, so its notices were not written.`,
+            state,
           ),
         );
       } else if (!carriedOut(state)) {
@@ -1560,7 +1561,26 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
     } catch (error) {
       if (revert !== null) {
-        stopWith(leftOutCards.revertKept(batch, attempt, revert, detailOf(error)));
+        // The write that threw held the withdrawal of the other failed tasks' cards. With the batch
+        // still answerable they are withdrawn on their own; the answered run's card is the one this
+        // card folds into, and the card offers the same answer.
+        let state: BatchState | null = null;
+        try {
+          state = getBatch(db, batchId).state;
+          if (state === BatchState.Open || state === BatchState.Failed)
+            deps.state.write((w) => {
+              for (const run of failed)
+                if (run.id !== workstreamId)
+                  for (const item of openItemsForWorkstream(w.tx, run.id))
+                    if (item.detail?.[BATCH_CARD_DETAIL] !== undefined) withdrawCard(w, item.id);
+            });
+        } catch (again) {
+          deps.logger.warn(
+            { batchId, workstreamId, err: detailOf(again) },
+            'ship without a run could not withdraw the other failed cards',
+          );
+        }
+        stopWith(leftOutCards.revertKept(batch, attempt, revert, detailOf(error), state));
         return;
       }
       if (stopped()) notStarted('10db was stopping');
