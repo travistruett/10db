@@ -42,6 +42,8 @@ interface World {
   stagedFor: string[];
   /** The commit each stage was told not to fetch: the one the builder rolled back from. */
   stagedSkipping: (string | null)[];
+  /** The commit already staged that each stage was told to keep when it is still the newest. */
+  stagedKeeping: (string | null)[];
   stage: () => Promise<StageResult>;
   /** Stops a stage under way, as the installer kills the script's process group. */
   stopStage: () => Promise<void>;
@@ -104,11 +106,12 @@ function make(
         ? Promise.reject(world.stagedAhead)
         : Promise.resolve(world.stagedAhead);
     },
-    stage: (target, running, skip) => {
+    stage: (target, running, skip, keep) => {
       world.calls.push('stage');
       world.stagedFrom.push(target.repo);
       world.stagedFor.push(running);
       world.stagedSkipping.push(skip);
+      world.stagedKeeping.push(keep);
       return world.stage();
     },
     stopStage: () => {
@@ -181,6 +184,7 @@ beforeEach(() => {
     stagedFrom: [],
     stagedFor: [],
     stagedSkipping: [],
+    stagedKeeping: [],
     pause: () => Promise.resolve(),
     stage: () => Promise.resolve(STAGED_OK),
     stopStage: () => Promise.resolve(),
@@ -289,6 +293,68 @@ describe('tick', () => {
     });
   });
 
+  it('installs a newer finished build, not the staged older one, when the head’s build finishes while lanes are busy', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    // The head's own build is still running, so the stage found only NEW.
+    world.stage = () => Promise.resolve(STAGED_OK);
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    // Main's head did not move, but its build finished while the lanes ran.
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls.filter((call) => call === 'stage')).toHaveLength(2);
+    expect(world.calls.filter((call) => call === 'apply')).toHaveLength(1);
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEWER,
+    });
+  });
+
+  it('tells each stage which build is already staged, so a stage that finds the same one fetches nothing', async () => {
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    // Main moves, but its newest finished build is still the staged NEW: the stage keeps it.
+    world.head = NEWER;
+    expect(await update.tick()).toBe('busy');
+    expect(world.stagedKeeping).toEqual([null, NEW]);
+    // The kept build is the one that installs once the lanes are done.
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEW,
+    });
+  });
+
+  it('asks again for a newer finished build, keeping the staged one, before it installs', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    world.busy = 0;
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
+    expect(world.stagedKeeping).toEqual([null, NEW]);
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEWER,
+    });
+  });
+
+  it('stages again only when no task is mid-session, so busy lanes cost no download', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).toEqual(['stage']);
+  });
+
   it('installs nothing when the newest finished build is the one that runs, however often it looks', async () => {
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
     const update = make();
@@ -314,6 +380,54 @@ describe('tick', () => {
     expect(await update.tick()).toBe('failed');
     expect(cards()).toEqual([]);
     expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe(NEW);
+  });
+
+  it('keeps the failure for Settings when there is no project to carry a card', async () => {
+    world.stage = () =>
+      Promise.resolve({ ok: false, step: 'download', message: 'curl: connection reset' });
+    const update = make({ cardProject: null });
+    expect(update.status().problem).toBeNull();
+    await update.tick();
+    expect(update.status().problem).toMatchObject({ kind: 'failed' });
+    expect(update.status().problem?.message).toContain('downloading the build');
+    expect(update.status().problem?.message).toContain('curl: connection reset');
+    expect(update.status().problem?.message).toContain(NEW.slice(0, 12));
+    // Later checks skip the failed head, and Settings goes on saying why.
+    expect(await update.tick()).toBe('failed-before');
+    expect(update.status().problem).toMatchObject({ kind: 'failed' });
+  });
+
+  it('drops the failure when the builder asks again, and when main moves on', async () => {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'offline' });
+    const update = make({ cardProject: null });
+    await update.tick();
+    update.retry();
+    expect(update.status().problem).toBeNull();
+    await update.tick();
+    world.head = RUNNING;
+    await update.tick();
+    expect(update.status().problem).toBeNull();
+  });
+
+  it('says it could not reach GitHub while the check fails, and stops saying it once one succeeds', async () => {
+    const update = make();
+    expect(update.status().problem).toBeNull();
+    world.head = new Error('offline');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.kind).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/signed out|offline/i);
+    world.head = RUNNING;
+    expect(await update.tick()).toBe('current');
+    expect(update.status().problem).toBeNull();
+  });
+
+  it('says nothing about GitHub while the switch is off', async () => {
+    world.head = new Error('offline');
+    const update = make();
+    await update.tick();
+    world.enabled = false;
+    await update.tick();
+    expect(update.status().problem).toBeNull();
   });
 
   it('holds new work back before it looks again, and waits for the scheduler to settle', async () => {
@@ -697,6 +811,9 @@ describe('a waiting update drains the factory', () => {
       clock.advance(WAIT_LIMIT_MS);
       await update.tick();
       world.head = NEWER;
+      // A build newer than the staged one finished: it is fetched and compared (the head itself is
+      // compared by another answer).
+      world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
       world.stagedAhead = new Error('offline');
       return update;
     }
@@ -716,6 +833,138 @@ describe('a waiting update drains the factory', () => {
       world.stagedAhead = true;
       expect(await update.tick()).toBe('draining');
       expect(update.status().waitingSince).toEqual(stagedAt);
+    });
+  });
+
+  describe('when looking for a newer build fails with a build staged', () => {
+    /** NEW is staged while the head, NEWER, builds; the next stage fails at `step`, keeping NEW. */
+    async function stagedThenFailsAt(step: string) {
+      world.head = NEWER;
+      world.busy = 1;
+      const update = make();
+      expect(await update.tick()).toBe('busy');
+      world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+      return update;
+    }
+
+    it.each(['find-commit', 'find-build'])(
+      'installs the staged build, as with no GitHub at all, when the stage fails at %s',
+      async (step) => {
+        const update = await stagedThenFailsAt(step);
+        world.busy = 0;
+        expect(await update.tick()).toBe('applying');
+        expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+          head: NEWER,
+          commit: NEW,
+        });
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+        expect(cards()).toEqual([]);
+      },
+    );
+
+    it('leaves the drain on, and goes on looking, when main moved and the look failed', async () => {
+      const update = await stagedThenFailsAt('find-build');
+      clock.advance(WAIT_LIMIT_MS);
+      expect(await update.tick()).toBe('draining');
+      world.head = 'e'.repeat(40);
+      expect(await update.tick()).toBe('draining');
+      expect(world.calls).not.toContain('undrain');
+      expect(world.stagedKeeping).toEqual([null, NEW]);
+      expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      world.stage = () => Promise.resolve(STAGED_OK);
+      world.head = 'f'.repeat(40);
+      expect(await update.tick()).toBe('draining');
+      expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
+    });
+
+    it.each(['download', 'verify-checksum'])(
+      'does not install the older build when the newer one failed at %s, and raises one card',
+      async (step) => {
+        const update = await stagedThenFailsAt(step);
+        world.busy = 0;
+        expect(await update.tick()).toBe('failed');
+        expect(await update.tick()).toBe('failed-before');
+        expect(world.calls).not.toContain('apply');
+        expect(cards()).toHaveLength(1);
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe(NEWER);
+      },
+    );
+
+    it('keeps the staged build for the next look once a newer one failed to fetch', async () => {
+      const update = await stagedThenFailsAt('download');
+      world.busy = 0;
+      await update.tick();
+      // Main moves on and the newest finished build turns out to be the staged one after all.
+      world.head = 'e'.repeat(40);
+      world.stage = () => Promise.resolve(STAGED_OK);
+      expect(await update.tick()).toBe('applying');
+      expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
+    });
+
+    it('tries the build that failed to fetch again once the builder asks', async () => {
+      const update = await stagedThenFailsAt('download');
+      world.busy = 0;
+      await update.tick();
+      update.retry();
+      world.stage = () =>
+        Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+      expect(await update.tick()).toBe('applying');
+      expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
+      expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+        head: NEWER,
+        commit: NEWER,
+      });
+    });
+
+    it('does not fall back on the older build when GitHub goes away after a newer one failed', async () => {
+      // The head moved first, so the staged build was found for an earlier head than the failure.
+      world.busy = 1;
+      const update = make();
+      await update.tick();
+      world.head = NEWER;
+      world.stage = () =>
+        Promise.resolve({ ok: false, step: 'download', message: 'gh: 502', kept: true });
+      expect(await update.tick()).toBe('failed');
+      world.busy = 0;
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      expect(world.calls).not.toContain('apply');
+    });
+
+    it('forgets the staged build when the failed stage says it is gone', async () => {
+      const update = await stagedThenFailsAt('find-build');
+      world.stage = () => Promise.resolve({ ok: false, step: 'find-build', message: 'gh: 502' });
+      expect(await update.tick()).toBe('busy');
+      world.busy = 0;
+      expect(await update.tick()).toBe('failed');
+      world.head = 'e'.repeat(40);
+      world.stage = () => Promise.resolve(STAGED_OK);
+      await update.tick();
+      expect(world.stagedKeeping.at(-1)).toBeNull();
+    });
+
+    it('forgets the staged build when the stage finds the running build is the newest', async () => {
+      const update = await stagedThenFailsAt('find-build');
+      world.busy = 0;
+      world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+      expect(await update.tick()).toBe('no-newer-build');
+      expect(await update.tick()).toBe('no-newer-build');
+      expect(world.stagedKeeping).toEqual([null, NEW, null]);
+      expect(world.calls).not.toContain('apply');
+    });
+
+    it('forgets the staged build when the switch goes off during the look', async () => {
+      const update = await stagedThenFailsAt('find-build');
+      world.busy = 0;
+      world.stage = () => {
+        world.enabled = false;
+        return Promise.resolve({ ok: false, step: 'stage', message: 'stopped' });
+      };
+      expect(await update.tick()).toBe('off');
+      world.enabled = true;
+      world.stage = () => Promise.resolve(STAGED_OK);
+      await update.tick();
+      expect(world.stagedKeeping).toEqual([null, NEW, null]);
     });
   });
 
@@ -863,6 +1112,11 @@ describe('a build that fails', () => {
     expect(card?.body).toContain(RUNNING.slice(0, 12));
     expect(card?.body).toContain('make rollback-app');
     expect(world.calls).toEqual(['stage']);
+  });
+
+  it('names the switch by its label in Settings', async () => {
+    await make().tick();
+    expect(cards()[0]?.body).toContain('turn Update 10db by itself off and on in Settings');
   });
 
   it('raises no second card for the same commit however often it checks', async () => {

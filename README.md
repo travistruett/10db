@@ -43,13 +43,14 @@ Status: under construction. The design is in
   the restart. Nothing running is stopped. Settings and the Factory view say an update is waiting or draining and
   since when; Install Now starts the pause at once, and turning the self-update off cancels it.
   When a build or install fails, the app keeps running (or the previous app is put back), the lanes resume, and
-  one card in the Inbox names the failing step.
+  one card in the Inbox names the failing step. Settings > Updates says why an app won't update itself: a copy
+  outside /Applications, a build with no repository, gh missing, signed out or offline, or a failed update.
 - `make rollback-app` unzips that app into place and keeps the one it replaces as the zip, so running it again
   toggles back. It changes no data: it prints the commands that save the current database and restore the
   matching backup. It notes the commit it rolled back from in
   `~/Library/Application Support/10db/self-update/rolled-back-from`, so the self-update does not reinstall that
-  build: the app stays rolled back until main has a newer finished build, or until you turn Update by itself off
-  and on in Settings.
+  build: the app stays rolled back until main has a newer finished build, or until you turn Update 10db by itself
+  off and on in Settings.
 
 ## Develop
 
