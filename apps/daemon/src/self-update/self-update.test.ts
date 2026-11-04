@@ -450,6 +450,21 @@ describe('tick', () => {
     }
   });
 
+  it('does not call the machine offline for a connection cut off with EOF, and quotes gh', async () => {
+    for (const text of [
+      'gh api failed (exit 1): EOF',
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r/compare/a...b": EOF',
+    ]) {
+      world.head = new GhError(GhFailure.Unreachable, text);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      const message = update.status().problem?.message ?? '';
+      expect(message).toMatch(/lost its connection to GitHub/i);
+      expect(message).toContain(text);
+      expect(message).not.toMatch(/offline/i);
+    }
+  });
+
   it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
     const reasons: string[] = [];
     for (const error of [
