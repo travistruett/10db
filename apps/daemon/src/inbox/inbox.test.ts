@@ -58,7 +58,7 @@ import {
   removeNetworkHost,
   storableRule,
 } from '../permissions';
-import { protectedReads, type FileAccessContext } from '../sandbox';
+import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
   createPermissionBroker,
@@ -1060,6 +1060,7 @@ describe('permission broker in a sandboxed lane', () => {
         configDirs: [configDir],
       }),
       readList: [join(root, 'work', 'listed')],
+      systemDocRoots: SYSTEM_DOC_ROOTS,
       configDir,
       providerSessionId: 'own-id',
       sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },

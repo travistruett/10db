@@ -18,6 +18,8 @@ export interface FileAccessContext {
   /** The checkout's secret files by exact real path; unlike protected reads, a search over their directory is not refused. */
   readonly secretFiles?: readonly string[];
   readonly readList: readonly string[];
+  /** The system documentation this context reads without asking: `SYSTEM_DOC_ROOTS` for a lane. */
+  readonly systemDocRoots?: readonly string[];
   /** Claude Code's config directory, where it keeps each session's tool results. */
   readonly configDir: string;
   /** The id Claude Code knows the session by; null until a start or resume names it. */
@@ -207,7 +209,8 @@ function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
 /**
  * The system's own read-only documentation. System Integrity Protection keeps these directories
  * read-only and they hold no user data, so a lane reads them without a card. Only reads: nothing
- * here widens what a lane may write (a write is judged by `judgeWrite` and the guard).
+ * here widens what a lane may write (a write is judged by `judgeWrite` and the guard). A lane opts
+ * in through `FileAccessContext.systemDocRoots`; a Shape session does not, so it stays confined.
  */
 export const SYSTEM_DOC_ROOTS: readonly string[] = [
   '/usr/share/man',
@@ -237,7 +240,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (isOwnTaskOutput(real, ctx)) return 'allowed';
   if (isOutsideCopy(real, ctx)) return 'outside-copy';
   if (ctx.readList.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) return 'allowed';
-  if (SYSTEM_DOC_ROOTS.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) {
+  if ((ctx.systemDocRoots ?? []).flatMap(spellings).some((root) => isEqualOrUnder(real, root))) {
     return 'allowed';
   }
   return 'ask';

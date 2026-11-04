@@ -7,8 +7,13 @@
 A sandboxed lane's Read, Grep, Glob and LS of a path whose real path is at or under `/usr/share/man`,
 `/usr/share/info` or `/usr/share/doc` is `allowed` (`SYSTEM_DOC_ROOTS` in
 `apps/daemon/src/sandbox/file-access.ts`, checked in `judgeRead` after the lane's own copy, the protected
-paths and the worktrees folder, and beside the read list). It raises no Inbox card. Every other path
+paths and the worktrees folder, and after the read list). It raises no Inbox card. Every other path
 outside the copy, such as one under the builder's home directory, still asks.
+
+Only lanes get this. `judgeRead` is shared with the Shape judge, so the roots are opt-in: the lane sandbox
+sets `FileAccessContext.systemDocRoots` and Shape's context leaves it unset. A Shape session still reads
+only its checkout and its conversation's files, and is denied these paths
+(`2026-11-02-shape-session-and-convert.md`).
 
 The rule is about reads only. It adds nothing to `judgeWrite`, to the broker's Edit judgement or to the
 guard's refusal of a file-tool write outside the repository, so an Edit or Write of a path under
