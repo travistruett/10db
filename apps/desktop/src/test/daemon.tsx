@@ -75,6 +75,10 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/one-way-paths', base), () =>
       HttpResponse.json({ paths: [] }),
     ),
+    // and the size up to which a lane's proposal is filed to the Icebox without a card.
+    http.get(daemonUrl('/projects/:projectId/small-proposal-limit', base), () =>
+      HttpResponse.json({ limit: 1200 }),
+    ),
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),

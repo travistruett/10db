@@ -46,6 +46,7 @@ import {
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
+  SmallProposalLimitDto,
   ShapeConvertInput,
   ShapeDismissInput,
   ShapeEditInput,
@@ -275,6 +276,20 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.setOneWayPaths(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/small-proposal-limit', (c) =>
+      c.json(deps.services.getSmallProposalLimit(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/small-proposal-limit',
+      validator('json', (value): SmallProposalLimitDto => SmallProposalLimitDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setSmallProposalLimit(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),

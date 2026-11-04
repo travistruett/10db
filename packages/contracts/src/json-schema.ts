@@ -87,6 +87,7 @@ import {
   ShapeDismissInput,
   ShapeRehearseInput,
   ShapeRehearseResult,
+  SmallProposalLimitDto,
 } from './shape-review';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
@@ -228,6 +229,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-measures-dto': ShapeMeasuresDto,
   'shape-jev-setting-dto': ShapeJevSettingDto,
   'one-way-paths-dto': OneWayPathsDto,
+  'small-proposal-limit-dto': SmallProposalLimitDto,
   'shape-rehearse-input': ShapeRehearseInput,
   'shape-rehearse-result': ShapeRehearseResult,
   'shape-dismiss-input': ShapeDismissInput,

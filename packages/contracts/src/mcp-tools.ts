@@ -12,7 +12,15 @@ import {
   TaskId,
   WorkstreamId,
 } from './ids';
-import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency, Verdict } from './states';
+import {
+  ClaimKind,
+  ProposalKind,
+  QuestionCategory,
+  RiskTag,
+  Severity,
+  Urgency,
+  Verdict,
+} from './states';
 import { MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
@@ -119,6 +127,13 @@ export const McpToolInputs = {
     kind: z.enum(ProposalKind),
     title: z.string().min(1),
     body: z.string().min(1),
+    /**
+     * The risks the proposed work carries. A small new-task proposal with none is filed to the Icebox
+     * without a card; one with a tag always raises a card.
+     */
+    riskTags: z.array(z.enum(RiskTag)).optional(),
+    /** Set when the work must join a batch that is already running; a person decides that. */
+    joinsRunningBatch: z.boolean().optional(),
   }),
   report_deviation: z.object({
     opId: OpId,
@@ -173,7 +188,11 @@ export const McpToolOutputs = {
   find_knowledge: z.object({ results: z.array(KnowledgeHit), empty: z.boolean() }),
   ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
   record_decision: z.object({ decisionId: DecisionId }),
-  propose: z.object({ proposalId: ProposalId }),
+  propose: z.object({
+    proposalId: ProposalId,
+    /** The task 10db filed to the Icebox by itself; null when a card was raised for a person. */
+    taskId: TaskId.nullable(),
+  }),
   report_deviation: z.object({ deviationId: DeviationId }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [

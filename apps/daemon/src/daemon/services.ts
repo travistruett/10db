@@ -24,6 +24,8 @@ import {
   getGoal,
   getMcpApproval,
   getProject,
+  getSmallProposalLimit,
+  setSmallProposalLimit,
   getTask,
   getTeam,
   getWorkstream,
@@ -388,6 +390,17 @@ export function createServices(deps: {
     },
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
+    getSmallProposalLimit(projectId) {
+      getProject(db, projectId);
+      return { limit: getSmallProposalLimit(db, projectId) };
+    },
+    setSmallProposalLimit(projectId, input) {
+      deps.state.write((ctx) => {
+        getProject(ctx.tx, projectId);
+        setSmallProposalLimit(ctx, projectId, input.limit);
+      });
+      return { limit: input.limit };
+    },
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),

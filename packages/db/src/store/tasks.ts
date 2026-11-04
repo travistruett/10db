@@ -288,10 +288,36 @@ function areasForProposal(
   return only && others.length === 0 ? [only.name] : [];
 }
 
+/** The task whose lane raised the proposal; null when another source did, or the task is gone. */
+export function proposalSourceTask(tx: DbReader, proposalId: ProposalId): TaskDto | null {
+  const source = tx
+    .select({ ref: schema.sources.ref })
+    .from(schema.proposals)
+    .innerJoin(schema.sources, eq(schema.sources.id, schema.proposals.sourceId))
+    .where(eq(schema.proposals.id, proposalId))
+    .get();
+  const workstreamId = WorkstreamId.safeParse(source?.ref['workstreamId']);
+  if (!workstreamId.success) return null;
+  const raiser = tx
+    .select({ taskId: schema.workstreams.taskId })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.id, workstreamId.data))
+    .get();
+  return raiser ? getTask(tx, raiser.taskId) : null;
+}
+
+/** The project's Icebox column: its first column when the builder renamed it; null on the derived board. */
+function iceboxColumnId(tx: DbReader, projectId: ProjectId): BoardColumnId | null {
+  const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
+  const columns = listBoardColumns(tx, projectId);
+  return (columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0])?.id ?? null;
+}
+
 /**
  * Files an accepted new-task proposal as an open task linked to it. The proposal names no acceptance
  * criteria, so the task starts with none; its title meets the same rule as a task made by hand. Its
- * areas come from the task that raised it, or the project's only area (`areasForProposal`).
+ * areas come from the task that raised it, or the project's only area (`areasForProposal`). With
+ * `parkInIcebox` it is parked in the Icebox column, as 10db files a small proposal by itself.
  */
 export function insertTaskFromProposal(
   ctx: WriteContext,
@@ -300,11 +326,13 @@ export function insertTaskFromProposal(
     readonly projectId: ProjectId;
     readonly title: string;
     readonly description: string;
+    readonly parkInIcebox?: boolean;
   },
   placement?: Placement,
 ): TaskDto {
   const project = getProject(ctx.tx, input.projectId);
   return writeTask(ctx, input.projectId, {
+    boardColumnId: input.parkInIcebox === true ? iceboxColumnId(ctx.tx, input.projectId) : null,
     landing: taskLandingFor(project),
     ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     title: Title.parse(input.title),
@@ -358,9 +386,6 @@ export function insertFollowUpTask(
   how: FollowUpOrigin = FollowUpOrigin.Found,
 ): TaskDto {
   const source = getTask(ctx.tx, sourceId);
-  const iceboxKey = columnNameKey(DEFAULT_BOARD_COLUMN);
-  const columns = listBoardColumns(ctx.tx, source.projectId);
-  const icebox = columns.find((c) => columnNameKey(c.name) === iceboxKey) ?? columns[0];
   const origin = originLine(how, source);
   const project = getProject(ctx.tx, source.projectId);
   return writeTask(ctx, source.projectId, {
@@ -375,7 +400,7 @@ export function insertFollowUpTask(
     riskTags: [],
     flowId: null,
     proposalId: null,
-    boardColumnId: icebox?.id ?? null,
+    boardColumnId: iceboxColumnId(ctx.tx, source.projectId),
   });
 }
 

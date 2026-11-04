@@ -25,6 +25,7 @@ import {
   releaseClaims,
   schema,
   seedProject,
+  setSmallProposalLimit,
   setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
@@ -495,6 +496,65 @@ describe('MCP tools', () => {
       'request_claim',
       'write_handoff',
     ]);
+  });
+
+  describe('propose', () => {
+    const openCards = () => listInbox(state.db, { states: ['OPEN'] });
+    const small = { kind: 'new_task', title: 'Reword the criterion', body: 'It is unclear.' };
+
+    it('files a small proposal with no risk tag to the Icebox, with no card, naming the lane’s task', async () => {
+      const s = await seedSession();
+      const { json } = await s.call('propose', { opId: 'op-prop-0001', ...small });
+      const filed = listTasks(state.db, s.project.id).find((t) => t.title === small.title);
+      const icebox = listBoardColumns(state.db, s.project.id).find((c) => c.name === 'Icebox');
+      expect(filed).toBeDefined();
+      expect(filed?.boardColumnId).toBe(icebox?.id);
+      expect(json).toMatchObject({ taskId: filed?.id });
+      expect(filed?.description).toContain('Filed by 10db');
+      expect(filed?.description).toContain(s.task.title);
+      expect(filed?.description).toContain(s.task.id);
+      expect(filed?.description).toContain('It is unclear.');
+      expect(openCards()).toEqual([]);
+      const proposal = state.db.select().from(schema.proposals).all()[0];
+      expect(proposal).toMatchObject({ status: 'accepted' });
+    });
+
+    it.each([
+      ['a risk tag', { riskTags: ['dependency'] }],
+      ['a risk named in its text', { title: 'Bump the zod dependency' }],
+      ['joining a running batch', { joinsRunningBatch: true }],
+      ['a size over the limit', { body: 'x'.repeat(1300) }],
+      ['a change to a task', { kind: 'change_task' }],
+    ])('still raises a card for a proposal with %s', async (_name, over) => {
+      const s = await seedSession();
+      const { json } = await s.call('propose', { opId: 'op-prop-0002', ...small, ...over });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]).toMatchObject({ kind: 'proposal' });
+      expect(json).toMatchObject({ taskId: null });
+      expect(listTasks(state.db, s.project.id).filter((t) => t.title === small.title)).toEqual([]);
+      expect(state.db.select().from(schema.proposals).all()[0]).toMatchObject({
+        status: 'pending',
+      });
+    });
+
+    it('sends every proposal to the Inbox when the project’s limit is zero', async () => {
+      const s = await seedSession();
+      state.write((ctx) => {
+        setSmallProposalLimit(ctx, s.project.id, 0);
+      });
+      await s.call('propose', { opId: 'op-prop-0003', ...small });
+      expect(openCards()).toHaveLength(1);
+    });
+
+    it('files a bigger proposal by itself once the limit is raised', async () => {
+      const s = await seedSession();
+      state.write((ctx) => {
+        setSmallProposalLimit(ctx, s.project.id, 5000);
+      });
+      await s.call('propose', { opId: 'op-prop-0004', ...small, body: 'x'.repeat(1300) });
+      expect(openCards()).toEqual([]);
+      expect(listTasks(state.db, s.project.id).some((t) => t.title === small.title)).toBe(true);
+    });
   });
 
   describe('install_dependencies', () => {
@@ -1681,7 +1741,13 @@ describe('MCP idempotence by opId', () => {
     {
       name: 'propose (one proposal and one card)',
       tool: 'propose',
-      args: { opId: 'op-idem-0002', kind: 'new_task', title: 'Add x', body: 'because' },
+      args: {
+        opId: 'op-idem-0002',
+        kind: 'new_task',
+        title: 'Add x',
+        body: 'because',
+        riskTags: ['security'],
+      },
       created: { proposals: 1, inbox: 1 },
     },
     {

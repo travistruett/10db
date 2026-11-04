@@ -121,6 +121,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setShapeJev: track('setShapeJev'),
     getOneWayPaths: track('getOneWayPaths'),
     setOneWayPaths: track('setOneWayPaths'),
+    getSmallProposalLimit: track('getSmallProposalLimit'),
+    setSmallProposalLimit: track('setSmallProposalLimit'),
     rehearseShape: track('rehearseShape'),
     dismissShapeFinding: track('dismissShapeFinding'),
     shipBatch: track('shipBatch'),
@@ -1168,6 +1170,28 @@ describe('shape routes', () => {
     expect((await put({ paths: ['a/**', 'b.ts'] })).status).toBe(200);
     expect((await put({ paths: [''] })).status).toBe(400);
     expect(set).toEqual([{ paths: ['a/**', 'b.ts'] }]);
+  });
+
+  it('reads and sets a project’s small proposal limit, accepting zero and refusing a negative', async () => {
+    const set: unknown[] = [];
+    const services = stubServices({
+      getSmallProposalLimit: () => ({ limit: 1200 }),
+      setSmallProposalLimit: (_id, input) => {
+        set.push(input);
+        return input;
+      },
+    });
+    const read = await app(services).request(`/projects/${projectId}/small-proposal-limit`, auth);
+    expect(await read.json()).toEqual({ limit: 1200 });
+    const put = (body: unknown) =>
+      app(services).request(`/projects/${projectId}/small-proposal-limit`, {
+        ...post(body),
+        method: 'PUT',
+      });
+    expect((await put({ limit: 0 })).status).toBe(200);
+    expect((await put({ limit: -1 })).status).toBe(400);
+    expect((await put({ limit: 'big' })).status).toBe(400);
+    expect(set).toEqual([{ limit: 0 }]);
   });
 
   it('Rehearse answers what it queued (202); a finding is dismissed (204)', async () => {
