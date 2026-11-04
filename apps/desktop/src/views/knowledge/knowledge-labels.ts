@@ -57,6 +57,11 @@ export function whoText(by: string | null): string {
 /** Tools that write on the builder's behalf and are Claude Code (`builder_mcp` is its 10db tools). */
 const CLAUDE_CODE_VIAS: readonly string[] = ['claude_code', 'builder_mcp'];
 
+/** A tool that wrote through the API, in the builder's words; an unknown tool keeps its own name. */
+export function viaLabel(via: string): string {
+  return CLAUDE_CODE_VIAS.includes(via) ? 'Claude Code' : via;
+}
+
 /**
  * Where a record came from, in the builder's words. An answered card, an agent and 10db itself have
  * their own source kinds; a builder source says more in its ref: a Plan conversation names its
@@ -74,7 +79,7 @@ export function sourceLabel(p: Pick<ProvenanceDto, 'sourceKind' | 'sourceRef' | 
       if (typeof p.sourceRef['shapeId'] === 'string') return 'Plan conversation';
       const via = p.origin?.via;
       if (via === undefined) return 'The app';
-      return CLAUDE_CODE_VIAS.includes(via) ? 'Claude Code' : via;
+      return viaLabel(via);
     }
   }
 }

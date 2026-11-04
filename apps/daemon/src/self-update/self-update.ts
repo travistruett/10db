@@ -4,6 +4,7 @@ import {
   type InboxItemId,
   type ProjectId,
   type SelfUpdateBlockerDto,
+  type SelfUpdateNotInstalling,
   type ShapeId,
 } from '@10db/contracts';
 import {
@@ -15,6 +16,7 @@ import {
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
+import { GhError, GhFailure } from '../github';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 
@@ -231,7 +233,21 @@ export interface SelfUpdateProgress {
    * head failed. Null while the switch is off and while nothing is wrong.
    */
   readonly problem: SelfUpdateBlockerDto | null;
+  /**
+   * Why the available update is not waiting to install: its update failed, the builder rolled back
+   * from it, or it has no finished build newer than the running one. Null while it waits, installs
+   * or none is available.
+   */
+  readonly notInstalling: SelfUpdateNotInstalling | null;
 }
+
+/** What a check's result says about an available update that will not install. */
+const NOT_INSTALLING: Readonly<Partial<Record<TickResult, SelfUpdateNotInstalling>>> = {
+  [TickResult.Failed]: 'failed',
+  [TickResult.FailedBefore]: 'failed',
+  [TickResult.RolledBack]: 'rolled-back',
+  [TickResult.NoNewerBuild]: 'unbuilt',
+};
 
 const STEP_LABELS: Readonly<Record<string, string>> = {
   'find-commit': 'asking GitHub for the head of main',
@@ -253,6 +269,33 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
 
 /** The steps of a stage that come before it knows which build is newest. */
 const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
+
+/**
+ * What Settings says when GitHub could not be asked, by what went wrong: gh signed out, the machine
+ * offline, gh missing or hung, or an error GitHub answered with (a renamed or closed repository, a
+ * rate limit, an answer that is no commit). Only the first two are about sign-in or the network.
+ */
+function unreachableMessage(cause: unknown): string {
+  const again = '10db tries again every minute.';
+  const detail = messageOf(cause).trim().replace(/\.$/, '');
+  if (cause instanceof GhError) {
+    switch (cause.kind) {
+      case GhFailure.SignedOut:
+        return `gh is signed out, so 10db cannot see new builds. Run gh auth login in a terminal; ${again}`;
+      case GhFailure.Unreachable:
+        return `This machine looks offline: gh could not reach GitHub, so 10db cannot see new builds. ${again}`;
+      case GhFailure.NotInstalled:
+        return `gh is not installed any more, so 10db cannot see new builds. Install it (brew install gh) and sign in with gh auth login; ${again}`;
+      case GhFailure.Timeout:
+        return `GitHub gave gh no answer in time, so 10db cannot see new builds (${detail}). ${again}`;
+      case GhFailure.Failed:
+        return `GitHub answered with an error, so 10db cannot see new builds: ${detail}. GitHub was reached, so check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
+      case GhFailure.Aborted:
+        break;
+    }
+  }
+  return `10db could not ask GitHub for new builds: ${detail || 'no reason was given'}. ${again}`;
+}
 
 const short = (commit: string): string => commit.slice(0, 12);
 const messageOf = (error: unknown): string =>
@@ -428,6 +471,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   let failure: { readonly head: string; readonly message: string } | null = null;
   /** The last check could not ask GitHub. */
   let unreachable = false;
+  /** What went wrong the last time GitHub could not be asked; says which reason Settings gives. */
+  let askFailure: unknown = null;
+  /**
+   * Why the last check that could ask found nothing to install for the available head, when it did.
+   * Gone once the head changes or the builder asks again, which no check has to end for.
+   */
+  let notInstalling: SelfUpdateNotInstalling | null = null;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -459,6 +509,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub for the head of main');
+      askFailure = error;
       return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
@@ -476,6 +527,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub how main compares with this build');
+      askFailure = error;
       return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
@@ -493,6 +545,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       }
       return TickResult.NotAhead;
     }
+    // Why an update is not installing is about one head of main, and a stage can take minutes.
+    if (available !== head) notInstalling = null;
     available = head;
     // A failure is about one head of main: a newer head is a fresh start.
     if (failure !== null && failure.head !== head) failure = null;
@@ -539,10 +593,22 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
               { step: result.step, message: result.message },
               'could not look for a newer build than the staged one',
             );
+            askFailure = new Error(`${STEP_LABELS[result.step] ?? result.step}: ${result.message}`);
             return withoutGitHub(runningCommit);
           }
-          // A newer build exists and did not arrive. The staged one stays for the next try, as the
-          // failed head's: it does not install, not even with GitHub away.
+          // Main's head is the one this build was staged for: the stage only ran again because
+          // nothing is mid-session, to see whether a newer build had finished. The staged build was
+          // checked when it was fetched and installs with no network, as with GitHub away, so a
+          // failed second look is no failed update: nothing is recorded, and it installs.
+          if (staged.head === head) {
+            logger.warn(
+              { step: result.step, message: result.message, staged: staged.commit },
+              'could not fetch a newer build than the staged one again: installing the staged one',
+            );
+            return installWhenIdle(runningCommit, staged);
+          }
+          // Main moved on and its build did not arrive. The staged one stays for the next try, as
+          // the failed head's: it does not install, not even with GitHub away.
           staged = { ...staged, head };
         } else {
           staged = null;
@@ -554,12 +620,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       staged = null;
       // The newest finished build is not the head's when the head's is still building. It is the
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
-      // when it is the build the builder rolled back from; the next check looks again.
+      // when it is the build the builder rolled back from: this head was not rolled back from, it
+      // has no build yet, and the next check looks again.
       if (result.current) {
         noBuildYet();
-        return skip !== null && result.commit === skip
-          ? TickResult.RolledBack
-          : TickResult.NoNewerBuild;
+        return TickResult.NoNewerBuild;
       }
       // Never an older build: the one that was fetched must be ahead of the running commit too. The
       // staged one was checked when it was fetched, and the running commit has not changed.
@@ -569,6 +634,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       } catch (error) {
         if (isStopped()) return TickResult.Working;
         logger.warn({ err: error }, 'could not ask GitHub how the staged build compares');
+        askFailure = error;
         // The stage replaced the build it could have fallen back on, so no drain has anything to
         // install. The next check fetches again, and the update's wait goes on from where it was.
         endDrain();
@@ -614,7 +680,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (build.commit === rolledBackFrom()) {
       staged = null;
       noBuildYet();
-      return TickResult.RolledBack;
+      return TickResult.NoNewerBuild;
     }
     if (!deps.enabled()) {
       clearWaiting();
@@ -763,7 +829,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     try {
       const result = await check(deps.runningCommit);
       // Working means the check ended early because the daemon is stopping: it learned nothing.
-      if (result !== TickResult.Working) unreachable = result === TickResult.Unreachable;
+      if (result !== TickResult.Working) {
+        unreachable = result === TickResult.Unreachable;
+        // Neither did a check that could not ask GitHub, so the last reason still holds.
+        if (!unreachable) notInstalling = NOT_INSTALLING[result] ?? null;
+      }
       return result;
     } finally {
       working = false;
@@ -773,13 +843,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   /** A failed update is the more useful thing to say: GitHub answering again does not undo it. */
   function problem(): SelfUpdateBlockerDto | null {
     if (failure !== null) return { kind: 'failed', message: failure.message };
-    if (unreachable) {
-      return {
-        kind: 'unreachable',
-        message:
-          'gh could not reach GitHub, so 10db cannot see new builds. It is signed out or offline: check gh auth status, and 10db tries again every minute.',
-      };
-    }
+    if (unreachable) return { kind: 'unreachable', message: unreachableMessage(askFailure) };
     return null;
   }
 
@@ -840,6 +904,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     },
     retry() {
       failure = null;
+      notInstalling = null;
       state.write((ctx) => {
         deleteAppSetting(ctx, SELF_UPDATE_FAILED_KEY);
         deleteAppSetting(ctx, SELF_UPDATE_ROLLED_BACK_KEY);
@@ -868,6 +933,13 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       draining: drainingSince !== null,
       drainingSince,
       problem: !deps.enabled() ? null : problem(),
+      notInstalling:
+        available === null || !deps.enabled()
+          ? null
+          : // A failure outside a check (an install that ended, a start that settled it) counts too.
+            failure !== null
+            ? 'failed'
+            : notInstalling,
     }),
   };
 }

@@ -47,6 +47,7 @@ describe('SelfUpdateStatusDto blocker', () => {
     isDefault: true,
     runningCommit: SHA,
     availableCommit: null,
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: null,
     draining: false,
@@ -93,6 +94,7 @@ describe('SelfUpdateStatusDto', () => {
     isDefault: true,
     runningCommit: SHA,
     availableCommit: null,
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: null,
     draining: false,
@@ -103,6 +105,15 @@ describe('SelfUpdateStatusDto', () => {
 
   it('describes the switch, the commits and the wait', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
+  });
+
+  it.each(['failed', 'rolled-back', 'unbuilt'])('says an update is not installing: %s', (why) => {
+    const held = { ...status, availableCommit: SHA, notInstalling: why };
+    expect(SelfUpdateStatusDto.parse(held)).toEqual(held);
+  });
+
+  it('refuses a reason it does not know', () => {
+    expect(SelfUpdateStatusDto.safeParse({ ...status, notInstalling: 'sad' }).success).toBe(false);
   });
 
   it('says what the update waits for: running work, and lanes waiting on a card', () => {

@@ -78,6 +78,20 @@ describe('a turn held by the drain when 10db quits', () => {
     expect(notices()).toEqual(['10db quit before the rehearsal ran. Press Rehearse again.']);
   });
 
+  it('is reported when it was sent after the service closed, and the hold letting go starts no session for it', async () => {
+    drain.begin(new Date(0));
+    await f.service.close();
+    // The HTTP server still takes a message while the daemon stops; close has already emptied the queue.
+    f.service.send(shapeId(), 'Too late.');
+    await tick();
+    drain.stop();
+    await f.service.settled(shapeId());
+    expect(notices()).toEqual([
+      '10db quit before Claude read “Too late.”, so it went unanswered. Send it again.',
+    ]);
+    expect(f.adapter.shapeSessions).toHaveLength(0);
+  });
+
   it('says nothing when the turn ran before the quit', async () => {
     drain.begin(new Date(0));
     f.service.send(shapeId(), 'One more thing.');

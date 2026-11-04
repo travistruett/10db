@@ -30,6 +30,21 @@
         }
       ]
     },
+    "notInstalling": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "failed",
+            "rolled-back",
+            "unbuilt"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "waitMinutes": {
       "type": "integer",
       "minimum": 0,
@@ -138,6 +153,7 @@
     "isDefault",
     "runningCommit",
     "availableCommit",
+    "notInstalling",
     "waitMinutes",
     "waitingSince",
     "draining",

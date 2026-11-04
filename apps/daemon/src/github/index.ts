@@ -2,6 +2,7 @@ export {
   createGh,
   GhError,
   GhFailure,
+  ghFailureOf,
   jobIdsOfLink,
   MergeBlocked,
   parseJobLog,

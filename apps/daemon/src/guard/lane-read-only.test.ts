@@ -74,6 +74,31 @@ describe('laneReadOnlyWords', () => {
     expect(laneReadOnlyWords(command)).toBeNull();
   });
 
+  it.each<[string, string]>([
+    ['git log -S with a value starting with O', 'git log -SOption -- a.ts'],
+    ['git log -G with a value starting with O', 'git log -GOAuth'],
+    ['git diff --text', 'git diff --text'],
+    ['git grep --text', 'git grep --text x'],
+    ['git diff -a', 'git diff -a'],
+  ])('%s reads only, for a lane and a read-only step', (_name, command) => {
+    expect(laneReadOnlyWords(command)).not.toBeNull();
+    expect(readOnlyShellRefusal(command)).toBeNull();
+  });
+
+  it.each<[string, string]>([
+    ['git grep -O', 'git grep -O less x'],
+    ['git grep -n1Osh', 'git grep -n1Osh x'],
+    ['git grep --open-files-in-pager', 'git grep --open-files-in-pager=less x'],
+    ['git diff --output', 'git diff --output=x'],
+    ['git log --out', 'git log --out=x'],
+    ['git diff --ext-diff', 'git diff --ext-diff'],
+    ['git diff --textconv', 'git diff --textconv'],
+    ['git grep --textconv', 'git grep --textconv x'],
+  ])('%s is refused for a lane and a read-only step', (_name, command) => {
+    expect(laneReadOnlyWords(command)).toBeNull();
+    expect(readOnlyShellRefusal(command)).not.toBeNull();
+  });
+
   it('adds ps for lanes without widening the read-only steps', () => {
     expect(laneReadOnlyWords('ps aux')).not.toBeNull();
     expect(readOnlyShellRefusal('ps aux')).not.toBeNull();
@@ -159,6 +184,53 @@ describe('a lane Bash call made only of read-only commands', () => {
       false,
     );
     expect('settled' in pre('grep -r x --file=/data/10db/f', access(['/data/10db']))).toBe(false);
+  });
+
+  it.each<[string]>([
+    ['ps -Eww'],
+    ['ps Eww'],
+    ['ps eww'],
+    ['ps -x eww'],
+    ['ps -E'],
+    ['ps aux -wwE'],
+  ])('is not settled for ps showing the environment: %s', (command) => {
+    expect(laneReadOnlyWords(command)).toBeNull();
+    expect('settled' in pre(command)).toBe(false);
+  });
+
+  it.each<[string]>([['ps aux'], ['ps -ef'], ['ps -p 123 -o pid=,comm='], ['ps -axo pid,ppid']])(
+    'is still settled for ps that prints no environment: %s',
+    (command) => {
+      expect(pre(command)).toEqual({ decision: 'allow', settled: expect.any(String) as string });
+    },
+  );
+
+  it.each<[string]>([
+    ['cat /dev/zero | wc -c'],
+    ['sort /dev/urandom'],
+    ['head /dev//random'],
+    ['grep -f/dev/zero x a'],
+    ['grep --file=/dev/urandom x a'],
+    ['wc -c /dev/./zero'],
+  ])('is not settled when it reads a device with no end: %s', (command) => {
+    expect('settled' in pre(command)).toBe(false);
+  });
+
+  it.each<[string]>([
+    ['grep -f/protected/path x a'],
+    ['grep -nf/protected/path x a'],
+    ['grep -ef=/protected/path x a'],
+    ['rg -f/protected/path x'],
+    ['head -n1 -f/protected/path'],
+  ])('is not settled when a short option carries a path it may never read: %s', (command) => {
+    expect('settled' in pre(command, access(['/protected/path']))).toBe(false);
+  });
+
+  it('still settles short options and bundles that carry no protected path', () => {
+    expect(pre('grep -rnE -A3 -f/some/list x a | head -n 5')).toEqual({
+      decision: 'allow',
+      settled: expect.any(String) as string,
+    });
   });
 
   it('is not settled after a cd, which moves what a relative path means', () => {

@@ -1,4 +1,4 @@
-import { KnowledgeItemKind, type PrincipleItem } from '@10db/contracts';
+import { isSearch, KnowledgeItemKind, type PrincipleItem } from '@10db/contracts';
 import { Code, Group, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { useKnowledgePrinciples, type KnowledgeFilter } from '../../daemon/knowledge-queries';
@@ -25,7 +25,7 @@ export function PrincipleList({
   const principles = useKnowledgePrinciples(filter);
   // A stable sort keeps the daemon's order (newest first, or best match first) within a kind. With a
   // search the best match leads, so the kind grouping is left out.
-  const searching = filter.q.trim() !== '';
+  const searching = isSearch(filter.q);
   const rows = (principles.data?.items ?? [])
     .filter((i) => i.kind === KnowledgeItemKind.Principle)
     .toSorted((a, b) =>

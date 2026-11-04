@@ -1,5 +1,5 @@
 import { CommitSha } from '@10db/contracts';
-import type { GhCall, GhExec } from '../github';
+import { GhError, GhFailure, ghFailureOf, type GhCall, type GhExec } from '../github';
 import { REPOSITORY } from './build-info';
 
 /**
@@ -12,13 +12,16 @@ export function githubHeadOfMain(
 ): (repo: string) => Promise<string> {
   return async (repo) => {
     if (!REPOSITORY.test(repo)) throw new Error(`'${repo}' is not a GitHub repository name`);
-    const result = await exec(['api', `repos/${repo}/commits/main`, '--jq', '.sha'], call());
-    if (result.exitCode !== 0) {
-      throw new Error(`gh could not read main of ${repo}: ${result.stderr.trim() || 'no message'}`);
-    }
+    const args = ['api', `repos/${repo}/commits/main`, '--jq', '.sha'];
+    const result = await exec(args, call());
+    if (result.exitCode !== 0) throw ghFailureOf(args, result);
     const sha = CommitSha.safeParse(result.stdout.trim());
-    if (!sha.success)
-      throw new Error(`GitHub answered something that is not a commit for main of ${repo}`);
+    if (!sha.success) {
+      throw new GhError(
+        GhFailure.Failed,
+        `GitHub answered something that is not a commit for main of ${repo}`,
+      );
+    }
     return sha.data;
   };
 }
@@ -42,19 +45,18 @@ export function githubMainIsAhead(
     if (!CommitSha.safeParse(base).success || !CommitSha.safeParse(head).success) {
       throw new Error('a commit to compare is not a full commit SHA');
     }
-    const result = await exec(
-      ['api', `repos/${repo}/compare/${base}...${head}`, '--jq', '.status'],
-      call(),
-    );
+    const args = ['api', `repos/${repo}/compare/${base}...${head}`, '--jq', '.status'];
+    const result = await exec(args, call());
     if (result.exitCode !== 0) {
       if (UNKNOWN_COMMIT.test(result.stderr)) return false;
-      throw new Error(
-        `gh could not compare main of ${repo}: ${result.stderr.trim() || 'no message'}`,
-      );
+      throw ghFailureOf(args, result);
     }
     const status = result.stdout.trim();
     if (!COMPARISON.has(status)) {
-      throw new Error(`GitHub answered something that is not a comparison for main of ${repo}`);
+      throw new GhError(
+        GhFailure.Failed,
+        `GitHub answered something that is not a comparison for main of ${repo}`,
+      );
     }
     return status === 'ahead';
   };

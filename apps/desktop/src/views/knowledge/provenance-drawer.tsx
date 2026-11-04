@@ -1,8 +1,7 @@
 import type { ProvenanceDto } from '@10db/contracts';
 import { Alert, Anchor, Blockquote, Drawer, Loader, Stack, Text } from '@mantine/core';
 import { useProvenance, type RecordRef, type TracedRecord } from '../../daemon/knowledge-queries';
-import { STATE_LABELS } from './knowledge-labels';
-import { dateTimeText, sourceLabel, whoText } from './knowledge-labels';
+import { STATE_LABELS, dateTimeText, sourceLabel, viaLabel, whoText } from './knowledge-labels';
 
 type Action = NonNullable<ProvenanceDto['retired']>;
 
@@ -12,7 +11,7 @@ function ActionLines({ verb, action }: { readonly verb: string; readonly action:
   return (
     <Stack gap={2}>
       <Text size="sm">
-        {`${verb} by ${whoText(action.by)} on ${dateTimeText(action.at)}${via ? ` through ${via}` : ''}`}
+        {`${verb} by ${whoText(action.by)} on ${dateTimeText(action.at)}${via ? ` through ${viaLabel(via)}` : ''}`}
       </Text>
       {action.reason ? <Text size="sm">{action.reason}</Text> : null}
       {action.source?.quote ? <Blockquote>{action.source.quote}</Blockquote> : null}
@@ -112,7 +111,7 @@ export function ProvenanceDrawer({
             {p.confirmedBy && p.confirmedAt ? (
               <Text size="sm" c="dimmed">
                 {`Confirmed by ${whoText(p.confirmedBy)} on ${dateTimeText(p.confirmedAt)}${
-                  p.confirmedSource ? ` through ${p.confirmedSource.via}` : ''
+                  p.confirmedSource ? ` through ${viaLabel(p.confirmedSource.via)}` : ''
                 }`}
               </Text>
             ) : null}

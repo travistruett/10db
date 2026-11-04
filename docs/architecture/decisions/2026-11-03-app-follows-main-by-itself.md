@@ -35,8 +35,9 @@ the folder stays as it is, so a head that moves while lanes are busy costs a loo
 fetched build must also be ahead of the running commit (the same comparison), else nothing is installed. The DMG
 is checked against `SHA256SUMS`, and the stage folder keeps the DMG, the checksum, the commit and a copy of the
 two install scripts, because the install replaces the app that holds them. A newer build replaces the staged one
-only once it is checked, and the commit file is removed first and written last, so a folder that names a commit
-holds all of that build.
+only once it is checked and whole: it is copied into a sibling folder (`stage.next`), its commit file written last,
+and swapped in by rename, so a folder that names a commit holds all of that build, and a copy that fails or is killed
+leaves the staged build as it was. The daemon removes whatever a killed copy left in the sibling.
 
 **What is staged is the newest finished build, not the head.** The daemon stages again, passing `--have`, when main's
 head moves, and, for a staged build that is not the head's own, once nothing is mid-session: it is about to install,
@@ -53,12 +54,27 @@ started waits at the drain, or at a hold of its own from the moment an install t
 idle moment has no drain and a shape turn does not go through the scheduler. Waiting there it has begun nothing, so
 it stops counting, or it would keep the drain up for ever. Shape's queue is in memory and no recovery restores it:
 if the quit comes first, the service writes a notice in the conversation naming each turn that never ran, for the
-builder to send again. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
+builder to send again. That covers a message sent after the install is asked for (between the final look and the
+quit, while the script does its checksum and lock): the hold is up before that look, so the message is queued, not
+started, and the quit's `close` refuses it with the notice. It is refused, not answered after the relaunch, because
+the queue is memory and a resumed session is never given earlier messages; the message stays in the transcript and
+the notice says to send it again. A message that reaches the service after `close` (the HTTP server still takes
+requests while the daemon stops) gets the same notice at once and no session, as the hold letting go on the way out
+must not start one. If the app is killed rather than quit (a SIGKILL, a crash) no notice is written; that is the one
+way a message goes unanswered without a word. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
 was reading branches launch nothing, so no lane begins between the last check and the quit. It waits and checks
 again each minute while a batch is cutting or shipping or a lane runs.
+
+A staged build older than the head is looked at once more first. When its commit is not the head's (the head's own
+build was still running when it was staged) and nothing is mid-session, the check stages again before it installs,
+with `--have` naming the staged commit: it fetches only if a newer finished build exists, and otherwise the staged
+folder stays and installs. That second look is an optimisation (a newer build, one quit), not the update itself, so
+when it fails at any step with the head unchanged since the build was staged, the staged build installs as it would
+with GitHub away: no card, no `self_update.failed_commit`. It is a failure only when main's head has moved on since
+the build was staged, because then the newer build is the update that did not arrive (see Failure).
 
 **When it has waited too long: the factory drains.** On 2026-11-03 #466 merged and its build finished, yet the app
 was still on the previous commit 30 minutes later: three lanes ran back to back, each starting its next step as soon
@@ -108,8 +124,9 @@ factory (`self-update/drain.ts`) until the app has installed:
   fails while it looks for a newer build (`find-commit`, `find-build`) is the same outage: the staged build stays
   and goes on, with no card, no `self_update.failed_commit` and the drain as it was. With no build staged (a newer
   fetched build replaced it and could not be compared) the drain has nothing to install and ends, and the update's
-  wait goes on from where it was. The one exception: a staged build whose head has failed (see Failure) does not
-  install this way either.
+  wait goes on from where it was. The same holds for the re-stage of a staged build older than the head, once nothing
+  is mid-session, when it fails with the head unchanged at any step: the staged build installs (see "When it
+  installs"). The one exception: a staged build whose head has failed (see Failure) does not install this way either.
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
@@ -120,6 +137,15 @@ factory (`self-update/drain.ts`) until the app has installed:
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.
+- **Not installing:** an available head can also be one that will not install: its update failed, the builder rolled
+  back from it, or it has no finished build newer than the running one. `notInstalling` (`failed`, `rolled-back`,
+  `unbuilt`, else null) says which, taken from the last check's result. Settings then says why instead of
+  "waiting for a moment when nothing is mid-session". It offers no Install Now for `failed` or `rolled-back`, where it
+  would do nothing; for `unbuilt` it still does, because Install Now is remembered until a build is staged.
+  `rolled-back` is only ever the head the builder rolled back from: a newer head whose newest finished build is
+  that rolled-back one is `unbuilt`, because it installs by itself when its own build finishes. A check that could
+  not ask GitHub learned nothing, so the reason stays; a different head, or the switch turned off and on, clears it
+  at once rather than when the next check ends. An install that fails while the daemon runs counts with no check.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
@@ -155,7 +181,8 @@ does after a manual install. `--status-file` makes either half write `{ok, mode,
 `TENDB_INSTALL_GH` set to the gh it resolved from its fixed install prefixes, `GH_REPO` set to the pinned
 repository, and the login environment otherwise as gh's sign-in needs it, without `PATH`, `BASH_ENV`, `ENV`,
 `DYLD_*`, `LD_*` or `TENDB_INSTALL_*`. The stage half runs in its own process group with its own `TMPDIR`; a
-timeout or the app quitting kills the group and removes both folders, and starts no stage after.
+timeout kills the group and removes its folders but a build it was keeping, and the app quitting does the same, keeps
+nothing, and starts no stage after.
 
 **Failure.** A failure leaves the running app as it was, or restorable: `install-app.sh` puts the previous app
 back when a step after the quit fails, relaunches it, and `make rollback-app` still works. It raises one Inbox
@@ -177,12 +204,17 @@ checks and show only with it on: `unreachable` (the last finished check could no
 update failed). The reason text of a failure is held in memory, not stored: after a restart the check that finds
 `self_update.failed_commit` still at main's head reduces it to a generic line that names the commit.
 
-A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
-killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above). Any later step
-(`wait-for-build`, `download`, `verify-checksum`, `stage`) is a failure as above, with its card and
+A stage that fails with a build already staged leaves that folder in place, unless it was killed in the swap itself,
+two renames apart, or on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above),
+nor is any step of the re-stage while main's head is unchanged since the build was staged ("When it installs"
+above). Any later step (`wait-for-build`,
+`download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
-confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
-it fetches only if a newer build is still the newest. It does not retry every minute, because a checksum mismatch
+confirmed. It stays staged, so when main moves the next stage passes `--have`: it fetches only if a newer build is
+still the newest. The builder's retry is the switch, and turning it off forgets the staged build (the folder is
+removed), so off and then on starts the next stage with nothing to keep and passes no `--have`: the newer build is
+fetched as wanted, and the older one is downloaded again only if it turns out to be the newest. Only a head move
+keeps the staged build with `--have`. It does not retry every minute, because a checksum mismatch
 would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its

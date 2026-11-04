@@ -17,7 +17,9 @@ interface Note {
 }
 
 function noteFor(status: SelfUpdateStatusDto): Note | null {
-  if (!status.enabled || status.availableCommit === null) return null;
+  // An update that will not install neither waits nor drains, whatever else the status still holds.
+  if (!status.enabled || status.availableCommit === null || status.notInstalling !== null)
+    return null;
   const build = status.availableCommit.slice(0, SHORT);
   const waitsFor = updateWaitsFor(status);
   if (status.draining && status.drainingSince !== null)
