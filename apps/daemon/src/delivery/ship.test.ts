@@ -272,6 +272,8 @@ describe('shipping', () => {
     expect(failed).toMatchObject({ state: 'FAILED', failure: 'install_broken' });
     const card = h.only(h.cards());
     expect(card.body).toMatch(/fix pnpm on the login shell's PATH/i);
+    // The daemon reads the login shell's PATH once, at startup, so a Retry alone can't see a change.
+    expect(card.body).toMatch(/restart 10db/i);
     expect(card.body).toContain('Retry');
     expect(card.body).not.toMatch(/Retry removes/);
     expect(card.body).not.toMatch(/installs again/);
