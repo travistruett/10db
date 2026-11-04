@@ -16,6 +16,7 @@ import {
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
+import { GhError, GhFailure } from '../github';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 
@@ -269,6 +270,33 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
 /** The steps of a stage that come before it knows which build is newest. */
 const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
 
+/**
+ * What Settings says when GitHub could not be asked, by what went wrong: gh signed out, the machine
+ * offline, gh missing or hung, or an error GitHub answered with (a renamed or closed repository, a
+ * rate limit, an answer that is no commit). Only the first two are about sign-in or the network.
+ */
+function unreachableMessage(cause: unknown): string {
+  const again = '10db tries again every minute.';
+  const detail = messageOf(cause).trim().replace(/\.$/, '');
+  if (cause instanceof GhError) {
+    switch (cause.kind) {
+      case GhFailure.SignedOut:
+        return `gh is signed out, so 10db cannot see new builds. Run gh auth login in a terminal; ${again}`;
+      case GhFailure.Unreachable:
+        return `This machine looks offline: gh could not reach GitHub, so 10db cannot see new builds. ${again}`;
+      case GhFailure.NotInstalled:
+        return `gh is not installed any more, so 10db cannot see new builds. Install it (brew install gh) and sign in with gh auth login; ${again}`;
+      case GhFailure.Timeout:
+        return `GitHub gave gh no answer in time, so 10db cannot see new builds (${detail}). ${again}`;
+      case GhFailure.Failed:
+        return `GitHub answered with an error, so 10db cannot see new builds: ${detail}. GitHub was reached, so check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
+      case GhFailure.Aborted:
+        break;
+    }
+  }
+  return `10db could not ask GitHub for new builds: ${detail || 'no reason was given'}. ${again}`;
+}
+
 const short = (commit: string): string => commit.slice(0, 12);
 const messageOf = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -443,6 +471,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   let failure: { readonly head: string; readonly message: string } | null = null;
   /** The last check could not ask GitHub. */
   let unreachable = false;
+  /** What went wrong the last time GitHub could not be asked; says which reason Settings gives. */
+  let askFailure: unknown = null;
   /**
    * Why the last check that could ask found nothing to install for the available head, when it did.
    * Gone once the head changes or the builder asks again, which no check has to end for.
@@ -479,6 +509,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub for the head of main');
+      askFailure = error;
       return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
@@ -496,6 +527,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     } catch (error) {
       if (isStopped()) return TickResult.Working;
       logger.warn({ err: error }, 'could not ask GitHub how main compares with this build');
+      askFailure = error;
       return withoutGitHub(runningCommit);
     }
     if (isStopped()) return TickResult.Working;
@@ -561,6 +593,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
               { step: result.step, message: result.message },
               'could not look for a newer build than the staged one',
             );
+            askFailure = new Error(`${STEP_LABELS[result.step] ?? result.step}: ${result.message}`);
             return withoutGitHub(runningCommit);
           }
           // Main's head is the one this build was staged for: the stage only ran again because
@@ -601,6 +634,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       } catch (error) {
         if (isStopped()) return TickResult.Working;
         logger.warn({ err: error }, 'could not ask GitHub how the staged build compares');
+        askFailure = error;
         // The stage replaced the build it could have fallen back on, so no drain has anything to
         // install. The next check fetches again, and the update's wait goes on from where it was.
         endDrain();
@@ -809,13 +843,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   /** A failed update is the more useful thing to say: GitHub answering again does not undo it. */
   function problem(): SelfUpdateBlockerDto | null {
     if (failure !== null) return { kind: 'failed', message: failure.message };
-    if (unreachable) {
-      return {
-        kind: 'unreachable',
-        message:
-          'gh could not reach GitHub, so 10db cannot see new builds. It is signed out or offline: check gh auth status, and 10db tries again every minute.',
-      };
-    }
+    if (unreachable) return { kind: 'unreachable', message: unreachableMessage(askFailure) };
     return null;
   }
 

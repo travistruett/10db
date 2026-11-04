@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { GhError, GhFailure } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import {
@@ -425,13 +426,57 @@ describe('tick', () => {
   it('says it could not reach GitHub while the check fails, and stops saying it once one succeeds', async () => {
     const update = make();
     expect(update.status().problem).toBeNull();
-    world.head = new Error('offline');
+    world.head = new GhError(GhFailure.Unreachable, 'gh api failed: dial tcp: i/o timeout');
     expect(await update.tick()).toBe('unreachable');
     expect(update.status().problem?.kind).toBe('unreachable');
-    expect(update.status().problem?.message).toMatch(/signed out|offline/i);
+    expect(update.status().problem?.message).toMatch(/offline/i);
     world.head = RUNNING;
     expect(await update.tick()).toBe('current');
     expect(update.status().problem).toBeNull();
+  });
+
+  it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
+    const reasons: string[] = [];
+    for (const error of [
+      new GhError(GhFailure.SignedOut, 'gh is not signed in. Run gh auth login in a terminal.'),
+      new GhError(GhFailure.Unreachable, 'gh api failed (exit 1): error connecting to github.com'),
+      new GhError(GhFailure.Failed, 'gh api failed (exit 1): gh: Not Found (HTTP 404)'),
+    ]) {
+      world.head = error;
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      reasons.push(update.status().problem?.message ?? '');
+    }
+    expect(reasons[0]).toMatch(/signed out/i);
+    expect(reasons[0]).toMatch(/gh auth login/);
+    expect(reasons[1]).toMatch(/offline/i);
+    expect(reasons[1]).not.toMatch(/signed out/i);
+    expect(reasons[2]).toMatch(/HTTP 404/);
+    expect(reasons[2]).not.toMatch(/signed out|offline/i);
+    expect(new Set(reasons).size).toBe(3);
+  });
+
+  it('names the error GitHub answered when the comparison is what failed, and when gh is not installed or times out', async () => {
+    world.ahead = new GhError(GhFailure.Failed, 'gh api failed (exit 1): HTTP 403 rate limit');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/HTTP 403 rate limit/);
+    world.ahead = true;
+    world.head = new GhError(GhFailure.NotInstalled, 'no gh');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/not installed/i);
+    world.head = new GhError(GhFailure.Timeout, 'gh api gave no answer within 30 s');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/no answer/i);
+  });
+
+  it('does not blame sign-in or the network for a failure it cannot classify', async () => {
+    world.head = new Error('something odd');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    const message = update.status().problem?.message ?? '';
+    expect(message).toMatch(/something odd/);
+    expect(message).not.toMatch(/signed out|offline/i);
   });
 
   it('says nothing about GitHub while the switch is off', async () => {
