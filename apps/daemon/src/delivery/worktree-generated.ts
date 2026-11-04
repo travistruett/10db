@@ -28,6 +28,19 @@ export const GENERATED: readonly Generated[] = [
   { dir: 'packages/db/drizzle/', manifest: 'packages/db/package.json', name: '@10db/db' },
 ];
 
+/** The generated directory that holds a drizzle journal: its package numbers what it makes. */
+export const MIGRATIONS_DIR = 'packages/db/drizzle/';
+
+/** A batch's own migration, re-created after the base's in place of the file the merge dropped. */
+export interface CarriedMigration {
+  /** Its tag on the branch (`0042_add_x`). */
+  readonly tag: string;
+  /** Its tag without the number: the `--name` that makes it again. */
+  readonly name: string;
+  /** Authored by hand from a stub the generator wrote, so its SQL is not the generator's. */
+  readonly custom: boolean;
+}
+
 /** A manifest past this is not a workspace package's: it is not read. */
 const MANIFEST_MAX_BYTES = 256 * 1024;
 
@@ -74,13 +87,24 @@ const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
  * The command that regenerates `dirs`: each one's package's `generate` script, with the pnpm the
  * daemon resolved (`pnpm`, an absolute path outside every checkout). Like the install, the program
  * is fixed here and the repository's own config can't choose it. A filter that matches no package
- * fails the command: pnpm would otherwise run nothing and exit 0.
+ * fails the command: pnpm would otherwise run nothing and exit 0. `migrations` replaces the plain run
+ * of the migrations package with one run per migration, in order, each under its own name.
  */
-export function generateCommand(pnpm: string, dirs: readonly string[]): string {
+export function generateCommand(
+  pnpm: string,
+  dirs: readonly string[],
+  migrations: readonly CarriedMigration[] = [],
+): string {
   const env =
     'pnpm_config_manage_package_manager_versions=false COREPACK_ENABLE_STRICT=0 COREPACK_ENABLE_AUTO_PIN=0';
   return GENERATED.filter((g) => dirs.includes(g.dir))
-    .map((g) => `${env} ${quoted(pnpm)} --filter ${quoted(g.name)} --fail-if-no-match generate`)
+    .flatMap((g) => {
+      const run = `${env} ${quoted(pnpm)} --filter ${quoted(g.name)} --fail-if-no-match generate`;
+      if (g.dir !== MIGRATIONS_DIR || migrations.length === 0) return [run];
+      return migrations.map(
+        ({ name, custom }) => `${run}${custom ? ' --custom' : ''} --name ${quoted(name)}`,
+      );
+    })
     .join(' && ');
 }
 
@@ -104,6 +128,8 @@ export interface WorktreeGenerators {
     readonly project: ProjectDto;
     readonly path: string;
     readonly dirs: readonly string[];
+    /** The batch's own migrations to re-create in order, instead of one plain run of the generator. */
+    readonly migrations?: readonly CarriedMigration[];
     readonly signal: AbortSignal;
   }): Promise<Regeneration>;
 }
@@ -115,7 +141,7 @@ export interface WorktreeGenerators {
  */
 export function createWorktreeGenerators(deps: WorktreeDependenciesDeps): WorktreeGenerators {
   return {
-    async regenerate({ batch, project, path, dirs, signal }) {
+    async regenerate({ batch, project, path, dirs, migrations, signal }) {
       const logPath = join(
         deps.dataDir,
         'logs',
@@ -134,7 +160,7 @@ export function createWorktreeGenerators(deps: WorktreeDependenciesDeps): Worktr
       }
       const result = await deps.gate.run({
         project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
-        command: generateCommand(pnpm, dirs),
+        command: generateCommand(pnpm, dirs, migrations),
         logPath,
         timeoutMs: deps.timeoutMs,
         env,

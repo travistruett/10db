@@ -808,6 +808,19 @@ export const REVERTED_NOTICE_KEY = 'reverted-work';
  */
 export const INSTALL_REPAIRED_NOTICE_KEY = 'install-repaired';
 
+/**
+ * The key of the batch notice that lists the migrations a merge of the base renumbered. Every later
+ * step of the batch is briefed from it, because docs that name those migrations are the lane's to fix.
+ */
+export const MIGRATIONS_RENUMBERED_NOTICE_KEY = 'migrations-renumbered';
+
+/**
+ * The key of the batch notice that lists the migrations a merge of the base lost and 10db could not
+ * re-create. It stands until the branch's journal holds them: no gate passes meanwhile, and every
+ * later step of the batch is briefed from it, because re-creating them falls to the lane.
+ */
+export const MIGRATIONS_UNCARRIED_NOTICE_KEY = 'migrations-uncarried';
+
 export const InboxTarget = z.object({
   workstreamId: WorkstreamId,
   sessionId: SessionId.nullable(),

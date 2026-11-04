@@ -15,6 +15,7 @@ import {
   ConflictError,
   InboxAnswerRefused,
   mintId,
+  MIGRATIONS_RENUMBERED_NOTICE_KEY,
   PARK_TASK_CHOICE,
   PARKED_NOTICE_KEY,
   ToolAccess,
@@ -56,6 +57,7 @@ import {
   patchWorkstream,
   schema,
   seedAccount,
+  setBatchNotice,
   transitionBatch,
   transitionWorkstream,
   updateInboxItem,
@@ -5114,6 +5116,25 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(cards.map((card) => card.body)).toEqual([expect.stringContaining('(.: tsx)')]);
       });
 
+      it('counts a migration the base merge lost as a failed gate, so a fix session re-creates it, with no gate run', async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
+        const note = 'The merge of origin/main left this branch without 0042_x.';
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-7', ['src/api/a.txt']), turn]],
+          {
+            baseUpdates: recordingBaseUpdates({ kind: 'uncarried', head: 'abc', note }, order),
+          },
+        ).finally(restore);
+        expect(order).not.toContain('gate spawned');
+        const row = ws(workstream.id);
+        expect(row).toMatchObject({ state: 'QUEUED', attempt: 1 });
+        expect(row.nextAction.kind).toBe('fix');
+        const evidence = listEvidence(engine.store.db, workstream.id);
+        expect(evidence).toHaveLength(1);
+        expect(evidence[0]?.summary).toContain(note);
+      });
+
       it('sends the work back to a session that resolves the conflict markers the base merge left, running no gate and raising no card, then gates the merged branch', async () => {
         const order: string[] = [];
         const options: (BeforeGateOptions | undefined)[] = [];
@@ -5207,6 +5228,37 @@ describe('the base merge leaving conflict markers in a task that used its fix at
     await engine.runner.idle();
     return workstream;
   }
+
+  it('is told which of its migrations the merge of its base renumbered, when the next session starts', async () => {
+    const notice = {
+      key: MIGRATIONS_RENUMBERED_NOTICE_KEY,
+      tone: 'info',
+      line: '1 of this batch migrations was renumbered',
+      body: "- 0042_x → 0043_x\n\nDocs that name a renumbered migration are the lane's to fix",
+    } as const;
+    const answers: BaseUpdate[] = [conflicted];
+    const baseUpdates: BaseUpdates = {
+      beforeGate: (batchId) => {
+        engine.state.write((c) => {
+          setBatchNotice(c, batchId, notice);
+        });
+        return Promise.resolve(answers.shift() ?? { kind: 'up_to_date', note: null });
+      },
+      gate: (_batchId, _signal, go) => go(),
+      atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+    };
+    engine = await createTestEngine({ Alpha: [[turn], [turn]] }, {}, { baseUpdates });
+    const batch = engine.state.write((ctx) =>
+      insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, batch.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts[0]?.prompt).not.toContain('0042_x');
+    expect(engine.adapter.prompts[1]?.prompt).toContain(notice.body);
+  });
 
   it('still gets a session that resolves the markers, rather than failing before any merge session ran', async () => {
     const workstream = await usedUp(
