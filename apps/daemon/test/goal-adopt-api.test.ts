@@ -148,6 +148,41 @@ describe('POST /projects/:projectId/goals/adopt', () => {
     expect(await goalsOf(project.id)).toEqual([goal]);
   });
 
+  it("runs the placement rule on the tasks it makes: an area in the project's isolate list gets a copy and a reason", async () => {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [
+        { name: 'repo', globs: ['**'] },
+        { name: 'docs', globs: ['docs/**'] },
+      ],
+      delivery: 'pull_request',
+      prTitlePrefix: 'feat(app)',
+      isolate: ['docs'],
+    });
+    const res = await adopt(project.id, { text: GOOD });
+    expect(res.status).toBe(201);
+    const placed = (await tasksOf(project.id)).map((t) => ({
+      title: t.title,
+      workspaceMode: t.workspaceMode,
+      placementReason: t.placementReason,
+    }));
+    expect(placed).toEqual([
+      {
+        title: "Patch a task's areas and dependencies",
+        workspaceMode: 'shared',
+        placementReason: null,
+      },
+      {
+        title: 'Edit areas in the task drawer',
+        workspaceMode: 'worktree',
+        placementReason: 'touches docs',
+      },
+      { title: "Propose a new project's areas", workspaceMode: 'shared', placementReason: null },
+    ]);
+  });
+
   it('refuses an unknown depends_on key, a cycle and an unknown area together, and writes nothing', async () => {
     const project = await seed();
     const res = await adopt(project.id, { text: BAD });

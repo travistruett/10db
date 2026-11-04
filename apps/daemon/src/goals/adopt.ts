@@ -4,6 +4,7 @@ import type { GoalAdoptInput, GoalAdoptIssue, ProjectId } from '@10db/contracts'
 import { getProject, insertGoal, listPeople, type DbReader } from '@10db/db';
 import type { GoalAdoptResult } from '../api';
 import type { StateStore } from '../events';
+import { proposePlacement } from '../placement';
 import { checkBriefRules, parseBrief } from './brief';
 
 // Goals spec §11 and decisions/2026-11-01-adopt-a-goal-from-a-brief.md: the brief is imported, not
@@ -50,7 +51,12 @@ export async function adoptGoal(
     };
   }
   const { goal } = deps.state.write((ctx) =>
-    insertGoal(ctx, projectId, { brief: parsed.brief, description: parsed.notes }),
+    insertGoal(ctx, projectId, {
+      brief: parsed.brief,
+      description: parsed.notes,
+      // Task placement spec P2: the rule runs when a task is made, and adoption makes tasks.
+      placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
+    }),
   );
   return { kind: 'adopted', goal };
 }
