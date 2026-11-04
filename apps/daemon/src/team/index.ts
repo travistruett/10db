@@ -7,6 +7,7 @@ export {
   retryWorkstream,
   startTaskWithPlan,
 } from './steps';
+export { lastRevertTold, revertCommitLine } from './reverted-work';
 export {
   advanceSteps,
   countSendBack,

@@ -656,6 +656,10 @@
                   "body": {
                     "type": "string",
                     "maxLength": 8000
+                  },
+                  "record": {
+                    "type": "string",
+                    "maxLength": 100000
                   }
                 },
                 "required": [
@@ -1109,6 +1113,10 @@
                 "body": {
                   "type": "string",
                   "maxLength": 8000
+                },
+                "record": {
+                  "type": "string",
+                  "maxLength": 100000
                 }
               },
               "required": [

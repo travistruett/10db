@@ -2,8 +2,10 @@ import {
   BatchState,
   isSettled,
   latestPerTask,
+  LEFT_OUT_NOTICE_KEY,
   shipReadiness,
   ShipReadiness,
+  WorkstreamState,
   type BatchDto,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -28,6 +30,13 @@ import { AddFixTask } from './batch/add-fix-task';
 
 const B = BatchState;
 
+/** `A`, `A and B`, `A, B and C`. */
+function joinNames(names: readonly string[]): string {
+  return names.length < 2
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1] ?? ''}`;
+}
+
 export interface BatchPanelProps {
   readonly batch: BatchDto;
   /** Every workstream, so the batch's members decide whether it can ship anyway. */
@@ -51,6 +60,11 @@ export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps)
     batch.state === B.Open &&
     readiness === ShipReadiness.ShipAnyway &&
     members.some((w) => !isSettled(w.state));
+  // Ship anyway ships the branch as it stands, so a failed task's commits go in the pull request
+  // unless Ship without it already reverted them.
+  const shipsFailed = members
+    .filter((w) => w.state === WorkstreamState.Failed && w.notice?.key !== LEFT_OUT_NOTICE_KEY)
+    .map((w) => w.taskTitle);
   const canAbandon = batch.state === B.Open || failed;
   const path = batch.worktreePath;
   // A fix task joins a separate copy's batch; the shared batch takes tasks through the sheet. A batch
@@ -153,6 +167,11 @@ export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps)
             </Button>
           ) : null}
         </Group>
+      ) : null}
+      {canShipAnyway && shipsFailed.length > 0 ? (
+        <Text size="xs" c="dimmed">
+          {`Ship anyway puts the commits of ${joinNames(shipsFailed)}, which failed, in the pull request.`}
+        </Text>
       ) : null}
       {canAbandon ? (
         <Text size="xs" c="dimmed">

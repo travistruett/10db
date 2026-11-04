@@ -37,6 +37,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
+import { revertCommitOf, revertedWorkNote, revertedWorkNotice } from './reverted-work';
 import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
 
 /** What starting this task would run: its flow resolved against the project's team and the catalogue. */
@@ -158,11 +159,17 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
         patch: { failure: null },
         reason: 'a workstream was retried',
       });
-    // Its work may go in the pull request now, so "left out" is no longer true of this run.
-    if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
+    // Its work may go in the pull request now, so "left out" is no longer true of this run. But the
+    // revert commit is still on the branch: the run keeps a notice that says so (the pull request
+    // lists its task as done only if the run commits again), and its session is told in the note below.
+    const leftOut = row.notice?.key === LEFT_OUT_NOTICE_KEY;
+    const revert = leftOut ? revertCommitOf(row.notice) : null;
+    if (leftOut) setWorkstreamNotice(ctx, id, revert ? revertedWorkNotice(revert) : null);
     // The builder's note is a fix for whichever step runs next, as when they send the work back. It
     // is stamped in the same write that starts that step, so a fresh session still finds it outstanding.
-    const text = note?.trim() ?? '';
+    const text = [note?.trim() ?? '', revert ? revertedWorkNote(revert) : '']
+      .filter((part) => part !== '')
+      .join('\n\n');
     const evidence =
       text === ''
         ? null
