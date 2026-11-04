@@ -719,11 +719,19 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * as long as GitHub stays away.
    */
   async function withoutGitHub(runningCommit: string): Promise<TickResult> {
-    if (staged === null || staged.head === failedHead() || staged.newerFailed === true) {
+    if (staged === null || heldBack(staged)) {
       endDrain();
       return TickResult.Unreachable;
     }
     return installWhenIdle(runningCommit, staged);
+  }
+
+  /**
+   * A staged build that does not install while GitHub is away: its own install failed, or the fetch
+   * of a newer one did. A retry() clears the failure but leaves the build still held back.
+   */
+  function heldBack(build: { readonly head: string; readonly newerFailed?: true }): boolean {
+    return build.head === failedHead() || build.newerFailed === true;
   }
 
   /** The staged build installs when nothing is mid-session; until then it waits or drains. */
@@ -999,7 +1007,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
             : // However the build was lost: with GitHub away the next check can't stage another, and
               // no check runs to fetch one.
               (notInstalling ??
-              (fetching ? 'fetching' : unreachable && staged === null ? 'unreachable' : null)),
+              (fetching
+                ? 'fetching'
+                : unreachable && (staged === null || heldBack(staged))
+                  ? 'unreachable'
+                  : null)),
     }),
   };
 }

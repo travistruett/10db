@@ -1290,6 +1290,16 @@ describe('a waiting update drains the factory', () => {
       expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
     });
 
+    it('does not say the held-back build waits for an idle moment when GitHub goes away after retry()', async () => {
+      const update = await retriedAfterNewerHeadFailed();
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      const status = update.status();
+      expect(status.availableCommit).toBe('e'.repeat(40));
+      expect(status.problem?.kind).toBe('unreachable');
+      expect(status.notInstalling).toBe('unreachable');
+    });
+
     it.each(['find-commit', 'find-build'])(
       'does not install the older build when the look fails at %s after retry(), and records nothing',
       async (step) => {
