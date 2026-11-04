@@ -738,6 +738,8 @@ describe('the failed workstream card', () => {
     describe('a left-out run that is retried after its commits were reverted', () => {
       /** While set, the ship's base update answers that the merge left markers. */
       let baseConflicts = false;
+      /** While set, the ship's gate fails, so a Ship without it leaves the batch FAILED. */
+      let gateFails = false;
 
       /**
        * Ships without Alpha, then retries it with the batch's gate passing; returns what the retry left.
@@ -746,8 +748,9 @@ describe('the failed workstream card', () => {
       async function leftOutThenRetried(
         failing: () => ReturnType<typeof failedInBatch> = () =>
           failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' }),
+        retry = true,
       ) {
-        let gateFails = true;
+        gateFails = true;
         h.close();
         h = createDeliveryHarness(
           {},
@@ -780,8 +783,50 @@ describe('the failed workstream card', () => {
         await h.jobs.idle();
         expect(getWorkstream(h.store.db, failed).notice?.key).toBe('left-out');
         gateFails = false;
-        retryWorkstream(h.state, failed);
+        if (retry) retryWorkstream(h.state, failed);
         return { batchId, failed };
+      }
+
+      /**
+       * Starts the failed run's task over, as Start with fresh does in a shared project: the batch holds
+       * Beta too, so it is kept, and the new run joins it. Returns the new run.
+       */
+      async function startedOver(batchId: BatchId, failed: WorkstreamId) {
+        const taskId = getWorkstream(h.store.db, failed).taskId;
+        h.starter.startTask(taskId);
+        await h.jobs.idle();
+        const run = listWorkstreams(h.store.db, { batchId }).at(-1);
+        if (!run || run.id === failed || run.taskId !== taskId)
+          throw new Error('the new run joined the batch');
+        return run.id;
+      }
+
+      /** The revert a run's left-out notice names. */
+      function revertNamedBy(run: WorkstreamId): string {
+        const notice = getWorkstream(h.store.db, run).notice;
+        expect(notice?.key).toBe('left-out');
+        const sha = /^Revert commit: ([0-9a-f]+)$/m.exec(notice?.body ?? '')?.[1];
+        if (sha === undefined) throw new Error('the notice names a revert');
+        return sha;
+      }
+
+      /**
+       * Alpha left out, retried and told of that revert, then its new commit left out too, with the
+       * ship's gate failing so the batch stays FAILED and open to a start. Returns both reverts.
+       */
+      async function leftOutTwice() {
+        const { batchId, failed } = await leftOutThenRetried();
+        const first = getWorkstream(h.store.db, failed).notice?.body ?? '';
+        commitAs(failed, 'src/api/alpha-again.txt', 'alpha again\n');
+        h.settle(failed, 'FAILED');
+        gateFails = true;
+        inbox.answer(failedCard(failed, batchId).id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        gateFails = false;
+        expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
+        const latest = revertNamedBy(failed);
+        expect(first).not.toContain(latest);
+        return { batchId, failed, latest };
       }
 
       /** The paths the shipped batch's branch holds. */
@@ -909,6 +954,108 @@ describe('the failed workstream card', () => {
         expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
         expect(body).toContain('### Alpha');
         expect(body).not.toMatch(/reverted/);
+      });
+
+      describe('and started over in the same batch', () => {
+        it('tells the new run’s session the commits were reverted', async () => {
+          const { batchId, failed } = await leftOutThenRetried(undefined, false);
+          const run = await startedOver(batchId, failed);
+
+          const next = getWorkstream(h.store.db, run).nextAction;
+          if (next.kind !== 'fix') throw new Error(`expected a fix, got ${next.kind}`);
+          const note = getEvidence(h.store.db, next.evidenceId);
+          expect(note.kind).toBe('builder');
+          expect(note.summary).toMatch(/reverted/i);
+          expect(note.summary).toMatch(/[0-9a-f]{40}/);
+        });
+
+        it('does not list the task as finished when the new run commits nothing, though the old run was never retried', async () => {
+          const { batchId, failed } = await leftOutThenRetried(undefined, false);
+          const run = await startedOver(batchId, failed);
+
+          h.settle(run, 'DONE');
+          h.shipper.checkBatch(batchId);
+          await h.jobs.idle();
+
+          const shipped = getBatch(h.store.db, batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(branchFiles(batchId)).not.toContain('src/api/alpha.txt');
+          const body = h.gh.body(shipped.prUrl ?? '');
+          expect(body).not.toContain('### Alpha');
+          expect(body).toMatch(/Alpha \(done, .*reverted/);
+        });
+
+        it('lists the task as finished when the new run commits the work again', async () => {
+          const { batchId, failed } = await leftOutThenRetried(undefined, false);
+          const run = await startedOver(batchId, failed);
+          commitAs(run, 'src/api/alpha.txt', 'alpha again\n');
+
+          h.settle(run, 'DONE');
+          h.shipper.checkBatch(batchId);
+          await h.jobs.idle();
+
+          const shipped = getBatch(h.store.db, batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+          const body = h.gh.body(shipped.prUrl ?? '');
+          expect(body).toContain('### Alpha');
+          expect(body).not.toMatch(/reverted/);
+        });
+
+        it('lists the task as finished when an earlier retry left a note and the new run redoes the work', async () => {
+          const { batchId, failed } = await leftOutThenRetried();
+          h.settle(failed, 'FAILED');
+          const run = await startedOver(batchId, failed);
+          commitAs(run, 'src/api/alpha.txt', 'alpha again\n');
+
+          h.settle(run, 'DONE');
+          h.shipper.checkBatch(batchId);
+          await h.jobs.idle();
+
+          const shipped = getBatch(h.store.db, batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+          const body = h.gh.body(shipped.prUrl ?? '');
+          expect(body).toContain('### Alpha');
+          expect(body).not.toMatch(/reverted/);
+        });
+
+        it('reads the latest revert when a retried run was left out again, and commits nothing', async () => {
+          const { batchId, failed, latest } = await leftOutTwice();
+          const run = await startedOver(batchId, failed);
+
+          const next = getWorkstream(h.store.db, run).nextAction;
+          if (next.kind !== 'fix') throw new Error(`expected a fix, got ${next.kind}`);
+          expect(getEvidence(h.store.db, next.evidenceId).summary).toContain(latest);
+
+          h.settle(run, 'DONE');
+          h.shipper.checkBatch(batchId);
+          await h.jobs.idle();
+
+          const shipped = getBatch(h.store.db, batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(branchFiles(batchId)).not.toContain('src/api/alpha-again.txt');
+          const body = h.gh.body(shipped.prUrl ?? '');
+          expect(body).not.toContain('### Alpha');
+          expect(body).toMatch(/Alpha \(done, .*reverted/);
+        });
+
+        it('lists the task as finished when a run started after the second revert commits the work', async () => {
+          const { batchId, failed } = await leftOutTwice();
+          const run = await startedOver(batchId, failed);
+          commitAs(run, 'src/api/alpha-third.txt', 'alpha third\n');
+
+          h.settle(run, 'DONE');
+          h.shipper.checkBatch(batchId);
+          await h.jobs.idle();
+
+          const shipped = getBatch(h.store.db, batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(branchFiles(batchId)).toContain('src/api/alpha-third.txt');
+          const body = h.gh.body(shipped.prUrl ?? '');
+          expect(body).toContain('### Alpha');
+          expect(body).not.toMatch(/reverted/);
+        });
       });
 
       it('counts a merge run’s commit when that run was the one left out, retried and told to redo the work', async () => {
