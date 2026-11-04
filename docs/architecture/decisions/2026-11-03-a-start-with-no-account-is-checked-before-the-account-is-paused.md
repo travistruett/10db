@@ -8,7 +8,9 @@
 - **The check.** When a start of a subscription account gets no account from Claude Code (no answer in time, or
   `accountInfo()` rejected), the session runs `claude auth status --json` with the session's own env, which
   names the account's config directory (`claudeAuthStatus` in `sessions/sign-in-check.ts`, 20 s limit). It reads
-  `loggedIn`: `signed_in`, `signed_out`, or `unknown` for a failure, a timeout or output it cannot read. A keyed
+  `loggedIn`: `signed_in`, `signed_out`, or `unknown` for a timeout, a kill, a failed spawn or output it cannot
+  read. A non-zero exit alone is not `unknown`: Claude Code 2.1.317, run with an empty `CLAUDE_CONFIG_DIR`, prints
+  `{"loggedIn": false, ...}` and exits 1, so the output of a process that exited by itself is still read. A keyed
   account has no sign-in to check and is not asked.
 - **Signed out.** `signed_out` refuses the account at once, on the first silent start, as a `signed_out` refusal.
   The card is the same sign-in card as before and names the sign-in command; its message now says `claude auth

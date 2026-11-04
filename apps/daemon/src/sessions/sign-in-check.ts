@@ -14,8 +14,10 @@ const AuthStatus = z.looseObject({ loggedIn: z.boolean() });
 
 /**
  * Runs `claude auth status --json` with the session's env and reads `loggedIn`. It starts no model
- * session, so it answers in a moment even when a full Claude Code start is slow. Anything but a clear
- * answer (a failure, a timeout, output it cannot read) is `unknown`, never a guess.
+ * session, so it answers in a moment even when a full Claude Code start is slow. A signed-out claude
+ * prints its answer and exits 1, so a process that ran to its own non-zero exit still has its output
+ * read. Anything but a clear answer (a timeout, a kill, a failed spawn, output it cannot read) is
+ * `unknown`, never a guess.
  */
 export function claudeAuthStatus(
   claudePath: string,
@@ -28,7 +30,7 @@ export function claudeAuthStatus(
       ['auth', 'status', '--json'],
       { env: { ...env }, timeout: timeoutMs, maxBuffer: 1_000_000 },
       (error, stdout) => {
-        if (error) {
+        if (error && (error.killed === true || typeof error.code !== 'number')) {
           resolve('unknown');
           return;
         }

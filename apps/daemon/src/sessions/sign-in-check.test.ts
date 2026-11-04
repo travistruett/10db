@@ -28,6 +28,11 @@ describe('claudeAuthStatus', () => {
     await expect(claudeAuthStatus(claude, {}, 5_000)).resolves.toBe(expected);
   });
 
+  it('reads signed out from a claude that says so and exits 1', async () => {
+    const claude = fakeClaude(`printf '{"loggedIn": false}'; exit 1`);
+    await expect(claudeAuthStatus(claude, {}, 5_000)).resolves.toBe('signed_out');
+  });
+
   it('asks with the account env, so it reads the account config dir', async () => {
     const claude = fakeClaude(
       `[ "$1 $2 $3" = "auth status --json" ] && [ "$CLAUDE_CONFIG_DIR" = /accounts/b ] && printf '{"loggedIn": true}' || printf '{"loggedIn": false}'`,
@@ -42,6 +47,10 @@ describe('claudeAuthStatus', () => {
     ['prints something else', "printf 'not json'"],
     ['prints no loggedIn', "printf '{}'"],
     ['is too slow', 'sleep 5'],
+    ['fails and prints something else', "printf 'not json'; exit 1"],
+    ['fails and prints no loggedIn', "printf '{}'; exit 1"],
+    ['is too slow after printing an answer', `printf '{"loggedIn": false}'; sleep 5`],
+    ['is killed after printing an answer', `printf '{"loggedIn": false}'; kill -9 $$`],
   ])('is unknown when claude %s', async (_name, body) => {
     const claude = fakeClaude(body);
     await expect(claudeAuthStatus(claude, {}, 300)).resolves.toBe('unknown');
