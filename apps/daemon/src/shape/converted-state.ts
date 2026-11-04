@@ -5,6 +5,16 @@ import { getGoal, getTask, latestWorkstreamOf, listShapeLinks, type DbReader } f
 // or task it became, with where it stands now. Read-only: the session may only propose changes and
 // removals for a task marked "not started".
 
+/** The line that introduces the converted-state lines in a note. */
+export const CONVERTED_HEADING =
+  'Converted so far, read-only (propose a change or removal only for a task marked "not started"):';
+
+/** The converted-state lines under their heading, or null when nothing was converted. */
+export function convertedStateNote(db: DbReader, shapeId: ShapeId): string | null {
+  const lines = convertedStateLines(db, shapeId);
+  return lines.length === 0 ? null : [CONVERTED_HEADING, ...lines].join('\n');
+}
+
 /** One line per row a conversation converted, in the order Convert made them. */
 export function convertedStateLines(db: DbReader, shapeId: ShapeId): string[] {
   return listShapeLinks(db, shapeId).map((link) => {

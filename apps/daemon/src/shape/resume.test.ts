@@ -289,6 +289,71 @@ describe('telling a reopened conversation which tasks mis-sized', () => {
   });
 });
 
+describe('telling a reopened conversation what Convert made', () => {
+  const HEADING = 'Converted so far, read-only';
+  const times = (text: string, part: string) => text.split(part).length - 1;
+  const send = async (text: string) => {
+    f.service.send(shapeId(), text);
+    await f.service.settled(shapeId());
+  };
+
+  it('gives a resumed session each converted row with its id and state on the next message', async () => {
+    const [unstarted, started] = convertTasks('a', 'b').map((id) => must(id, 'task'));
+    write((ctx) => {
+      insertWorkstream(ctx, must(started, 'started'));
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    await send('What should change?');
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.spec.resumeProviderSessionId).toBe('sdk-1');
+    expect(session.spec.prompt).toContain(HEADING);
+    expect(session.spec.prompt).toContain(`task ${unstarted ?? ''} "Task a" — not started`);
+    expect(session.spec.prompt).toMatch(
+      new RegExp(`task ${started ?? ''} "Task b" — started \\(queued\\)`),
+    );
+  });
+
+  it('tells a live session as it stands at its next turn', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    await send('First.');
+    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    await send('Second.');
+    const session = must(f.adapter.shapeSessions[0], 'a session');
+    expect(session.sent[0]).toMatch(new RegExp(`task ${first ?? ''} "Task a" — started`));
+  });
+
+  it('carries no such lines when nothing was converted', async () => {
+    write((ctx) => {
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    await send('Hello.');
+    expect(must(prompts()[0], 'prompt')).not.toContain(HEADING);
+  });
+
+  it('says it once when a resume event reopens the conversation too', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    write((ctx) => {
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    f.service.resume(shapeId(), 'Task a is done.');
+    await send('What should change?');
+    expect(times(must(prompts()[0], 'prompt'), `task ${first ?? ''} "Task a"`)).toBe(1);
+  });
+
+  it('puts the lines in a digested start once', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    write((ctx) =>
+      insertShapeMessage(ctx, shapeId(), {
+        author: ShapeMessageAuthor.Claude,
+        kind: ShapeMessageKind.Text,
+        body: 'Converted.',
+      }),
+    );
+    await send('What should change?');
+    expect(times(must(prompts()[0], 'prompt'), `task ${first ?? ''} "Task a"`)).toBe(1);
+  });
+});
+
 describe('re-planning a reopened conversation', () => {
   const cite = (): ShapeMessageId => f.service.resume(shapeId(), 'Reopened to re-plan.').id;
 

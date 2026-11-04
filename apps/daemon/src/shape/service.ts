@@ -9,6 +9,7 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
+  ShapeState,
   shapeFileKind,
   SessionMode,
   type DecisionId,
@@ -110,7 +111,7 @@ import {
 import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
-import { convertedStateLines } from './converted-state';
+import { CONVERTED_HEADING, convertedStateNote } from './converted-state';
 import { untoldMissized, type UntoldMissized } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
@@ -268,6 +269,8 @@ interface Intake {
   readonly files: readonly ShapeFileRow[];
   /** Finished tasks outside their size that Claude has not heard about. */
   readonly missized: UntoldMissized;
+  /** A converted conversation: what Convert made as it stands now, null when nothing needs saying. */
+  readonly converted: string | null;
 }
 
 type TurnEnd =
@@ -507,11 +510,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     intake: Intake,
     shown: readonly ShapeFileRow[] = intake.files,
     sizes: readonly string[] = intake.missized.lines,
+    converted: string | null = intake.converted,
   ): string => {
     // An image too large to send as a block is named as a path, with the way to read it.
     const byPath = pathImageIds(shown, intake.files);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
+      ...(converted === null ? [] : [`[note] ${converted}`]),
       ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
       ...shown.map(
         (file) =>
@@ -541,11 +546,22 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
    * and which mis-sized tasks is read from the database, so what waited through a restart still
    * reaches it.
    */
-  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
-    notes: rt.notes.splice(0),
-    files: listUntoldShapeFiles(state.db, shapeId),
-    missized: untoldMissized(state.db, shapeId),
-  });
+  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => {
+    const notes = rt.notes.splice(0);
+    // A converted conversation tells its turn what Convert made, as it stands as the turn starts.
+    // A resume note already carries the same lines.
+    const converted =
+      getShape(state.db, shapeId).state === ShapeState.Converted &&
+      !notes.some((note) => note.includes(CONVERTED_HEADING))
+        ? convertedStateNote(state.db, shapeId)
+        : null;
+    return {
+      notes,
+      files: listUntoldShapeFiles(state.db, shapeId),
+      missized: untoldMissized(state.db, shapeId),
+      converted,
+    };
+  };
 
   /** Records that the turn just sent carried these files and these mis-sized tasks. */
   const told = (files: readonly ShapeFileRow[], missized: UntoldMissized): void => {
@@ -598,8 +614,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       files = listShapeFiles(state.db, shapeId);
     }
-    // The digest already names every mis-sized task.
-    const lines = intakeText(intake, files, digested ? [] : intake.missized.lines);
+    // The digest already names every mis-sized task and every converted row.
+    const lines = intakeText(
+      intake,
+      files,
+      digested ? [] : intake.missized.lines,
+      digested ? null : intake.converted,
+    );
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
@@ -994,17 +1015,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       const message = say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Event, event);
       // The session sees what Convert made as it stands now, read-only, ahead of its next turn; a
       // fresh session gets the same lines in its digest.
-      const lines = convertedStateLines(state.db, shapeId);
+      const converted = convertedStateNote(state.db, shapeId);
       runtimeOf(shapeId).notes.push(
-        [
-          `[m:${message.id}] ${event}`,
-          ...(lines.length === 0
-            ? []
-            : [
-                'Converted so far, read-only (propose a change or removal only for a task marked "not started"):',
-                ...lines,
-              ]),
-        ].join('\n'),
+        [`[m:${message.id}] ${event}`, ...(converted === null ? [] : [converted])].join('\n'),
       );
       return message;
     },
