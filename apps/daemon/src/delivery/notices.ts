@@ -225,10 +225,10 @@ export const leftOutNotices = {
     body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /**
-   * An earlier Ship without it reverted its commits in `revert`, and this answer had nothing left to
-   * revert: the run was retried and added no commit, or was never retried (the earlier answer's
-   * notices were not written, or a later answer found the revert standing). The wording holds for
-   * both. The revert line is what a Retry reads to tell the session again.
+   * The run's record names `revert`, which is still on the branch, but no revert on the branch lists
+   * a commit of the task and this answer reverted none of them. A run with a commit a revert lists
+   * gets `reverted` instead, naming that revert. Either kind of run may or may not have been retried,
+   * so the wording says nothing of a retry. The revert line is what a Retry reads to tell the session.
    */
   alreadyReverted: (revert: string): Notice => ({
     key: LEFT_OUT_NOTICE_KEY,

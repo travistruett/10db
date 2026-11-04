@@ -35,13 +35,17 @@ the full note as its fix, unless an implement step has started since the last no
 The note is repeated. Every Retry of a run whose revert still stands writes it again, so a second Retry of a run
 that committed nothing tells the new session once more. A commit made since the last note ends that: it brings work
 back, and 10db never undoes a revert, so the run is not told again. A commit that resolved conflict markers does
-not end it. A Retry that finds no revert standing writes a `no_revert` record and tells nothing
+not end it. A Retry of a run whose `left-out` notice names no revert, when the batch's open left-out card holds
+none either, writes a `no_revert` record and tells nothing
 (`decisions/2026-11-04-the-failure-line-reads-whether-a-run-was-told-of-a-revert-from-the-run.md`).
 
-A later Ship without it can find a run's revert still on the branch with no new commit, whether or not the run was
-ever retried. It reverts nothing more and gives the run the `left-out` notice `alreadyReverted`, which names the
-revert and does not say the run failed again or that a retry added none, since either may be untrue. That notice's
-revert line is what a Retry reads to tell the session.
+A later Ship without it gives a run with a commit listed by a revert on the branch the `left-out` notice `reverted`,
+whether or not the run was ever retried. The notice names that revert, or this answer's own revert when it also
+undoes newer commits of the run. It gives a run the `left-out` notice `alreadyReverted` only when no commit of the
+task is listed by a revert on the branch, this answer reverted none of them, and the run's record names a revert
+still on the branch. That notice names the revert and does not say the run failed again or that a retry added none,
+since neither has to be true of such a run. The revert line of either notice is what a Retry reads to tell the
+session.
 
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.

@@ -16,8 +16,8 @@ import {
 const HEAD = 'a'.repeat(40);
 
 describe('the already-reverted left-out notice', () => {
-  // It is written for a run that was retried and failed again, and for one that never was: a later
-  // Ship without it finds the revert still on the branch either way.
+  // It is written when the run's record names a revert still on the branch, no revert on the branch
+  // lists a commit of the task, and the answer reverted none of them. That holds of a run retried or not.
   const { body, line } = leftOutNotices.alreadyReverted('b'.repeat(40));
 
   it('names the earlier revert and says nothing more was reverted', () => {
