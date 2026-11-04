@@ -106,7 +106,8 @@ function tryRealPath(p: string): string | null {
   }
 }
 
-function expandHome(path: string, home: string): string {
+/** `path` with a leading `~` made `home`, as Claude Code's file tools read it. */
+export function expandHome(path: string, home: string): string {
   if (path === '~') return home;
   return path.startsWith('~/') ? join(home, path.slice(2)) : path;
 }

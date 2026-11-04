@@ -1,9 +1,4 @@
-import {
-  ScreenMessageBody,
-  ShapeMessageAuthor,
-  ShapeMessageKind,
-  type ShapeId,
-} from '@10db/contracts';
+import { ShapeMessageAuthor, ShapeMessageKind, type ShapeId } from '@10db/contracts';
 import {
   lastShapeMessages,
   listShapeLinks,
@@ -11,6 +6,7 @@ import {
   type DbReader,
   type ShapeProposalRow,
 } from '@10db/db';
+import { parseScreenBody } from '../screens';
 import { convertedStateLines } from './converted-state';
 import { missizedLines } from './sizing';
 
@@ -35,18 +31,10 @@ function titleOf(row: ShapeProposalRow): string {
  * one was taken and how to take it again.
  */
 function screenLine(body: string): string {
-  const parsed = ScreenMessageBody.safeParse(safeJson(body));
-  return parsed.success
-    ? `[A screenshot of the ${parsed.data.screen} at ${String(parsed.data.width)}×${String(parsed.data.height)} was taken here; it is not in this session. Take it again with see_screen if you need it.]`
-    : '[A screenshot was taken here; it is not in this session.]';
-}
-
-function safeJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
-  }
+  const screen = parseScreenBody(body);
+  return screen === null
+    ? '[A screenshot was taken here; it is not in this session.]'
+    : `[A screenshot of the ${screen.screen} at ${String(screen.width)}×${String(screen.height)} was taken here; it is not in this session. Take it again with see_screen if you need it.]`;
 }
 
 /**
