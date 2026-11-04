@@ -363,8 +363,8 @@ not by the token.
   kept under the conversation's `screens/` directory, and written as a `screen`
   transcript row that names it, with a dimmed `see_screen · board · 1200×900` line before it. **The builder sees
   the same image the session was given:** the transcript draws the row as the picture (read with the UI token, as
-  a data URL). A picture that is wrong or blank, a screen that fails to load or does not finish in 15 s, a crashed
-  view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
+  a data URL). A picture that is wrong or blank, a screen that fails to load or does not finish loading in 15 s, a
+  capture that runs past the 19 s a whole draw has from its start, a crashed view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
   `see_screen · refused · …` line), never a blank image.
 - **Budget.** At most 12 screens a conversation; each is at most 1600 by 2000 px; the system prompt says to ask for
   the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session

@@ -52,6 +52,7 @@ const draw = (capture: () => Promise<DrawnScreen> = () => Promise.resolve(pictur
     doc: document,
     capture,
     timeoutMs: 15_000,
+    budgetMs: 19_000,
   });
 
 describe('the frame', () => {
@@ -141,7 +142,7 @@ describe('drawing a screen', () => {
     say(ready);
     const hidden = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden');
     try {
-      await vi.advanceTimersByTimeAsync(15_000);
+      await vi.advanceTimersByTimeAsync(19_000);
       expect(await drawing).toEqual({ ok: false, reason: WINDOW_HIDDEN });
     } finally {
       hidden.mockRestore();
@@ -188,39 +189,46 @@ describe('drawing a screen', () => {
     say(ready);
     expect(frames()).toHaveLength(1);
     // The load timer no longer runs: the app had said it was ready.
-    await vi.advanceTimersByTimeAsync(14_999);
+    await vi.advanceTimersByTimeAsync(13_999);
     expect(frames()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     const result = await drawing;
     expect(result.ok).toBe(false);
     const reason = !result.ok ? result.reason : '';
     expect(reason).toBe(
-      'The Board finished loading, but making it into a picture took longer than 15 s, so it was not drawn.',
+      'The Board finished loading, but making it into a picture took longer than 14 s, so it was not drawn.',
     );
     expect(reason).not.toContain('finish loading');
     expect(frames()).toEqual([]);
   });
 
-  it('gives a capture its own time, after the load has used its own', async () => {
-    const drawing = drawScreen({
-      request,
-      daemon: 'http://127.0.0.1:4999',
-      origin: ORIGIN,
-      doc: document,
-      capture: () => new Promise(() => undefined),
-      timeoutMs: 15_000,
-      captureTimeoutMs: 4_000,
-    });
-    await vi.advanceTimersByTimeAsync(14_000);
+  it('gives a capture what the load left of the draw, however late the app was ready', async () => {
+    const drawing = draw(() => new Promise(() => undefined));
+    await vi.advanceTimersByTimeAsync(14_500);
     say(ready);
-    await vi.advanceTimersByTimeAsync(3_999);
+    await vi.advanceTimersByTimeAsync(4_499);
     expect(frames()).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     await expect(drawing).resolves.toEqual({
       ok: false,
       reason:
-        'The Board finished loading, but making it into a picture took longer than 4 s, so it was not drawn.',
+        'The Board finished loading, but making it into a picture took longer than 4.5 s, so it was not drawn.',
     });
+  });
+
+  it('draws a screen that loads quickly and takes a long time to capture', async () => {
+    const drawing = draw(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            resolve(picture);
+          }, 17_000);
+        }),
+    );
+    await vi.advanceTimersByTimeAsync(1_000);
+    say(ready);
+    await vi.advanceTimersByTimeAsync(17_000);
+    await expect(drawing).resolves.toEqual({ ok: true, image: picture });
   });
 
   it('names the task’s drawer and Plan for what they are', async () => {
@@ -231,6 +239,7 @@ describe('drawing a screen', () => {
       doc: document,
       capture: () => Promise.resolve(picture),
       timeoutMs: 1000,
+      budgetMs: 2000,
     });
     await vi.advanceTimersByTimeAsync(1000);
     const result = await drawing;

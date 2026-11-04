@@ -32,8 +32,8 @@ export interface DrawOptions {
   ): Promise<DrawnScreen>;
   /** How long the app has to say it is ready. */
   readonly timeoutMs: number;
-  /** How long the capture has once it has: the load's time is spent. Defaults to `timeoutMs`. */
-  readonly captureTimeoutMs?: number;
+  /** How long the whole draw has, from its start. The capture has whatever the load left of it. */
+  readonly budgetMs: number;
 }
 
 /** The name of a screen, as a refusal says it. */
@@ -113,6 +113,7 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
 
   return new Promise<DrawResult>((resolve) => {
     const win = doc.defaultView;
+    const startedAt = performance.now();
     let settled = false;
     let capturing = false;
     let captureTimer: ReturnType<typeof setTimeout> | undefined;
@@ -136,9 +137,9 @@ export function drawScreen(options: DrawOptions): Promise<DrawResult> {
       }
       if (capturing) return;
       capturing = true;
-      // The app has answered, so the load is over: a capture is timed on its own.
+      // The app has answered, so the load is over: the capture has what is left of the draw.
       clearTimeout(timer);
-      const captureMs = options.captureTimeoutMs ?? options.timeoutMs;
+      const captureMs = Math.max(0, options.budgetMs - (performance.now() - startedAt));
       captureTimer = setTimeout(() => {
         finish({
           ok: false,

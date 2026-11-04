@@ -10,10 +10,10 @@ import { drawScreen, WINDOW_HIDDEN, type DrawResult } from './draw-screen';
 // or the reason there is none. A window out of sight keeps asking, so the daemon can't tell: it is the
 // window that refuses, at once. It renders nothing itself.
 
-/** How long a frame has to load its screen: the daemon gives up on the window a little after. */
-const DRAW_TIMEOUT_MS = 15_000;
-/** How long the capture has once the screen has loaded. With the load it stays inside the daemon's 20 s. */
-const CAPTURE_TIMEOUT_MS = 4_000;
+/** How long a frame has to load its screen. */
+const LOAD_TIMEOUT_MS = 15_000;
+/** How long a whole draw has, load and capture: a little inside the 20 s the daemon gives the window. */
+const DRAW_BUDGET_MS = 19_000;
 /** Said when the daemon will not take the window's own reason. */
 const REASON_LOST = 'The window could not tell the daemon why the screen was not drawn.';
 const REASON_MAX = ScreenRefusalInput.shape.reason.maxLength ?? 300;
@@ -36,8 +36,8 @@ async function draw(request: ScreenRenderRequest, daemon: string): Promise<DrawR
     origin: window.location.origin,
     doc: document,
     capture: captureFrame,
-    timeoutMs: DRAW_TIMEOUT_MS,
-    captureTimeoutMs: CAPTURE_TIMEOUT_MS,
+    timeoutMs: LOAD_TIMEOUT_MS,
+    budgetMs: DRAW_BUDGET_MS,
   });
 }
 
