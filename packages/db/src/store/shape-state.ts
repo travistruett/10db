@@ -2,6 +2,7 @@ import {
   EventType,
   mintId,
   NotFoundError,
+  ShapeProposalState,
   type DecisionId,
   type GoalId,
   type PrincipleId,
@@ -15,12 +16,11 @@ import {
   type ShapeMessageKind,
   type ShapeProposalId,
   type ShapeProposalKind,
-  type ShapeProposalState,
   type ShapeQuestionId,
   type ShapeState,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import { getShape } from './shapes';
@@ -382,4 +382,35 @@ export function findShapeLinkOfTask(db: DbReader, taskId: TaskId): ShapeLinkRow 
 /** Deletes the links of one proposal, when Remove Draft Goal makes it pending again. */
 export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalId): void {
   ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.proposalId, proposalId)).run();
+}
+
+/**
+ * Lets go of a goal and its tasks as they are removed (Shape spec §11). A question stored under any
+ * of them is deleted with its link and its proposal is pending again, so it converts anew with the
+ * goal; every other link to those tasks goes too, so no later Convert resolves a key to a removed task.
+ */
+export function releaseShapeLinksOfGoal(
+  ctx: WriteContext,
+  goalId: GoalId,
+  taskIds: readonly TaskId[],
+): void {
+  const questions = ctx.tx
+    .select()
+    .from(schema.shapeQuestions)
+    .where(
+      or(
+        eq(schema.shapeQuestions.goalId, goalId),
+        inArray(schema.shapeQuestions.taskId, [...taskIds]),
+      ),
+    )
+    .all();
+  for (const question of questions) {
+    ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, question.id)).run();
+    ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, question.id)).run();
+    patchShapeProposal(ctx, question.proposalId, { state: ShapeProposalState.Pending });
+  }
+  ctx.tx
+    .delete(schema.shapeLinks)
+    .where(inArray(schema.shapeLinks.taskId, [...taskIds]))
+    .run();
 }

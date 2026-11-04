@@ -130,6 +130,11 @@ describe('remembering and sizing (§5.5, §8)', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/topicKey/);
   });
 
+  it('tells the session to set about on a question, so Convert stores it under its goal or task', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/question/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/set about to the key of the goal or task/);
+  });
+
   it('tells the session to size from similar finished tasks as a basis', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/similar_tasks/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/basis/);

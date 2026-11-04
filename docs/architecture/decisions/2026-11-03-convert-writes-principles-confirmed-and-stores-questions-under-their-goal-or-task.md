@@ -25,7 +25,13 @@ source messages) and sends nothing; goals phase 3 sends them. `PlanQuestion` gai
 of the goal or task the question belongs to. Convert stores the question under that goal or task
 (`shape_questions.goal_id` or `task_id`), refuses `about` naming a pending row that is not selected, and a
 question with no `about` belongs to neither. Without a field naming it, nothing in a question says which goal or
-task it is about.
+task it is about. Shape's prompt and the `propose_plan` description tell the session to set `about`.
+
+Remove Draft Goal takes back every question stored under the goal or one of its tasks, in the same transaction: the
+row and its link are deleted and its proposal is pending again, so it converts anew with the goal and `about` still
+means what it said. The links to the goal's tasks go too, including a task added by a later proposal, so a later
+Convert cannot resolve a key to a cancelled task; a question about such a task is refused by name until it is
+re-proposed.
 
 **Links.** `shape_links` gains `principle_id` and `question_id`, and its CHECK now demands exactly one of its five
 targets. The change is two generated migrations, as 0027 and 0028 were: 0039 adds `shape_questions` and the two

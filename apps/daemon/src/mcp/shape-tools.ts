@@ -24,7 +24,7 @@ export const SHAPE_TOOL_DESCRIPTIONS: Record<ShapeToolName, string> = {
   similar_tasks:
     'Finished tasks like a query, with their lane time, wall time and tokens, to base a size on.',
   propose_plan:
-    'State the whole plan: goals, loose tasks, landings, records, questions and, once something is converted, additions, changes and removals. Every call restates everything; rows you leave out move to Earlier. Refused until the builder has pressed Propose. Every error comes back at once; fix them all and call again.',
+    'State the whole plan: goals, loose tasks, landings, records, questions (each with about, the key of the goal or task it belongs to) and, once something is converted, additions, changes and removals. Every call restates everything; rows you leave out move to Earlier. Refused until the builder has pressed Propose. Every error comes back at once; fix them all and call again.',
   attach: 'Attach a Mermaid diagram, a chart or an HTML mockup to a proposed task or goal.',
   write_spec:
     "Write an effort's spec (the goal's or loose task's key, and the spec in Markdown). Required before Convert for an effort that needs one; propose_plan answers needSpec when it does.",
