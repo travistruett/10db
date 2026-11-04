@@ -371,9 +371,23 @@ describe('readAccess', () => {
       expected: 'ask',
     },
     {
+      name: 'a header under an SDK root that exists on this machine',
+      setup: () => {
+        mkdirSync(join(root, 'SDKs', 'x.sdk', 'usr', 'include'), { recursive: true });
+        writeFileSync(join(root, 'SDKs', 'x.sdk', 'usr', 'include', 'a.h'), '');
+      },
+      path: () => `${root}/SDKs/x.sdk/usr/include/a.h`,
+      context: () => ({ systemDocRoots: [join(root, 'SDKs', '*', 'usr', 'include')] }),
+      expected: 'allowed',
+    },
+    {
       name: 'an SDK header reached by a .. out of it',
-      path: () => `${CLT}/MacOSX26.2.sdk/usr/include/../../../../../../../etc/hosts`,
-      context: systemDocs,
+      setup: () => {
+        mkdirSync(join(root, 'SDKs', 'x.sdk', 'usr', 'include'), { recursive: true });
+        writeFileSync(join(root, 'SDKs', 'x.sdk', 'usr', 'secret'), '');
+      },
+      path: () => `${root}/SDKs/x.sdk/usr/include/../secret`,
+      context: () => ({ systemDocRoots: [join(root, 'SDKs', '*', 'usr', 'include')] }),
       expected: 'ask',
     },
     {
