@@ -16,6 +16,8 @@ const NOTES_FILE = 'release-notes.md';
 const OVERFLOW_LINK =
   /^This release is too large to preview in the pull request body\. View the full release notes here: \S*\/blob\/(.+)\/release-notes\.md$/m;
 const PENDING_LABEL = 'autorelease: pending';
+// Room for 200 pull request bodies at GitHub's limit, escaped into JSON.
+const MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 // release-please skips a release PR whose notes have no `---` lines around their content.
 const PLACEHOLDER = `---
 
@@ -32,8 +34,9 @@ if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) {
 const contents = `repos/${repository}/contents/${NOTES_FILE}`;
 
 function gh(args, input) {
-  const result = spawnSync('gh', args, { encoding: 'utf8', input });
-  return { ok: result.status === 0, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  const result = spawnSync('gh', args, { encoding: 'utf8', input, maxBuffer: MAX_RESPONSE_BYTES });
+  const stderr = result.error === undefined ? (result.stderr ?? '') : String(result.error);
+  return { ok: result.status === 0, stdout: result.stdout ?? '', stderr };
 }
 
 function fail(what, detail = '') {

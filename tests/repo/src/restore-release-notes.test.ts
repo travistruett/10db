@@ -146,6 +146,15 @@ describe('restore-release-notes.mjs', () => {
     expect(result.status).toBe(0);
   });
 
+  it('reads a list of merged PRs far larger than the default 1 MiB output limit', () => {
+    const longBodies = Array.from({ length: 200 }, () => 'x'.repeat(60_000));
+    const result = runWithFakeGh(script, [pullRequests('merged', longBodies), noneOpen], {
+      REPOSITORY: repository,
+    });
+    expect(result.stderr).toBe('');
+    expect(result.status).toBe(0);
+  });
+
   it('fails without writing when GitHub answers something other than not found', () => {
     const result = runWithFakeGh(
       script,

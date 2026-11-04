@@ -49,9 +49,18 @@ function workflowReplies(workflows: readonly Workflow[]): GhReply[] {
   ];
 }
 
-const openIssues = (...issues: readonly { number: number; title: string; body: string }[]) => ({
+interface OpenIssue {
+  readonly number: number;
+  readonly title: string;
+  readonly body: string;
+  readonly isBot?: boolean;
+}
+
+const openIssues = (...issues: readonly OpenIssue[]) => ({
   args: 'issue list',
-  stdout: JSON.stringify(issues),
+  stdout: JSON.stringify(
+    issues.map(({ isBot, ...issue }) => ({ ...issue, author: { is_bot: isBot ?? true } })),
+  ),
 });
 const changes: GhReply[] = [
   { args: 'issue create' },
@@ -181,6 +190,13 @@ describe('report-main-failures.mjs', () => {
     const [close, ...rest] = report([passing], issues);
     expect(rest).toEqual([]);
     expect(close).toContain(`issue close 7 --repo ${repository}`);
+  });
+
+  it("opens its own issue when someone else's has the same title, so nobody can silence it", () => {
+    const issues = openIssues({ number: 3, title, body: failingBody, isBot: false });
+    const [create, ...rest] = report([failing], issues);
+    expect(rest).toEqual([]);
+    expect(create).toContain('issue create');
   });
 
   it('leaves other issues alone', () => {

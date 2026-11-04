@@ -67,10 +67,14 @@ const issues = JSON.parse(
     '--limit',
     '200',
     '--json',
-    'number,title,body',
+    'number,title,body,author',
   ]),
 );
-const issue = issues.find((candidate) => candidate.title === ISSUE_TITLE);
+// Anyone can open an issue on a public repository, and one with this title must not silence the
+// report. Only an app installed here can author as a bot.
+const issue = issues.find(
+  (candidate) => candidate.title === ISSUE_TITLE && candidate.author.is_bot,
+);
 
 if (failures.length === 0) {
   if (issue !== undefined) {
