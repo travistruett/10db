@@ -41,6 +41,15 @@
   stop the board loading for its project. `setBatchNotice` and `setWorkstreamNotice` cut both with `fitNotice`, ending
   in an ellipsis; the merge notices also cut gh's own words to 4000 characters, so the pull request's link after them
   stays.
+  - **`Notice.record`** is a fifth, optional field (`NOTICE_RECORD_MAX`, 100,000 characters): what 10db keeps with a
+    notice to read back after a restart, usually JSON (the runs a rerun notice asked GitHub for, a cancelled notice's
+    kind and head, the migrations a merge renumbered or lost). No card or drawer shows it. `fitNotice` **never cuts it**,
+    since a cut record would no longer parse or would read as another one: a record over the limit is **left off**, and
+    the notice is stored without one. `rerunRecord` then returns null, so the head counts as fully asked and 10db
+    asks GitHub for nothing more on it. That is the cautious reading, and the failure the field exists to prevent, but
+    it takes thousands of runs on one head to reach it. See
+    `decisions/2026-11-04-a-notice-may-keep-a-record-nobody-sees.md`, which also says what the other readers do with no
+    record. A test holds the leaving off (`packages/contracts/src/notice.test.ts`).
 - **No card is raised again for the same condition.** `setBatchNotice` and `setWorkstreamNotice` compare with what is
   stored and write nothing, and emit no event, when the notice is the same, so a later gate that meets the same
   conflict changes nothing, and the builder has nothing to dismiss. There is no card to fold, so a dismissed card

@@ -45,6 +45,18 @@ describe('the rerun notice', () => {
     expect(body).toContain('will not ask again');
   });
 
+  it('says 10db runs no other check once it stopped, and names no notice once that one cleared', () => {
+    const stopped = rerunNotices.ran(HEAD, runs, 'stopped').body;
+    expect(stopped).not.toContain('as soon as GitHub allows');
+    expect(stopped).toContain('will not run another');
+    const cleared = rerunNotices.ran(HEAD, runs, 'cleared').body;
+    expect(cleared).not.toContain('beside this one');
+    expect(cleared).not.toContain('will not');
+    for (const state of ['stopped', 'cleared'] as const) {
+      expect(rerunRecord(rerunNotices.ran(HEAD, runs, state))?.done).toBe(false);
+    }
+  });
+
   it('keeps the record when the stored notice is cut to fit', () => {
     const many: RerunRuns = new Map(
       Array.from({ length: 400 }, (_, i) => [String(1000 + i), [{ name: `check-${String(i)}` }]]),
