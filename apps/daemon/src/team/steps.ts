@@ -3,14 +3,19 @@ import {
   BatchState,
   InvalidError,
   LEFT_OUT_NOTICE_KEY,
+  McpToolName,
+  McpToolOutputs,
   NEW_TASK_NO_AREAS,
+  StepRole,
   TaskStatus,
   WorkstreamState,
   type BatchId,
+  type Notice,
   type StepPlanDto,
   type TaskId,
   type WorkstreamDto,
   type WorkstreamId,
+  type WorkstreamStep,
 } from '@10db/contracts';
 import {
   findFlowByName,
@@ -26,6 +31,7 @@ import {
   latestHandoffForStep,
   listEvidence,
   listSessions,
+  listToolOpResults,
   listWorkstreams,
   getAccount,
   listModelProfiles,
@@ -39,7 +45,13 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
-import { revertCommitOf, revertOfRun, revertedWorkNote, revertedWorkNotice } from './reverted-work';
+import {
+  lastRevertNoteAt,
+  revertCommitOf,
+  revertOfRun,
+  revertedWorkNote,
+  revertedWorkNotice,
+} from './reverted-work';
 import { clearSendBacks, restartStep, retryTargetAfterRejection, sendBackSteps } from './step-flow';
 
 /** What starting this task would run: its flow resolved against the project's team and the catalogue. */
@@ -157,6 +169,38 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
   return state.write((ctx) => insertPlannedWorkstream(ctx, taskId, plan, null));
 }
 
+/** The nearest implement step before a read-only step; null for any other step, or when none is before it. */
+function implementBefore(steps: readonly WorkstreamStep[], index: number): number | null {
+  const step = steps[index];
+  if (!step || step.role === StepRole.Implement || step.role === StepRole.Plan) return null;
+  for (let i = index - 1; i >= 0; i -= 1) if (steps[i]?.role === StepRole.Implement) return i;
+  return null;
+}
+
+/**
+ * The revert commit a retry must tell its session about: the run's commits are still reverted on the
+ * batch's branch. A run left out holds a revert on its notice. A run retried before holds it in the
+ * note its session was given, and is told again unless it has committed since: a commit after the
+ * revert brings work back, and 10db never undoes a revert.
+ */
+function revertStillOn(
+  db: DbReader,
+  row: { readonly id: WorkstreamId; readonly notice: Notice | null },
+): string | null {
+  if (row.notice?.key === LEFT_OUT_NOTICE_KEY) {
+    const named = revertCommitOf(row.notice);
+    if (named !== null) return named;
+  }
+  const evidence = listEvidence(db, row.id);
+  const record = revertOfRun({ notice: row.notice, evidence });
+  if (record === null) return null;
+  const since = lastRevertNoteAt(evidence);
+  if (since !== null)
+    for (const result of listToolOpResults(db, row.id, McpToolName.Commit, since))
+      if (McpToolOutputs.commit.safeParse(result).success) return null;
+  return record.revert;
+}
+
 /**
  * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
  * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
@@ -198,9 +242,9 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
     // Its work may go in the pull request now, so "left out" is no longer true of this run. But the
     // revert commit is still on the branch: the run keeps a notice that says so (the pull request
     // lists its task as done only if the run commits again), and its session is told in the note below.
-    const leftOut = row.notice?.key === LEFT_OUT_NOTICE_KEY;
-    const revert = leftOut ? revertCommitOf(row.notice) : null;
-    if (leftOut) setWorkstreamNotice(ctx, id, revert ? revertedWorkNotice(revert) : null);
+    const revert = revertStillOn(ctx.tx, row);
+    if (revert) setWorkstreamNotice(ctx, id, revertedWorkNotice(revert));
+    else if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
     // The builder's note is a fix for whichever step runs next, as when they send the work back. It
     // is stamped in the same write that starts that step, so a fresh session still finds it outstanding.
     const text = [note?.trim() ?? '', revert ? revertedWorkNote(revert) : '']
@@ -218,7 +262,12 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
             logPath: null,
             commitShas: [],
           });
-    const reworkAt = retryTargetAfterRejection(row.steps, row.stepIndex);
+    // A revert note is for the step that can commit: a read-only step cannot redo the work, and its
+    // rejection would send the work back to the implement step without the note. So a retry that
+    // tells of a revert restarts the implement step before a read-only one, as a rejection would.
+    const reworkAt =
+      retryTargetAfterRejection(row.steps, row.stepIndex) ??
+      (revert ? implementBefore(row.steps, row.stepIndex) : null);
     const reworked = reworkAt === null ? undefined : row.steps[reworkAt];
     if (reworkAt !== null && reworked) {
       // A reviewer's rejection used the attempts up: the step that did the work runs again, as when

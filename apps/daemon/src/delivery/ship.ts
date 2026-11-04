@@ -1523,6 +1523,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         readonly shas: readonly string[];
         /** How many of its commits the earlier revert covers. */
         readonly covered: number;
+        /** The revert of an earlier answer that its record names and the branch still holds. */
+        readonly prior: string | null;
       }[] = [];
       for (const run of failed) {
         const left: string[] = [];
@@ -1531,7 +1533,22 @@ export function createShipper(deps: ShipperDeps): Shipper {
           if (standing !== null && (await deps.git.isAncestor(checkout, sha, standing)))
             covered += 1;
           else left.push(sha);
-        commits.push({ run, shas: left, covered });
+        // A run left out before and retried keeps its revert on the branch. If this answer reverts
+        // nothing of it, as when the retry committed nothing, its notice still names that revert, so
+        // the next Retry tells the session.
+        const record = runsOf(batchId, run)
+          .flatMap((r) => {
+            const found = revertOfRun({ notice: r.notice, evidence: listEvidence(db, r.id) });
+            return found === null ? [] : [found.revert];
+          })
+          .at(-1);
+        const prior =
+          record !== undefined &&
+          (await deps.git.hasCommit(checkout, record)) &&
+          (await deps.git.isAncestor(checkout, record, `refs/heads/${branch}`))
+            ? record
+            : null;
+        commits.push({ run, shas: left, covered, prior });
       }
       const shas = commits.flatMap((c) => c.shas);
       if (shas.length > 0) {
@@ -1570,7 +1587,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
-        for (const { run, shas: own, covered } of commits)
+        for (const { run, shas: own, covered, prior } of commits)
           setWorkstreamNotice(
             w,
             run.id,
@@ -1578,7 +1595,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
               ? leftOutNotices.reverted(own.length, revert)
               : standing !== null && covered > 0
                 ? leftOutNotices.reverted(covered, standing)
-                : leftOutNotices.nothingToRevert(),
+                : prior !== null
+                  ? leftOutNotices.alreadyReverted(prior)
+                  : leftOutNotices.nothingToRevert(),
           );
         // Every failed member's commits are gone now, so no attempt's are left for its notice to warn of.
         clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);

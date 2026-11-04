@@ -1,4 +1,9 @@
-import { LEFT_OUT_NOTICE_KEY, REVERTED_NOTICE_KEY, type Notice } from '@10db/contracts';
+import {
+  LEFT_OUT_NOTICE_KEY,
+  REVERT_COMMIT_LINE,
+  REVERTED_NOTICE_KEY,
+  type Notice,
+} from '@10db/contracts';
 
 /**
  * What a run keeps once its batch shipped without it (Ship without it) and the builder retried it: its
@@ -6,7 +11,7 @@ import { LEFT_OUT_NOTICE_KEY, REVERTED_NOTICE_KEY, type Notice } from '@10db/con
  * brings the work back. The notices carry the revert commit's id on a line of their own, and this
  * module is the one place that writes and reads it.
  */
-const REVERT_LINE = 'Revert commit: ';
+const REVERT_LINE = REVERT_COMMIT_LINE;
 
 /** The line a notice's body carries to name the revert commit. */
 export function revertCommitLine(sha: string): string {
@@ -36,6 +41,20 @@ export function lastRevertTold(
   let found: string | null = null;
   for (const row of evidence)
     if (row.kind === 'builder') found = revertCommitIn(row.summary) ?? found;
+  return found;
+}
+
+/** When the last retry of a run told its session of a revert; null when none did. */
+export function lastRevertNoteAt(
+  evidence: readonly {
+    readonly kind: string;
+    readonly summary: string;
+    readonly createdAt: string;
+  }[],
+): string | null {
+  let found: string | null = null;
+  for (const row of evidence)
+    if (row.kind === 'builder' && revertCommitIn(row.summary) !== null) found = row.createdAt;
   return found;
 }
 

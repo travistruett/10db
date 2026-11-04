@@ -1303,6 +1303,26 @@ describe('the failed workstream card', () => {
         expect(note.summary).toMatch(/[0-9a-f]{40}/);
       });
 
+      it('keeps the revert in the notice of a run left out again after a retry that committed nothing', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+        const first = getWorkstream(h.store.db, failed).notice?.body ?? '';
+        const revert = /^Revert commit: ([0-9a-f]+)$/m.exec(first)?.[1];
+        if (revert === undefined) throw new Error('the retried run keeps the revert');
+        h.settle(failed, 'FAILED');
+        gateFails = true;
+        inbox.answer(failedCard(failed, batchId).id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        gateFails = false;
+        expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
+
+        // Nothing new was reverted, but the revert from the first answer is still on the branch.
+        expect(revertNamedBy(failed)).toBe(revert);
+        retryWorkstream(h.state, failed);
+        const next = getWorkstream(h.store.db, failed).nextAction;
+        if (next.kind !== 'fix') throw new Error(`expected a fix, got ${next.kind}`);
+        expect(getEvidence(h.store.db, next.evidenceId).summary).toContain(revert);
+      });
+
       it('does not list the task as finished when the retry commits nothing', async () => {
         const { batchId, failed } = await leftOutThenRetried();
 
