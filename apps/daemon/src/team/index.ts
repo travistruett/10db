@@ -8,6 +8,13 @@ export {
   startTaskWithPlan,
 } from './steps';
 export {
+  lastRevertTold,
+  revertCommitLine,
+  revertCommitOf,
+  revertedWorkNote,
+  revertedWorkNotice,
+} from './reverted-work';
+export {
   advanceSteps,
   countSendBack,
   failStep,

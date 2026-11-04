@@ -1,5 +1,6 @@
 import { LEFT_OUT_NOTICE_KEY, type BatchDto, type Notice } from '@10db/contracts';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
+import { revertCommitLine } from '../team';
 import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
 import { flakeNote, type FlakyTest } from './flaky-tests';
 import type { GateStepFailure } from './gate-failures';
@@ -110,7 +111,7 @@ export const leftOutNotices = {
     key: LEFT_OUT_NOTICE_KEY,
     tone: 'info',
     line: `Left out of the pull request: ${count === 1 ? 'its commit was' : `its ${String(count)} commits were`} reverted`,
-    body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits.`,
+    body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /** It had no commit on the branch, so the pull request already lacked its work. */
   nothingToRevert: (): Notice => ({

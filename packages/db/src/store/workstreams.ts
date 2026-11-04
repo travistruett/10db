@@ -9,6 +9,7 @@ import {
   NotFoundError,
   LEFT_OUT_NOTICE_KEY,
   PARKED_NOTICE_KEY,
+  REVERTED_NOTICE_KEY,
   TaskStatus,
   WorkstreamState,
   type AccountId,
@@ -380,7 +381,8 @@ export function setWorkstreamNotice(
 /**
  * Clears every run's notice, as a daemon start does: the waits they describe ended with the last one.
  * A parked run keeps its own: it records what the builder answered, not a wait. So does a run left
- * out of its batch's pull request.
+ * out of its batch's pull request, and so does a retried run whose commits are still reverted: the
+ * pull request is built from that notice.
  */
 export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
   const rows = ctx.tx
@@ -389,7 +391,10 @@ export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
     .where(isNotNull(schema.workstreams.notice))
     .all()
     .filter(
-      (row) => row.notice?.key !== PARKED_NOTICE_KEY && row.notice?.key !== LEFT_OUT_NOTICE_KEY,
+      (row) =>
+        row.notice?.key !== PARKED_NOTICE_KEY &&
+        row.notice?.key !== LEFT_OUT_NOTICE_KEY &&
+        row.notice?.key !== REVERTED_NOTICE_KEY,
     );
   for (const row of rows) {
     ctx.tx

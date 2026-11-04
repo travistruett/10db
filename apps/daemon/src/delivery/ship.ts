@@ -60,7 +60,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { insertPlannedWorkstream } from '../team';
+import { insertPlannedWorkstream, lastRevertTold } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -723,16 +723,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     signal: AbortSignal,
   ): Promise<string> {
-    const tasks = members(db, batch.id).map((w) => {
+    const tasks = [];
+    for (const w of members(db, batch.id)) {
       const task = getTask(db, w.taskId);
-      return {
+      tasks.push({
         title: w.taskTitle,
         description: task.description,
         acceptanceCriteria: task.acceptanceCriteria,
         state: w.state,
-        leftOut: leftOut(w),
-      };
-    });
+        // A retried run whose commits are still reverted has no work in the branch, so the body must
+        // not list its task as finished.
+        leftOut: leftOut(w) || (await revertedAway(batch.id, w, target)),
+      });
+    }
     const sha = await deps.git.head(target.checkout);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
     mkdirSync(dirname(file), { recursive: true });
@@ -1290,6 +1293,41 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
+  /** Every commit the task of `member` made through the commit tool in the batch, in the order recorded. */
+  function commitsMadeBy(batchId: BatchId, member: WorkstreamDto): string[] {
+    const made: string[] = [];
+    const runs = listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
+    for (const run of runs)
+      for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
+        const parsed = McpToolOutputs.commit.safeParse(result);
+        if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
+      }
+    return made;
+  }
+
+  /**
+   * Whether a run that was retried after Ship without it has none of its work on the branch: the revert
+   * its notice names is still there and the task made no commit since. A task is in the pull request
+   * only through a commit the revert does not cover, because the revert undid every earlier one.
+   */
+  async function revertedAway(
+    batchId: BatchId,
+    member: WorkstreamDto,
+    target: { readonly checkout: string; readonly branch: string },
+  ): Promise<boolean> {
+    // The note the retry gave the session is the record: the notice may have been replaced by a wait.
+    const revert = lastRevertTold(listEvidence(db, member.id));
+    if (revert === null) return false;
+    for (const sha of commitsMadeBy(batchId, member))
+      if (
+        (await deps.git.hasCommit(target.checkout, sha)) &&
+        (await deps.git.isAncestor(target.checkout, sha, `refs/heads/${target.branch}`)) &&
+        !(await deps.git.isAncestor(target.checkout, sha, revert))
+      )
+        return false;
+    return true;
+  }
+
   /**
    * The commits a failed run's task made through the commit tool that are still on the batch's
    * branch, oldest first. Commits on a shared branch mix in other lanes', so the task's own tool-op
@@ -1303,13 +1341,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     checkout: string,
     branch: string,
   ): Promise<string[]> {
-    const made: string[] = [];
-    const runs = listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
-    for (const run of runs)
-      for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
-        const parsed = McpToolOutputs.commit.safeParse(result);
-        if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
-      }
+    const made = commitsMadeBy(batchId, member);
     const kept: string[] = [];
     for (const sha of made)
       if (

@@ -114,16 +114,19 @@ function whatAndWhy(tasks: readonly PrBodyTask[]): string {
         );
       return parts.join('\n\n');
     });
-  const notDone = tasks.filter((t) => t.state !== WorkstreamState.Done);
+  // A finished run left out had its commits reverted and made none since: its work is not here.
+  const notDone = tasks.filter((t) => t.state !== WorkstreamState.Done || t.leftOut === true);
   if (notDone.length > 0)
     blocks.push(
       [
         'Not done:',
         '',
-        ...notDone.map(
-          (t) =>
-            `- ${t.title} (${word(t.state)}${t.leftOut === true ? ', left out of this pull request' : ''})`,
-        ),
+        ...notDone.map((t) => {
+          if (t.leftOut !== true) return `- ${t.title} (${word(t.state)})`;
+          return t.state === WorkstreamState.Done
+            ? `- ${t.title} (${word(t.state)}, but its commits were reverted and not restored, so it is left out of this pull request)`
+            : `- ${t.title} (${word(t.state)}, left out of this pull request)`;
+        }),
       ].join('\n'),
     );
   return blocks.join('\n\n');
@@ -142,7 +145,7 @@ function howChecked(
   const ciLine = `CI run for the pushed head: [${ci.sha.slice(0, 7)}](${url})`;
   if (gate.command === null) {
     // Only a task that finished was approved in 10db; a batch shipped with unfinished work was not.
-    const approved = tasks.every((t) => t.state === WorkstreamState.Done);
+    const approved = tasks.every((t) => t.state === WorkstreamState.Done && t.leftOut !== true);
     return [
       approved ? 'No gate command: each task was approved in 10db.' : 'No gate command.',
       '',
