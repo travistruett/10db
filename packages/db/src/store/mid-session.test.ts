@@ -13,6 +13,7 @@ import {
   countMidSession,
   countWaitingOnCard,
   insertWorkstream,
+  isLaneWaitingOnCard,
   patchWorkstream,
   transitionWorkstream,
 } from './workstreams';
@@ -104,6 +105,20 @@ describe('countMidSession', () => {
       });
       expect(countMidSession(store.db)).toBe(0);
       expect(countWaitingOnCard(store.db)).toBe(0);
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(false);
+    });
+
+    it('is told apart from a lane that runs, one with a gate, and one that is not there', () => {
+      const id = waitingOnCard();
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(true);
+      expect(isLaneWaitingOnCard(store.db, 'wks_missing' as WorkstreamId)).toBe(false);
+      store.write((ctx) => {
+        patchWorkstream(ctx, id, null, { gatePid: 4242, gatePidStart: 'x' });
+      });
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(false);
+      const running = workstream();
+      moveThrough(running, [S.Starting, S.Running]);
+      expect(isLaneWaitingOnCard(store.db, running)).toBe(false);
     });
   });
 

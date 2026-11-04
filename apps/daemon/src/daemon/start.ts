@@ -19,6 +19,7 @@ import {
 import {
   addStockHazardCommands,
   countWaitingOnCard,
+  isLaneWaitingOnCard,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -459,11 +460,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWait: () => {
       scheduler?.requestTick();
     },
-    // During the drain a holder that runs nothing (queued, or parked before its next session or gate)
-    // frees no claim until the update installs. A wait on it would keep its session running, and the
-    // update waits for that session to end, so the wait is refused and the session ends by itself.
+    // During the drain a holder that runs nothing (queued, parked before its next session or gate, or
+    // waiting on a card with a live session) frees no claim until the update installs. A wait on it
+    // would keep its session running, and the update waits for that session to end, so the wait is
+    // refused and the session ends by itself.
     parked: (id) =>
-      updateDrain.draining && runner !== null && (!runner.isRunning(id) || runner.isParked(id)),
+      updateDrain.draining &&
+      runner !== null &&
+      (!runner.isRunning(id) || runner.isParked(id) || isLaneWaitingOnCard(state.db, id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;

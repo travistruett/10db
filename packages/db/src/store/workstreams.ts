@@ -514,6 +514,23 @@ function isWaitingOnCard(r: {
 }
 
 /**
+ * Whether this lane is only waiting on a card (as `countWaitingOnCard` counts it): it runs nothing and
+ * frees no claim until the builder answers. False for a lane that is not there.
+ */
+export function isLaneWaitingOnCard(db: DbReader, id: WorkstreamId): boolean {
+  const row = db
+    .select({
+      state: schema.workstreams.state,
+      gatePid: schema.workstreams.gatePid,
+      currentSessionId: schema.workstreams.currentSessionId,
+    })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.id, id))
+    .get();
+  return row?.gatePid === null && isWaitingOnCard(row);
+}
+
+/**
  * How many of `countMidSession`'s lanes are only waiting on a card: parked on a permission or ask
  * with a live session and no gate process. These are the ones a drain stops waiting for.
  */
