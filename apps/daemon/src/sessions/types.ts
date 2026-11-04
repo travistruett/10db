@@ -137,6 +137,8 @@ export interface ShapeSessionSpec {
   preToolUse(req: ShapeToolRequest): ShapeVerdict;
   /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
   readonly postToolUse?: (req: ShapeToolResult) => void;
+  /** Runs when a call failed: what the daemon counted for a Read that returned nothing comes back. */
+  readonly toolFailed?: (req: ShapeToolRequest) => void;
 }
 
 export const SessionEndReason = {

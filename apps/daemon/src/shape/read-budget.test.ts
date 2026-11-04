@@ -1,5 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { relative } from 'node:path';
+import { join, relative } from 'node:path';
 import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
 import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -8,15 +9,16 @@ import { INLINE_CONVERSATION_MAX_BYTES } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
 import {
-  READ_PICTURE_CHARGE_MAX_BYTES,
-  READ_PICTURES_RESERVE_BYTES,
+  READ_CHARGE_MAX_BYTES,
+  READ_RESERVE_BYTES,
   measuredMediaBytes,
-  readPictureBytesSpent,
-  readPictureLine,
+  largestReadMeasured,
+  readBytesSpent,
+  readCountedLine,
 } from './read-budget';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
-// Shape spec §5.4: a picture Claude pulls in with Read is a tool result a resumed session resends, beside
+// Shape spec §5.4: a picture or PDF Claude pulls in with Read is a tool result a resumed session resends, beside
 // the pictures the daemon sends itself. The preToolUse hook counts it and refuses what would pass the total.
 
 const MB = 1024 * 1024;
@@ -24,10 +26,8 @@ const MB = 1024 * 1024;
 const REQUEST_LIMIT = 32_000_000;
 const onTheWire = (bytes: number): number => Math.ceil((bytes * 4) / 3);
 /** What inline pictures and Read pictures may add together, and how many 1 MiB Reads a session with no inline picture holds. */
-const POOL = INLINE_CONVERSATION_MAX_BYTES + READ_PICTURES_RESERVE_BYTES;
-const EMPTY_ROOM = Math.floor(POOL / READ_PICTURE_CHARGE_MAX_BYTES);
-/** What a full inline budget leaves Reads. */
-const FULL_INLINE_ROOM = Math.floor(READ_PICTURES_RESERVE_BYTES / READ_PICTURE_CHARGE_MAX_BYTES);
+const POOL = INLINE_CONVERSATION_MAX_BYTES + READ_RESERVE_BYTES;
+const EMPTY_ROOM = Math.floor(POOL / READ_CHARGE_MAX_BYTES);
 /** A base64 string of this many decoded bytes, as a Read's result carries a picture. */
 const base64Of = (bytes: number): string => Buffer.alloc(bytes, 7).toString('base64');
 const imageResult = (bytes: number) => ({
@@ -50,6 +50,16 @@ const wholePng = (bytes: number): Buffer => {
 };
 const drop = (name: string, bytes: Uint8Array) =>
   f.service.addFile(shapeId(), { name, mediaType: '', bytes });
+// 2880 x 1800 is over the 2000 px side cap, so it goes as a path line.
+const retina = (bytes: number): Buffer => {
+  const base = pngOfSize(2880, 1800);
+  return pngOfSize(2880, 1800, bytes - base.length - 12);
+};
+/**
+ * A picture the size of the allowance that goes as a path: charged 1 MiB measured or not, so these tests'
+ * counts of Reads don't depend on a measurement. The ones about a larger file drop their own.
+ */
+const dropBig = () => drop('big.png', retina(MB));
 
 async function nextTurn(text = 'Here you go'): Promise<FakeShapeTurn> {
   const seen: { turn: FakeShapeTurn | null } = { turn: null };
@@ -73,7 +83,7 @@ const readPages = (path: string, pages: unknown, n = 0, agentId?: string) =>
   readInput({ file_path: path, pages }, n, agentId);
 const reasonOf = (answer: ReturnType<typeof read>): string =>
   answer.decision === 'deny' ? answer.reason : '';
-const spent = () => readPictureBytesSpent(listShapeMessages(f.c.store.db, shapeId()));
+const spent = () => readBytesSpent(listShapeMessages(f.c.store.db, shapeId()));
 
 describe('the pictures a Shape session pulls in with Read', () => {
   it('and the inline pictures share a pool that fits the request limit, with room for text', () => {
@@ -96,8 +106,8 @@ describe('the pictures a Shape session pulls in with Read', () => {
     const paths = files.map((file) => file.storedPath);
     const answers = paths.map((path) => read(path));
     const allowed = answers.filter((a) => a.decision === 'allow').length;
-    // Each Read is charged what Claude Code can return for it, at most the per-picture charge.
-    expect(allowed).toBe(FULL_INLINE_ROOM);
+    // Nothing has been measured, so each Read is charged what it can return at most: its file's 2 MiB.
+    expect(allowed).toBe(Math.floor(READ_RESERVE_BYTES / (2 * MB)));
     expect(allowed).toBeLessThan(paths.length);
     const refused = answers.at(-1);
     expect(refused).toMatchObject({ decision: 'deny' });
@@ -105,8 +115,120 @@ describe('the pictures a Shape session pulls in with Read', () => {
       /pictures .*Read.*32 MB|too many pictures/i,
     );
     // What the request would carry stays under the limit, text left out.
-    const charged = allowed * READ_PICTURE_CHARGE_MAX_BYTES;
+    const charged = allowed * 2 * MB;
     expect(onTheWire(9 * 2 * MB) + onTheWire(charged)).toBeLessThan(REQUEST_LIMIT);
+  });
+
+  describe('in one message, before the session has measured any', () => {
+    // Each Read of a batch passes PreToolUse before any result comes back, and only the first result is
+    // unknown: resizing does not make a picture larger than its file, so the file's size bounds it.
+    const measure = (path: string, bytes: number): void => {
+      must(
+        must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+        'a PostToolUse hook',
+      )({ toolName: 'Read', input: { file_path: path }, response: imageResult(bytes) });
+    };
+    const RESULT = 2.5 * MB;
+
+    it('stay within the pool when each returns more than 1 MiB', async () => {
+      // 14 MiB of the pool is spent, then seven Reads of Retina pictures come in one message.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        const count = turnNo === 2 ? 1 : 3;
+        for (let i = 0; i < count; i += 1)
+          drop(`i${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn(`Turn ${String(turnNo)}`)).images).toHaveLength(count);
+      }
+      const inline = 7 * 2 * MB;
+      const shots = Array.from({ length: 7 }, (_, i) =>
+        drop(`shot${String(i)}.png`, wholePng(3 * MB)),
+      );
+      await nextTurn('Look at these');
+      const admitted = shots.filter((shot) => read(shot.storedPath).decision === 'allow');
+      expect(admitted).toHaveLength(2);
+      // Then their results come back, each larger than the 1 MiB allowance.
+      for (const shot of admitted) measure(shot.storedPath, RESULT);
+      expect(spent()).toBe(admitted.length * RESULT);
+      expect(inline + spent()).toBeLessThanOrEqual(POOL);
+      expect(onTheWire(inline + spent())).toBeLessThan(REQUEST_LIMIT - 1_500_000);
+    });
+
+    it('stay within the pool even when a result is as large as its file', async () => {
+      const shots = Array.from({ length: 20 }, (_, i) =>
+        drop(`shot${String(i)}.png`, wholePng(3 * MB)),
+      );
+      await nextTurn('All of them');
+      const admitted = shots.filter((shot) => read(shot.storedPath).decision === 'allow');
+      expect(admitted).toHaveLength(Math.floor(POOL / (3 * MB)));
+      for (const shot of admitted) measure(shot.storedPath, 3 * MB);
+      expect(spent()).toBeLessThanOrEqual(POOL);
+    });
+
+    it('are refused with the way on, and fit once a result has come back', async () => {
+      const shots = Array.from({ length: 2 }, (_, i) =>
+        drop(`shot${String(i)}.png`, wholePng(12 * MB)),
+      );
+      await nextTurn('Look at these');
+      const [first, second] = shots.map((shot) => shot.storedPath);
+      expect(read(must(first, 'a shot'))).toEqual({ decision: 'allow' });
+      const refused = read(must(second, 'a shot'));
+      expect(refused).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(refused)).toMatch(/full file size/);
+      expect(reasonOf(refused)).toMatch(/then try again/);
+      measure(must(first, 'a shot'), RESULT);
+      expect(read(must(second, 'a shot'))).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(2 * RESULT);
+    });
+
+    it('are not unlocked by a small picture, which says nothing of what a large one returns', async () => {
+      const small = drop('small.png', wholePng(20_000));
+      const shot = drop('shot.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(small.storedPath);
+      measure(small.storedPath, 20_000);
+      read(shot.storedPath);
+      expect(spent()).toBe(20_000 + 5 * MB);
+    });
+
+    it('give back what a Read that failed was counted, so it can’t use up the pool', async () => {
+      const shots = Array.from({ length: 2 }, (_, i) =>
+        drop(`shot${String(i)}.png`, wholePng(12 * MB)),
+      );
+      await nextTurn('Look at these');
+      const failed = must(shots[0], 'a shot').storedPath;
+      read(failed);
+      must(
+        must(f.adapter.shapeSessions[0], 'a session').spec.toolFailed,
+        'a PostToolUseFailure hook',
+      )({ toolName: 'Read', input: { file_path: failed } });
+      expect(spent()).toBe(0);
+      expect(read(must(shots[1], 'a shot').storedPath)).toEqual({ decision: 'allow' });
+      // A failure measured nothing: the next large picture is still charged its whole size.
+      expect(spent()).toBe(12 * MB);
+    });
+
+    it('leave what a subagent’s failed Read did not count alone', async () => {
+      const shot = drop('shot.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      read(shot.storedPath);
+      const failed = must(f.adapter.shapeSessions[0], 'a session').spec.toolFailed;
+      must(
+        failed,
+        'a PostToolUseFailure hook',
+      )({
+        toolName: 'Read',
+        input: { file_path: shot.storedPath },
+        agentId: 'agent-1',
+        agentType: 'scope',
+      });
+      must(
+        failed,
+        'a PostToolUseFailure hook',
+      )({
+        toolName: 'Glob',
+        input: { file_path: shot.storedPath },
+      });
+      expect(spent()).toBe(5 * MB);
+    });
   });
 
   it('charge a small one by its size, so many small ones still fit', async () => {
@@ -117,7 +239,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
 
   it('leave a text file and a subagent’s Read uncounted', async () => {
     const doc = drop('brief.md', Buffer.from('# The brief'));
-    const big = drop('big.png', wholePng(5 * MB));
+    const big = dropBig();
     await nextTurn('Hello');
     for (let i = 0; i < 20; i += 1) {
       expect(read(doc.storedPath)).toEqual({ decision: 'allow' });
@@ -131,7 +253,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     // The judge and Claude Code both expand ~, so the charge must too. The dropped files are under the temp dir.
     await f.close();
     f = createServiceFixture({ home: tmpdir() });
-    const big = drop('big.png', wholePng(5 * MB));
+    const big = dropBig();
     await nextTurn('Hello');
     const spelled = `~/${relative(tmpdir(), big.storedPath)}`;
     for (let i = 0; i < EMPTY_ROOM; i += 1) expect(read(spelled)).toEqual({ decision: 'allow' });
@@ -169,7 +291,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
 
     it('is refused once the pages asked for would pass what the pool has left', async () => {
       const doc = drop('small.pdf', tinyPdf());
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       for (let i = 0; i < EMPTY_ROOM - 2; i += 1) read(big.storedPath);
       expect(readPages(doc.storedPath, '1-3')).toMatchObject({ decision: 'deny' });
@@ -186,7 +308,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       const doc = drop('small.pdf', tinyPdf());
       await nextTurn('Hello');
       expect(readPages(doc.storedPath, pages)).toEqual({ decision: 'allow' });
-      expect(spent()).toBe(count * READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(count * READ_CHARGE_MAX_BYTES);
     });
 
     it('stays under the limit however small the PDF and however many ranges are asked for', async () => {
@@ -212,9 +334,41 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(readPages(doc.storedPath, '1')).toEqual({ decision: 'allow' });
     });
 
+    it('is held to the 3 MiB reserve, three pages in all, when the inline budget is full', async () => {
+      // Nine 2 MiB pictures, three to a message, fill the 18 MiB inline budget.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`i${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn(`Fill ${String(turnNo)}`)).images).toHaveLength(3);
+      }
+      const doc = drop('small.pdf', tinyPdf());
+      await nextTurn('Now the PDF');
+      const pagesThatFit = READ_RESERVE_BYTES / READ_CHARGE_MAX_BYTES;
+      expect(pagesThatFit).toBe(3);
+
+      // Four pages pass the reserve; the refusal names the three that still fit.
+      const tooMany = readPages(doc.storedPath, '1-4');
+      expect(tooMany).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(tooMany)).toContain('up to 3 pages');
+      expect(reasonOf(tooMany)).toContain('"1-3"');
+      expect(spent()).toBe(0);
+
+      // Three pages in all are allowed, one Read or several; the next page is refused.
+      expect(readPages(doc.storedPath, '1-2')).toEqual({ decision: 'allow' });
+      const oneLeft = readPages(doc.storedPath, '3-4');
+      expect(oneLeft).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(oneLeft)).toContain('up to 1 pages');
+      expect(readPages(doc.storedPath, '3')).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(pagesThatFit * READ_CHARGE_MAX_BYTES);
+      const past = readPages(doc.storedPath, '4');
+      expect(past).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(past)).toMatch(/No room is left for more pages/);
+      expect(reasonOf(past)).not.toMatch(/up to \d+ pages/);
+    });
+
     it('shares one total with pictures, and a subagent’s Read is left uncounted', async () => {
       const doc = drop('two.pdf', tinyPdf());
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       for (let i = 0; i < 5; i += 1) {
         expect(read(doc.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
@@ -247,7 +401,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     });
 
     it('is not told it has room when nothing is left', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       const doc = drop('small.pdf', tinyPdf());
       await nextTurn('Hello');
       for (let i = 0; i < EMPTY_ROOM; i += 1) read(big.storedPath);
@@ -261,17 +415,62 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(read('/nowhere/gone.pdf').decision).not.toBe('ask');
       expect(spent()).toBe(0);
     });
+
+    describe('whose Read Claude Code answers with only text', () => {
+      const after = (path: string, pages: string, response: unknown): void => {
+        must(
+          must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+          'a PostToolUse hook',
+        )({ toolName: 'Read', input: { file_path: path, pages }, response });
+      };
+      const refusal =
+        'This PDF has 50 pages, which is too many to read at once. Use the pages parameter.';
+
+      it.each([
+        ['a bare string', refusal],
+        ['a text result', { type: 'text', file: { filePath: '/a.pdf', content: refusal } }],
+        ['a string in a content block', [{ type: 'text', text: refusal }]],
+      ])('adds nothing to the total when the result is %s', async (_name, response) => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+        expect(spent()).toBe(3 * READ_CHARGE_MAX_BYTES);
+        after(doc.storedPath, '1-3', response);
+        expect(spent()).toBe(0);
+      });
+
+      it('lets the same PDF be read again by the page afterwards', async () => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        for (let i = 0; i < 10; i += 1) {
+          expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+          after(doc.storedPath, '1-3', refusal);
+        }
+        expect(spent()).toBe(0);
+      });
+
+      it('keeps the charge of a result whose pages stayed on disk', async () => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        readPages(doc.storedPath, '1-3');
+        after(doc.storedPath, '1-3', {
+          type: 'parts',
+          file: { filePath: doc.storedPath, count: 3 },
+        });
+        expect(spent()).toBe(3 * READ_CHARGE_MAX_BYTES);
+      });
+    });
   });
 
   it('count a path with a line break in it', () => {
     // The transcript line carries the path as Claude spelled it; a break must not hide the count.
-    const line = readPictureLine('/repo/a\nb.png', 1_000);
+    const line = readCountedLine('/repo/a\nb.png', 1_000);
     const message = { kind: ShapeMessageKind.Tool, body: line } as ShapeMessageDto;
-    expect(readPictureBytesSpent([message])).toBe(1_000);
+    expect(readBytesSpent([message])).toBe(1_000);
   });
 
   it('are still counted after the daemon restarts and the session is resumed', async () => {
-    const big = drop('big.png', wholePng(5 * MB));
+    const big = dropBig();
     await nextTurn('Hello');
     for (let i = 0; i < EMPTY_ROOM - 1; i += 1) read(big.storedPath);
     await f.restart();
@@ -283,7 +482,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
   });
 
   it('are not counted for a fresh session, which carries no earlier tool result', async () => {
-    const big = drop('big.png', wholePng(5 * MB));
+    const big = dropBig();
     await nextTurn('Hello');
     for (let i = 0; i < EMPTY_ROOM; i += 1) read(big.storedPath);
     expect(read(big.storedPath)).toMatchObject({ decision: 'deny' });
@@ -298,7 +497,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
   });
 
   it('are not counted for a fresh session when no digest was written because Claude never spoke', async () => {
-    const big = drop('big.png', wholePng(5 * MB));
+    const big = dropBig();
     // The session is let go past 70% of the context before any reply: no text, so no digest row.
     f.adapter.shapeBehaviour = () => Promise.resolve({ text: '', contextPercent: 71 });
     f.service.send(shapeId(), 'Hello');
@@ -319,7 +518,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
 
   describe('with little inline picture spend', () => {
     it('are not refused on the fourth large Read while the request has room', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       const answers = Array.from({ length: EMPTY_ROOM + 1 }, () => read(big.storedPath));
       expect(answers.slice(0, EMPTY_ROOM).every((a) => a.decision === 'allow')).toBe(true);
@@ -328,7 +527,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     });
 
     it('leave Reads what inline pictures spent less of, one 2 MiB picture at a time', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       drop('i.png', wholePng(2 * MB));
       expect((await nextTurn('One')).images).toHaveLength(1);
       // 2 MiB of the 18 are inline: 19 MiB are left to Reads.
@@ -339,7 +538,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     });
 
     it('leave the inline budget what Reads spent beyond their reserve', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       // Sixteen Reads: 13 MiB past the 3 MiB reserve, so 5 of the 18 MiB of inline pictures are left.
       for (let i = 0; i < 16; i += 1) read(big.storedPath);
@@ -350,12 +549,6 @@ describe('the pictures a Shape session pulls in with Read', () => {
   });
 
   describe('dropped Retina screenshots, which go as paths', () => {
-    // 2880 x 1800 is over the 2000 px side cap, so each goes as a path line, and each is over 1 MiB, so a
-    // Read is charged the whole allowance for it.
-    const retina = (bytes: number): Buffer => {
-      const base = pngOfSize(2880, 1800);
-      return pngOfSize(2880, 1800, bytes - base.length - 12);
-    };
     const notices = (): string[] =>
       listShapeMessages(f.c.store.db, shapeId())
         .filter((m) => m.kind === ShapeMessageKind.Notice)
@@ -386,19 +579,68 @@ describe('the pictures a Shape session pulls in with Read', () => {
         drop(`shot${String(i)}.png`, retina(MB + 200_000)),
       );
       await nextTurn('Look at these');
-      // A full inline budget leaves the 3 MiB reserve: three of the four.
+      // A full inline budget leaves the 3 MiB reserve, and nothing measured charges a file its size: two.
       const answers = files.map((file) => read(file.storedPath));
-      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'allow', 'deny']);
+      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny', 'deny']);
       const told = notices().filter((body) => /shot\d\.png/.test(body));
       expect(told).toHaveLength(1);
-      expect(told[0]).toContain('shot3.png');
-      expect(told[0]).not.toMatch(/shot[012]\.png/);
+      expect(told[0]).toMatch(/shot2\.png, shot3\.png/);
+      expect(told[0]).not.toMatch(/shot[01]\.png/);
       expect(told[0]).toMatch(/won't be able to Read/);
       // The session is out of room, not the image: a smaller copy goes as a path and is refused too.
       expect(told[0]).toMatch(/out of room for pictures/);
       expect(told[0]).toMatch(/Tell Claude which picture matters most/);
       expect(told[0]).toMatch(/new conversation/);
       expect(told[0]).not.toMatch(/smaller copy|too large/);
+    });
+
+    it('are offered only a new conversation when no room is left for any of them', async () => {
+      await fillInline();
+      const big = dropBig();
+      await nextTurn('One to Read');
+      // Three Reads of 1 MiB take the 3 MiB the full inline budget leaves: room 0.
+      for (let i = 0; i < 3; i += 1) read(big.storedPath);
+      expect(notices()).toEqual([]);
+      const files = [4, 5].map((n) => drop(`shot${String(n)}.png`, retina(MB + 200_000)));
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/shot4\.png, shot5\.png/);
+      expect(told[0]).toMatch(/out of room for pictures/);
+      expect(told[0]).toMatch(/new conversation/);
+      // Reading one first would be refused, so it is not suggested.
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
+      expect(read(must(files[0], 'a dropped file').storedPath)).toMatchObject({ decision: 'deny' });
+      // Told already, so the refused Read adds no second notice.
+      expect(notices().filter((body) => /shot\d\.png/.test(body))).toHaveLength(1);
+    });
+
+    it('are offered only a new conversation when the room left is under what each is charged', async () => {
+      await fillInline();
+      const big = dropBig();
+      await nextTurn('One to Read');
+      // Two 1 MiB Reads leave 1 MiB, under the 1.2 MiB a dropped shot is charged.
+      for (let i = 0; i < 2; i += 1) read(big.storedPath);
+      for (const n of [4, 5]) drop(`shot${String(n)}.png`, retina(MB + 200_000));
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/new conversation/);
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
+    });
+
+    it('say a refused Read only has a new conversation to offer', async () => {
+      await fillInline();
+      const first = [0, 1].map((n) => drop(`shot${String(n)}.png`, retina(MB + 200_000)));
+      await nextTurn('Two');
+      const [third] = [drop('shot2.png', retina(MB + 200_000))];
+      await nextTurn('One more');
+      for (const file of first) read(must(file, 'a file').storedPath);
+      expect(read(must(third, 'a file').storedPath)).toMatchObject({ decision: 'deny' });
+      const told = notices().filter((body) => body.includes('shot2.png'));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/new conversation/);
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
     });
 
     it('can still have a named one Read, when Claude is told to take it first', async () => {
@@ -410,13 +652,214 @@ describe('the pictures a Shape session pulls in with Read', () => {
       const answers = [files[3], files[0], files[1], files[2]].map((file) =>
         read(must(file, 'a dropped file').storedPath),
       );
-      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'allow', 'deny']);
+      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny', 'deny']);
     });
 
     it('count the pictures already Read against what a session can Read', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       for (let i = 0; i < EMPTY_ROOM - 2; i += 1) read(big.storedPath);
+      for (let i = 0; i < 3; i += 1) drop(`shot${String(i)}.png`, retina(MB + 200_000));
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/shot1\.png, shot2\.png/);
+      expect(told[0]).not.toMatch(/shot0\.png/);
+    });
+
+    describe('when the turn that names them never reaches Claude', () => {
+      const shots = () =>
+        Array.from({ length: 4 }, (_, i) => drop(`shot${String(i)}.png`, retina(MB + 200_000)));
+      const shotNotices = () => notices().filter((body) => /shot\d\.png/.test(body));
+
+      it('says nothing when the send fails, and says it on the retry', async () => {
+        await fillInline();
+        shots();
+        const live = must(f.adapter.shapeSessions[0], 'the live session').handle;
+        const send = live.send.bind(live);
+        let failures = 1;
+        (live as { send: typeof live.send }).send = (text, images) => {
+          if (failures-- > 0) throw new Error('the pipe is closed');
+          send(text, images);
+        };
+        f.service.send(shapeId(), 'Look at these');
+        await f.service.settled(shapeId());
+        expect(notices().filter((body) => body.includes('could not start'))).toHaveLength(1);
+        expect(shotNotices()).toEqual([]);
+        await nextTurn('Look again');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+      });
+
+      it('says nothing when the session fails to start, and says it on the retry', async () => {
+        await fillInline();
+        shots();
+        // Quitting ends the live session; the next turn resumes the conversation's session.
+        await f.restart();
+        const start = f.adapter.startShape.bind(f.adapter);
+        let failures = 1;
+        f.adapter.startShape = (spec) => {
+          if (failures-- > 0) throw new Error('Claude is not available');
+          return start(spec);
+        };
+        f.service.send(shapeId(), 'Look at these');
+        await f.service.settled(shapeId());
+        expect(notices().filter((body) => body.includes('could not start'))).toHaveLength(1);
+        expect(shotNotices()).toEqual([]);
+        await nextTurn('Look again');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+      });
+    });
+
+    describe('refused when the send-time notice could not predict it', () => {
+      const shots = (n: number, from = 0) =>
+        Array.from({ length: n }, (_, i) =>
+          drop(`shot${String(from + i)}.png`, retina(MB + 200_000)),
+        );
+      const shotNotices = () => notices().filter((body) => /shot\d\.png/.test(body));
+
+      it('names an image of an earlier turn that no Read had yet made room for', async () => {
+        await fillInline();
+        // Turn one drops two (2.4 of the 3 MiB fit) and Claude Reads none; turn two drops one, and the
+        // send-time notice sees all the room still free for it.
+        const first = shots(2);
+        await nextTurn('Two');
+        const [third] = shots(1, 2);
+        await nextTurn('One more');
+        expect(shotNotices()).toEqual([]);
+        expect(read(must(first[0], 'a file').storedPath)).toEqual({ decision: 'allow' });
+        expect(read(must(first[1], 'a file').storedPath)).toEqual({ decision: 'allow' });
+        expect(read(must(third, 'a file').storedPath)).toMatchObject({ decision: 'deny' });
+        const told = shotNotices();
+        expect(told).toHaveLength(1);
+        expect(told[0]).toContain('shot2.png');
+        expect(told[0]).toMatch(/refused|couldn't Read/);
+        expect(told[0]).toMatch(/out of room for pictures/);
+        // Refused again: the builder was told already.
+        read(must(third, 'a file').storedPath);
+        expect(shotNotices()).toHaveLength(1);
+      });
+
+      it('names the image actually refused when Claude Reads out of the order the notice assumed', async () => {
+        await fillInline();
+        const files = shots(4);
+        await nextTurn('Look at these');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+        // Claude takes shot2, then shot0, which fill the room; shot1 is refused though the notice never named it.
+        const order = [files[2], files[0], files[1]].map((file) =>
+          read(must(file, 'a file').storedPath),
+        );
+        expect(order.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        const told = shotNotices();
+        expect(told).toHaveLength(2);
+        expect(told[1]).toContain('shot1.png');
+        expect(told[1]).not.toMatch(/shot[023]\.png/);
+      });
+
+      it('tells apart two images with one name, naming each by the file it is kept in', async () => {
+        await fillInline();
+        const [first, second] = shots(2);
+        await nextTurn('Two');
+        // Every pasted screenshot is called this, one to a turn, so no send-time notice sees them.
+        const pasted = [1, 2].map(() => drop('pasted-image.png', retina(MB + 200_000)));
+        await nextTurn('A paste');
+        expect(notices()).toEqual([]);
+        for (const file of [first, second]) read(must(file, 'a file').storedPath);
+        expect(read(must(pasted[0], 'a paste').storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toContain('Read pasted-image.png:');
+        // Another file, though it has the same name: the builder is told, and can tell which.
+        expect(read(must(pasted[1], 'a paste').storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(2);
+        expect(notices()[1]).toContain('Read pasted-image-2.png:');
+      });
+
+      it('still names a refused image when the send-time notice named another of its name', async () => {
+        await fillInline();
+        const pasted = [0, 1, 2, 3].map(() => drop('pasted-image.png', retina(MB + 200_000)));
+        await nextTurn('Pastes');
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toMatch(/Read pasted-image-3\.png, pasted-image-4\.png:/);
+        const order = [pasted[2], pasted[0], pasted[1]].map((file) =>
+          read(must(file, 'a paste').storedPath),
+        );
+        expect(order.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        expect(notices()).toHaveLength(2);
+        expect(notices()[1]).toContain('Read pasted-image-2.png:');
+      });
+
+      it('names an image with a comma in its name once, however many times it is refused', async () => {
+        await fillInline();
+        const first = shots(2);
+        await nextTurn('Two');
+        const comma = drop('Mockup, final.png', retina(MB + 200_000));
+        const plain = drop('final.png', retina(MB + 200_000));
+        await nextTurn('Mockups');
+        for (const file of first) read(file.storedPath);
+        const before = notices().length;
+        for (let i = 0; i < 3; i += 1)
+          expect(read(comma.storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(before + 1);
+        expect(notices().at(-1)).toContain('Read Mockup, final.png:');
+        // The other name is the end of that one, and is another file.
+        read(plain.storedPath);
+        expect(notices()).toHaveLength(before + 2);
+        expect(notices().at(-1)).toContain('Read final.png:');
+      });
+
+      it('does not repeat an image the send-time notice named, a comma in its name or not', async () => {
+        await fillInline();
+        const files = [...shots(2), drop('Mockup, final.png', retina(MB + 200_000))];
+        await nextTurn('Look at these');
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toContain('Mockup, final.png');
+        const answers = files.map((file) => read(file.storedPath));
+        expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        expect(notices()).toHaveLength(1);
+      });
+
+      it('says nothing for a refused picture that is not a dropped file, or a subagent’s Read', async () => {
+        // A real checkout: a Read outside it is denied by confinement and never reaches the pool.
+        const checkout = realpathSync(mkdtempSync(join(tmpdir(), 'shape-checkout-')));
+        await f.close();
+        f = createServiceFixture({ checkout });
+        try {
+          await fillInline();
+          const files = shots(2);
+          await nextTurn('Look at these');
+          for (const file of files) read(file.storedPath);
+          const before = notices().length;
+          // The same name as a dropped file, so a match by name or by basename would notice it.
+          const inCheckout = join(checkout, 'shot0.png');
+          writeFileSync(inCheckout, retina(MB + 200_000));
+          const refused = read(inCheckout);
+          expect(refused).toMatchObject({ decision: 'deny' });
+          expect(reasonOf(refused)).toMatch(/Too many pictures read/);
+          const later = drop('later.png', retina(MB + 200_000));
+          expect(read(later.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
+          expect(notices()).toHaveLength(before);
+        } finally {
+          rmSync(checkout, { recursive: true, force: true });
+        }
+      });
+    });
+
+    it('count at the allowance in the notice once a large Read has been measured', async () => {
+      await fillInline();
+      const shot = drop('first.png', retina(MB + 200_000));
+      await nextTurn('This one');
+      read(shot.storedPath);
+      must(
+        must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+        'a PostToolUse hook',
+      )({
+        toolName: 'Read',
+        input: { file_path: shot.storedPath },
+        response: imageResult(500_000),
+      });
+      // 2.5 MiB of the reserve is left: two at the 1 MiB allowance, though 1.2 MiB files.
       for (let i = 0; i < 3; i += 1) drop(`shot${String(i)}.png`, retina(MB + 200_000));
       await nextTurn('Look at these');
       const told = notices().filter((body) => /shot\d\.png/.test(body));
@@ -427,6 +870,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
   });
 
   describe('once the session has measured what a Read returned', () => {
+    const dropBig = () => drop('big.png', wholePng(5 * MB));
     const measure = (path: string, response: unknown, n = 0, agentId?: string): void => {
       const after = must(f.adapter.shapeSessions[n], 'a session').spec.postToolUse;
       must(
@@ -440,17 +884,17 @@ describe('the pictures a Shape session pulls in with Read', () => {
       });
     };
 
-    it('charges the measured size in place of the allowance', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+    it('charges the measured size in place of what it counted', async () => {
+      const big = dropBig();
       await nextTurn('Hello');
       expect(read(big.storedPath)).toEqual({ decision: 'allow' });
-      expect(spent()).toBe(READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(big.size);
       measure(big.storedPath, imageResult(300_000));
       expect(spent()).toBe(300_000);
     });
 
     it('lets more Reads in when each returns less than the allowance', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       let allowed = 0;
       for (let i = 0; i < 300; i += 1) {
@@ -459,38 +903,188 @@ describe('the pictures a Shape session pulls in with Read', () => {
         allowed += 1;
       }
       // A Read is let in while the allowance, not yet measured, still fits in what the measured ones left.
-      expect(allowed).toBe(Math.floor((POOL - READ_PICTURE_CHARGE_MAX_BYTES) / 100_000) + 1);
+      expect(allowed).toBe(Math.floor((POOL - READ_CHARGE_MAX_BYTES) / 100_000) + 1);
       expect(allowed).toBeGreaterThan(EMPTY_ROOM * 5);
       expect(spent()).toBe(allowed * 100_000);
     });
 
     it('charges more than the allowance when a Read returned more', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       read(big.storedPath);
       measure(big.storedPath, imageResult(2 * MB));
       expect(spent()).toBe(2 * MB);
     });
 
-    it('keeps the allowance when the result has no picture bytes, or is a subagent’s or not a Read the hook counted', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+    it('keeps what it counted when the result has no picture bytes, or is a subagent’s or not a Read the hook counted', async () => {
+      const big = dropBig();
       const doc = drop('brief.md', Buffer.from('# The brief'));
       await nextTurn('Hello');
       read(big.storedPath);
       measure(big.storedPath, { type: 'parts', file: { filePath: big.storedPath, count: 3 } });
       measure(big.storedPath, imageResult(10), 0, 'agent-1');
       measure(doc.storedPath, imageResult(10));
-      expect(spent()).toBe(READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(big.size);
+    });
+
+    it('charges 0 for a Read Claude Code answered with file_unchanged, which added no bytes', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      expect(spent()).toBe(big.size);
+      measure(big.storedPath, { type: 'file_unchanged', file: { filePath: big.storedPath } });
+      expect(spent()).toBe(0);
+    });
+
+    it('keeps the allowance of a parts result, whose bytes stayed on disk, while file_unchanged gives it back', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, { type: 'parts', file: { filePath: big.storedPath, count: 3 } });
+      expect(spent()).toBe(big.size);
+      measure(big.storedPath, { type: 'file_unchanged', file: { filePath: big.storedPath } });
+      expect(spent()).toBe(0);
     });
 
     it('is counted after a restart', async () => {
-      const big = drop('big.png', wholePng(5 * MB));
+      const big = dropBig();
       await nextTurn('Hello');
       read(big.storedPath);
       measure(big.storedPath, imageResult(300_000));
       await f.restart();
       await nextTurn('Again');
       expect(spent()).toBe(300_000);
+    });
+  });
+
+  describe('once the session has measured a Read over 1 MiB', () => {
+    // Reads issued in one message all pass PreToolUse before any result is measured, so an unmeasured Read
+    // is charged at the largest size this session has measured, never under the allowance.
+    const BIG = 2.5 * MB;
+    const dropBig = () => drop('big.png', wholePng(5 * MB));
+    const measure = (path: string, bytes: number, pages?: string): void => {
+      must(
+        must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+        'a PostToolUse hook',
+      )({
+        toolName: 'Read',
+        input: pages === undefined ? { file_path: path } : { file_path: path, pages },
+        response: imageResult(bytes),
+      });
+    };
+
+    it('charges a later unmeasured Read at least that size', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      expect(spent()).toBe(BIG);
+      expect(read(big.storedPath)).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(2 * BIG);
+    });
+
+    it('does not lower the charge when a later Read measures less', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      read(big.storedPath);
+      measure(big.storedPath, 300_000);
+      expect(spent()).toBe(BIG + 300_000);
+      read(big.storedPath);
+      expect(spent()).toBe(2 * BIG + 300_000);
+    });
+
+    it('still charges a file smaller than that by its own size', async () => {
+      const big = dropBig();
+      const small = drop('small.png', wholePng(20_000));
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      read(small.storedPath);
+      expect(spent()).toBe(BIG + 20_000);
+    });
+
+    it('keeps a later batch, admitted before any of its own results is measured, within the pool', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      // Twenty Reads in one message: all pass PreToolUse, then their results come back.
+      const admitted = Array.from({ length: 20 }, () => read(big.storedPath)).filter(
+        (a) => a.decision === 'allow',
+      ).length;
+      expect(admitted).toBe(Math.floor((POOL - BIG) / BIG));
+      for (let i = 0; i < admitted; i += 1) measure(big.storedPath, BIG);
+      expect(spent()).toBe((admitted + 1) * BIG);
+      expect(spent()).toBeLessThanOrEqual(POOL);
+      expect(onTheWire(spent())).toBeLessThan(REQUEST_LIMIT - 1_500_000);
+    });
+
+    it('replaces what each Read of a first batch was counted, though the allowance has grown by then', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      // Nothing measured yet: three Reads of one message are each counted at the file's size.
+      for (let i = 0; i < 3; i += 1) read(big.storedPath);
+      expect(spent()).toBe(3 * big.size);
+      for (let i = 0; i < 3; i += 1) measure(big.storedPath, BIG);
+      expect(spent()).toBe(3 * BIG);
+    });
+
+    it('stays a whole number of bytes when a PDF’s size does not divide by its pages', async () => {
+      const doc = drop(
+        'three.pdf',
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(100_000)]),
+      );
+      const big = dropBig();
+      await nextTurn('Hello');
+      readPages(doc.storedPath, '1-3');
+      measure(doc.storedPath, 10_000_000, '1-3');
+      expect(largestReadMeasured(listShapeMessages(f.c.store.db, shapeId()))).toBe(3_333_334);
+      // Both kinds of later Read are charged the rounded-up page, and both show in the total.
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      readPages(doc.storedPath, '4');
+      expect(spent()).toBe(10_000_000 + BIG + 3_333_334);
+      read(big.storedPath);
+      expect(spent()).toBe(10_000_000 + BIG + 2 * 3_333_334);
+    });
+
+    it('charges a PDF page at the largest page measured, and measures a PDF by its pages', async () => {
+      const doc = drop(
+        'two.pdf',
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(100_000)]),
+      );
+      await nextTurn('Hello');
+      expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+      measure(doc.storedPath, 9 * MB, '1-3');
+      expect(spent()).toBe(9 * MB);
+      expect(readPages(doc.storedPath, '4-5')).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(9 * MB + 6 * MB);
+    });
+
+    it('reads a measurement of a PDF written before the page count was recorded as 1 MiB a page', () => {
+      const body = 'Read · /a.pdf · PDF · 6291456 bytes measured in place of 3145728';
+      expect(readBytesSpent([{ kind: ShapeMessageKind.Tool, body } as ShapeMessageDto])).toBe(
+        6291456 - 3145728,
+      );
+      expect(largestReadMeasured([{ kind: ShapeMessageKind.Tool, body } as ShapeMessageDto])).toBe(
+        2 * MB,
+      );
+    });
+
+    it('is forgotten with a fresh session, which carries none of those results', async () => {
+      const big = dropBig();
+      await nextTurn('Hello');
+      read(big.storedPath);
+      measure(big.storedPath, BIG);
+      f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+      f.service.send(shapeId(), 'Full');
+      await f.service.settled(shapeId());
+      await nextTurn('Fresh');
+      expect(read(big.storedPath, 1)).toEqual({ decision: 'allow' });
+      // With nothing measured in the new session, a file is charged its size again.
+      expect(spent()).toBe(big.size);
     });
   });
 

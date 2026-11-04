@@ -1,5 +1,5 @@
 import { readFileSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve as resolvePath } from 'node:path';
 import {
   ConflictError,
   EventType,
@@ -49,6 +49,7 @@ import {
   markSessionStarted,
   markShapeFilesInline,
   markShapeFilesTold,
+  markShapeFilesUnreadableTold,
   markShapeLinksSizeTold,
   patchShape,
   setOneWayPaths as setOneWayPathsRow,
@@ -61,6 +62,7 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
+import { expandHome } from '../sandbox';
 import { stringField } from '../guard';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
@@ -82,13 +84,22 @@ import {
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
+  isFileUnchanged,
+  isTextOnly,
   measuredMediaBytes,
-  readPictureBytesSpent,
+  noticeName,
+  pagesCharged,
+  readAllowance,
+  readBytesSpent,
   readCharge,
+  readPictureCap,
   readCeiling,
+  readCountedLine,
   readMeasuredLine,
-  readPictureLine,
-  readPictureRefusal,
+  eachFitsAlone,
+  readRefusal,
+  refusedImageNotice,
+  unmeasuredRead,
   unreadableImages,
   unreadableImagesNotice,
 } from './read-budget';
@@ -330,6 +341,12 @@ interface Intake {
 }
 
 /** The image blocks a turn carries, and the files they came from. */
+/** The images a Read would refuse, and whether Reading any one of them first would be let in. */
+interface Unreadable {
+  readonly files: readonly ShapeFileRow[];
+  readonly readFirst: boolean;
+}
+
 interface SentImages {
   readonly images: ShapeImage[];
   readonly ids: ShapeFileRow['id'][];
@@ -599,23 +616,75 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
    * Tells the builder which images this turn points Claude at as a path that a Read would refuse, because the
    * pictures the session already carries leave no room in the pool (§5.4). `shown` are the files the message
    * names, `intake.files` the ones it sends, and a `fresh` session carries no earlier picture or Read.
+   * Returns the images that would be refused, read from the state before the turn is marked told; the turn
+   * says so through `warnUnreadable` once it has reached Claude, so a turn that fails leaves its retry to say it.
    */
-  const warnUnreadable = (
+  const unreadableOf = (
     shapeId: ShapeId,
     intake: Intake,
     shown: readonly ShapeFileRow[],
     sentInline: ReadonlySet<ShapeFileRow['id']>,
     fresh: boolean,
-  ): void => {
+  ): Unreadable => {
     const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
     const paths = shown.filter((file) => byPath.has(file.id));
-    if (paths.length === 0) return;
+    if (paths.length === 0) return { files: [], readFirst: false };
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
-    const reads = fresh ? 0 : readPictureBytesSpent(listShapeMessages(state.db, shapeId));
-    const names = unreadableImages(paths, readCeiling(inline) - reads);
-    if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
+    const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
+    const room = readCeiling(inline) - readBytesSpent(messages);
+    const cap = readPictureCap(messages);
+    const files = unreadableImages(paths, room, cap);
+    // Reading one first only helps when the room left takes any one of them.
+    return { files, readFirst: eachFitsAlone(files, room, cap) };
+  };
+
+  /** Writes the notice for the images `unreadableOf` found, if any. */
+  const warnUnreadable = (shapeId: ShapeId, unreadable: Unreadable): void => {
+    if (unreadable.files.length > 0)
+      noticeUnreadable(
+        shapeId,
+        unreadable.files,
+        unreadableImagesNotice(unreadable.files.map(noticeName), unreadable.readFirst),
+      );
+  };
+
+  /** Sends a notice that names these images, and marks each so a refused Read doesn't name it again. */
+  const noticeUnreadable = (
+    shapeId: ShapeId,
+    files: readonly ShapeFileRow[],
+    body: string,
+  ): void => {
+    state.write((ctx) => {
+      insertShapeMessage(ctx, shapeId, {
+        author: ShapeMessageAuthor.Note,
+        kind: ShapeMessageKind.Notice,
+        body,
+      });
+      markShapeFilesUnreadableTold(
+        ctx,
+        files.map((f) => f.id),
+      );
+    });
+  };
+
+  /**
+   * Tells the builder a Read of one of the conversation's dropped images was refused, unless an earlier notice
+   * already named that image (§5.4). `warnUnreadable` only predicts, so this covers what it can't: images of
+   * earlier turns no Read had made room for, room spent after the send, and Reads out of the assumed order.
+   */
+  const noticeRefusedImage = (
+    shapeId: ShapeId,
+    readPath: string,
+    access: Pick<ShapeAccess, 'checkout' | 'home'>,
+  ): void => {
+    const target = resolvePath(access.checkout, expandHome(readPath, access.home));
+    const file = listShapeFiles(state.db, shapeId).find(
+      (f) => resolvePath(f.storedPath) === target,
+    );
+    if (file?.unreadableToldAt === null)
+      noticeUnreadable(shapeId, [file], refusedImageNotice(noticeName(file)));
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
@@ -743,7 +812,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
     const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
-    warnUnreadable(shapeId, intake, files, new Set(inlineIds), resumeId === null);
+    // Worked out now, from the state before this turn is marked told, and said once the session has started.
+    const unreadable = unreadableOf(shapeId, intake, files, new Set(inlineIds), resumeId === null);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -782,30 +852,45 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           },
           access,
         );
-        // A picture the session itself Reads is resent with every later request (§5.4); a subagent's
+        // A picture or PDF the session itself Reads is resent with every later request (§5.4); a subagent's
         // reaches the session as text, so only the session's own Reads are counted.
-        const picture =
+        const readPath =
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
+        const messages = readPath === null ? [] : listShapeMessages(state.db, shapeId);
+        // Reads in one message all pass here before any result is measured, so a picture is charged a
+        // bound on its result: its file's size until a large one is measured, then the largest measured.
+        const allowance = readAllowance(messages);
         const charged =
-          picture === null ? null : readCharge(picture, stringField(req.input, 'pages'), access);
-        if (picture !== null && charged !== null && charged.bytes > 0) {
-          const refusal = readPictureRefusal(
-            picture,
+          readPath === null
+            ? null
+            : readCharge(
+                readPath,
+                stringField(req.input, 'pages'),
+                access,
+                allowance,
+                readPictureCap(messages),
+              );
+        if (readPath !== null && charged !== null && charged.bytes > 0) {
+          const refusal = readRefusal(
+            readPath,
             charged.bytes,
-            readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+            readBytesSpent(messages),
             // Reads get whatever the inline pictures leave of the pool they share.
             readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
             charged.kind,
+            allowance,
           );
-          if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
-          else
+          if (refusal !== null) {
+            verdict = { decision: 'deny', reason: refusal };
+            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access);
+          } else
             say(
               shapeId,
               ShapeMessageAuthor.Claude,
               ShapeMessageKind.Tool,
-              readPictureLine(picture, charged.bytes, charged.kind),
+              readCountedLine(readPath, charged.bytes, charged.kind),
             );
         }
         if (verdict.decision === 'deny')
@@ -828,14 +913,44 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         if (req.toolName !== 'Read' || req.agentId !== undefined) return;
         const path = stringField(req.input, 'file_path');
         if (path === null) return;
-        const charged = readCharge(path, stringField(req.input, 'pages'), access);
+        // A measured 0 can't tell 'the bytes stayed on disk' (a `parts` result, which keeps its allowance)
+        // from 'nothing was added' (`file_unchanged`: Claude Code answered that an earlier tool result still
+        // stands), so the result's type decides: the second gives its whole charge back, and so does a result
+        // that is only text (a Read refused with a reason, such as a long PDF with no `pages`).
         const measured = measuredMediaBytes(req.response);
-        if (charged === null || !Number.isFinite(charged.bytes) || measured === 0) return;
+        const nothingAdded =
+          isFileUnchanged(req.response) || (measured === 0 && isTextOnly(req.response));
+        if (measured === 0 && !nothingAdded) return;
+        // What the hook counted for this Read, from the transcript: the allowance can have grown since,
+        // when another Read of the same message was measured first.
+        const counted = unmeasuredRead(listShapeMessages(state.db, shapeId), path);
+        if (counted === null) return;
+        const pages = pagesCharged(stringField(req.input, 'pages'));
         say(
           shapeId,
           ShapeMessageAuthor.Claude,
           ShapeMessageKind.Tool,
-          readMeasuredLine(path, measured, charged.bytes, charged.kind),
+          readMeasuredLine(
+            path,
+            measured,
+            counted.counted,
+            counted.kind,
+            Number.isFinite(pages) ? pages : undefined,
+          ),
+        );
+      },
+      toolFailed: (req) => {
+        // A failed Read returned nothing, so it gives back what it was counted, which can be a whole file.
+        if (req.toolName !== 'Read' || req.agentId !== undefined) return;
+        const path = stringField(req.input, 'file_path');
+        if (path === null) return;
+        const counted = unmeasuredRead(listShapeMessages(state.db, shapeId), path);
+        if (counted === null) return;
+        say(
+          shapeId,
+          ShapeMessageAuthor.Claude,
+          ShapeMessageKind.Tool,
+          readMeasuredLine(path, 0, counted.counted, counted.kind),
         );
       },
     };
@@ -858,6 +973,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     };
     rt.live = live;
     told(shapeId, files, intake.missized, inlineIds, resumeId === null);
+    warnUnreadable(shapeId, unreadable);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -914,9 +1030,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       else {
         const lines = intakeText(intake);
         const { images, ids } = imagesOf(intake.files, intake.spent);
-        warnUnreadable(shapeId, intake, intake.files, new Set(ids), false);
+        const unreadable = unreadableOf(shapeId, intake, intake.files, new Set(ids), false);
         rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
         told(shapeId, intake.files, intake.missized, ids, false);
+        warnUnreadable(shapeId, unreadable);
       }
     } catch (error) {
       // The turn never reached Claude, so what was to go ahead of it waits for the next one; its
