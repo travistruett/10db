@@ -1,7 +1,8 @@
-import type { ShapeMessageDto } from '@10db/contracts';
+import { ScreenMessageBody, type ShapeMessageDto } from '@10db/contracts';
 import { Box, ScrollArea, Stack, Text } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
 import { useEffect, useRef } from 'react';
+import { Screenshot } from './screenshot';
 
 /** Marks a transcript block with its message id, so Why? can find the messages a row came from. */
 const MESSAGE_ATTRIBUTE = 'data-message-id';
@@ -21,7 +22,23 @@ type Block =
       readonly body: string;
     }
   | { readonly kind: 'tool'; readonly id: string; readonly body: string }
+  | {
+      readonly kind: 'screen';
+      readonly id: string;
+      readonly shapeId: ShapeMessageDto['shapeId'];
+      readonly screen: ScreenMessageBody;
+    }
   | { readonly kind: 'note'; readonly id: string; readonly body: string };
+
+/** A `screen` row's body, or null when it is not one this version understands. */
+function screenOf(body: string): ScreenMessageBody | null {
+  try {
+    const parsed = ScreenMessageBody.safeParse(JSON.parse(body));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 /** Which messages show, and how: the digest and edit notes are for the session, not the builder. */
 export function blocksOf(messages: readonly ShapeMessageDto[]): Block[] {
@@ -39,6 +56,10 @@ export function blocksOf(messages: readonly ShapeMessageDto[]): Block[] {
         ];
       case 'tool':
         return [{ kind: 'tool', id: m.id, body: m.body }];
+      case 'screen': {
+        const screen = screenOf(m.body);
+        return screen === null ? [] : [{ kind: 'screen', id: m.id, shapeId: m.shapeId, screen }];
+      }
       case 'propose':
         return [{ kind: 'note', id: m.id, body: 'You pressed Propose.' }];
       case 'rehearse':
@@ -123,6 +144,8 @@ export function Transcript({ messages, why }: TranscriptProps) {
                   {block.body}
                 </Text>
               </>
+            ) : block.kind === 'screen' ? (
+              <Screenshot shapeId={block.shapeId} screen={block.screen} />
             ) : block.kind === 'tool' ? (
               <Text
                 size="xs"

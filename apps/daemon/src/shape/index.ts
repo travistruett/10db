@@ -4,6 +4,7 @@
 
 export { judgeShapeCall } from './confinement';
 export {
+  SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
