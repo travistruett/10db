@@ -749,6 +749,35 @@ describe('additions, changes and removals', () => {
     expect(listGoalTasks(c.store.db, goalId).some((t) => t.title === 'Task g3')).toBe(true);
   });
 
+  it('leaves no question attached to a task a removal cancels, and keeps it stored', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'seats')],
+      questions: [
+        {
+          key: 'who-pays',
+          text: 'Who pays for the extra seats?',
+          for: 'finance',
+          about: 'seats',
+          sourceMessageIds: [m],
+        },
+      ],
+    });
+    converted('seats', 'who-pays');
+    const task = taskTitled('Task seats');
+    expect(listShapeQuestions(c.store.db, c.shape.id)[0]?.taskId).toBe(task.id);
+
+    const m2 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }] });
+    converted(`remove:${task.id}`);
+
+    expect(getTask(c.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toMatchObject([
+      { key: 'who-pays', taskId: null, goalId: null },
+    ]);
+    expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
+  });
+
   it('leaves nothing behind when a write fails part-way', () => {
     const m = c.say();
     propose({

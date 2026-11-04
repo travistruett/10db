@@ -396,6 +396,18 @@ export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalI
 }
 
 /**
+ * Detaches the questions stored under a task a plan removal cancels, so none points at a dead task.
+ * Each stays stored and linked, now about nothing.
+ */
+export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): void {
+  ctx.tx
+    .update(schema.shapeQuestions)
+    .set({ taskId: null })
+    .where(eq(schema.shapeQuestions.taskId, taskId))
+    .run();
+}
+
+/**
  * Lets go of a goal and its tasks as they are removed (Shape spec §11). A question stored under any
  * of them is deleted with its link and its proposal is pending again, so it converts anew with the
  * goal; every other link to those tasks goes too, so no later Convert resolves a key to a removed task.
