@@ -214,6 +214,61 @@ describe('Remove Draft Goal', () => {
         );
       },
     );
+
+    it('returns a diagram on a task added to the goal later to that task row, and relinks it when proposed again', () => {
+      const { goalId } = convertedGoalAndDecision();
+      const m = c.say();
+      const addition = (goal: GoalId) => ({
+        key: 'extra',
+        title: 'Extra',
+        criteria: ['It works'],
+        areas: ['api'],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: [m],
+        goalId: goal,
+      });
+      const convertPending = () => {
+        const pending = listShapeProposals(c.store.db, c.shape.id)
+          .filter((r) => r.state === ShapeProposalState.Pending)
+          .map((r) => r.id);
+        const out = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+        if (!out.ok) throw new Error(out.errors.join('; '));
+        return out;
+      };
+      const proposed = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition(goalId)] })),
+      );
+      if (!proposed.ok) throw new Error(proposed.errors.join('; '));
+      const added = convertPending();
+      const taskId = must(added.results.find((r) => r.key === 'extra')?.taskIds[0], 'the task id');
+      write((ctx) => attach(ctx, c.shape.id, { target: { taskId }, attachment: diagram }));
+
+      write((ctx) => {
+        removeDraftGoalOf(ctx, c.shape.id, goalId);
+      });
+      // The diagram is on the addition's own row, which the goal's proposal row does not hold.
+      expect(
+        listShapeAttachments(c.store.db, c.shape.id).map((a) => [a.key, a.goalId, a.taskId]),
+      ).toEqual([['extra', null, null]]);
+
+      const newGoalId = must(
+        convertPending().results.find((r) => r.key === 'g')?.goalId,
+        'the new goal id',
+      );
+      const again = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition(newGoalId)] })),
+      );
+      if (!again.ok) throw new Error(again.errors.join('; '));
+      const newTaskId = must(
+        convertPending().results.find((r) => r.key === 'extra')?.taskIds[0],
+        'the new task id',
+      );
+      expect(newTaskId).not.toBe(taskId);
+      expect(listShapeAttachments(c.store.db, c.shape.id)).toMatchObject([
+        { key: 'extra', goalId: null, taskId: newTaskId },
+      ]);
+    });
   });
 
   describe('with a question converted under it', () => {

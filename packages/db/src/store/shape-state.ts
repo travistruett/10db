@@ -436,7 +436,8 @@ export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): v
  * Gives a diagram, chart or mockup attached by goal or task id back to the proposal row it came from.
  * attach() keys such a row by the id of the goal or task, which Remove Draft Goal deletes, so each
  * row is keyed again by its link's key (the goal's or the task's proposal key) before the links go.
- * Call it while the links still exist. A spec or eval is already keyed by its proposal.
+ * Pass the links of the goal and of every task in it, those added in a later round included, while
+ * they still exist. A spec or eval is already keyed by its proposal.
  */
 export function rekeyShapeAttachmentsToProposal(
   ctx: WriteContext,
