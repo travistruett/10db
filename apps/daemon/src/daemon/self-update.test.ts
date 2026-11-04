@@ -436,7 +436,8 @@ describe('self-update in the daemon', () => {
           title: 'Greetings',
           taskIds: [alpha.id, beta.id],
         });
-        await waitFor(() => started.mock.results.length === 2);
+        // A real cut, which a loaded Mac can take seconds over.
+        await waitFor(() => started.mock.results.length === 2, 30_000);
 
         head = NEW;
         await waitForAsync(async () => (await selfUpdate(api)).draining);
@@ -445,7 +446,7 @@ describe('self-update in the daemon', () => {
         // Both sessions end during the drain, so both lanes reach their gates.
         for (const session of started.mock.results)
           (session.value as { send(text: string): void }).send('go');
-        await waitFor(() => applied.length > 0 && applied);
+        await waitFor(() => applied.length > 0 && applied, 20_000);
         expect(applied).toEqual([NEW]);
         const lanes = await lanesOf(api);
         expect(lanes.get(alpha.id)?.state).toBe('VERIFYING');
@@ -456,7 +457,7 @@ describe('self-update in the daemon', () => {
         network.cleanup();
         remote.cleanup();
       }
-    });
+    }, 60_000);
   });
 
   it('raises one card naming the failing step when the build fails, and installs nothing', async () => {
