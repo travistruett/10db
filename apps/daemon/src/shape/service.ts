@@ -83,7 +83,7 @@ import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   readPictureBytesSpent,
-  readPictureCharge,
+  readCharge,
   readPictureLine,
   readPictureRefusal,
 } from './read-budget';
@@ -742,12 +742,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
-        const charge = picture === null ? 0 : readPictureCharge(picture, access);
-        if (picture !== null && charge > 0) {
+        const charged = picture === null ? null : readCharge(picture, access);
+        if (picture !== null && charged !== null && charged.bytes > 0) {
           const refusal = readPictureRefusal(
             picture,
-            charge,
+            charged.bytes,
             readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+            charged.kind,
           );
           if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
           else
@@ -755,7 +756,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               shapeId,
               ShapeMessageAuthor.Claude,
               ShapeMessageKind.Tool,
-              readPictureLine(picture, charge),
+              readPictureLine(picture, charged.bytes, charged.kind),
             );
         }
         if (verdict.decision === 'deny')

@@ -330,7 +330,12 @@ reads; a file that isn't there is charged nothing. A Read that would take the li
 that says to work from the pictures already read or ask for a smaller one. Each counted Read is a dimmed
 `Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
 it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
-session as text. A Read of a PDF is not counted (a separate task).
+session as text. A Read of a `.pdf` (a dropped one is up to 20 MB) is charged to the same total, but its whole file
+size with no 1 MiB cap, since a document block carries the file and what Read returns for pages is unmeasured; it
+is recorded as `Read · <path> · PDF · <n> bytes counted`. So a PDF over 3 MiB is always refused (with a reason that
+says to work from what is already read or ask for a smaller PDF or its text), and a conversation that Reads all 20
+dropped PDFs stays under the request limit. **Not measured:** a live session has not shown what Read returns for a
+PDF (document block or page pictures); the charge is an upper bound for a document block only.
 **Not measured:** the 1 MiB is an allowance, not a measurement, and it ships that way with the orchestrator's
 acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-7131-b2f7-0a24df988ba6), since a lane
 can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a

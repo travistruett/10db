@@ -31,26 +31,45 @@ export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
 /** The pictures Claude Code's `Read` turns into an image block. */
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
-/** What a Read of this path is charged: 0 for anything but a picture that exists. */
-export function readPictureCharge(
+/**
+ * A PDF Claude Code's `Read` returns as a document block (the whole file, base64) or, for a page range, as
+ * pages rendered to pictures. UNMEASURED like the picture allowance above (no live session has run), so a PDF
+ * is charged its whole file size with no cap: a document block can't be larger than the file, and a smaller
+ * charge for pages would be a guess. A PDF past the total is refused, so a big PDF can't be Read at all.
+ */
+const PDF_NAME = /\.pdf$/i;
+
+export type ReadKind = 'picture' | 'PDF';
+
+/** What a Read of this path is charged: null for anything but a picture or PDF that exists. */
+export function readCharge(
   path: string,
   access: Pick<ShapeAccess, 'checkout' | 'home'>,
-): number {
-  if (!PICTURE_NAME.test(path)) return 0;
+): { kind: ReadKind; bytes: number } | null {
+  const kind: ReadKind | null = PICTURE_NAME.test(path)
+    ? 'picture'
+    : PDF_NAME.test(path)
+      ? 'PDF'
+      : null;
+  if (kind === null) return null;
   try {
     const stat = statSync(resolve(access.checkout, expandHome(path, access.home)));
-    return stat.isFile() ? Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES) : 0;
+    if (!stat.isFile()) return null;
+    return {
+      kind,
+      bytes: kind === 'PDF' ? stat.size : Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES),
+    };
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
-    return 0;
+    return null;
   }
 }
 
 /** The dimmed transcript line that records a counted Read; `readPictureBytesSpent` reads it back. */
-export const readPictureLine = (path: string, charge: number): string =>
-  `Read · ${path} · picture · ${String(charge)} bytes counted`;
+export const readPictureLine = (path: string, charge: number, kind: ReadKind = 'picture'): string =>
+  `Read · ${path} · ${kind} · ${String(charge)} bytes counted`;
 
-const COUNTED = /^Read · .* · picture · (\d+) bytes counted$/s;
+const COUNTED = /^Read · .* · (?:picture|PDF) · (\d+) bytes counted$/s;
 
 /**
  * The bytes of Read pictures the live session carries: the counted lines after the latest digest, which
@@ -66,9 +85,20 @@ export function readPictureBytesSpent(messages: readonly ShapeMessageDto[]): num
   }, 0);
 }
 
-/** Why a Read is refused, or null when its picture fits beside the ones already read. */
-export function readPictureRefusal(path: string, charge: number, spent: number): string | null {
+/** Why a Read is refused, or null when it fits beside the pictures and PDFs already read. */
+export function readPictureRefusal(
+  path: string,
+  charge: number,
+  spent: number,
+  kind: ReadKind = 'picture',
+): string | null {
   if (spent + charge <= READ_PICTURES_MAX_BYTES) return null;
+  if (kind === 'PDF')
+    return (
+      `Too much read in this conversation: the PDF ${path} would pass the total of pictures and PDFs a ` +
+      `resumed session can carry under the API's 32 MB request limit. Work from what is already read, or ` +
+      `ask the builder for a smaller PDF or its text.`
+    );
   return (
     `Too many pictures read in this conversation: ${path} would pass the total a resumed session can carry ` +
     `under the API's 32 MB request limit. Work from the pictures already read, or ask the builder for a ` +
