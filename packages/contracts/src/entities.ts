@@ -611,6 +611,8 @@ export type NextAction = z.infer<typeof NextAction>;
 export const NOTICE_LINE_MAX = 500;
 /** The longest `Notice.body`, shown in the drawer. */
 export const NOTICE_BODY_MAX = 8000;
+/** The longest `Notice.record`: what 10db keeps with a notice for itself, never shown. */
+export const NOTICE_RECORD_MAX = 100_000;
 
 /**
  * Something a task's card and drawer say about the task or its batch that asks the builder nothing:
@@ -626,6 +628,11 @@ export const Notice = z.object({
   line: z.string().min(1).max(NOTICE_LINE_MAX),
   /** What the drawer shows under the line: who, why, and what to do about it. */
   body: z.string().max(NOTICE_BODY_MAX),
+  /**
+   * What 10db keeps with the notice to read back after a restart (JSON, say). It is not display text:
+   * no card or drawer shows it, and `fitNotice` never cuts it into something that no longer parses.
+   */
+  record: z.string().max(NOTICE_RECORD_MAX).optional(),
 });
 export type Notice = z.infer<typeof Notice>;
 
@@ -638,10 +645,13 @@ function cut(text: string, max: number): string {
  * list of paths must not make the batch or run that holds it fail to parse.
  */
 export function fitNotice(notice: Notice): Notice {
+  const { record, ...shown } = notice;
   return {
-    ...notice,
+    ...shown,
     line: cut(notice.line, NOTICE_LINE_MAX),
     body: cut(notice.body, NOTICE_BODY_MAX),
+    // A cut record would no longer parse and could read as another one: a record too long is left off.
+    ...(record !== undefined && record.length <= NOTICE_RECORD_MAX ? { record } : {}),
   };
 }
 
