@@ -1,6 +1,7 @@
 import { ProvenanceDto, ShapeOrigin, type ProjectDto } from '@10db/contracts';
 import {
   createTestStore,
+  insertDecision,
   insertSession,
   insertShape,
   insertSource,
@@ -211,6 +212,43 @@ describe('provenance', () => {
         taskTitle: null,
         shapeTitle: 'Density',
       });
+    });
+  });
+
+  describe('a record converted from a Plan conversation', () => {
+    const convertedFrom = (shapeId: string) =>
+      decisionProvenance(
+        store.db,
+        store.write((ctx) =>
+          insertDecision(ctx, {
+            projectId: project.id,
+            question: 'Which queue library?',
+            choice: 'BullMQ',
+            rationale: 'r',
+            decidedBy: 'builder',
+            scope: 'project',
+            area: null,
+            sourceId: insertSource(ctx, 'builder', { shapeId, proposalKey: 'q1' }),
+            supersedesId: null,
+          }),
+        ).value,
+      );
+
+    it('names the conversation by id and title', () => {
+      const shape = store.write((ctx) =>
+        insertShape(ctx, project.id, { title: 'Density', origin: ShapeOrigin.App }),
+      ).value;
+      const p = ProvenanceDto.parse(convertedFrom(shape.id));
+      expect(p.conversation).toEqual({ id: shape.id, title: 'Density' });
+      expect(p.session).toBeNull();
+    });
+
+    it('names no conversation for a shapeId that is not one', () => {
+      expect(convertedFrom('shp_gone').conversation).toBeNull();
+    });
+
+    it('names no conversation for a record with no Shape source', () => {
+      expect(decisionProvenance(store.db, decide(true).id).conversation).toBeNull();
     });
   });
 

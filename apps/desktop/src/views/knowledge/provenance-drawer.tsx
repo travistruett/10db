@@ -105,6 +105,8 @@ export function ProvenanceDrawer({
                   ? (p.session.taskTitle ?? p.session.workstreamId)
                   : `Plan conversation: ${p.session.shapeTitle ?? p.session.shapeId}`}
               </Text>
+            ) : p.conversation ? (
+              <Text size="sm">{`Plan conversation: ${p.conversation.title ?? p.conversation.id}`}</Text>
             ) : null}
             {p.quote ? <Blockquote>{p.quote}</Blockquote> : null}
             {p.confirmedBy && p.confirmedAt ? (

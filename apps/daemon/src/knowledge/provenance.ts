@@ -2,6 +2,7 @@ import {
   InboxItemId,
   NotFoundError,
   SessionId,
+  ShapeId,
   SourceKind,
   WorkstreamId,
   type DecisionId,
@@ -56,6 +57,7 @@ type Common = Pick<
   | 'by'
   | 'inbox'
   | 'session'
+  | 'conversation'
   | 'quote'
   | 'speaker'
   | 'confirmedBy'
@@ -89,6 +91,11 @@ function describeSource(db: DbReader, a: Attribution): Common {
         };
       })
     : null;
+  // A conversion writes its records as the builder's, with the conversation in the ref.
+  const shapeId = ShapeId.safeParse(ref['shapeId']);
+  const conversation = shapeId.success
+    ? orNull(() => ({ id: shapeId.data, title: getShape(db, shapeId.data).title }))
+    : null;
   return {
     sourceKind: source.kind,
     sourceRef: source.ref,
@@ -104,6 +111,7 @@ function describeSource(db: DbReader, a: Attribution): Common {
         }
       : null,
     session,
+    conversation,
     quote: a.quote ?? text(ref['quote']),
     speaker: a.speaker,
     confirmedBy: a.confirmedBy,
