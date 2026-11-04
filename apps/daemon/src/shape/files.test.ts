@@ -12,7 +12,12 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
-import { createScreens, INLINE_CONVERSATION_MAX_BYTES, type ScreenOutcome } from '../screens';
+import {
+  createScreens,
+  INLINE_CONVERSATION_MAX_BYTES,
+  inlineBytesSpent,
+  type ScreenOutcome,
+} from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { jpegOfSize } from '../../test/jpeg';
 import { pngOfSize } from '../../test/png';
@@ -502,6 +507,32 @@ describe('a large dropped image', () => {
         expect((await nextTurn('Three')).images).toHaveLength(3);
         for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, wholePng(2 * MB));
         expect((await nextTurn('Three more')).images).toHaveLength(1);
+      });
+    });
+
+    describe('after a fresh start with no digest, because Claude never spoke text', () => {
+      it('does not charge the screens taken before that start, and takes one after it', async () => {
+        // The session is let go past 70% of the context before any reply: no text, so no digest row.
+        f.adapter.shapeBehaviour = () => Promise.resolve({ text: '', contextPercent: 71 });
+        f.service.send(shapeId(), 'Hello');
+        await f.service.settled(shapeId());
+        const screens = screensOf(drawn(1_500_000));
+        for (let n = 0; n < 11; n += 1) await screens.see(shapeId(), window);
+        // 15.7 MiB of screens, taken by a session that is gone.
+        for (let i = 0; i < 3; i += 1) drop(`new${String(i)}.png`, wholePng(2 * MB));
+        const turn = await nextTurn('Again');
+        const fresh = must(f.adapter.shapeSessions[1], 'a fresh session');
+        expect(fresh.spec.resumeProviderSessionId).toBeNull();
+        expect(
+          f.service.view(shapeId()).messages.some((m) => m.kind === ShapeMessageKind.Digest),
+        ).toBe(false);
+        expect(turn.images).toHaveLength(3);
+        // This session carries 6 MiB: the old screens would add 15.7 and 1.4 more to pass the 18.
+        await screens.see(shapeId(), window);
+        expect(kept()).toHaveLength(12);
+        expect(inlineBytesSpent(f.state, f.filesDir, shapeId())).toBeLessThanOrEqual(
+          INLINE_CONVERSATION_MAX_BYTES,
+        );
       });
     });
 
