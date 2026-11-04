@@ -13,8 +13,29 @@ export interface LateOutcome {
   readonly refused: readonly string[];
   /** Why a send failed. */
   readonly failure: string | null;
-  /** The text of the send that failed, to put back in the input. */
+  /** What goes in the input: what it held when it left, the text of a send that failed, or both. */
   readonly draft: string | null;
+}
+
+/**
+ * One text holding both: the first when it is the second's whole text, otherwise the second ahead.
+ * Only a whole match counts. A failed "ok" inside "look at this" is a message of its own.
+ */
+export function keepBoth(typed: string, failed: string): string {
+  if (typed.trim() === '' || typed.trim() === failed.trim()) return failed;
+  return `${failed}\n\n${typed}`;
+}
+
+/**
+ * What the input holds once the send of `sent` succeeds: nothing when it is just that text, and
+ * otherwise the text with the sent part taken off the end, where `keepBoth` puts what was typed
+ * during the send. An input edited into something else stays as it stands.
+ */
+export function withoutSent(typed: string, sent: string): string {
+  const text = typed.trim();
+  if (text === sent) return '';
+  const tail = `\n\n${sent}`;
+  return text.endsWith(tail) ? text.slice(0, -tail.length) : typed;
 }
 
 const waiting = new Map<ShapeId, LateOutcome>();
@@ -24,13 +45,14 @@ const changed = (): void => {
   for (const listener of listeners) listener();
 };
 
-/** Adds `more` to what waits for `shapeId`; a later failure or draft replaces an earlier one. */
+/** Adds `more` to what waits for `shapeId`: a later failure replaces an earlier one, a draft joins it. */
 export function leaveLate(shapeId: ShapeId, more: Partial<LateOutcome>): void {
   const base = waiting.get(shapeId);
+  const { draft = null } = more;
   waiting.set(shapeId, {
     refused: [...(base?.refused ?? []), ...(more.refused ?? [])],
     failure: more.failure ?? base?.failure ?? null,
-    draft: more.draft ?? base?.draft ?? null,
+    draft: draft === null ? (base?.draft ?? null) : keepBoth(base?.draft ?? '', draft),
   });
   changed();
 }

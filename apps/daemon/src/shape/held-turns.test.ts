@@ -92,6 +92,53 @@ describe('a turn held by the drain when 10db quits', () => {
     expect(f.adapter.shapeSessions).toHaveLength(0);
   });
 
+  it('is reported when it was sent after the service closed with no hold up, and starts no session', async () => {
+    await f.service.close();
+    f.service.send(shapeId(), 'Too late.');
+    await f.service.settled(shapeId());
+    expect(notices()).toEqual([
+      '10db quit before Claude read “Too late.”, so it went unanswered. Send it again.',
+    ]);
+    expect(f.adapter.shapeSessions).toHaveLength(0);
+    expect(f.service.turnsInProgress()).toBe(0);
+  });
+
+  it('is reported when a Propose came after the service closed, and starts no session', async () => {
+    await f.service.close();
+    f.service.propose(shapeId());
+    await f.service.settled(shapeId());
+    expect(notices()).toEqual(['10db quit before Claude could propose. Press Propose again.']);
+    expect(f.adapter.shapeSessions).toHaveLength(0);
+  });
+
+  it('is reported when a rehearsal was asked for after the service closed, and starts no session', async () => {
+    const m = f.c.say();
+    f.c.store.write((ctx) =>
+      reconcileDraft(
+        ctx,
+        shapeId(),
+        PlanDraft.parse({
+          looseTasks: [
+            {
+              key: 'a',
+              title: 'Task a',
+              criteria: ['It works'],
+              areas: ['api'],
+              size: 'S',
+              ceremony: 'direct',
+              sourceMessageIds: [m],
+            },
+          ],
+        }),
+      ),
+    );
+    await f.service.close();
+    expect(f.service.rehearse(shapeId()).status).toBe('started');
+    await f.service.settled(shapeId());
+    expect(notices()).toEqual(['10db quit before the rehearsal ran. Press Rehearse again.']);
+    expect(f.adapter.shapeSessions).toHaveLength(0);
+  });
+
   it('says nothing when the turn ran before the quit', async () => {
     drain.begin(new Date(0));
     f.service.send(shapeId(), 'One more thing.');

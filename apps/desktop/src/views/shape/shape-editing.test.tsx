@@ -542,6 +542,237 @@ describe('dropping files', () => {
       expect(kept.value).toBe('Move density ahead of the scrollbars.');
     });
 
+    describe('what is in the input when the upload opens the conversation', () => {
+      const failingSend = (view: ShapeViewDto, upload: ReturnType<typeof waiting>) => [
+        ...conversation(view),
+        created(view),
+        http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+          HttpResponse.json(
+            { error: 'unavailable', message: 'The daemon is restarting' },
+            { status: 503 },
+          ),
+        ),
+        http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
+          await upload.held;
+          return HttpResponse.json(fileDto(view), { status: 201 });
+        }),
+      ];
+
+      it('carries text typed after the drop, without a send, into the conversation', async () => {
+        const view = proposed([], {}, 0);
+        const upload = waiting();
+        serve(...failingSend(view, upload));
+        const { router } = renderApp('/shape');
+        const input = await screen.findByRole('textbox', { name: 'Message' });
+        await screen.findByRole('list', { name: 'Recent conversations' });
+        dropOn(input, brief());
+        fireEvent.change(input, { target: { value: 'Typed while it uploaded.' } });
+        upload.release();
+        await waitFor(() => {
+          expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+        });
+        const kept = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+        expect(kept.value).toBe('Typed while it uploaded.');
+      });
+
+      it('carries the edited text, not the text that failed', async () => {
+        const view = proposed([], {}, 0);
+        const upload = waiting();
+        serve(...failingSend(view, upload));
+        const { router } = renderApp('/shape');
+        const input = await screen.findByRole('textbox', { name: 'Message' });
+        await screen.findByRole('list', { name: 'Recent conversations' });
+        dropOn(input, brief());
+        send(input, 'Move density ahead of the scrollbars.');
+        expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+        fireEvent.change(input, { target: { value: 'Move density behind the scrollbars.' } });
+        upload.release();
+        await waitFor(() => {
+          expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+        });
+        const kept = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+        expect(kept.value).toBe('Move density behind the scrollbars.');
+      });
+
+      it('leaves the input empty, with no old failure, when the builder cleared it', async () => {
+        const view = proposed([], {}, 0);
+        const upload = waiting();
+        serve(...failingSend(view, upload));
+        const { router } = renderApp('/shape');
+        const input = await screen.findByRole('textbox', { name: 'Message' });
+        await screen.findByRole('list', { name: 'Recent conversations' });
+        dropOn(input, brief());
+        send(input, 'Move density ahead of the scrollbars.');
+        expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+        fireEvent.change(input, { target: { value: '' } });
+        upload.release();
+        await waitFor(() => {
+          expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+        });
+        const kept = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+        expect(kept.value).toBe('');
+        expect(screen.queryByText('The daemon is restarting')).toBeNull();
+      });
+
+      describe('when the builder edits the text of a send still in flight', () => {
+        const heldSend = (
+          view: ShapeViewDto,
+          message: ReturnType<typeof waiting>,
+          upload: ReturnType<typeof waiting>,
+          answer: () => Response,
+        ) => [
+          ...conversation(view),
+          created(view),
+          http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+            await message.held;
+            return answer();
+          }),
+          http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
+            await upload.held;
+            return HttpResponse.json(fileDto(view), { status: 201 });
+          }),
+        ];
+
+        const editThenOpen = async (view: ShapeViewDto, upload: ReturnType<typeof waiting>) => {
+          const { router } = renderApp('/shape');
+          const input = await screen.findByRole('textbox', { name: 'Message' });
+          await screen.findByRole('list', { name: 'Recent conversations' });
+          dropOn(input, brief());
+          send(input, 'Move density ahead');
+          fireEvent.change(input, { target: { value: 'Move density ahead, and thin the bars.' } });
+          upload.release();
+          await waitFor(() => {
+            expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+          });
+          const kept = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+          await waitFor(() => {
+            expect(kept.value).toBe('Move density ahead, and thin the bars.');
+          });
+          return kept;
+        };
+
+        it('carries the input as it stands when the send succeeds', async () => {
+          const view = proposed([], {}, 0);
+          const message = waiting();
+          const upload = waiting();
+          let answered = false;
+          serve(
+            ...heldSend(view, message, upload, () => {
+              answered = true;
+              return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+            }),
+          );
+          const kept = await editThenOpen(view, upload);
+          message.release();
+          await waitFor(() => {
+            expect(answered).toBe(true);
+          });
+          expect(kept.value).toBe('Move density ahead, and thin the bars.');
+        });
+
+        it('keeps the edits, with the failed text ahead of them, and shows why when the send fails', async () => {
+          const view = proposed([], {}, 0);
+          const message = waiting();
+          const upload = waiting();
+          serve(
+            ...heldSend(view, message, upload, () =>
+              HttpResponse.json(
+                { error: 'unavailable', message: 'The daemon is restarting' },
+                { status: 503 },
+              ),
+            ),
+          );
+          const kept = await editThenOpen(view, upload);
+          message.release();
+          expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+          // The edit is a text of its own, not the failed one: only a whole match counts as the same.
+          expect(kept.value).toBe('Move density ahead\n\nMove density ahead, and thin the bars.');
+        });
+      });
+
+      it('keeps the text and the reason when the upload lands as the send fails', async () => {
+        const view = proposed([], {}, 0);
+        const message = waiting();
+        const upload = waiting();
+        const reached = { message: false, upload: false };
+        serve(
+          ...conversation(view),
+          created(view),
+          http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+            reached.message = true;
+            await message.held;
+            return HttpResponse.json(
+              { error: 'unavailable', message: 'The daemon is restarting' },
+              { status: 503 },
+            );
+          }),
+          http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
+            reached.upload = true;
+            await upload.held;
+            return HttpResponse.json(fileDto(view), { status: 201 });
+          }),
+        );
+        const { router } = renderApp('/shape');
+        const input = await screen.findByRole('textbox', { name: 'Message' });
+        await screen.findByRole('list', { name: 'Recent conversations' });
+        dropOn(input, brief());
+        send(input, 'Move density ahead of the scrollbars.');
+        await waitFor(() => {
+          expect(reached).toEqual({ message: true, upload: true });
+        });
+        message.release();
+        upload.release();
+        await waitFor(() => {
+          expect(router.state.location.pathname).toBe(`/shape/${view.shape.id}`);
+        });
+        expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+        const kept = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+        expect(kept.value).toBe('Move density ahead of the scrollbars.');
+      });
+
+      it('carries the text once, however many uploads finish after the builder left', async () => {
+        const view = proposed([], {}, 0);
+        const first = waiting();
+        const second = waiting();
+        serve(
+          ...conversation(view),
+          created(view),
+          accepted(view),
+          http.post(daemonUrl('/shapes/:shapeId/files'), async ({ request }) => {
+            if (new URL(request.url).searchParams.get('name') === 'brief.md') {
+              await first.held;
+              return HttpResponse.json(fileDto(view), { status: 201 });
+            }
+            await second.held;
+            // A refusal, because that is what shows the new input has heard this upload finish.
+            return refused('notes.md isn’t really Markdown');
+          }),
+        );
+        const { router } = renderApp('/shape');
+        const input = await screen.findByRole('textbox', { name: 'Message' });
+        await screen.findByRole('list', { name: 'Recent conversations' });
+        fireEvent.change(input, { target: { value: 'Thin the scrollbars.' } });
+        dropOn(input, brief());
+        dropOn(input, [new File(['# Hi'], 'notes.md', { type: 'text/markdown' })]);
+        await waitFor(() => {
+          expect(screen.getByRole('textbox', { name: 'Message' })).toBe(input);
+        });
+        await router.navigate({ to: '/shape/$shapeId', params: { shapeId: view.shape.id } });
+        first.release();
+        const opened = await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+        await waitFor(() => {
+          expect(opened.value).toBe('Thin the scrollbars.');
+        });
+        fireEvent.keyDown(opened, { key: 'Enter', metaKey: true });
+        await waitFor(() => {
+          expect(opened.value).toBe('');
+        });
+        second.release();
+        expect(await screen.findByText('notes.md isn’t really Markdown')).toBeTruthy();
+        expect(opened.value).toBe('');
+      });
+    });
+
     it('does not pull the builder back when the later one finishes after they moved on', async () => {
       const view = proposed([], {}, 0);
       const upload = waiting();
