@@ -525,8 +525,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         null,
         false,
       );
-    // With several generated migrations each is made from the schema file as it stood at that step,
-    // so the file is replaced between runs and is the merge's again after the last, whatever happens.
+    // With several generated migrations each is made from a schema file that stands for that step, so
+    // the file is replaced between runs and is the merge's again after the last, whatever happens.
     const mergedSchema =
       steps.before.size > 0
         ? await ctx.git.bytesAt(path, current, SCHEMA_FILE, SCHEMA_MAX_BYTES)

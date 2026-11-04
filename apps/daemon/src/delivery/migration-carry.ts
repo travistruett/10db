@@ -12,6 +12,7 @@ import { basename, dirname, join } from 'node:path';
 import type { Git } from '../git';
 import { journalTags, ownTags, parseTag } from './migration-numbers';
 import type { RenumberedMigration } from './notices';
+import { schemaOf, stepSchema } from './snapshot-schema';
 import { MIGRATIONS_DIR, type CarriedMigration } from './worktree-generated';
 
 const JOURNAL = `${MIGRATIONS_DIR}meta/_journal.json`;
@@ -33,32 +34,6 @@ export type OwnMigrations =
   | { readonly kind: 'unreadable'; readonly tag: string; readonly why: string };
 
 const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [] };
-
-/** What `generate` writes into every snapshot whatever the schema: never part of the comparison. */
-const SNAPSHOT_BOOKKEEPING: ReadonlySet<string> = new Set(['id', 'prevId', '_meta']);
-
-/** `value` with each object's keys sorted: `--custom` copies a snapshot in another key order. */
-function sortedKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortedKeys);
-  if (typeof value !== 'object' || value === null) return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([key, field]) => [key, sortedKeys(field)]),
-  );
-}
-
-/** A snapshot's schema, comparable with another's; null when it is not a snapshot. */
-export function schemaOf(text: string): string | null {
-  try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
-    const schema = Object.entries(parsed).filter(([key]) => !SNAPSHOT_BOOKKEEPING.has(key));
-    return JSON.stringify(sortedKeys(Object.fromEntries(schema)));
-  } catch {
-    return null;
-  }
-}
 
 /**
  * The migrations `tip` added under the migrations directory that the base at `from` lacks. `--custom`
@@ -106,8 +81,8 @@ export const SCHEMA_MAX_BYTES = 16 * 1024 * 1024;
 
 export type SchemaSteps =
   /**
-   * `before` holds, for each generated migration but the last, its schema file as it stood at that
-   * migration, merged with the base's. The last one is made from the schema file as merged.
+   * `before` holds, for each generated migration but the last, a schema file that stands for the
+   * schema at that migration, merged with the base's. The last one is made from the file as merged.
    */
   | { readonly kind: 'steps'; readonly before: ReadonlyMap<string, Buffer> }
   /** The schema as of migration `tag` can't be told, so it can't be made as a step of its own. */
@@ -116,13 +91,12 @@ export type SchemaSteps =
 /**
  * `generate` diffs the schema file as merged, so with two generated migrations the first would take
  * the changes of both and the second would make nothing. Each step needs the schema as it stood
- * at its migration, with the base's changes: its file at the commit that added the migration, line
- * merged with the base from their merge base. That commit is found by the migration's name, since an
- * earlier catch-up's regenerate commit holds the migrations under new numbers while the commits
- * that first made them are still behind it. Nothing to do for fewer than two generated migrations.
+ * at its migration, with the base's changes. The branch's snapshots at `tip` keep each step, whether
+ * its commits made one migration each, one commit made several, or an earlier catch-up's regenerate
+ * commit holds them all. Nothing to do for fewer than two generated migrations.
  */
 export async function schemaSteps(
-  git: Pick<Git, 'additionsUnder' | 'mergeBase' | 'mergedFileAt'>,
+  git: Pick<Git, 'fileAt' | 'mergeBase'>,
   repo: string,
   tip: string,
   from: string,
@@ -131,32 +105,29 @@ export async function schemaSteps(
   const generated = migrations.filter((m) => !m.custom);
   const before = new Map<string, Buffer>();
   if (generated.length < 2) return { kind: 'steps', before };
-  const commits = await git.additionsUnder(repo, tip, MIGRATIONS_DIR);
+  const text = async (rev: string, path: string): Promise<string | null> => {
+    const found = await git.fileAt(repo, rev, path, META_MAX_BYTES);
+    return found.kind === 'file' ? found.text : null;
+  };
+  const snapshotOf = (rev: string, number: string) =>
+    text(rev, `${MIGRATIONS_DIR}meta/${number}_snapshot.json`);
+  /** The snapshot of the last migration `rev` holds. */
+  const latest = async (rev: string): Promise<string | null> => {
+    const last = parseTag(journalTags(await text(rev, JOURNAL))?.at(-1) ?? '');
+    return last === null ? null : snapshotOf(rev, last.number);
+  };
+  const ancestor = await git.mergeBase(repo, tip, from);
+  const shared = ancestor === null ? null : await latest(ancestor);
+  const theirs = await latest(from);
   for (const migration of generated.slice(0, -1)) {
     const unknown = (why: string): SchemaSteps => ({ kind: 'unknown', tag: migration.tag, why });
-    const added = commits.find((commit) =>
-      commit.files.some(
-        (file) =>
-          file.startsWith(MIGRATIONS_DIR) &&
-          file.endsWith('.sql') &&
-          parseTag(basename(file, '.sql'))?.name === migration.name,
-      ),
-    );
-    if (added === undefined)
-      return unknown("the commit that made it is not in the branch's history");
-    const base = await git.mergeBase(repo, added.sha, from);
-    if (base === null) return unknown('its commit shares no history with the base');
-    const schema = await git.mergedFileAt({
-      repo,
-      path: SCHEMA_FILE,
-      base,
-      ours: added.sha,
-      theirs: from,
-      maxBytes: SCHEMA_MAX_BYTES,
-    });
-    if (schema === null)
-      return unknown(`${SCHEMA_FILE} as it stood then could not be merged with the base's`);
-    before.set(migration.tag, schema);
+    const ours = await snapshotOf(tip, parseTag(migration.tag)?.number ?? '');
+    if (ours === null || shared === null || theirs === null)
+      return unknown('a snapshot it needs is not there');
+    const schema = stepSchema(shared, ours, theirs);
+    if (schema.kind === 'refused')
+      return unknown(`a schema for its step could not be made: ${schema.why}`);
+    before.set(migration.tag, Buffer.from(schema.text));
   }
   return { kind: 'steps', before };
 }
