@@ -114,7 +114,8 @@ export type ToolHandlers = { [K in McpToolName]: (input: In<K>) => Promise<Out<K
  * complete_step's followUps are deliberately not counted: they are a review's findings, its end
  * product, a separate allowance (decisions/2026-11-04-a-reviews-complete-step-follow-ups-are-outside-the-step-cap.md),
  * bounded at MAX_FOLLOW_UPS across all the step's complete_step calls by the list in its result
- * (decisions/2026-11-04-complete-step-follow-ups-are-bounded-per-step.md).
+ * (decisions/2026-11-04-complete-step-follow-ups-are-bounded-per-step.md), and filed once under a
+ * reused opId (decisions/2026-11-04-a-reused-complete-step-opid-files-no-follow-up-twice.md).
  */
 function stepFilings(
   db: Parameters<typeof countStepToolOps>[0],
@@ -721,8 +722,8 @@ export function createToolHandlers(
           // most MAX_FOLLOW_UPS in all, however many times it is called or by which session.
           const kept = filedFollowUpLines(step.result?.summary ?? '');
           // An earlier session that used this opId has already filed its follow-ups. This call is a
-          // retry or a rerun of it, so a follow-up with the title of one of those is that one: it is
-          // named again but not filed twice. Each earlier follow-up matches at most one input.
+          // retry or a rerun of it, so a follow-up with the title of one of those is that one: the reply
+          // names it again but it is not filed twice. Each earlier follow-up matches at most one input.
           const alreadyFiled = earlier
             ? McpToolOutputs.complete_step.parse(earlier.result).followUps
             : [];
@@ -741,13 +742,13 @@ export function createToolHandlers(
             const task = insertFollowUpTask(ctx, row.taskId, followUp);
             return { taskId: task.id, title: task.title };
           });
+          // The stored reply keeps every filing under this opId, so a later reuse still matches them.
           const filed = [...alreadyFiled, ...newlyFiled];
-          // The builder finds the follow-ups from the step's result, so they are written into it. The
-          // earlier session's are added if the step's result no longer lists them.
-          const listed = [
-            ...kept,
-            ...filed.map((f) => `- ${f.taskId} ${f.title}`).filter((line) => !kept.includes(line)),
-          ];
+          // The builder finds the follow-ups from the step's result, so they are written into it. Only
+          // this run's go in, which is what the check above bounds: a filing of a round before the step
+          // was entered again stays in the result that round left in `earlier`, and carrying it in
+          // could take the list past the bound and refuse a later call that files nothing.
+          const listed = [...kept, ...newlyFiled.map((f) => `- ${f.taskId} ${f.title}`)];
           const summary =
             listed.length === 0
               ? input.summary

@@ -40,6 +40,7 @@ import {
 } from '@10db/db';
 import {
   EventType,
+  filedFollowUpLines,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   mintId,
@@ -57,7 +58,7 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { commitResolvedMarkers } from '../team';
+import { advanceSteps, commitResolvedMarkers } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -2605,6 +2606,64 @@ describe('complete_step', () => {
         expect(first.json).toMatchObject({
           followUps: filedBefore.map((t) => ({ taskId: t.id, title: t.title })),
         });
+      });
+
+      it('files nothing twice and stays within the bound when the step runs again before its opId is reused', async () => {
+        const s = await onStep('review');
+        const opId = 'op-step-multi-j';
+        const firstRound = more(0, 3);
+        await s.call('complete_step', {
+          opId,
+          summary: 'First round.',
+          verdict: 'reject',
+          followUps: firstRound,
+        });
+        // The rework ran: the review is entered again, and its result moves to `earlier`.
+        state.write((ctx) => {
+          const { steps } = getWorkstream(ctx.tx, s.workstream.id);
+          patchWorkstream(ctx, s.workstream.id, null, {
+            steps: advanceSteps(steps, 0, 1, { now: ctx.now, sessions: 2 }),
+          });
+        });
+        expect(resultOf(s)).toBeNull();
+
+        const secondRound = await connectSession(s.workstream.id);
+        const filedNew = await secondRound.call('complete_step', {
+          opId,
+          summary: 'Second round.',
+          verdict: 'reject',
+          followUps: more(100, MAX_FOLLOW_UPS),
+        });
+        expect(filedNew.isError).toBe(false);
+        // The list is this attempt's, so it holds a full allowance and no more. The first round's stay
+        // named in the result it moved to `earlier`.
+        expect(filedFollowUpLines(resultOf(s)?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        const step = getWorkstream(base.db, s.workstream.id).steps[1];
+        expect(filedFollowUpLines(step?.earlier[0]?.summary ?? '')).toHaveLength(firstRound.length);
+
+        // The same opId again, resending the first round's: nothing is filed, on a full list.
+        const thirdSession = await connectSession(s.workstream.id);
+        const resent = await thirdSession.call('complete_step', {
+          opId,
+          summary: 'Resent notes.',
+          verdict: 'approve',
+          followUps: firstRound,
+        });
+        expect(resent.isError).toBe(false);
+        expect(resultOf(s)?.verdict).toBe('approve');
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
+
+        // A later call that files nothing is not refused.
+        const none = await thirdSession.call('complete_step', {
+          opId: 'op-step-multi-k',
+          summary: 'Final notes.',
+          verdict: 'reject',
+        });
+        expect(none.isError).toBe(false);
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('reject');
+        expect(filedFollowUpLines(result?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
       });
     });
 
