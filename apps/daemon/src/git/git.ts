@@ -536,6 +536,30 @@ export interface Git {
   /** The best common ancestor of two commits; null when they have none. */
   mergeBase(repo: string, one: string, other: string): Promise<string | null>;
   /**
+   * The files under `dir` that each commit reachable from `tip` added, oldest commit first (a merge
+   * adds none, and a rename counts as an addition). Read from the object store; commits that added
+   * nothing under `dir` are left out.
+   */
+  additionsUnder(
+    repo: string,
+    tip: string,
+    dir: string,
+  ): Promise<{ readonly sha: string; readonly files: readonly string[] }[]>;
+  /**
+   * What the regular file `path` comes to when commit `ours` is merged with `theirs` from the common
+   * ancestor `base`, as a line merge of their trees: its bytes, or null when the merge conflicts in it,
+   * leaves no regular file there or the file is over `maxBytes`. Nothing in the repository's refs or
+   * worktree changes.
+   */
+  mergedFileAt(input: {
+    readonly repo: string;
+    readonly path: string;
+    readonly base: string;
+    readonly ours: string;
+    readonly theirs: string;
+    readonly maxBytes: number;
+  }): Promise<Buffer | null>;
+  /**
    * What one folder of commit `rev` holds directly (`folder` a path from the root, `''` for the root):
    * its regular files, with each one's size in bytes, and its folders (never a link or a submodule),
    * each sorted by name. Read from the object store as `fileAt` reads, one folder and nothing below it,
@@ -2908,6 +2932,63 @@ export function createGit(opts: GitOptions = {}): Git {
         if (error instanceof GitError && error.exitCode === 1) return null;
         throw error;
       }
+    },
+    async additionsUnder(repo, tip, dir) {
+      const c = await pinned(repo);
+      const out = await git(
+        c,
+        [
+          'log',
+          '--no-show-signature',
+          '--no-mailmap',
+          '--no-merges',
+          '--no-renames',
+          '--no-ext-diff',
+          '--no-textconv',
+          '--diff-filter=A',
+          // A merge that took the base's version of `dir` would otherwise hide the branch's side.
+          '--full-history',
+          '--reverse',
+          '--name-only',
+          '-z',
+          '--format=%x01%H',
+          `${tip}^{commit}`,
+          '--',
+          dir,
+        ],
+        { env: { GIT_LITERAL_PATHSPECS: '1' } },
+      );
+      const commits: { sha: string; files: string[] }[] = [];
+      for (const chunk of out.split('\u0001')) {
+        // Git ends the format with a NUL and a newline, which lands in front of the first path.
+        const [sha = '', ...names] = chunk.split('\0');
+        const files = names.map((name) => name.replace(/^\n/u, '')).filter((name) => name !== '');
+        if (OBJECT_ID.test(sha) && files.length > 0) commits.push({ sha, files });
+      }
+      return commits;
+    },
+    async mergedFileAt({ repo, path, base, ours, theirs, maxBytes }) {
+      const c = await pinned(repo);
+      const [oursOid, theirsOid, baseOid] = await Promise.all(
+        [ours, theirs, base].map((rev) => revParse(c, `${rev}^{commit}`)),
+      );
+      if (!oursOid || !theirsOid || !baseOid) return null;
+      const { tree, conflicted } = await mergeTree(c, oursOid, theirsOid, baseOid);
+      if (conflicted.includes(path)) return null;
+      const entry = (
+        await git(c, ['ls-tree', '-z', '--long', '--full-tree', tree, '--', path], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        })
+      )
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return null;
+      const [, mode = '', type, oid = '', size = ''] = entry;
+      if (type !== 'blob' || !REGULAR_FILE_MODES.includes(mode)) return null;
+      const bytes = Number(size);
+      if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return null;
+      return gitCapped(c, ['cat-file', 'blob', oid], maxBytes + 1);
     },
     async folderAt(repo, rev, folder) {
       const c = await pinned(repo);

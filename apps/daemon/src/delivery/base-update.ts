@@ -28,7 +28,12 @@ import {
   addedTags,
   carriedSoFar,
   copyCustomSql,
+  overwriteFile,
   ownMigrations,
+  SCHEMA_FILE,
+  SCHEMA_MAX_BYTES,
+  schemaSteps,
+  stepRuns,
 } from './migration-carry';
 import {
   baseNotices,
@@ -42,7 +47,7 @@ import {
 } from './notices';
 import { mergeRef, startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
-import { generatedIn, MIGRATIONS_DIR } from './worktree-generated';
+import { generatedIn, MIGRATIONS_DIR, type Regeneration } from './worktree-generated';
 
 /**
  * What 10db keeps (`Git.keepNote`, at `mergeRef`) while a base merge's conflict markers wait for a
@@ -499,14 +504,44 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (own?.kind === 'unreadable') return notCarried(own.tag, own.why, null, false);
     const migrations = own?.migrations ?? [];
     const baseTags = own?.baseTags ?? [];
-    const generated = await ctx.generators.regenerate({
-      batch,
-      project,
-      path,
-      dirs,
-      signal,
-      ...(migrations.length > 0 ? { migrations } : {}),
-    });
+    const steps = await schemaSteps(ctx.git, path, tip, merged.from, migrations);
+    if (steps.kind === 'unknown')
+      return notCarried(
+        steps.tag,
+        `it is one of several generated migrations, and ${steps.why}`,
+        null,
+        false,
+      );
+    // With several generated migrations each is made from the schema file as it stood at that step,
+    // so the file is replaced between runs and is the merge's again after the last, whatever happens.
+    const mergedSchema =
+      steps.before.size > 0
+        ? await ctx.git.bytesAt(path, current, SCHEMA_FILE, SCHEMA_MAX_BYTES)
+        : null;
+    if (steps.before.size > 0 && mergedSchema === null)
+      return notCarried(migrations[0]?.tag ?? '', `${SCHEMA_FILE} could not be read`, null, false);
+    let replaced = false;
+    let generated: Regeneration = { kind: 'aborted' };
+    try {
+      for (const [i, run] of stepRuns(migrations, steps.before).entries()) {
+        const schema = run.schema ?? mergedSchema;
+        if (schema !== null && (run.schema !== null || replaced)) {
+          overwriteFile(path, SCHEMA_FILE, schema);
+          replaced = true;
+        }
+        generated = await ctx.generators.regenerate({
+          batch,
+          project,
+          path,
+          dirs: i === 0 ? dirs : dirs.filter((dir) => dir === MIGRATIONS_DIR),
+          signal,
+          ...(run.migrations.length > 0 ? { migrations: run.migrations } : {}),
+        });
+        if (generated.kind !== 'done') break;
+      }
+    } finally {
+      if (replaced && mergedSchema !== null) overwriteFile(path, SCHEMA_FILE, mergedSchema);
+    }
     if (generated.kind === 'aborted') {
       // What a stopped run wrote would be in the next merge's way.
       await ctx.git.restoreDirs(path, dirs).catch(() => []);

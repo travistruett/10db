@@ -73,15 +73,37 @@ async function commitOnBatch(batch: BatchDto, file: string, content: string | Bu
   });
 }
 
+const SCHEMA = 'packages/db/src/schema.ts';
+
+/**
+ * A schema file whose lines the two sides add far apart, so git merges them without a conflict: the
+ * base's columns near the top, the batch's near the bottom.
+ */
+const schemaWith = (input: { base?: readonly string[]; mine?: readonly string[] } = {}): string =>
+  `${[
+    '// header',
+    ...(input.base ?? []),
+    'table a',
+    'one',
+    'two',
+    'three',
+    'four',
+    ...(input.mine ?? []),
+    '// end',
+  ].join('\n')}\n`;
+
 /** Main holds `0000_init`, then the batch's `mine` and a teammate's `0001_theirs` land on each side. */
 async function bothSidesAdded(
-  mine: readonly { tag: string; sql: string | Buffer; custom?: boolean }[],
+  mine: readonly { tag: string; sql: string | Buffer; custom?: boolean; schema?: string }[],
+  /** With a schema file: main's holds `schemaWith()`, and the teammate's migration adds `column c` to it. */
+  options: { schema?: boolean } = {},
 ): Promise<BatchDto> {
   h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
   h.commit(
     'packages/db/package.json',
     `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
   );
+  if (options.schema === true) h.commit(SCHEMA, schemaWith());
   h.commit(JOURNAL, journal('0000_init'));
   h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
   h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
@@ -95,9 +117,10 @@ async function bothSidesAdded(
   });
   const tables = ['a'];
   const tags = ['0000_init'];
-  for (const [i, { tag, sql, custom }] of mine.entries()) {
+  for (const [i, { tag, sql, custom, schema }] of mine.entries()) {
     if (custom !== true) tables.push(tag);
     tags.push(tag);
+    if (schema !== undefined) await commitOnBatch(batch, SCHEMA, schema);
     await commitOnBatch(batch, `${DB}/${tag}.sql`, sql);
     await commitOnBatch(
       batch,
@@ -106,6 +129,7 @@ async function bothSidesAdded(
     );
     await commitOnBatch(batch, JOURNAL, journal(...tags));
   }
+  if (options.schema === true) h.teammatePush('main', SCHEMA, schemaWith({ base: ['column c'] }));
   h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
   h.teammatePush('main', `${DB}/meta/0001_snapshot.json`, snapshot('theirs', 'a', 'c'));
   h.teammatePush('main', JOURNAL, journal('0000_init', '0001_theirs'));
@@ -123,6 +147,8 @@ function drizzle(
     /** The name whose step stops the run, as a failed drizzle-kit exits non-zero. */
     failAt?: string;
     afterRun?: (path: string) => void;
+    /** The schema file each generated migration was made from, in order. */
+    schemas?: string[];
   } = {},
 ): DeliveryContext['generators'] {
   return {
@@ -132,6 +158,9 @@ function drizzle(
       const tags = (
         JSON.parse(readFileSync(file, 'utf8')) as { entries: { tag: string }[] }
       ).entries.map((e) => e.tag);
+      // The schema as drizzle-kit would read it; null where the repository has no schema file.
+      const schemaFile = join(path, SCHEMA);
+      const schema = existsSync(schemaFile) ? readFileSync(schemaFile, 'utf8') : null;
       let pending = true;
       for (const { name, custom } of migrations) {
         if (name === input.failAt)
@@ -142,13 +171,26 @@ function drizzle(
             tail: 'drizzle-kit failed',
             logPath: join(path, 'generate.log'),
           });
-        if (!custom && !pending) continue;
+        if (!custom && schema !== null) {
+          // generate diffs the schema against the last snapshot: a schema it already holds makes no file.
+          const last = tags.at(-1)?.slice(0, 4) ?? '0000';
+          const held = (
+            JSON.parse(readFileSync(join(path, DB, `meta/${last}_snapshot.json`), 'utf8')) as {
+              tables: string[];
+            }
+          ).tables;
+          if (held.includes(schema)) continue;
+          input.schemas?.push(schema);
+        } else if (!custom && !pending) continue;
         if (!custom) pending = false;
         const number = String(tags.length).padStart(4, '0');
         const tag = `${number}_${name}`;
         tags.push(tag);
         writeFileSync(join(path, DB, `${tag}.sql`), custom ? CUSTOM_STUB : `-- made ${name}\n`);
-        writeFileSync(join(path, DB, `meta/${number}_snapshot.json`), snapshot(tag, 'a', 'c'));
+        writeFileSync(
+          join(path, DB, `meta/${number}_snapshot.json`),
+          snapshot(tag, 'a', 'c', ...(schema === null || custom ? [] : [schema])),
+        );
         writeFileSync(file, journal(...tags));
       }
       input.afterRun?.(path);
@@ -422,11 +464,41 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(h.origin$('for-each-ref', `refs/heads/${batch.branch ?? ''}`)).toBe('');
   });
 
-  it('commits nothing and names the migration on a card when generating it makes no migration', async () => {
+  it("commits nothing and names the migration on a card when the schema of a step can't be told", async () => {
+    // Two generated migrations, and the repository has no schema file to step through.
     const batch = await bothSidesAdded([
       { tag: '0001_mine', sql: 'alter table a add b;\n' },
       { tag: '0002_second', sql: 'alter table a add d;\n' },
     ]);
+    const path = pathOf(batch);
+    const calls: (readonly CarriedMigration[])[] = [];
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ calls }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(calls).toEqual([]);
+    expect(statusOf(path)).toBe('');
+    expect(existsSync(join(path, DB, '0002_mine.sql'))).toBe(false);
+    const card = h.only(h.cards());
+    expect(card.body).toContain('0001_mine');
+    expect(card.body).toContain(SCHEMA);
+  });
+
+  it("commits nothing and names the migration on a card when a step's generate makes no migration", async () => {
+    // The second migration's commit left the schema as the first's was, so it adds nothing.
+    const batch = await bothSidesAdded(
+      [
+        {
+          tag: '0001_mine',
+          sql: 'alter table a add b;\n',
+          schema: schemaWith({ mine: ['column b'] }),
+        },
+        { tag: '0002_second', sql: 'alter table a add b;\n' },
+      ],
+      { schema: true },
+    );
     const path = pathOf(batch);
     await createBaseUpdates({ ...h.ctx, generators: drizzle() }).beforeGate(batch.id, signal);
 
@@ -557,5 +629,104 @@ describe('carrying a batch over when main and the batch both added migrations', 
     const notice = h.only(getBatch(h.store.db, batch.id).notices);
     expect(notice.body).toContain('0001_mine → 0003_mine');
     expect(notice.body).not.toContain('0002_mine');
+  });
+});
+
+describe('carrying a branch with two generated migrations over, each as its own step', () => {
+  afterEach(() => {
+    h.close();
+  });
+
+  const afterFirst = schemaWith({ mine: ['column b'] });
+  const afterSecond = schemaWith({ mine: ['column b', 'column d'] });
+  const pair = [
+    { tag: '0001_mine', sql: 'alter table a add b;\n', schema: afterFirst },
+    { tag: '0002_second', sql: 'alter table a add d;\n', schema: afterSecond },
+  ];
+  const merged = schemaWith({ base: ['column c'], mine: ['column b', 'column d'] });
+
+  it("keeps both after main's, under their names, each made from the schema as it stood at that step, merged with main's", async () => {
+    const batch = await bothSidesAdded(pair, { schema: true });
+    const schemas: string[] = [];
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ schemas }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('merged');
+    expect(h.cards()).toEqual([]);
+    expect(schemas).toEqual([schemaWith({ base: ['column c'], mine: ['column b'] }), merged]);
+    const path = pathOf(batch);
+    // The schema file the steps used is the merge's again.
+    expect(statusOf(path)).toBe('');
+    expect(readFileSync(join(path, SCHEMA), 'utf8')).toBe(merged);
+    expect(readFileSync(join(path, JOURNAL), 'utf8')).toBe(
+      journal('0000_init', '0001_theirs', '0002_mine', '0003_second'),
+    );
+    expect(readFileSync(join(path, DB, '0002_mine.sql'), 'utf8')).toBe('-- made mine\n');
+    expect(readFileSync(join(path, DB, '0003_second.sql'), 'utf8')).toBe('-- made second\n');
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice.body).toContain('0001_mine → 0002_mine');
+    expect(notice.body).toContain('0002_second → 0003_second');
+  });
+
+  it('keeps them separate when it catches up again, once one commit holds both', async () => {
+    const batch = await bothSidesAdded(pair, { schema: true });
+    const updates = createBaseUpdates({ ...h.ctx, generators: drizzle() });
+    await updates.beforeGate(batch.id, signal);
+    h.teammatePush('main', SCHEMA, schemaWith({ base: ['column c', 'column e'] }));
+    h.teammatePush('main', `${DB}/0002_again.sql`, 'alter table a add e;\n');
+    h.teammatePush('main', `${DB}/meta/0002_snapshot.json`, snapshot('again', 'a', 'c', 'e'));
+    h.teammatePush('main', JOURNAL, journal('0000_init', '0001_theirs', '0002_again'));
+    const schemas: string[] = [];
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ schemas }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('merged');
+    expect(h.cards()).toEqual([]);
+    expect(schemas).toEqual([
+      schemaWith({ base: ['column c', 'column e'], mine: ['column b'] }),
+      schemaWith({ base: ['column c', 'column e'], mine: ['column b', 'column d'] }),
+    ]);
+    const path = pathOf(batch);
+    expect(statusOf(path)).toBe('');
+    expect(readFileSync(join(path, JOURNAL), 'utf8')).toBe(
+      journal('0000_init', '0001_theirs', '0002_again', '0003_mine', '0004_second'),
+    );
+    expect(h.only(getBatch(h.store.db, batch.id).notices).body).toContain('0001_mine → 0003_mine');
+  });
+
+  it('carries a custom migration between the two in its place', async () => {
+    const batch = await bothSidesAdded(
+      [
+        { tag: '0001_mine', sql: 'alter table a add b;\n', schema: afterFirst },
+        { tag: '0002_mine_backfill', sql: 'update a;\n', custom: true },
+        { tag: '0003_second', sql: 'alter table a add d;\n', schema: afterSecond },
+      ],
+      { schema: true },
+    );
+    await createBaseUpdates({ ...h.ctx, generators: drizzle() }).beforeGate(batch.id, signal);
+
+    expect(h.cards()).toEqual([]);
+    expect(statusOf(pathOf(batch))).toBe('');
+    expect(readFileSync(join(pathOf(batch), JOURNAL), 'utf8')).toBe(
+      journal('0000_init', '0001_theirs', '0002_mine', '0003_mine_backfill', '0004_second'),
+    );
+  });
+
+  it("puts the schema file back and commits nothing when a step's generate fails", async () => {
+    const batch = await bothSidesAdded(pair, { schema: true });
+    const path = pathOf(batch);
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'second' }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(statusOf(path)).toBe('');
+    expect(readFileSync(join(path, SCHEMA), 'utf8')).toBe(merged);
+    expect(h.only(h.cards()).body).toContain('0002_second');
   });
 });

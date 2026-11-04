@@ -60,8 +60,29 @@ The notice is the store because it needs no schema change, survives a restart, a
 drawer. It is not cleared: a review step is the usual next step and can't edit, so the implement step after it must
 still be told.
 
-**Not solved:** a branch with two or more generated migrations. `generate` diffs the schema as merged, so the first
-takes all of the branch's schema changes and the second has nothing left: drizzle-kit exits 0 and writes no file.
-That raises the card naming the second migration, and commits nothing. Folding them into one would be wrong as well
-as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028 of `packages/db/AGENTS.md`). Making each
-step would need the schema as it stood at each migration, merged with the base's.
+## Several generated migrations: one step each
+
+Built. `generate` diffs the schema as merged, so run plainly the first of two generated migrations would take all of
+the branch's schema changes and the second would have nothing left: drizzle-kit exits 0 and writes no file. Folding
+them into one would be wrong as well as unnamed: some pairs are two steps for a reason (migrations 0027 and 0028 of
+`packages/db/AGENTS.md`; the rebuild's `INSERT … SELECT` fails on a column added in the same step). So with two or
+more generated migrations each is made from the schema as it stood at that migration, merged with the base's
+(`schemaSteps`, `stepRuns`):
+
+- **Which schema:** `packages/db/src/schema.ts` at the commit that added the migration's `.sql`, line-merged
+  (`Git.mergedFileAt`, `git merge-tree` from that commit's merge base with the base) with the base's. The commit is
+  found by the migration's name, oldest first, across all of the branch's history (`Git.additionsUnder`, with
+  `--full-history`: a merge that took the base's `drizzle/` would otherwise hide the branch's side). A name, not
+  a tag, because an earlier catch-up's `Regenerate` commit holds the migrations under new numbers while the commits
+  that first made them are still behind it, so a second catch-up steps the same way and no schema is stored. The last
+  generated migration, and any custom one, is made from the schema file as the merge left it.
+- **How:** one run of the generator per stretch of migrations made from the same file. 10db writes the step's schema
+  over `schema.ts` before the run (the SQL copy's checks apply: no link in the path, a regular file with one link) and
+  puts the merged file back after the last run, a failed or stopped one included.
+- **When it fails:** the commit isn't in the history, or the file doesn't merge with the base's (the step's file is
+  line-merged from the base, so two edits of one spot conflict): the same `uncarried` card, naming the first generated
+  migration whose schema could not be told, with nothing committed.
+- **Limits:** the schema is the one file; a schema spread over other files is stepped only through that file. A
+  migration whose schema change was committed after the migration, rather than with it, has the earlier step's schema,
+  and the generator then makes nothing for it: the card of "made no migration" names it. The final state is always the
+  merged file's, since the last step is made from it.
