@@ -224,10 +224,11 @@ depends on how:
   keep and passes no `--have`: the newer build is fetched as wanted, and the older one is downloaded again only if
   it turns out to be the newest.
 - Saving the switch on while it is already on clears `self_update.failed_commit` and keeps the staged build, so the
-  next stage for the same head passes `--have` again. If that fetch fails too, at any step, it is a failure again,
-  with its card and `self_update.failed_commit`, and the older build still does not install, not even once nothing
-  is mid-session and not with GitHub away: the mark that the newer build failed outlives the retry, and only a
-  fetch that succeeds, or the switch going off, ends it.
+  next stage for the same head passes `--have` again. If that fetch fails too, at any later step, it is a failure
+  again, with its card and `self_update.failed_commit`. A failed look after the retry records nothing and raises no
+  card. Either way the older build still does not install, not even once nothing is mid-session and not with GitHub
+  away: the mark that the newer build failed outlives the retry. Any stage that answers ends it, whatever it
+  answers, and so does one that loses the folder, or the switch going off.
 
 A head move also keeps the staged build with `--have`. None of this retries every minute, because a checksum
 mismatch would then download the same DMG each minute and hold the drain for ever.

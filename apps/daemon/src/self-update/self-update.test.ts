@@ -1207,6 +1207,36 @@ describe('a waiting update drains the factory', () => {
       },
     );
 
+    /** The newer build failed and the builder retried, so only the mark says it failed. */
+    async function retriedAfterNewerHeadFailed() {
+      const update = await stagedThenNewerHeadFailsAt('download');
+      world.busy = 0;
+      expect(await update.tick()).toBe('failed');
+      update.retry();
+      expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      return update;
+    }
+
+    it('does not install the older build when GitHub goes away after retry()', async () => {
+      const update = await retriedAfterNewerHeadFailed();
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      expect(world.calls).not.toContain('apply');
+      expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+    });
+
+    it.each(['find-commit', 'find-build'])(
+      'does not install the older build when the look fails at %s after retry(), and records nothing',
+      async (step) => {
+        const update = await retriedAfterNewerHeadFailed();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
+        expect(world.calls).not.toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      },
+    );
+
     it('does not fall back on the older build when GitHub goes away after a newer one failed', async () => {
       // The head moved first, so the staged build was found for an earlier head than the failure.
       world.busy = 1;
