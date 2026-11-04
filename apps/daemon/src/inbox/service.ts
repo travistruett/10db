@@ -48,6 +48,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
+import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
@@ -77,6 +78,8 @@ interface AskInput {
   readonly signal: AbortSignal;
   /** The card folds only with the same lane's identical asks, never with another lane's. */
   readonly foldPerLane?: boolean;
+  /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
+  readonly escalated?: boolean;
 }
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
@@ -194,13 +197,22 @@ function optionsForTargets(
 function foldKeyFor(
   input: Pick<
     AskInput,
-    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane'
+    | 'projectId'
+    | 'workstreamId'
+    | 'kind'
+    | 'title'
+    | 'body'
+    | 'options'
+    | 'foldPerLane'
+    | 'escalated'
   >,
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
     input.projectId,
     ...(input.foldPerLane === true ? [input.workstreamId] : []),
+    // A call Claude Code handed to a person never shares a card with an ordinary ask.
+    ...(input.escalated === true ? ['escalated'] : []),
     input.kind,
     norm(input.title),
     norm(input.body),
@@ -324,6 +336,8 @@ export function createInboxService(deps: {
    * it is stopped, not told. It must not throw; it logs what it could not do.
    */
   onParkAnswer?(item: InboxItemDto): void;
+  /** Where a failure that must not fail the builder's answer is logged. */
+  readonly log?: Logger;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -398,7 +412,10 @@ export function createInboxService(deps: {
           note: 'Covered by the project rule just allowed on another lane’s card',
         });
       } catch (error) {
-        if (!(error instanceof ConflictError)) throw error;
+        // Answered meanwhile: nothing to release. Any other failure leaves that card open for the builder;
+        // it must not fail the answer they already gave, which is stored and delivered.
+        if (error instanceof ConflictError) continue;
+        deps.log?.warn({ err: error, cardId: card.id }, 'could not release a covered edit card');
       }
     }
   }

@@ -2543,6 +2543,46 @@ describe('permission broker in a sandboxed lane', () => {
         expect(listPermissionRules(state.db, a.project.id, a.workstream.id)).toHaveLength(1);
       });
 
+      it("still returns the builder's answered card when releasing the other lane's card fails, leaving it open and logging it", async () => {
+        const warnings: { fields: unknown; message: unknown }[] = [];
+        const logger = {
+          ...silentLogger,
+          warn: (fields: unknown, message?: unknown) => warnings.push({ fields, message }),
+        };
+        const failing: { id?: string } = {};
+        inbox = createInboxService({
+          state: {
+            db: state.db,
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx);
+                // A write failure that lands as the other lane's card is answered rolls it back.
+                if (
+                  failing.id !== undefined &&
+                  (result as { id?: string } | null)?.id === failing.id
+                ) {
+                  throw new Error('disk full');
+                }
+                return result;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: logger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.id = betaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'OPEN' });
+        expect(openCards().map((c) => c.id)).toEqual([betaCard.id]);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]?.fields).toMatchObject({ cardId: betaCard.id });
+      });
+
       it('leaves another lane’s card for a different file open', () => {
         const a = seedWorkstream(base);
         const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
@@ -2574,6 +2614,27 @@ describe('permission broker in a sandboxed lane', () => {
         const open = openCards();
         expect(open).toHaveLength(1);
         expect(open[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+      });
+
+      it('keeps an escalated Edit on its own card, apart from an identical ordinary Edit in the same lane', async () => {
+        const a = seedWorkstream(base);
+        const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+        writeFileSync(file(), '{"a":1}');
+        const input = { file_path: file(), old_string: '"a":1', new_string: '"a":2' };
+        const first = sandboxed(a)(request('Edit', input));
+        const ordinary = sandboxed(b)(request('Edit', input));
+        void sandboxed(b)(request('Edit', input, true)).catch(() => undefined);
+        const betaCards = openCards().filter((c) => c.targets[0]?.workstreamId === b.workstream.id);
+        expect(betaCards).toHaveLength(2);
+        const alphaCard = openCards().find((c) => c.targets[0]?.workstreamId === a.workstream.id);
+        if (alphaCard === undefined) throw new Error('no card for Alpha');
+        inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(await ordinary).toEqual({ behavior: 'allow' });
+        const open = openCards();
+        expect(open).toHaveLength(1);
+        expect(open[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+        expect(open[0]?.detail).toMatchObject({ escalated: true });
       });
 
       it('leaves the other lane’s card open for allow_once', () => {

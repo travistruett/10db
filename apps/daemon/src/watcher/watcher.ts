@@ -506,11 +506,15 @@ export function createWatcher(deps: {
           .map(async (p) => [p, await stampOrReason(root, p)] as const),
       ),
     );
-    // A card withdrawn or a rule removed during the reads allows nothing now, and a lane whose run ended
-    // meanwhile has no card to use up or write to excuse.
-    forgetEndedLanes();
-    const active = new Set(listWorkstreams(db, { states: ACTIVE_STATES }).map((ws) => ws.id));
-    ({ cards, standing } = allowancesOf(lanes.filter((l) => active.has(l))));
+    // A card withdrawn or a rule removed during a read allows nothing now, and a lane whose run ended
+    // meanwhile has no card to use up or write to excuse. Called after every await, so no decision below
+    // uses a list made before one.
+    const relist = (): void => {
+      forgetEndedLanes();
+      const active = new Set(listWorkstreams(db, { states: ACTIVE_STATES }).map((ws) => ws.id));
+      ({ cards, standing } = allowancesOf(lanes.filter((l) => active.has(l))));
+    };
+    relist();
     for (const path of paths) {
       if (standing.some(({ rel }) => rel === path)) {
         allowed.add(path);
@@ -519,7 +523,17 @@ export function createWatcher(deps: {
       // The decision is made against the excused writes and cards as they are now, not as they were before
       // the reads: another checkout's batch may have used a card or excused a write meanwhile.
       if (keysOf(path).length === 0 && unusedCardsOf(path).length === 0) continue;
-      const read = reads.get(path) ?? (await stampOrReason(root, path));
+      let read = reads.get(path);
+      if (read === undefined) {
+        // A card for this path was answered during the batch reads, so it is read here. The read is an
+        // await: what the lanes, cards and rules allow is listed again after it, and the path decided anew.
+        read = await stampOrReason(root, path);
+        relist();
+        if (standing.some(({ rel }) => rel === path)) {
+          allowed.add(path);
+          continue;
+        }
+      }
       const keys = keysOf(path);
       const unusedCards = unusedCardsOf(path);
       if (keys.length === 0 && unusedCards.length === 0) continue;

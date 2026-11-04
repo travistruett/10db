@@ -2084,6 +2084,48 @@ describe('worktree checkouts', () => {
       expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
     });
 
+    it('does not use a card for a path stamped inline after the reads when its lane ended during that stamp', async () => {
+      const lane = inWorktree('Alpha', 'ui');
+      watcher.sync();
+      // Only the first path (decided first: the paths go in order) has a card before the batch reads, so only
+      // it is read with them.
+      editCard(lane, '.env.local', 'allow_once', lane.path);
+      const stamp = vi.mocked(stampOrReason);
+      stamp.mockClear();
+      const releases: ((r: { stamp: string }) => void)[] = [];
+      for (let i = 0; i < 2; i += 1) {
+        stamp.mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              releases.push(resolve);
+            }),
+        );
+      }
+      writeAt(lane.path, '.env.local');
+      writeAt(lane.path, SENSITIVE_FILE);
+      const flushing = watcher.flush();
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(1);
+      });
+      // The builder answers the lane's card for the second path while the batch reads are held.
+      editCard(lane, SENSITIVE_FILE, 'allow_once', lane.path);
+      releases[0]?.({ stamp: 'first-stamp' });
+      // The second path is now stamped inline, in the decision loop; the lane ends while that read is held.
+      await vi.waitFor(() => {
+        expect(stamp).toHaveBeenCalledTimes(2);
+      });
+      state.write((ctx) =>
+        transitionWorkstream(ctx, lane.workstream.id, {
+          to: WorkstreamState.Cancelled,
+          fence: null,
+        }),
+      );
+      releases[1]?.({ stamp: 'second-stamp' });
+      await flushing;
+      // The lane is over, so its card for the second path is not used up and the write is carded.
+      expect(flags().map((f) => f.body)).toEqual([`${lane.path}: ${SENSITIVE_FILE}`]);
+    });
+
     it('merges the batches that pile up in a shared checkout behind a slow stamp into one', async () => {
       const a = running('Alpha', ['api']);
       running('Beta', ['ui']);
