@@ -33,6 +33,7 @@ export { createBranchCardAnswers } from './branch-card';
 export { StartChoice } from './cards';
 export { createWorktreeCardAnswers } from './worktree-card';
 export { createStartCardAnswers } from './start-card';
+export { createLostMigrationsAnswers } from './lost-migrations';
 export { removeMergedBranches } from './branch-sweep';
 export {
   batchLaunchVerdict,

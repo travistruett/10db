@@ -1,5 +1,6 @@
 import type { BatchDto, BatchId, Notice, ProjectDto, WorkstreamId } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
   getBatch,
   getProject,
   getWorkstreamRow,
@@ -11,7 +12,14 @@ import { existsSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
 import type { BranchMerge, ResolvedConflict } from '../git';
-import { baseCards, baseConflictKey, baseKeptKey, baseRegenerateKey, detailOf } from './cards';
+import {
+  baseCards,
+  baseConflictKey,
+  baseKeptKey,
+  baseRegenerateKey,
+  detailOf,
+  LostChoice,
+} from './cards';
 import {
   hideNotices,
   networkCall,
@@ -848,6 +856,21 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
+  /**
+   * Puts the builder's way out on the batch's regenerate card: the lost-migrations notice has no
+   * list to read, so only the builder can say the journal holds the migrations. A card that already
+   * offers it is left as it is, so a gate that meets the notice again changes nothing.
+   */
+  function offerClear(batch: BatchDto, path: string): void {
+    try {
+      const open = findOpenByFoldKey(db, batch.projectId, baseRegenerateKey(batch.id));
+      if (open?.options.some((o) => o.label === LostChoice.Clear) === true) return;
+      raise(ctx.inbox, batch.projectId, baseCards.lostUnreadable(batch, path));
+    } catch (error) {
+      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations card not raised');
+    }
+  }
+
   /** The batch's notice, as it stands now, of migrations a merge lost. */
   const uncarriedNotice = (batch: BatchDto): Notice | undefined =>
     getBatch(db, batch.id).notices.find((n) => n.key === NOTICE_KEY.migrationsUncarried);
@@ -912,7 +935,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
    * came and went, and the branch now holds the base, so nothing else would look at it again. Once
    * the journal at HEAD holds them all, the notice and the regenerate card go.
    */
-  async function standing(batch: BatchDto, answer: BaseUpdate): Promise<BaseUpdate> {
+  async function standing(
+    batch: BatchDto,
+    answer: BaseUpdate,
+    options: BeforeGateOptions = {},
+  ): Promise<BaseUpdate> {
     if (answer.kind !== 'up_to_date' && answer.kind !== 'merged' && answer.kind !== 'not_merged')
       return answer;
     const notice = uncarriedNotice(batch);
@@ -920,9 +947,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (notice === undefined || path === null) return answer;
     const held = uncarriedIn(notice);
     if (held === null) {
-      // Which migrations were lost can't be told, so nothing can say they are carried: the notice and
-      // the regenerate card stay, and the gate stops, here and at every gate after.
+      // Which migrations were lost can't be told, so nothing can say they are carried: the notice
+      // stays, and the gate stops, here and at every gate after, until the builder clears it
+      // (`createLostMigrationsAnswers`) on the card offered here.
       ctx.logger.warn({ batchId: batch.id }, 'lost migrations notice has no readable list');
+      // A caller that raises a card of its own for the stop (a ship) offers the answer there.
+      if (
+        options.forPullRequest !== true &&
+        options.raisesUncarried !== true &&
+        options.standingOnly !== true
+      )
+        offerClear(batch, path);
       const said = uncarriedSaid(notice);
       return {
         kind: 'uncarried',
@@ -1718,12 +1753,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       try {
         const batch = getBatch(db, batchId);
         if (options.standingOnly === true)
-          return await standing(batch, { kind: 'up_to_date', note: null });
+          return await standing(batch, { kind: 'up_to_date', note: null }, options);
         const answer = await update(batchId, signal, options);
         // No gate follows: a lane is told by the notice, and a hazard's task waits only for the base.
         return options.atLaunch === true || options.forMigrations !== undefined
           ? answer
-          : await standing(batch, answer);
+          : await standing(batch, answer, options);
       } catch (error) {
         if (stopped()) return { kind: 'aborted' };
         ctx.logger.warn({ batchId, err: why(error) }, 'base not merged before the gate');

@@ -279,7 +279,7 @@ describe('shipping', () => {
     expect(card.body).not.toMatch(/installs again/);
   });
 
-  it('offers only Abandon when the list of lost migrations could not be read', async () => {
+  it('offers clearing the notice, or Abandon, when the list of lost migrations could not be read', async () => {
     h = createDeliveryHarness(
       { gateCommand: 'touch gate-ran' },
       {
@@ -305,7 +305,12 @@ describe('shipping', () => {
     const card = h.only(h.cards());
     expect(card.body).toContain('The list could not be read.');
     expect(card.body).not.toContain('Re-create');
-    expect(card.detail).toMatchObject({ batchId: batch.id, actions: ['abandon'] });
+    expect(card.options.map((o) => o.label)).toEqual(['Clear the notice']);
+    expect(card.detail).toMatchObject({
+      batchId: batch.id,
+      actions: ['retry', 'abandon'],
+      lostMigrations: { batchId: batch.id },
+    });
   });
 
   it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {
