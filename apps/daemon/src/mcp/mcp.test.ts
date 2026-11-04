@@ -2435,6 +2435,36 @@ describe('principle proposals', () => {
     expect(searchPrinciples(base.db, s.project.id, 'pull', 5)).toEqual([]);
   });
 
+  it('names every declared risk tag on a principle proposal’s card, after the card’s own text', async () => {
+    const s = await seedSession();
+    await s.call('propose', {
+      opId: 'op-propose-p5',
+      kind: 'principle',
+      title: 'Never log tokens',
+      body: 'One reached the logs last week.',
+      principle: { statement: 'Never write a token to a log' },
+      riskTags: ['security', 'auth', 'security'],
+    });
+    const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
+    expect(card?.body).toContain('Never write a token to a log');
+    expect(card?.body).toMatch(
+      /One reached the logs last week\.\n\nRaised as a card because it carries the security and auth risk tags\.$/,
+    );
+  });
+
+  it('adds no reason to a principle proposal’s card when it declares no risk tag', async () => {
+    const s = await seedSession();
+    await s.call('propose', {
+      opId: 'op-propose-p6',
+      kind: 'principle',
+      title: 'Small PRs',
+      body: 'Prefer small pull requests',
+      riskTags: [],
+    });
+    const card = listInbox(base.db, { states: ['OPEN'] }).find((c) => c.kind === 'proposal');
+    expect(card?.body).not.toContain('Raised as a card');
+  });
+
   it.each([
     {
       name: 'a principle draft on a task proposal',

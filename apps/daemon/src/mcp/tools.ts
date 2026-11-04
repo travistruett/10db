@@ -59,7 +59,13 @@ import {
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
-import { fileProposalByItself, proposalCardBody, proposalFiling } from '../inbox';
+import {
+  carriesRiskTags,
+  fileProposalByItself,
+  proposalCardBody,
+  proposalFiling,
+  raisedAsCardLine,
+} from '../inbox';
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
@@ -360,6 +366,8 @@ export function createToolHandlers(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
           if (draft) {
+            // Every principle gets a card, so its tags are the one thing the card must add.
+            const carries = carriesRiskTags(input.riskTags);
             const { proposalId, principle } = proposePrinciple(ctx, {
               projectId: project.id,
               title: input.title,
@@ -367,6 +375,7 @@ export function createToolHandlers(
               draft,
               sourceId,
               speaker: `agent:${sessionId}`,
+              cardNote: carries === null ? null : raisedAsCardLine(carries),
             });
             return record(
               'propose',

@@ -70,6 +70,87 @@ describe('proposalFiling', () => {
     },
   );
 
+  it('names every declared risk tag', () => {
+    expect(proposalFiling({ ...small, riskTags: ['security', 'auth'], limit: 1200 })).toEqual({
+      file: false,
+      reason: 'it carries the security and auth risk tags',
+    });
+    expect(
+      proposalFiling({ ...small, riskTags: ['security', 'auth', 'migration'], limit: 1200 }),
+    ).toEqual({
+      file: false,
+      reason: 'it carries the security, auth and migration risk tags',
+    });
+  });
+
+  it('names the declared risk tags when the limit is zero', () => {
+    expect(proposalFiling({ ...small, riskTags: ['security'], limit: 0 })).toEqual({
+      file: false,
+      reason:
+        'it carries the security risk tag, and filing small proposals by itself is off for this project',
+    });
+  });
+
+  // A principle proposal takes its own path to the card: mcp.test.ts covers its tags.
+  it.each(['change_task', 'note'] as const)(
+    'names the declared risk tags of a %s proposal',
+    (kind) => {
+      expect(
+        proposalFiling({ ...small, kind, riskTags: ['security', 'auth'], limit: 1200 }),
+      ).toEqual({
+        file: false,
+        reason: 'it carries the security and auth risk tags, and it is not a new task',
+      });
+    },
+  );
+
+  describe('past the step cap', () => {
+    const capped = { ...small, limit: 1200, stepCapReached: true };
+
+    it('names the declared risk tags, not the cap', () => {
+      expect(proposalFiling({ ...capped, riskTags: ['auth'] })).toEqual({
+        file: false,
+        reason: 'it carries the auth risk tag',
+      });
+    });
+
+    it('names a risk in the text, not the cap', () => {
+      expect(proposalFiling({ ...capped, title: 'Check the auth token path' })).toEqual({
+        file: false,
+        reason: 'it names the auth risk',
+      });
+    });
+
+    it('names a request to join a running batch, not the cap', () => {
+      expect(proposalFiling({ ...capped, joinsRunningBatch: true })).toEqual({
+        file: false,
+        reason: 'it asks to join a running batch',
+      });
+    });
+
+    it('names an oversize body, not the cap', () => {
+      expect(proposalFiling({ ...capped, body: 'x'.repeat(1300) })).toEqual({
+        file: false,
+        reason: 'it is over the limit for filing by itself',
+      });
+    });
+
+    it('names a limit of zero, not the cap', () => {
+      expect(proposalFiling({ ...capped, limit: 0 })).toEqual({
+        file: false,
+        reason: 'filing small proposals by itself is off for this project',
+      });
+    });
+
+    it('names the cap for a proposal that would otherwise be filed', () => {
+      expect(proposalFiling(capped)).toEqual({
+        file: false,
+        reason: 'this step has already filed as many tasks as a step may, so a person decides',
+      });
+      expect(proposalFiling({ ...capped, stepCapReached: false })).toEqual({ file: true });
+    });
+  });
+
   it.each([
     ['Bump the zod dependency', 'dependency'],
     ['Add a migration for the column', 'migration'],
