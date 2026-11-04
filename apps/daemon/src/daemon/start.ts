@@ -642,6 +642,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     gate: gateRunner,
     clock,
     dataDir: opts.dataDir,
+    logger: logger.child({ component: 'worktree-install' }),
     sessionEnv: () => launcher.projectEnv(),
     rules: (project: ProjectDto) => listPermissionRules(state.db, project.id, null),
     checkouts: () => allCheckouts(state.db),

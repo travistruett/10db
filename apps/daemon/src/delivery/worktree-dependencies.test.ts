@@ -231,6 +231,19 @@ describe('refreshing a worktree’s dependencies', () => {
       expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
     });
 
+    it('says in the install log why node_modules was removed', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.15.0\n');
+      const result = await refresh(
+        dependencies({}, 20_000, undefined, () => Promise.resolve('12.9.1')),
+      );
+      if (result.kind !== 'installed') throw new Error('not installed');
+      const text = readFileSync(result.logPath, 'utf8');
+      expect(text).toContain('Started over');
+      expect(text).toContain('pnpm@12.15.0');
+      expect(text).toContain('12.9.1');
+    });
+
     it('is left for pnpm to bring in line when it is the daemon’s pnpm', async () => {
       fakePnpm();
       installedCopy('packageManager: pnpm@12.9.1\n');
@@ -299,6 +312,46 @@ describe('refreshing a worktree’s dependencies', () => {
       expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
       expect(existsSync(join(worktree, 'node_modules/left-pad'))).toBe(true);
       expect(existsSync(join(worktree, 'node_modules/.pnpm/leftover'))).toBe(false);
+    });
+
+    const installLogs = () => {
+      const dir = join(tmp.path, 'data', 'logs', 'install');
+      return readdirSync(dir).map((name) => readFileSync(join(dir, name), 'utf8'));
+    };
+
+    it('keeps the first attempt’s output and says why it started over', async () => {
+      pnpmThatBreaksOnce();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      const result = await refresh(dependencies());
+      if (result.kind !== 'installed') throw new Error('not installed');
+      const logs = installLogs();
+      expect(logs).toHaveLength(2);
+      // The real cause survives the retry.
+      expect(
+        logs.some((text) => text.includes('ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR')),
+      ).toBe(true);
+      // The log the result points at says why node_modules was removed and where the first output is.
+      const text = readFileSync(result.logPath, 'utf8');
+      expect(text).toContain('Started over');
+      expect(text).toContain('do not resolve');
+    });
+
+    it('points a failed retry’s log at the first attempt’s log', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nrm -rf node_modules/left-pad\necho "attempt $(date +%N)-$$"\necho ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR\nexit 1\n`,
+      );
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      const result = await refresh(dependencies());
+      if (result.kind !== 'failed') throw new Error('not failed');
+      const text = readFileSync(result.logPath, 'utf8');
+      const named = /first attempt's output: (\S+)/.exec(text)?.[1];
+      expect(named).toBeDefined();
+      expect(named).not.toBe(result.logPath);
+      expect(readFileSync(named ?? '', 'utf8')).toContain(
+        'ERR_PNPM_PACKAGE_MANAGER_REMOVE_MODULES_DIR',
+      );
     });
 
     it('reports the second failure when the fresh install fails too', async () => {

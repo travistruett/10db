@@ -44,14 +44,14 @@ const RUST_DIR = 'apps/desktop/src-tauri/';
 /**
  * Files inside a package that the repo rule tests (tests/repo) read or run, so a change to one also
  * runs them: every manifest, Markdown file (AGENTS.md, CLAUDE.md, cited decisions), env file and
- * vitest or vite config; the Tauri shell's config and Cargo files; the apps' e2e and scripts folders;
+ * vitest or vite config, named ones such as vitest.delivery.config.ts too; the Tauri shell's config and Cargo files; the apps' e2e and scripts folders;
  * and the daemon tests that git-hook-variables.test.ts runs. Keep this in step with tests/repo.
  */
 const READ_BY_REPO_TESTS = [
   /(^|\/)package\.json$/,
   /\.md$/,
   /(^|\/)\.env[^/]*$/,
-  /(^|\/)(vitest|vite)\.config\.[cm]?[jt]s$/,
+  /(^|\/)(vitest|vite)(\.[^/.]+)*\.config\.[cm]?[jt]s$/,
   /^apps\/desktop\/src-tauri\//,
   /^apps\/[^/]+\/(e2e|scripts)\//,
   /^apps\/daemon\/(test|src\/git|src\/watcher)\//,
