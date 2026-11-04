@@ -68,8 +68,10 @@ has no `cd` of its own, but Claude Code carries a `cd` from an earlier Bash call
 call unsettled; with no `cwd` at all (a test double, the fake adapter) the copy's root is used. The hook's `cwd`
 is the field `BaseHookInput.cwd` of the SDK's hook input. That Claude Code updates it after a `cd` in an earlier
 call is taken from its documented meaning (the session's current directory), not proven live; if it stayed the
-start directory, a `cd`-then-read pair would still be judged from the copy's root. So `../../../../dev/zero`, `dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
-a chain of links all stay unsettled. A word with no single real path (`..` past a missing part, a link loop, a
+start directory, a `cd`-then-read pair would still be judged from the copy's root. So `../../../../dev/zero`,
+`/dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and a chain of links all stay
+unsettled. (A relative `dev/./zero` is not among them: it resolves to `dev/zero` inside the copy, which is not a
+device.) A word with no single real path (`..` past a missing part, a link loop, a
 part that cannot be examined) stays unsettled too. `ls /dev` and `ls /` are unsettled as a result: the guard
 knows no program's options, so it cannot tell a listing from a recursive read. A path merely outside the paths a
 lane may read without asking (`readAsk`) does not leave the call unsettled: see below.
