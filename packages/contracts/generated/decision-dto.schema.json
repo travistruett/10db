@@ -89,6 +89,12 @@
         }
       ]
     },
+    "withdrawnBy": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "withdrawnReason": {
       "type": [
         "string",
@@ -120,6 +126,7 @@
     "state",
     "sourceId",
     "withdrawnAt",
+    "withdrawnBy",
     "withdrawnReason",
     "createdAt",
     "updatedAt"
