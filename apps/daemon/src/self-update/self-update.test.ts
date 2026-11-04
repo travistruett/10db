@@ -2052,6 +2052,80 @@ describe('why an available update is not installing', () => {
       expect(update.status().availableCommit).toBe(NEW);
       expect(update.status().notInstalling).toBe('failed');
     });
+
+    it.each<[string, () => void, string]>([
+      [
+        'a staged build waiting',
+        () => {
+          world.busy = 1;
+        },
+        'busy',
+      ],
+      [
+        'a failed update',
+        () => {
+          world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+        },
+        'failed',
+      ],
+      [
+        'a head rolled back from',
+        () => {
+          world.rolledBackFrom = NEW;
+        },
+        'rolled-back',
+      ],
+      [
+        'a head with no build',
+        () => {
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+        },
+        'no-newer-build',
+      ],
+    ])(
+      'does not say the update waits for an idle moment once the switch dropped %s',
+      async (_name, arrange, first) => {
+        arrange();
+        const update = make();
+        update.settle();
+        expect(await update.tick()).toBe(first);
+        world.head = offline;
+        update.retry();
+        await update.turnOff();
+        expect(await update.tick()).toBe('unreachable');
+        const status = update.status();
+        expect(status.availableCommit).toBe(NEW);
+        expect(status.waitingSince).toBeNull();
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).not.toBeNull();
+      },
+    );
+
+    it('does not say so once a stage the switch cancelled dropped the waiting build', async () => {
+      world.busy = 1;
+      const update = make();
+      expect(await update.tick()).toBe('busy');
+      world.head = NEWER;
+      world.stage = () => {
+        world.enabled = false;
+        return Promise.resolve({ ok: false, step: 'download', message: 'killed' });
+      };
+      expect(await update.tick()).toBe('off');
+      world.enabled = true;
+      world.head = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEWER);
+      expect(update.status().notInstalling).not.toBeNull();
+    });
+
+    it('still says the update waits while a staged build goes on waiting', async () => {
+      world.busy = 1;
+      const update = make();
+      expect(await update.tick()).toBe('busy');
+      world.head = offline;
+      expect(await update.tick()).toBe('busy');
+      expect(update.status().notInstalling).toBeNull();
+    });
   });
 
   it('says failed as soon as an install ends while the daemon runs, before the next check', async () => {
