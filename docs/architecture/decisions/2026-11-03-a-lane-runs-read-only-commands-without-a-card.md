@@ -46,10 +46,21 @@ single-dash word over 256 characters is not split and leaves the call to today's
 a secret file, a directory that holds protected paths, a path that cannot be resolved, or one starting with
 `~` leaves the call to today's judgement. So does any `cd`, after which a relative path means another
 directory. So does a path that names a device with no end (`/dev/zero`, `/dev/urandom`, `/dev/random`,
-`ENDLESS_FILES` in `guard/background-loops.ts`, compared after normalising `//` and `.`), whichever command
-reads it and wherever it appears: a foreground read of one (`cat /dev/zero | wc -c`, `sort /dev/urandom`) spins
-until the Bash timeout, and the endless-loop ask looks only at background calls. A path merely outside the paths a lane may read
-without asking (`readAsk`) does not: see below.
+`ENDLESS_FILES` in `guard/background-loops.ts`) or a directory that holds one (`/dev`, and `/` above it),
+whichever command reads it and wherever it appears: a foreground read of one (`cat /dev/zero | wc -c`,
+`sort /dev/urandom`, `grep -r x /dev`) spins until the Bash timeout, and the endless-loop ask looks only at
+background calls. The comparison is on the path as the kernel opens it, not as it is spelled: each word is
+resolved from the lane's copy (the hook's `repoPath`, the command's working directory, which a settled line
+never changes because it has no `cd`), links followed, and with `..` collapsed as text first, and either reading
+counts. So `../../../../dev/zero`, `dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
+a chain of links all stay unsettled. A word with no single real path (`..` past a missing part, a link loop, a
+part that cannot be examined) stays unsettled too. `ls /dev` and `ls /` are unsettled as a result: the guard
+knows no program's options, so it cannot tell a listing from a recursive read. A path merely outside the paths a
+lane may read without asking (`readAsk`) does not leave the call unsettled: see below.
+
+What this does not see: a link met only while a command walks a directory it was given (`grep -R x .` follows a
+link inside the copy that points at `/dev/zero`, where `.` itself is no device), and a name the shell would
+glob into a device (globs are not settled anyway). The harm is bounded: one core until the Bash timeout.
 
 **Hazards.** A line of read-only commands names no program outside that closed set, so none can be a hazard.
 The hazard ask (`hazardHit`, `firstUnread`, `unreadableHazard`) is skipped for it. It had been asking about
@@ -79,8 +90,10 @@ classifier's own escalation also reaches a card no stored rule answers.
   the guard's refusals run before it.
 - What the call gives up is the classifier's second look, including its `hard_deny` for CPU load and the
   full gate. None of these commands can run the gate or a build, and a read-only line is as light as the
-  commands it names, except one that reads an endless device, which is not settled (above); `tail -f` and the
-  like in the background still meet the endless-loop ask.
+  commands it names, except one that names an endless device or a tree holding one by any path that resolves
+  to it, which is not settled (above). A device reached only by a link inside a directory the command walks is
+  not seen, and costs one core until the Bash timeout. `tail -f` and the like in the background still meet the
+  endless-loop ask.
 
 Turned down: adding `ps` to `READ_COMMANDS` (widens the read-only steps' allow rules); judging every glob word by
 expanding it (the guard would have to read the file system as the shell will, and the shell can differ);

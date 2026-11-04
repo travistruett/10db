@@ -1,4 +1,6 @@
+import { mkdirSync, rmSync, symlinkSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
 import { afterAll, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -214,6 +216,50 @@ describe('a lane Bash call made only of read-only commands', () => {
     ['wc -c /dev/./zero'],
   ])('is not settled when it reads a device with no end: %s', (command) => {
     expect('settled' in pre(command)).toBe(false);
+  });
+
+  describe('a device with no end, however the path is spelled', () => {
+    const UP = '../'.repeat(40);
+
+    it.each<[string]>([
+      [`cat ${UP}dev/zero | wc -c`],
+      [`head -c 5 ${UP}dev/urandom`],
+      [`grep -f${UP}dev/zero x a`],
+      [`grep --file=${UP}dev/urandom x a`],
+      ['cat a/../../../../../../../../../../../../../../dev/zero'],
+      ['cat zero-link | wc -c'],
+      ['cat ./zero-link | wc -c'],
+      ['cat dev-link/zero | wc -c'],
+      ['cat chain-link | wc -c'],
+      ['grep -r x /dev'],
+      ['grep -r x /dev/'],
+      ['grep -r x dev-link'],
+      [`grep -r x ${UP}dev`],
+      ['find /dev -name x'],
+    ])('is not settled: %s', (command) => {
+      symlinkSync('/dev/zero', join(repo.path, 'zero-link'));
+      symlinkSync('/dev', join(repo.path, 'dev-link'));
+      symlinkSync('zero-link', join(repo.path, 'chain-link'));
+      mkdirSync(join(repo.path, 'a'), { recursive: true });
+      try {
+        expect('settled' in pre(command)).toBe(false);
+      } finally {
+        for (const name of ['zero-link', 'dev-link', 'chain-link']) {
+          rmSync(join(repo.path, name), { force: true });
+        }
+      }
+    });
+
+    it.each<[string]>([['cat notes.txt'], ['grep -r x apps ../sibling'], ['ls /dev/null']])(
+      'still settles a path that is neither: %s',
+      (command) => {
+        expect(pre(command)).toEqual({ decision: 'allow', settled: expect.any(String) as string });
+      },
+    );
+
+    it('is not settled for a path with no single real path (`..` past a missing part)', () => {
+      expect('settled' in pre('cat missing/../../dev/zero')).toBe(false);
+    });
   });
 
   it.each<[string]>([
