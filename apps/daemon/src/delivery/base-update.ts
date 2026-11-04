@@ -41,6 +41,7 @@ import {
   NOTICE_KEY,
   renumberedLines,
   uncarriedIn,
+  uncarriedSaid,
   type RenumberedMigration,
   type UncarriedMigration,
 } from './notices';
@@ -86,9 +87,24 @@ export type BaseUpdate =
    * not make again: `note` names it. No gate runs, since a custom migration's loss changes no snapshot
    * a check could see, and every later gate answers this until the journal at HEAD holds it. A caller
    * asked for a pull request puts the merge at `head` back instead
-   * (`decisions/2026-11-04-a-base-merge-carries-a-batchs-migrations-over.md`).
+   * (`decisions/2026-11-04-a-base-merge-carries-a-batchs-migrations-over.md`). `unreadable` says the
+   * batch's notice has no list to read, so no journal clears it and only abandoning the batch ends it.
    */
-  | { readonly kind: 'uncarried'; readonly head: string; readonly note: string }
+  | {
+      readonly kind: 'uncarried';
+      readonly head: string;
+      readonly note: string;
+      readonly unreadable?: true;
+    }
+  /**
+   * Answered only for a pull request's catch-up: the merge took generated directories from the base
+   * and the regeneration reported a problem (the install it needs failed, a generator failed, it
+   * changed nothing, or it lost a file of the branch's), so the merge at `head` lacks the batch's own
+   * changes there. The caller puts it back and pushes nothing, with or without a check; `note` says
+   * what went wrong and is the whole of what the builder is told, since no regenerate card is raised
+   * for a merge that is put back.
+   */
+  | { readonly kind: 'unregenerated'; readonly head: string; readonly note: string }
   /**
    * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard or
    * for a pull request only, says what in the branch kept the base out.
@@ -220,6 +236,7 @@ export function gateNote(update: BaseUpdate): string | null {
     case 'conflicted':
     case 'install_broken':
     case 'uncarried':
+    case 'unregenerated':
       return update.note;
     case 'aborted':
       return null;
@@ -303,6 +320,11 @@ type SettledMerge = Extract<BranchMerge, { readonly kind: 'merged' }>;
 interface Merging {
   readonly update: BaseUpdate;
   readonly regenerate: SettledMerge | null;
+  /**
+   * The merge's note once its generated directories are regenerated; null with none to regenerate.
+   * `update`'s note, until then, says only that they were taken from the base.
+   */
+  readonly regeneratedNote?: string | null;
 }
 
 /** What kept a merge's generated directories from being regenerated. */
@@ -340,6 +362,10 @@ const STOPPED: Unregenerated = {
   logPath: null,
   restored: false,
 };
+
+/** Marks an `uncarried` answer given for `lost`, when that notice's list can't be read. */
+const unreadableMark = (lost: Notice): { readonly unreadable?: true } =>
+  uncarriedIn(lost) === null ? { unreadable: true } : {};
 
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
@@ -455,21 +481,30 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
-  /** What the gate's note says about the conflicts a merge settled; null when it settled none. */
-  function settledNote(batch: BatchDto, merged: SettledMerge): string | null {
+  /**
+   * What the gate's note says about the conflicts a merge settled; null when it settled none. A
+   * generated directory is only taken from the base when the merge is made, so it is said to be
+   * regenerated (`regenerated`) only once its regeneration has made it, and the merge that goes back
+   * is not said to be listed anywhere.
+   */
+  function settledNote(batch: BatchDto, merged: SettledMerge, regenerated: boolean): string | null {
     const resolved = merged.resolved ?? [];
     if (resolved.length === 0) return null;
-    ctx.logger.info(
-      { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
-      'base conflicts settled',
-    );
+    // Said once: a merge with directories to regenerate asks for both wordings.
+    if (regenerated)
+      ctx.logger.info(
+        { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
+        'base conflicts settled',
+      );
+    const origin = `origin/${batch.baseBranch}`;
     const said = resolved
-      .map(
-        (r) =>
-          `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "kept both sides' added lines"})`,
-      )
+      .map((r) => {
+        if (r.how !== 'regenerated') return `${r.path} (kept both sides' added lines)`;
+        return `${r.path} (${regenerated ? 'regenerated from its sources' : `taken from ${origin}, not regenerated`})`;
+      })
       .join(', ');
-    return `10db merged origin/${batch.baseBranch} into this branch and settled its conflicts with it: ${said}. The merge commit lists them.`;
+    const lead = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}.`;
+    return regenerated ? `${lead} The merge commit lists them.` : lead;
   }
 
   /**
@@ -701,6 +736,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly head: string;
         readonly note: string | null;
         readonly uncarried?: true;
+        /** The batch's lost-migrations notice has no list to read. */
+        readonly unreadable?: true;
+        /** A pull request's catch-up whose regeneration reported a problem that lost no migration. */
+        readonly unregenerated?: true;
+        /** The generators ran and reported no problem: the directories are regenerated. */
+        readonly made?: true;
         /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
         readonly renumbered?: readonly RenumberedMigration[];
       }
@@ -756,13 +797,26 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
         ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
       }) as const;
-    if (problem === null) return stands(null);
+    if (problem === null) return { ...stands(null), made: true };
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
-    if (lost === null) return stands(unregenerated(batch, path, merged, problem));
+    if (lost === null) {
+      // The generated directories are the base's, without the batch's changes in them: a catch-up
+      // pushes nothing, so its merge goes back and its own card says why. No regenerate card is
+      // raised, which would name a worktree the catch-up removes and a merge it rewinds.
+      if (forPullRequest)
+        return {
+          kind: 'done',
+          head,
+          unregenerated: true,
+          note: unregenerated(batch, path, merged, problem, { lost: true, card: false }),
+        };
+      return stands(unregenerated(batch, path, merged, problem));
+    }
     return {
       kind: 'done',
       head,
       uncarried: true,
+      ...unreadableMark(lost),
       note: joined(
         // A merge that goes back moved nothing.
         forPullRequest ? null : renumberedNote(batch, renumbered, true),
@@ -770,7 +824,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           lost: true,
           card: !forPullRequest && options.raisesUncarried !== true,
         }),
-        lost.body,
+        uncarriedSaid(lost),
       ),
     };
   }
@@ -797,20 +851,24 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     let tags: readonly string[];
     try {
       const added = await addedTags(ctx.git, path, `${merged.head}^1`, merged.from, dropped);
-      tags = await absentFrom(ctx.git, path, 'HEAD', added);
+      tags = await absentFrom(ctx.git, path, 'HEAD', added, merged.from);
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations not read');
       tags = dropped.filter((f) => f.endsWith('.sql')).map((f) => basename(f, '.sql'));
     }
     const lost = [...new Set(named === undefined ? tags : [...tags, named])].sort();
     if (lost.length === 0) return null;
-    const earlier = uncarriedIn(uncarriedNotice(batch));
+    const stored = uncarriedNotice(batch);
+    const earlier = uncarriedIn(stored);
+    // A notice whose list can't be read stays as it is, and keeps the gate stopped: rewriting it with
+    // only these migrations would forget the ones it lists, and the next gate would clear it.
+    if (earlier === null) return stored ?? null;
     const at = `${merged.head.slice(0, 12)}^1`;
     const notice = migrationNotices.uncarried([
       ...earlier,
       ...lost
         .filter((tag) => !earlier.some((m) => m.tag === tag))
-        .map((tag): UncarriedMigration => ({ tag, at })),
+        .map((tag): UncarriedMigration => ({ tag, at, base: merged.from })),
     ]);
     if (!forPullRequest)
       tell(batch, () => {
@@ -831,19 +889,26 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const path = batch.worktreePath;
     if (notice === undefined || path === null) return answer;
     const held = uncarriedIn(notice);
-    let absent: readonly string[];
+    if (held === null) {
+      // Which migrations were lost can't be told, so nothing can say they are carried: the notice and
+      // the regenerate card stay, and the gate stops, here and at every gate after.
+      ctx.logger.warn({ batchId: batch.id }, 'lost migrations notice has no readable list');
+      const said = uncarriedSaid(notice);
+      return {
+        kind: 'uncarried',
+        head: await ctx.git.head(path),
+        note: joined(gateNote(answer), said) ?? said,
+        ...unreadableMark(notice),
+      };
+    }
+    const left: UncarriedMigration[] = [];
     try {
-      absent = await absentFrom(
-        ctx.git,
-        path,
-        'HEAD',
-        held.map((m) => m.tag),
-      );
+      for (const m of held)
+        if ((await absentFrom(ctx.git, path, 'HEAD', [m.tag], m.base)).length > 0) left.push(m);
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations not read');
-      absent = held.map((m) => m.tag);
+      left.splice(0, left.length, ...held);
     }
-    const left = held.filter((m) => absent.includes(m.tag));
     if (left.length === 0) {
       tell(batch, () => {
         hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried]);
@@ -1240,15 +1305,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       },
       'base merged into the batch branch',
     );
+    const waiting = (merged.regenerate ?? []).length > 0;
     return {
       update: {
         kind: 'merged',
         base: merged.from,
         head: merged.head,
-        note: joined(settledNote(batch, merged), unmoved),
+        note: joined(settledNote(batch, merged, !waiting), unmoved),
         ...(forPullRequest ? { resolved: merged.resolved ?? [] } : {}),
       },
-      regenerate: (merged.regenerate ?? []).length > 0 ? merged : null,
+      regenerate: waiting ? merged : null,
+      ...(waiting ? { regeneratedNote: joined(settledNote(batch, merged, true), unmoved) } : {}),
     };
   }
 
@@ -1496,7 +1563,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           return {
             kind: 'uncarried',
             head: merged.kind === 'merged' ? merged.head : pending.head,
-            note: joined(note, lost.body) ?? lost.body,
+            note: joined(note, uncarriedSaid(lost)) ?? uncarriedSaid(lost),
+            ...unreadableMark(lost),
           };
       }
       return {
@@ -1522,6 +1590,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       // The merge step never says so: only the install, above, and a later check do.
       case 'install_broken':
       case 'uncarried':
+      case 'unregenerated':
         return merged;
       case 'merged': {
         if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
@@ -1539,9 +1608,25 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           signal,
         );
         if (regenerated.kind === 'aborted' || stopped()) return { kind: 'aborted' };
-        const note = joined(merged.note, regenerated.note, installed.note);
+        // The merge's note says its generated directories were regenerated only once they were.
+        const settled =
+          regenerated.made === true ? (merging.regeneratedNote ?? merged.note) : merged.note;
+        const note = joined(settled, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
-          return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
+          return {
+            kind: 'uncarried',
+            head: regenerated.head,
+            note: note ?? '',
+            ...(regenerated.unreadable === true ? { unreadable: true } : {}),
+          };
+        // Not the merge's own note: it names the directories the merge took from the base, and
+        // this card has its own words for what became of them.
+        if (regenerated.unregenerated === true)
+          return {
+            kind: 'unregenerated',
+            head: regenerated.head,
+            note: joined(regenerated.note, installed.note) ?? '',
+          };
         return {
           ...merged,
           head: regenerated.head,

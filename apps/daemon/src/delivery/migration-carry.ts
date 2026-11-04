@@ -40,9 +40,14 @@ const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [] };
  * leaves the schema as it was, so a snapshot that repeats the one before it marks a hand-written
  * migration: the SQL can't, since its author may have replaced the stub's first line. Read from the
  * commits. Journals that can't be read leave nothing to carry, and the plain run's checks speak.
+ *
+ * A tag both sides added says nothing by itself: each made its next number under the same `--name`.
+ * It is the base's only when it is the same migration there, by its SQL and its schema, since a
+ * snapshot's ids differ even so. Otherwise the branch's is its own, and the merge took the base's in
+ * its place with nothing in `dropped` to show it.
  */
 export async function ownMigrations(
-  git: Pick<Git, 'fileAt' | 'mergeBase'>,
+  git: Pick<Git, 'blobAt' | 'fileAt' | 'mergeBase'>,
   repo: string,
   tip: string,
   from: string,
@@ -57,8 +62,27 @@ export async function ownMigrations(
   const ancestor = await git.mergeBase(repo, tip, from);
   const shared = ancestor === null ? [] : (journalTags(await text(ancestor, JOURNAL)) ?? []);
   const migrations: CarriedMigration[] = [];
-  const snapshot = (number: string) => text(tip, `${MIGRATIONS_DIR}meta/${number}_snapshot.json`);
-  for (const tag of ownTags(ours, theirs, shared)) {
+  const snapshot = (number: string, rev = tip) =>
+    text(rev, `${MIGRATIONS_DIR}meta/${number}_snapshot.json`);
+  const schemaAt = async (rev: string, number: string): Promise<string | null> => {
+    const found = await snapshot(number, rev);
+    return found === null ? null : schemaOf(found);
+  };
+  /** Whether `tag`, on both sides and not their ancestor, is a different migration on each. */
+  const differs = async (tag: string): Promise<boolean> => {
+    const number = parseTag(tag)?.number;
+    if (number === undefined) return false;
+    const file = `${MIGRATIONS_DIR}${tag}.sql`;
+    return (
+      (await git.blobAt(repo, tip, file)) !== (await git.blobAt(repo, from, file)) ||
+      (await schemaAt(tip, number)) !== (await schemaAt(from, number))
+    );
+  };
+  const contested = new Set<string>();
+  for (const tag of ours)
+    if (theirs.includes(tag) && !shared.includes(tag) && (await differs(tag))) contested.add(tag);
+  const held = theirs.filter((tag) => !contested.has(tag));
+  for (const tag of ownTags(ours, held, shared)) {
     const parsed = parseTag(tag);
     if (parsed === null)
       return { kind: 'unreadable', tag, why: 'its tag is not one drizzle-kit writes' };
@@ -239,18 +263,32 @@ export async function addedTags(
   return tags;
 }
 
-/** Those of `tags` whose name the journal at `rev` doesn't hold: all of them when it can't be read. */
+/**
+ * Those of `tags` whose name the journal at `rev` doesn't hold: all of them when it can't be read. A
+ * name the journal at `base` holds as well is the base's migration, not the branch's, so with `base`
+ * the name counts only as many times as `rev` holds it beyond that.
+ */
 export async function absentFrom(
   git: Pick<Git, 'fileAt'>,
   repo: string,
   rev: string,
   tags: readonly string[],
+  base?: string,
 ): Promise<string[]> {
-  const found = await git.fileAt(repo, rev, JOURNAL, META_MAX_BYTES);
-  const names = new Set(
-    (journalTags(found.kind === 'file' ? found.text : null) ?? []).map((t) => parseTag(t)?.name),
-  );
-  return tags.filter((tag) => !names.has(parseTag(tag)?.name));
+  const namesAt = async (at: string): Promise<(string | undefined)[] | null> => {
+    const found = await git.fileAt(repo, at, JOURNAL, META_MAX_BYTES);
+    const journal = journalTags(found.kind === 'file' ? found.text : null);
+    return journal === null ? null : journal.map((t) => parseTag(t)?.name);
+  };
+  const names = await namesAt(rev);
+  const theirs = base === undefined ? [] : await namesAt(base);
+  if (names === null || theirs === null) return [...tags];
+  const count = (list: readonly (string | undefined)[], name: string | undefined): number =>
+    list.filter((one) => one === name).length;
+  return tags.filter((tag) => {
+    const name = parseTag(tag)?.name;
+    return count(names, name) <= count(theirs, name);
+  });
 }
 
 /**
