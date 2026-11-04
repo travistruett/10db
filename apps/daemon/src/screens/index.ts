@@ -11,7 +11,6 @@ export {
   inlineBytesSpent,
   inlinePictureBytes,
   isImageName,
-  liveMessages,
   parseScreenBody,
   readBytesSpent,
   readMeasuredLine,

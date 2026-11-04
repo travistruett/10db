@@ -349,7 +349,10 @@ describe('the pictures a Shape session pulls in with Read', () => {
   describe('once the session has measured what a Read returned', () => {
     const measure = (path: string, response: unknown, n = 0, agentId?: string): void => {
       const after = must(f.adapter.shapeSessions[n], 'a session').spec.postToolUse;
-      must(after, 'a PostToolUse hook')({
+      must(
+        after,
+        'a PostToolUse hook',
+      )({
         toolName: 'Read',
         input: { file_path: path },
         response,
