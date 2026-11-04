@@ -6,6 +6,7 @@ import {
   EventType,
   EvidenceKind,
   LANE_STATES,
+  lastRevertTold,
   mintId,
   NotFoundError,
   LEFT_OUT_NOTICE_KEY,
@@ -111,26 +112,38 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     lastActivityAt: row.lastActivityAt,
     runNextAt: row.runNextAt,
     notice: row.notice,
-    revertTold: revertTold(db, row.id),
+    revertTold: revertTold(db, row),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
 }
 
-/** Whether a builder note among the run's evidence names a revert commit (a retry or a joined start wrote it). */
-function revertTold(db: DbReader, id: WorkstreamId): boolean {
-  return db
-    .select({ summary: schema.evidence.summary })
+/**
+ * Whether a builder note among the run's evidence names a revert commit (a retry or a joined start wrote
+ * it) that still stands. A `left-out` notice that names no revert says none does, and so does a
+ * `no_revert` record newer than the note: Retry would not tell the run of it.
+ */
+function revertTold(db: DbReader, row: WorkstreamRow): boolean {
+  if (row.notice?.key === LEFT_OUT_NOTICE_KEY && revertCommitIn(row.notice.body) === null)
+    return false;
+  const records = db
+    .select({ kind: schema.evidence.kind, summary: schema.evidence.summary })
     .from(schema.evidence)
     .where(
       and(
-        eq(schema.evidence.workstreamId, id),
-        eq(schema.evidence.kind, EvidenceKind.Builder),
-        like(schema.evidence.summary, `%${REVERT_COMMIT_LINE}%`),
+        eq(schema.evidence.workstreamId, row.id),
+        or(
+          eq(schema.evidence.kind, EvidenceKind.NoRevert),
+          and(
+            eq(schema.evidence.kind, EvidenceKind.Builder),
+            like(schema.evidence.summary, `%${REVERT_COMMIT_LINE}%`),
+          ),
+        ),
       ),
     )
-    .all()
-    .some((row) => revertCommitIn(row.summary) !== null);
+    .orderBy(asc(schema.evidence.id))
+    .all();
+  return lastRevertTold(records) !== null;
 }
 
 export function getWorkstream(db: DbReader, id: WorkstreamId): WorkstreamDto {

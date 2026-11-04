@@ -1,11 +1,14 @@
 import {
   ConflictError,
   BatchState,
+  EvidenceKind,
   InvalidError,
+  lastRevertTold,
   LEFT_OUT_NOTICE_KEY,
   McpToolName,
   McpToolOutputs,
   NEW_TASK_NO_AREAS,
+  revertCommitIn,
   StepRole,
   TaskStatus,
   ToolAccess,
@@ -22,6 +25,7 @@ import {
 import {
   findFlowByName,
   getBatch,
+  getEvidence,
   getFlow,
   getProject,
   getTask,
@@ -52,9 +56,9 @@ import {
   commitCoveredByRevert,
   commitResolvedMarkers,
   lastRevertNoteAt,
-  lastRevertTold,
   revertCommitOf,
   revertOfRun,
+  revertOfRuns,
   revertedWorkNote,
   revertedWorkNotice,
 } from './reverted-work';
@@ -153,10 +157,9 @@ export function insertJoinedWorkstream(
 ): WorkstreamDto {
   const earlier = listWorkstreams(ctx.tx, { batchId }).filter((run) => run.taskId === taskId);
   const ws = insertPlannedWorkstream(ctx, taskId, plan, batchId);
-  let revert: string | null = null;
-  for (const run of earlier)
-    revert =
-      revertOfRun({ notice: run.notice, evidence: listEvidence(ctx.tx, run.id) })?.revert ?? revert;
+  const revert = revertOfRuns(
+    earlier.map((run) => ({ notice: run.notice, evidence: listEvidence(ctx.tx, run.id) })),
+  );
   const [first] = plan.steps;
   if (revert === null || !first) return ws;
   const note = insertBuilderNote(ctx, ws.id, revertedWorkNote(revert, first));
@@ -222,21 +225,16 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * card holds it). It covers this run, and it is told of that one unless it is the revert the run was
  * told of already: a different revert undid what the run had by then. The card is never older than
  * the run's record, because the answer that writes the notices closes it. A run whose `left-out` notice
- * names no revert has none on the branch, whatever its notes say, so only `kept` can apply to it.
+ * names no revert has none on the branch, whatever its notes say (`revertOfRun`), and neither has one
+ * a Retry recorded that for, so only `kept` can apply to them.
  */
 function revertStillOn(
   db: DbReader,
   row: { readonly id: WorkstreamId; readonly notice: Notice | null },
   kept: string | null,
 ): string | null {
-  if (row.notice?.key === LEFT_OUT_NOTICE_KEY) {
-    const named = revertCommitOf(row.notice);
-    if (named !== null) return named;
-    // Ship without it wrote this notice after reading the branch, and it names no revert: none of the
-    // run's is on the branch (`nothingToRevert`). A note from before it, which names a revert that has
-    // since left the branch, must not tell the session of one; only a card's revert can.
-    return kept;
-  }
+  const named = row.notice?.key === LEFT_OUT_NOTICE_KEY ? revertCommitOf(row.notice) : null;
+  if (named !== null) return named;
   const evidence = listEvidence(db, row.id);
   const record = revertOfRun({ notice: row.notice, evidence });
   if (record === null || (kept !== null && kept !== record.revert)) return kept;
@@ -301,7 +299,21 @@ export function retryWorkstream(
     // lists its task as done only if the run commits again), and its session is told in the note below.
     const revert = revertStillOn(ctx.tx, row, keptRevert);
     if (revert) setWorkstreamNotice(ctx, id, revertedWorkNotice(revert));
-    else if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
+    // No revert stands. That notice was the only thing saying so, and the old notes outlive it, so the
+    // answer goes on the run's record, where every reader of the notes finds it.
+    const noRevert = revert === null && row.notice?.key === LEFT_OUT_NOTICE_KEY;
+    if (noRevert) {
+      setWorkstreamNotice(ctx, id, null);
+      insertEvidence(ctx, {
+        workstreamId: id,
+        kind: EvidenceKind.NoRevert,
+        command: null,
+        exitCode: null,
+        summary: "Ship without it found no revert of this run on the batch's branch.",
+        logPath: null,
+        commitShas: [],
+      });
+    }
     // A revert note is for the step that can commit: a read-only step cannot redo the work, and its
     // rejection would send the work back to the implement step without the note. So a retry that
     // tells of a revert restarts the implement step before a read-only one, as a rejection would.
@@ -321,6 +333,12 @@ export function retryWorkstream(
       .filter((part) => part !== '')
       .join('\n\n');
     const evidence = text === '' ? null : insertBuilderNote(ctx, id, text);
+    // The fix a restarted step keeps, unless it is the note of a revert that is gone.
+    const keptFix =
+      row.nextAction.kind === 'fix' &&
+      !(noRevert && revertCommitIn(getEvidence(ctx.tx, row.nextAction.evidenceId).summary) !== null)
+        ? row.nextAction
+        : null;
     if (reworkAt !== null && reworked) {
       // A reviewer's rejection used the attempts up: the step that did the work runs again, as when
       // the rejection sent it back, with the review's notes and the builder's note if they gave one.
@@ -357,7 +375,7 @@ export function retryWorkstream(
           )
         : row.steps;
     const steps =
-      row.nextAction.kind === 'fix' && !evidence
+      keptFix && !evidence
         ? restarted.map((s, i) =>
             i === row.stepIndex ? { ...s, startedAt: row.steps[i]?.startedAt ?? s.startedAt } : s,
           )
@@ -376,11 +394,8 @@ export function retryWorkstream(
         // its note, and a gate failure its output, for the restarted step.
         nextAction: evidence
           ? { kind: 'fix', evidenceId: evidence.id }
-          : row.nextAction.kind === 'fix'
-            ? row.nextAction
-            : latest
-              ? { kind: 'continue_from_handoff', handoffId: latest.id }
-              : { kind: 'start' },
+          : (keptFix ??
+            (latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' })),
       },
       reason: 'retried by the builder',
     });

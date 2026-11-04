@@ -1,4 +1,6 @@
 import {
+  EvidenceKind,
+  lastRevertTold,
   LEFT_OUT_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
@@ -86,20 +88,6 @@ export function revertCommitOf(notice: Notice | null): string | null {
   return notice ? revertCommitIn(notice.body) : null;
 }
 
-/**
- * The revert commit the last retry of a run told its session about: the builder notes among the
- * run's evidence, oldest first. The notice shares one slot with the run's waits, so a wait for a claim
- * can replace it; the note is what the pull request relies on.
- */
-export function lastRevertTold(
-  evidence: readonly { readonly kind: string; readonly summary: string }[],
-): string | null {
-  let found: string | null = null;
-  for (const row of evidence)
-    if (row.kind === 'builder') found = revertCommitIn(row.summary) ?? found;
-  return found;
-}
-
 /** When the last retry of a run told its session of a revert; null when none did. */
 export function lastRevertNoteAt(
   evidence: readonly {
@@ -123,16 +111,45 @@ export function lastRevertNoteAt(
  * `reverted-work` in the write that adds the note, so a run still holding it was left out after its last
  * note, and its commits made after that note are in this revert. The run still counts as told: a commit
  * it makes after this revert was made knowing the work had been undone before.
+ *
+ * A `left-out` notice that names no revert is newer than any note too: Ship without it wrote it after
+ * finding none of the run's reverts on the branch (`nothingToRevert`), so the run records none, whatever
+ * its notes say. The Retry that clears that notice leaves a `no_revert` record for the same answer.
  */
-export function revertOfRun(run: {
-  readonly notice: Notice | null;
-  readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
-}): { readonly revert: string; readonly told: boolean } | null {
+export function revertOfRun(run: RunRecord): {
+  readonly revert: string;
+  readonly told: boolean;
+} | null {
+  if (leftOutWithNoRevert(run.notice)) return null;
   const noted = lastRevertTold(run.evidence);
   const leftOut = run.notice?.key === LEFT_OUT_NOTICE_KEY ? revertCommitOf(run.notice) : null;
   const carried = run.notice?.key === REVERTED_NOTICE_KEY ? revertCommitOf(run.notice) : null;
   const revert = leftOut ?? noted ?? carried;
   return revert === null ? null : { revert, told: noted !== null };
+}
+
+/**
+ * The revert that stands for a task after these runs of it, oldest first: a later run started from the
+ * one before it, so the last run with a record names it. A later run that found none on the branch
+ * says the older revert has gone too, since Ship without it read every run's latest record.
+ */
+export function revertOfRuns(runs: readonly RunRecord[]): string | null {
+  let revert: string | null = null;
+  for (const run of runs) {
+    const gone =
+      leftOutWithNoRevert(run.notice) || run.evidence.some((e) => e.kind === EvidenceKind.NoRevert);
+    revert = revertOfRun(run)?.revert ?? (gone ? null : revert);
+  }
+  return revert;
+}
+
+interface RunRecord {
+  readonly notice: Notice | null;
+  readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
+}
+
+function leftOutWithNoRevert(notice: Notice | null): boolean {
+  return notice?.key === LEFT_OUT_NOTICE_KEY && revertCommitOf(notice) === null;
 }
 
 /** The notice a retried run keeps while its commits stay reverted. */

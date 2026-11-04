@@ -15,6 +15,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   insertBatch,
+  insertEvidence,
   insertProposal,
   insertSource,
   insertTask,
@@ -571,6 +572,152 @@ describe('retryWorkstream', () => {
       expect(retried.notice).toBeNull();
       expect(retried.stepIndex).toBe(1);
       expect(builderNotes(ws.id)).toHaveLength(notes);
+    });
+
+    /** A run told of REVERT, failed again and left out with nothing to revert, as Ship without it leaves it. */
+    const leftOutWithRevertGone = (at: number) => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      failAgain(ws.id, at);
+      state.write((ctx) => setWorkstreamNotice(ctx, ws.id, nothingToRevert));
+      return ws;
+    };
+
+    it('does not say a run left out with nothing to revert was told of a revert', () => {
+      const ws = leftOutWithRevertGone(1);
+      expect(getWorkstream(state.db, ws.id).revertTold).toBe(false);
+    });
+
+    it('does not hand a run left out with nothing to revert the old note as its fix', () => {
+      const ws = leftOutWithRevertGone(0);
+      const [old] = builderNotes(ws.id);
+      expect(getWorkstream(state.db, ws.id).nextAction).toEqual({
+        kind: 'fix',
+        evidenceId: old?.id,
+      });
+      const retried = retryWorkstream(state, ws.id);
+      expect(retried.nextAction).toEqual({ kind: 'start' });
+      expect(outstandingFixEvidence(state.db, getWorkstreamRow(state.db, ws.id))).toBeNull();
+    });
+
+    it('still keeps a gate failure as the fix of a run left out with nothing to revert', () => {
+      const ws = leftOutWithRevertGone(0);
+      const gate = state.write((ctx) => {
+        const row = insertEvidence(ctx, {
+          workstreamId: ws.id,
+          kind: 'gate',
+          command: 'make gate',
+          exitCode: 1,
+          summary: 'failed',
+          logPath: null,
+          commitShas: [],
+        });
+        patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: row.id } });
+        return row;
+      });
+      expect(retryWorkstream(state, ws.id).nextAction).toEqual({
+        kind: 'fix',
+        evidenceId: gate.id,
+      });
+    });
+
+    it('does not tell of the gone revert on the Retry after the one that cleared the notice', () => {
+      const ws = leftOutWithRevertGone(1);
+      retryWorkstream(state, ws.id);
+      failAgain(ws.id, 1);
+      const notes = builderNotes(ws.id).length;
+      const failed = getWorkstream(state.db, ws.id);
+      expect(failed.notice).toBeNull();
+      // The failure line reads this fact, so it says the review step runs again.
+      expect(failed.revertTold).toBe(false);
+      const retried = retryWorkstream(state, ws.id);
+      expect(retried.notice).toBeNull();
+      expect(retried.stepIndex).toBe(1);
+      expect(builderNotes(ws.id)).toHaveLength(notes);
+    });
+
+    it('tells a run of a revert made after the Retry that cleared the notice', () => {
+      const ws = leftOutWithRevertGone(1);
+      retryWorkstream(state, ws.id);
+      failAgain(ws.id, 1);
+      state.write((ctx) => setWorkstreamNotice(ctx, ws.id, leftOut(SECOND_REVERT)));
+      const retried = retryWorkstream(state, ws.id);
+      expect(retried.stepIndex).toBe(0);
+      expect(retried.revertTold).toBe(true);
+      expect(builderNotes(ws.id).at(-1)?.summary).toContain(SECOND_REVERT);
+    });
+
+    it('does not ask the implement step to redo a revert gone by the Retry that cleared the notice', () => {
+      const task = addTask();
+      const plan = fullFlowPlan(task.id);
+      const batch = state.write((ctx) => {
+        const row = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+        transitionBatch(ctx, row.id, { to: 'OPEN' });
+        const left = insertPlannedWorkstream(ctx, task.id, plan, row.id);
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, left.id, { to, fence: null });
+        setWorkstreamNotice(ctx, left.id, leftOut(REVERT));
+        return row;
+      });
+      const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batch.id));
+      failAgain(joined.id, 0);
+      state.write((ctx) => setWorkstreamNotice(ctx, joined.id, nothingToRevert));
+      retryWorkstream(state, joined.id);
+      const notes = builderNotes(joined.id).length;
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, joined.id), implementAt(joined.id)),
+      );
+      expect(action).toEqual({ kind: 'start' });
+      expect(builderNotes(joined.id)).toHaveLength(notes);
+    });
+
+    describe('a start joining the batch', () => {
+      /** A failed run of `task` in a new open batch, told of REVERT by a retry. */
+      const toldRun = () => {
+        const task = addTask();
+        const plan = resolveStepPlan(state.db, task.id);
+        const { batchId, id } = state.write((ctx) => {
+          const row = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+          transitionBatch(ctx, row.id, { to: 'OPEN' });
+          const left = insertPlannedWorkstream(ctx, task.id, plan, row.id);
+          for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+            transitionWorkstream(ctx, left.id, { to, fence: null });
+          setWorkstreamNotice(ctx, left.id, leftOut(REVERT));
+          return { batchId: row.id, id: left.id };
+        });
+        retryWorkstream(state, id);
+        failAgain(id, 1);
+        return { task, plan, batchId, id };
+      };
+
+      it('is not told of a revert an earlier run was left out without', () => {
+        const { task, plan, batchId, id } = toldRun();
+        state.write((ctx) => setWorkstreamNotice(ctx, id, nothingToRevert));
+        const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batchId));
+        expect(builderNotes(joined.id)).toEqual([]);
+        expect(joined.nextAction).toEqual({ kind: 'start' });
+        expect(joined.revertTold).toBe(false);
+      });
+
+      it('is not told of a revert gone by the Retry that cleared the notice', () => {
+        const { task, plan, batchId, id } = toldRun();
+        state.write((ctx) => setWorkstreamNotice(ctx, id, nothingToRevert));
+        retryWorkstream(state, id);
+        failAgain(id, 1);
+        const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batchId));
+        expect(builderNotes(joined.id)).toEqual([]);
+        expect(joined.revertTold).toBe(false);
+      });
+
+      it('is not told of an older run’s revert a later run was left out without', () => {
+        const { task, plan, batchId, id } = toldRun();
+        const second = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batchId));
+        failAgain(second.id, 0);
+        state.write((ctx) => setWorkstreamNotice(ctx, second.id, nothingToRevert));
+        expect(getWorkstream(state.db, id).notice?.key).toBe('reverted-work');
+        const third = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batchId));
+        expect(builderNotes(third.id)).toEqual([]);
+      });
     });
 
     it('still tells a run left out with nothing to revert of the revert a card holds', () => {
