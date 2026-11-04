@@ -14,6 +14,8 @@ import {
   PARK_TASK_CHOICE,
   ProposedPrinciples,
   STOCK_HAZARD_REVISIONS,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
+  WorkstreamState,
   type InboxItemDto,
   type InboxTarget,
   type ProposalId,
@@ -27,6 +29,7 @@ import {
   getProject,
   getProposal,
   getProposalDto,
+  humanTouchDays,
   insertInboxItem,
   insertPermissionRule,
   insertProposal,
@@ -36,15 +39,17 @@ import {
   listInbox,
   listPermissionRules,
   listTasks,
+  openItemsForWorkstream,
   patchProject,
   schema,
   searchDecisions,
   searchPrincipleIds,
   searchPrinciples,
   seedProject,
+  transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -277,6 +282,41 @@ describe('inbox questions', () => {
     const { item } = ask(ws);
     inbox.cancelForWorkstream(ws.workstream.id);
     expect(getInboxItem(state.db, item.id).state).toBe('CANCELLED');
+  });
+
+  it('keeps counting a failure card that Start cancels as time the run waited on a retry', () => {
+    let now = Date.parse('2026-11-03T00:30:00.000Z');
+    const test = createTestStore(() => new Date(now));
+    onTestFinished(test.close);
+    const clocked = createStateStore(test.store, createEventBus());
+    const service = createInboxService({ state: clocked, onParkedAnswer: () => undefined });
+    const ws = seedWorkstream(test.store);
+    const move = (to: WorkstreamState): void => {
+      clocked.write((ctx) => transitionWorkstream(ctx, ws.workstream.id, { to, fence: null }));
+    };
+    move(WorkstreamState.Starting);
+    move(WorkstreamState.Running);
+
+    now = Date.parse('2026-11-03T01:00:00.000Z');
+    move(WorkstreamState.Failed);
+    const card = service.flag({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      title: `${WORKSTREAM_FAILED_TITLE_PREFIX}Alpha`,
+      body: 'it stopped',
+    });
+
+    now = Date.parse('2026-11-03T08:00:00.000Z');
+    move(WorkstreamState.Queued);
+    service.cancelForWorkstream(ws.workstream.id);
+
+    expect(getInboxItem(clocked.db, card.id)).toMatchObject({
+      state: 'CANCELLED',
+      targets: [{ workstreamId: ws.workstream.id }],
+    });
+    now = Date.parse('2026-11-03T12:00:00.000Z');
+    expect(humanTouchDays(clocked.db, ws.project.id, new Date(now))[0]?.failedMinutes).toBe(420);
+    expect(openItemsForWorkstream(clocked.db, ws.workstream.id)).toEqual([]);
   });
 });
 

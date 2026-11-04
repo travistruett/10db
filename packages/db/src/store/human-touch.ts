@@ -1,13 +1,16 @@
 import {
+  BatchState,
   EventType,
   HUMAN_TOUCH_DAYS,
   InboxKind,
   InboxState,
+  TaskStatus,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState,
   type HumanTouchDayDto,
   type ProjectId,
   type TaskId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import { and, asc, eq, gte, inArray, isNull, lt, or } from 'drizzle-orm';
 import * as schema from '../schema';
@@ -18,6 +21,13 @@ import type { DbReader } from './store';
 
 const DAY_MS = 86_400_000;
 const MINUTE_MS = 60_000;
+
+/** A batch in one of these states never runs anything again, so its failed runs can't be retried. */
+const FINISHED_BATCH_STATES: readonly BatchState[] = [
+  BatchState.Shipped,
+  BatchState.Closed,
+  BatchState.Abandoned,
+];
 
 /** A half-open span of time in epoch milliseconds. */
 interface Span {
@@ -141,13 +151,62 @@ function stateSpans(
   return out;
 }
 
-/** Minutes per day of card time that fell inside a stretch the card's workstream was in `state`. */
+/**
+ * When each workstream's failed run stopped being retryable: the first of its task being closed and
+ * its batch finishing. A failure card can stay open after that, offering a Retry that would be refused.
+ */
+function retryEnds(db: DbReader, ids: readonly WorkstreamId[]): Map<string, number> {
+  const out = new Map<string, number>();
+  if (ids.length === 0) return out;
+  const rows = db
+    .select({
+      id: schema.workstreams.id,
+      taskId: schema.workstreams.taskId,
+      batchId: schema.workstreams.batchId,
+    })
+    .from(schema.workstreams)
+    .where(inArray(schema.workstreams.id, [...ids]))
+    .all();
+  const events = db
+    .select({ entityId: schema.events.entityId, data: schema.events.data, at: schema.events.at })
+    .from(schema.events)
+    .where(
+      and(
+        inArray(schema.events.type, [EventType.TaskChanged, EventType.BatchUpdated]),
+        inArray(
+          schema.events.entityId,
+          rows.flatMap((r) => (r.batchId === null ? [r.taskId] : [r.taskId, r.batchId])),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.events.seq))
+    .all();
+  const endedAt = new Map<string, number>();
+  for (const event of events) {
+    const ended =
+      event.data['status'] === TaskStatus.Cancelled ||
+      FINISHED_BATCH_STATES.some((state) => state === event.data['to']);
+    if (ended && !endedAt.has(event.entityId)) endedAt.set(event.entityId, Date.parse(event.at));
+  }
+  for (const row of rows) {
+    const ends = [endedAt.get(row.taskId), row.batchId ? endedAt.get(row.batchId) : undefined];
+    const known = ends.filter((end) => end !== undefined);
+    if (known.length > 0) out.set(row.id, Math.min(...known));
+  }
+  return out;
+}
+
+/**
+ * Minutes per day of card time that fell inside a stretch the card's workstream was in `state`, up
+ * to the workstream's time in `endsAt` when it has one.
+ */
 function minutesInState(
   db: DbReader,
   cards: readonly CardRow[],
   state: WorkstreamState,
   windowStart: number,
   nowMs: number,
+  endsAt: ReadonlyMap<string, number> = new Map(),
 ): Map<string, number> {
   const spans = openSpans(db, cards, nowMs);
   const byWorkstream = new Map<string, Span[]>();
@@ -164,8 +223,10 @@ function minutesInState(
   const minutes = new Map<string, number>();
   for (const [workstreamId, open] of byWorkstream) {
     // Cards open together on one workstream count once.
-    const waited = intersect(union(open), union(blocked.get(workstreamId) ?? []));
-    for (const span of waited) {
+    const inState = union(blocked.get(workstreamId) ?? []);
+    const end = endsAt.get(workstreamId);
+    const counted = end === undefined ? inState : intersect(inState, [{ from: 0, to: end }]);
+    for (const span of intersect(union(open), counted)) {
       let from = Math.max(span.from, windowStart);
       while (from < span.to) {
         const dayEnd = Math.floor(from / DAY_MS) * DAY_MS + DAY_MS;
@@ -223,7 +284,8 @@ function tasksRanByDay(
  * (a flag for a failed workstream counted apart from other flags), the cards per task that ran, and the
  * minutes work waited on an answer. A card adds waiting time only while the workstream it targets is
  * waiting on a person; one answered while the task kept running adds none. The time a failure card
- * sat open while its workstream was FAILED, waiting for a retry, is counted apart as `failedMinutes`.
+ * sat open while its workstream was FAILED, waiting for a retry, is counted apart as `failedMinutes`,
+ * until the run can no longer be retried.
  */
 export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): HumanTouchDayDto[] {
   const nowMs = now.getTime();
@@ -247,12 +309,17 @@ export function humanTouchDays(db: DbReader, projectId: ProjectId, now: Date): H
 
   const waiting = minutesInState(db, cards, WorkstreamState.WaitingHuman, windowStart, nowMs);
   // A failure card is the only card that says a failed run is waiting for someone to retry it.
+  const failureCards = cards.filter((c) => isFailureCard(c));
   const failed = minutesInState(
     db,
-    cards.filter((c) => isFailureCard(c)),
+    failureCards,
     WorkstreamState.Failed,
     windowStart,
     nowMs,
+    retryEnds(
+      db,
+      failureCards.flatMap((c) => c.targets.map((t) => t.workstreamId)),
+    ),
   );
   const ran = tasksRanByDay(db, projectId, windowStart, windowEnd, nowMs);
 

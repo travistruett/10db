@@ -547,8 +547,9 @@ export function createInboxService(deps: {
           updateInboxItem(
             ctx,
             item.id,
+            // A cancelled card keeps its target: the Factory's figures attribute its open time by it.
             targets.length === 0
-              ? { state: InboxState.Cancelled, targets }
+              ? { state: InboxState.Cancelled }
               : {
                   targets,
                   ...(item.kind === InboxKind.Question

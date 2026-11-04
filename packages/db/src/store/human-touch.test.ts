@@ -1,19 +1,22 @@
 import {
+  BatchState as B,
   HUMAN_TOUCH_DAYS,
   InboxState,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState as S,
+  type BatchId,
   type InboxKind,
   type InboxItemId,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { insertBatch, transitionBatch } from './batches';
 import { humanTouchDays } from './human-touch';
 import { insertInboxItem, updateInboxItem } from './inbox';
 import { endSession, insertSession } from './sessions';
 import type { Store } from './store';
-import { insertTask } from './tasks';
+import { closeTask, insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, transitionWorkstream } from './workstreams';
 
@@ -69,7 +72,7 @@ function move(id: WorkstreamId, to: S): void {
 }
 
 /** A task whose workstream is running, with a session started now. */
-function startRun(projectId: ProjectId, title: string) {
+function startRun(projectId: ProjectId, title: string, batchId: BatchId | null = null) {
   const task = store.write((ctx) =>
     insertTask(ctx, projectId, {
       title,
@@ -78,7 +81,7 @@ function startRun(projectId: ProjectId, title: string) {
       areas: ['api'],
     }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId })).value;
   move(ws.id, S.Starting);
   move(ws.id, S.Running);
   const session = store.write((ctx) =>
@@ -91,7 +94,27 @@ function startRun(projectId: ProjectId, title: string) {
       mcpTokenHash: `hash-${title}`,
     }),
   ).value;
-  return { workstreamId: ws.id, sessionId: session.id };
+  return { taskId: task.id, workstreamId: ws.id, sessionId: session.id };
+}
+
+/** A run that failed at 01:00 today with its failure card open, the clock left there. */
+function failAtOne(projectId: ProjectId, batchId: BatchId | null = null) {
+  at('2026-11-03T00:30:00.000Z');
+  const run = startRun(projectId, 'failed', batchId);
+  at('2026-11-03T01:00:00.000Z');
+  move(run.workstreamId, S.Failed);
+  const failure = card(
+    projectId,
+    'flag',
+    `${WORKSTREAM_FAILED_TITLE_PREFIX}failed`,
+    run.workstreamId,
+  );
+  return { ...run, failure };
+}
+
+function failedMinutesAtNoon(projectId: ProjectId): number | undefined {
+  at('2026-11-03T12:00:00.000Z');
+  return humanTouchDays(store.db, projectId, new Date(nowMs))[0]?.failedMinutes;
 }
 
 describe('humanTouchDays', () => {
@@ -232,5 +255,46 @@ describe('humanTouchDays', () => {
     expect(by('2026-11-02')).toMatchObject({ failedMinutes: 480, waitingMinutes: 0 });
     expect(by('2026-11-03')).toMatchObject({ failedMinutes: 150, waitingMinutes: 0 });
     expect(by('2026-10-25')).toMatchObject({ failedMinutes: 0 });
+  });
+
+  it('stops counting a failed run when its task is closed, though the card stays open', () => {
+    const project = seedProject(store);
+    const run = failAtOne(project.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    store.write((ctx) => closeTask(ctx, run.taskId));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(5);
+  });
+
+  it.each([
+    ['abandoned', [B.Abandoned]],
+    ['shipped without it', [B.Shipping, B.Shipped]],
+  ] as const)('stops counting a failed run when its batch is %s', (_name, states) => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    for (const to of states) store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(5);
+  });
+
+  it('keeps counting a failed run while its batch can still retry it', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Failed }));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(660);
   });
 });
