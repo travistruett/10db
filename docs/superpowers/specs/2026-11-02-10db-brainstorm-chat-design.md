@@ -310,15 +310,16 @@ images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent 
 and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the
 pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose size can't be read (cut short, or not what
 its name says) goes as a path too, since it would be sent blind. The conversation total is one budget for every
-picture a resumed request resends that the daemon sends itself: it counts each image already told that fits both
-per-image caps (2 MiB and 2000 px, by the same check that decides what goes inline), an upper bound on what went
-inline, and each screen kept (§5.5), and `see_screen` refuses a picture that would pass it. An image sent as a
-path for its bytes or pixels counts for nothing, so Retina screenshots leave room for twelve screens. A
-conversation that sent such a block before the 2000 px cap is undercounted by that block, which is accepted:
-past 2000 px blocks were rare, and the 6 MB left over covers a few. Twelve screens at their 1.5 MB most fit
-inside the total, so it only limits them beside dropped images. A session started fresh (from a digest) resends
-no earlier block, so its first message starts at zero; later turns count the whole conversation again, which is
-the same upper bound. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and this
+picture a resumed request resends that the daemon sends itself: it counts each dropped image a turn of the live
+session sent as a block (`shape_files.inline_sent`, written as the turn is sent) and each screen kept (§5.5), and
+`see_screen` refuses a picture that would pass it. An image sent as a path, for its bytes or pixels or because
+the message or the total was full, counts for nothing, so Retina screenshots leave room for twelve screens. A
+conversation that existed before the column was added keeps the old count (every told image within both
+per-image caps), an upper bound. Twelve screens at their 1.5 MB most fit inside the total, so it only limits
+them beside dropped images. A session started fresh (from a digest) resends no earlier block, so it clears the
+mark on every file of the conversation: its first message and every later turn of that session count only the
+images that session sent. (Screens kept from an earlier session still count: they are not recorded per
+session.) A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and this
 budget doesn't count, so nothing here promises it fits in the 6 MB left over.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**

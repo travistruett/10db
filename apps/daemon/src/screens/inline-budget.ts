@@ -66,16 +66,15 @@ export const tooBigAlone = (file: {
 }): boolean => file.size > INLINE_IMAGE_MAX_BYTES || !withinSideCap(file.storedPath);
 
 /**
- * The image bytes a conversation has already spent: every screen it keeps and every image Claude was told
- * of that could have gone as a block. Which of those did depends on how they were batched into turns, and
- * a fresh session drops what came before it, so this is an upper bound on what the daemon sent under
- * today's caps. `filesRoot` is the data directory's `shapes` folder.
+ * The image bytes a conversation has already spent: every screen it keeps and every dropped image a turn
+ * of the live session sent as a block (`shape_files.inline_sent`, which a fresh session clears). Images
+ * that went as paths are not charged. `filesRoot` is the data directory's `shapes` folder.
  */
 export function inlineBytesSpent(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
-  const told = listShapeFiles(state.db, shapeId).reduce(
+  const sent = listShapeFiles(state.db, shapeId).reduce(
     (sum, file) =>
-      file.toldAt !== null && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
+      file.inlineSent && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
     0,
   );
-  return told + keptScreenBytes(join(filesRoot, shapeId, 'screens'));
+  return sent + keptScreenBytes(join(filesRoot, shapeId, 'screens'));
 }

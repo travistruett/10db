@@ -47,6 +47,7 @@ import {
   listShapes,
   listUntoldShapeFiles,
   markSessionStarted,
+  markShapeFilesInline,
   markShapeFilesTold,
   markShapeLinksSizeTold,
   patchShape,
@@ -307,6 +308,12 @@ interface Intake {
   readonly spent: number;
 }
 
+/** The image blocks a turn carries, and the files they came from. */
+interface SentImages {
+  readonly images: ShapeImage[];
+  readonly ids: ShapeFileRow['id'][];
+}
+
 type TurnEnd =
   | { readonly kind: 'complete'; readonly result: TurnResult | undefined }
   | { readonly kind: 'ended' };
@@ -564,19 +571,22 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[], spent: number): ShapeImage[] => {
+  const imagesOf = (files: readonly ShapeFileRow[], spent: number): SentImages => {
     const inline = inlineImageIds(files, spent);
-    return files.flatMap((file) => {
-      if (!inline.has(file.id)) return [];
+    const sent: SentImages = { images: [], ids: [] };
+    for (const file of files) {
+      if (!inline.has(file.id)) continue;
       try {
         const kind = shapeFileKind(file.name);
         const image = kind === null ? null : asImage(kind, readFileSync(file.storedPath));
-        return image === null ? [] : [image];
+        if (image === null) continue;
+        sent.images.push(image);
+        sent.ids.push(file.id);
       } catch (error) {
         log.warn({ err: error, file: file.name }, 'a dropped image could not be read');
-        return [];
       }
-    });
+    }
+    return sent;
   };
 
   /**
@@ -594,13 +604,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
-  /** Records that the turn just sent carried these files and these mis-sized tasks. */
-  const told = (files: readonly ShapeFileRow[], missized: UntoldMissized): void => {
+  /**
+   * Records that the turn just sent carried these files and these mis-sized tasks, and which of the
+   * files went as image blocks. A `fresh` session resends no earlier block, so it clears the others.
+   */
+  const told = (
+    shapeId: ShapeId,
+    files: readonly ShapeFileRow[],
+    missized: UntoldMissized,
+    inline: readonly ShapeFileRow['id'][],
+    fresh: boolean,
+  ): void => {
     state.write((ctx) => {
       markShapeFilesTold(
         ctx,
         files.map((f) => f.id),
       );
+      markShapeFilesInline(ctx, shapeId, inline, fresh);
       markShapeLinksSizeTold(ctx, missized.linkIds);
     });
   };
@@ -663,7 +683,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
-    const images = imagesOf(intake.files, budgeted.spent);
+    const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -736,7 +756,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       done: Promise.resolve(),
     };
     rt.live = live;
-    told(files, intake.missized);
+    told(shapeId, files, intake.missized, inlineIds, resumeId === null);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -792,11 +812,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       if (rt.live === null) start(shapeId, rt, turn, intake);
       else {
         const lines = intakeText(intake);
-        rt.live.handle.send(
-          lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
-          imagesOf(intake.files, intake.spent),
-        );
-        told(intake.files, intake.missized);
+        const { images, ids } = imagesOf(intake.files, intake.spent);
+        rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
+        told(shapeId, intake.files, intake.missized, ids, false);
       }
     } catch (error) {
       // The turn never reached Claude, so what was to go ahead of it waits for the next one; its

@@ -346,6 +346,37 @@ describe('a large dropped image', () => {
     expect(spec.prompt).not.toMatch(/tiny\.png\) — too large/);
   });
 
+  it('does not spend the total on images that went as paths because the message was full', async () => {
+    // Ten 1.9 MiB images: three fit a message, seven go as paths and are never resent.
+    for (let i = 0; i < 10; i += 1) drop(`shot${String(i)}.png`, wholePng(1.9 * MB));
+    const first = await nextTurn('Ten');
+    expect(first.images).toHaveLength(3);
+    // Only the 5.7 MiB that went inline counts: three more 1.9 MiB images still go inline.
+    for (let i = 0; i < 3; i += 1) drop(`next${String(i)}.png`, wholePng(1.9 * MB));
+    const second = await nextTurn('Three more');
+    expect(second.images).toHaveLength(3);
+    expect(second.message).not.toMatch(/too large to show/);
+  });
+
+  it('counts only the new session’s inline images after a digest start', async () => {
+    await spendTheTotal();
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+    f.service.send(shapeId(), 'Full');
+    await f.service.settled(shapeId());
+    // The fresh session's first turn, then a second that is resumed within it.
+    drop('first.png', wholePng(2 * MB));
+    const first = await nextTurn('First');
+    expect(
+      must(f.adapter.shapeSessions[1], 'a fresh session').spec.resumeProviderSessionId,
+    ).toBeNull();
+    expect(first.images).toHaveLength(1);
+    for (let i = 0; i < 3; i += 1) drop(`later${String(i)}.png`, wholePng(2 * MB));
+    const later = await nextTurn('Later');
+    // 2 MiB sent in this session so far: the nine of the old session are not carried.
+    expect(later.images).toHaveLength(3);
+    expect(later.message).not.toMatch(/too large to show/);
+  });
+
   // see_screen answers a picture in a tool result, which a resumed session resends like any image block.
   describe('beside the pictures see_screen takes', () => {
     const window = { screen: ScreenName.Board, width: 1200, height: 900 } as const;
