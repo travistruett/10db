@@ -77,6 +77,19 @@ describe('failureLine', () => {
       line: 'The plan review step rejected the work with no fix attempts left. Retry sends the work back to the plan step with the plan review findings, and the plan review runs after it.',
     },
     {
+      kind: 'install_broken',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The copy’s installed packages are broken, so the checks could not start. Nothing in the task’s code was at fault. Retry installs the packages again, then runs the build step again.',
+    },
+    {
+      // No trustworthy pnpm: a Retry meets the same refusal and installs nothing, so the line says to fix pnpm first.
+      kind: 'no_pnpm',
+      steps: [stepDto({ status: 'failed' })],
+      stepIndex: 0,
+      line: 'The copy’s installed packages are broken and 10db found no trustworthy pnpm to install them, so the checks could not start. Nothing in the task’s code was at fault. Fix pnpm on the login shell’s PATH before you Retry: until then a Retry meets the same refusal. If you change PATH, restart 10db so it reads the new one.',
+    },
+    {
       kind: null,
       steps: [stepDto({ status: 'failed' })],
       stepIndex: 0,

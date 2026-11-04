@@ -2508,10 +2508,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // The copy's packages do not resolve what its lockfile names: no gate ran, and the task's code did
     // not fail. The task stops with a card that says the install is broken, and no attempt is counted
-    // (a fix session could not repair it: 10db installs, and already did).
+    // (a fix session could not repair it: 10db installs, and already did). With no trustworthy pnpm
+    // no install ran and a Retry meets the same refusal, so that has its own kind for the failure line.
     if (before.update?.kind === 'install_broken' && ctl.stopReason !== 'shutdown') {
       fail(id, ctl.fence, {
-        kind: WorkstreamFailure.InstallBroken,
+        kind:
+          before.update.noPnpm === true
+            ? WorkstreamFailure.NoPnpm
+            : WorkstreamFailure.InstallBroken,
         reason: before.update.note,
       });
       return;

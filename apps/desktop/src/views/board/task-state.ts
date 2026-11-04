@@ -72,11 +72,17 @@ function whatHappened(kind: string | null, step: string | null): string {
       return `The ${step ? `${step} step` : 'review'} rejected the work with no fix attempts left.`;
     case WorkstreamFailure.InstallBroken:
       return 'The copy’s installed packages are broken, so the checks could not start. Nothing in the task’s code was at fault.';
+    case WorkstreamFailure.NoPnpm:
+      return 'The copy’s installed packages are broken and 10db found no trustworthy pnpm to install them, so the checks could not start. Nothing in the task’s code was at fault.';
     case null:
     default:
       return `The ${step ? `${step} step` : 'run'} failed.`;
   }
 }
+
+/** What to do before a Retry when no trustworthy pnpm was found: a Retry would meet the same refusal. */
+const FIX_PNPM_LINE =
+  'Fix pnpm on the login shell’s PATH before you Retry: until then a Retry meets the same refusal. If you change PATH, restart 10db so it reads the new one.';
 
 /**
  * What Retry will do, read from the same rules `retryWorkstream` follows: after a reviewer's rejection
@@ -90,6 +96,8 @@ function whatRetryDoes(
   step: string | null,
   notice: Notice | null,
 ): string {
+  // The packages can't be installed until pnpm is fixed, whatever step the Retry would run.
+  if (kind === WorkstreamFailure.NoPnpm) return FIX_PNPM_LINE;
   const target = retryTargetAfterRejection(steps, stepIndex);
   const rework = target === null ? undefined : steps[target];
   if (step && rework)

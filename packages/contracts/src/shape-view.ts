@@ -126,9 +126,11 @@ export const ShapeTurnDto = z.object({
   rehearsing: z.boolean(),
   /**
    * The next turn (a message, a Propose or a rehearsal) is held back by a waiting update's drain:
-   * nothing of it has started. If the update installs, 10db quits and the turn never runs (the
-   * builder is told to send it or press the button again); if the drain ends without an install
-   * (failed or cancelled), the turn runs. `running` is false and `queued` counts it.
+   * nothing of it has started. The split is whether 10db quits, not whether the update installs:
+   * once the app quits for the install the turn never runs (the builder is told to send it or press
+   * the button again), even when a later step (backup, zip, ditto) fails and nothing installs; if
+   * the drain ends before the quit (failed or cancelled), the turn runs. `running` is false and
+   * `queued` counts it.
    */
   waitingForUpdate: z.boolean(),
 });

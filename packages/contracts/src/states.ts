@@ -356,6 +356,11 @@ export const WorkstreamFailure = {
    * gate ran, and no attempt of the task's code was counted.
    */
   InstallBroken: 'install_broken',
+  /**
+   * As `InstallBroken`, but 10db found no trustworthy pnpm, so it ran no install and a Retry meets the
+   * same refusal until the builder fixes pnpm.
+   */
+  NoPnpm: 'no_pnpm',
 } as const;
 export type WorkstreamFailure = ValueOf<typeof WorkstreamFailure>;
 
