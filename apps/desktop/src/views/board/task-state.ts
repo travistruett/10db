@@ -1,6 +1,7 @@
 import {
   BatchState,
   FIX_ATTEMPT_LIMIT,
+  INSTALL_REPAIRED_NOTICE_KEY,
   LEFT_OUT_NOTICE_KEY,
   PARKED_NOTICE_KEY,
   PullRequestChecks,
@@ -319,6 +320,23 @@ export function taskNotices(
     ...(workstream.notice ? [workstream.notice] : []),
     ...(batch && batchStands(batch) ? batch.notices : []),
   ];
+}
+
+/**
+ * What a task's drawer still says of its batch after `taskNotices` stops: that an install was
+ * repaired, and when. That is history, not a wait, so it stays after the run failed or the batch
+ * closed, was abandoned or had its pull request merged. Empty where `taskNotices` already lists it.
+ * The card's state line does not use it.
+ */
+export function taskHistory(
+  workstream: WorkstreamDto | undefined,
+  batch: BatchDto | undefined,
+): Notice[] {
+  if (!workstream || !batch) return [];
+  const shown = taskNotices(workstream, batch);
+  return batch.notices.filter(
+    (n) => n.key === INSTALL_REPAIRED_NOTICE_KEY && !shown.some((s) => s.key === n.key),
+  );
 }
 
 /** The colors a notice's warning turns orange: the ones that say nothing needs the builder yet. */

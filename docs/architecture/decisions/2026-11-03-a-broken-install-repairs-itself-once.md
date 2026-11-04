@@ -30,7 +30,10 @@
   over happened.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. The next
-  repair replaces it with its own time. The time is the delivery context's clock.
+  repair replaces it with its own time. The time is the delivery context's clock. The notice is history, not a
+  wait: the desktop's `taskHistory` (`task-state.ts`) keeps listing it in the drawer after the run failed or
+  the batch closed, was abandoned or had its pull request merged, when `taskNotices` drops the batch's notices.
+  The card's state line does not show it then.
 
 ## Why
 
