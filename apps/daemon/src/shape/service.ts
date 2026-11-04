@@ -109,7 +109,7 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import type { ScreenService } from '../screens';
+import { inlineBytesSpent, type ScreenService } from '../screens';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateLines } from './converted-state';
@@ -241,6 +241,11 @@ export interface ShapeService {
   readonly toolsFor: ShapeToolsFor;
   /** Resolves when no turn is running or queued. */
   settled(shapeId: ShapeId): Promise<void>;
+  /**
+   * How many conversations have a turn running or queued: Claude is answering the builder, and a
+   * quit now would cut the answer off. A conversation counts once, however many turns it has queued.
+   */
+  turnsInProgress(): number;
   /** Stops every session. */
   close(): Promise<void>;
 }
@@ -274,6 +279,8 @@ interface Turn {
 interface Intake {
   readonly notes: readonly string[];
   readonly files: readonly ShapeFileRow[];
+  /** Inline image bytes the conversation's earlier turns spent, which a resumed session resends. */
+  readonly spent: number;
 }
 
 type TurnEnd =
@@ -512,7 +519,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   /** The lines that tell Claude what the builder did since it last heard: edits, then files. */
   const intakeText = (intake: Intake, shown: readonly ShapeFileRow[] = intake.files): string => {
     // An image too large to send as a block is named as a path, with the way to read it.
-    const byPath = pathImageIds(shown, intake.files);
+    const byPath = pathImageIds(shown, intake.files, intake.spent);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
       ...shown.map(
@@ -523,8 +530,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[]): ShapeImage[] => {
-    const inline = inlineImageIds(files);
+  const imagesOf = (files: readonly ShapeFileRow[], spent: number): ShapeImage[] => {
+    const inline = inlineImageIds(files, spent);
     return files.flatMap((file) => {
       if (!inline.has(file.id)) return [];
       try {
@@ -545,6 +552,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
     notes: rt.notes.splice(0),
     files: listUntoldShapeFiles(state.db, shapeId),
+    spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
   /** Records that the turn just sent carried these files. */
@@ -602,11 +610,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         );
       files = listShapeFiles(state.db, shapeId);
     }
-    const lines = intakeText(intake, files);
+    // A fresh session resends no earlier block, so only a resumed one carries what the conversation spent.
+    const budgeted: Intake = resumeId === null ? { ...intake, spent: 0 } : intake;
+    const lines = intakeText(budgeted, files);
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
-    const images = imagesOf(intake.files);
+    const images = imagesOf(intake.files, budgeted.spent);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -737,7 +747,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         const lines = intakeText(intake);
         rt.live.handle.send(
           lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
-          imagesOf(intake.files),
+          imagesOf(intake.files, intake.spent),
         );
         told(intake.files);
       }
@@ -1138,6 +1148,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     toolsFor,
     settled,
+
+    turnsInProgress() {
+      let count = 0;
+      for (const rt of runtimes.values())
+        if (rt.current !== null || rt.queue.length > 0) count += 1;
+      return count;
+    },
 
     async close() {
       for (const rt of runtimes.values()) {

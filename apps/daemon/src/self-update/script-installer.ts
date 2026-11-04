@@ -6,6 +6,7 @@ import { CommitSha } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock, type Timer } from '../clock';
 import type { Logger } from '../log';
+import { SELF_UPDATE_SWITCH } from './blocker';
 import type {
   ApplyResult,
   ScriptStatus,
@@ -61,11 +62,34 @@ export interface ScriptInstallerOptions {
   readonly logger: Logger;
   readonly clock?: Clock;
   readonly stageTimeoutMs?: number;
+  /**
+   * The processes that are the running 10db, which the install waits to see gone before it touches
+   * /Applications: this daemon, and the window that supervises it. Default: this process, and its
+   * parent when the shell holds its stdin (`TENDB_PARENT_STDIN`). Handed over by pid as a second
+   * check beside the script's process listing, whose failure to see its own ancestors once let an
+   * install go on over the running app.
+   */
+  readonly quitPids?: () => readonly number[];
+}
+
+/** The pids of this daemon and, when the app's window started it, of that window. */
+function ownQuitPids(): number[] {
+  return process.env['TENDB_PARENT_STDIN'] === '1' ? [process.pid, process.ppid] : [process.pid];
 }
 
 export interface ScriptInstaller {
-  /** Stages main's newest finished build unless it is the build of `running`, or of `skip` when given. */
-  stage(target: UpdateTarget, running: string, skip?: string | null): Promise<StageResult>;
+  /**
+   * Stages main's newest finished build unless it is the build of `running`, or of `skip` when given.
+   * When it is the build already staged (`keep`), nothing is fetched, the folder stays, and the
+   * result names it. A failure leaves that folder as well, unless the stage had begun replacing it
+   * or was killed on purpose, and says so with `kept`.
+   */
+  stage(
+    target: UpdateTarget,
+    running: string,
+    skip?: string | null,
+    keep?: string | null,
+  ): Promise<StageResult>;
   apply(staged: StagedBuild): Promise<ApplyResult>;
   /**
    * For shutdown: kills a stage under way, with the gh it started, removes its folders, and starts no
@@ -151,11 +175,37 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     }
   };
 
-  function runStage(target: UpdateTarget, running: string, skip: string | null): StageRun {
+  /** The commit the stage folder holds a build of, as the staging script wrote it; null with none. */
+  const stagedCommit = (): string | null => {
+    try {
+      const parsed = CommitSha.safeParse(readFileSync(join(stageDir, 'commit'), 'utf8').trim());
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  };
+
+  function runStage(
+    target: UpdateTarget,
+    running: string,
+    skip: string | null,
+    keep: string | null,
+  ): StageRun {
     const timeout = options.stageTimeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
     let killGroup = (): void => undefined;
     /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
     let cancelled = false;
+    /**
+     * Marks a failure that left the kept build: the script removes the commit first and writes it
+     * last, so a folder that still names `keep` is that build, whole. A stage killed on purpose
+     * keeps nothing, as the switch and a quit both forget the staged build.
+     */
+    const failedKeeping = (
+      failure: Extract<StageResult, { ok: false }>,
+    ): Extract<StageResult, { ok: false }> =>
+      keep !== null && !cancelled && !stopped && stagedCommit() === keep
+        ? { ...failure, kept: true }
+        : failure;
     const ended = new Promise<StageResult>((resolve) => {
       let child: ChildProcessByStdio<null, null, Readable>;
       try {
@@ -170,6 +220,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
             '--running',
             running,
             ...(skip === null ? [] : ['--skip', skip]),
+            ...(keep === null ? [] : ['--have', keep]),
             BRANCH,
           ],
           {
@@ -181,12 +232,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           },
         );
       } catch (error) {
-        tidy(false);
-        resolve({
+        const failure = failedKeeping({
           ok: false,
           step: 'stage',
           message: `Could not run the install script: ${messageOf(error)}`,
         });
+        tidy(failure.kept === true);
+        resolve(failure);
         return;
       }
       let stderr = '';
@@ -206,11 +258,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
         stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_KEPT);
       });
       /** Whatever ended the script, nothing of it is left running or on disk but its status. */
-      const finish = (result: StageResult): void => {
+      const finish = (ended: StageResult): void => {
         deadline.cancel();
         killGroup();
-        // Only a staged build keeps its folder; "current" and "skipped" fetched nothing.
-        tidy(result.ok && !result.current);
+        const result = ended.ok ? ended : failedKeeping(ended);
+        // Only a build keeps its folder: one just staged, or the kept one a failure left alone.
+        // "current" and "skipped" mean no build is wanted, the kept one included.
+        tidy(result.ok ? !result.current : result.kept === true);
         resolve(result);
       };
       child.once('error', (error) => {
@@ -227,7 +281,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
             step: 'stage',
             message: stopped
               ? 'The install script was stopped: 10db quit.'
-              : 'The install script was stopped: Update by itself was turned off.',
+              : `The install script was stopped: ${SELF_UPDATE_SWITCH} was turned off.`,
           });
           return;
         }
@@ -284,7 +338,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
   const rollbackMarker = join(options.workDir, ROLLBACK_MARKER);
 
   return {
-    stage(target, running, skip = null) {
+    stage(target, running, skip = null, keep = null) {
       if (stopped) {
         return Promise.resolve({
           ok: false,
@@ -292,18 +346,23 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           message: '10db is quitting, so the build was not fetched.',
         });
       }
+      // The staged folder is only kept when it holds the very build it is said to.
+      const kept = keep !== null && stagedCommit() === keep ? keep : null;
       try {
         rmSync(stageStatus, { force: true });
-        removeStageFiles(false);
+        removeStageFiles(kept !== null);
         mkdirSync(scratchDir, { recursive: true });
       } catch (error) {
-        return Promise.resolve({
+        const failure: Extract<StageResult, { ok: false }> = {
           ok: false,
           step: 'stage',
           message: `Could not make a place for the build in ${options.workDir}: ${messageOf(error)}`,
-        });
+        };
+        return Promise.resolve(
+          kept !== null && stagedCommit() === kept ? { ...failure, kept: true } : failure,
+        );
       }
-      const run = runStage(target, running, skip);
+      const run = runStage(target, running, skip, kept);
       current = run;
       void run.ended.then(() => {
         if (current === run) current = null;
@@ -364,6 +423,9 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
               staged.dir,
               '--quit-first',
               '--relaunch',
+              ...(options.quitPids ?? ownQuitPids)()
+                .filter((pid) => Number.isInteger(pid) && pid > 1)
+                .flatMap((pid) => ['--quit-pid', String(pid)]),
               '--status-file',
               applyStatus,
             ],

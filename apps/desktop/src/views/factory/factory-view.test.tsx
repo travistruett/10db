@@ -1282,6 +1282,7 @@ function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusD
     waitingSince: '2026-11-03T12:00:00.000Z',
     draining: false,
     drainingSince: null,
+    blocker: null,
     ...over,
   });
 }

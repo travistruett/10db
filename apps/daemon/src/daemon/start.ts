@@ -155,6 +155,7 @@ import {
   githubMainIsAhead,
   holdBoth,
   midSessionWork,
+  cannotUpdate,
   selfUpdateSetting,
   selfUpdateWaitMinutes,
   setSelfUpdateChoice,
@@ -1134,7 +1135,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         cardProject: () => listProjects(state.db)[0]?.id ?? null,
         headOf: opts.selfUpdate?.headOf ?? githubHeadOfMain(ghExec, ghCall),
         isAhead: opts.selfUpdate?.isAhead ?? githubMainIsAhead(ghExec, ghCall),
-        stage: (target, running, skip) => installer.stage(target, running, skip),
+        stage: (target, running, skip, keep) => installer.stage(target, running, skip, keep),
         stopStage: () => installer.stop(),
         cancelStage: () => installer.cancel(),
         apply: (staged) => installer.apply(staged),
@@ -1143,8 +1144,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         // A queued ship, checkout return or cleanup is a delivery job before it is a row.
         // A lane or gate parked by the drain has begun nothing: it is not cut off by the quit (the
         // stop leaves its saved action for recovery), and counting it would keep the drain going for ever.
+        // A shaping conversation with a turn under way counts: it is no workstream, and the quit
+        // would cut off the answer in front of the builder. The drain does not park it.
         midSession: () =>
-          Math.max(0, midSessionWork(state.db, deliveryJobs) - updateDrain.parked()),
+          Math.max(0, midSessionWork(state.db, deliveryJobs, shape) - updateDrain.parked()),
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {
           begin: (since) => {
@@ -1170,10 +1173,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
     }
   }
+  // What this install can never do, known now; a test's own installer needs no gh.
+  const cannotUpdateAtAll = cannotUpdate(
+    build,
+    ghBin !== null || opts.selfUpdate?.installer != null,
+  );
   const selfUpdateServices: SelfUpdateServices = {
     selfUpdateStatus: () => {
       const progress = selfUpdate?.status();
       return {
+        blocker: cannotUpdateAtAll ?? progress?.problem ?? null,
         ...selfUpdateSetting(state.db),
         runningCommit: build?.commit ?? null,
         availableCommit: progress?.availableCommit ?? null,

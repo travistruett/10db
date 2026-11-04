@@ -65,8 +65,8 @@ conversation. The session gets no browser, no click and no command.
   in 15 s, the screen failed to load (a 401 or 5xx on its data), the view crashed, the capture failed or came out
   one flat colour, the picture is not a whole PNG or JPEG by its bytes (a PNG to its IEND, a JPEG to its EOI), is
   not the size it says, is larger than the window asked for, or is too large to keep; the task is not in this
-  project; the conversation already holds 12 screens. Each writes `see_screen · refused · <reason>` as a dimmed
-  line.
+  project; the conversation already holds 12 screens, or has no room left in the picture total it shares with
+  dropped images (spec §5.4). Each writes `see_screen · refused · <reason>` as a dimmed line.
 - **A hidden window refuses at once, from the window.** Closing 10db's window only hides it (spec §3), and a
   hidden window keeps long-polling, so the daemon cannot tell it from a visible one. A hidden WebKit page runs no
   animation frame, which `html-to-image` waits on (from WebKit's behaviour, not observed here), so a capture there

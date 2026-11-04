@@ -40,8 +40,12 @@ export function SelfUpdateSection() {
     data === undefined
       ? null
       : data.runningCommit === null
-        ? 'This app is running from source, so it never updates itself.'
+        ? // The blocker says it already, under the switch.
+          data.blocker === null
+          ? 'This app is running from source, so it never updates itself.'
+          : null
         : `Running ${short(data.runningCommit)}.`;
+  const blocker = data?.blocker ?? null;
   const progress = data === undefined ? null : updateProgressText(data);
   const canInstallNow =
     data !== undefined && data.enabled && data.availableCommit !== null && !data.draining;
@@ -60,6 +64,18 @@ export function SelfUpdateSection() {
           }}
         />
       </SettingRow>
+      {blocker !== null ? (
+        <Text
+          size="sm"
+          c="red"
+          px="md"
+          py="sm"
+          role="alert"
+          aria-label="Why 10db will not update itself"
+        >
+          {blocker.message}
+        </Text>
+      ) : null}
       {data !== undefined ? (
         <SettingRow
           label="Pause lanes for a waiting update"

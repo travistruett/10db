@@ -1,9 +1,10 @@
-import type { ProjectId } from '@10db/contracts';
+import type { ProjectId, SelfUpdateBlockerDto } from '@10db/contracts';
 import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import { SELF_UPDATE_SWITCH } from './blocker';
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -34,7 +35,13 @@ export type StageResult =
    * skip: nothing was fetched.
    */
   | { readonly ok: true; readonly current: true; readonly commit: string }
-  | { readonly ok: false; readonly step: string; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly step: string;
+      readonly message: string;
+      /** The build the stage was told to keep is still whole in its folder. */
+      readonly kept?: true;
+    };
 
 export type ApplyResult =
   | {
@@ -84,9 +91,17 @@ export interface SelfUpdateDeps {
   isAhead(repo: string, base: string, head: string): Promise<boolean>;
   /**
    * Fetches and checks the newest finished build of main while the app goes on running, unless that
-   * is the build of `running` or of `skip` (the commit the builder rolled back from).
+   * is the build of `running` or of `skip` (the commit the builder rolled back from). When it is
+   * the build of `keep` (the one already staged), nothing is fetched and the staged folder stays as
+   * it is; the result then names that same dir and commit. A stage that fails leaves that folder
+   * too, unless it had begun replacing it, and says so with `kept`.
    */
-  stage(target: UpdateTarget, running: string, skip: string | null): Promise<StageResult>;
+  stage(
+    target: UpdateTarget,
+    running: string,
+    skip: string | null,
+    keep: string | null,
+  ): Promise<StageResult>;
   /**
    * Kills a stage under way, with everything it started, and removes its files; settles once it is
    * gone. Leaves an install under way alone.
@@ -183,6 +198,11 @@ export interface SelfUpdateProgress {
   readonly draining: boolean;
   /** When new work stopped starting; null while it is not held. */
   readonly drainingSince: Date | null;
+  /**
+   * Why a switched-on app is not updating right now: GitHub can't be asked, or the update to main's
+   * head failed. Null while the switch is off and while nothing is wrong.
+   */
+  readonly problem: SelfUpdateBlockerDto | null;
 }
 
 const STEP_LABELS: Readonly<Record<string, string>> = {
@@ -202,6 +222,9 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
   relaunch: 'starting 10db again',
   unknown: 'installing the new build',
 };
+
+/** The steps of a stage that come before it knows which build is newest. */
+const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
 
 const short = (commit: string): string => commit.slice(0, 12);
 const messageOf = (error: unknown): string =>
@@ -225,7 +248,7 @@ function failureCard(input: {
     body: [
       `10db tried to install the newest finished build of main (${short(input.commit)}) and failed while ${label}. The app is still running ${short(input.running)}; if it was replaced, make rollback-app puts the previous one back.`,
       input.message,
-      'It will not try again by itself until main has a newer commit. To try now, turn Update by itself off and on in Settings, or run make install-app.',
+      `It will not try again by itself until main has a newer commit. To try now, turn ${SELF_UPDATE_SWITCH} off and on in Settings, or run make install-app.`,
     ].join('\n\n'),
     foldKey: `self-update:${input.commit}`,
     refresh: true,
@@ -307,11 +330,21 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     return typeof stored === 'string' ? stored : null;
   };
 
+  /** The failed update Settings tells the builder about, for the head of main it was found for. */
+  let failure: { readonly head: string; readonly message: string } | null = null;
+  /** The last check could not ask GitHub. */
+  let unreachable = false;
+
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
       setAppSetting(ctx, SELF_UPDATE_FAILED_KEY, attempt.head);
     });
     logger.error({ ...attempt, step, message }, 'could not update the app');
+    // Whatever the Inbox does, Settings says it: with no project there is no card to carry it.
+    failure = {
+      head: attempt.head,
+      message: `The update to ${short(attempt.commit)} failed while ${STEP_LABELS[step] ?? step}: ${message.trim().replace(/\.$/, '')}. It will not try again by itself until main has a newer commit; turn ${SELF_UPDATE_SWITCH} off and on to try now.`,
+    };
     clearWaiting();
     const projectId = deps.cardProject();
     // A card needs a project to sit under; with none registered the log is all there is to say.
@@ -337,6 +370,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (isStopped()) return TickResult.Working;
     if (head === runningCommit) {
       available = null;
+      failure = null;
       clearWaiting();
       return TickResult.Current;
     }
@@ -353,6 +387,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (isStopped()) return TickResult.Working;
     if (!ahead) {
       available = null;
+      failure = null;
       clearWaiting();
       // Once per head of main, so the log says why this build never updates by itself.
       if (notAheadOf !== head) {
@@ -365,7 +400,14 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.NotAhead;
     }
     available = head;
+    // A failure is about one head of main: a newer head is a fresh start.
+    if (failure !== null && failure.head !== head) failure = null;
     if (failedHead() === head) {
+      // After a restart the reason is gone with the process; the failed head is not.
+      failure ??= {
+        head,
+        message: `An earlier update to ${short(head)} failed. It will not try again by itself until main has a newer commit; turn ${SELF_UPDATE_SWITCH} off and on to try now.`,
+      };
       clearWaiting();
       return TickResult.FailedBefore;
     }
@@ -375,23 +417,47 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.RolledBack;
     }
 
-    if (staged?.head !== head) {
-      staged = null;
+    // The staged build is the newest finished one as of when it was fetched, not tied to the head
+    // it was found for. Main's head moving asks again which build is newest, and the stage fetches
+    // nothing when it is the staged one. A staged build that is not the head's own may also have a
+    // newer one since: once nothing is mid-session it is about to install, so it is asked again
+    // first: never an older build than main's newest, and one quit instead of two.
+    const olderThanHead = staged !== null && staged.commit !== head;
+    if (staged?.head !== head || (olderThanHead && deps.midSession() === 0)) {
+      const keep = staged?.commit ?? null;
       // The build the builder rolled back from is not fetched again, so a check while main's head
       // is still building costs a look at GitHub, not a download.
       const skip = rolledBackFrom();
-      const result = await deps.stage(target, runningCommit, skip);
+      const result = await deps.stage(target, runningCommit, skip, keep);
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
       // Turned off while the build was fetched: a stage it killed is no failure, and nothing installs.
       if (!deps.enabled()) {
+        staged = null;
         clearWaiting();
         return TickResult.Off;
       }
       if (!result.ok) {
+        if (result.kept === true && staged !== null) {
+          // The look itself failed, so this is GitHub being away, however far the check got.
+          if (LOOKING_STEPS.has(result.step)) {
+            logger.warn(
+              { step: result.step, message: result.message },
+              'could not look for a newer build than the staged one',
+            );
+            return withoutGitHub(runningCommit);
+          }
+          // A newer build exists and did not arrive. The staged one stays for the next try, as the
+          // failed head's: it does not install, not even with GitHub away.
+          staged = { ...staged, head };
+        } else {
+          staged = null;
+        }
         fail(runningCommit, { head, commit: head }, result.step, result.message);
         return TickResult.Failed;
       }
+      // The folder now holds what the stage reports, whatever it held before.
+      staged = null;
       // The newest finished build is not the head's when the head's is still building. It is the
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
       // when it is the build the builder rolled back from; the next check looks again.
@@ -401,10 +467,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           ? TickResult.RolledBack
           : TickResult.NoNewerBuild;
       }
-      // Never an older build: the one that was fetched must be ahead of the running commit too.
-      let newer: boolean;
+      // Never an older build: the one that was fetched must be ahead of the running commit too. The
+      // staged one was checked when it was fetched, and the running commit has not changed.
+      let newer = keep !== null && result.commit === keep;
       try {
-        newer = await deps.isAhead(target.repo, runningCommit, result.commit);
+        newer ||= await deps.isAhead(target.repo, runningCommit, result.commit);
       } catch (error) {
         if (isStopped()) return TickResult.Working;
         logger.warn({ err: error }, 'could not ask GitHub how the staged build compares');
@@ -431,8 +498,9 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
 
   /**
    * GitHub can't be asked. A staged build was checked when it was fetched and installs with no
-   * network, so it goes on waiting, draining or installing, unless its install already failed. With
-   * none the drain has nothing to install and would hold lanes for as long as GitHub stays away.
+   * network, so it goes on waiting, draining or installing, unless its install, or the fetch of a
+   * newer build, already failed. With none the drain has nothing to install and would hold lanes for
+   * as long as GitHub stays away.
    */
   async function withoutGitHub(runningCommit: string): Promise<TickResult> {
     if (staged === null || staged.head === failedHead()) {
@@ -597,10 +665,26 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (working || applying) return TickResult.Working;
     working = true;
     try {
-      return await check(deps.runningCommit);
+      const result = await check(deps.runningCommit);
+      // Working means the check ended early because the daemon is stopping: it learned nothing.
+      if (result !== TickResult.Working) unreachable = result === TickResult.Unreachable;
+      return result;
     } finally {
       working = false;
     }
+  }
+
+  /** A failed update is the more useful thing to say: GitHub answering again does not undo it. */
+  function problem(): SelfUpdateBlockerDto | null {
+    if (failure !== null) return { kind: 'failed', message: failure.message };
+    if (unreachable) {
+      return {
+        kind: 'unreachable',
+        message:
+          'gh could not reach GitHub, so 10db cannot see new builds. It is signed out or offline: check gh auth status, and 10db tries again every minute.',
+      };
+    }
+    return null;
   }
 
   function schedule(): void {
@@ -658,6 +742,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       await deps.stopStage();
     },
     retry() {
+      failure = null;
       state.write((ctx) => {
         deleteAppSetting(ctx, SELF_UPDATE_FAILED_KEY);
         deleteAppSetting(ctx, SELF_UPDATE_ROLLED_BACK_KEY);
@@ -685,6 +770,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       waitingSince,
       draining: drainingSince !== null,
       drainingSince,
+      problem: !deps.enabled() ? null : problem(),
     }),
   };
 }

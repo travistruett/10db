@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
+import { SELF_UPDATE_SWITCH } from './blocker';
 import { createScriptInstaller, type ScriptInstaller } from './script-installer';
 
 const COMMIT = 'd'.repeat(40);
@@ -127,6 +128,90 @@ describe('stage', () => {
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
   });
 
+  it('keeps the staged build, and fetches nothing, when it is still the newest finished one', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${COMMIT}\n`);
+    writeFileSync(join(workDir, 'stage', 'build.dmg'), 'kept');
+    fakeScript(
+      `echo '{"ok":true,"mode":"stage","step":"have","message":"","commit":"${COMMIT}"}' > "$status"`,
+    );
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+      ok: true,
+      current: false,
+      dir: join(workDir, 'stage'),
+      commit: COMMIT,
+    });
+    expect(invocations()[0]).toContain(` --running ${RUNNING} --have ${COMMIT} main`);
+    expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+  });
+
+  it('does not keep a stage folder that is not the build it was told to keep', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${RUNNING}\n`);
+    writeFileSync(join(workDir, 'stage', 'old.dmg'), 'old');
+    fakeScript(stagedOk());
+    await installer.stage(TARGET, RUNNING, null, COMMIT);
+    expect(invocations()[0]).not.toContain('--have');
+    expect(existsSync(join(workDir, 'stage', 'old.dmg'))).toBe(false);
+  });
+
+  /** A build already staged, as an earlier stage left it. */
+  function stagedBuild(): void {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${COMMIT}\n`);
+    writeFileSync(join(workDir, 'stage', 'build.dmg'), 'kept');
+  }
+  const failedAt = (step: string) =>
+    `echo '{"ok":false,"mode":"stage","step":"${step}","message":"gh: 502","commit":""}' > "$status"\nexit 1`;
+
+  it('removes the kept build when the stage finds the running build', async () => {
+    stagedBuild();
+    fakeScript(
+      `echo '{"ok":true,"mode":"stage","step":"current","message":"","commit":"${RUNNING}"}' > "$status"`,
+    );
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+      ok: true,
+      current: true,
+      commit: RUNNING,
+    });
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
+  });
+
+  it.each(['find-build', 'download'])(
+    'leaves the kept build in its folder, and says so, when the stage fails at %s',
+    async (step) => {
+      stagedBuild();
+      fakeScript(failedAt(step));
+      expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+        ok: false,
+        step,
+        message: 'gh: 502',
+        kept: true,
+      });
+      expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+      expect(existsSync(join(workDir, 'tmp'))).toBe(false);
+    },
+  );
+
+  it('leaves the kept build when the script could not even start', async () => {
+    stagedBuild();
+    // No script at all: bash exits with no status, the way a broken bundle would.
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toMatchObject({
+      ok: false,
+      step: 'stage',
+      kept: true,
+    });
+    expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+  });
+
+  it('keeps nothing when the stage failed after it began replacing the kept build', async () => {
+    stagedBuild();
+    fakeScript(`rm -f "$stage/commit"\n${failedAt('stage')}`);
+    const result = await installer.stage(TARGET, RUNNING, null, COMMIT);
+    expect(result).toEqual({ ok: false, step: 'stage', message: 'gh: 502' });
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
+  });
+
   it('hands the data directory to the script, so it backs up the daemon’s own database', async () => {
     fakeScript(stagedOk());
     await installer.stage(TARGET, RUNNING);
@@ -241,7 +326,20 @@ describe('apply', () => {
       return existsSync(path) && readFileSync(path, 'utf8').trim();
     });
     expect(args).toBe(
-      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --status-file ${join(workDir, 'status.json')}`,
+      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid ${String(process.pid)} --status-file ${join(workDir, 'status.json')}`,
+    );
+  });
+
+  it('names every process that must be gone before the install, so the script waits for those pids', async () => {
+    installer = installerWith({ quitPids: () => [4242, 4243] });
+    stagedScript(`echo "$*" > "${workDir}/applied"`);
+    expect(await installer.apply(staged())).toMatchObject({ ok: true });
+    const args = await waitFor(() => {
+      const path = join(workDir, 'applied');
+      return existsSync(path) && readFileSync(path, 'utf8').trim();
+    });
+    expect(args).toBe(
+      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid 4242 --quit-pid 4243 --status-file ${join(workDir, 'status.json')}`,
     );
   });
 
@@ -346,12 +444,29 @@ describe('cancel', () => {
     });
     await installer.cancel();
     await waitFor(() => !alive(grandchild));
-    expect(await stage).toMatchObject({ ok: false, step: 'stage' });
+    expect(await stage).toMatchObject({
+      ok: false,
+      step: 'stage',
+      message: `The install script was stopped: ${SELF_UPDATE_SWITCH} was turned off.`,
+    });
     expect(existsSync(join(workDir, 'tmp'))).toBe(false);
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
 
     fakeScript(stagedOk());
     expect(await installer.stage(TARGET, RUNNING)).toMatchObject({ ok: true, commit: COMMIT });
+  });
+
+  it('removes a kept build too: the switch forgets it', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${COMMIT}\n`);
+    fakeScript(`touch "${workDir}/started"\nexec sleep 30`);
+    const stage = installer.stage(TARGET, RUNNING, null, COMMIT);
+    await waitFor(() => existsSync(join(workDir, 'started')));
+    await installer.cancel();
+    const result = await stage;
+    expect(result).toMatchObject({ ok: false, step: 'stage' });
+    expect(result).not.toHaveProperty('kept');
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
   });
 
   it('settles at once when no stage is under way', async () => {
