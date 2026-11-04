@@ -660,6 +660,7 @@ describe('buildQueryOptions', () => {
     expect(preToolUse).toHaveBeenCalledWith({
       toolName: 'Write',
       input: { file_path: '/elsewhere/x' },
+      cwd: '/repo',
     });
     expect(output).toEqual({
       hookSpecificOutput: {
