@@ -686,8 +686,17 @@ describe('a shipped pull request that conflicts with its base', () => {
       const snapshot = (id: string, ...tables: string[]): string =>
         `${JSON.stringify({ id, prevId: 'p', tables })}\n`;
 
-      /** Main holds 0000_init and 0001_theirs; the shipped batch's 0001_mine collides with it. */
-      async function renumbering(gate: string | null): Promise<BatchDto> {
+      const SCHEMAS = 'packages/contracts/generated';
+
+      /**
+       * Main holds 0000_init and 0001_theirs; the shipped batch's 0001_mine collides with it. With
+       * `otherDirectory` both also changed a generated directory the generators then leave as it is,
+       * a problem that loses no migration.
+       */
+      async function renumbering(
+        gate: string | null,
+        { otherDirectory = false } = {},
+      ): Promise<BatchDto> {
         h.commit(
           'packages/db/package.json',
           `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
@@ -695,12 +704,23 @@ describe('a shipped pull request that conflicts with its base', () => {
         h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
         h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
         h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
+        if (otherDirectory) {
+          h.commit(
+            'packages/contracts/package.json',
+            `${JSON.stringify({ name: '@10db/contracts', scripts: { generate: 'tsx generate.ts' } })}\n`,
+          );
+          h.commit(`${SCHEMAS}/a.schema.json`, '{"v":0}\n');
+        }
         h.git$('push', '-q', 'origin', 'main');
         const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
           keepWorktree: true,
         });
         await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'a', 'b'));
         await commitIn(batch, `${DB}/0001_mine.sql`, 'alter table a add b;\n');
+        if (otherDirectory) {
+          await commitIn(batch, `${SCHEMAS}/a.schema.json`, '{"v":"mine"}\n');
+          h.teammatePush('main', `${SCHEMAS}/a.schema.json`, '{"v":"theirs"}\n');
+        }
         h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
         h.teammatePush('main', `${DB}/0001_theirs.sql`, 'alter table a add c;\n');
         h.teammatePush('main', `${DB}/meta/0001_snapshot.json`, snapshot('theirs', 'a', 'c'));
@@ -757,6 +777,27 @@ describe('a shipped pull request that conflicts with its base', () => {
         const notice = h.only(now.notices.filter((n) => n.key === NOTICE_KEY.migrationsRenumbered));
         expect(notice.line).toContain('1 of this batch');
         expect(notice.body).toContain('0001_mine → 0002_mine');
+      });
+
+      it('lists what was pushed when another generated directory came back unchanged', async () => {
+        const batch = await renumbering(null, { otherDirectory: true });
+
+        const now = await catchUp(batch);
+
+        expect(h.origin$('ls-tree', '--name-only', batch.branch ?? '', `${DB}/`)).toContain(
+          '0002_mine.sql',
+        );
+        const notice = h.only(now.notices.filter((n) => n.key === NOTICE_KEY.migrationsRenumbered));
+        expect(notice.body).toContain('0001_mine → 0002_mine');
+      });
+
+      it('is left as it was when such a merge fails its check and is put back', async () => {
+        const batch = await renumbering('false', { otherDirectory: true });
+
+        await catchUp(batch);
+
+        expect(h.cards().some((c) => c.title.includes('gate failed'))).toBe(true);
+        expect(renumbered(batch)).toEqual([]);
       });
     });
 

@@ -740,24 +740,18 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       return outcome;
     }
     const { head, problem, renumbered } = outcome;
-    if (problem === null)
-      return {
+    // The merge stands, whatever else is said of it. A catch-up's may still be put back, though: its
+    // caller keeps the notice once it is pushed.
+    const stands = (other: string | null) =>
+      ({
         kind: 'done',
         head,
-        // A catch-up's merge may still be put back: its caller keeps the notice once it is pushed.
-        note: renumberedNote(batch, renumbered, !forPullRequest),
+        note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
         ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
-      };
+      }) as const;
+    if (problem === null) return stands(null);
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
-    if (lost === null)
-      return {
-        kind: 'done',
-        head,
-        note: joined(
-          renumberedNote(batch, renumbered, !forPullRequest),
-          unregenerated(batch, path, merged, problem),
-        ),
-      };
+    if (lost === null) return stands(unregenerated(batch, path, merged, problem));
     return {
       kind: 'done',
       head,
