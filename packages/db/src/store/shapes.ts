@@ -67,7 +67,9 @@ export function getShape(db: DbReader, id: ShapeId): ShapeDto {
 
 /**
  * The tokens a conversation has used so far (§4): input and output summed over every session it has
- * run, the same rows per-project usage reads. Cached tokens are a subset of the input, so not added.
+ * run, the same rows per-project usage reads. Cache reads are left out although they are not part of the
+ * input (the daemon stores them apart, so adding them would be valid): Settings usage and the goal digest
+ * leave them out too, and repeated cache reads across turns would swamp the number.
  */
 export function shapeTokens(db: DbReader, id: ShapeId): number {
   const row = db

@@ -10,6 +10,8 @@ export const SectionKey = {
   Landings: 'landings',
   Records: 'records',
   Questions: 'questions',
+  /** Rows Convert has made, of any kind: they are marked with this section instead of their own. */
+  Converted: 'converted',
   Earlier: 'earlier',
 } as const;
 export type SectionKey = (typeof SectionKey)[keyof typeof SectionKey];
@@ -119,6 +121,6 @@ export function summaryParts(groups: ProposedGroups): SummaryPart[] {
     (sum, rows) => sum + rows.filter(isConverted).length,
     0,
   );
-  add(converted, `${String(converted)} converted`, SectionKey.Goals);
+  add(converted, `${String(converted)} converted`, SectionKey.Converted);
   return parts;
 }

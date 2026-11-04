@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { kindLabel } from './proposal-text';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import type { RowReview } from './review-lines';
-import { SectionKey, type ProposedGroups } from './proposed-groups';
+import { isConverted, SectionKey, type ProposedGroups } from './proposed-groups';
 
 interface Block {
   readonly section: SectionKey;
@@ -51,7 +51,9 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
   const rows = blocksOf(groups).flatMap((block) =>
     block.rows.map((row, index) => ({
       row,
-      section: block.section,
+      // A converted row is marked apart, so "N converted" lands on it whichever kind it is and
+      // a kind's own count lands on a pending row.
+      section: isConverted(row) ? SectionKey.Converted : block.section,
       label: index === 0 ? kindLabel(row) : null,
       note: index === 0 ? block.note : undefined,
     })),

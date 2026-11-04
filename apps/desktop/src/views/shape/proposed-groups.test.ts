@@ -13,6 +13,11 @@ import { groupProposals, summaryParts } from './proposed-groups';
 
 const keys = (rows: readonly { readonly key: string }[]): string[] => rows.map((r) => r.key);
 
+const converted = {
+  state: 'accepted' as const,
+  converted: { goalId: null, taskIds: [], decisionId: null },
+};
+
 describe('groupProposals', () => {
   it('sorts rows into their sections, leaving superseded ones under Earlier and dropping dropped ones', () => {
     const groups = groupProposals([
@@ -93,5 +98,14 @@ describe('summaryParts', () => {
   it('points each count at its section', () => {
     const [part] = summaryParts(groupProposals([goalProposal('g')]));
     expect(part?.section).toBe('goals');
+  });
+
+  it.each([
+    ['loose tasks', [looseTaskProposal('a', converted), looseTaskProposal('b', converted)]],
+    ['a goal', [goalProposal('g', ['t'], converted)]],
+    ['a decision', [decisionProposal('d', converted)]],
+  ])('points the converted count at the converted rows, for %s', (_, rows) => {
+    const part = summaryParts(groupProposals(rows)).find((p) => p.text.endsWith('converted'));
+    expect(part?.section).toBe('converted');
   });
 });
