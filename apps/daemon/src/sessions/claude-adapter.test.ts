@@ -1290,6 +1290,127 @@ describe('createClaudeAdapter', () => {
       expect(signedIn.record.queries).toBe(1);
     });
 
+    describe('a claude that exits before it reports an account', () => {
+      // accountInfo() rejects and the message stream ends (cleanly or with an error) while the sign-in check
+      // is still running, so the event pump finishes first.
+      const exits = {
+        'ends cleanly': 'end',
+        'throws an error': { throws: 'Claude Code process exited with code 1' },
+      } as const;
+      /** A sign-in check that answers only after the event pump has had a turn to finish. */
+      const slowCheck = (state: SignInState) =>
+        vi.fn<SignInCheck>(async () => {
+          await new Promise((resolve) => setImmediate(resolve));
+          await new Promise((resolve) => setImmediate(resolve));
+          return state;
+        });
+      const exited = (then: NonNullable<Script['then']>): Script => {
+        // Built before the start that asks for it, so it is marked handled here.
+        const account = noAnswer.rejects();
+        account.catch(() => undefined);
+        return { messages: [], then, account };
+      };
+
+      it.each(Object.entries(exits))(
+        'is retried and not ended when the process %s, and a later start runs the session',
+        async (_how, then) => {
+          const clock = new ManualClock();
+          const check = slowCheck('signed_in');
+          const { adapter, record } = adapterFor(
+            [
+              exited(then),
+              exited(then),
+              { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+            ],
+            1_000,
+            clock,
+            check,
+          );
+          const done = collect(adapter.start(spec()).events);
+          await pastBackoff(clock, record, 2);
+          await pastBackoff(clock, record, 3);
+          const events = await done;
+          expect(record.queries).toBe(3);
+          expect(check).toHaveBeenCalledTimes(2);
+          expect(events.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
+          expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+        },
+      );
+
+      it.each(Object.entries(exits))(
+        'ends in the same refusal as a silent start after 3 starts when the process %s',
+        async (_how, then) => {
+          const clock = new ManualClock();
+          const check = slowCheck('signed_in');
+          const { adapter, record } = adapterFor(exited(then), 1_000, clock, check);
+          const done = collect(
+            adapter.start(spec({ account: account('claude_subscription') })).events,
+          );
+          await pastBackoff(clock, record, 2);
+          await pastBackoff(clock, record, 3);
+          const events = await done;
+          expect(record.queries).toBe(3);
+          expect(check).toHaveBeenCalledTimes(3);
+          expect(events.map((e) => e.type)).toEqual(['ended']);
+          expect(events[0]).toMatchObject({
+            type: 'ended',
+            reason: 'account_refused',
+            refusal: { problem: 'start_timeout' },
+          });
+          expect(endMessage(events[0])).toMatch(
+            /^Claude Code reported no account on each of 3 starts/,
+          );
+          expect(record.inputs).toEqual([]);
+        },
+      );
+
+      it.each(Object.entries(exits))(
+        'is refused as signed out at once when claude auth status says so and the process %s',
+        async (_how, then) => {
+          const { adapter, record } = adapterFor(
+            exited(then),
+            1_000,
+            new ManualClock(),
+            slowCheck('signed_out'),
+          );
+          const events = await collect(
+            adapter.start(spec({ account: account('claude_subscription') })).events,
+          );
+          expect(record.queries).toBe(1);
+          expect(events.map((e) => e.type)).toEqual(['ended']);
+          expect(events[0]).toMatchObject({
+            reason: 'account_refused',
+            refusal: { problem: 'signed_out' },
+          });
+        },
+      );
+
+      it('still ends as stopped when it is stopped while the sign-in check runs', async () => {
+        const clock = new ManualClock();
+        let release: () => void = () => undefined;
+        const check = vi.fn<SignInCheck>(
+          () =>
+            new Promise<SignInState>((resolve) => {
+              release = () => {
+                resolve('signed_in');
+              };
+            }),
+        );
+        const { adapter, record } = adapterFor(exited('end'), 1_000, clock, check);
+        const handle = adapter.start(spec());
+        const done = collect(handle.events);
+        await vi.waitFor(() => {
+          expect(check).toHaveBeenCalledTimes(1);
+        });
+        const stopping = handle.stop();
+        release();
+        await stopping;
+        const events = await done;
+        expect(record.queries).toBe(1);
+        expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      });
+    });
+
     it('says what claude printed on each start in the refusal', async () => {
       const clock = new ManualClock();
       const { adapter, record } = adapterFor(
