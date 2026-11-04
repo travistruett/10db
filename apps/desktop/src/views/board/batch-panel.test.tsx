@@ -110,6 +110,30 @@ describe('BatchPanel', () => {
     expect(buttons()).toEqual(expected);
   });
 
+  it('says beside Ship anyway that the failed task’s commits will be in the pull request', async () => {
+    panel(batch, [member('Alpha', 'FAILED'), member('Beta', 'DONE')]);
+    expect(
+      await screen.findByText(
+        'Ship anyway puts the commits of Alpha, which failed, in the pull request.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('names every failed task Ship anyway would include', async () => {
+    panel(batch, [member('Alpha', 'FAILED'), member('Beta', 'FAILED'), member('Gamma', 'DONE')]);
+    expect(
+      await screen.findByText(
+        'Ship anyway puts the commits of Alpha and Beta, which failed, in the pull request.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('says nothing of failed commits when Ship anyway is not offered', async () => {
+    panel(batch, [member('Alpha', 'QUEUED')]);
+    await screen.findByText('10db/greetings-0a1b2c3d');
+    expect(screen.queryByText(/Ship anyway puts/)).toBeNull();
+  });
+
   it('says why a ship failed in plain words, with the gate step and its log', async () => {
     panel(
       batchDto({

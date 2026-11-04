@@ -2048,8 +2048,41 @@ describe('a required check GitHub cancelled', () => {
     expect(noticeOf(id)?.body).toContain('Resource not accessible');
     expect(rerunNoticeOf(id)?.line).toContain('desktop');
     expect(rerunNoticeOf(id)?.line).not.toContain('lint');
+    // The refused check is not one 10db will run, and the builder sees no record.
+    expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
+    expect(rerunNoticeOf(id)?.body).not.toContain('{');
     await round(w);
     expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('shows no record in a rerun notice, and a restart still reads it', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    const body = rerunNoticeOf(id)?.body ?? '';
+    expect(body).toContain('as soon as GitHub allows');
+    expect(body).not.toContain('{');
+    expect(body).not.toContain('Runs 10db started');
+    await w.stop();
+
+    // A daemon that restarts reads the stored runs: 77 is not run again, 88 is asked for.
+    h.gh.failRerunOf.delete('88');
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
   });
 
   describe('a check cancelled after a rerun that did not include its run', () => {
@@ -2157,6 +2190,63 @@ describe('a required check GitHub cancelled', () => {
       expect(h.gh.reruns).toEqual(['77', '88']);
       expect(noticeOf(id)?.line).toContain('desktop');
       expect(noticeOf(id)?.line).toContain('lint');
+    });
+
+    it('after a restart, asks a run refused as still running even when an again notice is showing', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      for (let i = 0; i < GRACE_ROUNDS; i++) await round(w);
+      expect(noticeOf(id)?.line).toContain('desktop');
+      expect(noticeOf(id)?.line).toContain('cancelled again');
+
+      // Runs 88 and 99 are cancelled now: GitHub takes 88 and says 99 is still running.
+      h.gh.setRequiredChecks(prUrl, {
+        state: 'cancelled',
+        failing: [],
+        pending: [],
+        cancelled: [job('desktop', '77'), job('lint', '88'), job('docs', '99')],
+      });
+      h.gh.failRerunOf.set('99', new GhError('failed', 'run 99 cannot be rerun; already running'));
+      await round(w);
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77', '88']);
+      expect(noticeOf(id)?.line).toContain('cancelled again');
+      await w.stop();
+
+      const second = watcher();
+      second.start();
+      await second.idle();
+      for (let i = 0; i < 3; i++) await round(second);
+      // Run 99 is asked after the restart; 77 and 88 are never run a second time.
+      expect(h.gh.reruns).toEqual(['77', '88', '99']);
+    });
+
+    it('after a restart, does not ask a run GitHub hard-refused, while the checks stay cancelled', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+      await round(w);
+      h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
+      await round(w);
+      expect(noticeOf(id)?.line).toContain('could not run');
+      await w.stop();
+
+      const second = watcher();
+      second.start();
+      await second.idle();
+      for (let i = 0; i < GRACE_ROUNDS + 3; i++) await round(second);
+      expect(h.gh.reruns).toEqual(['77']);
+      expect(noticeOf(id)?.line).toContain('could not run');
+      expect(noticeOf(id)?.body).not.toContain('10db ran');
+
+      // Once the checks clear, the head is asked again like any other cancellation.
+      h.gh.setRequiredChecks(prUrl, running('desktop'));
+      await round(second);
+      expect(noticeOf(id)).toBeUndefined();
+      h.gh.setRequiredChecks(prUrl, lintCancelled);
+      await round(second);
+      await round(second);
+      expect(h.gh.reruns).toEqual(['77', '88']);
     });
 
     it('says GitHub refused, and asks once, when GitHub hard-refuses it', async () => {
@@ -2335,6 +2425,47 @@ describe('a required check GitHub cancelled', () => {
     await second.idle();
     await round(second);
     expect(h.gh.reruns).toEqual(['77', '77']);
+  });
+
+  it('runs the check on a new head after a restart, though an older head has a stopped notice stored', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(noticeOf(id)?.line).toContain('could not run');
+    await w.stop();
+
+    // A new commit moves the pull request to head B while the daemon is down.
+    h.gh.failRerunOf.clear();
+    h.gh.setHead(prUrl, HEAD_B);
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+    // The notice about head A's checks is gone, not left standing for head B.
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('keeps a stopped notice of the same head after a restart', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    w.start();
+    await w.idle();
+    await round(w);
+    await w.stop();
+
+    h.gh.failRerunOf.clear();
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)?.line).toContain('could not run');
   });
 
   it('leaves a check that is genuinely running pending, with nothing rerun', async () => {

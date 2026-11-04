@@ -40,6 +40,8 @@ import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-sto
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import {
   baseNotices,
+  cancelledNoticeHead,
+  cancelledNoticeKind,
   cancelledNotices,
   ciNotices,
   NOTICE_KEY,
@@ -568,10 +570,15 @@ export function createPrWatch(input: {
   }
 
   /** Shows the cancelled-check notice on the batch, naming each check with its link. */
-  function noticeCancelled(root: BatchDto, checks: RequiredChecks['cancelled'], why: CancelledWhy) {
+  function noticeCancelled(
+    root: BatchDto,
+    checks: RequiredChecks['cancelled'],
+    why: CancelledWhy,
+    head: string | null,
+  ) {
     ctx.state.write((write) => {
       const now = getBatch(write.tx, root.id);
-      setBatchNotice(write, root.id, cancelledNotices.stuck(now, checks, why));
+      setBatchNotice(write, root.id, cancelledNotices.stuck(now, checks, why, head));
     });
   }
 
@@ -635,6 +642,13 @@ export function createPrWatch(input: {
     // A failing check starts a fix, which pushes a new head: the cancelled one is not the question.
     if (required.state === 'failing') return;
     const cancelled = required.cancelled;
+    // A cancelled notice stored for another head names that head's checks: it is gone once the pull
+    // request moves on, so it neither stops 10db nor stays up for the new head.
+    const storedCancelled = getBatch(ctx.state.db, root.id).notices.find(
+      (n) => n.key === NOTICE_KEY.checksCancelled,
+    );
+    const storedFor = storedCancelled === undefined ? null : cancelledNoticeHead(storedCancelled);
+    if (storedFor !== null && storedFor !== read.headSha) clearCancelledNotice(root.id);
     const storedNotices = getBatch(ctx.state.db, root.id).notices;
     // The rerun is stored on the batch, so a daemon that restarted after it reads the head as asked.
     clearRerunNotices(root.id, read.headSha);
@@ -646,9 +660,10 @@ export function createPrWatch(input: {
     if (storedRerun !== undefined && read.headSha !== null) {
       const record = rerunRecord(storedRerun);
       const partial = record !== null && !record.done;
-      const shown = storedNotices.some((n) => n.key === NOTICE_KEY.checksCancelled);
-      // A partial rerun that shows a notice stopped at a run GitHub refused outright.
-      const shownKind = partial ? 'stopped' : 'again';
+      const shown = storedNotices.find((n) => n.key === NOTICE_KEY.checksCancelled);
+      // The kind is stored with the notice. One stored by an older daemon has none: a partial
+      // rerun that shows a notice then stopped at a run GitHub refused outright.
+      const shownKind = (shown && cancelledNoticeKind(shown)) ?? (partial ? 'stopped' : 'again');
       seen = {
         head: read.headSha,
         // A rerun that left a run to ask for already counted its reads: the next one asks again.
@@ -660,7 +675,7 @@ export function createPrWatch(input: {
         rerun: record === null ? new Map<string, { name: string }[]>() : record.runs,
         everyRunAsked: record === null,
         active: false,
-        notice: shown ? shownKind : null,
+        notice: shown === undefined ? null : shownKind,
       };
       cancelledRuns.set(root.id, seen);
     }
@@ -706,7 +721,7 @@ export function createPrWatch(input: {
       track.streak = 0;
       if (track.active || at - track.askedAt >= CHECKS_START_MS) {
         track.notice = 'again';
-        noticeCancelled(root, cancelled, { kind: 'again' });
+        noticeCancelled(root, cancelled, { kind: 'again' }, read.headSha);
       }
       return;
     }
@@ -720,17 +735,17 @@ export function createPrWatch(input: {
     // A check with no Actions run (a commit status from another CI) has nothing 10db can run.
     if (repo === null || notRun.some((job) => job.runId === null)) {
       track.notice = 'stopped';
-      noticeCancelled(root, notRun, { kind: 'no_run' });
+      noticeCancelled(root, notRun, { kind: 'no_run' }, read.headSha);
       return;
     }
     // Stored as soon as GitHub takes each run, before the next call: a daemon killed between two
     // reruns must not run this head a second time. It names only the checks GitHub took, over every
     // round, since a check it took stops being listed as cancelled once it runs.
-    const storeRerun = (done: boolean): void => {
+    const storeRerun = (state: 'asking' | 'refused' | 'done'): void => {
       if (read.headSha === null) return;
       const headSha = read.headSha;
       ctx.state.write((write) => {
-        setBatchNotice(write, root.id, rerunNotices.ran(headSha, track.rerun, done));
+        setBatchNotice(write, root.id, rerunNotices.ran(headSha, track.rerun, state));
       });
     };
     // A run GitHub took earlier this head is never in `runs`, whichever run it refused after it.
@@ -746,18 +761,21 @@ export function createPrWatch(input: {
           'could not run a cancelled check again',
         );
         track.notice = 'stopped';
+        // The runs GitHub took stay on record as not done, so a restart does not read the head as
+        // fully asked, but the notice stops saying 10db will ask for the refused one.
+        if (track.rerun.size > 0) storeRerun('refused');
         const notTaken = notRun.filter((job) => job.runId === null || !track.rerun.has(job.runId));
-        noticeCancelled(root, notTaken, { kind: 'refused', detail: detailOf(error) });
+        noticeCancelled(root, notTaken, { kind: 'refused', detail: detailOf(error) }, read.headSha);
         return;
       }
       track.rerun.set(
         runId,
         cancelled.filter((job) => job.runId === runId),
       );
-      storeRerun(false);
+      storeRerun('asking');
     }
     // Every run is asked for: the record says so, so a restart does not ask again.
-    storeRerun(true);
+    storeRerun('done');
     track.asked = true;
     track.askedAt = at;
     track.active = false;

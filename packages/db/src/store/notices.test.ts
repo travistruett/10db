@@ -3,6 +3,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   NOTICE_BODY_MAX,
   NOTICE_LINE_MAX,
+  REVERTED_NOTICE_KEY,
   WorkstreamDto,
   type Notice,
 } from '@10db/contracts';
@@ -151,6 +152,20 @@ describe('workstream notices', () => {
     expect(value).toEqual([]);
     expect(getWorkstream(store.db, workstream.id).notice).toEqual(leftOut);
   });
+
+  it('keeps the notice of a retried run whose commits are still reverted through a restart', () => {
+    const { workstream } = seed();
+    const reverted: Notice = {
+      key: REVERTED_NOTICE_KEY,
+      tone: 'warning',
+      line: 'Its earlier commits were reverted',
+      body: 'x',
+    };
+    store.write((ctx) => setWorkstreamNotice(ctx, workstream.id, reverted));
+    const { value } = store.write((ctx) => clearWorkstreamNotices(ctx));
+    expect(value).toEqual([]);
+    expect(getWorkstream(store.db, workstream.id).notice).toEqual(reverted);
+  });
 });
 
 describe('a notice longer than the contract allows', () => {
@@ -175,6 +190,16 @@ describe('a notice longer than the contract allows', () => {
     expect(notice?.body).toHaveLength(NOTICE_BODY_MAX);
     expect(notice?.body.endsWith('…')).toBe(true);
     expect(getWorkstream(store.db, workstream.id).notice).toEqual(notice);
+  });
+
+  it('keeps the whole record of a notice whose body is cut', () => {
+    const { batch } = seed();
+    const record = JSON.stringify({ runs: { '77': ['desktop'] }, done: false });
+    store.write((ctx) => setBatchNotice(ctx, batch.id, { ...long, record }));
+    const [notice] = getBatch(store.db, batch.id).notices;
+    expect(notice?.body).toHaveLength(NOTICE_BODY_MAX);
+    expect(notice?.record).toBe(record);
+    expect(() => BatchDto.parse(getBatch(store.db, batch.id))).not.toThrow();
   });
 
   it('cut the same way twice writes nothing the second time', () => {

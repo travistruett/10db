@@ -39,6 +39,28 @@ export function prTitle(prefix: string, title: string): string {
   return `${prefix}: ${cut}`;
 }
 
+/**
+ * What the pull request's title says its change is: the batch's title, unless the batch is named
+ * after a task Ship without it left out. The title becomes the squash commit, so it must not name
+ * work the pull request doesn't contain; the first task whose work is in it (a finished one first)
+ * stands in. With none left in, the batch's title is all there is.
+ */
+export function prSubject(
+  batchTitle: string,
+  tasks: readonly {
+    readonly title: string;
+    readonly state: WorkstreamState;
+    readonly leftOut?: boolean;
+  }[],
+): string {
+  // The way prTitle reads a title: trimmed, without a trailing full stop, case aside.
+  const key = (title: string): string => title.trim().replace(/\.+$/, '').trim().toLowerCase();
+  const same = (a: string, b: string): boolean => key(a) === key(b);
+  if (!tasks.some((t) => t.leftOut === true && same(t.title, batchTitle))) return batchTitle;
+  const kept = tasks.filter((t) => t.leftOut !== true && !same(t.title, batchTitle));
+  return (kept.find((t) => t.state === WorkstreamState.Done) ?? kept[0])?.title ?? batchTitle;
+}
+
 /** One task of the batch, as the PR body shows it. */
 export interface PrBodyTask {
   readonly title: string;
@@ -92,16 +114,19 @@ function whatAndWhy(tasks: readonly PrBodyTask[]): string {
         );
       return parts.join('\n\n');
     });
-  const notDone = tasks.filter((t) => t.state !== WorkstreamState.Done);
+  // A finished run left out had its commits reverted and made none since: its work is not here.
+  const notDone = tasks.filter((t) => t.state !== WorkstreamState.Done || t.leftOut === true);
   if (notDone.length > 0)
     blocks.push(
       [
         'Not done:',
         '',
-        ...notDone.map(
-          (t) =>
-            `- ${t.title} (${word(t.state)}${t.leftOut === true ? ', left out of this pull request' : ''})`,
-        ),
+        ...notDone.map((t) => {
+          if (t.leftOut !== true) return `- ${t.title} (${word(t.state)})`;
+          return t.state === WorkstreamState.Done
+            ? `- ${t.title} (${word(t.state)}, but its commits were reverted and not restored, so it is left out of this pull request)`
+            : `- ${t.title} (${word(t.state)}, left out of this pull request)`;
+        }),
       ].join('\n'),
     );
   return blocks.join('\n\n');
@@ -120,7 +145,7 @@ function howChecked(
   const ciLine = `CI run for the pushed head: [${ci.sha.slice(0, 7)}](${url})`;
   if (gate.command === null) {
     // Only a task that finished was approved in 10db; a batch shipped with unfinished work was not.
-    const approved = tasks.every((t) => t.state === WorkstreamState.Done);
+    const approved = tasks.every((t) => t.state === WorkstreamState.Done && t.leftOut !== true);
     return [
       approved ? 'No gate command: each task was approved in 10db.' : 'No gate command.',
       '',

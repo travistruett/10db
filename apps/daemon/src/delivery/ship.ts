@@ -60,7 +60,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { insertPlannedWorkstream } from '../team';
+import { insertPlannedWorkstream, lastRevertTold } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -111,7 +111,7 @@ import {
 } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
-import { prBody, prTitle, titlePrefix } from './pr-text';
+import { prBody, prSubject, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -723,16 +723,19 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     signal: AbortSignal,
   ): Promise<string> {
-    const tasks = members(db, batch.id).map((w) => {
+    const tasks = [];
+    for (const w of members(db, batch.id)) {
       const task = getTask(db, w.taskId);
-      return {
+      tasks.push({
         title: w.taskTitle,
         description: task.description,
         acceptanceCriteria: task.acceptanceCriteria,
         state: w.state,
-        leftOut: leftOut(w),
-      };
-    });
+        // A retried run whose commits are still reverted has no work in the branch, so the body must
+        // not list its task as finished.
+        leftOut: leftOut(w) || (await revertedAway(batch.id, w, target)),
+      });
+    }
     const sha = await deps.git.head(target.checkout);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
     mkdirSync(dirname(file), { recursive: true });
@@ -762,7 +765,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             target,
             sha,
           ),
-          batch.title,
+          prSubject(batch.title, tasks),
         ),
         bodyFile: file,
       },
@@ -1290,6 +1293,53 @@ export function createShipper(deps: ShipperDeps): Shipper {
     }
   }
 
+  /** Every run of the task of `member` in the batch, oldest first. */
+  function runsOf(batchId: BatchId, member: WorkstreamDto): WorkstreamDto[] {
+    return listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
+  }
+
+  /** Every commit `runs` made through the commit tool, in the order recorded. */
+  function commitsMadeBy(runs: readonly WorkstreamDto[]): string[] {
+    const made: string[] = [];
+    for (const run of runs)
+      for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
+        const parsed = McpToolOutputs.commit.safeParse(result);
+        if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
+      }
+    return made;
+  }
+
+  /**
+   * Whether a task retried after Ship without it has none of its work on the branch: a retry told a
+   * session of a revert, and no run so told made a commit that revert does not cover. The revert undid
+   * every earlier commit of the task, and 10db never undoes a revert, so it is taken to be on the branch.
+   * Only a run that was told counts: the shipping gate sends a merge run to a task that finished, and
+   * its commit resolves the base's conflicts without bringing any of the work back.
+   */
+  async function revertedAway(
+    batchId: BatchId,
+    member: WorkstreamDto,
+    target: { readonly checkout: string; readonly branch: string },
+  ): Promise<boolean> {
+    // The notes the retries gave the sessions are the record: a wait may have replaced a run's notice,
+    // and a merge run has neither. Only the task's latest run can be retried, so the last note is the
+    // latest revert.
+    const told = runsOf(batchId, member).flatMap((run) => {
+      const revert = lastRevertTold(listEvidence(db, run.id));
+      return revert === null ? [] : [{ run, revert }];
+    });
+    const revert = told.at(-1)?.revert;
+    if (revert === undefined) return false;
+    for (const sha of commitsMadeBy(told.map((t) => t.run)))
+      if (
+        (await deps.git.hasCommit(target.checkout, sha)) &&
+        (await deps.git.isAncestor(target.checkout, sha, `refs/heads/${target.branch}`)) &&
+        !(await deps.git.isAncestor(target.checkout, sha, revert))
+      )
+        return false;
+    return true;
+  }
+
   /**
    * The commits a failed run's task made through the commit tool that are still on the batch's
    * branch, oldest first. Commits on a shared branch mix in other lanes', so the task's own tool-op
@@ -1303,13 +1353,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     checkout: string,
     branch: string,
   ): Promise<string[]> {
-    const made: string[] = [];
-    const runs = listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
-    for (const run of runs)
-      for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
-        const parsed = McpToolOutputs.commit.safeParse(result);
-        if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
-      }
+    const made = commitsMadeBy(runsOf(batchId, member));
     const kept: string[] = [];
     for (const sha of made)
       if (
@@ -1337,15 +1381,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const member = getWorkstream(db, workstreamId);
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;
-    // Whatever changed since the card was answered, the answer no longer fits: do nothing.
-    if (
-      stopped() ||
-      (batch.state !== BatchState.Open && batch.state !== BatchState.Failed) ||
-      member.state !== WorkstreamState.Failed ||
-      unfinishedWork(batch) !== null ||
-      deps.holdShips?.()
-    )
-      return;
     const failed = members(db, batchId).filter(
       (m) => m.state === WorkstreamState.Failed && !leftOut(m),
     );
@@ -1355,14 +1390,60 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const attempt = { workstreamId, titles };
     const stopWith = (card: Card): void => {
       deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
-      raise(deps.inbox, batch.projectId, card);
+      try {
+        raise(deps.inbox, batch.projectId, card);
+      } catch (error) {
+        // A daemon that is stopping may have closed the database: the log is all that is left.
+        deps.logger.error(
+          { batchId, workstreamId, err: detailOf(error) },
+          'ship without a run could not raise its card',
+        );
+      }
     };
+    // The failed card is resolved already, so a stop that leaves nothing would be a silent answer.
+    const notStarted = (why: string, answerable = true): void => {
+      stopWith(leftOutCards.notStarted(batch, attempt, why, answerable));
+    };
+    // A second answer, queued before the first job moved the batch on: nothing is left to leave out, so
+    // the answer has been carried out and a card saying it was not would be false.
+    const carriedOut = (state: BatchState): boolean =>
+      failed.length === 0 && leftOut(member) && state !== BatchState.Abandoned;
+    const answerable = batch.state === BatchState.Open || batch.state === BatchState.Failed;
+    if (!answerable && carriedOut(batch.state)) return;
+    // Whatever changed since the card was answered, the answer no longer fits: nothing moves, and a card says why.
+    const unfinished = unfinishedWork(batch);
+    const refusal: { readonly why: string; readonly answerable: boolean } | null = !answerable
+      ? { why: `the batch is ${batch.state.toLowerCase()}`, answerable: false }
+      : member.state !== WorkstreamState.Failed
+        ? {
+            why: `${member.taskTitle} is ${member.state.toLowerCase()}, not failed`,
+            answerable: false,
+          }
+        : stopped()
+          ? { why: '10db was stopping', answerable: true }
+          : unfinished
+            ? { why: unfinished.message, answerable: true }
+            : deps.holdShips?.()
+              ? {
+                  why: 'a waiting update has paused new ships until it installs',
+                  answerable: true,
+                }
+              : null;
+    if (refusal) {
+      notStarted(refusal.why, refusal.answerable);
+      return;
+    }
+    // The revert commit, once there is one: from then on a stop must not leave the branch unexplained.
+    let revert: string | null = null;
     try {
       const { branch } = batch;
       const checkout = batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
       if (batch.worktreePath !== null) {
         const whole = await ensureWorktreeWhole(deps, batch, signal);
-        if (stopped()) return;
+        if (stopped()) {
+          notStarted('10db was stopping');
+          return;
+        }
         if (whole === 'refused') {
           stopWith(
             leftOutCards.failed(batch, attempt, "the batch's worktree could not be made whole"),
@@ -1385,7 +1466,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
       for (const run of failed)
         commits.push({ run, shas: await commitsOf(batchId, run, checkout, branch) });
       const shas = commits.flatMap((c) => c.shas);
-      let revert: string | null = null;
       if (shas.length > 0) {
         const reverted = await deps.git.revertCommits({
           repo: checkout,
@@ -1397,7 +1477,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
             commits.flatMap((c) => c.shas.map((sha) => `- ${sha} (${c.run.taskTitle})`)).join('\n'),
           ].join('\n\n'),
         });
-        if (stopped()) return;
+        // Only a revert that committed must go on whatever the signal says; a stop leaves the rest unchanged.
+        if (reverted.kind === 'reverted') revert = reverted.head;
+        else if (stopped()) {
+          notStarted('10db was stopping');
+          return;
+        }
         if (reverted.kind === 'conflict') {
           stopWith(leftOutCards.conflict(batch, attempt, reverted.paths));
           return;
@@ -1410,8 +1495,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
           stopWith(leftOutCards.blocked(batch, attempt, reverted.changed));
           return;
         }
-        if (reverted.kind === 'reverted') revert = reverted.head;
       }
+      // From here a stop of the daemon changes nothing: the revert commit is on the branch, so the
+      // notice and the move are written whatever the signal says. The ship itself is what a stopping
+      // daemon leaves queued, and a restart resumes a SHIPPING batch.
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
@@ -1435,10 +1522,30 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return true;
       });
-      if (moved) resume(batchId);
+      if (moved) {
+        if (!stopped()) resume(batchId);
+        return;
+      }
+      const { state } = getBatch(db, batchId);
+      if (revert !== null) {
+        stopWith(
+          leftOutCards.revertKept(
+            batch,
+            attempt,
+            revert,
+            `The batch became ${state.toLowerCase()} while the revert ran, so its notices and its move to shipping were not written.`,
+          ),
+        );
+      } else if (!carriedOut(state)) {
+        notStarted(`the batch is ${state.toLowerCase()}`, false);
+      }
     } catch (error) {
-      if (stopped()) return;
-      stopWith(leftOutCards.failed(batch, attempt, detailOf(error)));
+      if (revert !== null) {
+        stopWith(leftOutCards.revertKept(batch, attempt, revert, detailOf(error)));
+        return;
+      }
+      if (stopped()) notStarted('10db was stopping');
+      else stopWith(leftOutCards.failed(batch, attempt, detailOf(error)));
     }
   }
 

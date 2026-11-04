@@ -1265,6 +1265,36 @@ const leftOutAgain = (attempt: LeftOutAttempt): string =>
 
 /** What Ship without it tells the builder when it could not revert a failed task's commits. */
 export const leftOutCards = {
+  /**
+   * The answer no longer fit, or the job could not begin, so nothing was reverted. `why` is a clause
+   * that follows "not left out". The answer is offered again only when it can still be given; when
+   * it cannot, the batch may have shipped by another way, so the card speaks only of this answer.
+   */
+  notStarted: (
+    batch: BatchDto,
+    attempt: LeftOutAttempt,
+    why: string,
+    answerable: boolean,
+  ): Card => {
+    const text = {
+      title: `${leftOutSubject(attempt)}: ${why}`,
+      body: `Ship without it did not begin on ${leftOutNames(attempt)}: ${why}.\n\n${answerable ? `Nothing was shipped and the branch is unchanged. When that is settled, ${leftOutAgain(attempt)}` : 'Ship without it changed nothing, and no longer applies to this batch.'}`,
+    };
+    return answerable
+      ? leftOutCard(batch, attempt, text)
+      : { ...text, foldKey: `left-out:${batch.id}`, refresh: true };
+  },
+  /**
+   * The revert commit `revert` is on the batch's branch, but the notices and the move to shipping
+   * were not written. No answer is offered: Ship without it would revert the same commits again.
+   * Ship anyway ships the branch as it stands, which already lacks the task's changes.
+   */
+  revertKept: (batch: BatchDto, attempt: LeftOutAttempt, revert: string, why: string): Card => ({
+    title: `${leftOutNames(attempt)}: the revert is on the branch, but the batch did not move`,
+    body: `Ship without it reverted the commits of ${leftOutNames(attempt)} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\nThe revert stays on ${batch.branch ?? 'the branch'}, and nothing was shipped. ${leftOutNames(attempt)} ${attempt.titles.length === 1 ? 'is' : 'are'} still failed here, and ${attempt.titles.length === 1 ? 'its' : 'their'} drawer does not yet say the work was left out. Ship anyway from the Board ships the branch as it stands, without ${attempt.titles.length === 1 ? 'its' : 'their'} changes; do not answer Ship without it again, which would revert the same commits twice.`,
+    foldKey: `left-out:${batch.id}`,
+    refresh: true,
+  }),
   /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
   conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
     leftOutCard(batch, attempt, {
