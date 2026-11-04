@@ -270,6 +270,9 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
 /** The steps of a stage that come before it knows which build is newest. */
 const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
 
+/** gh's words for a rate limit or a 5xx from GitHub: errors that are not about the repository. */
+const GITHUB_SIDE_ERROR = /rate limit|abuse detection|\bHTTP 5\d\d\b/i;
+
 /**
  * What Settings says when GitHub could not be asked, by what went wrong: gh signed out, the machine
  * offline, gh missing or hung, or an error GitHub answered with (a renamed or closed repository, a
@@ -277,7 +280,10 @@ const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']
  */
 function unreachableMessage(cause: unknown): string {
   const again = '10db tries again every minute.';
-  const detail = messageOf(cause).trim().replace(/\.$/, '');
+  // gh with nothing on stderr leaves "failed (exit 1):"; drop the dangling colon and full stop.
+  const detail = messageOf(cause)
+    .trim()
+    .replace(/[\s:.]+$/, '');
   if (cause instanceof GhError) {
     switch (cause.kind) {
       case GhFailure.SignedOut:
@@ -289,7 +295,10 @@ function unreachableMessage(cause: unknown): string {
       case GhFailure.Timeout:
         return `GitHub gave gh no answer in time, so 10db cannot see new builds (${detail}). ${again}`;
       case GhFailure.Failed:
-        return `GitHub answered with an error, so 10db cannot see new builds: ${detail}. GitHub was reached, so check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
+        // A rate limit or a server error says nothing about the repository or the account.
+        if (GITHUB_SIDE_ERROR.test(detail))
+          return `GitHub is limiting or failing requests, so 10db cannot see new builds: ${detail}. Nothing to fix on this machine; ${again}`;
+        return `gh failed, so 10db cannot see new builds: ${detail}. If GitHub answered, check that the repository the app was built for still exists and that gh's account can read it. ${again}`;
       case GhFailure.Aborted:
         break;
     }
@@ -340,7 +349,17 @@ function isApplying(value: unknown): value is Attempt {
 export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   const { state, inbox, logger } = deps;
   let available: string | null = null;
-  let staged: (StagedBuild & { readonly head: string }) | null = null;
+  let staged:
+    | (StagedBuild & {
+        readonly head: string;
+        /**
+         * The build for `head` failed to fetch while this older one stayed staged. `head` alone can't
+         * say it: it equals main's head both when nothing moved since staging and after that failure,
+         * and only the first lets the staged build install when its re-stage fails.
+         */
+        readonly newerFailed?: true;
+      })
+    | null = null;
   let working = false;
   /** From the moment the install is asked to start: the app is about to quit. */
   let applying = false;
@@ -374,7 +393,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * Since when only shaping conversations have held the drain, and the card that told the builder
    * once they had for too long. Null while a lane, a gate or a job holds it too, or nothing does.
    */
-  let shapeHold: { readonly since: Date; cardId: InboxItemId | null } | null = null;
+  let shapeHold: {
+    readonly since: Date;
+    cardId: InboxItemId | null;
+    /** The conversations the card names, to reword it when they change. */
+    names: string;
+  } | null = null;
 
   function releaseShapeHold(reason: string): void {
     if (shapeHold?.cardId) inbox.resolve(shapeHold.cardId, reason);
@@ -393,13 +417,18 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return;
     }
     const now = deps.clock.now();
-    shapeHold ??= { since: now, cardId: null };
-    if (
-      shapeHold.cardId !== null ||
-      now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS
-    )
-      return;
+    shapeHold ??= { since: now, cardId: null, names: '' };
     const names = turns.map((turn) => `“${turn.title}”`).join(', ');
+    if (shapeHold.cardId !== null) {
+      // New turns are parked during a drain, so the set only shrinks: say who still holds it.
+      if (names !== shapeHold.names) {
+        shapeHold.names = names;
+        inbox.reword(shapeHold.cardId, shapeHoldBody(names, drainingSince));
+      }
+      return;
+    }
+    if (now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS) return;
+    shapeHold.names = names;
     logger.warn(
       { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
       'only shaping conversations keep the update waiting, and lanes stay paused',
@@ -411,12 +440,16 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       projectId,
       workstreamId: null,
       title: 'A shaping conversation is holding the update, and lanes are paused',
-      body: [
-        `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${drainingSince.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
-        `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
-      ].join('\n\n'),
+      body: shapeHoldBody(names, drainingSince),
       foldKey: SHAPE_HOLD_FOLD_KEY,
     }).id;
+  }
+
+  function shapeHoldBody(names: string, since: Date): string {
+    return [
+      `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${since.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
+      `Claude may still be answering, or the session may be hung. ${SHAPE_HOLD_WAY_OUT} Otherwise lanes start again once the turn ends and the app has installed and restarted.`,
+    ].join('\n\n');
   }
 
   /**
@@ -478,6 +511,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * Gone once the head changes or the builder asks again, which no check has to end for.
    */
   let notInstalling: SelfUpdateNotInstalling | null = null;
+  /**
+   * A check is fetching the build of a head with nothing staged yet, or waiting for GitHub to finish
+   * it: the update is not waiting for an idle moment, it has nothing to install.
+   */
+  let fetching = false;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -576,6 +614,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // The build the builder rolled back from is not fetched again, so a check while main's head
       // is still building costs a look at GitHub, not a download.
       const skip = rolledBackFrom();
+      // With a build already staged the update is waiting, whatever the stage looks for. With none,
+      // the stage is all there is: it fetches, or waits for GitHub's build, for many minutes. The
+      // flag lasts until the build is staged or the check ends.
+      fetching = staged === null;
       const result = await deps.stage(target, runningCommit, skip, keep);
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
@@ -600,7 +642,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           // nothing is mid-session, to see whether a newer build had finished. The staged build was
           // checked when it was fetched and installs with no network, as with GitHub away, so a
           // failed second look is no failed update: nothing is recorded, and it installs.
-          if (staged.head === head) {
+          if (staged.head === head && staged.newerFailed !== true) {
             logger.warn(
               { step: result.step, message: result.message, staged: staged.commit },
               'could not fetch a newer build than the staged one again: installing the staged one',
@@ -608,8 +650,9 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
             return installWhenIdle(runningCommit, staged);
           }
           // Main moved on and its build did not arrive. The staged one stays for the next try, as
-          // the failed head's: it does not install, not even with GitHub away.
-          staged = { ...staged, head };
+          // the failed head's: it does not install, not even with GitHub away, and not after the
+          // builder asks again and the fetch fails once more.
+          staged = { ...staged, head, newerFailed: true };
         } else {
           staged = null;
         }
@@ -650,6 +693,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         return TickResult.NoNewerBuild;
       }
       staged = { dir: result.dir, commit: result.commit, head };
+      fetching = false;
       // A newer head restages while the update waits: the wait goes on from the first staging.
       waitingSince ??= deps.clock.now();
     }
@@ -663,7 +707,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * as long as GitHub stays away.
    */
   async function withoutGitHub(runningCommit: string): Promise<TickResult> {
-    if (staged === null || staged.head === failedHead()) {
+    if (staged === null || staged.head === failedHead() || staged.newerFailed === true) {
       endDrain();
       return TickResult.Unreachable;
     }
@@ -837,6 +881,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return result;
     } finally {
       working = false;
+      fetching = false;
     }
   }
 
@@ -939,7 +984,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           : // A failure outside a check (an install that ended, a start that settled it) counts too.
             failure !== null
             ? 'failed'
-            : notInstalling,
+            : (notInstalling ?? (fetching ? 'fetching' : null)),
     }),
   };
 }

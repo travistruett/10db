@@ -149,7 +149,13 @@ describe('ShapeViewDto', () => {
           createdAt: AT,
         },
       ],
-      turn: { running: false, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: false,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
       sizes: [
         {
           proposalId: mintId('ShapeProposal'),

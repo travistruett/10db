@@ -498,12 +498,17 @@ export function countMidSession(
   const live = rows.filter(
     (r) => LANE_STATES.includes(r.state) || r.gatePid !== null || (withCards && isWaitingOnCard(r)),
   );
+  return live.length + countBatchesInFlight(db);
+}
+
+/** The batches being cut or shipped: the part of `countMidSession` that is no lane or gate. */
+export function countBatchesInFlight(db: DbReader): number {
   const batches = db
     .select({ n: count() })
     .from(schema.batches)
     .where(inArray(schema.batches.state, [BatchState.Cutting, BatchState.Shipping]))
     .get();
-  return live.length + (batches?.n ?? 0);
+  return batches?.n ?? 0;
 }
 
 function isWaitingOnCard(r: {
@@ -511,6 +516,23 @@ function isWaitingOnCard(r: {
   readonly currentSessionId: SessionId | null;
 }): boolean {
   return r.state === WorkstreamState.WaitingHuman && r.currentSessionId !== null;
+}
+
+/**
+ * Whether this lane is only waiting on a card (as `countWaitingOnCard` counts it): it runs nothing and
+ * frees no claim until the builder answers. False for a lane that is not there.
+ */
+export function isLaneWaitingOnCard(db: DbReader, id: WorkstreamId): boolean {
+  const row = db
+    .select({
+      state: schema.workstreams.state,
+      gatePid: schema.workstreams.gatePid,
+      currentSessionId: schema.workstreams.currentSessionId,
+    })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.id, id))
+    .get();
+  return row?.gatePid === null && isWaitingOnCard(row);
 }
 
 /**

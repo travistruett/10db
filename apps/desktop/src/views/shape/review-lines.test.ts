@@ -35,7 +35,13 @@ describe('rowReview', () => {
 
   it('reads an unrehearsed task as rehearsing while a rehearsal turn runs, and never marks a read one so', () => {
     const running = view({
-      turn: { running: true, queued: 0, proposing: false, rehearsing: true },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: true,
+        waitingForUpdate: false,
+      },
     });
     expect(rowReview(running, goal).tasks.map((t) => t.state)).toEqual(['rehearsed', 'rehearsing']);
   });

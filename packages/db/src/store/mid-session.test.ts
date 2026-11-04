@@ -10,9 +10,11 @@ import type { Store } from './store';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import {
+  countBatchesInFlight,
   countMidSession,
   countWaitingOnCard,
   insertWorkstream,
+  isLaneWaitingOnCard,
   patchWorkstream,
   transitionWorkstream,
 } from './workstreams';
@@ -104,6 +106,20 @@ describe('countMidSession', () => {
       });
       expect(countMidSession(store.db)).toBe(0);
       expect(countWaitingOnCard(store.db)).toBe(0);
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(false);
+    });
+
+    it('is told apart from a lane that runs, one with a gate, and one that is not there', () => {
+      const id = waitingOnCard();
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(true);
+      expect(isLaneWaitingOnCard(store.db, 'wks_missing' as WorkstreamId)).toBe(false);
+      store.write((ctx) => {
+        patchWorkstream(ctx, id, null, { gatePid: 4242, gatePidStart: 'x' });
+      });
+      expect(isLaneWaitingOnCard(store.db, id)).toBe(false);
+      const running = workstream();
+      moveThrough(running, [S.Starting, S.Running]);
+      expect(isLaneWaitingOnCard(store.db, running)).toBe(false);
     });
   });
 
@@ -124,5 +140,23 @@ describe('countMidSession', () => {
     expect(countMidSession(store.db)).toBe(0);
     store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Shipping }));
     expect(countMidSession(store.db)).toBe(1);
+  });
+});
+
+describe('countBatchesInFlight', () => {
+  it('counts the batches being cut or shipped, which countMidSession adds to its lanes', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Open }));
+    expect(countBatchesInFlight(store.db)).toBe(0);
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Shipping }));
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    // A lane is no batch.
+    moveThrough(workstream(), [S.Starting]);
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    expect(countMidSession(store.db)).toBe(2);
   });
 });

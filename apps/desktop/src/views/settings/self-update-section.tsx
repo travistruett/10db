@@ -31,9 +31,11 @@ export function updateProgressText(data: SelfUpdateStatusDto): string | null {
     return `You rolled back from ${build}, so 10db is not installing it. It installs the next finished build, once main has a newer commit; to try ${build} again now, turn "Update 10db by itself" off and on.`;
   if (data.notInstalling === 'unbuilt')
     return `${build} has no finished build yet, so there is nothing to install. 10db looks again every minute and installs it when its build finishes.`;
+  if (data.notInstalling === 'fetching')
+    return `10db is fetching the build of ${build}, or waiting for GitHub to finish it, which can take a few minutes. Nothing is staged yet, so there is nothing to wait for an idle moment with. 10db installs it once the build arrives and nothing is running.`;
   const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
-    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
+    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while what is running finishes, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
   const since = data.waitingSince === null ? '' : ` since ${absoluteTime(data.waitingSince)}`;
   return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed. ${waitsFor}`.trimEnd();
 }
@@ -110,7 +112,9 @@ export function SelfUpdateSection() {
               ? 'Update not installing'
               : notInstalling === 'unbuilt'
                 ? 'Update has no build yet'
-                : 'Update waiting'
+                : notInstalling === 'fetching'
+                  ? 'Update being fetched'
+                  : 'Update waiting'
           }
           description={
             <Text size="sm" c="dimmed" role="status" aria-label="Update status">
