@@ -1283,7 +1283,7 @@ function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusD
     waitingSince: '2026-11-03T12:00:00.000Z',
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
+    midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
     blocker: null,
     ...over,
   });
@@ -1327,7 +1327,7 @@ describe('FactoryView waiting update', () => {
       selfUpdate({
         draining: true,
         drainingSince: '2026-11-03T12:15:00.000Z',
-        midSession: { working: 2, waitingOnCard: 1, shapes: [] },
+        midSession: { working: 2, waitingOnCard: 1, batches: 0, jobs: 0, shapes: [] },
       }),
     );
     renderApp('/factory');
@@ -1345,6 +1345,8 @@ describe('FactoryView waiting update', () => {
         midSession: {
           working: 1,
           waitingOnCard: 0,
+          batches: 0,
+          jobs: 0,
           shapes: [{ id: mintId('Shape'), title: 'Denser board' }],
         },
       }),
@@ -1357,6 +1359,23 @@ describe('FactoryView waiting update', () => {
     expect(note.textContent).toMatch(/No lane is running/);
   });
 
+  it('names a batch being shipped and a delivery job, not a running step the Board lacks', async () => {
+    serve(
+      selfUpdate({
+        draining: true,
+        drainingSince: '2026-11-03T12:15:00.000Z',
+        midSession: { working: 2, waitingOnCard: 0, batches: 1, jobs: 1, shapes: [] },
+      }),
+    );
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(note.textContent).toMatch(
+      /waiting for 1 batch being cut or shipped and 1 delivery job to finish/,
+    );
+    expect(note.textContent).not.toMatch(/running step/);
+  });
+
   it('says nothing is left running when a drain waits for nothing', async () => {
     serve(selfUpdate({ draining: true, drainingSince: '2026-11-03T12:15:00.000Z' }));
     renderApp('/factory');
@@ -1366,7 +1385,11 @@ describe('FactoryView waiting update', () => {
   });
 
   it('names what holds an update that waits, a lane waiting on a card included', async () => {
-    serve(selfUpdate({ midSession: { working: 1, waitingOnCard: 2, shapes: [] } }));
+    serve(
+      selfUpdate({
+        midSession: { working: 1, waitingOnCard: 2, batches: 0, jobs: 0, shapes: [] },
+      }),
+    );
     renderApp('/factory');
 
     const note = await screen.findByRole('status', { name: 'Update waiting' });
@@ -1401,6 +1424,7 @@ describe('FactoryView waiting update', () => {
     ['the update failed with a drain still reported', { notInstalling: 'failed', draining: true }],
     ['the builder rolled back from the update', { notInstalling: 'rolled-back' }],
     ['the update has no finished build', { notInstalling: 'unbuilt' }],
+    ['the update’s build is being fetched', { notInstalling: 'fetching' }],
   ] as const)('says nothing is waiting when %s', async (_name, over) => {
     let asked = false;
     serve(

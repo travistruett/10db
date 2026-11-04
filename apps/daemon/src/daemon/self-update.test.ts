@@ -440,6 +440,8 @@ describe('self-update in the daemon', () => {
         expect((await selfUpdate(api)).midSession).toEqual({
           working: 0,
           waitingOnCard: 1,
+          batches: 0,
+          jobs: 0,
           shapes: [],
         });
       });
@@ -548,6 +550,81 @@ describe('self-update in the daemon', () => {
       // The step is not finished: its unfinished work did not go to the gate, and its next session
       // waits at the hold for the update.
       expect((await lanesOf(api)).get(beta.id)?.state).not.toBe('VERIFYING');
+      expect(started.mock.results).toHaveLength(2);
+    }, 60_000);
+
+    it('installs though a running session asked for a claim a lane waiting on a card holds: the ask is refused, and the card stays unanswered', async () => {
+      head = RUNNING;
+      const adapter = new FakeAdapter({
+        Alpha: [
+          [
+            {
+              do: 'mcp',
+              tool: 'ask_human',
+              args: {
+                opId: 'op-drain-ask-02',
+                category: 'engineering',
+                question: 'May I rename the module?',
+                options: [
+                  { label: 'Yes', description: 'rename it' },
+                  { label: 'No', description: 'leave it' },
+                ],
+              },
+            },
+            { do: 'turn_complete' },
+          ],
+        ],
+        Beta: [
+          [
+            { do: 'await_message', contains: 'beta' },
+            {
+              do: 'mcp',
+              tool: 'request_claim',
+              args: { opId: 'op-src-claim-02', kind: 'area', name: 'src', reason: 'need it' },
+            },
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-beta-handoff-02', 'Ask for src again and finish the work'),
+            },
+            { do: 'turn_complete' },
+          ],
+        ],
+      });
+      const started = vi.spyOn(adapter, 'start');
+      const api = await start({ caps: { global: 2 }, adapter });
+      await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+      const project = await api.post('/projects', ProjectDto, {
+        name: '10db',
+        repoPath: repo.path,
+        gateCommand: 'true',
+        flowId: await quickFlowId(api),
+        areas: [
+          { name: 'src', globs: ['src/**'] },
+          { name: 'docs', globs: ['docs/**'] },
+        ],
+      });
+      const alpha = await startTask(api, project.id, 'Alpha', 'src');
+      const beta = await startTask(api, project.id, 'Beta', 'docs');
+      await waitFor(() => started.mock.results.length === 2, 30_000);
+      await waitForAsync(async () => {
+        const lanes = await lanesOf(api);
+        return (
+          lanes.get(alpha.id)?.state === 'WAITING_HUMAN' && lanes.get(beta.id)?.state === 'RUNNING'
+        );
+      });
+      head = NEW;
+      await waitForAsync(async () => (await selfUpdate(api)).draining);
+      // Beta asks for src while Alpha waits on its card. Waiting would keep Beta's session, and so the
+      // drain, going until Alpha's session is stopped for the card's time limit.
+      for (const session of started.mock.results)
+        (session.value as { send(text: string): void }).send('beta');
+      await waitFor(() => applied.length > 0 && applied, 20_000);
+      expect(applied).toEqual([NEW]);
+      // Nobody answered the card, and Beta's unfinished work did not go to the gate.
+      const lanes = await lanesOf(api);
+      expect(lanes.get(alpha.id)?.state).toBe('WAITING_HUMAN');
+      expect(lanes.get(beta.id)?.state).not.toBe('VERIFYING');
       expect(started.mock.results).toHaveLength(2);
     }, 60_000);
 
@@ -777,6 +854,8 @@ describe('self-update in the daemon', () => {
     expect(midSession).toEqual({
       working: 1,
       waitingOnCard: 0,
+      batches: 0,
+      jobs: 0,
       shapes: [{ id: shape.id, title: 'Denser board.' }],
     });
     release();

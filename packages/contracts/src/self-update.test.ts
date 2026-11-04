@@ -52,7 +52,7 @@ describe('SelfUpdateStatusDto blocker', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
+    midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
   };
 
   it('is null or a kind with a message', () => {
@@ -99,7 +99,7 @@ describe('SelfUpdateStatusDto', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
+    midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
     blocker: null,
   };
 
@@ -107,40 +107,61 @@ describe('SelfUpdateStatusDto', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
   });
 
-  it.each(['failed', 'rolled-back', 'unbuilt'])('says an update is not installing: %s', (why) => {
-    const held = { ...status, availableCommit: SHA, notInstalling: why };
-    expect(SelfUpdateStatusDto.parse(held)).toEqual(held);
-  });
+  it.each(['failed', 'rolled-back', 'unbuilt', 'fetching'])(
+    'says an update is not installing: %s',
+    (why) => {
+      const held = { ...status, availableCommit: SHA, notInstalling: why };
+      expect(SelfUpdateStatusDto.parse(held)).toEqual(held);
+    },
+  );
 
   it('refuses a reason it does not know', () => {
     expect(SelfUpdateStatusDto.safeParse({ ...status, notInstalling: 'sad' }).success).toBe(false);
   });
 
   it('says what the update waits for: running work, and lanes waiting on a card', () => {
-    const busy = { ...status, midSession: { working: 2, waitingOnCard: 1, shapes: [] } };
-    expect(SelfUpdateStatusDto.parse(busy).midSession).toEqual({
-      working: 2,
-      waitingOnCard: 1,
-      shapes: [],
-    });
+    const busy = {
+      ...status,
+      midSession: { working: 2, waitingOnCard: 1, batches: 0, jobs: 0, shapes: [] },
+    };
+    expect(SelfUpdateStatusDto.parse(busy).midSession).toEqual(busy.midSession);
     expect(
       SelfUpdateStatusDto.safeParse({
         ...status,
-        midSession: { working: -1, waitingOnCard: 0, shapes: [] },
+        midSession: { ...status.midSession, working: -1 },
       }).success,
     ).toBe(false);
   });
 
   it('names the shaping conversations whose turn the update waits for', () => {
     const shape = { id: mintId('Shape'), title: 'Denser board' };
-    const holding = { ...status, midSession: { working: 1, waitingOnCard: 0, shapes: [shape] } };
+    const holding = {
+      ...status,
+      midSession: { ...status.midSession, working: 1, shapes: [shape] },
+    };
     expect(SelfUpdateStatusDto.parse(holding).midSession.shapes).toEqual([shape]);
     expect(
       SelfUpdateStatusDto.safeParse({
         ...status,
-        midSession: { working: 1, waitingOnCard: 0, shapes: [{ id: 'nope', title: 'x' }] },
+        midSession: { ...status.midSession, working: 1, shapes: [{ id: 'nope', title: 'x' }] },
       }).success,
     ).toBe(false);
+  });
+
+  it('counts the batches and delivery jobs among the work, apart from the running steps', () => {
+    const holding = {
+      ...status,
+      midSession: { ...status.midSession, working: 3, batches: 1, jobs: 2 },
+    };
+    expect(SelfUpdateStatusDto.parse(holding).midSession).toMatchObject({ batches: 1, jobs: 2 });
+    for (const bad of [{ batches: -1 }, { jobs: 1.5 }]) {
+      expect(
+        SelfUpdateStatusDto.safeParse({ ...status, midSession: { ...status.midSession, ...bad } })
+          .success,
+      ).toBe(false);
+    }
+    const noBatches = { working: 0, waitingOnCard: 0, jobs: 0, shapes: [] };
+    expect(SelfUpdateStatusDto.safeParse({ ...status, midSession: noBatches }).success).toBe(false);
   });
 
   it('says since when an update waits and drains', () => {
