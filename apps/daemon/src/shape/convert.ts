@@ -125,7 +125,7 @@ function unfitForQuestion(row: ShapeProposalRow): string {
       : row.state === ShapeProposalState.Superseded
         ? 'was replaced by a later plan'
         : row.state === ShapeProposalState.Accepted
-          ? 'was converted and then taken back'
+          ? 'was converted and then taken back (propose it again under the same key once its goal is converted)'
           : `is ${row.state}`;
   return `${gone}, so it cannot hold a question`;
 }

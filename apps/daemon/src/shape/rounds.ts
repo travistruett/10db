@@ -227,10 +227,17 @@ export function reconcileDraft(
   const converted: string[] = [];
   const merged: Unit[] = [];
   const keptTasks: string[] = [];
+  const world = buildPlanWorld(ctx.tx, shapeId);
+  const isTakenBack = (row: ShapeProposalRow): boolean =>
+    row.state === ShapeProposalState.Accepted &&
+    row.kind === 'task' &&
+    !world.convertedTasks.has(row.key);
 
   for (const unit of unitsOf(draft)) {
     const row = byKey.get(unit.key);
-    if (row?.state === ShapeProposalState.Accepted) {
+    // An accepted task with no link is an addition Remove Draft Goal took back with its goal: its
+    // task is cancelled, so the key is proposed afresh (against the goal's current id) rather than skipped.
+    if (row?.state === ShapeProposalState.Accepted && !isTakenBack(row)) {
       converted.push(unit.key);
       continue;
     }
@@ -244,7 +251,10 @@ export function reconcileDraft(
         continue;
       }
     }
-    const stored = row?.state === ShapeProposalState.Rejected ? undefined : row;
+    const stored =
+      row?.state === ShapeProposalState.Rejected || (row !== undefined && isTakenBack(row))
+        ? undefined
+        : row;
     const pinnedBody =
       stored === undefined
         ? { body: unit.body, keptTasks: [] }
@@ -255,7 +265,7 @@ export function reconcileDraft(
 
   const mergedDraft = draftOf(merged, draft);
   // Rows the draft leaves out are still citable and findable by key for the rules that read stored rows.
-  errors.push(...validatePlan(mergedDraft, buildPlanWorld(ctx.tx, shapeId)));
+  errors.push(...validatePlan(mergedDraft, world));
   if (errors.length > 0) return { ok: false, errors };
 
   const shape = getShape(ctx.tx, shapeId);
@@ -285,7 +295,7 @@ export function reconcileDraft(
       created.push(unit.key);
       continue;
     }
-    const revived = row.state === ShapeProposalState.Rejected;
+    const revived = row.state === ShapeProposalState.Rejected || isTakenBack(row);
     const previous = revived ? null : asRecord(row.body);
     // A row carries the round that last changed it: restating it unchanged leaves its mark alone.
     const changed = revived || row.state !== ShapeProposalState.Pending || !same(previous, body);
