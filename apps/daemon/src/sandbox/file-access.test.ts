@@ -48,6 +48,8 @@ function context(overrides: Partial<FileAccessContext> = {}): FileAccessContext 
 }
 
 const systemDocs = (): Partial<FileAccessContext> => ({ systemDocRoots: SYSTEM_DOC_ROOTS });
+const CLT = '/Library/Developer/CommandLineTools/SDKs';
+const XCODE = '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs';
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), '10db-fa-')));
@@ -293,6 +295,90 @@ describe('readAccess', () => {
     {
       name: 'the manual directory reached by a .. out of it',
       path: () => '/usr/share/man/../../../etc/hosts',
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: "a header under a Command Line Tools SDK's usr/include",
+      path: () => `${CLT}/MacOSX26.2.sdk/usr/include/sys/attr.h`,
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: "a man page under a Command Line Tools SDK's usr/share/man",
+      path: () => `${CLT}/MacOSX26.2.sdk/usr/share/man/man2/setattrlist.2`,
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: "an SDK's usr/include searched as a tree",
+      path: () => `${CLT}/MacOSX15.sdk/usr/include`,
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: "a header under the Xcode app's macOS SDKs",
+      path: () => `${XCODE}/MacOSX.sdk/usr/include/stdio.h`,
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: "a man page under the Xcode app's macOS SDKs",
+      path: () => `${XCODE}/MacOSX.sdk/usr/share/man/man2/setattrlist.2`,
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: 'a header under an SDK in a context that did not opt in',
+      path: () => `${CLT}/MacOSX26.2.sdk/usr/include/sys/attr.h`,
+      expected: 'ask',
+    },
+    {
+      name: 'another path under /Library',
+      path: () => '/Library/Preferences/com.apple.loginwindow.plist',
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'another path under the Command Line Tools',
+      path: () => '/Library/Developer/CommandLineTools/usr/bin/git',
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: "an SDK's other directories",
+      path: () =>
+        `${CLT}/MacOSX26.2.sdk/System/Library/Frameworks/Foundation.framework/Foundation.tbd`,
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'the SDKs directory itself',
+      path: () => CLT,
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'an SDK with nothing between SDKs and usr',
+      path: () => `${CLT}/usr/include/stdio.h`,
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'a path that only starts like an SDK usr/include',
+      path: () => `${CLT}/MacOSX26.2.sdk/usr/includes/secret`,
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'an SDK header reached by a .. out of it',
+      path: () => `${CLT}/MacOSX26.2.sdk/usr/include/../../../../../../../etc/hosts`,
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'an SDK name that is nested two directories deep',
+      path: () => `${CLT}/a/b/usr/include/x.h`,
       context: systemDocs,
       expected: 'ask',
     },
