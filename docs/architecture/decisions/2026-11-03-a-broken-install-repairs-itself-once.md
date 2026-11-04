@@ -29,7 +29,11 @@
   installs as well. The card's note says only that the install did not bring the packages back when no start
   over happened.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
-  shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. The next
+  shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. Both repairs
+  leave it: the gate's second pass, and `refresh`'s own start over after a failed install left the copy broken
+  (`refresh` reports what that install left as `leftBroken`, and `install` writes the notice when the copy is whole
+  afterwards, whether the retry exited zero or not). A copy `refresh` starts over before its first install, because
+  it was already broken, leaves no notice when that install brings it back: nothing failed. The next
   repair replaces it with its own time. The time is the delivery context's clock. The notice is history, not a
   wait: the desktop's `taskHistory` (`task-state.ts`) keeps listing it in the drawer after the run failed or
   the batch closed, was abandoned or had its pull request merged, when `taskNotices` drops the batch's notices.

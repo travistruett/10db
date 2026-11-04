@@ -75,6 +75,8 @@ export type DependencyRefresh =
       readonly startedOver: boolean;
       /** How many installs this call ran: 2 when a first one failed and left the copy broken. */
       readonly installs: number;
+      /** Set by the retry after a failed install left the copy broken: what that install left unresolved. */
+      readonly leftBroken?: string;
     }
   | {
       readonly kind: 'failed';
@@ -89,6 +91,8 @@ export type DependencyRefresh =
       readonly logPath: string;
       /** The hosts the sandbox refused the install, lower case, each once: each gets a card. */
       readonly blockedHosts: readonly string[];
+      /** Set by the retry after a failed install left the copy broken: what that install left unresolved. */
+      readonly leftBroken?: string;
     }
   /** Shutdown stopped the install. */
   | { readonly kind: 'aborted' };
@@ -321,7 +325,12 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           startOver(
             `the install exited ${String(first.exitCode)} and left the copy broken (${describeBroken(left)})`,
           );
-          return install();
+          // What the failed install left unresolved, so a caller that finds the copy whole after
+          // this retry can say what was repaired.
+          const retried = await install();
+          return retried.kind === 'installed' || retried.kind === 'failed'
+            ? { ...retried, leftBroken: describeBroken(left) }
+            : retried;
         }
       }
       return first;

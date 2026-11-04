@@ -498,6 +498,10 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(h.pnpm.calls()).toHaveLength(3);
       expect(update.kind).toBe('up_to_date');
       expect(update.kind === 'up_to_date' && update.note).toMatch(/needs failed \(exit 1/);
+      // The copy was broken after the failed install and whole after refresh's start over: that is a repair.
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.body).toContain('left-pad');
     });
 
     it('leaves a project whose gate never needed node_modules alone', async () => {
