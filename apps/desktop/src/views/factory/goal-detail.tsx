@@ -108,7 +108,7 @@ export function GoalDetail({ summary, opened }: GoalDetailProps) {
         ) : null}
         {removal.offer === 'started' ? (
           <Text size="xs" c="dimmed">
-            Remove Draft Goal needs every task unstarted; a task of this goal has run.
+            Remove Draft Goal needs every task unstarted; a task of this goal has started.
           </Text>
         ) : null}
       </Stack>
