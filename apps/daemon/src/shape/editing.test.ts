@@ -88,6 +88,22 @@ describe('the marks a round leaves', () => {
   });
 });
 
+describe('converting a change to a task that is joining a batch', () => {
+  it("asks the service's own read of pending joins, and refuses", async () => {
+    await f.close();
+    f = createServiceFixture({ joiningProblem: () => 'It is joining a batch' });
+    const m = f.c.say();
+    round({ looseTasks: [task(m, 'a')] });
+    const made = await f.service.convert(shapeId(), [row('a').id]);
+    const id = must(made.ok ? made.results[0]?.taskIds[0] : undefined, 'the task');
+    round({ changes: [{ taskId: id, areas: ['deps'], sourceMessageIds: [m] }] });
+    await expect(f.service.convert(shapeId(), [row(`change:${id}`).id])).resolves.toEqual({
+      ok: false,
+      errors: [`change:${id}: It is joining a batch`],
+    });
+  });
+});
+
 describe('editing a row', () => {
   it('pins the field, keeps it through the next round, and says so in the transcript', () => {
     const m = f.c.say();

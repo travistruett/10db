@@ -2,6 +2,7 @@ import {
   BatchDto,
   ProjectDto,
   TaskDto,
+  WorkspaceMode,
   WorkstreamDto,
   type InboxItemId,
   type ProjectId,
@@ -11,10 +12,13 @@ import {
 import {
   getInboxItem,
   insertBatch,
+  insertLandingGroup,
+  patchTask,
   transitionBatch,
   transitionWorkstream,
   insertWorkstream,
 } from '@10db/db';
+import { BatchCardChoice, batchCardFields } from '../src/delivery/batch-card';
 import { flagCard } from '../src/inbox';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -25,13 +29,16 @@ import { createTempRepo, tempDir, waitForAsync } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
+let worktrees: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 beforeEach(async () => {
   data = tempDir('restart failed');
+  worktrees = tempDir('restart failed worktrees');
   repo = createTempRepo();
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
+    worktreeRoot: worktrees.path,
     port: 0,
     adapter: new FakeAdapter({}),
     logLevel: 'warn',
@@ -46,6 +53,7 @@ afterEach(async () => {
   await daemon.scheduler.idle();
   await daemon.stop();
   repo.cleanup();
+  worktrees.cleanup();
   data.cleanup();
 });
 
@@ -131,6 +139,26 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     );
   });
 
+  it('starts over in a separate copy when the task was moved there, instead of rerunning in Your folder', async () => {
+    const { project, task, batchId, workstreamId } = await failedInOpenBatch();
+    daemon.state.write((ctx) => patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree }));
+
+    const res = await startTask(task.id, {});
+
+    expect(res.status).toBe(202);
+    const fresh = BatchDto.parse(res.body);
+    expect(fresh.id).not.toBe(batchId);
+    expect(fresh.worktreePath).not.toBeNull();
+    const old = (await batchesOf(project.id)).find((b) => b.id === batchId);
+    expect(old?.state).toBe('ABANDONED');
+    const runs = await api().get('/workstreams?active=false', z.array(WorkstreamDto));
+    expect(runs.find((w) => w.id === workstreamId)?.state).toBe('FAILED');
+    // The repo has no origin, so the new batch's cut is refused; wait for it before the daemon stops.
+    await waitForAsync(async () =>
+      (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,
+    );
+  });
+
   const failedCard = (project: ProjectId, workstream: WorkstreamId): InboxItemId =>
     daemon.state.write((ctx) =>
       flagCard(ctx, {
@@ -141,6 +169,90 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
       }),
     ).id;
   const cardState = (id: InboxItemId) => getInboxItem(daemon.state.db, id).state;
+
+  const post = async (path: string, body: unknown) => {
+    const res = await fetch(`${daemon.url}${path}`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, text: await res.text() };
+  };
+
+  describe('a Retry of a task moved out of its batch', () => {
+    it('is refused saying why, through the drawer, card menu and Factory route', async () => {
+      const { project, task, batchId, workstreamId } = await failedInOpenBatch();
+      daemon.state.write((ctx) =>
+        patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree }),
+      );
+
+      const res = await post(`/workstreams/${workstreamId}/retry`, {});
+
+      expect(res.status).toBe(409);
+      expect(res.text).toMatch(/a separate copy.*Your folder.*Start over/);
+      const runs = await api().get('/workstreams?active=false', z.array(WorkstreamDto));
+      expect(runs.find((w) => w.id === workstreamId)?.state).toBe('FAILED');
+      expect((await batchesOf(project.id)).map((b) => [b.id, b.state])).toEqual([
+        [batchId, 'OPEN'],
+      ]);
+    });
+
+    it("is refused through the failure card's Retry, and the card stays open", async () => {
+      const { project, task, batchId, workstreamId } = await failedInOpenBatch();
+      const fields = batchCardFields({ id: workstreamId, batchId });
+      if (!fields) throw new Error('a batch member gets card actions');
+      const card = daemon.state.write((ctx) =>
+        flagCard(ctx, {
+          projectId: project.id,
+          workstreamId,
+          title: 'Workstream failed: Alpha',
+          body: 'The gate failed',
+          ...fields,
+        }),
+      ).id;
+      daemon.state.write((ctx) =>
+        patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree }),
+      );
+
+      const res = await post(`/inbox/${card}/answer`, { choice: BatchCardChoice.Retry });
+
+      expect(res.status).toBe(409);
+      expect(res.text).toMatch(/Start over/);
+      expect(cardState(card)).toBe('OPEN');
+      const runs = await api().get('/workstreams?active=false', z.array(WorkstreamDto));
+      expect(runs.find((w) => w.id === workstreamId)?.state).toBe('FAILED');
+    });
+
+    it('is refused by Start too when a landing holds it in the batch, and the placement stays', async () => {
+      const { project, task, batchId, workstreamId } = await failedInOpenBatch();
+      const beta = await api().post(`/projects/${project.id}/tasks`, TaskDto, {
+        title: 'Beta',
+        acceptanceCriteria: ['x'],
+        areas: ['src'],
+      });
+      daemon.state.write((ctx) => {
+        insertLandingGroup(ctx, {
+          projectId: project.id,
+          title: 'Real areas',
+          taskIds: [task.id, beta.id],
+        });
+        const other = insertWorkstream(ctx, beta.id, { batchId });
+        for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
+          transitionWorkstream(ctx, other.id, { to, fence: null });
+        patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree });
+      });
+
+      const started = await startTask(task.id, {});
+
+      expect(started.status).toBe(409);
+      expect(JSON.stringify(started.body)).toMatch(/Real areas/);
+      expect((await batchesOf(project.id)).map((b) => b.id)).toEqual([batchId]);
+      const tasks = await api().get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+      expect(tasks.find((t) => t.id === task.id)?.workspaceMode).toBe('worktree');
+      const runs = await api().get('/workstreams?active=false', z.array(WorkstreamDto));
+      expect(runs.find((w) => w.id === workstreamId)?.state).toBe('FAILED');
+    });
+  });
 
   it('closes the failed card when Start reruns the workstream', async () => {
     const { project, task, workstreamId } = await failedInOpenBatch();

@@ -1,5 +1,10 @@
-import { ConflictError, WorkspaceMode, type TaskDto } from '@10db/contracts';
+import { ConflictError, WorkspaceMode, type BatchDto, type TaskDto } from '@10db/contracts';
 import { startCards, type Card } from './cards';
+
+/** Where an unfinished batch works: a copy has a worktree path, the shared batch never does. */
+export function batchPlacement(batch: BatchDto): WorkspaceMode {
+  return batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
+}
 
 /** Where a placement runs, in the words the desktop uses. */
 export function placementWords(mode: WorkspaceMode): string {
