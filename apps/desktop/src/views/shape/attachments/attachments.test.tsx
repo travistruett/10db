@@ -2,7 +2,7 @@ import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import type { ComponentProps, ReactElement } from 'react';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { server } from '../../../test/daemon';
 import { theme } from '../../../theme';
 import { AttachmentView } from './attachment-view';
@@ -161,6 +161,10 @@ describe('a chart whose usermeta.embedOptions tries to change how it is drawn', 
     document.getElementById('vega-embed-style')?.remove();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('cannot replace the loader: a loader option leaves the refusing loader refusing', async () => {
     renderWithDaemon(
       <AttachmentView
@@ -193,7 +197,7 @@ describe('a chart whose usermeta.embedOptions tries to change how it is drawn', 
     );
     await screen.findByRole('img', { name: 'Chart: First' });
     unmount();
-    // A later chart whose data a patch points at a URL must still hit a refusing loader.
+    // A later chart with no usermeta of its own draws with the loader as the first chart left it.
     renderWithDaemon(
       <AttachmentView
         attachment={{
@@ -211,12 +215,21 @@ describe('a chart whose usermeta.embedOptions tries to change how it is drawn', 
       />,
     );
     await screen.findByRole('img', { name: 'Chart: Second' });
-    expect(Object.isFrozen(refusingLoader)).toBe(true);
     expect(typeof refusingLoader.load).toBe('function');
+    expect(Object.isFrozen(refusingLoader)).toBe(true);
     expect(reached).toEqual([]);
   });
 
-  it('adds no style element to the document, whatever defaultStyle says', async () => {
+  it('adds no style element when defaultStyle is true', async () => {
+    renderWithDaemon(<AttachmentView attachment={chart({ defaultStyle: true })} title="Style" />);
+    await screen.findByRole('img', { name: 'Chart: Style' });
+    expect(styleElements()).toEqual([]);
+    expect(document.getElementById('vega-embed-style')).toBeNull();
+  });
+
+  // A regression guard, not a case the fix turned green: vega-embed 7.3.0 rewrites a usermeta
+  // defaultStyle string to false itself. Later versions may not.
+  it('adds no style element for a defaultStyle string', async () => {
     renderWithDaemon(
       <AttachmentView
         attachment={chart({ defaultStyle: 'body { display:none }' })}
@@ -267,6 +280,11 @@ describe('a chart whose usermeta.embedOptions tries to change how it is drawn', 
   });
 
   it('is drawn without ast: false, which would compile expressions to code', async () => {
+    // The window's CSP has no unsafe-eval, jsdom has no CSP: refuse generated code as the window would.
+    const refuseCode = (): never => {
+      throw new EvalError('Refused to generate code: the CSP has no unsafe-eval');
+    };
+    vi.stubGlobal('Function', new Proxy(Function, { apply: refuseCode, construct: refuseCode }));
     renderWithDaemon(<AttachmentView attachment={chart({ ast: false })} title="Ast" />);
     await screen.findByRole('img', { name: 'Chart: Ast' });
     expect(reached).toEqual([]);
