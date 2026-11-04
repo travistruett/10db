@@ -265,6 +265,26 @@ describe('readAccess', () => {
       expected: 'allowed',
     },
     {
+      name: 'a manual page under /usr/share/man',
+      path: () => '/usr/share/man/man1/ps.1',
+      expected: 'allowed',
+    },
+    {
+      name: 'the manual directory itself, searched as a tree',
+      path: () => '/usr/share/man',
+      expected: 'allowed',
+    },
+    {
+      name: 'a path that only starts like the manual directory',
+      path: () => '/usr/share/manual/secret',
+      expected: 'ask',
+    },
+    {
+      name: 'the manual directory reached by a .. out of it',
+      path: () => '/usr/share/man/../../../etc/hosts',
+      expected: 'ask',
+    },
+    {
       name: "the session's own tool result",
       setup: () => mkdirSync(join(own(), '..'), { recursive: true }),
       path: own,
