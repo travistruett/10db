@@ -882,6 +882,30 @@ describe('Shape: converted rows and their undo', () => {
     }
   });
 
+  it('says a converted principle was retired and offers no withdrawal for it', async () => {
+    const view = proposed([
+      {
+        ...principleProposal('ended', { state: 'accepted', statement: 'Never use semicolons' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: null,
+          principleId: mintId('Principle'),
+          withdrawn: false,
+          superseded: false,
+          retired: true,
+        },
+      },
+    ]);
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText('Retired from Knowledge')).toBeTruthy();
+    expect(screen.queryByText('Converted · in Knowledge')).toBeNull();
+    const actions = screen.queryByRole('button', { name: 'Actions for Never use semicolons' });
+    if (actions !== null) fireEvent.click(actions);
+    expect(screen.queryByRole('menuitem', { name: 'Withdraw Principle…' })).toBeNull();
+  });
+
   it('withdraws a decision only with a reason', async () => {
     const view = converted();
     const withdrawn: unknown[] = [];

@@ -45,6 +45,8 @@ export const ShapeConvertedDto = z.object({
   withdrawn: z.boolean().optional(),
   /** The converted principle was replaced by a later one with its topic key and scope; absent for every other kind. */
   superseded: z.boolean().optional(),
+  /** The converted principle was retired from the Knowledge view; absent for every other kind. */
+  retired: z.boolean().optional(),
 });
 export type ShapeConvertedDto = z.infer<typeof ShapeConvertedDto>;
 

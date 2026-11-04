@@ -8,7 +8,7 @@ import {
   type DaemonEvent,
   type ShapeId,
 } from '@10db/contracts';
-import { getShape, insertShape, listShapeProposals, patchShape } from '@10db/db';
+import { getShape, insertShape, listShapeProposals, patchShape, retirePrinciple } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -347,6 +347,33 @@ describe('Remove Draft Goal and Withdraw Decision', () => {
     expect(events.some((e) => e.type === EventType.ShapeChanged && e.entityId === shapeId)).toBe(
       true,
     );
+  });
+
+  it('says a converted principle was retired from Knowledge', async () => {
+    const m = c.say('Never sleep in tests.');
+    adapter.shapeBehaviour = proposing({
+      records: [
+        {
+          key: 'no-sleeps',
+          kind: 'principle',
+          scope: 'project',
+          statement: 'Never sleep in tests',
+          rationale: 'Sleeps make the suite flaky.',
+          sourceMessageIds: [m],
+        },
+      ],
+    });
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    await service.convert(
+      shapeId,
+      service.view(shapeId).proposals.map((p) => p.id),
+    );
+    const rowOf = () => service.view(shapeId).proposals.find((p) => p.kind === 'principle');
+    expect(rowOf()?.converted).toMatchObject({ retired: false });
+    const principleId = must(rowOf()?.converted?.principleId, 'the principle id');
+    c.store.write((ctx) => retirePrinciple(ctx, principleId, 'me', 'No longer true'));
+    expect(rowOf()?.converted).toMatchObject({ retired: true, withdrawn: false });
   });
 
   it('withdraws a converted decision, and the view says so', async () => {
