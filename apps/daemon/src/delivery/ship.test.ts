@@ -246,6 +246,35 @@ describe('shipping', () => {
     expect(card.title).not.toContain('the gate failed');
     expect(card.body).toContain('.: tsx');
     expect(card.body).toContain('Retry');
+    expect(card.body).toContain('Retry removes the copy');
+  });
+
+  it('tells the builder to fix pnpm before Retry, and does not say Retry installs, when no trustworthy pnpm was found', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: 'touch gate-ran' },
+      {
+        shipBaseUpdates: (real) => ({
+          ...real,
+          beforeGate: () =>
+            Promise.resolve({
+              kind: 'install_broken',
+              note: "The install in this copy is broken: 614 of 787 dependencies do not resolve (.: tsx). No install ran, so node_modules is as it was (No trustworthy pnpm was found on the login shell's PATH).",
+              noPnpm: true,
+            }),
+        }),
+      },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(failed).toMatchObject({ state: 'FAILED', failure: 'install_broken' });
+    const card = h.only(h.cards());
+    expect(card.body).toMatch(/fix pnpm on the login shell's PATH/i);
+    expect(card.body).toContain('Retry');
+    expect(card.body).not.toMatch(/Retry removes/);
+    expect(card.body).not.toMatch(/installs again/);
   });
 
   it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {

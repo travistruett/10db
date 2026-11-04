@@ -129,6 +129,11 @@ export type BaseUpdate =
       readonly head?: string;
       /** The generated directories the merge took from the base, which no regeneration made again. */
       readonly unregenerated?: readonly string[];
+      /**
+       * Set when no install ran because no trustworthy pnpm was found: a Retry meets the same
+       * refusal and removes and installs nothing until pnpm is fixed, so the card says to fix it first.
+       */
+      readonly noPnpm?: true;
     }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
@@ -271,6 +276,8 @@ type Installed =
        * wait again) or a refused host (the same refusal would come back).
        */
       readonly final?: true;
+      /** Set when `refresh` ran no install because it found no trustworthy pnpm. */
+      readonly noPnpm?: true;
       /** How many installs ran, over every pass, as `refresh` reported them; none when absent. */
       readonly installs?: number;
       /** Some install removed the copy's `node_modules` first, in `refresh` or the second pass. */
@@ -1369,6 +1376,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
                 ? `10db could not run the install this branch's lockfile needs (${installed.tail.trim()}; log: ${installed.logPath}), so its packages may not match it.`
                 : `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
             final: true as const,
+            ...(installed.installs === 0 ? { noPnpm: true as const } : {}),
             installs: installed.installs,
             ...(installed.startedOver ? { startedOver: true as const } : {}),
             ...(broken === undefined ? {} : { broken }),
@@ -1500,6 +1508,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           ) ?? 'The install in this copy is broken.',
         ...(merged.kind === 'merged' ? { head: merged.head } : {}),
         ...(left.length > 0 ? { unregenerated: left } : {}),
+        ...(installed.noPnpm === true ? { noPnpm: true as const } : {}),
       };
     }
     switch (merged.kind) {

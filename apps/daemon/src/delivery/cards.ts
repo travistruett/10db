@@ -795,11 +795,12 @@ export const shipCards = {
       detail: answers(batch),
     },
   }),
-  installBroken: (batch: BatchDto, note: string): ShipFailure => ({
+  installBroken: (batch: BatchDto, note: string, noPnpm = false): ShipFailure => ({
     failure: BatchFailure.InstallBroken,
     card: {
       title: `${notShipped(batch)}: the install in its copy is broken`,
-      body: `${note}\n\nNo gate ran and nothing was pushed. This is the copy's packages, not the batch's code. Retry removes the copy's node_modules and installs again from the lockfile before the gate runs.\n\n${RETRY}`,
+      // With no trustworthy pnpm a Retry meets the same refusal: it removes and installs nothing.
+      body: `${note}\n\nNo gate ran and nothing was pushed. This is the copy's packages, not the batch's code. ${noPnpm ? "Fix pnpm on the login shell's PATH first (a real program outside the project's checkouts, not a script or a version manager's shim): until then a Retry meets the same refusal and nothing changes. Retry once it is fixed." : "Retry removes the copy's node_modules and installs again from the lockfile before the gate runs."}\n\n${RETRY}`,
       detail: answers(batch),
     },
   }),

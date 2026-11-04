@@ -511,6 +511,15 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(note).toMatch(/no install ran/i);
       expect(note).toContain('No trustworthy pnpm was found');
       expect(note).not.toMatch(/removed node_modules|installed again|did not bring them back/);
+      // The card words its Retry advice by this: a Retry meets the same refusal.
+      expect(update).toMatchObject({ kind: 'install_broken', noPnpm: true });
+    });
+
+    it('does not mark an install that ran and left the copy broken as having no pnpm', async () => {
+      const { batch } = await pruned();
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      expect(update).not.toHaveProperty('noPnpm');
     });
 
     it('raises the card without starting over when the first install was refused a host', async () => {
