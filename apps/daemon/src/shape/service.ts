@@ -82,8 +82,11 @@ import {
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
+  measuredMediaBytes,
   readPictureBytesSpent,
   readCharge,
+  readCeiling,
+  readMeasuredLine,
   readPictureLine,
   readPictureRefusal,
 } from './read-budget';
@@ -119,7 +122,12 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import { inlineBytesSpent, type ScreenService } from '../screens';
+import {
+  FRESH_START_LINE,
+  inlineBytesSpent,
+  inlinePictureBytes,
+  type ScreenService,
+} from '../screens';
 import type { Hold } from '../verify';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
@@ -667,6 +675,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       const digest = buildDigest(state.db, shapeId);
       say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Digest, digest);
       parts.push(digest);
+    } else if (
+      resumeId === null &&
+      transcript.some(
+        (m) =>
+          m.kind === ShapeMessageKind.Screen ||
+          (m.kind === ShapeMessageKind.Tool && m.body.startsWith('Read · ')),
+      )
+    ) {
+      // No digest row marks this session's start (Claude never spoke), so the screens and Reads of the
+      // lost one, still in the transcript, would be charged to this one. This line marks it instead.
+      say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Tool, FRESH_START_LINE);
     }
     // A session that never heard the conversation (a start_shape summary, or earlier messages whose
     // session never started) is told what the builder has said so far, and about every file.
@@ -749,6 +768,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             picture,
             charged.bytes,
             readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+            // Reads get whatever the inline pictures leave of the pool they share.
+            readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
             charged.kind,
           );
           if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
@@ -774,6 +795,21 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           if (line !== null) say(shapeId, ShapeMessageAuthor.Claude, ShapeMessageKind.Tool, line);
         }
         return verdict;
+      },
+      postToolUse: (req) => {
+        // The result of a Read the hook counted: what came back replaces the allowance it was charged.
+        if (req.toolName !== 'Read' || req.agentId !== undefined) return;
+        const path = stringField(req.input, 'file_path');
+        if (path === null) return;
+        const charged = readCharge(path, stringField(req.input, 'pages'), access);
+        const measured = measuredMediaBytes(req.response);
+        if (charged === null || !Number.isFinite(charged.bytes) || measured === 0) return;
+        say(
+          shapeId,
+          ShapeMessageAuthor.Claude,
+          ShapeMessageKind.Tool,
+          readMeasuredLine(path, measured, charged.bytes, charged.kind),
+        );
       },
     };
     let handle: ShapeSessionHandle;

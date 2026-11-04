@@ -19,6 +19,7 @@ export type {
   ShapeSessionHandle,
   ShapeSessionSpec,
   ShapeToolRequest,
+  ShapeToolResult,
   ShapeVerdict,
   ToolDecision,
   ToolRequest,

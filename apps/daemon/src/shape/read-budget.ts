@@ -1,32 +1,65 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
+import type { ShapeMessageDto } from '@10db/contracts';
 import { expandHome } from '../sandbox';
+import {
+  PICTURE_POOL_BYTES,
+  READ_PICTURES_RESERVE_BYTES,
+  readBytesSpent,
+  readMeasuredLine,
+  readPictureLine,
+  type ReadKind,
+} from '../screens';
 import type { ShapeAccess } from './confinement';
 
 // Shape spec §5.4. A picture or PDF Claude pulls in with `Read` comes back as a tool result, and a resumed
 // session resends every earlier tool result with each request, beside the pictures the daemon sends
-// itself (`screens/inline-budget.ts`: 18 MiB, 24 MiB as base64, which leaves the API's 32 MB request
-// about 6.8 MB). The daemon never sees that result, so it counts the Read in the PreToolUse hook, before
-// it runs, and refuses the one that would pass the total.
+// itself (`screens/inline-budget.ts`). The two share one pool of 21 MiB, 28 MiB as base64, which leaves the
+// API's 32 MB request limit room for text. The daemon never sees a Read's result before it runs, so it
+// counts the Read in the PreToolUse hook and refuses the one that would pass what the inline pictures leave
+// of the pool; the PostToolUse hook then replaces the allowance with the size the result really had.
+
+export { READ_PICTURES_RESERVE_BYTES, readPictureLine, type ReadKind };
 
 const MIB = 1024 * 1024;
 
 /**
- * The most a conversation's Read pictures add to a request, in bytes before base64: 3 MiB is 4 MiB (4.2 MB)
- * on the wire, which leaves about 2.6 MB of the 32 MB for the conversation's text.
+ * What Reads may add to a request, in bytes before base64, once the live session carries `inlineSpent` bytes
+ * of inline pictures: what they leave of the pool, never less than the reserve a full inline budget leaves.
  */
-export const READ_PICTURES_MAX_BYTES = 3 * MIB;
+export const readCeiling = (inlineSpent: number): number =>
+  Math.max(READ_PICTURES_RESERVE_BYTES, PICTURE_POOL_BYTES - inlineSpent);
 
 /**
- * The most one Read picture is charged. Claude Code resizes a picture it reads to at most about 2000 px
- * a side and re-encodes it, so what it returns is not the file's size; this is the allowance for it, and a
- * smaller file is charged its own size, which resizing does not make larger. UNMEASURED: no live session
- * has run `test/shape-session.live.test.ts` (`TENDB_LIVE_CLAUDE=1`). It ships unmeasured with the
- * orchestrator's acceptance for the builder (inbox card inb_01a1a575); follow-up task
- * tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it. If a Read returns more than this, the total above is not a promise.
+ * The most one Read picture is charged before its result is measured. Claude Code resizes a picture it
+ * reads to at most about 2000 px a side and re-encodes it, so what it returns is not the file's size; this
+ * is the allowance for it, and a smaller file is charged its own size, which resizing does not make larger.
+ * The PostToolUse hook replaces it with the measured size of what came back (`measuredMediaBytes`); a
+ * result it can't measure stays charged this. The live test
+ * (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up task
+ * tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
  */
 export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
+
+/**
+ * The bytes before base64 of the pictures and documents a Read's result carries: every `base64` string in
+ * it, and every `data` string beside `type: "base64"` (an API content block's source). A result that holds
+ * none, such as text or a set of page files on disk, measures 0.
+ */
+export function measuredMediaBytes(response: unknown, depth = 0): number {
+  if (typeof response !== 'object' || response === null || depth > 8) return 0;
+  if (Array.isArray(response))
+    return response.reduce<number>((sum, item) => sum + measuredMediaBytes(item, depth + 1), 0);
+  const record = response as Record<string, unknown>;
+  let total = 0;
+  for (const [key, value] of Object.entries(record)) {
+    if (typeof value === 'string') {
+      if (key === 'base64' || (key === 'data' && record['type'] === 'base64'))
+        total += Buffer.byteLength(value, 'base64');
+    } else total += measuredMediaBytes(value, depth + 1);
+  }
+  return total;
+}
 
 /** The pictures Claude Code's `Read` turns into an image block. */
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
@@ -36,10 +69,10 @@ const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
  * returns is either the whole file as a document block or its pages as pictures, and the SDK's types show
  * pictures can come back with no range too, so its size is not the file's: a 100 kB text PDF renders to
  * pictures far larger than itself. So a Read is charged by the page, each page at the per-picture allowance,
- * and one whose pages aren't known is charged this most, which is past the total: refused, with the reason
- * saying to name them. UNMEASURED like that allowance: it ships with the builder's acceptance (inbox card
- * inb_01a1a613-db5c-74d6-9bc8-f779db7f360d), and follow-up task tsk_01a1a613-b481-766b-b60e-ec76fecb12ca runs
- * the PDF cases of `test/shape-session.live.test.ts`.
+ * and one whose pages aren't known, or name more than this, can't be bounded: it is charged without limit,
+ * so it is refused, with the reason saying to name them. The allowance is unmeasured like the picture one:
+ * follow-up task tsk_01a1a613-b481-766b-b60e-ec76fecb12ca runs the PDF cases of
+ * `test/shape-session.live.test.ts`.
  */
 const PDF_PAGES_MAX = 20;
 
@@ -47,16 +80,14 @@ const PDF_NAME = /\.pdf$/i;
 
 const PAGE_RANGE = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/;
 
-/** How many pages a Read's `pages` names, up to the most: that most when it names none or can't be read. */
+/** How many pages a Read's `pages` names: infinite when it names none, can't be read or is past the most. */
 function pagesCharged(pages: string | null): number {
   const range = pages === null ? null : PAGE_RANGE.exec(pages);
-  if (range === null) return PDF_PAGES_MAX;
+  if (range === null) return Number.POSITIVE_INFINITY;
   const first = Number(range[1]);
   const count = Number(range[2] ?? range[1]) - first + 1;
-  return first >= 1 && count >= 1 ? Math.min(count, PDF_PAGES_MAX) : PDF_PAGES_MAX;
+  return first >= 1 && count >= 1 && count <= PDF_PAGES_MAX ? count : Number.POSITIVE_INFINITY;
 }
-
-export type ReadKind = 'picture' | 'PDF';
 
 /**
  * What a Read of this path is charged: null for anything but a picture or PDF that exists. `pages` is the
@@ -89,36 +120,33 @@ export function readCharge(
   }
 }
 
-/** The dimmed transcript line that records a counted Read; `readPictureBytesSpent` reads it back. */
-export const readPictureLine = (path: string, charge: number, kind: ReadKind = 'picture'): string =>
-  `Read · ${path} · ${kind} · ${String(charge)} bytes counted`;
+/**
+ * The bytes of Read pictures the live session carries: the counted lines after the latest digest or
+ * fresh-start line, which mark where the session began (§5.5).
+ */
+export const readPictureBytesSpent = (messages: readonly ShapeMessageDto[]): number =>
+  readBytesSpent(messages);
 
-const COUNTED = /^Read · .* · (?:picture|PDF) · (\d+) bytes counted$/s;
+/** The line that corrects a Read's counted charge to what its result measured. */
+export { readMeasuredLine };
 
 /**
- * The bytes of Read pictures the live session carries: the counted lines after the latest digest, which
- * marks where the session began (§5.5). A restart resumes the session with all of them, so they come from
- * the transcript, not from memory.
+ * Why a Read is refused, or null when it fits within `ceiling` (`readCeiling`) beside the pictures and
+ * PDFs already read.
  */
-export function readPictureBytesSpent(messages: readonly ShapeMessageDto[]): number {
-  const start = messages.findLastIndex((m) => m.kind === ShapeMessageKind.Digest) + 1;
-  return messages.slice(start).reduce((sum, message) => {
-    if (message.kind !== ShapeMessageKind.Tool) return sum;
-    const counted = COUNTED.exec(message.body)?.[1];
-    return counted === undefined ? sum : sum + Number(counted);
-  }, 0);
-}
-
-/** Why a Read is refused, or null when it fits beside the pictures and PDFs already read. */
 export function readPictureRefusal(
   path: string,
   charge: number,
   spent: number,
+  ceiling: number,
   kind: ReadKind = 'picture',
 ): string | null {
-  if (spent + charge <= READ_PICTURES_MAX_BYTES) return null;
+  if (spent + charge <= ceiling) return null;
   if (kind === 'PDF') {
-    const room = Math.floor((READ_PICTURES_MAX_BYTES - spent) / READ_PICTURE_CHARGE_MAX_BYTES);
+    const room = Math.min(
+      PDF_PAGES_MAX,
+      Math.floor((ceiling - spent) / READ_PICTURE_CHARGE_MAX_BYTES),
+    );
     const next =
       room > 0
         ? `Read it again with \`pages\` naming one page or range, such as "1-${String(room)}": up to ${String(room)} pages fit`

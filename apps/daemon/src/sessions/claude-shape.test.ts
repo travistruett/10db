@@ -12,7 +12,7 @@ import { createChannel } from './channel';
 import { startShapeSession } from './claude-shape';
 import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
 import type { QueryFn } from './claude-adapter';
-import type { SessionEvent, ShapeSessionSpec, ShapeToolRequest } from './types';
+import type { SessionEvent, ShapeSessionSpec, ShapeToolRequest, ShapeToolResult } from './types';
 
 // Shape spec §5.1, §5.2: the SDK options of a conversation's session, and its start-up checks.
 
@@ -240,6 +240,53 @@ describe('the PreToolUse hook', () => {
     expect(await call({ tool_name: 'Read', tool_input: {} })).toMatchObject({
       hookSpecificOutput: { permissionDecision: 'deny' },
     });
+  });
+});
+
+describe('the PostToolUse hook', () => {
+  async function postHook(postToolUse?: (req: ShapeToolResult) => void) {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec(postToolUse === undefined ? {} : { postToolUse }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    const hook = run.options?.hooks?.PostToolUse?.[0]?.hooks[0];
+    if (!hook) throw new Error('no PostToolUse hook');
+    return (input: Record<string, unknown>) =>
+      hook({ hook_event_name: 'PostToolUse', ...input } as never, undefined, {
+        signal: new AbortController().signal,
+      });
+  }
+
+  it('hands the result, with the subagent’s id, to the session’s measurement', async () => {
+    const seen: unknown[] = [];
+    const call = await postHook((req) => seen.push(req));
+    await call({
+      tool_name: 'Read',
+      tool_input: { file_path: 'a.png' },
+      tool_response: { type: 'image' },
+      agent_id: 'agent-7',
+      agent_type: 'scope',
+    });
+    expect(seen).toEqual([
+      {
+        toolName: 'Read',
+        input: { file_path: 'a.png' },
+        response: { type: 'image' },
+        agentId: 'agent-7',
+        agentType: 'scope',
+      },
+    ]);
+  });
+
+  it('lets the call be when the measurement throws, and when there is none', async () => {
+    const throwing = await postHook(() => {
+      throw new Error('boom');
+    });
+    expect(await throwing({ tool_name: 'Read', tool_input: {}, tool_response: '' })).toEqual({});
+    const none = await postHook(undefined);
+    expect(await none({ tool_name: 'Read', tool_input: {}, tool_response: '' })).toEqual({});
   });
 });
 

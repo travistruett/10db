@@ -4,11 +4,20 @@
 export { createScreenBroker, type ScreenOutcome } from './broker';
 export { readImageSize } from './image-check';
 export {
+  FRESH_START_LINE,
   INLINE_CONVERSATION_MAX_BYTES,
+  PICTURE_POOL_BYTES,
+  READ_PICTURES_RESERVE_BYTES,
   inlineBytesSpent,
+  inlinePictureBytes,
   isImageName,
+  liveMessages,
   parseScreenBody,
+  readBytesSpent,
+  readMeasuredLine,
+  readPictureLine,
   tooBigAlone,
+  type ReadKind,
 } from './inline-budget';
 export { RENDER_READS, RENDER_REFUSED_READS, renderMayRead } from './render-access';
 export { createScreens, type ScreenService } from './screens';

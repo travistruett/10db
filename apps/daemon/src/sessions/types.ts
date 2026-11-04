@@ -78,6 +78,11 @@ export interface ShapeToolRequest {
   readonly agentType?: string | undefined;
 }
 
+/** A tool call that has run, as a Shape session's PostToolUse hook sees it, with what it returned. */
+export interface ShapeToolResult extends ShapeToolRequest {
+  readonly response: unknown;
+}
+
 /**
  * What a Shape session's PreToolUse hook answers. An allowed call may run with `updatedInput` instead
  * of what the model wrote: how 10db stamps a reviewer's report with the subagent's type.
@@ -125,6 +130,8 @@ export interface ShapeSessionSpec {
   };
   /** Runs before every tool call, the session's and its subagents'. */
   preToolUse(req: ShapeToolRequest): ShapeVerdict;
+  /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
+  readonly postToolUse?: (req: ShapeToolResult) => void;
 }
 
 export const SessionEndReason = {
