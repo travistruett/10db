@@ -304,7 +304,10 @@ The API refuses an image over about 5 MB, an image over 8000 px on a side howeve
 request over 32 MB, and a resumed session resends every earlier image, so one oversize block would end every
 later turn. An image over 2 MiB, over 2000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
 pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request about 6 MB), therefore goes
-as a path line marked "too large to show inline; Read it", which `Read` resizes itself. The 2000 px is the
+as a path line, which `Read` resizes itself. The line says why: an image over 2 MiB or 2000 px is marked "too
+large to show inline; Read it", while one within those caps that the message or conversation total left out is
+marked "left out to keep this message within the image limit; Read it" or "left out to keep the conversation
+within the image limit; Read it", so Claude is never told a small image is too large. The 2000 px is the
 API's limit once a request holds more than 20 images: a conversation's screens (up to 12, §5.5) and dropped
 images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent as a block could fail that turn
 and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the

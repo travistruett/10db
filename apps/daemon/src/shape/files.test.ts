@@ -289,8 +289,13 @@ describe('a large dropped image', () => {
     for (let i = 0; i < 4; i += 1) drop(`shot${String(i)}.png`, pngOfSize(100, 80, 2 * MB - 200));
     const turn = await nextTurn('Four');
     expect(turn.images).toHaveLength(3);
-    expect(turn.message.match(/too large to show/g)).toHaveLength(1);
-    expect(turn.message).toMatch(/shot3\.png\) .*too large to show/);
+    expect(turn.message.match(/too large to show/g)).toBeNull();
+    expect(
+      turn.message.match(/left out to keep this message within the image limit/g),
+    ).toHaveLength(1);
+    expect(turn.message).toMatch(
+      /shot3\.png\) — left out to keep this message within the image limit/,
+    );
   });
 
   it('keeps a whole conversation’s inline images under a total, the later ones going as paths', async () => {
@@ -301,7 +306,11 @@ describe('a large dropped image', () => {
       for (let i = 0; i < 3; i += 1) drop(`t${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
       const turn = await nextTurn(`Turn ${String(turnNo)}`);
       sent.push(turn.images.length);
-      marked.push(turn.message.match(/too large to show/g)?.length ?? 0);
+      expect(turn.message).not.toMatch(/too large to show/);
+      marked.push(
+        turn.message.match(/left out to keep the conversation within the image limit/g)?.length ??
+          0,
+      );
     }
     expect(sent.reduce((a, b) => a + b, 0) * 2 * MB).toBeLessThanOrEqual(
       INLINE_CONVERSATION_MAX_BYTES,
@@ -322,7 +331,10 @@ describe('a large dropped image', () => {
     drop('tiny.png', PNG);
     const turn = await nextTurn('One more');
     expect(turn.images).toEqual([]);
-    expect(turn.message).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+    expect(turn.message).toMatch(
+      /tiny\.png\) — left out to keep the conversation within the image limit; Read it/,
+    );
+    expect(turn.message).not.toMatch(/too large/);
   });
 
   /** Spends the whole conversation total: nine 2 MiB images over three turns, each told. */
@@ -341,7 +353,9 @@ describe('a large dropped image', () => {
     const { spec } = must(f.adapter.shapeSessions[1], 'a resumed session');
     expect(spec.resumeProviderSessionId).not.toBeNull();
     expect(spec.images ?? []).toEqual([]);
-    expect(spec.prompt).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+    expect(spec.prompt).toMatch(
+      /tiny\.png\) — left out to keep the conversation within the image limit; Read it/,
+    );
   });
 
   it('sends inline again from zero in a fresh session, which resends no earlier image', async () => {
@@ -356,7 +370,7 @@ describe('a large dropped image', () => {
     expect(spec.resumeProviderSessionId).toBeNull();
     expect(spec.prompt).toContain('continues in a fresh session');
     expect(spec.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
-    expect(spec.prompt).not.toMatch(/tiny\.png\) — too large/);
+    expect(spec.prompt).not.toMatch(/tiny\.png\) — /);
   });
 
   it('does not spend the total on images that went as paths because the message was full', async () => {
@@ -368,7 +382,7 @@ describe('a large dropped image', () => {
     for (let i = 0; i < 3; i += 1) drop(`next${String(i)}.png`, wholePng(1.9 * MB));
     const second = await nextTurn('Three more');
     expect(second.images).toHaveLength(3);
-    expect(second.message).not.toMatch(/too large to show/);
+    expect(second.message).not.toMatch(/too large to show|left out to keep/);
   });
 
   it('counts only the new session’s inline images after a digest start', async () => {
@@ -387,7 +401,7 @@ describe('a large dropped image', () => {
     const later = await nextTurn('Later');
     // 2 MiB sent in this session so far: the nine of the old session are not carried.
     expect(later.images).toHaveLength(3);
-    expect(later.message).not.toMatch(/too large to show/);
+    expect(later.message).not.toMatch(/too large to show|left out to keep/);
   });
 
   // see_screen answers a picture in a tool result, which a resumed session resends like any image block.
@@ -437,8 +451,10 @@ describe('a large dropped image', () => {
       drop('over.png', wholePng(1.5 * MB));
       const turn = await nextTurn('Both');
       expect(turn.images).toHaveLength(1);
-      expect(turn.message).toMatch(/over\.png\) — too large to show inline; Read it/);
-      expect(turn.message).not.toMatch(/fits\.png\) — too large/);
+      expect(turn.message).toMatch(
+        /over\.png\) — left out to keep the conversation within the image limit; Read it/,
+      );
+      expect(turn.message).not.toMatch(/fits\.png\) — /);
     });
 
     it('refuses a screen that would pass the total the dropped images left, saying why', async () => {
@@ -486,7 +502,7 @@ describe('a large dropped image', () => {
         const later = await nextTurn('Later');
         // About 2 MiB in this session, though the conversation keeps 11.4 MiB of older screens.
         expect(later.images).toHaveLength(3);
-        expect(later.message).not.toMatch(/too large to show/);
+        expect(later.message).not.toMatch(/too large to show|left out to keep/);
       });
 
       it('does not refuse the screen the digest told Claude to take again', async () => {
@@ -610,7 +626,11 @@ describe('a large dropped image', () => {
       for (let i = 0; i < 20; i += 1) drop(`m${String(i)}.png`, pngOfSize(1000, 800, 1.9 * MB));
       const turn = await nextTurn('Twenty');
       expect(turn.images).toHaveLength(3);
-      expect(turn.message.match(/too large to show/g)).toHaveLength(17);
+      // The cap left them out, so the line says that, not that they are too large.
+      expect(turn.message.match(/too large to show/g)).toBeNull();
+      expect(
+        turn.message.match(/left out to keep this message within the image limit; Read it/g),
+      ).toHaveLength(17);
       const sentBytes = turn.images.reduce((sum, image) => sum + image.data.length * 0.75, 0);
       // 5.7 MiB is carried, so 12.3 MiB remain: nine 1.4 MB (1.34 MiB) screens fit, the tenth does not.
       // Charging all twenty (38 MiB) would have refused the first.

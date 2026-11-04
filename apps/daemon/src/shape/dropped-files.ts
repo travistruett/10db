@@ -90,43 +90,65 @@ export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
  */
 export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<string> {
   const ids = new Set<string>();
-  let total = 0;
-  for (const file of files) {
-    if (!isImageName(file.name)) continue;
-    if (
-      tooBigAlone(file) ||
-      total + file.size > INLINE_IMAGES_MAX_BYTES ||
-      spent + total + file.size > INLINE_CONVERSATION_MAX_BYTES
-    )
-      continue;
-    total += file.size;
-    ids.add(file.id);
-  }
+  for (const [id, verdict] of imageVerdicts(files, spent)) if (verdict === 'inline') ids.add(id);
   return ids;
 }
 
+/** Why an image goes as a path: it is too big alone, or a cap on what a message or the conversation carries is full. */
+export type PathReason = 'too-big' | 'message-full' | 'conversation-full';
+
+/** What the `[file]` line says of an image that goes as a path, before "; Read it". */
+export const PATH_REASON: Readonly<Record<PathReason, string>> = {
+  'too-big': 'too large to show inline',
+  'message-full': 'left out to keep this message within the image limit',
+  'conversation-full': 'left out to keep the conversation within the image limit',
+};
+
+/** What becomes of each image among `files`: sent as a block, or as a path for this reason. */
+function imageVerdicts(
+  files: readonly FileSize[],
+  spent: number,
+): Map<string, 'inline' | PathReason> {
+  const verdicts = new Map<string, 'inline' | PathReason>();
+  let total = 0;
+  for (const file of files) {
+    if (!isImageName(file.name)) continue;
+    if (tooBigAlone(file)) verdicts.set(file.id, 'too-big');
+    else if (total + file.size > INLINE_IMAGES_MAX_BYTES) verdicts.set(file.id, 'message-full');
+    else if (spent + total + file.size > INLINE_CONVERSATION_MAX_BYTES)
+      verdicts.set(file.id, 'conversation-full');
+    else {
+      total += file.size;
+      verdicts.set(file.id, 'inline');
+    }
+  }
+  return verdicts;
+}
+
 /**
- * The ids of the images among `shown` (the files a message names) that reach Claude as a path alone
+ * The images among `shown` (the files a message names) that reach Claude as a path alone, each with why,
  * when `sent` (the files whose images the message carries) go as `inlineImageIds` says after `spent`
- * bytes sent earlier: an image over the per-image cap or the API's pixel limit, or one of `sent` the caps
- * left out. Any other shown image outside `sent` was sent earlier.
+ * bytes sent earlier: an image over the per-image cap or the API's pixel limit ('too-big'), or one of
+ * `sent` the per-message or conversation cap left out. Any other shown image outside `sent` was sent earlier.
  */
-export function pathImageIds(
+export function pathImageReasons(
   shown: readonly FileSize[],
   sent: readonly FileSize[],
   spent = 0,
-): Set<string> {
-  const inline = inlineImageIds(sent, spent);
-  const sentIds = new Set(sent.map((file) => file.id));
-  return new Set(
-    shown
-      .filter((file) => {
-        const kind = shapeFileKind(file.name);
-        if (kind === null || !isShapeImage(kind)) return false;
-        return tooBigAlone(file) || (sentIds.has(file.id) && !inline.has(file.id));
-      })
-      .map((file) => file.id),
-  );
+): Map<string, PathReason> {
+  const verdicts = imageVerdicts(sent, spent);
+  const reasons = new Map<string, PathReason>();
+  for (const file of shown) {
+    const kind = shapeFileKind(file.name);
+    if (kind === null || !isShapeImage(kind)) continue;
+    if (tooBigAlone(file)) {
+      reasons.set(file.id, 'too-big');
+      continue;
+    }
+    const verdict = verdicts.get(file.id);
+    if (verdict !== undefined && verdict !== 'inline') reasons.set(file.id, verdict);
+  }
+  return reasons;
 }
 
 /** The file as Claude takes it in a message: an image block, for the kinds that are images. */

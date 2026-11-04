@@ -89,7 +89,10 @@ describe('the pictures a Shape session pulls in with Read', () => {
     const files = Array.from({ length: 11 }, (_, i) => drop(`p${String(i)}.png`, wholePng(2 * MB)));
     const turn = await nextTurn('All of them');
     expect(turn.images).toHaveLength(0);
-    expect(turn.message).toMatch(/too large to show inline; Read it/);
+    expect(turn.message).toMatch(
+      /left out to keep the conversation within the image limit; Read it/,
+    );
+    expect(turn.message).not.toMatch(/too large to show/);
     const paths = files.map((file) => file.storedPath);
     const answers = paths.map((path) => read(path));
     const allowed = answers.filter((a) => a.decision === 'allow').length;

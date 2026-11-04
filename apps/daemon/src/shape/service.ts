@@ -97,7 +97,8 @@ import {
   asImage,
   checkDroppedFile,
   inlineImageIds,
-  pathImageIds,
+  PATH_REASON,
+  pathImageReasons,
   shapeFilesDir,
   storeFile,
 } from './dropped-files';
@@ -581,16 +582,16 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     sizes: readonly string[] = intake.missized.lines,
     converted: string | null = intake.converted,
   ): string => {
-    // An image too large to send as a block is named as a path, with the way to read it.
-    const byPath = pathImageIds(shown, intake.files, intake.spent);
+    // An image not sent as a block is named as a path, with the reason and the way to read it.
+    const byPath = pathImageReasons(shown, intake.files, intake.spent);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
       ...(converted === null ? [] : [`[note] ${converted}`]),
       ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
-      ...shown.map(
-        (file) =>
-          `[file] ${file.storedPath} (${file.name})${byPath.has(file.id) ? ' — too large to show inline; Read it' : ''}`,
-      ),
+      ...shown.map((file) => {
+        const reason = byPath.get(file.id);
+        return `[file] ${file.storedPath} (${file.name})${reason === undefined ? '' : ` — ${PATH_REASON[reason]}; Read it`}`;
+      }),
     ].join('\n');
   };
 
@@ -606,7 +607,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     sentInline: ReadonlySet<ShapeFileRow['id']>,
     fresh: boolean,
   ): void => {
-    const byPath = pathImageIds(shown, intake.files, fresh ? 0 : intake.spent);
+    const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
     const paths = shown.filter((file) => byPath.has(file.id));
     if (paths.length === 0) return;
     const inline =
