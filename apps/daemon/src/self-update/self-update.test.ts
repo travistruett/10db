@@ -2231,6 +2231,32 @@ describe('why an available update is not installing', () => {
     });
   });
 
+  it('keeps waiting, not fetching, while a newer head restages with a build already staged', async () => {
+    world.busy = 1;
+    const update = make();
+    const stagedAt = clock.now();
+    expect(await update.tick()).toBe('busy');
+    expect(update.status().waitingSince).toEqual(stagedAt);
+    expect(update.status().notInstalling).toBeNull();
+    clock.advance(60_000);
+    world.head = NEWER;
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().availableCommit).toBe(NEWER);
+    // The old build is still staged and the update still waits for an idle moment.
+    expect(update.status().notInstalling).toBeNull();
+    expect(update.status().waitingSince).toEqual(stagedAt);
+    finishStage(STAGED_OK);
+    expect(await tick).toBe('busy');
+    expect(update.status().notInstalling).toBeNull();
+    expect(update.status().waitingSince).toEqual(stagedAt);
+  });
+
   it('keeps the head’s reason through a stage for the same head', async () => {
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
     const update = make();
