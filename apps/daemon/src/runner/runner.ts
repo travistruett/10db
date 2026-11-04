@@ -90,12 +90,8 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
-<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
   contextPackedEvent,
-||||||| 90ec8bb
-=======
   denialsForLane,
->>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -1866,20 +1862,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
-<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
-            handle.send(compactionReinjection(pack, deniedPermissionsForWorkstream(db, id)));
-||||||| 90ec8bb
-            handle.send(
-              compactionReinjection(
-                buildContextPack(db, getWorkstream(db, id)),
-                deniedPermissionsForWorkstream(db, id),
-              ),
-            );
-=======
-            handle.send(
-              compactionReinjection(buildContextPack(db, getWorkstream(db, id)), denialsToTell()),
-            );
->>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
+            handle.send(compactionReinjection(pack, denialsToTell()));
             break;
           }
           case 'rate_limit':

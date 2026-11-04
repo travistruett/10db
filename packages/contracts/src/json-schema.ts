@@ -62,7 +62,6 @@ import {
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
-<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
 import {
   DecisionDto,
   DecisionInput,
@@ -87,12 +86,7 @@ import {
   ProposalVerdictAccept,
   ProposalVerdictReject,
 } from './knowledge-api';
-import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
-||||||| 90ec8bb
-import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
-=======
 import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
->>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
