@@ -70,6 +70,49 @@ describe('proposalFiling', () => {
     },
   );
 
+  it('names every declared risk tag', () => {
+    expect(proposalFiling({ ...small, riskTags: ['security', 'auth'], limit: 1200 })).toEqual({
+      file: false,
+      reason: 'it carries the security and auth risk tags',
+    });
+    expect(
+      proposalFiling({ ...small, riskTags: ['security', 'auth', 'migration'], limit: 1200 }),
+    ).toEqual({
+      file: false,
+      reason: 'it carries the security, auth and migration risk tags',
+    });
+  });
+
+  it('names the declared risk tags when the limit is zero', () => {
+    expect(proposalFiling({ ...small, riskTags: ['security'], limit: 0 })).toEqual({
+      file: false,
+      reason:
+        'it carries the security risk tag, and filing small proposals by itself is off for this project',
+    });
+  });
+
+  it.each(['change_task', 'principle', 'note'] as const)(
+    'names the declared risk tags of a %s proposal',
+    (kind) => {
+      expect(
+        proposalFiling({ ...small, kind, riskTags: ['security', 'auth'], limit: 1200 }),
+      ).toEqual({
+        file: false,
+        reason: 'it carries the security and auth risk tags, and it is not a new task',
+      });
+    },
+  );
+
+  it('names the declared risk tags when the step has filed as many tasks as it may', () => {
+    expect(
+      proposalFiling({ ...small, riskTags: ['auth'], limit: 1200, stepCapReached: true }),
+    ).toEqual({
+      file: false,
+      reason:
+        'it carries the auth risk tag, and this step has already filed as many tasks as a step may, so a person decides',
+    });
+  });
+
   it.each([
     ['Bump the zod dependency', 'dependency'],
     ['Add a migration for the column', 'migration'],

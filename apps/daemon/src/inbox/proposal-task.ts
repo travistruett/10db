@@ -91,7 +91,8 @@ export function declaredRiskTags(detail: Readonly<Record<string, unknown>> | nul
  * Decides whether a lane's proposal is filed to the Icebox without a card. Only a new-task proposal
  * can be, and only when the project's limit is above zero, it is no longer than the limit (title and
  * body in characters), it declares no risk tag, its text names none, and it does not ask to join a
- * running batch. Anything else raises the card a person answers.
+ * running batch. Anything else raises the card a person answers. When the proposal declares risk
+ * tags, the reason names all of them, then any other rule that also raised the card.
  */
 export function proposalFiling(proposal: {
   readonly kind: ProposalKind;
@@ -103,25 +104,43 @@ export function proposalFiling(proposal: {
   /** Set when the step the lane is in has already filed as many tasks as a step may. */
   readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
-  if (proposal.kind !== ProposalKind.NewTask)
-    return { file: false, reason: 'it is not a new task' };
+  const other = firstReasonNotToFile(proposal);
+  const declared = [...new Set(proposal.riskTags ?? [])];
+  if (declared.length === 0)
+    return other === null ? { file: true } : { file: false, reason: other };
+  // A declared tag is what the builder most needs to see, so the card names every one of them first,
+  // whichever other rule also raised it.
+  const carries = `it carries the ${listWords(declared)} risk tag${declared.length === 1 ? '' : 's'}`;
+  return { file: false, reason: other === null ? carries : `${carries}, and ${other}` };
+}
+
+/** The first rule, other than a declared risk tag, that keeps a proposal from being filed; null when none does. */
+function firstReasonNotToFile(proposal: {
+  readonly kind: ProposalKind;
+  readonly title: string;
+  readonly body: string;
+  readonly joinsRunningBatch?: boolean | undefined;
+  readonly limit: number;
+  readonly stepCapReached?: boolean | undefined;
+}): string | null {
+  if (proposal.kind !== ProposalKind.NewTask) return 'it is not a new task';
   if (proposal.stepCapReached === true)
-    return {
-      file: false,
-      reason: 'this step has already filed as many tasks as a step may, so a person decides',
-    };
-  if (proposal.limit <= 0)
-    return { file: false, reason: 'filing small proposals by itself is off for this project' };
-  const [declared] = proposal.riskTags ?? [];
-  if (declared !== undefined) return { file: false, reason: `it carries the ${declared} risk tag` };
-  if (proposal.joinsRunningBatch === true)
-    return { file: false, reason: 'it asks to join a running batch' };
+    return 'this step has already filed as many tasks as a step may, so a person decides';
+  if (proposal.limit <= 0) return 'filing small proposals by itself is off for this project';
+  if (proposal.joinsRunningBatch === true) return 'it asks to join a running batch';
   const text = `${proposal.title}\n${proposal.body}`;
   for (const tag of Object.values(RiskTag))
-    if (RISK_WORDS[tag].test(text)) return { file: false, reason: `it names the ${tag} risk` };
+    if (RISK_WORDS[tag].test(text)) return `it names the ${tag} risk`;
   if (proposal.title.length + proposal.body.length > proposal.limit)
-    return { file: false, reason: 'it is over the limit for filing by itself' };
-  return { file: true };
+    return 'it is over the limit for filing by itself';
+  return null;
+}
+
+/** "a", "a and b", "a, b and c". */
+function listWords(words: readonly string[]): string {
+  const last = words.at(-1);
+  if (last === undefined || words.length === 1) return words.join('');
+  return `${words.slice(0, -1).join(', ')} and ${last}`;
 }
 
 /** The longest task title the contract accepts (the Title rule in @10db/contracts). */
