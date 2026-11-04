@@ -2,6 +2,7 @@ import {
   EventType,
   mintId,
   NotFoundError,
+  ShapeProposalBody,
   ShapeProposalState,
   type DecisionId,
   type GoalId,
@@ -430,6 +431,44 @@ export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): v
     .set({ taskId: null })
     .where(eq(schema.shapeQuestions.taskId, taskId))
     .run();
+}
+
+/**
+ * Takes back the questions a task removal detached from the tasks of a goal Remove Draft Goal is
+ * about to remove: each is deleted with its link and its proposal is pending again, so it converts
+ * anew with the goal, as for a question still attached. A detached question has neither a goal nor a
+ * task, so it is found by the key its proposal says it is about; `taskKeys` are the keys the goal's
+ * tasks were converted under. Call it before those links go.
+ */
+export function releaseDetachedShapeQuestions(
+  ctx: WriteContext,
+  shapeId: ShapeId,
+  taskKeys: readonly string[],
+): void {
+  if (taskKeys.length === 0) return;
+  const detached = ctx.tx
+    .select()
+    .from(schema.shapeQuestions)
+    .where(
+      and(
+        eq(schema.shapeQuestions.shapeId, shapeId),
+        isNull(schema.shapeQuestions.goalId),
+        isNull(schema.shapeQuestions.taskId),
+      ),
+    )
+    .all();
+  for (const question of detached) {
+    const proposal = ctx.tx
+      .select()
+      .from(schema.shapeProposals)
+      .where(eq(schema.shapeProposals.id, question.proposalId))
+      .get();
+    const about = ShapeProposalBody.question.safeParse(proposal?.body).data?.about;
+    if (about === undefined || !taskKeys.includes(about)) continue;
+    ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, question.id)).run();
+    ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, question.id)).run();
+    patchShapeProposal(ctx, question.proposalId, { state: ShapeProposalState.Pending });
+  }
 }
 
 /**
