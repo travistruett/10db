@@ -171,6 +171,7 @@ import {
   type TurnResult,
 } from '../sessions';
 import {
+  actionEntering,
   advanceSteps,
   countSendBack,
   failStep,
@@ -860,7 +861,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       patchWorkstream(ctx, id, ctl.fence, {
         steps: stepsAdvanced(ctx, row, to, atLimit),
         stepIndex: to,
-        nextAction: { kind: 'start' },
+        nextAction: actionEntering(ctx, row, to),
         model: next.model,
         effort: next.effort,
       });

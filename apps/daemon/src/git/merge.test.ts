@@ -515,6 +515,9 @@ describe('mergeIntoBranch', () => {
         ]);
         commitFiles({ 'src/type.ts': 'b\nc\n' }, 'resolved');
         expect(await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'])).toEqual([]);
+        expect(
+          await git.conflictMarkers(repo.path, ['src/type.ts', 'src/other.ts'], 'HEAD^'),
+        ).toEqual(['src/type.ts']);
       });
     });
   });

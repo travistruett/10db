@@ -69,6 +69,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
+import { commitResultAsStored } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -639,6 +640,9 @@ export function createToolHandlers(
         opId: input.opId,
         branch,
       });
+      // The record says when this commit resolved conflict markers of a base merge: it is on the branch
+      // but brings none of a reverted task's work back. The session's answer is unchanged.
+      const stored = await commitResultAsStored(deps.git, checkout, result);
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,
@@ -650,7 +654,14 @@ export function createToolHandlers(
             alreadyCommitted: result.alreadyCommitted,
           },
         });
-        return record('commit', input.opId, result, ctx);
+        insertToolOp(ctx, {
+          workstreamId,
+          sessionId,
+          opId: input.opId,
+          tool: McpToolName.Commit,
+          result: stored,
+        });
+        return result;
       });
     },
 
