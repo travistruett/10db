@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EventType,
   InvalidError,
+  ScreenName,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
@@ -10,6 +11,8 @@ import {
   type ShapeFileDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pngImage } from '../../test/png';
+import { createScreens, INLINE_CONVERSATION_MAX_BYTES, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
@@ -177,6 +180,93 @@ describe('a large dropped image', () => {
     expect(turn.message.match(/too large to show/g)).toHaveLength(2);
   });
 
+  // The API refuses an image over 8000 px on a side however few bytes it takes, and a resumed session
+  // resends it with every request, so a tall full-page screenshot goes as a path too.
+  describe('over 8000 px on a side', () => {
+    const png = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(33);
+      PNG.copy(head);
+      head.writeUInt32BE(13, 8);
+      head.write('IHDR', 12, 'ascii');
+      head.writeUInt32BE(width, 16);
+      head.writeUInt32BE(height, 20);
+      return sized(head, 100_000);
+    };
+    const jpeg = (width: number, height: number): Buffer => {
+      const sof = Buffer.from([
+        0xff, 0xc0, 0, 17, 8, 0, 0, 0, 0, 3, 1, 0x22, 0, 2, 0x11, 1, 3, 0x11, 1,
+      ]);
+      sof.writeUInt16BE(height, 5);
+      sof.writeUInt16BE(width, 7);
+      // An APP0 segment first, so the frame header is not at a fixed offset.
+      const app0 = Buffer.from([0xff, 0xe0, 0, 6, 0x4a, 0x46, 0x49, 0x46]);
+      return sized(Buffer.concat([Buffer.from([0xff, 0xd8]), app0, sof]), 100_000);
+    };
+    const webpLossy = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(30);
+      head.write('RIFF', 0, 'ascii');
+      head.write('WEBP', 8, 'ascii');
+      head.write('VP8 ', 12, 'ascii');
+      head.set([0x9d, 0x01, 0x2a], 23);
+      head.writeUInt16LE(width, 26);
+      head.writeUInt16LE(height, 28);
+      return sized(head, 100_000);
+    };
+    const webpExtended = (width: number, height: number): Buffer => {
+      const head = Buffer.alloc(30);
+      head.write('RIFF', 0, 'ascii');
+      head.write('WEBP', 8, 'ascii');
+      head.write('VP8X', 12, 'ascii');
+      head.writeUIntLE(width - 1, 24, 3);
+      head.writeUIntLE(height - 1, 27, 3);
+      return sized(head, 100_000);
+    };
+
+    it.each([
+      { name: 'a tall PNG', file: 'long.png', bytes: png(1200, 8001) },
+      { name: 'a wide PNG', file: 'wide.png', bytes: png(8001, 1200) },
+      { name: 'a tall JPEG', file: 'long.jpg', bytes: jpeg(1200, 12_000) },
+      { name: 'a wide lossy WebP', file: 'wide.webp', bytes: webpLossy(9000, 600) },
+      { name: 'an extended WebP', file: 'long.webp', bytes: webpExtended(800, 16_000) },
+    ])('goes as a path to Read, not an image block: $name', async ({ file, bytes }) => {
+      const stored = drop(file, bytes);
+      const turn = await nextTurn('The whole page');
+      expect(turn.images).toEqual([]);
+      expect(turn.message).toContain(`[file] ${stored.storedPath} (${file})`);
+      expect(turn.message).toMatch(/too large to show.*Read/);
+    });
+
+    it.each([
+      { name: 'a PNG at 8000', file: 'edge.png', bytes: png(8000, 8000) },
+      { name: 'a tall JPEG at 8000', file: 'edge.jpg', bytes: jpeg(1200, 8000) },
+      { name: 'a lossy WebP at 8000', file: 'edge.webp', bytes: webpLossy(8000, 600) },
+    ])('is still sent inline at the limit: $name', async ({ file, bytes }) => {
+      drop(file, bytes);
+      const turn = await nextTurn('Fits');
+      expect(turn.images).toHaveLength(1);
+      expect(turn.message).not.toMatch(/too large to show/);
+    });
+
+    it('is named as a path while a normal image beside it is still sent inline', async () => {
+      drop('long.png', png(1200, 9000));
+      drop('small.png', PNG);
+      const turn = await nextTurn('Both');
+      expect(turn.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+      expect(turn.message).toMatch(/long\.png\) — too large to show inline; Read it/);
+      expect(turn.message).not.toMatch(/small\.png\) — too large/);
+    });
+
+    it('is named as a path in a session that has not started, and not sent as an image', async () => {
+      drop('long.png', png(1200, 9000));
+      f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok' });
+      f.service.send(shapeId(), 'Look');
+      await f.service.settled(shapeId());
+      const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+      expect(spec.images ?? []).toEqual([]);
+      expect(spec.prompt).toMatch(/long\.png\) — too large to show inline; Read it/);
+    });
+  });
+
   it('is not marked on a small image beside it, which is still sent inline', async () => {
     drop('big.png', sized(PNG, 6 * MB));
     drop('small.png', PNG);
@@ -191,6 +281,163 @@ describe('a large dropped image', () => {
     expect(turn.images).toHaveLength(3);
     expect(turn.message.match(/too large to show/g)).toHaveLength(1);
     expect(turn.message).toMatch(/shot3\.png\) .*too large to show/);
+  });
+
+  it('keeps a whole conversation’s inline images under a total, the later ones going as paths', async () => {
+    // A resumed session resends every earlier image block, so the sum across turns is what the API sees.
+    const sent: number[] = [];
+    const marked: number[] = [];
+    for (let turnNo = 0; turnNo < 5; turnNo += 1) {
+      for (let i = 0; i < 3; i += 1)
+        drop(`t${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      const turn = await nextTurn(`Turn ${String(turnNo)}`);
+      sent.push(turn.images.length);
+      marked.push(turn.message.match(/too large to show/g)?.length ?? 0);
+    }
+    expect(sent.reduce((a, b) => a + b, 0) * 2 * MB).toBeLessThanOrEqual(
+      INLINE_CONVERSATION_MAX_BYTES,
+    );
+    // base64 grows 4/3: what a resumed request carries stays well under the API's 32 MB.
+    expect((INLINE_CONVERSATION_MAX_BYTES * 4) / 3).toBeLessThan(28_000_000);
+    expect(sent).toEqual([3, 3, 3, 0, 0]);
+    expect(marked).toEqual([0, 0, 0, 3, 3]);
+  });
+
+  it('spends what is left of the conversation total on a smaller image, then stops', async () => {
+    for (let turnNo = 0; turnNo < 3; turnNo += 1)
+      for (let i = 0; i < 3; i += 1) {
+        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+        if (i === 2) await nextTurn(`Turn ${String(turnNo)}`);
+      }
+    // 18 MiB spent: nothing more fits, not even a tiny image.
+    drop('tiny.png', PNG);
+    const turn = await nextTurn('One more');
+    expect(turn.images).toEqual([]);
+    expect(turn.message).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+  });
+
+  /** Spends the whole conversation total: nine 2 MiB images over three turns, each told. */
+  const spendTheTotal = async (): Promise<void> => {
+    for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+      for (let i = 0; i < 3; i += 1)
+        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn(`Turn ${String(turnNo)}`);
+    }
+  };
+
+  it('counts what the conversation spent when a session resumes after a restart', async () => {
+    await spendTheTotal();
+    await f.restart();
+    drop('tiny.png', PNG);
+    await nextTurn('One more');
+    const { spec } = must(f.adapter.shapeSessions[1], 'a resumed session');
+    expect(spec.resumeProviderSessionId).not.toBeNull();
+    expect(spec.images ?? []).toEqual([]);
+    expect(spec.prompt).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+  });
+
+  it('sends inline again from zero in a fresh session, which resends no earlier image', async () => {
+    await spendTheTotal();
+    // Past 70% of the context the session is let go, so the next one starts from the digest.
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+    f.service.send(shapeId(), 'Full');
+    await f.service.settled(shapeId());
+    drop('tiny.png', PNG);
+    await nextTurn('One more');
+    const { spec } = must(f.adapter.shapeSessions[1], 'a fresh session');
+    expect(spec.resumeProviderSessionId).toBeNull();
+    expect(spec.prompt).toContain('continues in a fresh session');
+    expect(spec.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+    expect(spec.prompt).not.toMatch(/tiny\.png\) — too large/);
+  });
+
+  // see_screen answers a picture in a tool result, which a resumed session resends like any image block.
+  describe('beside the pictures see_screen takes', () => {
+    const window = { screen: ScreenName.Board, width: 1200, height: 900 } as const;
+    const drawn = (bytes: number): ScreenOutcome => {
+      const image = pngImage(1200, 900);
+      return {
+        ok: true,
+        image: {
+          mediaType: 'image/png',
+          data: pngImage(1200, 900, bytes - image.length - 12).toString('base64'),
+          width: 1200,
+          height: 900,
+        },
+      };
+    };
+    const screensOf = (outcome: ScreenOutcome) =>
+      createScreens({
+        state: f.state,
+        filesDir: f.filesDir,
+        broker: {
+          request: () => Promise.resolve(outcome),
+          claim: () => Promise.resolve(null),
+          deliver: () => false,
+          refuse: () => false,
+          tokenValid: () => false,
+        },
+      });
+    const kept = (): string[] => {
+      const dir = join(f.filesDir, shapeId(), 'screens');
+      return existsSync(dir) ? readdirSync(dir) : [];
+    };
+    const keptBytes = (): number =>
+      kept().reduce(
+        (sum, name) => sum + statSync(join(f.filesDir, shapeId(), 'screens', name)).size,
+        0,
+      );
+
+    it('takes the screens out of what is left for dropped images', async () => {
+      await nextTurn('Hello');
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+      // 16.8 MB of screens leaves about 2 MB: one more image fits, and a second does not.
+      drop('fits.png', sized(PNG, MB));
+      drop('over.png', sized(PNG, 1.5 * MB));
+      const turn = await nextTurn('Both');
+      expect(turn.images).toHaveLength(1);
+      expect(turn.message).toMatch(/over\.png\) — too large to show inline; Read it/);
+      expect(turn.message).not.toMatch(/fits\.png\) — too large/);
+    });
+
+    it('refuses a screen that would pass the total the dropped images left, saying why', async () => {
+      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('One');
+      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('Two');
+      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('Three');
+      // 16 MiB told: a 1.5 MB screen fits once.
+      const screens = screensOf(drawn(1_500_000));
+      await screens.see(shapeId(), window);
+      await expect(screens.see(shapeId(), window)).rejects.toThrow(
+        /no room for another picture.*new conversation/,
+      );
+      expect(kept()).toHaveLength(1);
+      expect(
+        f.service.view(shapeId()).messages.filter((m) => m.kind === ShapeMessageKind.Screen),
+      ).toHaveLength(1);
+      expect(
+        f.service
+          .view(shapeId())
+          .messages.some((m) => m.body.startsWith('see_screen · refused · ')),
+      ).toBe(true);
+    });
+
+    it('keeps nine dropped images and twelve asked-for screens under the total', async () => {
+      const screens = screensOf(drawn(1_500_000));
+      await spendTheTotal();
+      for (let n = 0; n < 12; n += 1)
+        await expect(screens.see(shapeId(), window)).rejects.toThrow(/no room/);
+      drop('late.png', PNG);
+      const turn = await nextTurn('More');
+      expect(turn.images).toEqual([]);
+      const told = f.service.view(shapeId()).files.filter((file) => file.name !== 'late.png');
+      const images = told.reduce((sum, file) => sum + file.size, 0);
+      expect(images + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
   });
 
   it('is sent as a path to a session that has not started, and not as an image', async () => {
