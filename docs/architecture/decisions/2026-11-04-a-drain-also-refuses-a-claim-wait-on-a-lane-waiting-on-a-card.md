@@ -23,11 +23,11 @@ The earlier record spoke of parked lanes, but this lane is not parked: its sessi
 nothing. Its agent is blocked on the card, so it frees no claim until the builder answers, and the drain has
 stopped counting it as mid-session (`decisions/2026-11-03-app-follows-main-by-itself.md`): the quit ends its
 session and recovery parks the lane on the same card. A session waiting in `request_claim` for that lane's
-claim would be waiting on something that can't happen before the update installs, and, being a live session
+claim would be waiting on something that may not happen before the update installs, and, being a live session
 that counts as mid-session, it would hold the update up until the builder answered the card or turned the
 switch off. Refusing the wait lets that session end by itself, and the drain no longer waits for it.
 
 Left unrefused, the one case the earlier record's two holders left open would have kept the same hang that
 record was written to remove. Releasing the lane's claim was turned down for the reason given there: it
-protects the lane's uncommitted work. The behaviour shipped in commit cd96eea; this record brings the
-decision in line with it.
+protects the lane's uncommitted work. The behaviour shipped in #500; this record brings the decision in line
+with it.
