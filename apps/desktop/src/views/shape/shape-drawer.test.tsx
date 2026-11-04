@@ -1,6 +1,6 @@
 import { mintId, type ShapeViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse, type RequestHandler } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
@@ -20,38 +20,53 @@ import {
 const project = projectViewDto();
 const realObserver = window.ResizeObserver;
 
-/** Reports a 900 px wide element, so the split pane chooses the drawer layout. */
-class NarrowObserver implements ResizeObserver {
+/** The width every observed element has. Under 1100 px the split pane chooses the drawer layout. */
+let contentWidth = 900;
+const watching = new Set<SizedObserver>();
+
+/** Reports `contentWidth` on observing, and again when `resizeTo` changes it. */
+class SizedObserver implements ResizeObserver {
   private readonly callback: ResizeObserverCallback;
+  private readonly targets = new Set<Element>();
   constructor(callback: ResizeObserverCallback) {
     this.callback = callback;
   }
   observe(target: Element): void {
-    const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 600, right: 900, width: 900, height: 600 };
-    const box = [{ inlineSize: 900, blockSize: 600 }];
-    this.callback(
-      [
-        {
-          target,
-          contentRect: { ...rect, toJSON: () => rect },
-          borderBoxSize: box,
-          contentBoxSize: box,
-          devicePixelContentBoxSize: box,
-        },
-      ],
-      this,
-    );
+    this.targets.add(target);
+    watching.add(this);
+    this.report();
   }
-  unobserve(): void {
-    // Nothing to stop.
+  report(): void {
+    const width = contentWidth;
+    const rect = { x: 0, y: 0, top: 0, left: 0, bottom: 600, right: width, width, height: 600 };
+    const box = [{ inlineSize: width, blockSize: 600 }];
+    const entries = [...this.targets].map((target) => ({
+      target,
+      contentRect: { ...rect, toJSON: () => rect },
+      borderBoxSize: box,
+      contentBoxSize: box,
+      devicePixelContentBoxSize: box,
+    }));
+    this.callback(entries, this);
+  }
+  unobserve(target: Element): void {
+    this.targets.delete(target);
   }
   disconnect(): void {
-    // Nothing to stop.
+    this.targets.clear();
+    watching.delete(this);
   }
 }
 
+function resizeTo(width: number): void {
+  contentWidth = width;
+  for (const observer of watching) observer.report();
+}
+
 beforeEach(() => {
-  window.ResizeObserver = NarrowObserver;
+  contentWidth = 900;
+  watching.clear();
+  window.ResizeObserver = SizedObserver;
 });
 afterEach(() => {
   window.ResizeObserver = realObserver;
@@ -290,5 +305,164 @@ describe('Shape: the drawer layout', () => {
       });
       expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
     });
+  });
+});
+
+// A screen is first drawn at width 0, which reads as the split layout, and takes its real layout a
+// frame later. The default window is under 1100 px, so every conversation opens through that change.
+describe('Shape: the conversation across a layout change', () => {
+  const shape = shapeDto({ projectId: project.id, state: 'proposed', proposeUnlocked: true });
+  const view = shapeViewDto({ shape, messages: [shapeMessageDto(shape.id)], proposals: [] });
+  const text = 'Move density ahead of the scrollbars.';
+
+  const waiting = () => {
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { held, release };
+  };
+  const refused = (message: string) =>
+    HttpResponse.json({ error: 'invalid', message }, { status: 400 });
+  const restarting = () =>
+    HttpResponse.json(
+      { error: 'unavailable', message: 'The daemon is restarting' },
+      { status: 503 },
+    );
+  const uploaded = () =>
+    HttpResponse.json(
+      {
+        id: mintId('ShapeFile'),
+        shapeId: shape.id,
+        name: 'brief.md',
+        mediaType: 'text/markdown',
+        size: 4,
+        storedPath: '/data/shapes/x/files/brief.md',
+        createdAt: '2026-11-02T12:00:00.000Z',
+      },
+      { status: 201 },
+    );
+  const serve = (...overrides: RequestHandler[]): void => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([shape])),
+      http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(view)),
+      http.post(daemonUrl('/projects/:projectId/shapes'), () =>
+        HttpResponse.json(shape, { status: 201 }),
+      ),
+      ...overrides,
+      ...baseHandlers(),
+    );
+  };
+  /** The new-conversation screen once it has its project and has measured itself. */
+  const onNewConversation = async (): Promise<HTMLElement> => {
+    await screen.findByRole('list', { name: 'Recent conversations' });
+    if (contentWidth < 1100) await screen.findByRole('button', { name: 'Proposed' });
+    return screen.getByRole('textbox', { name: 'Message' });
+  };
+  const send = (input: HTMLElement): void => {
+    fireEvent.change(input, { target: { value: text } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+  };
+  const drop = (input: HTMLElement): void => {
+    const files = [new File(['# Hi'], 'brief.md', { type: 'text/markdown' })];
+    fireEvent.drop(input, { dataTransfer: { files, types: ['Files'] } });
+  };
+  /** The opened conversation has measured itself: only it has New, and only the drawer has the bar. */
+  const openedInTheDrawerLayout = async (): Promise<void> => {
+    await screen.findByRole('link', { name: 'New' });
+    await screen.findByRole('button', { name: 'Proposed' });
+  };
+
+  it('keeps the reason and the text of a send that failed before the upload opened it', async () => {
+    const upload = waiting();
+    serve(
+      http.post(daemonUrl('/shapes/:shapeId/messages'), restarting),
+      http.post(daemonUrl('/shapes/:shapeId/files'), async () => {
+        await upload.held;
+        return uploaded();
+      }),
+    );
+    renderApp('/shape');
+    const input = await onNewConversation();
+    drop(input);
+    send(input);
+    expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
+    upload.release();
+    await openedInTheDrawerLayout();
+    expect(screen.getByText('The daemon is restarting')).toBeTruthy();
+    const kept = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message' });
+    expect(kept.value).toBe(text);
+  });
+
+  it('keeps the reason of a dropped file the daemon refused', async () => {
+    serve(
+      http.post(daemonUrl('/shapes/:shapeId/files'), () =>
+        refused('brief.md isn’t really Markdown'),
+      ),
+    );
+    renderApp('/shape');
+    drop(await onNewConversation());
+    await openedInTheDrawerLayout();
+    expect(screen.getByText('brief.md isn’t really Markdown')).toBeTruthy();
+  });
+
+  it('keeps the reason of a refused drop while a send is still on its way', async () => {
+    const message = waiting();
+    serve(
+      http.post(daemonUrl('/shapes/:shapeId/files'), () =>
+        refused('brief.md isn’t really Markdown'),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+        await message.held;
+        return HttpResponse.json(shapeMessageDto(shape.id), { status: 202 });
+      }),
+    );
+    renderApp('/shape');
+    const input = await onNewConversation();
+    send(input);
+    drop(input);
+    await openedInTheDrawerLayout();
+    expect(screen.getByText('brief.md isn’t really Markdown')).toBeTruthy();
+    message.release();
+  });
+
+  it('opens the conversation of a send the window was resized across', async () => {
+    contentWidth = 1200;
+    const message = waiting();
+    serve(
+      http.post(daemonUrl('/shapes/:shapeId/messages'), async () => {
+        await message.held;
+        return HttpResponse.json(shapeMessageDto(shape.id), { status: 202 });
+      }),
+    );
+    const { router } = renderApp('/shape');
+    const input = await onNewConversation();
+    send(input);
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Send' }).hasAttribute('data-loading')).toBe(true);
+    });
+    resizeTo(900);
+    await screen.findByRole('button', { name: 'Proposed' });
+    message.release();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${shape.id}`);
+    });
+  });
+
+  it('keeps the input, and what is typed in it, when the window crosses the drawer width', async () => {
+    contentWidth = 1200;
+    serve();
+    renderApp('/shape');
+    const input = await onNewConversation();
+    fireEvent.change(input, { target: { value: text } });
+    resizeTo(900);
+    await screen.findByRole('button', { name: 'Proposed' });
+    expect(screen.getByRole('textbox', { name: 'Message' })).toBe(input);
+    resizeTo(1200);
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Proposed' })).toBeNull();
+    });
+    expect(screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message' }).value).toBe(text);
   });
 });

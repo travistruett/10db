@@ -80,43 +80,7 @@ export function SplitPane({ children, drawerOpen, onClose }: SplitPaneProps) {
     };
   }, [closing]);
 
-  if (layout.mode === 'drawer') {
-    return (
-      <Box
-        ref={ref}
-        flex="1 1 0px"
-        mih={420}
-        style={{ position: 'relative', display: 'flex', flexDirection: 'column', minWidth: 0 }}
-      >
-        {bar}
-        <Box style={{ flex: 1, minHeight: 0 }}>{chat}</Box>
-        {drawerOpen ? (
-          <Box
-            style={{
-              position: 'absolute',
-              top: 0,
-              right: 0,
-              bottom: 0,
-              width: `min(${String(SIDEBAR_MIN)}px, 100%)`,
-              background: 'var(--mantine-color-body)',
-              borderLeft: '1px solid var(--mantine-color-default-border)',
-              zIndex: 5,
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            {/* The drawer covers the bar's Proposed button, so it carries its own close. */}
-            <Group justify="flex-end" px="xs" pt={6} style={{ flex: 'none' }}>
-              <CloseButton aria-label="Close Proposed" size="sm" onClick={onClose} />
-            </Group>
-            <Box style={{ flex: 1, minHeight: 0 }}>{sidebar}</Box>
-          </Box>
-        ) : null}
-      </Box>
-    );
-  }
-
-  const shown = chatPx ?? layout.chat;
+  const shown = chatPx ?? (layout.mode === 'split' ? layout.chat : null);
   const move = (px: number): void => {
     const next = chatShareAfterDrag(px, width);
     setChatPx(null);
@@ -154,42 +118,81 @@ export function SplitPane({ children, drawerOpen, onClose }: SplitPaneProps) {
     move(next);
   };
 
+  const split = layout.mode === 'split';
   return (
-    <Box ref={ref} flex="1 1 0px" mih={420} style={{ display: 'flex', minWidth: 0 }}>
+    <Box
+      ref={ref}
+      flex="1 1 0px"
+      mih={420}
+      style={{
+        position: 'relative',
+        display: 'flex',
+        flexDirection: split ? 'row' : 'column',
+        minWidth: 0,
+      }}
+    >
+      {split ? null : bar}
+      {/* The chat keeps this place in both layouts. A screen is drawn at width 0, which reads as
+          split, and may turn out narrower a frame later; moving the chat would remount it, and a
+          remount loses the draft, the failures and any send still on its way. */}
       <Box
-        style={{
-          flex: 'none',
-          minWidth: 0,
-          width: shown ?? `${String(share * 100)}%`,
-        }}
+        style={
+          split
+            ? { flex: 'none', minWidth: 0, width: shown ?? `${String(share * 100)}%` }
+            : { flex: 1, minHeight: 0 }
+        }
       >
         {chat}
       </Box>
-      {/* A focusable separator: its value is the chat's share of the width, in percent. */}
-      <Box
-        role="separator"
-        aria-orientation="vertical"
-        aria-label="Resize the conversation"
-        aria-valuemin={Math.round((CHAT_MIN / Math.max(width, 1)) * 100)}
-        aria-valuemax={Math.round(((width - SIDEBAR_MIN) / Math.max(width, 1)) * 100)}
-        aria-valuenow={Math.round((shown === null ? share : shown / Math.max(width, 1)) * 100)}
-        tabIndex={0}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onKeyDown={onKeyDown}
-        style={{
-          flex: 'none',
-          width: 9,
-          cursor: 'col-resize',
-          touchAction: 'none',
-          display: 'flex',
-          justifyContent: 'center',
-        }}
-      >
-        <Box style={{ width: 1, background: 'var(--mantine-color-default-border)' }} />
-      </Box>
-      <Box style={{ flex: 1, minWidth: 0 }}>{sidebar}</Box>
+      {split ? (
+        // A focusable separator: its value is the chat's share of the width, in percent.
+        <Box
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize the conversation"
+          aria-valuemin={Math.round((CHAT_MIN / Math.max(width, 1)) * 100)}
+          aria-valuemax={Math.round(((width - SIDEBAR_MIN) / Math.max(width, 1)) * 100)}
+          aria-valuenow={Math.round((shown === null ? share : shown / Math.max(width, 1)) * 100)}
+          tabIndex={0}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onKeyDown={onKeyDown}
+          style={{
+            flex: 'none',
+            width: 9,
+            cursor: 'col-resize',
+            touchAction: 'none',
+            display: 'flex',
+            justifyContent: 'center',
+          }}
+        >
+          <Box style={{ width: 1, background: 'var(--mantine-color-default-border)' }} />
+        </Box>
+      ) : null}
+      {split ? <Box style={{ flex: 1, minWidth: 0 }}>{sidebar}</Box> : null}
+      {!split && drawerOpen ? (
+        <Box
+          style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            bottom: 0,
+            width: `min(${String(SIDEBAR_MIN)}px, 100%)`,
+            background: 'var(--mantine-color-body)',
+            borderLeft: '1px solid var(--mantine-color-default-border)',
+            zIndex: 5,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          {/* The drawer covers the bar's Proposed button, so it carries its own close. */}
+          <Group justify="flex-end" px="xs" pt={6} style={{ flex: 'none' }}>
+            <CloseButton aria-label="Close Proposed" size="sm" onClick={onClose} />
+          </Group>
+          <Box style={{ flex: 1, minHeight: 0 }}>{sidebar}</Box>
+        </Box>
+      ) : null}
     </Box>
   );
 }
