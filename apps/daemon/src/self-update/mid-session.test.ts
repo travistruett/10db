@@ -1,5 +1,15 @@
-import { BatchState } from '@10db/contracts';
-import { createTestStore, insertBatch, seedProject, transitionBatch } from '@10db/db';
+import { BatchState, WorkstreamState as S, type SessionId } from '@10db/contracts';
+import {
+  countWaitingOnCard,
+  createTestStore,
+  insertBatch,
+  insertTask,
+  insertWorkstream,
+  patchWorkstream,
+  seedProject,
+  transitionBatch,
+  transitionWorkstream,
+} from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { midSessionWork } from './mid-session';
 
@@ -24,6 +34,29 @@ describe('midSessionWork', () => {
     expect(midSessionWork(store.db, none, { turnsInProgress: () => 0 })).toBe(0);
     expect(midSessionWork(store.db, none, { turnsInProgress: () => 2 })).toBe(2);
     expect(midSessionWork(store.db, { pending: () => 1 }, { turnsInProgress: () => 1 })).toBe(2);
+    close();
+  });
+
+  it('counts a lane waiting on a card with a live session, unless the drain leaves it out', () => {
+    const { store, close } = createTestStore();
+    const project = seedProject(store);
+    const task = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['api'] }),
+    ).value;
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of [S.Starting, S.Running]) {
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+    }
+    store.write((ctx) => {
+      patchWorkstream(ctx, ws.id, null, {
+        currentSessionId: 'ses_01a00000-0000-7000-8000-000000000001' as SessionId,
+      });
+      transitionWorkstream(ctx, ws.id, { to: S.WaitingHuman, fence: null });
+    });
+    const none = { pending: () => 0 };
+    expect(midSessionWork(store.db, none, quiet)).toBe(1);
+    expect(midSessionWork(store.db, none, quiet, { waitingOnCard: false })).toBe(0);
+    expect(countWaitingOnCard(store.db)).toBe(1);
     close();
   });
 

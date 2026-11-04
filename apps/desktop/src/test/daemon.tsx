@@ -103,6 +103,7 @@ export function baseHandlers(
           waitingSince: null,
           draining: false,
           drainingSince: null,
+          midSession: { working: 0, waitingOnCard: 0 },
           blocker: null,
         }),
       ),

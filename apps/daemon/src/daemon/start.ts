@@ -17,6 +17,7 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  countWaitingOnCard,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -1102,6 +1103,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const build = opts.build ?? null;
   let selfUpdate: SelfUpdate | null = null;
+  // What an update waits for, as counts. A queued ship, checkout return or cleanup is a delivery job
+  // before it is a row. A lane or gate parked by the drain has begun nothing: it is not cut off by
+  // the quit (the stop leaves its saved action for recovery), and counting it would keep the drain
+  // going for ever. A shaping conversation with a turn under way counts: it is no workstream, and
+  // the quit would cut off the answer in front of the builder. The drain does not park it. A lane
+  // waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
+  // its session and recovery parks it on its card again, so it must not hold the install, and every
+  // lane behind it, for as long as the builder leaves the card.
+  const midSessionWaits = (): { working: number; waitingOnCard: number } => {
+    const waitingOnCard = countWaitingOnCard(state.db);
+    const working = Math.max(
+      0,
+      midSessionWork(state.db, deliveryJobs, shape, { waitingOnCard: false }) -
+        updateDrain.parked(),
+    );
+    return { working, waitingOnCard };
+  };
+  const midSessionCount = (): number => {
+    const { working, waitingOnCard } = midSessionWaits();
+    return updateDrain.draining ? working : working + waitingOnCard;
+  };
   // Only a bundle in Applications that knows the repository it was built for follows it; a project,
   // its checkout and its origin have no say in where an update comes from.
   const updateRepository = build?.updatable === true ? build.repository : null;
@@ -1146,13 +1168,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         apply: (staged) => installer.apply(staged),
         outcome: installer.outcome,
         rollback: installer.rollback,
-        // A queued ship, checkout return or cleanup is a delivery job before it is a row.
-        // A lane or gate parked by the drain has begun nothing: it is not cut off by the quit (the
-        // stop leaves its saved action for recovery), and counting it would keep the drain going for ever.
-        // A shaping conversation with a turn under way counts: it is no workstream, and the quit
-        // would cut off the answer in front of the builder. The drain does not park it.
-        midSession: () =>
-          Math.max(0, midSessionWork(state.db, deliveryJobs, shape) - updateDrain.parked()),
+        midSession: midSessionCount,
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {
           begin: (since) => {
@@ -1195,6 +1211,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         waitingSince: progress?.waitingSince?.toISOString() ?? null,
         draining: progress?.draining ?? false,
         drainingSince: progress?.drainingSince?.toISOString() ?? null,
+        midSession: midSessionWaits(),
       };
     },
     setSelfUpdateWait: (minutes) => {

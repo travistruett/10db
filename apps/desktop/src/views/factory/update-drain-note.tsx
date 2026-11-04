@@ -5,6 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { useSelfUpdate } from '../../daemon/self-update-queries';
 import { absoluteTime } from '../../shell/relative';
 import { SettingsSectionKey } from '../settings/sections';
+import { updateWaitsFor } from '../settings/update-waits-for';
 
 const SHORT = 7;
 
@@ -18,16 +19,17 @@ interface Note {
 function noteFor(status: SelfUpdateStatusDto): Note | null {
   if (!status.enabled || status.availableCommit === null) return null;
   const build = status.availableCommit.slice(0, SHORT);
+  const waitsFor = updateWaitsFor(status);
   if (status.draining && status.drainingSince !== null)
     return {
       label: 'Update draining the factory',
-      text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: running steps finish, then 10db installs and restarts, and lanes resume.`,
+      text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: running steps finish, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
       color: 'var(--mantine-color-yellow-6)',
     };
   if (status.waitingSince !== null)
     return {
       label: 'Update waiting',
-      text: `An update to ${build} is waiting since ${absoluteTime(status.waitingSince)} for a moment when nothing is mid-session. If none comes within ${String(status.waitMinutes)} minutes, lanes pause until it has installed.`,
+      text: `An update to ${build} is waiting since ${absoluteTime(status.waitingSince)} for a moment when nothing is mid-session. If none comes within ${String(status.waitMinutes)} minutes, lanes pause until it has installed. ${waitsFor}`.trimEnd(),
       color: 'var(--mantine-color-dimmed)',
     };
   return null;

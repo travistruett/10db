@@ -1282,6 +1282,7 @@ function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusD
     waitingSince: '2026-11-03T12:00:00.000Z',
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0 },
     blocker: null,
     ...over,
   });
@@ -1318,6 +1319,39 @@ describe('FactoryView waiting update', () => {
     const link = within(note).getByRole('link', { name: 'Update settings' });
     expect(link.getAttribute('href')).toBe('/settings/updates');
     expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
+  });
+
+  it('names what the drain waits for, and says a lane waiting on a card does not hold it', async () => {
+    serve(
+      selfUpdate({
+        draining: true,
+        drainingSince: '2026-11-03T12:15:00.000Z',
+        midSession: { working: 2, waitingOnCard: 1 },
+      }),
+    );
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(note.textContent).toMatch(/waiting for 2 running steps to finish/);
+    expect(note.textContent).toMatch(/Lanes waiting on a card \(1\) do not hold it/);
+  });
+
+  it('says nothing is left running when a drain waits for nothing', async () => {
+    serve(selfUpdate({ draining: true, drainingSince: '2026-11-03T12:15:00.000Z' }));
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(note.textContent).toMatch(/Nothing is left running/);
+  });
+
+  it('names what holds an update that waits, a lane waiting on a card included', async () => {
+    serve(selfUpdate({ midSession: { working: 1, waitingOnCard: 2 } }));
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update waiting' });
+    expect(note.textContent).toMatch(
+      /Holding it now: 1 running step and 2 lanes waiting on a card/,
+    );
   });
 
   it('says one thing at a time: a drain, not the wait before it', async () => {

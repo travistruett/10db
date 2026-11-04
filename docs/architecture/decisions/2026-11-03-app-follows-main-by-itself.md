@@ -84,6 +84,15 @@ factory (`self-update/drain.ts`) until the app has installed:
   (`Drain.parked()`): a lane parked before its next session or its gate has begun nothing a quit would cut off, and
   counting it would hold the update up for ever. A stop at the quit leaves such a lane's saved next action, as any
   stop before a session did, and recovery queues it again, so lanes resume after the relaunch with no card.
+- **A lane waiting on a card stops counting once the drain begins.** A `WAITING_HUMAN` lane with a live session
+  (an unanswered permission or ask card) counts before the drain, so the builder has the wait limit to answer it, but
+  not during it (`countMidSession(db, { waitingOnCard: false })`). It runs nothing; the quit ends its session and
+  recovery parks the lane on the same card (`nextAction: answer`, with the provider session to resume), so it
+  resumes with the answer after the relaunch. Counting it for the drain would let one card left overnight hold the
+  install and, behind the drain, every other lane until the builder came back, with nothing to say so. A lane that
+  also runs a gate still counts for the gate. Turned down: not counting it at all (the builder would lose the wait
+  limit's chance to answer it before the app restarts), and ending the drain at a card (the update would never
+  install while the card stays).
 - **Ends:** the check installs as soon as the count is 0 (the drain stays on until the relaunch, so nothing starts in
   the gap). It ends, and lanes start again, when the builder turns the switch off, the install does not start or
   its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
@@ -98,7 +107,10 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
-  `draining` and `drainingSince`. Settings > Updates shows an update status line, the wait limit and Install Now;
+  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard }`, what the update waits for now
+  (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which hold it only
+  until the drain begins). Both notes say it: "waiting for N running steps", "Lanes waiting on a card (K) do not
+  hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.

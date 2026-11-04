@@ -50,6 +50,7 @@ describe('SelfUpdateStatusDto blocker', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0 },
   };
 
   it('is null or a kind with a message', () => {
@@ -95,11 +96,21 @@ describe('SelfUpdateStatusDto', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0 },
     blocker: null,
   };
 
   it('describes the switch, the commits and the wait', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
+  });
+
+  it('says what the update waits for: running work, and lanes waiting on a card', () => {
+    const busy = { ...status, midSession: { working: 2, waitingOnCard: 1 } };
+    expect(SelfUpdateStatusDto.parse(busy).midSession).toEqual({ working: 2, waitingOnCard: 1 });
+    expect(
+      SelfUpdateStatusDto.safeParse({ ...status, midSession: { working: -1, waitingOnCard: 0 } })
+        .success,
+    ).toBe(false);
   });
 
   it('says since when an update waits and drains', () => {

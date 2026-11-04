@@ -62,6 +62,25 @@
         }
       ]
     },
+    "midSession": {
+      "type": "object",
+      "properties": {
+        "working": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "waitingOnCard": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "working",
+        "waitingOnCard"
+      ]
+    },
     "blocker": {
       "anyOf": [
         {
@@ -103,6 +122,7 @@
     "waitingSince",
     "draining",
     "drainingSince",
+    "midSession",
     "blocker"
   ]
 }

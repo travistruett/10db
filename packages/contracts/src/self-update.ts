@@ -55,6 +55,17 @@ export const SelfUpdateStatusDto = z.object({
   /** When new work stopped starting; null while it is not held. */
   drainingSince: z.iso.datetime().nullable(),
   /**
+   * What the update waits for now, as counts. `working` is what a quit would cut off and the
+   * update always waits for: lanes and gates that run, batches being cut or shipped, delivery jobs
+   * and shaping turns. `waitingOnCard` is lanes parked on an unanswered permission or ask card with
+   * a session still live: they hold the update only until the drain begins, because a restart ends
+   * the session and recovery parks the lane on its card again, to resume with the answer.
+   */
+  midSession: z.object({
+    working: z.number().int().min(0),
+    waitingOnCard: z.number().int().min(0),
+  }),
+  /**
    * Why this app will not update itself, whatever the switch says; null when nothing stops it. The
    * ones that last (a source run, a copy outside Applications, no repository, no gh) show even with
    * the switch off; a GitHub that can't be reached and a failed update show only while it is on.

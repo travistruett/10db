@@ -9,6 +9,7 @@ import {
 } from '../../daemon/self-update-queries';
 import { absoluteTime } from '../../shell/relative';
 import { SettingRow, SettingsCard } from './setting-row';
+import { updateWaitsFor } from './update-waits-for';
 
 const SHORT = 7;
 const short = (commit: string): string => commit.slice(0, SHORT);
@@ -20,10 +21,11 @@ const short = (commit: string): string => commit.slice(0, SHORT);
 export function updateProgressText(data: SelfUpdateStatusDto): string | null {
   if (!data.enabled || data.availableCommit === null) return null;
   const build = short(data.availableCommit);
+  const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
-    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after.`;
+    return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
   const since = data.waitingSince === null ? '' : ` since ${absoluteTime(data.waitingSince)}`;
-  return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed.`;
+  return `${build} is waiting${since} for a moment when nothing is mid-session. If it is still waiting after ${String(data.waitMinutes)} minutes, 10db stops starting new steps until it has installed. ${waitsFor}`.trimEnd();
 }
 
 /**

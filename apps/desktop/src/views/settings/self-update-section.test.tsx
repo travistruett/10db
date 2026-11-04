@@ -18,6 +18,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    midSession: { working: 0, waitingOnCard: 0 },
     blocker: null,
     ...over,
   });
@@ -192,6 +193,35 @@ describe('a waiting update in Settings', () => {
     expect(draining.textContent).toMatch(/running steps finish/i);
     // Drained already: Install Now has nothing left to do.
     expect(screen.queryByRole('button', { name: 'Install Now' })).toBeNull();
+  });
+
+  it('names what the drain waits for, and what it does not wait for', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { working: 1, waitingOnCard: 2 },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(/waiting for 1 running step to finish/);
+    expect(draining.textContent).toMatch(/Lanes waiting on a card \(2\) do not hold it/);
+  });
+
+  it('names what holds an update that waits', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        midSession: { working: 0, waitingOnCard: 1 },
+      }),
+    );
+    renderApp('/settings/updates');
+    const waiting = await screen.findByRole('status', { name: 'Update status' });
+    expect(waiting.textContent).toMatch(/Holding it now: 1 lane waiting on a card/);
   });
 
   it('shows no update status when none is waiting', async () => {

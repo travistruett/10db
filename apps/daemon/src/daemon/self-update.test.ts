@@ -403,6 +403,51 @@ describe('self-update in the daemon', () => {
       expect((await lanesOf(api)).get(beta.id)?.state).toBe('QUEUED');
     });
 
+    describe('a lane waiting on a card the builder has not answered', () => {
+      const ask = {
+        do: 'mcp' as const,
+        tool: 'ask_human',
+        args: {
+          opId: 'op-drain-ask-01',
+          category: 'engineering',
+          question: 'May I rename the module?',
+          options: [
+            { label: 'Yes', description: 'rename it' },
+            { label: 'No', description: 'leave it' },
+          ],
+        },
+      };
+
+      async function waitingOnCard() {
+        head = RUNNING;
+        const api = await start({
+          caps: { global: 2 },
+          adapter: new FakeAdapter({ Alpha: [[ask, { do: 'turn_complete' }]] }),
+        });
+        const project = await addProject(api);
+        const alpha = await startTask(api, project.id, 'Alpha', 'src');
+        await waitForAsync(
+          async () => (await lanesOf(api)).get(alpha.id)?.state === 'WAITING_HUMAN',
+        );
+        return { api, project, alpha };
+      }
+
+      it('says it holds the update, as a lane waiting on a card and not as work running', async () => {
+        const { api } = await waitingOnCard();
+        expect((await selfUpdate(api)).midSession).toEqual({ working: 0, waitingOnCard: 1 });
+      });
+
+      it('does not hold the install once the factory drains: the card stays open for the answer', async () => {
+        const { api, alpha } = await waitingOnCard();
+        await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+        head = NEW;
+        await waitFor(() => applied.length > 0 && applied);
+        expect(applied).toEqual([NEW]);
+        // Nothing stopped it from the builder's side: the lane still waits on its card.
+        expect((await lanesOf(api)).get(alpha.id)?.state).toBe('WAITING_HUMAN');
+      });
+    });
+
     it('lets lanes start again when the builder turns the switch off', async () => {
       const { api, project } = await drained();
       const beta = await startTask(api, project.id, 'Beta', 'docs');
