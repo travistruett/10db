@@ -31,7 +31,8 @@ const INLINE_IMAGE_MAX_SIDE = 2000;
  * The most image bytes a whole conversation carries, dropped images and screens together. Base64 grows
  * them by 4/3: 18 MiB raw is 24 MiB (about 25 MB) on the wire, which leaves the API's 32 MB request limit
  * about 6 MB. Twelve screens at their 1.5 MB most fit inside it. A picture Claude pulls in with `Read` is a
- * tool result this budget can't see, so the 6 MB is not a promise that such pictures fit.
+ * tool result this budget can't see; the Shape hook counts those against 3 MiB of their own
+ * (`shape/read-budget.ts`).
  */
 export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
 

@@ -320,8 +320,22 @@ them beside dropped images. A session started fresh (from a digest) resends no e
 mark on every file of the conversation: its first message and every later turn of that session count only the
 images that session sent. Screens count the same way: only those whose transcript row follows the latest digest,
 so the picture is not charged where it is not carried, and `see_screen` is not refused on a screen the digest
-told Claude to take again. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and this
-budget doesn't count, so nothing here promises it fits in the 6 MB left over.
+told Claude to take again.
+A picture Claude pulls in with `Read` is a tool result the daemon never sees, and a resumed session resends it too,
+so it has a budget of its own in the session's PreToolUse hook (`shape/read-budget.ts`), sized to the 6.8 MB the
+18 MiB leaves. The hook charges each of the session's own Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`
+file (a dropped image or one in the checkout) the file's size, at most 1 MiB, since Claude Code resizes what it
+reads; a file that isn't there is charged nothing. A Read that would take the live session's total past 3 MiB
+(4 MiB as base64, which leaves about 2.6 MB of the 32 MB for the conversation's text) is refused with a reason
+that says to work from the pictures already read or ask for a smaller one. Each counted Read is a dimmed
+`Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
+it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
+session as text. A Read of a PDF is not counted (a separate task).
+**Not measured:** the 1 MiB is an allowance, not a measurement. `test/shape-session.live.test.ts` reads a 6 MB
+noise picture, a small one and a 4000 px one with a real session, finds the pictures Claude Code kept in the session's
+transcript and fails if one is over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run,
+and nothing yet shows whether Claude Code drops an old tool result's picture when it resends, which the budget
+assumes it does not.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 

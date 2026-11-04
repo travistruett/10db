@@ -61,6 +61,7 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
+import { stringField } from '../guard';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
@@ -69,6 +70,7 @@ import type {
   ShapeImage,
   ShapeSessionHandle,
   ShapeSessionSpec,
+  ShapeVerdict,
   TurnResult,
 } from '../sessions';
 import {
@@ -79,6 +81,12 @@ import {
 } from './ceremony';
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
+import {
+  readPictureBytesSpent,
+  readPictureCharge,
+  readPictureLine,
+  readPictureRefusal,
+} from './read-budget';
 import { buildDigest } from './digest';
 import {
   asImage,
@@ -715,7 +723,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       agents: SHAPE_AGENTS,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       preToolUse: (req) => {
-        const verdict = judgeShapeCall(
+        let verdict: ShapeVerdict = judgeShapeCall(
           {
             toolName: req.toolName,
             toolInput: req.input,
@@ -724,6 +732,28 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           },
           access,
         );
+        // A picture the session itself Reads is resent with every later request (§5.4); a subagent's
+        // reaches the session as text, so only the session's own Reads are counted.
+        const picture =
+          verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
+            ? stringField(req.input, 'file_path')
+            : null;
+        const charge = picture === null ? 0 : readPictureCharge(picture, access.checkout);
+        if (picture !== null && charge > 0) {
+          const refusal = readPictureRefusal(
+            picture,
+            charge,
+            readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+          );
+          if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
+          else
+            say(
+              shapeId,
+              ShapeMessageAuthor.Claude,
+              ShapeMessageKind.Tool,
+              readPictureLine(picture, charge),
+            );
+        }
         if (verdict.decision === 'deny')
           say(
             shapeId,
