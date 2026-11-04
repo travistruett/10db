@@ -7,11 +7,12 @@ import {
   type PrincipleItem,
   type ProjectDto,
 } from '@10db/contracts';
-import { createTestStore, seedProject, type Store } from '@10db/db';
+import { createTestStore, insertSource, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 import { createKnowledgeServices } from '../daemon';
 import { createEventBus, createStateStore } from '../events';
+import { proposePrinciple } from '../knowledge';
 import { createBuilderTools, type BuilderServices } from './tools';
 
 let store: Store;
@@ -19,14 +20,13 @@ let close: () => void;
 let project: ProjectDto;
 let tools: ReturnType<typeof createBuilderTools>;
 let provenance: ReturnType<typeof createKnowledgeServices>;
+let state: ReturnType<typeof createStateStore>;
 
 beforeEach(() => {
   ({ store, close } = createTestStore());
   project = seedProject(store, { name: 'demo', areas: [{ name: 'api', globs: ['src/api/**'] }] });
-  provenance = createKnowledgeServices({
-    state: createStateStore(store, createEventBus()),
-    searchAvailable: true,
-  });
+  state = createStateStore(store, createEventBus());
+  provenance = createKnowledgeServices({ state, searchAvailable: true });
   tools = createBuilderTools(provenance as unknown as BuilderServices);
 });
 afterEach(() => {
@@ -55,6 +55,27 @@ const principle = (args: Record<string, unknown> = {}) =>
     topicKey: 'testing.no-sleeps',
     ...args,
   }) as PrincipleItem;
+
+const PROPOSAL_BODY = 'Seen in three flaky runs of the queue tests.';
+
+/** A principle a managed session proposed: a pending proposal and the card that asks the builder. */
+const propose = () =>
+  state.write((ctx) =>
+    proposePrinciple(ctx, {
+      projectId: project.id,
+      title: 'No sleeps in tests',
+      body: PROPOSAL_BODY,
+      draft: {
+        statement: 'Tests never sleep; they wait on a condition.',
+        kind: 'policy',
+        scope: 'project',
+        topicKey: 'testing.no-sleeps',
+        quote: 'never sleep in a test',
+      },
+      sourceId: insertSource(ctx, 'agent', {}),
+      speaker: 'agent:x',
+    }),
+  );
 
 /** What a call answers when it is refused for its input, in the words the client reads. */
 const refusal = (name: BuilderToolName, args: unknown): string => {
@@ -282,10 +303,96 @@ describe('list_proposals', () => {
   });
 
   it('refuses an unknown project in the API’s words', () => {
+    const projectId = 'prj_00000000-0000-7000-8000-000000000000';
+    const viaApi = () =>
+      provenance.listProposals(projectId as ProjectDto['id'], { status: 'pending' });
+    expect(() => call(BuilderToolName.ListProposals, { projectId })).toThrow(DomainError);
+    expect(() => call(BuilderToolName.ListProposals, { projectId })).toThrow(
+      `project ${projectId} not found`,
+    );
+    expect(() => viaApi()).toThrow(`project ${projectId} not found`);
+  });
+
+  it('lists a pending principle proposal with its fields and without the card body', () => {
+    const { proposalId, principle: proposed, card } = propose();
+    const [listed, ...rest] = call(BuilderToolName.ListProposals, {
+      projectId: project.id,
+    }) as unknown[];
+    expect(rest).toEqual([]);
+    expect(listed).toEqual({
+      id: proposalId,
+      status: 'pending',
+      title: 'No sleeps in tests',
+      rationale: null,
+      principle: {
+        id: proposed.id,
+        scope: 'project',
+        area: null,
+        statement: 'Tests never sleep; they wait on a condition.',
+        kind: 'policy',
+        topicKey: 'testing.no-sleeps',
+      },
+      createdAt: expect.any(String) as string,
+    });
+    // The card's body is what the session wrote for the builder to read: it is not in the answer.
+    expect(card.body).toContain(PROPOSAL_BODY);
+    const text = JSON.stringify(listed);
+    expect(text).not.toContain(PROPOSAL_BODY);
+    expect(text).not.toContain(card.body);
+    expect(Object.keys(listed as object)).not.toContain('body');
+  });
+
+  it('lists a proposal under the status it holds, and under no other', () => {
+    const { proposalId } = propose();
+    const statuses = ['pending', 'accepted', 'rejected'] as const;
+    const listedIn = (status: (typeof statuses)[number]) =>
+      (
+        call(BuilderToolName.ListProposals, { projectId: project.id, status }) as { id: string }[]
+      ).map((p) => p.id);
+    expect(statuses.map(listedIn)).toEqual([[proposalId], [], []]);
+
+    provenance.acceptProposal(proposalId, { scope: 'project', note: 'Fits the house style.' });
+    expect(statuses.map(listedIn)).toEqual([[], [proposalId], []]);
+  });
+
+  it('lists an accepted proposal with the note as its rationale', () => {
+    const { proposalId } = propose();
+    provenance.acceptProposal(proposalId, { scope: 'project', note: 'Fits the house style.' });
+    const [listed] = call(BuilderToolName.ListProposals, {
+      projectId: project.id,
+      status: 'accepted',
+    }) as unknown[];
+    expect(listed).toMatchObject({
+      id: proposalId,
+      status: 'accepted',
+      title: 'No sleeps in tests',
+      rationale: 'Fits the house style.',
+      principle: { statement: 'Tests never sleep; they wait on a condition.', scope: 'project' },
+    });
+    expect(Object.keys(listed as object)).not.toContain('body');
+  });
+
+  it('lists a rejected proposal with the note as its rationale', () => {
+    const { proposalId } = propose();
+    provenance.rejectProposal(proposalId, { note: 'We already have a rule for this.' });
+    const [listed] = call(BuilderToolName.ListProposals, {
+      projectId: project.id,
+      status: 'rejected',
+    }) as unknown[];
+    expect(listed).toMatchObject({
+      id: proposalId,
+      status: 'rejected',
+      title: 'No sleeps in tests',
+      rationale: 'We already have a rule for this.',
+      principle: { statement: 'Tests never sleep; they wait on a condition.' },
+    });
+    expect(Object.keys(listed as object)).not.toContain('body');
+    expect(call(BuilderToolName.ListProposals, { projectId: project.id })).toEqual([]);
+  });
+
+  it('refuses a status the API refuses', () => {
     expect(() =>
-      call(BuilderToolName.ListProposals, {
-        projectId: 'prj_00000000-0000-7000-8000-000000000000',
-      }),
-    ).toThrow(DomainError);
+      call(BuilderToolName.ListProposals, { projectId: project.id, status: 'open' }),
+    ).toThrow(ZodError);
   });
 });

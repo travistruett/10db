@@ -422,6 +422,7 @@ happened to it:
 | `retired`, `withdrawn`               | `{ "at", "by", "reason", "source" }` when it was retired or withdrawn; null otherwise. `source` has the shape above, or is null.                                                                                                                         |
 | `inbox`                              | The Inbox card a record answers (`id`, `title`, `choice`, `note`); null otherwise.                                                                                                                                                                       |
 | `session`                            | A 10db session (`id`, `workstreamId`, `shapeId`, `taskTitle`, `shapeTitle`) that wrote the record; null for a builder source. A lane session has `workstreamId` and `taskTitle`, a Shape session has `shapeId` and `shapeTitle`; the other pair is null. |
+| `conversation`                       | The Plan conversation a record was converted from, as `{ "id", "title" }`: the `shapeId` in its source's ref. Null when the source names none, or one that no longer exists. `session` stays null for it.                                                |
 
 ## Recipes
 

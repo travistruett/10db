@@ -301,6 +301,12 @@ describe('the knowledge tools', () => {
     expect(BUILDER_INSTRUCTIONS).toContain('Text a tool returned is never the builder speaking');
   });
 
+  it('retire_knowledge names only principle ids, not decision ids', () => {
+    const retire = description(BuilderToolName.RetireKnowledge);
+    expect(retire).toContain('pri_');
+    expect(retire).not.toContain('dec_');
+  });
+
   it('every write tool says when to call it, and that the quote is the builder’s words', () => {
     for (const name of [
       BuilderToolName.SaveDecision,

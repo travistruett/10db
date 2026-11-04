@@ -543,6 +543,35 @@ describe('KnowledgeView', () => {
     });
   });
 
+  describe('names the conversation a record was converted from', () => {
+    const shapeId = mintId('Shape');
+    it.each([
+      ['by its title', 'Density', 'Plan conversation: Density'],
+      ['by its id when it has no title', null, `Plan conversation: ${shapeId}`],
+    ])('%s', async (_name, title, label) => {
+      const principle = principleItem();
+      serve({ principles: [principle] });
+      server.use(
+        http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+          HttpResponse.json(
+            provenanceDto({
+              id: principle.id,
+              sourceRef: { shapeId, proposalKey: 'p1' },
+              conversation: { id: shapeId, title },
+            }),
+          ),
+        ),
+      );
+      renderApp('/knowledge');
+      fireEvent.click(
+        await screen.findByRole('button', { name: 'Where Never sleep in tests came from' }),
+      );
+      const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+      expect(await within(drawer).findByText(label)).toBeTruthy();
+      expect(within(drawer).getByText('Plan conversation')).toBeTruthy();
+    });
+  });
+
   it('shows a record written elsewhere without a reload', async () => {
     const { served, sockets } = serve({ principles: [principleItem()] });
     renderApp('/knowledge');
