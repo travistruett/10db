@@ -8,6 +8,7 @@ import {
   decisionProposal,
   goalProposal,
   looseTaskProposal,
+  principleProposal,
   questionProposal,
   shapeDto,
   shapeMessageDto,
@@ -745,6 +746,89 @@ describe('Shape: converted rows and their undo', () => {
     await waitFor(() => {
       expect(removed).toEqual([goalId]);
     });
+  });
+
+  it('withdraws a converted principle only with a reason, from its row menu', async () => {
+    const principleId = mintId('Principle');
+    const view = proposed([
+      {
+        ...principleProposal('no-mocks', { state: 'accepted' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: null,
+          principleId,
+          withdrawn: false,
+          superseded: false,
+        },
+      },
+    ]);
+    const withdrawn: unknown[] = [];
+    serve(
+      ...conversations(view),
+      http.post(
+        daemonUrl('/shapes/:shapeId/principles/:principleId/withdraw'),
+        async ({ request, params }) => {
+          withdrawn.push({
+            principleId: params['principleId'],
+            ...((await request.json()) as object),
+          });
+          return new HttpResponse(null, { status: 204 });
+        },
+      ),
+    );
+    open(view);
+    expect(await screen.findByText('Converted · in Knowledge')).toBeTruthy();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Actions for Never mock the database' }),
+    );
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw Principle…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Principle' });
+    const submit = within(dialog).getByRole('button', { name: 'Withdraw Principle' });
+    expect(disabled(submit)).toBe(true);
+    fireEvent.change(within(dialog).getByRole('textbox', { name: /Reason/ }), {
+      target: { value: 'We mock it now' },
+    });
+    fireEvent.click(submit);
+    await waitFor(() => {
+      expect(withdrawn).toEqual([{ principleId, reason: 'We mock it now' }]);
+    });
+  });
+
+  it('offers no withdrawal for a principle already withdrawn or replaced', async () => {
+    const view = proposed([
+      {
+        ...principleProposal('gone', { state: 'accepted', statement: 'Never use tabs' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: null,
+          principleId: mintId('Principle'),
+          withdrawn: true,
+          superseded: false,
+        },
+      },
+      {
+        ...principleProposal('old', { state: 'accepted', statement: 'Never use spaces' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: null,
+          principleId: mintId('Principle'),
+          withdrawn: false,
+          superseded: true,
+        },
+      },
+    ]);
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText('Withdrawn')).toBeTruthy();
+    expect(screen.getByText('Converted · replaced by a later principle')).toBeTruthy();
+    for (const statement of ['Never use tabs', 'Never use spaces']) {
+      const actions = screen.queryByRole('button', { name: `Actions for ${statement}` });
+      if (actions !== null) fireEvent.click(actions);
+      expect(screen.queryByRole('menuitem', { name: 'Withdraw Principle…' })).toBeNull();
+    }
   });
 
   it('withdraws a decision only with a reason', async () => {

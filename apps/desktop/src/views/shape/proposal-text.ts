@@ -63,35 +63,32 @@ export function destination(row: ShapeProposalDto): string {
     case 'landing':
       return 'its tasks share one pull request';
     case 'question':
-      return 'stays here for now';
+      return 'stored; sent when people arrive';
   }
 }
 
 const taskCount = (n: number): string => `${String(n)} ${n === 1 ? 'task' : 'tasks'}`;
 
-/** Whether Convert writes this kind today; principles and questions stay in the list. */
-export function isConvertible(row: ShapeProposalDto): boolean {
-  switch (row.kind) {
-    case 'goal':
-    case 'task':
-    case 'change_task':
-    case 'remove_task':
-    case 'decision':
-    case 'landing':
-      return true;
-    case 'principle':
-    case 'question':
-      return false;
-  }
-}
-
 /** The dimmed line under a converted row; null for a row Convert hasn't made. */
 export function convertedLine(row: ShapeProposalDto): string | null {
   if (!isConverted(row)) return null;
   if (row.converted?.withdrawn === true) return 'Withdrawn';
-  return row.kind === 'decision' || row.kind === 'principle'
-    ? 'Converted · in Knowledge'
-    : 'Converted · on the Board';
+  switch (row.kind) {
+    case 'principle':
+      return row.converted?.superseded === true
+        ? 'Converted · replaced by a later principle'
+        : 'Converted · in Knowledge';
+    case 'decision':
+      return 'Converted · in Knowledge';
+    case 'question':
+      return 'Converted · stored, sent when people arrive';
+    case 'goal':
+    case 'task':
+    case 'change_task':
+    case 'remove_task':
+    case 'landing':
+      return 'Converted · on the Board';
+  }
 }
 
 /** What the latest round did to a row, until the next round (spec §6); null when it did nothing. */

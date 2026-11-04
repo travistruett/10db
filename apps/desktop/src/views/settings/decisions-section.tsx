@@ -13,6 +13,7 @@ import {
 } from '@10db/contracts';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Group,
@@ -442,6 +443,14 @@ export function DecisionsSection() {
   const disabled = off;
   return (
     <Stack gap="lg">
+      <Text size="sm" c="dimmed">
+        These are the routine calls 10db makes with a fast model, such as whether a change needs a
+        review. The decisions you and your agents record are in{' '}
+        <Anchor component={Link} to="/knowledge" size="sm">
+          Knowledge
+        </Anchor>
+        .
+      </Text>
       {off ? (
         <Alert color="yellow" title="Decisions are off">
           The daemon was started with TENDB_JUDGE=off, so it never calls OpenRouter. Restart 10db

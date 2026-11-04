@@ -2,8 +2,10 @@ import {
   EventType,
   mintId,
   NotFoundError,
+  ShapeProposalState,
   type DecisionId,
   type GoalId,
+  type PrincipleId,
   type ShapeDto,
   type ShapeFileId,
   type ShapeId,
@@ -14,11 +16,11 @@ import {
   type ShapeMessageKind,
   type ShapeProposalId,
   type ShapeProposalKind,
-  type ShapeProposalState,
+  type ShapeQuestionId,
   type ShapeState,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gt, inArray, isNull } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, or } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import { getShape } from './shapes';
@@ -285,9 +287,13 @@ export function countShapeFiles(db: DbReader, shapeId: ShapeId): number {
 
 export type ShapeLinkRow = typeof schema.shapeLinks.$inferSelect;
 
-/** What Convert made from a proposal: exactly one of a goal, a task and a decision. */
+/** What Convert made from a proposal: exactly one of a goal, a task, a decision, a principle and a question. */
 export type ShapeLinkTarget =
-  { readonly goalId: GoalId } | { readonly taskId: TaskId } | { readonly decisionId: DecisionId };
+  | { readonly goalId: GoalId }
+  | { readonly taskId: TaskId }
+  | { readonly decisionId: DecisionId }
+  | { readonly principleId: PrincipleId }
+  | { readonly questionId: ShapeQuestionId };
 
 export function insertShapeLink(
   ctx: WriteContext,
@@ -305,10 +311,53 @@ export function insertShapeLink(
     goalId: 'goalId' in input ? input.goalId : null,
     taskId: 'taskId' in input ? input.taskId : null,
     decisionId: 'decisionId' in input ? input.decisionId : null,
+    principleId: 'principleId' in input ? input.principleId : null,
+    questionId: 'questionId' in input ? input.questionId : null,
     createdAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeLinks).values(row).run();
   return row;
+}
+
+export type ShapeQuestionRow = typeof schema.shapeQuestions.$inferSelect;
+
+/** A question Convert stores for goals phase 3 to send; it belongs to a goal or a task, or to neither. */
+export function insertShapeQuestion(
+  ctx: WriteContext,
+  input: {
+    readonly shapeId: ShapeId;
+    readonly proposalId: ShapeProposalId;
+    readonly key: string;
+    readonly text: string;
+    readonly forWho: string;
+    readonly sourceMessageIds: readonly ShapeMessageId[];
+    readonly goalId?: GoalId;
+    readonly taskId?: TaskId;
+  },
+): ShapeQuestionRow {
+  const row: ShapeQuestionRow = {
+    id: mintId('ShapeQuestion') satisfies ShapeQuestionId,
+    shapeId: input.shapeId,
+    proposalId: input.proposalId,
+    key: input.key,
+    text: input.text,
+    forWho: input.forWho,
+    sourceMessageIds: [...input.sourceMessageIds],
+    goalId: input.goalId ?? null,
+    taskId: input.taskId ?? null,
+    createdAt: ctx.now,
+  };
+  ctx.tx.insert(schema.shapeQuestions).values(row).run();
+  return row;
+}
+
+export function listShapeQuestions(db: DbReader, shapeId: ShapeId): ShapeQuestionRow[] {
+  return db
+    .select()
+    .from(schema.shapeQuestions)
+    .where(eq(schema.shapeQuestions.shapeId, shapeId))
+    .orderBy(asc(schema.shapeQuestions.id))
+    .all();
 }
 
 export function listShapeLinks(db: DbReader, shapeId: ShapeId): ShapeLinkRow[] {
@@ -333,4 +382,35 @@ export function findShapeLinkOfTask(db: DbReader, taskId: TaskId): ShapeLinkRow 
 /** Deletes the links of one proposal, when Remove Draft Goal makes it pending again. */
 export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalId): void {
   ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.proposalId, proposalId)).run();
+}
+
+/**
+ * Lets go of a goal and its tasks as they are removed (Shape spec §11). A question stored under any
+ * of them is deleted with its link and its proposal is pending again, so it converts anew with the
+ * goal; every other link to those tasks goes too, so no later Convert resolves a key to a removed task.
+ */
+export function releaseShapeLinksOfGoal(
+  ctx: WriteContext,
+  goalId: GoalId,
+  taskIds: readonly TaskId[],
+): void {
+  const questions = ctx.tx
+    .select()
+    .from(schema.shapeQuestions)
+    .where(
+      or(
+        eq(schema.shapeQuestions.goalId, goalId),
+        inArray(schema.shapeQuestions.taskId, [...taskIds]),
+      ),
+    )
+    .all();
+  for (const question of questions) {
+    ctx.tx.delete(schema.shapeLinks).where(eq(schema.shapeLinks.questionId, question.id)).run();
+    ctx.tx.delete(schema.shapeQuestions).where(eq(schema.shapeQuestions.id, question.id)).run();
+    patchShapeProposal(ctx, question.proposalId, { state: ShapeProposalState.Pending });
+  }
+  ctx.tx
+    .delete(schema.shapeLinks)
+    .where(inArray(schema.shapeLinks.taskId, [...taskIds]))
+    .run();
 }

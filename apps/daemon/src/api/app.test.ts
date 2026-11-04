@@ -105,6 +105,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
+    withdrawShapePrinciple: track('withdrawShapePrinciple'),
     resumeShape: track('resumeShape'),
     getGoalShape: track('getGoalShape'),
     getTaskShape: track('getTaskShape'),
@@ -121,6 +122,19 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setOneWayPaths: track('setOneWayPaths'),
     rehearseShape: track('rehearseShape'),
     dismissShapeFinding: track('dismissShapeFinding'),
+    listKnowledge: track('listKnowledge'),
+    recordDecision: track('recordDecision'),
+    supersedeDecision: track('supersedeDecision'),
+    withdrawDecision: track('withdrawDecision'),
+    decisionProvenance: track('decisionProvenance'),
+    createPrinciple: track('createPrinciple'),
+    supersedePrinciple: track('supersedePrinciple'),
+    retirePrinciple: track('retirePrinciple'),
+    withdrawPrinciple: track('withdrawPrinciple'),
+    principleProvenance: track('principleProvenance'),
+    listProposals: track('listProposals'),
+    acceptProposal: track('acceptProposal'),
+    rejectProposal: track('rejectProposal'),
     shipBatch: track('shipBatch'),
     abandonBatch: track('abandonBatch'),
     moveTask: track('moveTask'),
@@ -1338,6 +1352,22 @@ describe('shape routes', () => {
     ).toBe(400);
   });
 
+  it('Withdraw Principle answers 204, and refuses a blank reason', async () => {
+    const principleId = mintId('Principle');
+    const calls: string[] = [];
+    const services = stubServices({
+      withdrawShapePrinciple: (shape, id, reason) => {
+        calls.push(`withdraw ${shape} ${id} ${reason}`);
+      },
+    });
+    const path = `/shapes/${shapeId}/principles/${principleId}/withdraw`;
+    expect((await app(services).request(path, post({ reason: 'We allow it now' }))).status).toBe(
+      204,
+    );
+    expect(calls).toEqual([`withdraw ${shapeId} ${principleId} We allow it now`]);
+    expect((await app(services).request(path, post({ reason: '' }))).status).toBe(400);
+  });
+
   describe('editing a row', () => {
     const proposalId = mintId('ShapeProposal');
     const path = `/shapes/${shapeId}/proposals/${proposalId}`;
@@ -1478,6 +1508,88 @@ describe('shape routes', () => {
       ['POST', `/shapes/${shapeId}/convert`],
       ['POST', `/shapes/${shapeId}/files`],
       ['PATCH', `/shapes/${shapeId}/proposals/${mintId('ShapeProposal')}`],
+    ] as const)
+      expect((await app().request(path, { method })).status).toBe(401);
+  });
+});
+
+describe('knowledge routes', () => {
+  const pid = mintId('Project');
+  const did = mintId('Decision');
+  const pri = mintId('Principle');
+  const prp = mintId('Proposal');
+  const decision = { question: 'q', choice: 'c', rationale: 'r' };
+  const principle = { statement: 's', kind: 'policy', topicKey: 'k' };
+  const request = (method: string, path: string, body?: unknown) =>
+    app().request(path, {
+      method,
+      headers: {
+        Authorization: `Bearer ${TOKEN}`,
+        ...(body ? { 'content-type': 'application/json' } : {}),
+      },
+      ...(body ? { body: JSON.stringify(body) } : {}),
+    });
+
+  it.each([
+    [
+      'GET',
+      `/projects/${pid}/knowledge?q=queue&history=1&kind=policy&limit=5`,
+      undefined,
+      'listKnowledge',
+    ],
+    ['POST', `/projects/${pid}/decisions`, decision, 'recordDecision'],
+    ['POST', `/decisions/${did}/supersede`, { choice: 'x', dryRun: true }, 'supersedeDecision'],
+    ['POST', `/decisions/${did}/withdraw`, { reason: 'x' }, 'withdrawDecision'],
+    ['GET', `/decisions/${did}/provenance`, undefined, 'decisionProvenance'],
+    ['POST', `/projects/${pid}/principles`, principle, 'createPrinciple'],
+    ['POST', `/principles/${pri}/supersede`, { topicKey: 'new.key' }, 'supersedePrinciple'],
+    ['POST', `/principles/${pri}/retire`, { reason: 'x' }, 'retirePrinciple'],
+    ['POST', `/principles/${pri}/withdraw`, { reason: 'x' }, 'withdrawPrinciple'],
+    ['GET', `/principles/${pri}/provenance`, undefined, 'principleProvenance'],
+    ['GET', `/projects/${pid}/proposals?status=accepted`, undefined, 'listProposals'],
+    ['POST', `/proposals/${prp}/accept`, { scope: 'you' }, 'acceptProposal'],
+    ['POST', `/proposals/${prp}/reject`, { note: 'no' }, 'rejectProposal'],
+  ] as const)('%s %s reaches %s', async (method, path, body, service) => {
+    expect((await request(method, path, body)).status).toBe(500);
+    expect(reached).toEqual([service]);
+  });
+
+  it.each([
+    ['an unknown list parameter', 'GET', `/projects/${pid}/knowledge?quer=x`, undefined],
+    ['an unknown kind', 'GET', `/projects/${pid}/knowledge?kind=rule`, undefined],
+    ['an unknown scope', 'GET', `/projects/${pid}/knowledge?scope=team`, undefined],
+    ['a blank withdraw reason', 'POST', `/decisions/${did}/withdraw`, { reason: ' ' }],
+    ['a source with no tool', 'POST', `/projects/${pid}/decisions`, { ...decision, source: {} }],
+    ['an unknown body field', 'POST', `/projects/${pid}/decisions`, { ...decision, colour: 'x' }],
+    [
+      'a principle with a bad topic key',
+      'POST',
+      `/projects/${pid}/principles`,
+      { ...principle, topicKey: 'Bad Key' },
+    ],
+    ['an edit that changes nothing', 'POST', `/principles/${pri}/supersede`, { dryRun: true }],
+    ['a malformed id', 'POST', '/decisions/nope/withdraw', { reason: 'x' }],
+  ] as const)('answers 400 for %s', async (_name, method, path, body) => {
+    expect((await request(method, path, body)).status).toBe(400);
+    expect(reached).toEqual([]);
+  });
+
+  it('names the field of a refused body', async () => {
+    const res = await request('POST', `/projects/${pid}/decisions`, { ...decision, colour: 'x' });
+    expect(JSON.stringify(await res.json())).toContain('colour');
+    const bad = await request('POST', `/projects/${pid}/principles`, {
+      ...principle,
+      topicKey: 'Bad Key',
+    });
+    expect(JSON.stringify(await bad.json())).toContain('topicKey');
+  });
+
+  it('needs the token', async () => {
+    for (const [method, path] of [
+      ['GET', `/projects/${pid}/knowledge`],
+      ['POST', `/projects/${pid}/decisions`],
+      ['GET', `/principles/${pri}/provenance`],
+      ['POST', `/proposals/${prp}/accept`],
     ] as const)
       expect((await app().request(path, { method })).status).toBe(401);
   });

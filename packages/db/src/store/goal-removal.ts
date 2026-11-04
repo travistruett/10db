@@ -2,6 +2,7 @@ import { ConflictError, EventType, GoalState, TaskStatus, type GoalId } from '@1
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getGoal, listGoalTasks } from './goals';
+import { releaseShapeLinksOfGoal } from './shape-state';
 import type { WriteContext } from './store';
 import { cancelTask } from './tasks';
 
@@ -9,7 +10,8 @@ import { cancelTask } from './tasks';
  * Removes a draft goal that nothing has started (Shape spec §11): its tasks are removed as any
  * unstarted task is, then its criteria and the goal itself. A task that has started, or that a task
  * outside the goal waits on, refuses the whole removal; the caller's transaction leaves nothing behind.
- * The removed tasks keep their rows with status cancelled and no goal.
+ * The removed tasks keep their rows with status cancelled and no goal. A question converted under the
+ * goal or one of its tasks goes back to its pending proposal.
  */
 export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
   const goal = getGoal(ctx.tx, goalId);
@@ -17,8 +19,9 @@ export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
     throw new ConflictError(
       `Goal ${goal.title} is ${goal.state}, not a draft; only a draft goal is removed`,
     );
+  const tasks = listGoalTasks(ctx.tx, goalId);
   // Tasks that nothing else in the goal waits on go first, so none is refused for its dependents.
-  let remaining = listGoalTasks(ctx.tx, goalId).filter((t) => t.status !== TaskStatus.Cancelled);
+  let remaining = tasks.filter((t) => t.status !== TaskStatus.Cancelled);
   while (remaining.length > 0) {
     const open = remaining;
     const leaves = open.filter((t) => !open.some((other) => other.dependsOn.includes(t.id)));
@@ -28,6 +31,11 @@ export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
     for (const task of leaves) cancelTask(ctx, task.id);
     remaining = open.filter((t) => !leaves.includes(t));
   }
+  releaseShapeLinksOfGoal(
+    ctx,
+    goalId,
+    tasks.map((t) => t.id),
+  );
   ctx.tx.update(schema.tasks).set({ goalId: null }).where(eq(schema.tasks.goalId, goalId)).run();
   ctx.tx.delete(schema.goalCriteria).where(eq(schema.goalCriteria.goalId, goalId)).run();
   ctx.tx.delete(schema.goalViews).where(eq(schema.goalViews.goalId, goalId)).run();

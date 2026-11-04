@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "description": "you, project or area. Default: project.",
+      "type": "string",
+      "enum": [
+        "you",
+        "project",
+        "area"
+      ]
+    },
+    "area": {
+      "description": "The area, for scope \"area\".",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "question": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "choice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "quote": {
+      "description": "The builder's own words that led to this, quoted as they said them. Omit if there are none.",
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    }
+  },
+  "required": [
+    "question",
+    "choice",
+    "rationale",
+    "projectId"
+  ],
+  "additionalProperties": false
+}

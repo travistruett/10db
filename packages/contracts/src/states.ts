@@ -103,6 +103,59 @@ export const ProposalKind = {
 } as const;
 export type ProposalKind = ValueOf<typeof ProposalKind>;
 
+/**
+ * Who a knowledge record applies to (spec §9): the builder everywhere, one project, or one area of it.
+ * Shape's `RecordScope` is this same vocabulary, so a record keeps one set of values.
+ */
+export const KnowledgeScope = { You: 'you', Project: 'project', Area: 'area' } as const;
+export type KnowledgeScope = ValueOf<typeof KnowledgeScope>;
+
+/** policy = must, heuristic = prefer, belief = context (spec §4). */
+export const PrincipleKind = {
+  Policy: 'policy',
+  Heuristic: 'heuristic',
+  Belief: 'belief',
+} as const;
+export type PrincipleKind = ValueOf<typeof PrincipleKind>;
+
+/** What is stored; whether a confirmed principle is still current is derived on read. */
+export const PrincipleStatus = {
+  Proposed: 'proposed',
+  Confirmed: 'confirmed',
+  Retired: 'retired',
+} as const;
+export type PrincipleStatus = ValueOf<typeof PrincipleStatus>;
+
+/** A record's state, derived on read and never stored (spec §4 invariants). */
+export const KnowledgeState = {
+  Proposed: 'proposed',
+  Current: 'current',
+  Superseded: 'superseded',
+  Retired: 'retired',
+  Withdrawn: 'withdrawn',
+} as const;
+export type KnowledgeState = ValueOf<typeof KnowledgeState>;
+
+export const ProposalStatus = {
+  Pending: 'pending',
+  Accepted: 'accepted',
+  Rejected: 'rejected',
+} as const;
+export type ProposalStatus = ValueOf<typeof ProposalStatus>;
+
+/** A principle proposal card's options: accept at a scope, or reject. Stable values; the UI shows words. */
+export const PrincipleVerdict = {
+  AcceptProject: 'accept_project',
+  AcceptYou: 'accept_you',
+  AcceptArea: 'accept_area',
+  Reject: 'reject',
+} as const;
+export type PrincipleVerdict = ValueOf<typeof PrincipleVerdict>;
+
+/** A "review this principle?" card's options (spec §9). */
+export const PrincipleReviewChoice = { Keep: 'keep', Retire: 'retire' } as const;
+export type PrincipleReviewChoice = ValueOf<typeof PrincipleReviewChoice>;
+
 export const Severity = { Info: 'info', Warn: 'warn', Error: 'error' } as const;
 export type Severity = ValueOf<typeof Severity>;
 

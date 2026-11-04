@@ -20,6 +20,9 @@ const WORK: readonly QueryKey[] = [['workstreams'], ['tasks'], goalKeys.all];
 /** The batch sheet's proposal: its candidates, claims and step plans follow all of these. */
 const CANDIDATES: QueryKey = ['candidates'];
 
+/** The Knowledge view's lists, its proposals and the provenance drawer. */
+const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenance']];
+
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   project: [queryKeys.projects, CANDIDATES],
@@ -27,8 +30,13 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
   // The digest's Decisions and Deviations rows.
-  decision: [goalKeys.all],
   deviation: [goalKeys.all],
+  // The Knowledge view. Confirming a principle resolves its proposal and accepting a proposal confirms
+  // its principle, and any change to a record changes where it came from (retired, replaced), so the
+  // three entities refetch the same lists. A decision is also a digest row.
+  decision: [...KNOWLEDGE, goalKeys.all],
+  principle: KNOWLEDGE,
+  proposal: KNOWLEDGE,
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
   board_column: [['board-columns'], CANDIDATES],
@@ -53,7 +61,6 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   team: [CANDIDATES],
   routing_rules: [CANDIDATES],
   benchmarks: [CANDIDATES],
-  // `proposal` (from proposal.resolved) has no view to refresh; the card that resolved it sends its own inbox event.
 };
 
 /** What to refetch for one event type, on top of its entity type's entries. */

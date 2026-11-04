@@ -32,6 +32,8 @@
         "commit.recorded",
         "decision.recorded",
         "decision.withdrawn",
+        "principle.saved",
+        "context.packed",
         "deviation.recorded",
         "proposal.created",
         "proposal.resolved",

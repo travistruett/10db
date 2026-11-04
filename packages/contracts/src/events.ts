@@ -23,6 +23,9 @@ export const EventType = {
   CommitRecorded: 'commit.recorded',
   DecisionRecorded: 'decision.recorded',
   DecisionWithdrawn: 'decision.withdrawn',
+  PrincipleSaved: 'principle.saved',
+  /** A session's bootstrap or re-injected context pack: what it used and what it dropped (spec §9). */
+  ContextPacked: 'context.packed',
   DeviationRecorded: 'deviation.recorded',
   ProposalCreated: 'proposal.created',
   ProposalResolved: 'proposal.resolved',

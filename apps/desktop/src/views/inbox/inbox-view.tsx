@@ -1,4 +1,10 @@
-import { InboxKind, type InboxItemDto } from '@10db/contracts';
+import {
+  InboxKind,
+  isParkChoice,
+  type DecisionRecording,
+  type InboxAnswer,
+  type InboxItemDto,
+} from '@10db/contracts';
 import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
@@ -7,6 +13,7 @@ import { queryKeys, useAnswerInbox, useInbox } from '../../daemon/queries';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
+import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { useInboxKeys } from './use-inbox-keys';
 
@@ -24,6 +31,8 @@ interface Draft {
   readonly id: string;
   readonly choice: string | null;
   readonly note: string;
+  /** How a question's answer is recorded as a decision; absent until the builder changes the default. */
+  readonly record?: DecisionRecording | null;
   readonly error: string | null;
 }
 
@@ -107,6 +116,9 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
   const note = own?.note ?? '';
   const error = own?.error ?? null;
   const effectiveChoice = selected ? (choice ?? recommended(selected)) : null;
+  // Until the builder changes it, a question is recorded as the daemon would record it by default.
+  const recording =
+    own?.record !== undefined ? own.record : selected ? defaultRecording(selected) : null;
 
   const select = (row: InboxRow): void => {
     setSelectedId(row.key);
@@ -168,8 +180,16 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
       return;
     }
     const trimmed = note.trim();
+    const base: InboxAnswer =
+      trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed };
+    // A question card always says how it is recorded, so the daemon never guesses from the category.
+    // Parking the task is 10db's control over the run, not an answer: nothing is recorded, so nothing is sent.
+    const body: InboxAnswer =
+      selected.kind === InboxKind.Question && !isParkChoice(picked)
+        ? { ...base, record: recording }
+        : base;
     answer.mutate(
-      { id, answer: trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed } },
+      { id, answer: body },
       {
         onSuccess: () => {
           setDraft((current) => (current?.id === key ? null : current));
@@ -230,6 +250,7 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
                 selected={open}
                 choice={open ? effectiveChoice : null}
                 note={open ? note : ''}
+                recording={open ? recording : null}
                 error={open ? (error ?? failed) : failed}
                 pending={answer.isPending && row.items.some((i) => i.id === answer.variables.id)}
                 noteRef={noteRef}
@@ -242,6 +263,10 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
                 onNote={(value) => {
                   setSelectedId(row.key);
                   patch(row.key, { note: value });
+                }}
+                onRecord={(next) => {
+                  setSelectedId(row.key);
+                  patch(row.key, { record: next });
                 }}
                 sendBackNote={sendBackNotes[row.items[0].id] ?? ''}
                 onSendBackNote={(value) => {

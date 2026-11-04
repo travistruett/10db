@@ -10,6 +10,7 @@ import {
   findRecords,
   getDecision,
   insertDecision,
+  insertPrinciple,
   insertSource,
   listShapeMessages,
   listShapeProposals,
@@ -81,6 +82,39 @@ describe('find_records', () => {
     );
     expect(lines.map((m) => m.body)).toEqual([
       'find_records · Decided 2026-10-30: Which board density? Comfortable rows only',
+    ]);
+  });
+
+  it('surfaces a principle with its kind, key, scope and date, and cites it in the chat', async () => {
+    const principle = c.store.write((ctx) =>
+      insertPrinciple(
+        { ...ctx, now: new Date(nowMs).toISOString() },
+        {
+          target: { scope: 'project', projectId: c.project.id },
+          statement: 'Never sleep in tests',
+          kind: 'policy',
+          topicKey: 'tests.no-sleeps',
+          status: 'confirmed',
+          sourceId: insertSource(ctx, 'builder', {}),
+          sourceQuote: null,
+          speaker: 'me',
+          confirmedBy: 'me',
+        },
+      ),
+    ).value;
+    const result = (await findRecordsTool('sleep')) as { records: unknown[] };
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        kind: 'principle',
+        id: principle.id,
+        principleKind: 'policy',
+        topicKey: 'tests.no-sleeps',
+        scope: 'project',
+        createdAt: '2026-10-30T09:00:00.000Z',
+      }),
+    ]);
+    expect(listShapeMessages(c.store.db, c.shape.id).map((m) => m.body)).toEqual([
+      'find_records · Principle 2026-10-30 (policy, tests.no-sleeps): Never sleep in tests',
     ]);
   });
 

@@ -391,17 +391,60 @@ export function rerunNoticeHead(key: string): string | null {
   return key.startsWith(prefix) ? key.slice(prefix.length) : null;
 }
 
+/** The Actions runs GitHub took a rerun of for one head, each with the checks it reran. */
+export type RerunRuns = ReadonlyMap<string, readonly { readonly name: string }[]>;
+
+const RUNS_MARK = 'Runs 10db started (run id: its checks, then whether it is done): ';
+
+/**
+ * What a stored rerun notice records of the head: the runs GitHub took, and whether 10db is done
+ * asking (a run GitHub refused as still running is asked again, also by a daemon that restarted).
+ * Null when the notice carries no record (an older one: the head counts as fully asked).
+ */
+export function rerunRecord(
+  notice: Notice,
+): { runs: Map<string, { name: string }[]>; done: boolean } | null {
+  const at = notice.body.lastIndexOf(RUNS_MARK);
+  if (at < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.body.slice(at + RUNS_MARK.length));
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { runs, done } = parsed as { runs?: unknown; done?: unknown };
+    if (typeof runs !== 'object' || runs === null || typeof done !== 'boolean') return null;
+    const out = new Map<string, { name: string }[]>();
+    for (const [runId, names] of Object.entries(runs)) {
+      if (!Array.isArray(names) || !names.every((n): n is string => typeof n === 'string'))
+        return null;
+      out.set(
+        runId,
+        names.map((name) => ({ name })),
+      );
+    }
+    return { runs: out, done };
+  } catch {
+    return null;
+  }
+}
+
 /** What delivery shows on a shipped batch's tasks once it ran a cancelled required check again. */
 export const rerunNotices = {
-  /** Also the record that the head was asked: it is read back after a restart. */
-  ran: (head: string, checks: readonly { readonly name: string }[]): Notice => {
+  /**
+   * Also the record that the head was asked: it is read back after a restart. It names only the
+   * checks of runs GitHub took, and `done` says there is no run left to ask for.
+   */
+  ran: (head: string, runs: RerunRuns, done: boolean): Notice => {
+    const checks = [...runs.values()].flat();
     const names = checks.map((c) => `"${c.name}"`).join(', ');
     const one = checks.length === 1;
+    const record = JSON.stringify({
+      runs: Object.fromEntries([...runs].map(([runId, c]) => [runId, c.map((x) => x.name)])),
+      done,
+    });
     return {
       key: rerunNoticeKey(head),
       tone: 'info',
       line: `${one ? `Required check ${names} was` : `Required checks ${names} were`} cancelled; 10db ran ${one ? 'it' : 'them'} again`,
-      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. This notice goes when the pull request merges, closes or gets a new commit.`,
+      body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. ${done ? '' : 'Another cancelled run was still running, so 10db runs it as soon as GitHub allows. '}This notice goes when the pull request merges, closes or gets a new commit.\n\n${RUNS_MARK}${record}`,
     };
   },
 };

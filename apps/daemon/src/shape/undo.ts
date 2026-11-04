@@ -4,6 +4,7 @@ import {
   ShapeState,
   type DecisionId,
   type GoalId,
+  type PrincipleId,
   type ShapeId,
 } from '@10db/contracts';
 import {
@@ -15,8 +16,9 @@ import {
   withdrawDecision,
   type WriteContext,
 } from '@10db/db';
+import { withdrawPrincipleRecord } from '../knowledge';
 
-// Shape spec §11, Undo. Convert has no undo of its own beyond these two.
+// Shape spec §11, Undo. Convert has no undo of its own beyond these three.
 
 /**
  * Remove Draft Goal: the goal this conversation made goes with its tasks, while every one is
@@ -45,4 +47,20 @@ export function withdrawConvertedDecision(
   if (!listShapeLinks(ctx.tx, shapeId).some((l) => l.decisionId === decisionId))
     throw new InvalidError(`${decisionId} is not a decision this conversation wrote`);
   withdrawDecision(ctx, decisionId, { by: 'builder', reason });
+}
+
+/**
+ * Withdraw Principle…: a principle this conversation wrote becomes a tombstone with the builder's
+ * reason, as the knowledge routes withdraw one, and leaves searches and context packs. A principle
+ * a later one replaced cannot be withdrawn (409).
+ */
+export function withdrawConvertedPrinciple(
+  ctx: WriteContext,
+  shapeId: ShapeId,
+  principleId: PrincipleId,
+  reason: string,
+): void {
+  if (!listShapeLinks(ctx.tx, shapeId).some((l) => l.principleId === principleId))
+    throw new InvalidError(`${principleId} is not a principle this conversation wrote`);
+  withdrawPrincipleRecord(ctx, principleId, reason, undefined);
 }

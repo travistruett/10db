@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BatchId, TaskId } from './ids';
+import { BatchId, PrincipleId, ProposalId, TaskId } from './ids';
 
 /**
  * The `detail` key of a flag that reports a failed action. It says what makes the card stale, so 10db
@@ -25,3 +25,14 @@ export const CardResolution = z.object({
   reason: z.string().min(1),
 });
 export type CardResolution = z.infer<typeof CardResolution>;
+
+/**
+ * The `detail` key of a question card whose answer's note stated a standing rule (it said "always" or
+ * "never"): the principle proposals that answer made, so the resolved card can say so and link to them.
+ */
+export const CARD_PROPOSED_PRINCIPLES = 'proposedPrinciples';
+
+export const ProposedPrinciples = z
+  .array(z.object({ proposalId: ProposalId, principleId: PrincipleId }))
+  .min(1);
+export type ProposedPrinciples = z.infer<typeof ProposedPrinciples>;
