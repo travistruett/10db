@@ -304,6 +304,40 @@ describe('Shape: the conversation', () => {
     expect(within(conversation).getByRole('textbox', { name: 'Message' })).toBeTruthy();
   });
 
+  it('removes a refused Propose from the alert once a later send succeeds', async () => {
+    const view = proposed([looseTaskProposal('density')], { round: 1 });
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/propose'), () =>
+        HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        ),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      ),
+    );
+    open(view);
+    const propose = await screen.findByRole('button', { name: 'Propose Again' });
+    await waitFor(() => {
+      expect(disabled(propose)).toBe(false);
+    });
+    fireEvent.click(propose);
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+    const input = within(conversation).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'Try again.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect((input as HTMLTextAreaElement).value).toBe('');
+    });
+    await waitFor(() => {
+      expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
+    });
+    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+  });
+
   it('puts the daemon’s words in the red alert above the input when Stop is refused', async () => {
     const view = proposed([], {
       round: 0,
