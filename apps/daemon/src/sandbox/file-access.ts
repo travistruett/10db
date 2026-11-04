@@ -131,6 +131,20 @@ function strictRealPath(p: string): string {
 }
 
 /**
+ * A tool input's path as the tool reads it from `cwd`, the hook's working directory: a relative path
+ * (not `~`, which is the home directory) is joined to it, not collapsed, since `..` after a link means
+ * something. Claude Code carries a Bash call's `cd` into the next call, and Grep, Glob and LS resolve a
+ * relative path from there, so after one the lane's copy is no longer the base. With no `cwd`, or one
+ * that is not absolute, the path is left for the context's checkout to resolve. The guard's judge and
+ * the permission broker both judge a read through `readAccess`, so they share this base.
+ */
+export function fromDirectory(path: string, cwd: string | undefined): string {
+  if (cwd === undefined || !isAbsolute(cwd) || isAbsolute(path)) return path;
+  if (path === '~' || path.startsWith('~/')) return path;
+  return cwd.endsWith(sep) ? `${cwd}${path}` : `${cwd}${sep}${path}`;
+}
+
+/**
  * The real paths a tool input could name: the text read lexically, and as the kernel reads it.
  * Throws a `PathResolutionError` when either reading has no single real path.
  */
@@ -280,10 +294,12 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
  * protected path is refused too.
  */
 export function readAccess(
-  path: string,
+  spelled: string,
   ctx: FileAccessContext,
   tree = false,
+  cwd?: string,
 ): { access: ReadAccess; realPath: string } {
+  const path = fromDirectory(spelled, cwd);
   let best: { access: ReadAccess; realPath: string } | null = null;
   let reals: string[];
   try {
@@ -394,12 +410,12 @@ export function writeAccess(
 /** The guard's file-access judge for one lane: protected reads and git internals are refused by real path. */
 export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
   return {
-    read(toolName, input) {
+    read(toolName, input, cwd) {
       let path = toolName;
       try {
         for (path of readPathsOf(toolName, input)) {
           if (isOverLongPath(path)) return { refuse: OVER_LONG_PATH_REFUSAL };
-          const { access } = readAccess(path, ctx, toolName !== 'Read');
+          const { access } = readAccess(path, ctx, toolName !== 'Read', cwd);
           if (access === 'protected') {
             return { refuse: `${path} is a protected path; 10db never lets a lane read it.` };
           }
@@ -415,10 +431,10 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
         return { refuse: refusalFor(path, error) };
       }
     },
-    readAsk(toolName, input) {
+    readAsk(toolName, input, cwd) {
       try {
         for (const path of readPathsOf(toolName, input)) {
-          if (readAccess(path, ctx, toolName !== 'Read').access === 'ask') {
+          if (readAccess(path, ctx, toolName !== 'Read', cwd).access === 'ask') {
             return `${path} is outside the paths a lane may read without asking.`;
           }
         }
