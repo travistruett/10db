@@ -62,19 +62,23 @@ backup_file_for() { echo "$(dirname "$data_dir")/$(basename "$data_dir")-backup-
 previous_zip_for() { echo "$previous_dir/10db-$1.zip"; }
 
 # Pids install-app.sh --apply --quit-first was told the running 10db is (--quit-pid, the daemon's
-# own and its shell's), space separated. They are waited for by pid, whatever pgrep's pattern sees.
+# own and its shell's), space separated. A second check beside the listing below, by pid.
 quit_pids=""
 
 # Prints the pids of the app's processes that hold the database (all of the app's but the bridge),
 # and those of quit_pids that are still alive, on one line; nothing when none runs. Returns pgrep's
 # own status when it cannot look (2 or more).
+#
+# -a because macOS's pgrep and pkill otherwise leave out their caller and all its ancestors: the
+# self-update's script is the daemon's child and the window's grandchild (detached starts a new
+# session, not a new parent), so without it neither can be seen or signalled until the daemon exits.
 running_pids() {
   local listing pids="" status=0 pid alive=""
-  listing="$(pgrep -lf "$app_process_pattern")" || status=$?
+  listing="$(pgrep -alf "$app_process_pattern")" || status=$?
   case "$status" in
     0)
       # grep exits 1 when the bridge was the only match; that is not a failure.
-      pids="$(grep -Ev -- "$bridge_process_pattern" <<< "$listing" | awk '{ print $1 }')" || true
+      pids="$(grep -Ev -- "$bridge_process_pattern" <<< "$listing" | awk '{ printf "%s ", $1 }')" || true
       ;;
     1) ;;
     *) return "$status" ;;
@@ -106,10 +110,12 @@ desktop_bundle_id="app.10db.desktop"
 # --quit-pid is gone. Only 10db's own update calls it (install-app.sh --quit-first), after it made sure
 # nothing was mid-session; it never kills the daemon itself.
 #
-# The request is the app's own quit (an Apple event, what `osascript -e 'quit app'` from a shell
-# sends), which runs the shell's exit path and stops the daemon cleanly. A SIGTERM to the window
-# is only the fallback for when that request is refused (Automation not allowed, no GUI session):
-# the window dies without running that path, and the daemon then stops only on seeing its stdin close.
+# The request is the app's own quit (an Apple event to the bundle id, what `osascript -e 'quit app'`
+# from a shell sends), which runs the shell's exit path and stops the daemon cleanly, and finds the
+# app without a process listing. The fallback, for when that request is refused (Automation not
+# allowed, no GUI session), is a SIGTERM to the window alone: the daemon sees its stdin close and
+# stops, where a SIGTERM to the daemon would leave the window open. The signal comes first in
+# pkill's arguments, because macOS's pkill reads it nowhere else, and -a is explained at running_pids.
 # Nothing is installed unless every one of those processes has exited within the bound.
 quit_app() {
   local limit="${TENDB_INSTALL_QUIT_SECONDS:-90}" waited=0 status=0 pids=""
@@ -121,7 +127,7 @@ quit_app() {
     if ! osascript -e "with timeout of 20 seconds" -e "tell application id \"$desktop_bundle_id\" to quit" \
       -e "end timeout" > /dev/null; then
       echo "$script_name: 10db did not take the quit request; signalling its window instead" >&2
-      pkill -TERM -f "$desktop_process_pattern" || true
+      pkill -TERM -a -f "$desktop_process_pattern" || true
     fi
   fi
   while :; do

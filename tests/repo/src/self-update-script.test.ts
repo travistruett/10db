@@ -233,8 +233,19 @@ describe('install-app.sh --apply', () => {
     expect(box.list(box.previousDir)).toEqual([]);
   });
 
+  it('sees the app that started it, and installs nothing over it', () => {
+    const result = apply({
+      STUB_APP_IS_ANCESTOR: '1',
+      STUB_RUNNING_UNTIL_CALL: '999',
+      TENDB_INSTALL_QUIT_SECONDS: '2',
+    });
+    expect(result.status).toBe(1);
+    expect(status()).toMatchObject({ ok: false, mode: 'apply', step: 'quit' });
+    expect(box.marker(app())).toBe('old build');
+  });
+
   describe('waiting for the pids it was given', () => {
-    // An app pgrep does not see (its command line may not match) but whose pid the daemon knows.
+    // A process pgrep does not list but whose pid the daemon knows.
     const sleepers: number[] = [];
     const startProcess = (): number => {
       // Left to init by its parent shell, so it is no zombie of this test once it is killed.
@@ -304,6 +315,30 @@ describe('install-app.sh --apply', () => {
       expect(result.status).toBe(1);
       expect(status()).toMatchObject({ ok: false, step: 'quit' });
       expect(box.marker(app())).toBe('old build');
+    });
+
+    // The self-update's script is the daemon's child and so the window's grandchild, and BSD pgrep
+    // and pkill leave out their caller's ancestors unless told otherwise.
+    it('signals the window that is its own ancestor, and installs once it has gone', () => {
+      const pid = startProcess();
+      const result = applyWaiting(pid, {
+        STUB_APP_IS_ANCESTOR: '1',
+        STUB_OSASCRIPT_FAILS: '1',
+        STUB_SIGNAL_KILLS: String(pid),
+        TENDB_INSTALL_QUIT_SECONDS: '20',
+      });
+      expect(result.status).toBe(0);
+      expect(box.marker(app())).toBe('new build');
+    });
+
+    it('names each process once when pgrep and the daemon both list it', () => {
+      const pid = startProcess();
+      const result = applyWaiting(pid, {
+        STUB_RUNNING: `57868 tendb-desktop\n${String(pid)} tendb-node`,
+        TENDB_INSTALL_QUIT_SECONDS: '1',
+      });
+      expect(result.status).toBe(1);
+      expect(String(status()['message'])).toContain(`process 57868 ${String(pid)})`);
     });
 
     it.each([

@@ -22,6 +22,53 @@ const count = (name: string): string =>
   `n=$(( $(cat "$STUB_STATE/${name}" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$STUB_STATE/${name}"`;
 
 /**
+ * BSD pgrep and pkill leave out the caller and its ancestors unless given -a, so a script started
+ * by the app cannot see it without that flag. Stubs answer "no match" there (STUB_APP_IS_ANCESTOR).
+ */
+const MISSES_ANCESTOR = [
+  'if [ -n "${STUB_APP_IS_ANCESTOR:-}" ]; then',
+  '  ancestors=""; for arg in "$@"; do case "$arg" in -*a*) ancestors=1 ;; esac; done',
+  '  [ -n "$ancestors" ] || exit 1',
+  'fi',
+];
+
+/**
+ * Hands over to the real tool for the tests of the real one (STUB_REAL_APP_ROOT). Only its flags
+ * pass through: the pattern is replaced by one that matches only the app in that test's folder, so
+ * the test can never signal or wait for a real 10db running on this Mac.
+ */
+const realTool = (path: string, pattern: string): readonly string[] => [
+  'if [ -n "${STUB_REAL_APP_ROOT:-}" ]; then',
+  '  flags=(); for arg in "$@"; do case "$arg" in -*) flags+=("$arg") ;; esac; done',
+  `  exec ${path} "\${flags[@]}" "$STUB_REAL_APP_ROOT/${pattern}"`,
+  'fi',
+];
+
+/** Stands for the window of a 10db: starts the daemon on a pipe, whose stdin ends with the window. */
+const FAKE_WINDOW = [
+  '#!/bin/bash',
+  'mkfifo "$STUB_STATE/daemon-stdin"',
+  '"$(dirname "$0")/tendb-node" "$@" < "$STUB_STATE/daemon-stdin" &',
+  'exec 3> "$STUB_STATE/daemon-stdin"',
+  // Stays until the script is done, whatever it decides, unless a signal ends it first.
+  'until [ -e "$STUB_WINDOW_UNTIL" ]; do sleep 0.05; done',
+  '',
+].join('\n');
+
+/**
+ * Stands for the daemon: starts the install script as its child, as the self-update does, and
+ * exits when the window's end of its stdin closes.
+ */
+const FAKE_DAEMON = [
+  '#!/bin/bash',
+  'pids=()',
+  '[ -z "${STUB_DAEMON_GIVES_PIDS:-}" ] || pids=(--quit-pid "$$" --quit-pid "$PPID")',
+  '/bin/bash "$STUB_INSTALL_SCRIPT" "$@" ${pids[@]+"${pids[@]}"} < /dev/null &',
+  'cat > /dev/null',
+  '',
+].join('\n');
+
+/**
  * Stand-ins for the tools install-app.sh and rollback-app.sh drive. They are child processes this
  * repo doesn't own and that reach GitHub, the disk images subsystem, Launch Services or a real
  * running 10db, so every one is replaced; each logs its arguments to `$STUB_LOG` as one line. The
@@ -76,7 +123,9 @@ const STUBS: Record<string, readonly string[]> = {
     'esac',
   ],
   pgrep: [
+    ...realTool('/usr/bin/pgrep', '10db\\.app/Contents/MacOS/'),
     count('pgrep'),
+    ...MISSES_ANCESTOR,
     'if [ -n "${STUB_RUNNING:-}" ] && [ "$n" -ge "${STUB_RUNNING_FROM_CALL:-1}" ] \\',
     '  && [ "$n" -le "${STUB_RUNNING_UNTIL_CALL:-999999}" ]; then',
     '  echo "$STUB_RUNNING"',
@@ -150,9 +199,15 @@ const STUBS: Record<string, readonly string[]> = {
     'exec /bin/mv "$@"',
   ],
   xattr: ['exit 0'],
-  // Asks the running app to quit and starts it again; only their calls matter. A quit request through
-  // osascript (what ⌘Q does) can end the pids in STUB_QUIT_KILLS, as an app that quits would.
-  pkill: ['exit 0'],
+  // Asks the running app to quit and starts it again. A quit request through osascript (what ⌘Q does)
+  // can end the pids in STUB_QUIT_KILLS, and a signal those in STUB_SIGNAL_KILLS, as an app that quits
+  // would. macOS's pkill reads the signal only as its first argument: `pkill -a -TERM` is a usage error.
+  pkill: [
+    ...realTool('/usr/bin/pkill', '10db\\.app/Contents/MacOS/tendb-desktop'),
+    'case "$1" in -[A-Z]*) ;; *) echo "pkill: illegal option" >&2; exit 2 ;; esac',
+    ...MISSES_ANCESTOR,
+    '[ -z "${STUB_SIGNAL_KILLS:-}" ] || kill $STUB_SIGNAL_KILLS',
+  ],
   osascript: [
     '[ -z "${STUB_OSASCRIPT_FAILS:-}" ] || { echo "execution error: Not authorized to send Apple events (-1743)" >&2; exit 1; }',
     '[ -z "${STUB_QUIT_KILLS:-}" ] || kill $STUB_QUIT_KILLS',
@@ -173,6 +228,17 @@ export interface InstalledAppSandbox {
     args: readonly string[],
     env?: Record<string, string>,
   ): { status: number | null; stdout: string; stderr: string };
+  /**
+   * Runs a script under scripts/release/ as a real child of a running app: a process named as the
+   * window starts one named as the daemon, which starts the script, and pgrep and pkill are the real
+   * ones, narrowed to this app. Returns when the script is done and the window (held by
+   * `windowUntil`, a file the script writes when it ends) has gone.
+   */
+  runUnderApp(
+    script: string,
+    args: readonly string[],
+    options: { windowUntil: string; daemonGivesPids: boolean; env?: Record<string, string> },
+  ): { stdout: string; stderr: string };
   /** One line per stub call, `<tool> <args>`. */
   calls(): string[];
   /** The marker file inside an app bundle, or null when the bundle has none. */
@@ -235,6 +301,23 @@ export function installedAppSandbox(): InstalledAppSandbox {
     return result.stdout;
   };
 
+  const scriptEnv = (env: Record<string, string>): Record<string, string> => ({
+    PATH: `${bin}:/usr/bin:/bin`,
+    HOME: root,
+    TMPDIR: root,
+    TENDB_INSTALL_APPLICATIONS_DIR: applications,
+    TENDB_INSTALL_DATA_DIR: dataDir,
+    TENDB_INSTALL_LSREGISTER: join(bin, 'lsregister'),
+    TENDB_INSTALL_POLL_SECONDS: '0',
+    STUB_LOG: log,
+    STUB_STATE: state,
+    STUB_HEAD_SHA: HEAD_SHA,
+    STUB_SUCCESS_RUN: '42',
+    STUB_ARTIFACT: artifact,
+    STUB_DMG_CONTENTS: dmgContents,
+    ...env,
+  });
+
   return {
     root,
     applications,
@@ -245,24 +328,30 @@ export function installedAppSandbox(): InstalledAppSandbox {
       const result = spawnSync('/bin/bash', [join(repoRoot, 'scripts/release', script), ...args], {
         cwd: root,
         encoding: 'utf8',
-        env: {
-          PATH: `${bin}:/usr/bin:/bin`,
-          HOME: root,
-          TMPDIR: root,
-          TENDB_INSTALL_APPLICATIONS_DIR: applications,
-          TENDB_INSTALL_DATA_DIR: dataDir,
-          TENDB_INSTALL_LSREGISTER: join(bin, 'lsregister'),
-          TENDB_INSTALL_POLL_SECONDS: '0',
-          STUB_LOG: log,
-          STUB_STATE: state,
-          STUB_HEAD_SHA: HEAD_SHA,
-          STUB_SUCCESS_RUN: '42',
-          STUB_ARTIFACT: artifact,
-          STUB_DMG_CONTENTS: dmgContents,
-          ...env,
-        },
+        env: scriptEnv(env),
       });
       return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    },
+    runUnderApp(script, args, { windowUntil, daemonGivesPids, env = {} }) {
+      const running = join(root, 'running');
+      const macos = join(running, '10db.app', 'Contents', 'MacOS');
+      mkdirSync(macos, { recursive: true });
+      writeFileSync(join(macos, 'tendb-desktop'), FAKE_WINDOW, { mode: 0o755 });
+      writeFileSync(join(macos, 'tendb-node'), FAKE_DAEMON, { mode: 0o755 });
+      // Returns once the script's output closes as well, so after the script, not with the window.
+      const result = spawnSync(join(macos, 'tendb-desktop'), args, {
+        cwd: root,
+        encoding: 'utf8',
+        timeout: 30_000,
+        env: scriptEnv({
+          STUB_REAL_APP_ROOT: running.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+          STUB_INSTALL_SCRIPT: join(repoRoot, 'scripts/release', script),
+          STUB_WINDOW_UNTIL: windowUntil,
+          ...(daemonGivesPids ? { STUB_DAEMON_GIVES_PIDS: '1' } : {}),
+          ...env,
+        }),
+      });
+      return { stdout: result.stdout, stderr: result.stderr };
     },
     calls: () => (existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : []),
     marker(appPath) {

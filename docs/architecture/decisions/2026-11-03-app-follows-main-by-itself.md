@@ -108,15 +108,27 @@ runs the new commit within the wait limit plus the time the running steps take p
 
 **What the script does.** `--apply` takes the install lock and asks the running app to quit the way ⌘Q does: an
 Apple event to the window's bundle id (`app.10db.desktop`), which runs the shell's exit path so the supervisor
-stops the daemon cleanly. A SIGTERM to the window was the only request before; it kills the window without that
-path, leaving the daemon to notice its stdin closing, and is now only the fallback when the Apple event is refused
-(no Automation permission for a script started by the daemon, or no GUI session). It then waits, within
-`TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds the database is left (the builder's MCP bridge,
-`builder-mcp.mjs`, holds none and is neither waited for nor signalled) **and** every `--quit-pid` is gone. The daemon
-passes its own pid, and its parent's when the window started it (`TENDB_PARENT_STDIN`), because a process listing
-by name can miss the app (an incident installed over a 10db that was still running, because the wait found
-nothing and returned at once). If any is still there at the bound the quit step fails ("10db could not be quit")
-and nothing in Applications is touched. Then it does what an install does: back up
+stops the daemon cleanly, and needs no process listing to find it. When the Apple event is refused (no Automation
+permission for a script started by the daemon, or no GUI session) it falls back to a SIGTERM to the window alone;
+the daemon then stops on seeing its stdin close. A signal to the daemon would not do: it exits 0, the supervisor
+stops, and the window stays. It then waits, within `TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds
+the database is left (the builder's MCP bridge, `builder-mcp.mjs`, holds none and is neither waited for nor
+signalled) **and** every `--quit-pid` is gone. The daemon passes its own pid, and its parent's when the window
+started it (`TENDB_PARENT_STDIN`), as a second check beside the listing. If any is still there at the bound the
+quit step fails ("10db could not be quit") and nothing in Applications is touched.
+
+**Why the quit once did nothing.** On 2026-11-04 the update installed over a 10db that went on running. The script
+then quit by `pkill -TERM -f` and watched with `pgrep -lf`, and macOS's pkill and pgrep leave out their caller and
+all its ancestors unless given `-a`. The script is the daemon's child and the window's grandchild, and starting it
+detached gives it a new session, not a new parent. So pkill matched nothing, pgrep listed no app, and the wait
+returned at once. SIGTERM was not unreliable and pgrep did not miss at random: the same request from the builder's
+shell, which descends from nothing in the app, works, and so did the osascript quit that finished the job by hand.
+`pgrep -alf` and `pkill -TERM -a -f` now see the app whoever runs them. The signal stays first: `pkill -a -TERM` is
+a usage error, which the fallback's `|| true` would hide. This was read from the man page and the process tree and
+is checked with the real tools by `tests/repo/src/self-update-real-processes.test.ts`, which runs in CI's macOS job
+because a lane's sandbox cannot list processes.
+
+Then it does what an install does: back up
 the database with `sqlite3 .backup`, zip the previous app to `10db-previous/`, copy the new one in, clear its
 quarantine, register it, and with `--relaunch` open it. `make rollback-app` finds that zip and that backup as it
 does after a manual install. `--status-file` makes either half write `{ok, mode, step, message, commit}`.

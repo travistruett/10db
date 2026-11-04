@@ -65,8 +65,9 @@ export interface ScriptInstallerOptions {
   /**
    * The processes that are the running 10db, which the install waits to see gone before it touches
    * /Applications: this daemon, and the window that supervises it. Default: this process, and its
-   * parent when the shell holds its stdin (`TENDB_PARENT_STDIN`). Not found by name, so a pattern
-   * that misses the app cannot let the install go on over it.
+   * parent when the shell holds its stdin (`TENDB_PARENT_STDIN`). Handed over by pid as a second
+   * check beside the script's process listing, whose failure to see its own ancestors once let an
+   * install go on over the running app.
    */
   readonly quitPids?: () => readonly number[];
 }
