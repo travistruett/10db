@@ -2013,6 +2013,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
           wrote = update.head;
         // A broken install still left its merge on the branch: it goes back with the others.
         else if (update.kind === 'install_broken' && update.head !== undefined) wrote = update.head;
+        // A stop after the merge left it unpushed: it goes back too, and no later catch-up finds a
+        // commit it takes for someone else's.
+        else if (update.kind === 'aborted' && update.head !== undefined) wrote = update.head;
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {

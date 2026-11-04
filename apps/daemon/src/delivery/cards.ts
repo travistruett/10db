@@ -481,11 +481,51 @@ export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-ref
 /** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
 export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
 
+/** The answer of a card about a lost-migrations notice whose list could not be read. */
+export const LostChoice = { Clear: 'Clear the notice' } as const;
+export type LostChoice = (typeof LostChoice)[keyof typeof LostChoice];
+
+/** The `detail` key of such a card; it holds the batch id (`createLostMigrationsAnswers`). */
+export const LOST_MIGRATIONS_DETAIL = 'lostMigrations';
+
+/**
+ * What a card carries to let the builder end a lost-migrations notice with no readable list. The
+ * list is the only thing a gate checks the journal against, so with it gone nothing but the builder
+ * can say the migrations are back: the answer is the builder's word that they are.
+ */
+export function lostMigrationsOffer(batch: BatchDto): Pick<Card, 'options' | 'detail'> {
+  return {
+    options: [
+      {
+        label: LostChoice.Clear,
+        description:
+          "Remove the notice, so gates and a ship no longer stop on it. Only after you checked that the batch's journal holds every migration the base merge lost",
+      },
+    ],
+    detail: { batchId: batch.id, [LOST_MIGRATIONS_DETAIL]: { batchId: batch.id } },
+  };
+}
+
+/** What the builder checks before answering `LostChoice.Clear`, in words. */
+export const CHECK_THE_JOURNAL =
+  "To check: list the migrations the batch added (`git diff --name-only <base>...<branch>` on the package's drizzle directory, and the commits the notice names), and confirm each one's name is in the journal at the branch's HEAD, under a number after the base's, with its SQL intact. A migration still missing is re-created on the branch (generate --name <name>, or --custom --name <name> with the SQL copied back byte for byte) before the notice is cleared.";
+
 /**
  * What delivery tells the builder when a worktree batch's branch took its base but its generated files
  * could not be made again. A conflict or files in the way are notices instead (`notices.ts`).
  */
 export const baseCards = {
+  /**
+   * The batch's lost-migrations notice has no readable list, so no gate can tell whether the journal
+   * holds the migrations. It folds into `regenerate`'s card, and offers the one answer that ends it.
+   */
+  lostUnreadable: (batch: BatchDto, worktree: string): Card => ({
+    title: `Batch "${batch.title}": a merge of ${batch.baseBranch} lost migrations 10db can no longer list`,
+    body: `A merge of ${batch.baseBranch} lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice. 10db cannot tell whether the journal holds them, so no gate passes and nothing ships while the notice stands, and 10db never reads an unreadable list as all carried.\n\n${CHECK_THE_JOURNAL}\n\nThe batch's worktree is ${worktree}. Once the journal holds them all, answer "${LostChoice.Clear}" here: the next gate then runs, and a retry of a failed ship can pass. Abandoning the batch also ends it.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    ...lostMigrationsOffer(batch),
+  }),
   /**
    * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
    * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
@@ -783,14 +823,9 @@ export const shipCards = {
     },
   }),
   /**
-   * The copy's packages still did not resolve what its lockfile names after 10db installed again
-   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
-   * failure would have said nothing of the batch's code. Retry installs again before the gate.
-   */
-  /**
    * `note` names the migrations a merge of the base lost and says how to re-create them. An
-   * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again and
-   * only Abandon is offered.
+   * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again until
+   * the builder clears the notice after checking the journal (`LostChoice.Clear`); Abandon also ends it.
    */
   migrationsLost: (
     batch: BatchDto,
@@ -801,11 +836,20 @@ export const shipCards = {
       title: `${notShipped(batch)}: merging ${batch.baseBranch} lost a migration of the batch's`,
       body:
         unreadable === true
-          ? `${note}\n\nNo gate ran and nothing was pushed. A Retry would stop here again. Abandon gives the batch up, which is the only way this ends.`
+          ? `${note}\n\nNo gate ran and nothing was pushed. A Retry would stop here again until the notice is cleared.\n\n${CHECK_THE_JOURNAL}\n\nOnce the journal holds them all, answer "${LostChoice.Clear}" on this card and ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)} Abandon gives the batch up instead.`
           : `${note}\n\nNo gate ran and nothing was pushed. Re-create the migration on the batch's branch and commit it.\n\n${RETRY}`,
-      detail: unreadable === true ? { batchId: batch.id, actions: ['abandon'] } : answers(batch),
+      detail:
+        unreadable === true
+          ? { ...lostMigrationsOffer(batch).detail, ...answers(batch) }
+          : answers(batch),
+      ...(unreadable === true ? { options: lostMigrationsOffer(batch).options } : {}),
     },
   }),
+  /**
+   * The copy's packages still did not resolve what its lockfile names after 10db installed again
+   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
+   * failure would have said nothing of the batch's code. Retry installs again before the gate.
+   */
   installBroken: (batch: BatchDto, note: string, noPnpm = false): ShipFailure => ({
     failure: BatchFailure.InstallBroken,
     card: {

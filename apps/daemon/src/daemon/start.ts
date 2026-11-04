@@ -74,6 +74,7 @@ import {
   createCiStopAnswers,
   createGhCardAnswers,
   createStartCardAnswers,
+  createLostMigrationsAnswers,
   createWorktreeCardAnswers,
   createBatchStarter,
   createDeliveryJobs,
@@ -477,6 +478,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGhCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
@@ -517,6 +519,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerCiStopCard?.(item, answer);
       answerGhCard?.(item, answer);
       answerStartCard?.(item, answer);
+      answerLostMigrationsCard?.(item, answer);
       answerWorktreeCard?.(item, answer);
       answerDeadlockCard(item, answer);
     },
@@ -692,6 +695,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   answerCiStopCard = createCiStopAnswers(delivery);
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
+  answerLostMigrationsCard = createLostMigrationsAnswers(delivery);
   // One for the runner and the shipper alike, so a batch's verify and shipping gates run in turn.
   const baseUpdates = createBaseUpdates(delivery);
   // Before a task gets the migrations hazard, from request_claim or at its start.

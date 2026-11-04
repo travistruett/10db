@@ -113,7 +113,7 @@ export const uncarriedIn = (notice: Notice | undefined): UncarriedMigration[] | 
  * could clear the notice, so its steps wouldn't either.
  */
 const UNREADABLE_LOST =
-  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. The notice's text may be cut short and may miss migrations lost since, so it is not the whole list. Re-creating migrations won't clear this notice, so don't: no gate passes and nothing ships while it stands, and the one thing that ends it is the builder abandoning the batch.";
+  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. The notice's text may be cut short and may miss migrations lost since, so it is not the whole list. Re-creating migrations won't clear this notice, so don't: no gate passes and nothing ships while it stands. Only the builder ends it, by checking the journal and clearing the notice on the card 10db raised, or by abandoning the batch.";
 
 /** What the lost-migrations `notice` tells a lane or the builder: its text, while its list reads. */
 export const uncarriedSaid = (notice: Notice): string =>
