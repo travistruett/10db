@@ -136,14 +136,14 @@ export const migrationNotices = {
 
 /** What a batch's tasks are told about an install 10db repaired by itself. */
 export const installNotices = {
-  /** The first install before a gate left the copy broken; a check after the second found it whole. */
+  /** An install left the copy broken; a check after the install that started over found it whole. */
   repaired: (unresolved: string, at: Date): Notice => {
     const when = `${at.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
     return {
       key: NOTICE_KEY.installRepaired,
       tone: 'info',
       line: `The install in this copy was repaired at ${when}`,
-      body: `The install before the gate left this copy's packages broken (${unresolved}). At ${when} 10db removed node_modules and installed again from the lockfile. A check after that found every package resolved, so the step went on with no card and no attempt counted.`,
+      body: `An install left this copy's packages broken (${unresolved}). At ${when} 10db removed node_modules and installed again from the lockfile. A check after that found every package resolved, so the step went on with no card and no attempt counted.`,
     };
   },
 };
