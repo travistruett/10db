@@ -66,7 +66,17 @@ import { DEFAULT_RUNNER_LIMITS } from '../runner';
 import { createGit, type Git } from '../git';
 import type { Judge, JudgeAnswer, JudgeRequest } from '../judge';
 import { silentLogger } from '../log';
-import { createGateRunner, type GateRequest, type GateResult } from '../verify';
+import { ManualClock } from '../clock';
+import {
+  createGateRunner,
+  createGateSlots,
+  limitGates,
+  type GateRequest,
+  type GateResult,
+  type GateRunner,
+  type GateSlots,
+  type Hold,
+} from '../verify';
 import type {
   BaseUpdate,
   BaseUpdates,
@@ -143,6 +153,49 @@ const curl = {
   input: { command: 'curl -s https://example.com' },
 };
 const shell = (command: string) => ({ do: 'tool' as const, toolName: 'Bash', input: { command } });
+
+/**
+ * A hold the test opens and closes, as the load guard and an update's drain do: it holds from the
+ * start unless told otherwise. `asked` lists every wait on it, and `parked` those still waiting.
+ */
+function fakeHold(holdingAtFirst = true) {
+  let holding = holdingAtFirst;
+  const waiting = new Set<() => void>();
+  const asked: (AbortSignal | undefined)[] = [];
+  return {
+    asked,
+    parked: () => waiting.size,
+    begin: () => {
+      holding = true;
+    },
+    release: () => {
+      holding = false;
+      for (const open of [...waiting]) open();
+    },
+    hold: {
+      holding: () => holding,
+      untilClear: (signal?: AbortSignal) => {
+        asked.push(signal);
+        if (!holding) return Promise.resolve(true);
+        return new Promise<boolean>((resolve) => {
+          const open = (): void => {
+            waiting.delete(open);
+            resolve(true);
+          };
+          waiting.add(open);
+          signal?.addEventListener('abort', () => {
+            waiting.delete(open);
+            resolve(false);
+          });
+        });
+      },
+    },
+  };
+}
+
+/** Gates that began: a gate held back, or stopped before its command, records none. */
+const gatesStarted = () =>
+  listEventsAfter(engine.store.db, 0, 10_000).filter((e) => e.type === 'gate.started').length;
 
 let current: Parameters<typeof getWorkstream>[1];
 const ws0 = () => current;
@@ -1002,6 +1055,52 @@ describe('runner', () => {
     expect(later).toContain('Bash: pnpm lint');
     expect(later).toContain('Note from the builder: use pnpm exec eslint instead');
     expect(engine.adapter.prompts[0]?.prompt).not.toContain('The builder denied');
+  });
+
+  it('leaves a denied read of the worktrees folder outside the copy out of the prompt and the compaction message', async () => {
+    const worktreeRoot = '/worktrees/67a1ebdc';
+    const outside = `${worktreeRoot}/10db-b83cc7/scripts/gate.sh`;
+    engine = await createTestEngine(
+      {
+        Alpha: [[{ do: 'compact' }, { do: 'await_message', contains: 'context pack' }, turn]],
+      },
+      {},
+      { worktreeRoot },
+    );
+    const { task, workstream } = engine.addTask('Alpha');
+    const denied = (toolName: string, summary: string): void => {
+      engine.state.write((ctx) => {
+        const item = insertInboxItem(ctx, {
+          projectId: task.projectId,
+          kind: 'permission',
+          title: `Allow ${toolName}?`,
+          body: summary,
+          options: [{ label: 'deny', description: '' }],
+          recommendation: null,
+          category: 'product',
+          urgency: 'normal',
+          detail: { toolName, summary },
+          foldKey: null,
+          targets: [{ workstreamId: workstream.id, sessionId: null }],
+        });
+        updateInboxItem(ctx, item.id, { state: 'ANSWERED', answer: { choice: 'deny' } });
+      });
+    };
+    denied('Read', outside);
+    denied('Read', '/etc/hosts');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const told = [
+      engine.adapter.prompts[0]?.prompt ?? '',
+      ...engine.adapter.sent.map((message) => message.text),
+    ];
+    expect(told).toHaveLength(2);
+    for (const text of told) {
+      expect(text).toContain('Read: /etc/hosts');
+      expect(text).not.toContain(worktreeRoot);
+    }
   });
 
   it('runs the gate in the session environment, never the daemon process environment', async () => {
@@ -1894,34 +1993,6 @@ describe('runner', () => {
   });
 
   describe('while the Mac is overloaded', () => {
-    /** A hold the test opens, as the load guard does; `asked` counts the sessions that waited on it. */
-    function fakeHold() {
-      let open: () => void = () => undefined;
-      let overloaded = true;
-      const asked: (AbortSignal | undefined)[] = [];
-      return {
-        asked,
-        release: () => {
-          overloaded = false;
-          open();
-        },
-        hold: {
-          untilClear: (signal?: AbortSignal) => {
-            asked.push(signal);
-            if (!overloaded) return Promise.resolve(true);
-            return new Promise<boolean>((resolve) => {
-              open = () => {
-                resolve(true);
-              };
-              signal?.addEventListener('abort', () => {
-                resolve(false);
-              });
-            });
-          },
-        },
-      };
-    }
-
     it('starts no session until the load falls, then runs the lane as usual', async () => {
       const fake = fakeHold();
       engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
@@ -1945,6 +2016,91 @@ describe('runner', () => {
       await engine.runner.cancel(workstream.id);
       expect(ws(workstream.id).state).toBe('CANCELLED');
       expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    });
+  });
+
+  describe('when the hold comes on after a lane went past it', () => {
+    it('starts no session after waiting for its turn to start, and gives the turn back', async () => {
+      const fake = fakeHold(false);
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold: fake.hold });
+      const accountId = engine.project.accountId;
+      const anotherStart = await engine.startGate.acquire(accountId);
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await waitFor(() => engine.startGate.waiting(accountId) === 1);
+      fake.begin();
+      anotherStart();
+      await waitFor(() => fake.parked() === 1);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      expect(engine.startGate.waiting(accountId)).toBe(0);
+      fake.release();
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    });
+
+    /** A task whose lane takes one of the given gate slots once its session ends. */
+    async function laneBehindGate(hold: Hold, slots: GateSlots) {
+      const gate = limitGates(createGateRunner({ sandbox: null, logger: silentLogger }), {
+        slots,
+        clock: new ManualClock(),
+        logger: silentLogger,
+      });
+      engine = await createTestEngine({ Alpha: [[turn]] }, {}, { hold, gate });
+      return engine.addTask('Alpha').workstream;
+    }
+
+    it('starts no gate after waiting for a slot, and keeps no slot while it is held', async () => {
+      const fake = fakeHold(false);
+      const slots = createGateSlots(1);
+      const workstream = await laneBehindGate(fake.hold, slots);
+      const anotherGate = await slots.acquire();
+      engine.launch(workstream.id);
+      await waitFor(() => slots.waiting === 1);
+      fake.begin();
+      anotherGate?.release();
+      await waitFor(() => fake.parked() === 1);
+      expect(slots.busy).toBe(0);
+      expect(gatesStarted()).toBe(0);
+      expect(ws(workstream.id).state).toBe('VERIFYING');
+      fake.release();
+      await engine.runner.idle();
+      expect(gatesStarted()).toBe(1);
+      expect(ws(workstream.id).state).toBe('DONE');
+    });
+
+    it('ends a lane held at its gate at once when it is cancelled, with no gate started', async () => {
+      const fake = fakeHold(false);
+      const slots = createGateSlots(1);
+      const workstream = await laneBehindGate(fake.hold, slots);
+      const anotherGate = await slots.acquire();
+      engine.launch(workstream.id);
+      await waitFor(() => slots.waiting === 1);
+      fake.begin();
+      anotherGate?.release();
+      await waitFor(() => fake.parked() === 1);
+      await engine.runner.cancel(workstream.id);
+      expect(ws(workstream.id).state).toBe('CANCELLED');
+      expect(gatesStarted()).toBe(0);
+      expect(fake.parked()).toBe(0);
+    });
+
+    it('leaves a lane held at its gate verifying at shutdown, for recovery to run the gate', async () => {
+      const fake = fakeHold(false);
+      const slots = createGateSlots(1);
+      const workstream = await laneBehindGate(fake.hold, slots);
+      const anotherGate = await slots.acquire();
+      engine.launch(workstream.id);
+      await waitFor(() => slots.waiting === 1);
+      fake.begin();
+      anotherGate?.release();
+      await waitFor(() => fake.parked() === 1);
+      await engine.runner.stopAll('shutdown');
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'VERIFYING',
+        nextAction: { kind: 'verify' },
+      });
+      expect(listEvidence(engine.store.db, workstream.id)).toEqual([]);
     });
   });
 
@@ -3959,6 +4115,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
+      worktreeRoot: join(probeRoot, 'w'),
       ...(processes === undefined ? {} : { processes }),
     });
     const inputs: LaneSessionInput[] = [];
@@ -5034,6 +5191,140 @@ describe("the batch's base when a lane launches", () => {
     await run(baseUpdates, true);
     expect(launches).toHaveLength(1);
     expect(engine.adapter.prompts).toHaveLength(1);
+  });
+});
+
+describe("a batch's gate while new work is held", () => {
+  /** Base updates that bring nothing in, recording in `order` each turn taken and each update. */
+  function recordingBase(order: string[]): BaseUpdates {
+    return {
+      beforeGate: () => {
+        order.push('base');
+        return Promise.resolve({ kind: 'up_to_date', note: null });
+      },
+      gate: (_batchId, _signal, run) => {
+        order.push('turn');
+        return run();
+      },
+      atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+    };
+  }
+
+  /** The real gate, recording in `order` each gate asked for and each command that starts. */
+  function recordingGate(order: string[]): GateRunner {
+    const gate = createGateRunner({ sandbox: null, logger: silentLogger });
+    return {
+      run: (request) => {
+        order.push('gate asked');
+        return gate.run({
+          ...request,
+          onSpawn: (pid) => {
+            order.push('gate spawned');
+            request.onSpawn?.(pid);
+          },
+        });
+      },
+    };
+  }
+
+  /** Starts one task in a batch under `hold`; its session ends when `endSession` is called. */
+  async function laneInBatch(hold: Hold, baseUpdates: BaseUpdates, order: string[]) {
+    engine = await createTestEngine(
+      { Alpha: [[{ do: 'await_message', contains: 'go' }, turn]] },
+      {},
+      { baseUpdates, hold, gate: recordingGate(order) },
+    );
+    const start = vi.spyOn(engine.adapter, 'start');
+    const batch = engine.state.write((ctx) =>
+      insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, batch.id);
+    engine.launch(workstream.id);
+    await waitFor(() => start.mock.results.length === 1);
+    const session = start.mock.results[0]?.value as { send(text: string): void } | undefined;
+    if (!session) throw new Error('no session started');
+    return {
+      workstream,
+      endSession: () => {
+        session.send('go');
+      },
+    };
+  }
+
+  it("parks before it takes the batch's turn, so nothing of the batch waits behind it", async () => {
+    const order: string[] = [];
+    const fake = fakeHold(false);
+    const { workstream, endSession } = await laneInBatch(fake.hold, recordingBase(order), order);
+    fake.begin();
+    endSession();
+    await waitFor(() => fake.parked() === 1);
+    expect(order).toEqual([]);
+    fake.release();
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(order).toEqual(['turn', 'gate asked', 'base', 'gate spawned']);
+  });
+
+  it("gives the batch's turn back when the hold came on while it waited for it", async () => {
+    const order: string[] = [];
+    const fake = fakeHold(false);
+    let siblingFinished: () => void = () => undefined;
+    const sibling = new Promise<void>((resolve) => {
+      siblingFinished = resolve;
+    });
+    let waitingForTurn = false;
+    const recording = recordingBase(order);
+    const { workstream, endSession } = await laneInBatch(
+      fake.hold,
+      {
+        ...recording,
+        gate: async (batchId, signal, run) => {
+          waitingForTurn = true;
+          await sibling;
+          return recording.gate(batchId, signal, run);
+        },
+      },
+      order,
+    );
+    endSession();
+    await waitFor(() => waitingForTurn);
+    fake.begin();
+    siblingFinished();
+    await waitFor(() => fake.parked() === 1);
+    // It took the turn, found the hold on, and started nothing: no base, no gate.
+    expect(order).toEqual(['turn', 'gate asked']);
+    expect(gatesStarted()).toBe(0);
+    fake.release();
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(order).toEqual(['turn', 'gate asked', 'turn', 'gate asked', 'base', 'gate spawned']);
+    expect(gatesStarted()).toBe(1);
+  });
+
+  it('starts no gate when the hold came on while its base came in', async () => {
+    const order: string[] = [];
+    const fake = fakeHold(false);
+    const recording = recordingBase(order);
+    let cameIn = false;
+    const { workstream, endSession } = await laneInBatch(
+      fake.hold,
+      {
+        ...recording,
+        beforeGate: (batchId, signal, options) => {
+          if (!cameIn) fake.begin();
+          cameIn = true;
+          return recording.beforeGate(batchId, signal, options);
+        },
+      },
+      order,
+    );
+    endSession();
+    await waitFor(() => fake.parked() === 1);
+    expect(order).not.toContain('gate spawned');
+    fake.release();
+    await engine.runner.idle();
+    expect(order).toContain('gate spawned');
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 });
 

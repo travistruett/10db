@@ -148,6 +148,13 @@ export interface ShipperDeps extends DeliveryContext {
   isRunning(id: WorkstreamId): boolean;
   /** Says whether the Mac was overloaded while a gate ran, so a failed gate's card can say so. */
   readonly load?: Pick<LoadGuard, 'overloadedSince'>;
+  /**
+   * True while a waiting update drains the factory: no ship and no catch-up begins, and one under way
+   * runs on. A batch whose work is done stays open and `checkOpenBatches` ships it once this is false
+   * again; a ship the builder asks for is refused, as the pull request watch's catch-up is left for
+   * its next round.
+   */
+  readonly holdShips?: () => boolean;
 }
 
 export interface Shipper {
@@ -1102,6 +1109,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   function checkBatch(batchId: BatchId): void {
+    // The batch stays open; the check that follows the drain ships it.
+    if (deps.holdShips?.()) return;
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
@@ -1139,12 +1148,21 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
   }
 
+  /** A ship the builder asked for begins nothing while an update drains the factory. */
+  function refuseWhileHeld(batch: BatchDto): void {
+    if (deps.holdShips?.())
+      throw new ConflictError(
+        `Batch "${batch.title}" can't ship yet: a waiting update has paused new ships until it installs. Ship it after the restart, or turn Update 10db by itself off in Settings.`,
+      );
+  }
+
   function ship(batchId: BatchId): BatchDto {
     const batch = getBatch(db, batchId);
     const unfinished = unfinishedWork(batch);
     switch (batch.state) {
       case BatchState.Open: {
         if (unfinished) throw unfinished;
+        refuseWhileHeld(batch);
         const shipping = toShipping(batchId, 'shipped anyway by the builder');
         resume(batchId);
         return shipping;
@@ -1167,6 +1185,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
           deps.onWorkQueued();
           return reopened;
         }
+        refuseWhileHeld(batch);
         const shipping = toShipping(batchId, 'retried by the builder');
         resume(batchId);
         return shipping;
@@ -1520,6 +1539,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   function queueCatchUp(batchId: BatchId, cause: CatchUpCause): void {
+    // A catch-up runs the shipping gate, so none begins during a drain; the watch asks again.
+    if (deps.holdShips?.()) return;
     const batch = getBatch(db, batchId);
     if (!landsItself(batch) || catchingUp.has(batchId)) return;
     catchingUp.add(batchId);

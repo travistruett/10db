@@ -22,6 +22,26 @@ export function selfUpdateSetting(db: DbReader): SelfUpdateSetting {
     : { enabled: true, isDefault: true };
 }
 
+/** How many minutes a staged update waits for an idle moment before the factory drains for it. */
+export const SELF_UPDATE_WAIT_MINUTES_KEY = 'self_update.wait_minutes';
+export const DEFAULT_WAIT_MINUTES = 15;
+
+/** The builder's wait limit in minutes; 0 drains the moment a build is staged. */
+export function selfUpdateWaitMinutes(db: DbReader): number {
+  const stored = getAppSetting(db, SELF_UPDATE_WAIT_MINUTES_KEY);
+  return typeof stored === 'number' && Number.isInteger(stored) && stored >= 0
+    ? stored
+    : DEFAULT_WAIT_MINUTES;
+}
+
+/** Stores the builder's wait limit; null forgets it, so the default applies again. */
+export function setSelfUpdateWaitMinutes(state: StateStore, minutes: number | null): void {
+  state.write((ctx) => {
+    if (minutes === null) deleteAppSetting(ctx, SELF_UPDATE_WAIT_MINUTES_KEY);
+    else setAppSetting(ctx, SELF_UPDATE_WAIT_MINUTES_KEY, minutes);
+  });
+}
+
 /** Stores the builder's choice; null forgets it, so the default applies again. */
 export function setSelfUpdateChoice(state: StateStore, enabled: boolean | null): void {
   state.write((ctx) => {

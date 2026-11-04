@@ -11,9 +11,15 @@ import { GhError, PrMergeable } from '../github';
 vi.setConfig({ testTimeout: 120_000 });
 
 let h: DeliveryHarness;
+/** Whether a waiting update drains the factory. */
+let draining: boolean;
 beforeEach(() => {
+  draining = false;
   // The tests settle work and ask the shipper themselves.
-  h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+  h = createDeliveryHarness(
+    { workspaceMode: 'worktree' },
+    { trigger: false, holdShips: () => draining },
+  );
   h.commit('src/index.ts', "import a from './a';\nexport {};\n");
   h.git$('push', '-q', 'origin', 'main');
 });
@@ -772,6 +778,47 @@ describe('a shipped pull request that conflicts with its base', () => {
     await catchUp(batch);
     expect(onOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
+  });
+});
+
+describe('a catch-up while a waiting update drains the factory', () => {
+  /** A shipped pull request that conflicts with main, as the drain begins. */
+  async function conflictingAsItDrains() {
+    const batch = await shipped();
+    h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+    conflicts(batch);
+    draining = true;
+    return { batch, before: onOrigin(batch.branch) };
+  }
+
+  it.each([
+    [
+      'the base into a conflicting pull request',
+      (batch: BatchDto) => {
+        h.shipper.catchUp(batch.id);
+      },
+    ],
+    [
+      'the base into a pull request whose checks never started',
+      (batch: BatchDto) => {
+        h.shipper.restartCi(batch.id);
+      },
+    ],
+  ])('starts no gate to bring %s', async (_name, ask) => {
+    const { batch, before } = await conflictingAsItDrains();
+    ask(batch);
+    expect(h.jobs.pending()).toBe(0);
+    await h.jobs.idle();
+    expect(onOrigin(batch.branch)).toBe(before);
+  });
+
+  it('brings the base in when the next round asks, once the drain has ended', async () => {
+    const { batch, before } = await conflictingAsItDrains();
+    await catchUp(batch);
+    expect(onOrigin(batch.branch)).toBe(before);
+    draining = false;
+    await catchUp(batch);
+    expect(onOrigin(batch.branch)).not.toBe(before);
   });
 });
 

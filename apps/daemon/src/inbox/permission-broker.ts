@@ -35,7 +35,13 @@ import {
   storableRule,
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
-import { readAccess, readPathsOf, writeAccess, type FileAccessContext } from '../sandbox';
+import {
+  outsideCopyRefusal,
+  readAccess,
+  readPathsOf,
+  writeAccess,
+  type FileAccessContext,
+} from '../sandbox';
 import type { ToolDecision, ToolRequest } from '../sessions';
 import { foundHostReason } from './gate-host-card';
 import { ParkedError, type InboxService } from './service';
@@ -482,6 +488,10 @@ export function createPermissionBroker(
             behavior: 'deny',
             message: `${path} is a protected path; 10db never lets a lane read it.`,
           };
+        }
+        if (access === 'outside-copy') {
+          // Never right, so never a card: the lane's paths come from its own copy.
+          return { behavior: 'deny', message: outsideCopyRefusal(path, sandbox.fileAccess) };
         }
         if (access === 'ask') asking.push(realPath);
       }

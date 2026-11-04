@@ -72,6 +72,7 @@ function forSession(
     gitDirs: (path) => git.gitDirs(path),
     systemPrefixes: [],
     runtime,
+    worktreeRoot: join(home, 'worktrees'),
   }).forSession({
     project: {
       id: projectId,

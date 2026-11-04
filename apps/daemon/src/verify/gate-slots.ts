@@ -96,8 +96,10 @@ export function createGateSlots(limit: number): GateSlots {
   };
 }
 
-/** Holds work back while the Mac is overloaded; the load guard is one. */
+/** Holds new work back: the load guard is one, while the Mac is overloaded. */
 export interface Hold {
+  /** Whether it holds now: `untilClear` can't say without waiting. */
+  holding(): boolean;
   /** Resolves true once work may start, and false when `signal` aborts first. */
   untilClear(signal?: AbortSignal): Promise<boolean>;
 }
