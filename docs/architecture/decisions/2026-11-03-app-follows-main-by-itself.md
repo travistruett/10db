@@ -126,8 +126,15 @@ hears the detached script exit, reads the status file, starts the scheduler agai
 the card. An apply failure after the quit is reported once by the next daemon, from the status file and the
 `self_update.applying` marker, at startup. The head of main whose update failed is kept
 (`self_update.failed_commit`); it is not tried again until main has a newer head or the builder touches the
-switch, so one failure is one card. Cards sit under the first project; with none registered the failure is only
-logged.
+switch, so one failure is one card. Cards sit under the first project; with none registered no card is raised and
+the failure is logged and shown in Settings > Updates.
+
+**Why it will not update.** `GET /settings/self-update` carries `blocker`: a `kind` and a `message`, or null, and
+Settings > Updates shows the message under the switch. Four kinds are facts about the install, known at start, and
+show even with the switch off: `source`, `no-repository`, `not-in-applications` and `gh-missing`. Two come from
+checks and show only with it on: `unreachable` (the last finished check could not reach GitHub) and `failed` (an
+update failed). The reason text of a failure is held in memory, not stored: after a restart the check that finds
+`self_update.failed_commit` still at main's head reduces it to a generic line that names the commit.
 
 A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
 killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above). Any later step

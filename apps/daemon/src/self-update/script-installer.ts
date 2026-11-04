@@ -6,6 +6,7 @@ import { CommitSha } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock, type Timer } from '../clock';
 import type { Logger } from '../log';
+import { SELF_UPDATE_SWITCH } from './blocker';
 import type {
   ApplyResult,
   ScriptStatus,
@@ -267,7 +268,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
             step: 'stage',
             message: stopped
               ? 'The install script was stopped: 10db quit.'
-              : 'The install script was stopped: Update by itself was turned off.',
+              : `The install script was stopped: ${SELF_UPDATE_SWITCH} was turned off.`,
           });
           return;
         }

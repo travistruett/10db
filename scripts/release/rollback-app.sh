@@ -98,7 +98,7 @@ if [ -n "$current_zip" ]; then keep_only_zip "$current_zip"; fi
 rm -f "$rollback_marker"
 if [ -n "$replaced_commit" ]; then
   mkdir -p "$(dirname "$rollback_marker")" && printf '%s\n' "$replaced_commit" > "$rollback_marker" \
-    || echo "$script_name: could not write $rollback_marker; turn Update by itself off in Settings before 10db installs the build you rolled back from again" >&2
+    || echo "$script_name: could not write $rollback_marker; turn Update 10db by itself off in Settings before 10db installs the build you rolled back from again" >&2
 fi
 
 echo "Restored $app_path from $zip."

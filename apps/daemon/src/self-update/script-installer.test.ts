@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
+import { SELF_UPDATE_SWITCH } from './blocker';
 import { createScriptInstaller, type ScriptInstaller } from './script-installer';
 
 const COMMIT = 'd'.repeat(40);
@@ -430,7 +431,11 @@ describe('cancel', () => {
     });
     await installer.cancel();
     await waitFor(() => !alive(grandchild));
-    expect(await stage).toMatchObject({ ok: false, step: 'stage' });
+    expect(await stage).toMatchObject({
+      ok: false,
+      step: 'stage',
+      message: `The install script was stopped: ${SELF_UPDATE_SWITCH} was turned off.`,
+    });
     expect(existsSync(join(workDir, 'tmp'))).toBe(false);
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
 

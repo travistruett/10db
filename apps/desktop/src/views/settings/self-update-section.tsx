@@ -65,7 +65,14 @@ export function SelfUpdateSection() {
         />
       </SettingRow>
       {blocker !== null ? (
-        <Text size="sm" c="red" role="alert" aria-label="Why 10db will not update itself">
+        <Text
+          size="sm"
+          c="red"
+          px="md"
+          py="sm"
+          role="alert"
+          aria-label="Why 10db will not update itself"
+        >
           {blocker.message}
         </Text>
       ) : null}

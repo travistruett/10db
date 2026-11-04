@@ -150,6 +150,14 @@ describe('why the app cannot update itself, in Settings', () => {
     const alert = await screen.findByRole('alert', { name: 'Why 10db will not update itself' });
     expect(alert.textContent).toContain(message);
   });
+
+  it('insets the reason like the rows around it, since the card adds no padding', async () => {
+    serving(status({ blocker: { kind: 'gh-missing', message: 'gh is not installed.' } }));
+    renderApp('/settings/updates');
+    const alert = await screen.findByRole('alert', { name: 'Why 10db will not update itself' });
+    expect(alert.style.paddingInline).toBe('var(--mantine-spacing-md)');
+    expect(alert.style.paddingBlock).toBe('var(--mantine-spacing-sm)');
+  });
 });
 
 describe('a waiting update in Settings', () => {
