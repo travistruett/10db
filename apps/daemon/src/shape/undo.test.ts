@@ -386,6 +386,57 @@ describe('Remove Draft Goal', () => {
       }
     });
 
+    it('refuses a taken-back task’s key stated as a goal, and writes nothing', () => {
+      const goalId = convertedWithQuestion('density');
+      const m = c.say();
+      const addition = {
+        key: 'extra',
+        title: 'Extra',
+        criteria: ['It works'],
+        areas: ['api'],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: [m],
+        goalId,
+      };
+      write((ctx) => reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition] })));
+      const selected = listShapeProposals(c.store.db, c.shape.id)
+        .filter((r) => r.state === ShapeProposalState.Pending)
+        .map((r) => r.id);
+      const converted = write((ctx) => convertProposals(ctx, c.shape.id, selected));
+      if (!converted.ok) throw new Error(converted.errors.join('; '));
+      write((ctx) => {
+        removeDraftGoalOf(ctx, c.shape.id, goalId);
+      });
+      const before = listShapeProposals(c.store.db, c.shape.id);
+      const round = getShape(c.store.db, c.shape.id).round;
+
+      const refused = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          PlanDraft.parse({
+            goals: [
+              {
+                key: 'extra',
+                title: 'Extra goal',
+                objective: 'Do it.',
+                ceremony: 'direct',
+                sourceMessageIds: [m],
+                tasks: [{ key: 'x1', title: 'Only task', areas: ['api'], size: 'S' }],
+              },
+            ],
+          }),
+        ),
+      );
+      expect(refused).toEqual({
+        ok: false,
+        errors: ['extra: stored as a task, so it cannot be stated as a goal; use another key'],
+      });
+      expect(listShapeProposals(c.store.db, c.shape.id)).toEqual(before);
+      expect(getShape(c.store.db, c.shape.id).round).toBe(round);
+    });
+
     it('lets a task added to the removed goal be proposed again under its key, and the question converts with it', () => {
       const goalId = convertedWithQuestion('density');
       const m = c.say();
