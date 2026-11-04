@@ -261,6 +261,9 @@ export const ProvenanceDto = z.object({
   /** The record this one replaced, and the one that replaced it. */
   supersedes: z.union([DecisionId, PrincipleId]).nullable(),
   supersededBy: z.union([DecisionId, PrincipleId]).nullable(),
+  /** Those two records in words: a principle's statement, or a decision's question and choice. */
+  supersedesText: z.string().nullable(),
+  supersededByText: z.string().nullable(),
   retired: Actor.nullable(),
   withdrawn: Actor.nullable(),
   inbox: z

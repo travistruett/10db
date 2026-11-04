@@ -93,11 +93,15 @@ describe('provenance', () => {
     expect(decisionProvenance(store.db, a.id)).toMatchObject({
       state: 'superseded',
       supersedes: null,
+      supersedesText: null,
       supersededBy: b.id,
+      supersededByText: 'Which queue library? → pg-boss',
     });
     expect(decisionProvenance(store.db, b.id)).toMatchObject({
       supersedes: a.id,
+      supersedesText: 'Which queue library? → BullMQ',
       supersededBy: null,
+      supersededByText: null,
     });
   });
 
@@ -122,12 +126,14 @@ describe('provenance', () => {
     expect(principleProvenance(store.db, b.id)).toMatchObject({
       state: 'retired',
       supersedes: a.id,
+      supersedesText: 'Never sleep in tests',
       retired: { by: 'me', reason: 'fake timers now' },
       withdrawn: null,
     });
     expect(principleProvenance(store.db, a.id)).toMatchObject({
       state: 'superseded',
       supersededBy: b.id,
+      supersededByText: 'Never sleep or poll in tests',
     });
     const c = rule();
     store.write((ctx) => withdrawPrinciple(ctx, c.id, 'me', 'wrong'));

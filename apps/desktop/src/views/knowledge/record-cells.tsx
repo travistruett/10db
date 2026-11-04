@@ -1,14 +1,12 @@
-import { KnowledgeState } from '@10db/contracts';
 import { ActionIcon, Alert, Badge, Group, Loader, Text } from '@mantine/core';
 import { IconInfoCircle, IconSearchOff } from '@tabler/icons-react';
-import type { KnowledgeListDto } from '@10db/contracts';
+import type { KnowledgeListDto, KnowledgeState } from '@10db/contracts';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { STATE_COLORS, STATE_LABELS } from './knowledge-labels';
 
-/** A current record needs no label; every other state is said, because History is what shows them. */
+/** Every state is said, Current too: a decision has no kind, so this badge is all a row says about it. */
 export function StateBadge({ state }: { readonly state: KnowledgeState }) {
-  if (state === KnowledgeState.Current) return null;
   return (
     <Badge size="sm" variant="light" color={STATE_COLORS[state]}>
       {STATE_LABELS[state]}

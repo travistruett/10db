@@ -1,4 +1,4 @@
-import { KnowledgeItemKind, type ProvenanceDto } from '@10db/contracts';
+import type { ProvenanceDto } from '@10db/contracts';
 import { Alert, Anchor, Blockquote, Drawer, Loader, Stack, Text } from '@mantine/core';
 import { useProvenance, type TracedRecord } from '../../daemon/knowledge-queries';
 import { STATE_LABELS } from './knowledge-labels';
@@ -20,6 +20,34 @@ function ActionLines({ verb, action }: { readonly verb: string; readonly action:
   );
 }
 
+/** The record this one replaced or was replaced by, named in its own words; opening it keeps that name. */
+function RecordLink({
+  verb,
+  kind,
+  id,
+  text,
+  onTrace,
+}: {
+  readonly verb: string;
+  readonly kind: ProvenanceDto['kind'];
+  readonly id: ProvenanceDto['supersedes'];
+  readonly text: string | null;
+  readonly onTrace: (record: TracedRecord) => void;
+}) {
+  if (id === null || text === null) return null;
+  return (
+    <Anchor
+      component="button"
+      type="button"
+      size="sm"
+      ta="left"
+      onClick={() => {
+        onTrace({ kind, id, label: text });
+      }}
+    >{`${verb}: ${text}`}</Anchor>
+  );
+}
+
 /** Where a decision or principle came from, what it replaced or was replaced by, and what has happened to it. */
 export function ProvenanceDrawer({
   record,
@@ -33,9 +61,6 @@ export function ProvenanceDrawer({
 }) {
   const provenance = useProvenance(record);
   const p = provenance.data ?? null;
-  const follow = (id: NonNullable<ProvenanceDto['supersedes']>): void => {
-    onTrace({ kind: record?.kind ?? KnowledgeItemKind.Principle, id, label: id });
-  };
   return (
     <Drawer
       opened={record !== null}
@@ -83,28 +108,20 @@ export function ProvenanceDrawer({
             ) : null}
             {p.retired ? <ActionLines verb="Retired" action={p.retired} /> : null}
             {p.withdrawn ? <ActionLines verb="Withdrawn" action={p.withdrawn} /> : null}
-            {p.supersedes ? (
-              <Anchor
-                component="button"
-                type="button"
-                size="sm"
-                ta="left"
-                onClick={() => {
-                  if (p.supersedes) follow(p.supersedes);
-                }}
-              >{`Replaced ${p.supersedes}`}</Anchor>
-            ) : null}
-            {p.supersededBy ? (
-              <Anchor
-                component="button"
-                type="button"
-                size="sm"
-                ta="left"
-                onClick={() => {
-                  if (p.supersededBy) follow(p.supersededBy);
-                }}
-              >{`Replaced by ${p.supersededBy}`}</Anchor>
-            ) : null}
+            <RecordLink
+              verb="Replaced"
+              kind={p.kind}
+              id={p.supersedes}
+              text={p.supersedesText}
+              onTrace={onTrace}
+            />
+            <RecordLink
+              verb="Replaced by"
+              kind={p.kind}
+              id={p.supersededBy}
+              text={p.supersededByText}
+              onTrace={onTrace}
+            />
           </>
         ) : null}
       </Stack>

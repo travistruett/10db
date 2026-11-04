@@ -384,6 +384,8 @@ happened to it:
   "confirmedSource": null,
   "supersedes": null,
   "supersededBy": "pri_…",
+  "supersedesText": null,
+  "supersededByText": "Tests never sleep; they wait on a condition.",
   "retired": null,
   "withdrawn": {
     "at": "2026-11-04T09:00:00.000Z",
@@ -402,18 +404,19 @@ happened to it:
 }
 ```
 
-| Field                        | Meaning                                                                                                                                     |
-| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `sourceKind`, `sourceRef`    | The `sources` row as stored. Kinds include `builder` (this API, and the builder's own screens), and others for answered cards and sessions. |
-| `origin`                     | For a builder source with a `via`: the tool, its `sessionId` and `cwd` (null when absent). Null for every other source.                     |
-| `recordedAt`, `by`           | When the source was written, and who made the record (`me` for the builder, or `agent:<session>`).                                          |
-| `quote`, `speaker`           | The words the record came from and who said them. A decision's quote is the source's `quote`.                                               |
-| `confirmedBy`, `confirmedAt` | Principles: who confirmed it and when.                                                                                                      |
-| `confirmedSource`            | Principles: the `source` the accept named, as `{ "via", "sessionId", "cwd", "quote", "recordedAt" }`. Null otherwise.                       |
-| `supersedes`, `supersededBy` | The record this one replaced, and the one that replaced it (null when none).                                                                |
-| `retired`, `withdrawn`       | `{ "at", "by", "reason", "source" }` when it was retired or withdrawn; null otherwise. `source` has the shape above, or is null.            |
-| `inbox`                      | The Inbox card a record answers (`id`, `title`, `choice`, `note`); null otherwise.                                                          |
-| `session`                    | A 10db session (`id`, `workstreamId`, `taskTitle`) that wrote the record; null for a builder source.                                        |
+| Field                                | Meaning                                                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sourceKind`, `sourceRef`            | The `sources` row as stored. Kinds include `builder` (this API, and the builder's own screens), and others for answered cards and sessions. |
+| `origin`                             | For a builder source with a `via`: the tool, its `sessionId` and `cwd` (null when absent). Null for every other source.                     |
+| `recordedAt`, `by`                   | When the source was written, and who made the record (`me` for the builder, or `agent:<session>`).                                          |
+| `quote`, `speaker`                   | The words the record came from and who said them. A decision's quote is the source's `quote`.                                               |
+| `confirmedBy`, `confirmedAt`         | Principles: who confirmed it and when.                                                                                                      |
+| `confirmedSource`                    | Principles: the `source` the accept named, as `{ "via", "sessionId", "cwd", "quote", "recordedAt" }`. Null otherwise.                       |
+| `supersedes`, `supersededBy`         | The record this one replaced, and the one that replaced it (null when none).                                                                |
+| `supersedesText`, `supersededByText` | Those two records in words: a principle's statement, or a decision's `question → choice` (null when none).                                  |
+| `retired`, `withdrawn`               | `{ "at", "by", "reason", "source" }` when it was retired or withdrawn; null otherwise. `source` has the shape above, or is null.            |
+| `inbox`                              | The Inbox card a record answers (`id`, `title`, `choice`, `note`); null otherwise.                                                          |
+| `session`                            | A 10db session (`id`, `workstreamId`, `taskTitle`) that wrote the record; null for a builder source.                                        |
 
 ## Recipes
 

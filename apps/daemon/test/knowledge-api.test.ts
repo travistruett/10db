@@ -301,7 +301,11 @@ describe('writing and reading back', () => {
       supersedesId: old.id,
     });
     const prov = (await call('GET', `/principles/${old.id}/provenance`)).body;
-    expect(prov).toMatchObject({ state: 'superseded', supersededBy: next.body.id });
+    expect(prov).toMatchObject({
+      state: 'superseded',
+      supersededBy: next.body.id,
+      supersededByText: 'Wait on conditions',
+    });
     expect((await call('GET', `/principles/${next.body.id}/provenance`)).body).toMatchObject({
       supersedes: old.id,
       origin: { via: 'claude_code', sessionId: 'cc-1' },

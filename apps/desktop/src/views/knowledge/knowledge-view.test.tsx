@@ -1,7 +1,13 @@
-import { mintId, type DecisionItem, type PrincipleItem, type ProposalDto } from '@10db/contracts';
+import {
+  mintId,
+  type DecisionItem,
+  type KnowledgeScope,
+  type PrincipleItem,
+  type ProposalDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { daemonEvent, projectViewDto } from '../../test/fixtures';
 import {
@@ -72,7 +78,7 @@ describe('KnowledgeView', () => {
     expect(await screen.findByRole('heading', { name: 'Knowledge', level: 2 })).toBeTruthy();
   });
 
-  it('lists principles, policies first, with scope, kind and date, for the chosen project', async () => {
+  it('lists principles, policies first, with scope, kind and date', async () => {
     const { asked } = serve({
       principles: [
         principleItem({
@@ -176,6 +182,7 @@ describe('KnowledgeView', () => {
     expect(within(table).getByText('Tabler')).toBeTruthy();
     expect(within(table).getByText('ui')).toBeTruthy();
     expect(within(table).getByText('13 Oct 2026')).toBeTruthy();
+    expect(within(table).getByText('Current')).toBeTruthy();
   });
 
   it('counts pending proposals on their tab and shows what each proposes', async () => {
@@ -186,6 +193,156 @@ describe('KnowledgeView', () => {
     expect(screen.getByText('Never sleep in tests')).toBeTruthy();
     expect(screen.getByText('Two flaky runs came from sleeps.')).toBeTruthy();
     expect(screen.getByText('Proposed')).toBeTruthy();
+  });
+
+  describe('on the Proposals tab', () => {
+    /** A principle proposal for one place. */
+    const placed = (
+      title: string,
+      place: { scope: KnowledgeScope; area: string | null },
+      body = 'Agreed in review.',
+    ): ProposalDto => {
+      const proposal = proposalDto({ title, body });
+      if (proposal.principle === null) throw new Error('the fixture proposes a principle');
+      return { ...proposal, principle: { ...proposal.principle, ...place } };
+    };
+    const proposals = [
+      placed('Mine', { scope: 'you', area: null }),
+      placed('Whole project', { scope: 'project', area: null }, 'Mentions the deploy freeze.'),
+      placed('For the api', { scope: 'area', area: 'api' }),
+      placed('For the ui', { scope: 'area', area: 'ui' }),
+      proposalDto({ kind: 'note', title: 'A note', body: 'b', principle: null }),
+    ];
+
+    const shown = (): (string | undefined)[] => {
+      const table = screen.queryByRole('table', { name: 'Proposals' });
+      if (table === null) return [];
+      return within(table)
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => row.querySelector('p')?.textContent);
+    };
+
+    async function openProposals() {
+      fireEvent.click(await screen.findByRole('tab', { name: /^Proposals/ }));
+      await waitFor(() => {
+        expect(shown()).toHaveLength(proposals.length);
+      });
+    }
+
+    it('narrows to the proposals matching every word typed', async () => {
+      serve({ proposals });
+      renderApp('/knowledge');
+      await openProposals();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'FREEZE deploy' },
+      });
+      await waitFor(() => {
+        expect(shown()).toEqual(['Whole project']);
+      });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'nothing says this' },
+      });
+      expect(await screen.findByText('No proposal matches.')).toBeTruthy();
+    });
+
+    it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
+      serve({ proposals });
+      renderApp('/knowledge');
+      await openProposals();
+      await chooseScope('You');
+      await waitFor(() => {
+        expect(shown()).toEqual(['Mine']);
+      });
+      await chooseScope('Project');
+      await waitFor(() => {
+        expect(shown()).toEqual(['Whole project', 'A note']);
+      });
+      await chooseScope('api');
+      await waitFor(() => {
+        expect(shown()).toEqual(['For the api']);
+      });
+    });
+  });
+
+  describe('with two projects', () => {
+    const alpha = projectViewDto({ name: 'alpha', repoPath: '/Users/x/a' });
+    const beta = projectViewDto({ name: 'beta', repoPath: '/Users/x/b' });
+
+    afterEach(() => {
+      window.localStorage.clear();
+    });
+
+    /** Each project answers with its own records, and every read is noted with the project it asked for. */
+    function serveBoth() {
+      const asked: { projectId: string; path: string; params: URLSearchParams }[] = [];
+      const note = (request: Request, projectId: unknown): void => {
+        const url = new URL(request.url);
+        asked.push({ projectId: String(projectId), path: url.pathname, params: url.searchParams });
+      };
+      server.use(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+        http.get(daemonUrl('/projects/:projectId/knowledge'), ({ request, params }) => {
+          note(request, params['projectId']);
+          const statement = params['projectId'] === alpha.id ? 'Alpha rule' : 'Beta rule';
+          return HttpResponse.json(knowledgeList([principleItem({ statement })]));
+        }),
+        http.get(daemonUrl('/projects/:projectId/proposals'), ({ request, params }) => {
+          note(request, params['projectId']);
+          return HttpResponse.json([]);
+        }),
+        ...baseHandlers(),
+      );
+      return asked;
+    }
+
+    it('reads the knowledge and proposals of the stored project', async () => {
+      window.localStorage.setItem('tendb.project', JSON.stringify(beta.id));
+      const asked = serveBoth();
+      renderApp('/knowledge');
+      expect(await screen.findByText('Beta rule')).toBeTruthy();
+      await waitFor(() => {
+        expect(asked.some((a) => a.path.endsWith('/proposals'))).toBe(true);
+      });
+      expect(asked.some((a) => a.path.endsWith('/knowledge'))).toBe(true);
+      expect(asked.every((a) => a.projectId === beta.id)).toBe(true);
+    });
+
+    it('follows the switcher and starts the new project’s view afresh', async () => {
+      const asked = serveBoth();
+      renderApp('/knowledge');
+      expect(await screen.findByText('Alpha rule')).toBeTruthy();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'rule' },
+      });
+      fireEvent.click(screen.getByRole('switch', { name: 'History' }));
+      await waitFor(() => {
+        expect(asked.at(-1)?.params.get('q')).toBe('rule');
+      });
+      fireEvent.click(screen.getByRole('tab', { name: 'Decisions' }));
+      await waitFor(() => {
+        expect(asked.at(-1)?.params.get('kind')).toBe('decision');
+      });
+
+      asked.length = 0;
+      fireEvent.click(screen.getByRole('button', { name: 'Project: alpha. Switch project' }));
+      fireEvent.click(await screen.findByRole('option', { name: /beta/, hidden: true }));
+
+      expect(await screen.findByText('Beta rule')).toBeTruthy();
+      expect(screen.getByRole('tab', { name: 'Principles' }).getAttribute('aria-selected')).toBe(
+        'true',
+      );
+      expect(screen.getByRole('textbox', { name: 'Search' })).toHaveProperty('value', '');
+      expect(screen.getByRole('switch', { name: 'History' })).toHaveProperty('checked', false);
+      const list = asked.filter((a) => a.path.endsWith('/knowledge'));
+      expect(list.every((a) => a.projectId === beta.id)).toBe(true);
+      expect(list.at(-1)?.params.get('q') ?? '').toBe('');
+      expect(list.at(-1)?.params.get('history')).toBe('0');
+      await waitFor(() => {
+        expect(asked.some((a) => a.path.endsWith('/proposals'))).toBe(true);
+      });
+      expect(asked.every((a) => a.projectId === beta.id)).toBe(true);
+    });
   });
 
   it('shows where a principle came from, with what it replaced', async () => {
@@ -209,6 +366,7 @@ describe('KnowledgeView', () => {
             confirmedBy: 'me',
             confirmedAt: '2026-10-14T12:00:00.000Z',
             supersedes: before,
+            supersedesText: 'Sleep when you must',
           }),
         ),
       ),
@@ -224,7 +382,50 @@ describe('KnowledgeView', () => {
     expect(within(drawer).getByText('sleeping made the suite flaky')).toBeTruthy();
     expect(within(drawer).getByText(/^Recorded 13 Oct 2026, \d\d:\d\d by you$/)).toBeTruthy();
     expect(within(drawer).getByText(/Confirmed by you on 14 Oct 2026/)).toBeTruthy();
-    expect(within(drawer).getByText(`Replaced ${before}`)).toBeTruthy();
+    expect(
+      within(drawer).getByRole('button', { name: 'Replaced: Sleep when you must' }),
+    ).toBeTruthy();
+    expect(drawer.textContent).not.toContain(before);
+  });
+
+  it('follows a replaced record, naming it by its words', async () => {
+    const principle = principleItem({ statement: 'Never sleep in tests' });
+    const before = mintId('Principle');
+    serve({ principles: [principle] });
+    server.use(
+      http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+        HttpResponse.json(
+          provenanceDto({
+            id: principle.id,
+            supersedes: before,
+            supersedesText: 'Sleep when you must',
+          }),
+        ),
+      ),
+      http.get(daemonUrl(`/principles/${before}/provenance`), () =>
+        HttpResponse.json(
+          provenanceDto({
+            id: before,
+            state: 'superseded',
+            supersededBy: principle.id,
+            supersededByText: 'Never sleep in tests',
+          }),
+        ),
+      ),
+    );
+    renderApp('/knowledge');
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'Where Never sleep in tests came from' }),
+    );
+    const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+    fireEvent.click(
+      await within(drawer).findByRole('button', { name: 'Replaced: Sleep when you must' }),
+    );
+    expect(
+      await within(drawer).findByRole('button', { name: 'Replaced by: Never sleep in tests' }),
+    ).toBeTruthy();
+    expect(within(drawer).getByText('Sleep when you must')).toBeTruthy();
+    expect(drawer.textContent).not.toContain(before);
   });
 
   it.each([
@@ -251,6 +452,7 @@ describe('KnowledgeView', () => {
             },
             state: 'withdrawn',
             supersededBy: mintId('Decision'),
+            supersededByText: 'Which queue library? → pg-boss',
           }),
         ),
       ),
@@ -262,7 +464,11 @@ describe('KnowledgeView', () => {
     expect(await within(drawer).findByText(label)).toBeTruthy();
     expect(within(drawer).getByText(/Withdrawn by you on 15 Oct 2026/)).toBeTruthy();
     expect(within(drawer).getByText('Wrong repo')).toBeTruthy();
-    expect(within(drawer).getByText(/Replaced by dec_/)).toBeTruthy();
+    expect(
+      within(drawer).getByRole('button', {
+        name: 'Replaced by: Which queue library? → pg-boss',
+      }),
+    ).toBeTruthy();
   });
 
   it('shows a record written elsewhere without a reload', async () => {

@@ -123,6 +123,18 @@ function actionSource(db: DbReader, id: SourceId | null): ProvenanceDto['confirm
   };
 }
 
+/** A decision a provenance links to, in words: the records carry no route of their own to look it up. */
+function decisionText(db: DbReader, id: DecisionId | null): string | null {
+  if (id === null) return null;
+  const d = getDecisionDto(db, id);
+  return `${d.question} → ${d.choice}`;
+}
+
+/** A principle a provenance links to, in words. */
+function principleText(db: DbReader, id: PrincipleId | null): string | null {
+  return id === null ? null : getPrinciple(db, id).statement;
+}
+
 export function decisionProvenance(db: DbReader, id: DecisionId): ProvenanceDto {
   const d = getDecisionDto(db, id);
   const row = getDecision(db, id);
@@ -141,6 +153,8 @@ export function decisionProvenance(db: DbReader, id: DecisionId): ProvenanceDto 
     confirmedSource: null,
     supersedes: d.supersedesId,
     supersededBy: d.supersededById,
+    supersedesText: decisionText(db, d.supersedesId),
+    supersededByText: decisionText(db, d.supersededById),
     retired: null,
     withdrawn:
       row.withdrawnAt === null
@@ -172,6 +186,8 @@ export function principleProvenance(db: DbReader, id: PrincipleId): ProvenanceDt
     confirmedSource: actionSource(db, row.confirmedSourceId),
     supersedes: p.supersedesId,
     supersededBy: p.supersededById,
+    supersedesText: principleText(db, p.supersedesId),
+    supersededByText: principleText(db, p.supersededById),
     retired:
       row.retiredAt === null
         ? null

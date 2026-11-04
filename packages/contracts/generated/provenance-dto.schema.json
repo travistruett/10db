@@ -127,6 +127,18 @@
         }
       ]
     },
+    "supersedesText": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "supersededByText": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "retired": {
       "anyOf": [
         {
@@ -442,6 +454,8 @@
     "by",
     "supersedes",
     "supersededBy",
+    "supersedesText",
+    "supersededByText",
     "retired",
     "withdrawn",
     "inbox",

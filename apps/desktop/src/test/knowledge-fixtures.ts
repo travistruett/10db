@@ -114,6 +114,8 @@ export function provenanceDto(overrides: Partial<ProvenanceDto> = {}): Provenanc
     by: 'me',
     supersedes: null,
     supersededBy: null,
+    supersedesText: null,
+    supersededByText: null,
     retired: null,
     withdrawn: null,
     inbox: null,
