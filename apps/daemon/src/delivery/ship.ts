@@ -1037,14 +1037,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
               // The batch's last task is the session to send when the base's conflicts need one.
               const update = await deps.baseUpdates.beforeGate(batchId, signal, {
                 inSession: true,
+                raisesUncarried: true,
               });
               before.update = update;
               // Markers in the branch fail any gate, and the stale branch isn't what would merge. A
-              // broken install fails every tool of the gate, whatever the batch's code is.
+              // broken install fails every tool of the gate, whatever the batch's code is. A lost
+              // custom migration fails none of them, which is why it stops the gate here.
               return (
                 update.kind !== 'aborted' &&
                 update.kind !== 'conflicted' &&
-                update.kind !== 'install_broken'
+                update.kind !== 'install_broken' &&
+                update.kind !== 'uncarried'
               );
             }),
           );
@@ -1053,6 +1056,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
               sendToMerge(batch, before.update);
             if (before.update?.kind === 'install_broken' && !stopped())
               fail(batch, shipCards.installBroken(batch, before.update.note));
+            if (before.update?.kind === 'uncarried' && !stopped())
+              fail(batch, shipCards.migrationsLost(batch, before.update.note));
             return null;
           }
           return {
@@ -1147,6 +1152,16 @@ export function createShipper(deps: ShipperDeps): Shipper {
             return;
           }
           showNotice(deps.state, batchId, gateNotices.rerunPassed(steps));
+        }
+      } else {
+        // No gate brings the base in here, but a lane's launch may have, and lost a migration.
+        const standing = await deps.baseUpdates.beforeGate(batchId, signal, {
+          standingOnly: true,
+        });
+        if (standing.kind === 'aborted') return;
+        if (standing.kind === 'uncarried') {
+          fail(batch, shipCards.migrationsLost(batch, standing.note));
+          return;
         }
       }
       // 3. Push, never forced.
@@ -1758,9 +1773,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
         // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
         // since the install and the generators run long enough for the builder to commit meanwhile.
+<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
         if (update.kind === 'merged') wrote = update.head;
         // A broken install still left its merge on the branch: it goes back with the others.
         else if (update.kind === 'install_broken' && update.head !== undefined) wrote = update.head;
+||||||| 84d0b7e
+        if (update.kind === 'merged') wrote = update.head;
+=======
+        if (update.kind === 'merged' || update.kind === 'uncarried') wrote = update.head;
+>>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
@@ -1799,6 +1820,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
           { batchId, prUrl },
           'pull request conflicts but its branch holds the base',
         );
+        return;
+      }
+      if (brought.kind === 'uncarried') {
+        stop({ kind: 'other', why: `10db pushed nothing. ${brought.note}` });
         return;
       }
       if (check !== null) {

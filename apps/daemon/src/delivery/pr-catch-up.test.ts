@@ -559,6 +559,126 @@ describe('a shipped pull request that conflicts with its base', () => {
       builderKept(batch.branch ?? '');
     });
 
+    it("pushes nothing and raises the one card, naming the migration, when the branch's can't be carried over", async () => {
+      const journal = (...tags: string[]): string =>
+        `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;
+      const snapshot = (id: string, table: string): string =>
+        `${JSON.stringify({ id, prevId: 'p', tables: [table] })}\n`;
+      h.commit(
+        'packages/db/package.json',
+        `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+      );
+      h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
+      h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
+      h.git$('push', '-q', 'origin', 'main');
+      const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
+        keepWorktree: true,
+      });
+      await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
+      h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
+      h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
+      conflicts(batch);
+      vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(({ path }) =>
+        Promise.resolve({
+          kind: 'failed',
+          exitCode: 1,
+          timedOut: false,
+          tail: '',
+          logPath: join(path, 'generate.log'),
+        }),
+      );
+      const pushed = h.origin$('rev-parse', onOrigin(batch.branch));
+
+      await catchUp(batch);
+
+      expect(h.origin$('rev-parse', onOrigin(batch.branch))).toBe(pushed);
+      // The fixture keeps the worktree, which has a card of its own.
+      const cards = h.cards().filter((c) => !c.title.includes('kept the worktree'));
+      expect(h.only(cards).title).toContain("couldn't update it");
+      expect(h.only(cards).body).toContain('0001_mine');
+    });
+
+    describe('when the migration the merge dropped is never re-created', () => {
+      const journal = (...tags: string[]): string =>
+        `${JSON.stringify({ entries: tags.map((tag, idx) => ({ idx, tag })) })}\n`;
+      const snapshot = (id: string, table: string): string =>
+        `${JSON.stringify({ id, prevId: 'p', tables: [table] })}\n`;
+
+      /** A shipped batch and main that each added migration 0001; the worktree is kept, and no check runs. */
+      async function bothAdded(): Promise<BatchDto> {
+        h.commit(
+          'packages/db/package.json',
+          `${JSON.stringify({ name: '@10db/db', scripts: { generate: 'drizzle-kit generate' } })}\n`,
+        );
+        h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
+        h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
+        h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+        h.git$('push', '-q', 'origin', 'main');
+        const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
+          keepWorktree: true,
+        });
+        await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
+        await commitIn(batch, `${DB}/0001_mine.sql`, 'update a;\n');
+        h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
+        h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
+        h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\n# changed\n');
+        conflicts(batch);
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
+        return batch;
+      }
+
+      async function pushedNothing(batch: BatchDto, why?: string): Promise<void> {
+        const pushed = onOrigin(batch.branch);
+
+        await catchUp(batch);
+
+        expect(onOrigin(batch.branch)).toBe(pushed);
+        expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
+        // The fixture keeps the worktree, which has a card of its own.
+        const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+        expect(card.title).toContain("couldn't update it");
+        expect(card.body).toContain('0001_mine');
+        if (why !== undefined) expect(card.body).toContain(why);
+      }
+
+      it('pushes nothing when the install the merged lockfile needs fails', async () => {
+        const batch = await bothAdded();
+        vi.spyOn(h.ctx.dependencies, 'refresh').mockRejectedValue(new Error('the install failed'));
+
+        await pushedNothing(batch, 'the install the merged lockfile needs failed');
+      });
+
+      it('pushes nothing when the generators throw', async () => {
+        const batch = await bothAdded();
+        vi.spyOn(h.ctx.generators, 'regenerate').mockRejectedValue(new Error('no sandbox'));
+
+        await pushedNothing(batch, 'no sandbox');
+      });
+
+      it('pushes nothing when the worktree is dirty, so the generators never start', async () => {
+        const batch = await bothAdded();
+        const regenerate = vi.spyOn(h.ctx.generators, 'regenerate');
+        writeFileSync(join(batch.worktreePath ?? '', 'src/index.ts'), 'in progress\n');
+
+        await pushedNothing(batch, 'uncommitted changes');
+
+        expect(regenerate).not.toHaveBeenCalled();
+      });
+
+      it('pushes nothing when the install in the copy is broken', async () => {
+        const batch = await bothAdded();
+        // The merged lockfile names a package no install brings.
+        h.teammatePush(
+          'main',
+          'pnpm-lock.yaml',
+          "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.3.0\n        version: 1.3.0\n",
+        );
+        mkdirSync(join(batch.worktreePath ?? '', 'node_modules'), { recursive: true });
+
+        await pushedNothing(batch, 'install');
+      });
+    });
+
     it("keeps a builder's commit made while the generators run, when the check then fails", async () => {
       const batch = await migrationsCollide();
       const run = { ran: 0 };
