@@ -115,18 +115,26 @@ export function proposalFiling(proposal: {
   /** Set when the step the lane is in has already filed as many tasks as a step may. */
   readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
-  const other = firstReasonNotToFile(proposal);
   const carries = carriesRiskTags(proposal.riskTags);
-  // The step cap is the last rule: it only names a proposal that would otherwise have been filed, so
-  // a risk, a size or a batch request is never hidden behind it.
-  const capped = proposal.stepCapReached === true ? STEP_CAP_REASON : null;
-  if (carries === null) {
-    const reason = other ?? capped;
-    return reason === null ? { file: true } : { file: false, reason };
-  }
+  const structural = structuralReason(proposal);
+  // A risk the lane declared is stated once, in the clause naming the tags; this one names only the
+  // risks its text mentions that it did not declare.
+  const named = namesRisks(undeclaredRisksNamed(proposal));
+  // Over the limit only counts when nothing else already sends the proposal to a person.
+  const size =
+    structural === null &&
+    named === null &&
+    proposal.title.length + proposal.body.length > proposal.limit
+      ? 'it is over the limit for filing by itself'
+      : null;
   // A declared tag is what the builder most needs to see, so the card names every one of them first,
   // whichever other rule also raised it.
-  return { file: false, reason: other === null ? carries : `${carries}, and ${other}` };
+  const clauses = [carries, structural, named, size].filter((c): c is string => c !== null);
+  // The step cap is the last rule: it only names a proposal that would otherwise have been filed, so
+  // a risk, a size or a batch request is never hidden behind it.
+  if (clauses.length === 0 && proposal.stepCapReached === true)
+    return { file: false, reason: STEP_CAP_REASON };
+  return clauses.length === 0 ? { file: true } : { file: false, reason: clauses.join(', and ') };
 }
 
 const STEP_CAP_REASON =
@@ -139,23 +147,33 @@ export function carriesRiskTags(riskTags: readonly RiskTag[] | undefined): strin
   return `it carries the ${listWords(declared)} risk tag${declared.length === 1 ? '' : 's'}`;
 }
 
-/** The first rule, other than a declared risk tag, that keeps a proposal from being filed; null when none does. */
-function firstReasonNotToFile(proposal: {
+/** The first kind, limit or batch rule that keeps a proposal from being filed; null when none does. */
+function structuralReason(proposal: {
   readonly kind: ProposalKind;
-  readonly title: string;
-  readonly body: string;
   readonly joinsRunningBatch?: boolean | undefined;
   readonly limit: number;
 }): string | null {
   if (proposal.kind !== ProposalKind.NewTask) return 'it is not a new task';
   if (proposal.limit <= 0) return 'filing small proposals by itself is off for this project';
   if (proposal.joinsRunningBatch === true) return 'it asks to join a running batch';
-  const text = `${proposal.title}\n${proposal.body}`;
-  for (const tag of Object.values(RiskTag))
-    if (RISK_WORDS[tag].test(text)) return `it names the ${tag} risk`;
-  if (proposal.title.length + proposal.body.length > proposal.limit)
-    return 'it is over the limit for filing by itself';
   return null;
+}
+
+/** The risks the proposal's text names that its lane did not declare, once each. */
+function undeclaredRisksNamed(proposal: {
+  readonly title: string;
+  readonly body: string;
+  readonly riskTags?: readonly RiskTag[] | undefined;
+}): RiskTag[] {
+  const declared = new Set<RiskTag>(proposal.riskTags);
+  const text = `${proposal.title}\n${proposal.body}`;
+  return Object.values(RiskTag).filter((tag) => !declared.has(tag) && RISK_WORDS[tag].test(text));
+}
+
+/** The clause naming risks the text mentions; null when there are none. */
+function namesRisks(risks: readonly RiskTag[]): string | null {
+  if (risks.length === 0) return null;
+  return `it names the ${listWords(risks)} risk${risks.length === 1 ? '' : 's'}`;
 }
 
 /** "a", "a and b", "a, b and c". */

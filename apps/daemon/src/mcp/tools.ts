@@ -2,6 +2,7 @@ import {
   ClaimKind,
   currentStep,
   EventType,
+  filedFollowUpLines,
   FOLLOW_UPS_HEADING,
   InvalidError,
   KnowledgeKindFilter,
@@ -110,6 +111,10 @@ export type ToolHandlers = { [K in McpToolName]: (input: In<K>) => Promise<Out<K
  * How many tasks the workstream's current step has filed with no person involved: its file_follow_up
  * calls, and its propose calls that 10db filed to the Icebox itself (a card or a principle has no
  * taskId). The two share MAX_FOLLOW_UPS; a replayed opId is one record, so it counts once.
+ * complete_step's followUps are deliberately not counted: they are a review's findings, its end
+ * product, a separate allowance (decisions/2026-11-04-a-reviews-complete-step-follow-ups-are-outside-the-step-cap.md),
+ * bounded at MAX_FOLLOW_UPS across all the step's complete_step calls by the list in its result
+ * (decisions/2026-11-04-complete-step-follow-ups-are-bounded-per-step.md).
  */
 function stepFilings(
   db: Parameters<typeof countStepToolOps>[0],
@@ -135,10 +140,10 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card.',
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card. The followUps of complete_step (review roles) are a separate allowance: they do not count toward the 10 and the 10 does not block them.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
-    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused.',
+    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused. The followUps of complete_step are not counted and are not refused by it.',
   request_claim:
     'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
   install_dependencies:
@@ -149,7 +154,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   write_handoff:
     'Write the six-part handoff when 10db asks you to. 10db adds the git facts. End your turn after calling it.',
   complete_step:
-    'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. Implement steps never call this; they end by ending the turn.',
+    'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
 
 export function createToolHandlers(
@@ -711,20 +716,24 @@ export function createToolHandlers(
             throw new InvalidError(
               'Only a review, plan review or QA step files follow-up tasks; leave followUps out of a plan.',
             );
+          // The step's result lists every follow-up it has filed. A later call replaces the notes but
+          // carries that list forward, and the list is what bounds the step: complete_step may file at
+          // most MAX_FOLLOW_UPS in all, however many times it is called or by which session.
+          const kept = filedFollowUpLines(step.result?.summary ?? '');
+          if (kept.length + input.followUps.length > MAX_FOLLOW_UPS)
+            throw new InvalidError(
+              `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks through complete_step and this step's result already lists ${String(kept.length)}. Send at most ${String(Math.max(0, MAX_FOLLOW_UPS - kept.length))} followUps, and put the rest in your notes.`,
+            );
           const filed = input.followUps.map((followUp) => {
             const task = insertFollowUpTask(ctx, row.taskId, followUp);
             return { taskId: task.id, title: task.title };
           });
           // The builder finds the follow-ups from the step's result, so they are written into it.
+          const listed = [...kept, ...filed.map((f) => `- ${f.taskId} ${f.title}`)];
           const summary =
-            filed.length === 0
+            listed.length === 0
               ? input.summary
-              : [
-                  input.summary,
-                  '',
-                  FOLLOW_UPS_HEADING,
-                  ...filed.map((f) => `- ${f.taskId} ${f.title}`),
-                ].join('\n');
+              : [input.summary, '', FOLLOW_UPS_HEADING, ...listed].join('\n');
           // Throwing here rolls back the tasks filed above.
           if (summary.length > MAX_STEP_SUMMARY)
             throw new InvalidError(
