@@ -80,7 +80,7 @@ import {
   type TrackedFiles,
 } from './ceremony';
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
-import { convertProposals, type ConvertOutcome } from './convert';
+import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   readPictureBytesSpent,
   readPictureCharge,
@@ -151,6 +151,8 @@ export interface ShapeServiceDeps {
   launch(projectId: ProjectId): ShapeLaunch;
   /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
   readonly filesDir: string;
+  /** The starter's read of a pending join, which Convert refuses a change of areas over. */
+  readonly joiningProblem: JoiningProblem;
   /** How long a session idles before its process closes; 10 minutes. */
   readonly idleMs?: number;
   /** The share of the context window past which a conversation moves to a fresh session; 70. */
@@ -1237,7 +1239,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       rt.held = true;
       try {
         return state.write((ctx) => {
-          const outcome = convertProposals(ctx, shapeId, proposalIds);
+          const outcome = convertProposals(ctx, shapeId, proposalIds, deps.joiningProblem);
           if (outcome.ok && outcome.createdNow > 0)
             insertShapeMessage(ctx, shapeId, {
               author: ShapeMessageAuthor.Note,

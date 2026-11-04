@@ -27,6 +27,7 @@ import {
   cancelTask,
   getProject,
   getShape,
+  getTask,
   insertDecision,
   insertGoal,
   insertGoalTask,
@@ -47,6 +48,7 @@ import {
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
+import { proposePlacement } from '../placement';
 import { buildPlanWorld, tasksInside } from './world';
 
 // Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
@@ -73,6 +75,9 @@ export type ConvertOutcome =
       readonly results: readonly ConvertedRow[];
     }
   | { readonly ok: false; readonly errors: readonly string[] };
+
+/** Why a task's areas can't change because a join of it is pending, or null when none is. */
+export type JoiningProblem = (taskId: TaskId) => string | null;
 
 /** Where a principle record applies: the builder, the project, or one of its areas. */
 function principleTarget(record: PlanPrincipleRecord, projectId: ProjectId): KnowledgeTarget {
@@ -161,6 +166,7 @@ export function convertProposals(
   ctx: WriteContext,
   shapeId: ShapeId,
   proposalIds: readonly ShapeProposalId[],
+  joiningProblem: JoiningProblem = () => null,
 ): ConvertOutcome {
   const rows = listShapeProposals(ctx.tx, shapeId);
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -279,7 +285,14 @@ export function convertProposals(
         errors.push(`${row.key} is about ${owner.title}, which isn't selected`);
     } else if (row.kind === 'change_task' || row.kind === 'remove_task') {
       const body = ShapeProposalBody[row.kind].parse(row.body);
-      const problem = world.unstartedProblem(body.taskId);
+      // A join still pending has written no workstream, so it reads as unstarted, and the areas and
+      // placement it would write here would collide with it (task placement spec, P3).
+      const problem =
+        world.unstartedProblem(body.taskId) ??
+        (row.kind === 'change_task' &&
+        ShapeProposalBody.change_task.parse(row.body).areas !== undefined
+          ? joiningProblem(body.taskId)
+          : null);
       if (problem !== null) errors.push(`${row.key}: ${problem}`);
     }
   }
@@ -314,6 +327,7 @@ export function convertProposals(
       );
       const written = insertGoal(ctx, project.id, {
         brief: goalBrief(goal),
+        placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
         outsideKeys: new Map(taskIds),
         dependsOnOutside: outside,
       });
@@ -344,18 +358,13 @@ export function convertProposals(
         description: task.description,
         dependsOn: task.dependsOn.flatMap((key) => taskIds.get(key) ?? []),
       };
+      const input = { ...base, acceptanceCriteria: task.criteria, areas: task.areas };
+      // The placement rule runs on every task Convert makes (task placement spec, P2).
+      const placement = proposePlacement(project, { areas: task.areas, riskTags: [] });
       const written =
         task.goalId === undefined
-          ? insertTask(ctx, project.id, {
-              ...base,
-              acceptanceCriteria: task.criteria,
-              areas: task.areas,
-            })
-          : insertGoalTask(ctx, project.id, task.goalId, {
-              ...base,
-              acceptanceCriteria: task.criteria,
-              areas: task.areas,
-            });
+          ? insertTask(ctx, project.id, input, placement)
+          : insertGoalTask(ctx, project.id, task.goalId, input, placement);
       taskIds.set(row.key, written.id);
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, taskId: written.id });
       made.set(row.id, { taskIds: [written.id] });
@@ -435,14 +444,24 @@ export function convertProposals(
 
   for (const row of pending.filter((r) => r.kind === 'change_task')) {
     const change: PlanChange = ShapeProposalBody.change_task.parse(row.body);
-    patchTask(ctx, change.taskId, {
-      ...(change.title === undefined ? {} : { title: change.title }),
-      ...(change.description === undefined ? {} : { description: change.description }),
-      ...(change.acceptanceCriteria === undefined
-        ? {}
-        : { acceptanceCriteria: change.acceptanceCriteria }),
-      ...(change.areas === undefined ? {} : { areas: change.areas }),
-    });
+    // Changed areas can now match the placement rule; the store moves the task only if it hasn't
+    // started and the builder hasn't placed it, as for an edit through the task API.
+    const before = change.areas === undefined ? undefined : getTask(ctx.tx, change.taskId);
+    patchTask(
+      ctx,
+      change.taskId,
+      {
+        ...(change.title === undefined ? {} : { title: change.title }),
+        ...(change.description === undefined ? {} : { description: change.description }),
+        ...(change.acceptanceCriteria === undefined
+          ? {}
+          : { acceptanceCriteria: change.acceptanceCriteria }),
+        ...(change.areas === undefined ? {} : { areas: change.areas }),
+      },
+      change.areas === undefined || before === undefined
+        ? undefined
+        : proposePlacement(project, { areas: change.areas, riskTags: before.riskTags }),
+    );
     made.set(row.id, { taskIds: [change.taskId] });
   }
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {

@@ -1,5 +1,6 @@
 import {
   BatchState,
+  ConflictError,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -9,6 +10,8 @@ import {
 import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
+import { landingHold } from './landing-join';
+import { batchPlacement } from './placement';
 import type { BatchStarter } from './start';
 import type { Shipper } from './ship';
 
@@ -19,12 +22,20 @@ export interface FailedRestarts {
    */
   continueRun(taskId: TaskId): WorkstreamDto | null;
   /**
+   * Whether the task's failed run sits in a batch that works somewhere other than where the task
+   * now runs (Your folder or a separate copy). A retry would stay in that batch, so Start starts
+   * the task over instead (`supersede`, then a new run in its placement). False without such a run.
+   */
+  placementMoved(taskId: TaskId): boolean;
+  /**
    * Before a task starts over from the base branch: abandons the batch that holds only the task's
    * failed attempt, so no open batch is left holding work nothing will finish. A batch that holds
    * other tasks' work stays, and its id is returned: once the task has started again the batch no
    * longer waits on the superseded attempt, so the caller checks it for shipping (`Shipper.checkBatch`).
    * Refuses while a run in the batch is live, and, before it abandons anything, when the start that
-   * follows would be refused, so the attempt stays to be retried.
+   * follows would be refused, so the attempt stays to be retried. A task that moved is also refused
+   * when its landing holds it in a batch that works elsewhere (`landingHold`): the start would join
+   * that batch and undo the move.
    */
   supersede(taskId: TaskId): BatchId | null;
 }
@@ -48,10 +59,20 @@ export function createFailedRestarts(deps: {
     return { workstream, batch };
   }
 
+  /** Whether the task's placement is no longer the one the batch works in. */
+  function placementMovedFrom(taskId: TaskId, batch: BatchDto): boolean {
+    return getTask(db, taskId).workspaceMode !== batchPlacement(batch);
+  }
+
   return {
+    placementMoved(taskId) {
+      const failed = failedRun(taskId);
+      return failed !== null && placementMovedFrom(taskId, failed.batch);
+    },
     continueRun(taskId) {
       const failed = failedRun(taskId);
-      if (!failed) return null;
+      // A retry stays in its batch, so it can't run where the task now says it should.
+      if (!failed || placementMovedFrom(taskId, failed.batch)) return null;
       const retried = deps.starter.retry(failed.workstream.id);
       // The run is going again: the card that offered Retry for its failure has been answered.
       deps.inbox.cancelForWorkstream(failed.workstream.id);
@@ -60,6 +81,10 @@ export function createFailedRestarts(deps: {
     supersede(taskId) {
       const failed = failedRun(taskId);
       if (!failed) return null;
+      if (placementMovedFrom(taskId, failed.batch)) {
+        const held = landingHold(db, getTask(db, taskId), failed.batch);
+        if (held !== null) throw new ConflictError(held);
+      }
       const members = listWorkstreams(db, { batchId: failed.batch.id });
       if (members.some((w) => w.taskId !== taskId)) return failed.batch.id;
       deps.starter.refuseStart(taskId, failed.batch.id);

@@ -374,6 +374,7 @@ describe('a pending join', () => {
         h.starter.refuseIfJoining(beta.id);
       }),
     ).toMatch(/Beta.*joining/);
+    expect(h.starter.joiningProblem(beta.id)).toMatch(/Beta.*joining/);
     expect(
       refusal(() => h.starter.startBatch(h.project.id, { title: 'Again', taskIds: ids(beta) })),
     ).toMatch(/Beta.*joining/);
@@ -383,6 +384,7 @@ describe('a pending join', () => {
     expect(listWorkstreams(h.store.db, { batchId: batch.id }).map((w) => w.taskId)).toContain(
       beta.id,
     );
+    expect(h.starter.joiningProblem(beta.id)).toBeNull();
     // The join wrote, so the pending-join test lets the task go; its own run now holds it.
     expect(
       refusal(() => {
