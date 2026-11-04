@@ -1,6 +1,6 @@
 import { InvalidError } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { proposalFiling, taskFieldsFromProposal } from './proposal-task';
+import { proposalCardBody, proposalFiling, taskFieldsFromProposal } from './proposal-task';
 
 const words = (count: number) => Array.from({ length: count }, () => 'word').join(' ');
 
@@ -47,13 +47,16 @@ describe('proposalFiling', () => {
   it('files one exactly at the limit and sends one a character over', () => {
     const at = { ...small, title: 'ab', body: 'cd' };
     expect(proposalFiling({ ...at, limit: 4 })).toEqual({ file: true });
-    expect(proposalFiling({ ...at, limit: 3 })).toEqual({ file: false, reason: 'over the limit' });
+    expect(proposalFiling({ ...at, limit: 3 })).toEqual({
+      file: false,
+      reason: 'it is over the limit for filing by itself',
+    });
   });
 
   it('sends every proposal to the Inbox when the limit is zero', () => {
     expect(proposalFiling({ ...small, limit: 0 })).toEqual({
       file: false,
-      reason: 'self-filing is off',
+      reason: 'filing small proposals by itself is off for this project',
     });
   });
 
@@ -62,7 +65,7 @@ describe('proposalFiling', () => {
     (tag) => {
       expect(proposalFiling({ ...small, riskTags: [tag], limit: 1200 })).toEqual({
         file: false,
-        reason: `carries the ${tag} risk tag`,
+        reason: `it carries the ${tag} risk tag`,
       });
     },
   );
@@ -75,7 +78,7 @@ describe('proposalFiling', () => {
   ])('raises a card when the text names a risk: %s', (title, tag) => {
     expect(proposalFiling({ ...small, title, limit: 1200 })).toEqual({
       file: false,
-      reason: `names the ${tag} risk`,
+      reason: `it names the ${tag} risk`,
     });
   });
 
@@ -88,7 +91,7 @@ describe('proposalFiling', () => {
   it('raises a card for a proposal that asks to join a running batch', () => {
     expect(proposalFiling({ ...small, joinsRunningBatch: true, limit: 1200 })).toEqual({
       file: false,
-      reason: 'asks to join a running batch',
+      reason: 'it asks to join a running batch',
     });
   });
 
@@ -97,8 +100,14 @@ describe('proposalFiling', () => {
     (kind) => {
       expect(proposalFiling({ ...small, kind, limit: 1200 })).toEqual({
         file: false,
-        reason: 'is not a new task',
+        reason: 'it is not a new task',
       });
     },
   );
+
+  it('puts the reason on the card body after the proposal text', () => {
+    expect(proposalCardBody('Why.', 'it carries the auth risk tag')).toBe(
+      'Why.\n\nRaised as a card because it carries the auth risk tag.',
+    );
+  });
 });

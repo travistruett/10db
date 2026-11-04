@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
   InvalidError,
   ProposalKind,
@@ -57,9 +58,34 @@ export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId):
   return task;
 }
 
-/** Whether 10db files a lane's proposal itself, and why not when it does not. */
+/**
+ * Whether 10db files a lane's proposal itself, and why not when it does not. The reason is a clause
+ * that reads after "Raised as a card because" (`proposalCardBody`).
+ */
 export type ProposalFiling =
   { readonly file: true } | { readonly file: false; readonly reason: string };
+
+/** The card's body: the proposal's own text, then a line saying why it reached the Inbox. */
+export function proposalCardBody(body: string, reason: string): string {
+  return `${body}\n\nRaised as a card because ${reason}.`;
+}
+
+const RiskTagSchema = z.enum(RiskTag);
+
+/**
+ * The risk tags a lane declared, kept on the proposal's card so accepting it files a task that
+ * carries them. Anything in the card's detail that is not a risk tag is dropped.
+ */
+export function declaredRiskTags(detail: Readonly<Record<string, unknown>> | null): RiskTag[] {
+  const declared: unknown = detail?.['riskTags'];
+  if (!Array.isArray(declared)) return [];
+  const known = new Set<RiskTag>();
+  for (const tag of declared as unknown[]) {
+    const parsed = RiskTagSchema.safeParse(tag);
+    if (parsed.success) known.add(parsed.data);
+  }
+  return [...known];
+}
 
 /**
  * Decides whether a lane's proposal is filed to the Icebox without a card. Only a new-task proposal
@@ -74,18 +100,27 @@ export function proposalFiling(proposal: {
   readonly riskTags?: readonly RiskTag[] | undefined;
   readonly joinsRunningBatch?: boolean | undefined;
   readonly limit: number;
+  /** Set when the step the lane is in has already filed as many tasks as a step may. */
+  readonly stepCapReached?: boolean | undefined;
 }): ProposalFiling {
-  if (proposal.kind !== ProposalKind.NewTask) return { file: false, reason: 'is not a new task' };
-  if (proposal.limit <= 0) return { file: false, reason: 'self-filing is off' };
+  if (proposal.kind !== ProposalKind.NewTask)
+    return { file: false, reason: 'it is not a new task' };
+  if (proposal.stepCapReached === true)
+    return {
+      file: false,
+      reason: 'this step has already filed as many tasks as a step may, so a person decides',
+    };
+  if (proposal.limit <= 0)
+    return { file: false, reason: 'filing small proposals by itself is off for this project' };
   const [declared] = proposal.riskTags ?? [];
-  if (declared !== undefined) return { file: false, reason: `carries the ${declared} risk tag` };
+  if (declared !== undefined) return { file: false, reason: `it carries the ${declared} risk tag` };
   if (proposal.joinsRunningBatch === true)
-    return { file: false, reason: 'asks to join a running batch' };
+    return { file: false, reason: 'it asks to join a running batch' };
   const text = `${proposal.title}\n${proposal.body}`;
   for (const tag of Object.values(RiskTag))
-    if (RISK_WORDS[tag].test(text)) return { file: false, reason: `names the ${tag} risk` };
+    if (RISK_WORDS[tag].test(text)) return { file: false, reason: `it names the ${tag} risk` };
   if (proposal.title.length + proposal.body.length > proposal.limit)
-    return { file: false, reason: 'over the limit' };
+    return { file: false, reason: 'it is over the limit for filing by itself' };
   return { file: true };
 }
 

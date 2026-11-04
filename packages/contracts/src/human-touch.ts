@@ -31,9 +31,15 @@ export const HumanTouchDayDto = z.object({
   cardsPerTask: z.number().nonnegative().nullable(),
   /**
    * Minutes work waited on an answer: the time a card was open while the workstream it targets was
-   * waiting on a person. A card answered while the task kept running adds none.
+   * waiting on a person. A card answered while the task kept running adds none. Time a failed run
+   * waited on its failure card is `failedMinutes`, not this.
    */
   waitingMinutes: z.number().nonnegative(),
+  /**
+   * Minutes a failed run waited for a person to retry it: the time a workstream-failure card was open
+   * while the workstream it targets was FAILED. Not part of `waitingMinutes`.
+   */
+  failedMinutes: z.number().nonnegative(),
 });
 export type HumanTouchDayDto = z.infer<typeof HumanTouchDayDto>;
 

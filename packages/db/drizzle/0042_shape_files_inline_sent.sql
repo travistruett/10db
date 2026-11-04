@@ -1,1 +1,0 @@
-ALTER TABLE `shape_files` ADD `inline_sent` integer DEFAULT false NOT NULL;
