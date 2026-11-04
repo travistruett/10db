@@ -340,7 +340,8 @@ test('a 2,000-message conversation mounts only the blocks near the viewport as W
   expect(medianMs).toBeLessThan(SLOWEST_MEDIAN_FRAME_MS);
 
   // Why? reaches a block that is not mounted, past blocks whose real heights are not known yet.
-  await page.getByRole('button', { name: 'Actions for Thin scrollbars' }).click();
+  // 'Thin scrollbars' is a task inside the goal, not a row of its own: the goal row has the menu.
+  await page.getByRole('button', { name: 'Actions for Board polish' }).click();
   await page.getByRole('menuitem', { name: 'Why?' }).click();
   const target = transcript.locator('[data-highlighted]');
   await expect(target).toContainText(`Message ${String(WHY_TARGET)}`);
