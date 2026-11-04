@@ -35,8 +35,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // The Knowledge view. Confirming a principle resolves its proposal and accepting a proposal confirms
   // its principle, and any change to a record changes where it came from (retired, replaced), so the
   // three entities refetch the same lists. A decision is also a digest row. An open Plan view's converted
-  // row reads its record's state (retired, withdrawn, replaced), so a change made outside the view
-  // (an MCP tool, a lane) refetches the conversations too.
+  // row reads its record's state (withdrawn or replaced, and retired for a principle), so a change made
+  // outside the view (an MCP tool, a lane) refetches the conversations too.
   decision: [...KNOWLEDGE, goalKeys.all, shapeKeys.all],
   principle: [...KNOWLEDGE, shapeKeys.all],
   proposal: KNOWLEDGE,

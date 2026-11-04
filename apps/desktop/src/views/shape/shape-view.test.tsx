@@ -1505,12 +1505,12 @@ describe('Shape: converted rows and their undo', () => {
   // The menu opens a frame after the click, so wait for it; Why? is always in it. `hidden` because
   // jsdom gives the target no size, so the popover then hides itself as detached (display: none)
   // and a plain role query would find no item at all, whatever the menu holds.
-  const expectNoWithdrawalOffered = async (statement: string) => {
-    fireEvent.click(screen.getByRole('button', { name: `Actions for ${statement}` }));
+  const expectNoWithdrawalOffered = async (title: string, action = 'Withdraw Principle…') => {
+    fireEvent.click(screen.getByRole('button', { name: `Actions for ${title}` }));
     const items = await screen.findAllByRole('menuitem', { hidden: true });
     const labels = items.map((item) => item.textContent);
     expect(labels).toContain('Why?');
-    expect(labels).not.toContain('Withdraw Principle…');
+    expect(labels).not.toContain(action);
   };
 
   it('offers no withdrawal for a principle already withdrawn', async () => {
@@ -1551,6 +1551,26 @@ describe('Shape: converted rows and their undo', () => {
     open(view);
     expect(await screen.findByText('Converted · replaced by a later principle')).toBeTruthy();
     await expectNoWithdrawalOffered('Never use spaces');
+  });
+
+  it('offers no withdrawal for a decision already replaced', async () => {
+    const view = proposed([
+      {
+        ...decisionProposal('old', { state: 'accepted', choice: 'Use BullMQ' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: mintId('Decision'),
+          withdrawn: false,
+          superseded: true,
+        },
+      },
+    ]);
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText('Converted · replaced by a later decision')).toBeTruthy();
+    expect(screen.queryByText('Converted · in Knowledge')).toBeNull();
+    await expectNoWithdrawalOffered('Use BullMQ', 'Withdraw Decision…');
   });
 
   it('says a converted principle was retired and offers no withdrawal for it', async () => {
