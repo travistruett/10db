@@ -27,10 +27,24 @@ export interface FileAccessContext {
    * else there is another session's or server's, so it is protected.
    */
   readonly sandboxTemp: { readonly root: string; readonly own: string };
+  /**
+   * Where the daemon makes every lane's copy. A path at or under it that is not in `checkout` is
+   * never right (a lane builds paths from its own copy), so it is refused, not asked about.
+   */
+  readonly worktreeRoot?: string;
 }
 
-/** `contains-protected` is a directory-scoped read of a path that has a protected path under it. */
-export type ReadAccess = 'inside' | 'allowed' | 'protected' | 'contains-protected' | 'ask';
+/**
+ * `contains-protected` is a directory-scoped read of a path that has a protected path under it.
+ * `outside-copy` is a path in the worktrees folder that is not in the lane's own copy.
+ */
+export type ReadAccess =
+  'inside' | 'allowed' | 'protected' | 'contains-protected' | 'outside-copy' | 'ask';
+
+/** The refusal for a read of `path`, a path in the worktrees folder outside the lane's copy. */
+export function outsideCopyRefusal(path: string, ctx: FileAccessContext): string {
+  return `${path} is in the worktrees folder but outside this lane's copy. The copy is ${ctx.checkout}; build paths from it (or use relative paths), never from the worktrees folder.`;
+}
 /** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part, a part that cannot be examined). */
 /** `sandbox-temp` is under the sandbox temp root but outside this session's own temp dir. */
 export type WriteAccess =
@@ -186,6 +200,7 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
   ask: 2,
   protected: 3,
   'contains-protected': 3,
+  'outside-copy': 3,
 };
 
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
@@ -199,6 +214,12 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (tree && roots.some((root) => isEqualOrUnder(root, real))) return 'contains-protected';
   if (spellings(ctx.checkout).some((root) => isEqualOrUnder(real, root))) return 'inside';
   if (isOwnTaskOutput(real, ctx)) return 'allowed';
+  if (
+    ctx.worktreeRoot !== undefined &&
+    spellings(ctx.worktreeRoot).some((root) => isEqualOrUnder(real, root))
+  ) {
+    return 'outside-copy';
+  }
   if (ctx.readList.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) return 'allowed';
   return 'ask';
 }
@@ -338,6 +359,7 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
               refuse: `${path} contains protected paths; 10db never lets a lane search or list it.`,
             };
           }
+          if (access === 'outside-copy') return { refuse: outsideCopyRefusal(path, ctx) };
         }
         return 'ok';
       } catch (error) {

@@ -29,6 +29,7 @@ export {
 } from './temp-dir';
 export {
   fileAccessJudge,
+  outsideCopyRefusal,
   readAccess,
   readPathsOf,
   writeAccess,

@@ -887,6 +887,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
           log: logger.child({ component: 'sandbox' }),
           runtime,
+          worktreeRoot,
         })
       : null;
   const createdRunner = createRunner({
