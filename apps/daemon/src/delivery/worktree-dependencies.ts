@@ -12,7 +12,7 @@ import {
   checkInstall,
   describeBroken,
   madeByAnotherPnpm,
-  madeFromAnotherStore,
+  storeRecordProblem,
   PNPM_LOCKFILE,
   removeBrokenInstall,
 } from './install-health';
@@ -228,7 +228,10 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         if (asked === true) return 'the install before this one left the copy broken';
         if (madeByAnotherPnpm(path, version))
           return `its node_modules/.modules.yaml names ${recordedPnpm(path)}, not the daemon's pnpm@${version ?? '?'}`;
-        if (madeFromAnotherStore(path, store))
+        const storeProblem = storeRecordProblem(path, store);
+        if (storeProblem === 'unreadable')
+          return 'its node_modules/.modules.yaml could not be read (it is not valid pnpm state)';
+        if (storeProblem === 'other_store')
           return `its node_modules/.modules.yaml names a pnpm store other than ${store ?? "the daemon's"}`;
         if (health.kind === 'broken') return describeBroken(health);
         return null;

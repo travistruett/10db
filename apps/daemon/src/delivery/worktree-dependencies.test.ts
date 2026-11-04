@@ -217,6 +217,37 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(existsSync(join(worktree, 'pnpm-lock.yaml'))).toBe(true);
   });
 
+  it('says in the install log which store another store was, when .modules.yaml names one', async () => {
+    fakePnpm();
+    installedCopy('storeDir: /private/tmp/10db-earlier/cache/pnpm-store/v11\n');
+    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
+    if (result.kind !== 'installed') throw new Error('not installed');
+    const text = readFileSync(result.logPath, 'utf8');
+    expect(result).toMatchObject({ startedOver: true });
+    expect(text).toContain('names a pnpm store other than /tmp/10db-now/store');
+  });
+
+  it('says in the install log that .modules.yaml could not be read, not that it names another store', async () => {
+    fakePnpm();
+    installedCopy('storeDir: [unclosed\n');
+    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
+    if (result.kind !== 'installed') throw new Error('not installed');
+    const text = readFileSync(result.logPath, 'utf8');
+    expect(result).toMatchObject({ startedOver: true });
+    expect(text).toContain('node_modules/.modules.yaml could not be read');
+    expect(text).not.toContain('names a pnpm store');
+  });
+
+  it('says .modules.yaml could not be read when it fails its schema', async () => {
+    fakePnpm();
+    installedCopy('storeDir: 12\n');
+    const result = await refresh(dependencies({ pnpm_config_store_dir: '/tmp/10db-now/store' }));
+    if (result.kind !== 'installed') throw new Error('not installed');
+    const text = readFileSync(result.logPath, 'utf8');
+    expect(text).toContain('could not be read');
+    expect(text).not.toContain('names a pnpm store');
+  });
+
   describe('a node_modules another pnpm made', () => {
     const stale = () => existsSync(join(worktree, 'node_modules/.pnpm/stale'));
 
