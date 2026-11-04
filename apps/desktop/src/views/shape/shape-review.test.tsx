@@ -111,7 +111,13 @@ describe('Shape: the implementer rehearsal and Convert', () => {
     const goal = goalProposal('brainstorm', ['one', 'two']);
     const view = proposed([goal], {
       rehearsals: marks(goal, false),
-      turn: { running: true, queued: 0, proposing: false, rehearsing: true },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: true,
+        waitingForUpdate: false,
+      },
     });
     const converted: unknown[] = [];
     serve(

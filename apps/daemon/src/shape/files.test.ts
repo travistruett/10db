@@ -769,6 +769,7 @@ describe('start_shape', () => {
       queued: 0,
       proposing: false,
       rehearsing: false,
+      waitingForUpdate: false,
     });
     expect(f.service.list(f.c.project.id).map((s) => s.id)).toContain(shape.id);
     expect(f.events.some((e) => e.type === EventType.ShapeChanged && e.entityId === shape.id)).toBe(

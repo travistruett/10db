@@ -184,6 +184,7 @@ describe('the view', () => {
       queued: 2,
       proposing: true,
       rehearsing: false,
+      waitingForUpdate: false,
     });
     release();
     await service.settled(shapeId);
@@ -192,6 +193,7 @@ describe('the view', () => {
       queued: 0,
       proposing: false,
       rehearsing: false,
+      waitingForUpdate: false,
     });
   });
 

@@ -49,6 +49,7 @@ const view = () =>
     queued: 0,
     proposing: false,
     rehearsing: false,
+    waitingForUpdate: false,
   });
 
 const diagram = { kind: 'mermaid', source: 'flowchart LR\n  a --> b' } as const;

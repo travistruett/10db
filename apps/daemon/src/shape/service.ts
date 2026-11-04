@@ -369,6 +369,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const runtimes = new Map<ShapeId, Runtime>();
   /** Set by `close`: a turn queued after it is reported as never run, not started. */
   let closed = false;
+  /** `closed` read afresh, for after an await, where the compiler would still take it as false. */
+  const isClosed = (): boolean => closed;
 
   const runtimeOf = (shapeId: ShapeId): Runtime => {
     let rt = runtimes.get(shapeId);
@@ -918,10 +920,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           // have changed meanwhile.
           if (deps.hold?.holding() === true) {
             rt.parked = true;
+            // The screen says the turn waits for an update, and takes the line back when it lets go.
+            announce(shapeId);
             try {
               await deps.hold.untilClear();
             } finally {
               rt.parked = false;
+              // Closed: the store may be shut already, and the screen is gone with the daemon.
+              if (!isClosed()) announce(shapeId);
             }
             continue;
           }
@@ -1170,6 +1176,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           queued: queue.length,
           proposing: rt?.current?.kind === 'propose' || queue.some((t) => t.kind === 'propose'),
           rehearsing: rt?.current?.kind === 'rehearse' || queue.some((t) => t.kind === 'rehearse'),
+          waitingForUpdate: rt?.parked === true && queue.length > 0,
         },
         worldOfShape(shapeId),
         clock.now(),

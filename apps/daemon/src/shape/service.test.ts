@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import {
   ConflictError,
+  EventType,
   mintId,
   PlanDraft,
   ShapeMessageAuthor,
@@ -42,6 +43,7 @@ import { createShapeService, type ShapeService } from './service';
 
 let c: ConversationFixture;
 let state: StateStore;
+let bus: ReturnType<typeof createEventBus>;
 let adapter: FakeAdapter;
 let clock: ManualClock;
 let service: ShapeService;
@@ -50,7 +52,8 @@ let drain: ReturnType<typeof createDrain>;
 beforeEach(() => {
   c = seedConversation();
   drain = createDrain();
-  state = createStateStore(c.store, createEventBus());
+  bus = createEventBus();
+  state = createStateStore(c.store, bus);
   adapter = new FakeAdapter({});
   clock = new ManualClock();
   shapeId = c.shape.id;
@@ -206,6 +209,40 @@ describe('a message', () => {
     await service.settled(shapeId);
     expect(adapter.shapeSessions).toHaveLength(1);
     expect(service.turnsInProgress()).toBe(0);
+  });
+
+  it('reports a turn held by a drain as waiting for the update, until the drain ends and the turn starts', async () => {
+    expect(service.view(shapeId).turn.waitingForUpdate).toBe(false);
+    drain.begin(new Date(0));
+    service.send(shapeId, 'During the drain.');
+    await tick();
+    // Parked: running is false and the message is queued, which alone gives the builder no reason.
+    expect(service.view(shapeId).turn).toMatchObject({
+      running: false,
+      queued: 1,
+      waitingForUpdate: true,
+    });
+    drain.end();
+    await service.settled(shapeId);
+    expect(service.view(shapeId).turn.waitingForUpdate).toBe(false);
+  });
+
+  it('announces the conversation after a drain parks its turn, so the screen reads the view again', async () => {
+    // What the screen would read each time it is told: the flag as of each announcement.
+    const read: boolean[] = [];
+    const off = bus.subscribe((e) => {
+      if (e.type === EventType.ShapeChanged) read.push(service.view(shapeId).turn.waitingForUpdate);
+    });
+    drain.begin(new Date(0));
+    service.send(shapeId, 'During the drain.');
+    await tick();
+    expect(read.at(-1)).toBe(true);
+    drain.end();
+    await tick();
+    // Told again as the drain lets go, before the turn has finished.
+    expect(read.at(-1)).toBe(false);
+    await service.settled(shapeId);
+    off();
   });
 
   it('lets a turn that is running finish when a drain begins, and holds the turn queued behind it', async () => {
