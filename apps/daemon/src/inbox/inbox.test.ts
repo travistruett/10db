@@ -453,6 +453,43 @@ describe('proposal verdicts', () => {
     );
   });
 
+  it.each([
+    [['migration'], 'touches migrations'],
+    [['dependency'], 'touches dependencies'],
+    [['security', 'migration', 'dependency'], 'touches migrations, dependencies'],
+  ] as const)(
+    'places an accepted task declaring %j in a pull request project in a separate copy',
+    (riskTags, reason) => {
+      const project = seedProject(base, {
+        delivery: 'pull_request',
+        workspaceMode: 'shared',
+        prTitlePrefix: 'feat(app)',
+      });
+      const ws = seedWorkstream(base, { project });
+      const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+        riskTags,
+      });
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        workspaceMode: 'worktree',
+        placementReason: reason,
+      });
+    },
+  );
+
+  it('keeps an accepted task declaring migration in Your folder when the project has local delivery', () => {
+    const project = seedProject(base, { delivery: 'local', workspaceMode: 'shared' });
+    const ws = seedWorkstream(base, { project });
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      riskTags: ['migration'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+      workspaceMode: 'shared',
+      placementReason: null,
+    });
+  });
+
   it('files an accepted task with no risk tags when the card declares none', () => {
     const ws = seedWorkstream(base);
     const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
