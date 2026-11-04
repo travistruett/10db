@@ -1111,6 +1111,85 @@ describe('the failed workstream card', () => {
         });
       });
 
+      it('offers Ship without it again when the ship the card waited on fails', async () => {
+        let batch: string | null = null;
+        h.close();
+        h = createDeliveryHarness(
+          {},
+          {
+            shipGate: (gate) => ({
+              run: async (request) => ({ ...(await gate.run(request)), exitCode: 1 }),
+            }),
+            wrapGit: (git) => ({
+              ...git,
+              revertCommits: async (request) => {
+                const reverted = await git.revertCommits(request);
+                if (batch === null) throw new Error('batch unset');
+                h.state.write((w) =>
+                  transitionBatch(w, batch as BatchId, { to: 'SHIPPING', reason: 'a test' }),
+                );
+                return reverted;
+              },
+            }),
+          },
+        );
+        inbox = answering();
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        batch = batchId;
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const revert = h.git$('rev-parse', 'HEAD');
+        const waiting = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(waiting.options).toEqual([]);
+
+        h.shipper.resume(batchId);
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
+        const again = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(again.id).toBe(waiting.id);
+        expect(again.body).not.toMatch(/nothing to answer/i);
+        expect(again.options.map((o) => o.label)).toEqual([
+          'Ship anyway',
+          'Ship without it',
+          'Later',
+        ]);
+        expect(again.detail).toMatchObject({ batchCard: { batchId, revert } });
+        expect(again.detail).toMatchObject({ resolvesWhen: { event: 'batch_shipped', batchId } });
+      });
+
+      it('closes an answerable revert card when the batch is abandoned', async () => {
+        revertsWithFailedWrite();
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+
+        h.shipper.abandon(batchId);
+
+        expect(getInboxItem(h.store.db, stopped.id).state).not.toBe('OPEN');
+        expect(h.cards().filter((c) => c.title.includes('revert'))).toEqual([]);
+      });
+
+      it('closes the other left-out cards when the batch is abandoned', async () => {
+        const { batchId, failed } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'a\n' });
+        raise(
+          inbox,
+          h.project.id,
+          leftOutCards.conflict(
+            getBatch(h.store.db, batchId),
+            { workstreamId: failed, titles: ['Alpha'] },
+            ['src/api/alpha.txt'],
+          ),
+        );
+        const open = h.only(h.cards().filter((c) => c.title.includes('conflicts')));
+
+        h.shipper.abandon(batchId);
+
+        expect(getInboxItem(h.store.db, open.id).state).not.toBe('OPEN');
+      });
+
       it('shows its own title when a left-out card was open already', async () => {
         let reverts = 0;
         revertThen(() => {

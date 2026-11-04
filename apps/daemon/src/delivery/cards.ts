@@ -12,9 +12,10 @@ import {
   type RequiredCheckJobDto,
   type TaskDto,
   type TaskId,
-  type WorkstreamId,
+  WorkstreamId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
+import { z } from 'zod';
 import {
   checkoutSwitchCommand,
   GitNetworkError,
@@ -1248,6 +1249,24 @@ export interface LeftOutAttempt {
 }
 
 /**
+ * The `detail` key of a revert-kept card that waits for a ship to end and offers no answer: the
+ * attempt it was raised for, so the card can offer Ship without it if the ship fails.
+ */
+export const LEFT_OUT_KEPT_DETAIL = 'leftOutKept';
+
+/** What `LEFT_OUT_KEPT_DETAIL` holds. */
+export const LeftOutKept = z.object({
+  workstreamId: WorkstreamId,
+  titles: z.array(z.string()),
+  revert: z.string().min(1),
+  why: z.string(),
+});
+export type LeftOutKept = z.infer<typeof LeftOutKept>;
+
+/** The fold key of a batch's left-out cards: one open at a time. */
+export const leftOutFoldKey = (batchId: BatchId): string => `left-out:${batchId}`;
+
+/**
  * What every card of a stopped revert shares: it folds per batch, goes when the batch ships, and
  * offers the failed task's own choices, so Ship without it can be answered again here. The first
  * answer closed the failed card, and Ship anyway from the drawer reverts nothing. A revert already on
@@ -1260,7 +1279,7 @@ function leftOutCard(
 ): Card {
   return {
     ...card,
-    foldKey: `left-out:${batch.id}`,
+    foldKey: leftOutFoldKey(batch.id),
     refresh: true,
     resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
     ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }, attempt.revert),
@@ -1306,7 +1325,7 @@ export const leftOutCards = {
     };
     return answerable
       ? leftOutCard(batch, attempt, text)
-      : { ...text, foldKey: `left-out:${batch.id}`, refresh: true };
+      : { ...text, foldKey: leftOutFoldKey(batch.id), refresh: true };
   },
   /**
    * The revert commit `revert` is on the batch's branch, but the notices and the move to shipping
@@ -1334,7 +1353,7 @@ export const leftOutCards = {
     const names = leftOutNames(attempt);
     const answerable = state === null || state === BatchState.Open || state === BatchState.Failed;
     const lead = `Ship without it reverted the commits of ${names} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\n`;
-    const fold = { foldKey: `left-out:${batch.id}`, refresh: true } as const;
+    const fold = { foldKey: leftOutFoldKey(batch.id), refresh: true } as const;
     if (answerable)
       return leftOutCard(
         batch,
@@ -1353,9 +1372,23 @@ export const leftOutCards = {
       };
     const body = `${lead}The batch is ${state.toLowerCase()}, so it went or goes on without ${its} changes: the revert is in the branch. The notices on ${names} were not written, so ${its} drawer does not say the work was left out. There is nothing to answer here.`;
     // A batch that shipped already will not ship again, so nothing would close the card.
-    return state === BatchState.Shipped || state === BatchState.Closed
-      ? { title, body, ...fold }
-      : { title, body, ...fold, resolvesWhen: { event: 'batch_shipped', batchId: batch.id } };
+    if (state === BatchState.Shipped || state === BatchState.Closed)
+      return { title, body, ...fold };
+    // The ship may still fail, and then the batch is answerable: the card keeps the attempt, so
+    // `settleLeftOutCards` can offer the answer then.
+    const kept: LeftOutKept = {
+      workstreamId: attempt.workstreamId,
+      titles: [...attempt.titles],
+      revert,
+      why: why.slice(0, 1500),
+    };
+    return {
+      title,
+      body,
+      ...fold,
+      detail: { [LEFT_OUT_KEPT_DETAIL]: kept },
+      resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+    };
   },
   /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
   conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>

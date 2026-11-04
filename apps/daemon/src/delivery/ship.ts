@@ -86,6 +86,7 @@ import {
 } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
+import { settleLeftOutCards } from './left-out-settle';
 import { resolveShipCards } from './stale-cards';
 import {
   ghCall,
@@ -340,7 +341,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
   ): void {
     const moved = deps.state.write((w) => {
       if (getBatch(w.tx, batch.id).state !== BatchState.Shipping) return false;
-      transitionBatch(w, batch.id, { to: BatchState.Failed, patch: { failure }, reason });
+      settleLeftOutCards(
+        w,
+        transitionBatch(w, batch.id, { to: BatchState.Failed, patch: { failure }, reason }),
+      );
       return true;
     });
     if (!moved) return;
@@ -384,11 +388,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
         patch: { failure: BatchFailure.BaseConflict },
         reason,
       });
-      transitionBatch(w, batch.id, {
-        to: BatchState.Open,
-        patch: { failure: null },
-        reason: 'a session resolves the merge',
-      });
+      settleLeftOutCards(
+        w,
+        transitionBatch(w, batch.id, {
+          to: BatchState.Open,
+          patch: { failure: null },
+          reason: 'a session resolves the merge',
+        }),
+      );
       setTaskStatus(w, task.id, TaskStatus.Open);
       const next = insertPlannedWorkstream(
         w,
@@ -2164,10 +2171,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           releaseClaims(w, ws.id);
           clearLease(w, ws.id);
         }
-        return transitionBatch(w, batchId, {
+        const moved = transitionBatch(w, batchId, {
           to: BatchState.Abandoned,
           reason: 'abandoned by the builder',
         });
+        settleLeftOutCards(w, moved);
+        return moved;
       });
       for (const ws of toCancel) deps.inbox.cancelForWorkstream(ws.id);
       deps.jobs.run(jobKey(abandoned, JobQueue.Ship), async () => {
