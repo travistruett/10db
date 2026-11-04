@@ -58,7 +58,7 @@ import {
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
-import { fileProposalByItself, proposalFiling } from '../inbox';
+import { fileProposalByItself, proposalCardBody, proposalFiling } from '../inbox';
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
@@ -384,7 +384,7 @@ export function createToolHandlers(
             projectId: project.id,
             kind: 'proposal',
             title: input.title,
-            body: input.body,
+            body: proposalCardBody(input.body, filing.reason),
             options: [
               { label: 'accept', description: 'Accept the proposal' },
               { label: 'reject', description: 'Reject it' },
@@ -392,7 +392,8 @@ export function createToolHandlers(
             recommendation: null,
             category: QuestionCategory.Product,
             urgency: Urgency.Low,
-            detail: { proposalId },
+            // The declared risk tags ride on the card, so accepting it files a task that carries them.
+            detail: { proposalId, riskTags: [...new Set(input.riskTags ?? [])] },
             foldKey: null,
             targets: [],
           });

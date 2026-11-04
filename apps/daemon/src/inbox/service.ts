@@ -55,7 +55,7 @@ import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
-import { taskFieldsFromProposal } from './proposal-task';
+import { declaredRiskTags, taskFieldsFromProposal } from './proposal-task';
 
 /** Rejects an answer promise when the asking session stops waiting. */
 export class ParkedError extends Error {
@@ -308,15 +308,18 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     rationale: answer.note ?? null,
   });
   if (accepted && proposal.kind === ProposalKind.NewTask) {
-    // A proposal names no areas or risk tags, so it takes the project's default, by the same rule as any task.
+    // A proposal names no areas, so it takes the project's default, by the same rule as any task. The
+    // risk tags its lane declared are kept on the card and the task carries them.
+    const riskTags = declaredRiskTags(item.detail);
     insertTaskFromProposal(
       ctx,
       {
         proposalId: proposal.id,
         projectId: proposal.projectId,
         ...taskFieldsFromProposal(proposal),
+        riskTags,
       },
-      proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags: [] }),
+      proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags }),
     );
   }
 }

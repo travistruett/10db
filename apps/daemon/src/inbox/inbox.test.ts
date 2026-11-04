@@ -376,6 +376,7 @@ describe('proposal verdicts', () => {
     kind: ProposalKind,
     title: string,
     body: string,
+    detail: Record<string, unknown> = {},
   ): { proposalId: ProposalId; card: InboxItemDto } {
     const proposalId = state.write((ctx) =>
       insertProposal(ctx, {
@@ -399,7 +400,7 @@ describe('proposal verdicts', () => {
         recommendation: null,
         category: 'product',
         urgency: 'low',
-        detail: { proposalId },
+        detail: { proposalId, ...detail },
         foldKey: null,
         targets: [],
       }),
@@ -440,6 +441,37 @@ describe('proposal verdicts', () => {
       });
     },
   );
+
+  it('files an accepted task with the risk tags the lane declared', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      riskTags: ['security', 'migration'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: ['security', 'migration'] },
+    );
+  });
+
+  it('files an accepted task with no risk tags when the card declares none', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: [] },
+    );
+  });
+
+  it('ignores a card whose declared risk tags are not risk tags', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      riskTags: ['nonsense'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: [] },
+    );
+  });
 
   it('links the filed task to its proposal and the task.created event carries the link', () => {
     const ws = seedWorkstream(base);

@@ -548,6 +548,39 @@ describe('MCP tools', () => {
       });
     });
 
+    it.each([
+      ['a risk tag', { riskTags: ['dependency'] }, 'it carries the dependency risk tag'],
+      [
+        'a risk named in its text',
+        { title: 'Bump the zod dependency' },
+        'it names the dependency risk',
+      ],
+      ['joining a running batch', { joinsRunningBatch: true }, 'it asks to join a running batch'],
+      ['a size over the limit', { body: 'x'.repeat(1300) }, 'it is over the limit'],
+      ['a change to a task', { kind: 'change_task' }, 'it is not a new task'],
+    ])('says on the card why a proposal with %s was raised', async (_name, over, reason) => {
+      const s = await seedSession();
+      await s.call('propose', { opId: 'op-prop-0005', ...small, ...over });
+      expect(openCards()[0]?.body).toContain(`Raised as a card because ${reason}`);
+    });
+
+    it('keeps the declared risk tags on the card, and the task filed from it carries them', async () => {
+      const s = await seedSession();
+      await s.call('propose', {
+        opId: 'op-prop-0006',
+        ...small,
+        riskTags: ['security', 'auth'],
+      });
+      const card = openCards()[0];
+      if (!card) throw new Error('no card opened');
+      expect(card.body).toContain(small.body);
+      expect(card.detail).toMatchObject({ riskTags: ['security', 'auth'] });
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, s.project.id).find((t) => t.title === small.title)).toMatchObject({
+        riskTags: ['security', 'auth'],
+      });
+    });
+
     it('sends every proposal to the Inbox when the project’s limit is zero', async () => {
       const s = await seedSession();
       state.write((ctx) => {
