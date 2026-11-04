@@ -529,6 +529,13 @@ export interface Git {
    */
   fileAt(repo: string, rev: string, path: string, maxBytes: number): Promise<FileAt>;
   /**
+   * The exact bytes of `path` in commit `rev`, read as `fileAt` reads: null for anything but a regular
+   * file's blob of at most `maxBytes`.
+   */
+  bytesAt(repo: string, rev: string, path: string, maxBytes: number): Promise<Buffer | null>;
+  /** The best common ancestor of two commits; null when they have none. */
+  mergeBase(repo: string, one: string, other: string): Promise<string | null>;
+  /**
    * What one folder of commit `rev` holds directly (`folder` a path from the root, `''` for the root):
    * its regular files, with each one's size in bytes, and its folders (never a link or a submodule),
    * each sorted by name. Read from the object store as `fileAt` reads, one folder and nothing below it,
@@ -2875,6 +2882,32 @@ export function createGit(opts: GitOptions = {}): Git {
       const bytes = Number(size);
       if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return { kind: 'too_large', bytes };
       return { kind: 'file', text: await git(c, ['cat-file', 'blob', oid]) };
+    },
+    async bytesAt(repo, rev, path, maxBytes) {
+      const c = await pinned(repo);
+      const out = await git(c, ['ls-tree', '-z', '--long', '--full-tree', rev, '--', path], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      });
+      const entry = out
+        .split('\0')
+        .map((line) => LS_TREE_ENTRY.exec(line))
+        .find((match) => match?.[5] === path);
+      if (!entry) return null;
+      const [, mode = '', type, oid = '', size = ''] = entry;
+      if (type !== 'blob' || !REGULAR_FILE_MODES.includes(mode)) return null;
+      const bytes = Number(size);
+      if (!Number.isSafeInteger(bytes) || bytes > maxBytes) return null;
+      // One byte over the cap is never asked for: the size above says what the blob holds.
+      return gitCapped(c, ['cat-file', 'blob', oid], maxBytes + 1);
+    },
+    async mergeBase(repo, one, other) {
+      const c = await pinned(repo);
+      try {
+        return (await git(c, ['merge-base', one, other])).trim();
+      } catch (error) {
+        if (error instanceof GitError && error.exitCode === 1) return null;
+        throw error;
+      }
     },
     async folderAt(repo, rev, folder) {
       const c = await pinned(repo);

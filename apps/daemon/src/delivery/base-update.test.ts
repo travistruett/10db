@@ -841,8 +841,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           generators: generating(regenerated, run),
         }).beforeGate(batch.id, signal);
         expect(committed).toBe(true);
-        expect(update.kind).toBe('merged');
-        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(update.kind).toBe('uncarried');
+        expect(update.kind === 'uncarried' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
         expect(subjects(path, 2)).toEqual([
           'Add src/builder.ts',
           `Merge origin/main into ${batch.branch ?? ''}`,
@@ -868,8 +868,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
             },
           },
         }).beforeGate(batch.id, signal);
-        expect(update.kind).toBe('merged');
-        expect(update.kind === 'merged' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
+        expect(update.kind).toBe('uncarried');
+        expect(update.kind === 'uncarried' && update.head).toBe(gitIn(path, 'rev-parse', 'HEAD^'));
         expect(subjects(path, 2)).toEqual([
           'Add src/builder.ts',
           `Merge origin/main into ${batch.branch ?? ''}`,
@@ -902,8 +902,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           },
         },
       }).beforeGate(batch.id, signal);
-      expect(update.kind).toBe('merged');
-      expect(update.kind === 'merged' && update.note).toContain(`${DB}/`);
+      expect(update.kind).toBe('uncarried');
+      expect(update.kind === 'uncarried' && update.note).toContain(`${DB}/`);
       const card = h.only(h.cards());
       expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
       expect(card.body).toContain(`- ${DB}/`);
@@ -967,7 +967,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         ...h.ctx,
         generators: generating({}),
       }).beforeGate(batch.id, signal);
-      expect(update.kind).toBe('merged');
+      expect(update.kind).toBe('uncarried');
       const card = h.only(h.cards());
       expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
       expect(card.body).toContain(
@@ -1012,7 +1012,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         generators: generating({}, run),
       }).beforeGate(batch.id, signal);
       expect(run.ran).toBe(0);
-      expect(update.kind).toBe('merged');
+      expect(update.kind).toBe('uncarried');
       expect(h.only(h.cards()).body).toContain(
         "the install the merged lockfile needs failed, so 10db didn't run the generators",
       );
@@ -1031,7 +1031,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         generators: generating({ [`${DB}/0002_mine.sql`]: MINE }, run),
       }).beforeGate(batch.id, signal);
       expect(run.ran).toBe(0);
-      expect(update.kind).toBe('merged');
+      expect(update.kind).toBe('uncarried');
       expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
         `Merge origin/main into ${batch.branch ?? ''}`,
       );

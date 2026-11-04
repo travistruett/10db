@@ -23,6 +23,23 @@ describe('generateCommand', () => {
     );
   });
 
+  it("re-creates a batch's migrations one run each, in order, custom ones with --custom, after the contracts", () => {
+    const command = generateCommand(
+      '/usr/bin/pnpm',
+      GENERATED.map((g) => g.dir),
+      [
+        { tag: '0042_add_x', name: 'add_x', custom: false },
+        { tag: '0043_it-s', name: "it's", custom: true },
+      ],
+    );
+    const run = `${ENV} '/usr/bin/pnpm' --filter '@10db/db' --fail-if-no-match generate`;
+    expect(command.split(' && ')).toEqual([
+      `${ENV} '/usr/bin/pnpm' --filter '@10db/contracts' --fail-if-no-match generate`,
+      `${run} --name 'add_x'`,
+      `${run} --custom --name 'it'\\''s'`,
+    ]);
+  });
+
   it('names the two directories the root AGENTS.md says are never merged by hand', () => {
     expect(GENERATED.map((g) => g.dir)).toEqual([
       'packages/contracts/generated/',
