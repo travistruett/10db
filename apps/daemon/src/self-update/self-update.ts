@@ -34,7 +34,13 @@ export type StageResult =
    * skip: nothing was fetched.
    */
   | { readonly ok: true; readonly current: true; readonly commit: string }
-  | { readonly ok: false; readonly step: string; readonly message: string };
+  | {
+      readonly ok: false;
+      readonly step: string;
+      readonly message: string;
+      /** The build the stage was told to keep is still whole in its folder. */
+      readonly kept?: true;
+    };
 
 export type ApplyResult =
   | {
@@ -86,7 +92,8 @@ export interface SelfUpdateDeps {
    * Fetches and checks the newest finished build of main while the app goes on running, unless that
    * is the build of `running` or of `skip` (the commit the builder rolled back from). When it is
    * the build of `keep` (the one already staged), nothing is fetched and the staged folder stays as
-   * it is; the result then names that same dir and commit.
+   * it is; the result then names that same dir and commit. A stage that fails leaves that folder
+   * too, unless it had begun replacing it, and says so with `kept`.
    */
   stage(
     target: UpdateTarget,
@@ -209,6 +216,9 @@ const STEP_LABELS: Readonly<Record<string, string>> = {
   relaunch: 'starting 10db again',
   unknown: 'installing the new build',
 };
+
+/** The steps of a stage that come before it knows which build is newest. */
+const LOOKING_STEPS: ReadonlySet<string> = new Set(['find-commit', 'find-build']);
 
 const short = (commit: string): string => commit.slice(0, 12);
 const messageOf = (error: unknown): string =>
@@ -390,7 +400,6 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     const olderThanHead = staged !== null && staged.commit !== head;
     if (staged?.head !== head || (olderThanHead && deps.midSession() === 0)) {
       const keep = staged?.commit ?? null;
-      staged = null;
       // The build the builder rolled back from is not fetched again, so a check while main's head
       // is still building costs a look at GitHub, not a download.
       const skip = rolledBackFrom();
@@ -399,13 +408,31 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       if (isStopped()) return TickResult.Working;
       // Turned off while the build was fetched: a stage it killed is no failure, and nothing installs.
       if (!deps.enabled()) {
+        staged = null;
         clearWaiting();
         return TickResult.Off;
       }
       if (!result.ok) {
+        if (result.kept === true && staged !== null) {
+          // The look itself failed, so this is GitHub being away, however far the check got.
+          if (LOOKING_STEPS.has(result.step)) {
+            logger.warn(
+              { step: result.step, message: result.message },
+              'could not look for a newer build than the staged one',
+            );
+            return withoutGitHub(runningCommit);
+          }
+          // A newer build exists and did not arrive. The staged one stays for the next try, as the
+          // failed head's: it does not install, not even with GitHub away.
+          staged = { ...staged, head };
+        } else {
+          staged = null;
+        }
         fail(runningCommit, { head, commit: head }, result.step, result.message);
         return TickResult.Failed;
       }
+      // The folder now holds what the stage reports, whatever it held before.
+      staged = null;
       // The newest finished build is not the head's when the head's is still building. It is the
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
       // when it is the build the builder rolled back from; the next check looks again.
@@ -446,8 +473,9 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
 
   /**
    * GitHub can't be asked. A staged build was checked when it was fetched and installs with no
-   * network, so it goes on waiting, draining or installing, unless its install already failed. With
-   * none the drain has nothing to install and would hold lanes for as long as GitHub stays away.
+   * network, so it goes on waiting, draining or installing, unless its install, or the fetch of a
+   * newer build, already failed. With none the drain has nothing to install and would hold lanes for
+   * as long as GitHub stays away.
    */
   async function withoutGitHub(runningCommit: string): Promise<TickResult> {
     if (staged === null || staged.head === failedHead()) {

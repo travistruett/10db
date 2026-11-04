@@ -67,7 +67,8 @@ export interface ScriptInstaller {
   /**
    * Stages main's newest finished build unless it is the build of `running`, or of `skip` when given.
    * When it is the build already staged (`keep`), nothing is fetched, the folder stays, and the
-   * result names it.
+   * result names it. A failure leaves that folder as well, unless the stage had begun replacing it
+   * or was killed on purpose, and says so with `kept`.
    */
   stage(
     target: UpdateTarget,
@@ -160,6 +161,16 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     }
   };
 
+  /** The commit the stage folder holds a build of, as the staging script wrote it; null with none. */
+  const stagedCommit = (): string | null => {
+    try {
+      const parsed = CommitSha.safeParse(readFileSync(join(stageDir, 'commit'), 'utf8').trim());
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  };
+
   function runStage(
     target: UpdateTarget,
     running: string,
@@ -170,6 +181,17 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     let killGroup = (): void => undefined;
     /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
     let cancelled = false;
+    /**
+     * Marks a failure that left the kept build: the script removes the commit first and writes it
+     * last, so a folder that still names `keep` is that build, whole. A stage killed on purpose
+     * keeps nothing, as the switch and a quit both forget the staged build.
+     */
+    const failedKeeping = (
+      failure: Extract<StageResult, { ok: false }>,
+    ): Extract<StageResult, { ok: false }> =>
+      keep !== null && !cancelled && !stopped && stagedCommit() === keep
+        ? { ...failure, kept: true }
+        : failure;
     const ended = new Promise<StageResult>((resolve) => {
       let child: ChildProcessByStdio<null, null, Readable>;
       try {
@@ -196,12 +218,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           },
         );
       } catch (error) {
-        tidy(false);
-        resolve({
+        const failure = failedKeeping({
           ok: false,
           step: 'stage',
           message: `Could not run the install script: ${messageOf(error)}`,
         });
+        tidy(failure.kept === true);
+        resolve(failure);
         return;
       }
       let stderr = '';
@@ -221,12 +244,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
         stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_KEPT);
       });
       /** Whatever ended the script, nothing of it is left running or on disk but its status. */
-      const finish = (result: StageResult): void => {
+      const finish = (ended: StageResult): void => {
         deadline.cancel();
         killGroup();
-        // Only a staged build keeps its folder; "current" and "skipped" fetched nothing, and a stage
-        // that did not end well leaves no build, the kept one included.
-        tidy(result.ok && !result.current);
+        const result = ended.ok ? ended : failedKeeping(ended);
+        // Only a build keeps its folder: one just staged, or the kept one a failure left alone.
+        // "current" and "skipped" mean no build is wanted, the kept one included.
+        tidy(result.ok ? !result.current : result.kept === true);
         resolve(result);
       };
       child.once('error', (error) => {
@@ -299,16 +323,6 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
 
   const rollbackMarker = join(options.workDir, ROLLBACK_MARKER);
 
-  /** The commit the stage folder holds a build of, as the staging script wrote it; null with none. */
-  const stagedCommit = (): string | null => {
-    try {
-      const parsed = CommitSha.safeParse(readFileSync(join(stageDir, 'commit'), 'utf8').trim());
-      return parsed.success ? parsed.data : null;
-    } catch {
-      return null;
-    }
-  };
-
   return {
     stage(target, running, skip = null, keep = null) {
       if (stopped) {
@@ -325,11 +339,14 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
         removeStageFiles(kept !== null);
         mkdirSync(scratchDir, { recursive: true });
       } catch (error) {
-        return Promise.resolve({
+        const failure: Extract<StageResult, { ok: false }> = {
           ok: false,
           step: 'stage',
           message: `Could not make a place for the build in ${options.workDir}: ${messageOf(error)}`,
-        });
+        };
+        return Promise.resolve(
+          kept !== null && stagedCommit() === kept ? { ...failure, kept: true } : failure,
+        );
       }
       const run = runStage(target, running, skip, kept);
       current = run;

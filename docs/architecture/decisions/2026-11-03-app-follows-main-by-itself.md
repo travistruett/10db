@@ -24,15 +24,24 @@ says `ahead`). A head that is the running commit, or a running commit main is no
 branch, or one nobody pushed), is not an update, so a branch build is never replaced by an older main.
 
 **What it installs: the install path of today, not another.** The daemon stages with
-`install-app.sh --stage <data dir>/self-update/stage --running <running commit> [--skip <rolled-back commit>] main`: the same choice as
+`install-app.sh --stage <data dir>/self-update/stage --running <running commit> [--skip <rolled-back commit>] [--have <staged commit>] main`: the same choice as
 `make install-app` (decisions/2026-11-02-install-takes-the-newest-finished-build.md). It takes the newest of
 main's last 100 commits that has a finished successful `release-dry-run` build with a live artifact, **not
 necessarily the head**, and never an older one: it waits for or starts the head's build only when none of the 100
 has one, and with `--running` a newest finished build that is the running commit is not fetched at all (status
-step `current`, so a build still under way for the head costs one cheap lookup a minute, not a download). The
+step `current`, so a build still under way for the head costs one cheap lookup a minute, not a download). With
+`--have`, a newest finished build that is the one already staged is not fetched either (status step `have`), and
+the folder stays as it is, so a head that moves while lanes are busy costs a lookup, not a DMG. The
 fetched build must also be ahead of the running commit (the same comparison), else nothing is installed. The DMG
 is checked against `SHA256SUMS`, and the stage folder keeps the DMG, the checksum, the commit and a copy of the
-two install scripts, because the install replaces the app that holds them.
+two install scripts, because the install replaces the app that holds them. A newer build replaces the staged one
+only once it is checked, and the commit file is removed first and written last, so a folder that names a commit
+holds all of that build.
+
+**What is staged is the newest finished build, not the head.** The daemon stages again, passing `--have`, when main's
+head moves, and, for a staged build that is not the head's own, once nothing is mid-session: it is about to install,
+and a newer build may have finished since. So an older build never installs while a newer one exists, and there is
+one quit instead of two. While lanes are busy and the head has not moved, it does not look.
 
 **When it installs.** Only when nothing is mid-session: no lane holding a session (`countLanes`'s states, and a
 `WAITING_HUMAN` workstream with a live session), no workstream with a gate process, no batch `CUTTING` or
@@ -77,9 +86,12 @@ factory (`self-update/drain.ts`) until the app has installed:
   its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
   Install Now is remembered while no build is staged yet, and drains the moment one is.
 - **Without GitHub:** a check that can't reach it goes on from the staged build, which was checked when it was
-  fetched and installs with no network, so the drain still installs or waits for the running steps. With no build
-  staged (a stage replaces the one before it) the drain has nothing to install and ends, and the update's wait goes
-  on from where it was.
+  fetched and installs with no network, so the drain still installs or waits for the running steps. A stage that
+  fails while it looks for a newer build (`find-commit`, `find-build`) is the same outage: the staged build stays
+  and goes on, with no card, no `self_update.failed_commit` and the drain as it was. With no build staged (a newer
+  fetched build replaced it and could not be compared) the drain has nothing to install and ends, and the update's
+  wait goes on from where it was. The one exception: a staged build whose head has failed (see Failure) does not
+  install this way either.
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
@@ -116,6 +128,14 @@ the card. An apply failure after the quit is reported once by the next daemon, f
 (`self_update.failed_commit`); it is not tried again until main has a newer head or the builder touches the
 switch, so one failure is one card. Cards sit under the first project; with none registered the failure is only
 logged.
+
+A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
+killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above). Any later step
+(`wait-for-build`, `download`, `verify-checksum`, `stage`) is a failure as above, with its card and
+`self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
+confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
+it fetches only if a newer build is still the newest. It does not retry every minute, because a checksum mismatch
+would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its
 first check and installs the build the builder just rolled back from. `rollback-app.sh` reads the commit from the

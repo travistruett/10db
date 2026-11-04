@@ -410,7 +410,11 @@ actual="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
 if [ "$mode" = stage ]; then
   step=stage
   # A build kept from an earlier stage (--have) is replaced whole, so the folder never holds two DMGs.
-  if [ -n "$have_commit" ] && [ -f "$stage_dir/commit" ]; then rm -rf "$stage_dir"; fi
+  # Its commit goes first, and the new one is written last: a folder that names a commit holds all of it.
+  if [ -n "$have_commit" ] && [ -f "$stage_dir/commit" ]; then
+    rm -f "$stage_dir/commit"
+    rm -rf "$stage_dir"
+  fi
   mkdir -p "$stage_dir/scripts/release" || fail "could not create $stage_dir"
   # The app that is installed may be replaced while --apply runs, so the apply half runs from here.
   cp scripts/release/install-app.sh scripts/release/installed-app.sh "$stage_dir/scripts/release/" \

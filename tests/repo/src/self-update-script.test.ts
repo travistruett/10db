@@ -125,6 +125,18 @@ describe('install-app.sh --stage', () => {
     expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
   });
 
+  it('leaves the staged build as it is when the newer one fails its checksum', () => {
+    mkdirSync(stageDir, { recursive: true });
+    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
+    writeFileSync(join(stageDir, 'older.dmg'), 'older');
+    box.corruptChecksum();
+    const result = stage({}, ['--running', OLDER, '--have', OLDER]);
+    expect(result.status).toBe(1);
+    expect(status()).toMatchObject({ ok: false, mode: 'stage', step: 'verify-checksum' });
+    expect(readFileSync(join(stageDir, 'older.dmg'), 'utf8')).toBe('older');
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLDER);
+  });
+
   it('stages a build that is not the running one', () => {
     const result = stage({}, ['--running', OLDER]);
     expect(result.status).toBe(0);
