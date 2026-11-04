@@ -1541,6 +1541,46 @@ describe('MCP tools', () => {
       await Promise.all([alpha, beta, gamma]);
     });
 
+    it('lists each yielded claim once when a third task also waits for it', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      const g = await seedSession(['migrations'], undefined, {
+        project: a.project,
+        title: 'Gamma',
+      });
+      const gamma = g.call('request_claim', {
+        opId: 'op-deadlock-g',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(g)).not.toBeNull();
+      });
+      state.write((ctx) => {
+        releaseClaims(ctx, a.workstream.id);
+        acquireClaims(ctx, {
+          projectId: a.project.id,
+          workstreamId: g.workstream.id,
+          requests: [{ kind: 'area', name: 'api' }],
+          leaseExpiresAt: ctx.now,
+        });
+      });
+      const refreshed = await vi.waitFor(() => {
+        const found = getInboxItem(state.db, card.id);
+        if (!found.options.some((o) => o.label === 'Gamma yields area api'))
+          throw new Error('card not refreshed');
+        return found;
+      });
+      expect(refreshed.options.map((o) => o.label)).toEqual([
+        'Beta yields area ui',
+        'Gamma yields area api',
+        'Cancel Beta',
+        'Cancel Gamma',
+      ]);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta, gamma]);
+    });
+
     it('keeps the refused call waiting on the card, and says so when a slice ends', async () => {
       claimWaitSliceMs = 50;
       const { a, alpha, beta, card } = await deadlocked();
