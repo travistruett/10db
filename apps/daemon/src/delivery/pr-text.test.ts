@@ -96,10 +96,10 @@ describe("this repository's scope list", () => {
 });
 
 describe('prSubject', () => {
-  const task = (title: string, state: 'DONE' | 'FAILED', leftOut = false) => ({
+  const task = (title: string, state: 'DONE' | 'FAILED', noWork = false) => ({
     title,
     state,
-    leftOut,
+    noWork,
   });
 
   it('is the batch title when no task named after it was left out', () => {

@@ -1,6 +1,6 @@
 import { WorkspaceMode } from '@10db/contracts';
 import { getBatch, getTask, listWorkstreams, patchTask } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createFailedRestarts } from './restart';
 
@@ -28,11 +28,11 @@ function hold(key: string): () => void {
  * and starts over, as the daemon's start does: supersede, start, check the batch it left. The copy's
  * cut waits behind `hold` until the test lets it run.
  */
-async function startedOver(opts: { refusedCut?: boolean } = {}) {
+async function startedOver(opts: { refusedCut?: boolean; title?: string } = {}) {
   const alpha = h.addTask('Alpha');
   const beta = h.addTask('Beta', { areas: ['ui'] });
   const [batch] = h.starter.startBatch(h.project.id, {
-    title: 'Both',
+    title: opts.title ?? 'Both',
     taskIds: [alpha.id, beta.id],
   });
   if (!batch) throw new Error('a batch is expected');
@@ -96,5 +96,34 @@ describe('the batch a task started over from, while its copy is being cut', () =
       .at(-1);
     expect(latest).toMatchObject({ state: 'CANCELLED', batchId: null });
     expect(getTask(h.store.db, alpha.id).workstreamId).toBe(latest?.id);
+  });
+
+  describe('the title of a pull request named after the attempt, which committed nothing', () => {
+    it('is not the attempt’s name when Ship anyway goes before the cut ends', async () => {
+      const { batchId, release } = await startedOver({ title: 'Alpha' });
+      h.commit('src/ui/beta.txt');
+
+      h.shipper.shipAnyway(batchId);
+      // The cut is held until the pull request exists: the attempt is still a member as it opens.
+      await vi.waitFor(() => {
+        expect(h.gh.prCreates()).toHaveLength(1);
+      });
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+      release();
+      await h.jobs.idle();
+    });
+
+    it('is not the attempt’s name when Ship anyway follows a refused cut', async () => {
+      const { batchId, release } = await startedOver({ refusedCut: true, title: 'Alpha' });
+      h.commit('src/ui/beta.txt');
+      release();
+      await h.jobs.idle();
+      h.gh.auth = 'ok';
+
+      h.shipper.shipAnyway(batchId);
+      await h.jobs.idle();
+
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+    });
   });
 });

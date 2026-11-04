@@ -802,6 +802,9 @@ export const LEFT_OUT_NOTICE_KEY = 'left-out';
  */
 export const REVERTED_NOTICE_KEY = 'reverted-work';
 
+/** The start of the line on which these notices, and a retried run's note, name the revert commit. */
+export const REVERT_COMMIT_LINE = 'Revert commit: ';
+
 /**
  * The key of the batch notice that records 10db repaired a broken install by itself. It is history,
  * not a wait: a task's drawer keeps showing it after its run fails or its batch ends.

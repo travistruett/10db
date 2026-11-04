@@ -2,8 +2,11 @@ import {
   ConflictError,
   InvalidError,
   NEW_TASK_NO_AREAS,
+  mintId,
   type BatchState,
+  type Notice,
   type TaskId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   createTestStore,
@@ -16,6 +19,7 @@ import {
   insertSource,
   insertTask,
   insertTaskFromProposal,
+  insertToolOp,
   insertWorkstream,
   listBoardColumns,
   listEvidence,
@@ -24,17 +28,27 @@ import {
   patchAccount,
   patchProject,
   patchTask,
+  patchWorkstream,
   seedProject,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureForTests } from '../../test/catalogue';
+import { revertCommitLine } from './reverted-work';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { outstandingFixEvidence } from '../runner';
 import { seedTeam } from './seed';
-import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from './steps';
+import {
+  actionEntering,
+  insertJoinedWorkstream,
+  insertPlannedWorkstream,
+  resolveStepPlan,
+  retryWorkstream,
+  startTaskWithPlan,
+} from './steps';
 
 let state: StateStore;
 let close: () => void;
@@ -329,6 +343,208 @@ describe('retryWorkstream', () => {
       const ws = failedPlanned();
       expect(retryWorkstream(state, ws.id, note).nextAction).toEqual({ kind: 'start' });
       expect(listEvidence(state.db, ws.id)).toEqual([]);
+    });
+  });
+
+  describe('a run whose commits were reverted by Ship without it', () => {
+    const REVERT = 'a'.repeat(40);
+    const SECOND_REVERT = 'b'.repeat(40);
+
+    /** A planned run (implement, review) failed at `at`, holding `notice`. */
+    const failedAt = (at: 0 | 1, notice: Notice | null) => {
+      const ws = startTaskWithPlan(state, addTask().id);
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+        patchWorkstream(ctx, ws.id, null, {
+          stepIndex: at,
+          steps: ws.steps.map((s, i) => ({
+            ...s,
+            status: i < at ? 'done' : i === at ? 'failed' : 'pending',
+          })),
+        });
+        setWorkstreamNotice(ctx, ws.id, notice);
+      });
+      return ws;
+    };
+    const builderNotes = (id: WorkstreamId) =>
+      listEvidence(state.db, id).filter((e) => e.kind === 'builder');
+    const leftOut = (revert: string): Notice => ({
+      key: 'left-out',
+      tone: 'info',
+      line: 'Left out of the pull request: its commit was reverted',
+      body: `This run failed, and you chose Ship without it.\n\n${revertCommitLine(revert)}`,
+    });
+    const commit = (id: WorkstreamId, sha: string) => {
+      state.write((ctx) => {
+        insertToolOp(ctx, {
+          workstreamId: id,
+          sessionId: mintId('Session'),
+          opId: `op-${sha}`,
+          tool: 'commit',
+          result: { sha, alreadyCommitted: false },
+        });
+      });
+    };
+
+    it('tells the implement step when Retry restarts the read-only review that failed', () => {
+      const ws = failedAt(1, leftOut(REVERT));
+      const retried = retryWorkstream(state, ws.id);
+      const [note] = builderNotes(ws.id);
+      expect(note?.summary).toContain(REVERT);
+      expect(retried).toMatchObject({
+        state: 'QUEUED',
+        stepIndex: 0,
+        nextAction: { kind: 'fix', evidenceId: note?.id },
+      });
+      expect(retried.steps.map((s) => s.role)).toEqual(['implement', 'review']);
+      expect(retried.notice?.key).toBe('reverted-work');
+    });
+
+    it('tells the implement step of the revert when a rejection sends the retry back to it', () => {
+      const ws = failedAt(1, leftOut(REVERT));
+      state.write((ctx) => {
+        patchWorkstream(ctx, ws.id, null, {
+          steps: getWorkstream(ctx.tx, ws.id).steps.map((s, i) =>
+            i === 1
+              ? {
+                  ...s,
+                  result: {
+                    verdict: 'reject',
+                    summary: 'no',
+                    sessionId: mintId('Session'),
+                    at: ctx.now,
+                  },
+                }
+              : s,
+          ),
+        });
+      });
+      const retried = retryWorkstream(state, ws.id);
+      expect(retried.stepIndex).toBe(0);
+      expect(builderNotes(ws.id).map((n) => n.summary.includes(REVERT))).toEqual([true]);
+    });
+
+    it('tells the session again on a second Retry of a run that committed nothing since', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      const retried = retryWorkstream(state, ws.id);
+      const notes = builderNotes(ws.id);
+      expect(notes).toHaveLength(2);
+      expect(notes[1]?.summary).toContain(REVERT);
+      expect(retried).toMatchObject({
+        nextAction: { kind: 'fix', evidenceId: notes[1]?.id },
+        notice: { key: 'reverted-work' },
+      });
+    });
+
+    it('does not tell a run again that committed after it was told', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      commit(ws.id, 'c'.repeat(40));
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      retryWorkstream(state, ws.id);
+      expect(builderNotes(ws.id)).toHaveLength(1);
+    });
+
+    it('names the later revert when the run was left out again', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      commit(ws.id, 'c'.repeat(40));
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+        setWorkstreamNotice(ctx, ws.id, leftOut(SECOND_REVERT));
+      });
+      retryWorkstream(state, ws.id);
+      const notes = builderNotes(ws.id);
+      expect(notes).toHaveLength(2);
+      expect(notes[1]?.summary).toContain(SECOND_REVERT);
+    });
+
+    const REDO = 'Redo the work and commit it with the commit tool';
+    /** Four criteria keep the full flow's plan step, so the run starts on a read-only step. */
+    const fullFlowPlan = (taskId: TaskId) => {
+      state.write((ctx) =>
+        patchTask(ctx, taskId, {
+          flowId: flowId('full'),
+          acceptanceCriteria: ['a', 'b', 'c', 'd'],
+        }),
+      );
+      const plan = resolveStepPlan(state.db, taskId);
+      expect(plan.steps[0]?.role).toBe('plan');
+      return plan;
+    };
+    const implementAt = (id: WorkstreamId) =>
+      getWorkstreamRow(state.db, id).steps.findIndex((s) => s.role === 'implement');
+
+    it('tells a run started again at its plan step at the implement step too', () => {
+      const task = addTask();
+      const plan = fullFlowPlan(task.id);
+      const batch = state.write((ctx) => {
+        const row = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+        const left = insertPlannedWorkstream(ctx, task.id, plan, row.id);
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, left.id, { to, fence: null });
+        setWorkstreamNotice(ctx, left.id, leftOut(REVERT));
+        return row;
+      });
+      const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batch.id));
+      const [told] = builderNotes(joined.id);
+      expect(joined.nextAction).toEqual({ kind: 'fix', evidenceId: told?.id });
+      expect(told?.summary).toContain(REVERT);
+      expect(told?.summary).not.toContain(REDO);
+
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, joined.id), implementAt(joined.id)),
+      );
+      const fix = builderNotes(joined.id).at(-1);
+      expect(action).toEqual({ kind: 'fix', evidenceId: fix?.id });
+      expect(fix?.summary).toContain(REDO);
+      expect(fix?.summary).toContain(REVERT);
+    });
+
+    it('starts an implement step as usual when no note told of a revert', () => {
+      const task = addTask();
+      const plan = fullFlowPlan(task.id);
+      const ws = state.write((ctx) => insertPlannedWorkstream(ctx, task.id, plan, null));
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), implementAt(ws.id)),
+      );
+      expect(action).toEqual({ kind: 'start' });
+      expect(builderNotes(ws.id)).toEqual([]);
+    });
+
+    it('does not tell a later implement step once one has started since the note', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      const retried = retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, ws.id);
+        const [first] = row.steps;
+        if (!first) throw new Error('no step');
+        const second = { ...first, startedAt: null, status: 'pending' as const };
+        patchWorkstream(ctx, ws.id, null, { steps: [...row.steps, second] });
+      });
+      const before = builderNotes(ws.id).length;
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), retried.steps.length),
+      );
+      expect(action).toEqual({ kind: 'start' });
+      expect(builderNotes(ws.id)).toHaveLength(before);
+    });
+
+    it('does not tell a step entered that is not an implement step', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      const action = state.write((ctx) => actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), 1));
+      expect(action).toEqual({ kind: 'start' });
     });
   });
 

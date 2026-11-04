@@ -25,8 +25,30 @@ run is therefore one that was told. Runs started before this change have no note
 `left-out` notice behind it, the task is listed as not done unless a told run committed, which errs towards saying
 less was shipped.
 
+The step that can commit is the one asked to redo the work. A retry at a read-only step with an implement step
+before it restarts that implement step. A step that runs before the first implement step (a plan or plan review,
+on a retry or on a joined run's start) restarts as usual and gets a note that says only what happened, since it
+cannot commit. When the run then moves forward into its implement step, that step gets the full note as its fix,
+unless an implement step has started since the last note.
+
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
+
+A told run's own commit does not count either when it resolved conflict markers. The runner queues the same run
+again when the base merge at its gate leaves markers (`sendToMerge`), so a retried run can skip the redo and commit
+only the resolution. 10db commits that merge with the markers in it, so the branch itself says which commits resolve
+them: the commit tool compares each commit with its parent, and stores `resolvedMarkers: true` in the commit's
+tool-op result (the session's answer is unchanged) when a file it changed held markers at the parent. The pull
+request leaves those commits out when it asks whether a told run committed again, and Retry leaves them out when it
+asks whether to tell the session again, so one commit is judged one way. It holds whichever session makes the
+commit: one that asked the builder a question, was paused by the usage limit, handed off, or left the resolution
+uncommitted for the next session.
+
+A run that resolves the markers and redoes the work in another commit counts through that commit. One commit that
+does both does not count, and the task is under Not done with its work on the branch, because the record cannot
+separate the two; that errs towards saying less was shipped. So does a redo that edits a file with marker lines in
+it. A commit by a told run that is neither work nor a resolution still counts: a caller adapted to the base in a
+commit of its own, once the markers are gone, or a fix for a merged branch's failed gate.
 
 ## Why
 
@@ -46,7 +68,11 @@ redoes the work: that run was told, so its commit counts.
 The note is the record rather than the notice, because a run's notice shares one slot with its waits, so a wait
 for a claim can replace it.
 
-The check does not read what a commit changed. A run that was told and whose only later commit resolves conflict
-markers counts as having committed again, and a run that never heard of the revert stays under Not done even if
-it did the work again. The first would need a comparison of the reverted changes with the branch, and the second
-errs towards saying less was shipped, not more.
+A run that never heard of the revert stays under Not done even if it did the work again; that errs towards saying
+less was shipped, not more.
+
+Marking commits by the `merge` next action was turned down, because the action does not last as long as the
+resolution: a question, a usage limit, a handoff or an uncommitted resolution replaces it, and every commit of a
+merge session would carry it, the redo too. Comparing the branch with what the revert undid was turned down too. A
+redo may rewrite the work or put it in other files, so a match on content or paths would list finished work as not
+done, and a resolution in a file the revert also touched would pass as work.

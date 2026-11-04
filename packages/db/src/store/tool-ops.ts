@@ -5,7 +5,7 @@ import {
   type StepPosition,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, gt } from 'drizzle-orm';
+import { and, asc, count, desc, eq, gt, gte } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import type { DbReader, WriteContext } from './store';
@@ -38,12 +38,26 @@ export function hasToolOp(db: DbReader, workstreamId: WorkstreamId, tool: string
   );
 }
 
-/** What every recorded call of the tool by any session of the workstream returned, oldest first. */
-export function listToolOpResults(db: DbReader, workstreamId: WorkstreamId, tool: string): Json[] {
+/**
+ * What every recorded call of the tool by any session of the workstream returned, oldest first. With
+ * `since`, only the calls recorded at or after that time.
+ */
+export function listToolOpResults(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  tool: string,
+  since?: string,
+): Json[] {
   return db
     .select({ result: schema.toolOps.result })
     .from(schema.toolOps)
-    .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.tool, tool)))
+    .where(
+      and(
+        eq(schema.toolOps.workstreamId, workstreamId),
+        eq(schema.toolOps.tool, tool),
+        since === undefined ? undefined : gte(schema.toolOps.createdAt, since),
+      ),
+    )
     .orderBy(asc(schema.toolOps.createdAt), asc(schema.toolOps.id))
     .all()
     .map((row) => row.result);
