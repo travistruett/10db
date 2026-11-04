@@ -23,7 +23,7 @@ security hash. As before, the builder can change a made key before confirming.
 
 ## Why
 
-Commit fe128bc, on the task "topicKeyFrom never gives two different mostly non-Latin statements the same key". The
+Commit babb56a (#478), on the task "topicKeyFrom never gives two different mostly non-Latin statements the same key". The
 key is built only from `a-z` and `0-9`, so every character of another script is dropped. A statement that is mostly
 non-Latin with a few Latin words (a product name, a code term) then reduced to those few words, and two different
 statements that shared them got the same key. Under supersede-by-key-and-target the second silently replaced the
