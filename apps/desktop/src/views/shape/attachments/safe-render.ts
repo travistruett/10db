@@ -77,9 +77,11 @@ export async function chartSvg(spec: Readonly<Record<string, unknown>>): Promise
 let diagrams = 0;
 
 // At 'strict' Mermaid draws into a temporary element appended to document.body (it needs layout to
-// measure text) and removes it afterwards. While it is there, anything in it that loads does, and
-// `pnpm dev` and `pnpm dev:factory` have no CSP to stop it. What keeps a diagram from loading, as of
-// Mermaid 12.2:
+// measure text) and removes it afterwards. While it is there, anything in it that loads does. The
+// window's img-src (the Tauri CSP; `pnpm dev` and `pnpm dev:factory` get the same header from Vite,
+// see window-csp.ts) is a second line of defence: it stops an image from elsewhere, but not every
+// load, and the test environment (jsdom) enforces no CSP at all. So the checks below still matter.
+// What keeps a diagram from loading, as of Mermaid 12.2:
 // - Only DRAWN_KINDS are drawn. Their ways to name an image were read in Mermaid's source; another kind
 //   (C4's sprites, architecture's text icon) has its own, and is refused until someone reads it. Check
 //   this list when Mermaid is bumped.
