@@ -15,6 +15,7 @@ import {
   patchShape,
   patchShapeProposal,
   rekeyShapeAttachmentsToProposal,
+  releaseDetachedShapeQuestions,
   removeDraftGoal,
   withdrawDecision,
   type WriteContext,
@@ -38,6 +39,13 @@ export function removeDraftGoalOf(ctx: WriteContext, shapeId: ShapeId, goalId: G
   rekeyShapeAttachmentsToProposal(
     ctx,
     links.filter((l) => l.goalId === goalId || taskIds.has(l.taskId)),
+  );
+  // A task removal leaves its question stored under no task, which the goal's removal cannot find by
+  // id; the question's proposal names the task key, which only these links still say.
+  releaseDetachedShapeQuestions(
+    ctx,
+    shapeId,
+    links.filter((l) => l.taskId !== null && taskIds.has(l.taskId)).map((l) => l.key),
   );
   // The links name the goal, so they go first; a refusal below rolls the whole write back.
   deleteShapeLinksOf(ctx, link.proposalId);
