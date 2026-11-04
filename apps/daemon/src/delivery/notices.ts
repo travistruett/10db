@@ -378,6 +378,8 @@ export const cancelledNotices = {
     batch: BatchDto,
     checks: readonly { readonly name: string; readonly link: string | null }[],
     why: CancelledWhy,
+    /** The pull request head the checks were cancelled on, stored so a restart knows the notice's head. */
+    head: string | null = null,
   ): Notice => {
     const prUrl = batch.prUrl;
     const number = prUrl === null ? null : /\/pull\/(\d+)$/.exec(prUrl)?.[1];
@@ -410,10 +412,25 @@ export const cancelledNotices = {
       line,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that ${batch.baseBranch} requires, so ${named}${prUrl === null ? '' : ` (${prUrl})`} cannot merge.\n\n${list}\n\n${tail} Run ${one ? 'it' : 'them'} again from the link${one ? '' : 's'} above (Re-run jobs), or push a commit to the branch. This notice goes once the check runs again or passes.`,
       // Read back after a restart, so 10db knows which kind of notice this was.
-      record: JSON.stringify({ kind: why.kind === 'again' ? 'again' : 'stopped' }),
+      record: JSON.stringify({ kind: why.kind === 'again' ? 'again' : 'stopped', head }),
     };
   },
 };
+
+/**
+ * The pull request head a stored cancelled-check notice is about. Null when the notice is an older
+ * one that did not record it.
+ */
+export function cancelledNoticeHead(notice: Notice): string | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    const head = (parsed as { head?: unknown } | null)?.head;
+    return typeof head === 'string' ? head : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Which kind of cancelled-check notice is stored: 'again' (10db ran the checks it names, and still

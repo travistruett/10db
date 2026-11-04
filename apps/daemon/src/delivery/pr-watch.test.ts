@@ -2392,6 +2392,47 @@ describe('a required check GitHub cancelled', () => {
     expect(h.gh.reruns).toEqual(['77', '77']);
   });
 
+  it('runs the check on a new head after a restart, though an older head has a stopped notice stored', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    w.start();
+    await w.idle();
+    await round(w);
+    expect(noticeOf(id)?.line).toContain('could not run');
+    await w.stop();
+
+    // A new commit moves the pull request to head B while the daemon is down.
+    h.gh.failRerunOf.clear();
+    h.gh.setHead(prUrl, HEAD_B);
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+    // The notice about head A's checks is gone, not left standing for head B.
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
+  it('keeps a stopped notice of the same head after a restart', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+    w.start();
+    await w.idle();
+    await round(w);
+    await w.stop();
+
+    h.gh.failRerunOf.clear();
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)?.line).toContain('could not run');
+  });
+
   it('leaves a check that is genuinely running pending, with nothing rerun', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, running('desktop'));

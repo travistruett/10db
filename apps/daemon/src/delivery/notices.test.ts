@@ -1,6 +1,7 @@
 import { fitNotice, NOTICE_BODY_MAX } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import {
+  cancelledNoticeHead,
   cancelledNoticeKind,
   cancelledNotices,
   rerunNotices,
@@ -90,6 +91,20 @@ describe('the cancelled-check notice kind', () => {
     const notice = cancelledNotices.stuck(batch, checks, why);
     expect(cancelledNoticeKind(notice)).toBe(kind);
     expect(notice.body).not.toContain('{"kind"');
+  });
+
+  it('stores the head it is about, and reads it back without showing it', () => {
+    const notice = cancelledNotices.stuck(batch, checks, { kind: 'again' }, HEAD);
+    expect(cancelledNoticeHead(notice)).toBe(HEAD);
+    expect(notice.body).not.toContain(HEAD);
+    expect(cancelledNoticeKind(notice)).toBe('again');
+  });
+
+  it('reads no head from a notice that has none', () => {
+    const notice = cancelledNotices.stuck(batch, checks, { kind: 'again' });
+    expect(cancelledNoticeHead(notice)).toBeNull();
+    expect(cancelledNoticeHead({ ...notice, record: undefined })).toBeNull();
+    expect(cancelledNoticeHead({ ...notice, record: '{"kind":"again"}' })).toBeNull();
   });
 
   it('reads no kind from an older notice with no record', () => {
