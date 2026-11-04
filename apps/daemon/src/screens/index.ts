@@ -5,9 +5,9 @@ export { createScreenBroker, type ScreenOutcome } from './broker';
 export { readImageSize } from './image-check';
 export {
   INLINE_CONVERSATION_MAX_BYTES,
-  INLINE_IMAGE_MAX_BYTES,
   inlineBytesSpent,
   isImageName,
+  tooBigAlone,
 } from './inline-budget';
 export { RENDER_READS, RENDER_REFUSED_READS, renderMayRead } from './render-access';
 export { createScreens, type ScreenService } from './screens';

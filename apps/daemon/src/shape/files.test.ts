@@ -433,6 +433,53 @@ describe('a large dropped image', () => {
       const images = told.reduce((sum, file) => sum + file.size, 0);
       expect(images + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
     });
+
+    it('keeps twelve screens beside twenty dropped images of any size, across turns and a restart', async () => {
+      const sent: Buffer[] = [];
+      const turnSent = async (text: string): Promise<FakeShapeTurn> => {
+        const turn = await nextTurn(text);
+        for (const image of turn.images) sent.push(Buffer.from(image.data, 'base64'));
+        return turn;
+      };
+      for (let round = 0; round < 4; round += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`r${String(round)}-${String(i)}.png`, pngOfSize(2880, 1800, 1.9 * MB));
+        drop(`s${String(round)}.png`, PNG);
+        await turnSent(`Round ${String(round)}`);
+        if (round === 1) await f.restart();
+      }
+      drop('small.webp', WEBP);
+      drop('more.jpg', JPEG);
+      drop('other.png', pngOfSize(120, 80));
+      await turnSent('Three more');
+      expect(f.service.view(shapeId()).files).toHaveLength(19);
+
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+
+      // The Retina images went as paths, so they use none of the total: a small image still fits.
+      drop('late.png', PNG);
+      const turn = await turnSent('The twentieth');
+      expect(turn.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+      expect(turn.message).not.toMatch(/late\.png\) — too large/);
+      await turnSent('And still going');
+
+      expect(f.service.view(shapeId()).files).toHaveLength(20);
+      expect(sent).toHaveLength(8);
+      expect(sent.every((bytes) => (readImageSize(bytes)?.width ?? Infinity) <= 2000)).toBe(true);
+      const carried = sent.reduce((sum, bytes) => sum + bytes.length, 0) + keptBytes();
+      expect(carried).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
+
+    it('does not charge an image whose size cannot be read, which went as a path', async () => {
+      const whole = pngOfSize(100, 80, 1.9 * MB);
+      for (let i = 0; i < 9; i += 1) drop(`cut${String(i)}.png`, whole.subarray(0, -1));
+      await nextTurn('Nine');
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+    });
   });
 
   it('is sent as a path to a session that has not started, and not as an image', async () => {
