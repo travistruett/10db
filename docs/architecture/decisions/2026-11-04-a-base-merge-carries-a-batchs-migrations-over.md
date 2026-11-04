@@ -19,16 +19,30 @@ migrations after the base's, in their journal order, instead of one plain run of
 - **How:** one run of the package's `generate` per migration, chained after the contracts' generator:
   `generate --name <name>`, or `generate --custom --name <name>`. A custom migration's SQL is then read from the
   branch's tip as bytes (`Git.bytesAt`) and written over the stub. The generators ran the repository's scripts, so
-  the write refuses a link in the file's place or in the path to it.
+  the write refuses a link in the path to it. It opens the file non-blocking and goes on only for a regular file
+  with one link, truncating after that check, and reads the journal the same way: this runs in the daemon, outside
+  the sandbox, so a FIFO would freeze its event loop and a hard link would reach a file outside the worktree.
 - **Checked:** the worktree's journal must hold the base's tags, then each migration's name in order. Only then
   are the files committed, as one `Regenerate …` commit. A migration carried over no longer counts as dropped, even
   when its SQL differs because the base changed the same table.
 - **When it fails:** a failed run, a migration the generator did not make, a custom SQL it could not put back, or
   a migration that can't be read: 10db restores the directories, commits nothing on top of the merge, and raises
   the one `base-regenerate` card, naming the first migration not carried over and where its file is. A card for a
-  run that never got that far (a stop, a failed install) names the `.sql` files the merge dropped. A pull
-  request's catch-up (`forPullRequest`) instead answers `uncarried`: the merge lacks a migration, so nothing is
-  pushed, the merge is put back as for any stopped catch-up, and the one catch-up card says why.
+  run that never got that far (a stop, a failed install) names the `.sql` files the merge dropped.
+- **A merge that lost one stops the gate:** whenever a `.sql` the branch added was dropped and the journal at HEAD
+  lacks its name, whatever the reason (a failed carry, a failed or broken install, generators that threw, a dirty or
+  moved worktree, a stop), `beforeGate` answers `uncarried` and no gate runs. Drift can't be left to catch this: a
+  custom migration changes no snapshot. A file the common ancestor had came off because the base removed it, so it
+  doesn't count. The migrations go on the batch's `migrations-uncarried` notice, because the merge stands and every
+  later gate answers `up_to_date`; each gate reads the notice and answers `uncarried` until the journal holds them,
+  then clears it and the card. Telling by name means a stub of the right name clears it, and that a batch which no
+  longer wants the migration clears it with an empty custom migration of that name.
+- **Who does what with it:** a task's verify gate counts it as a failed gate, so a fix session re-creates the
+  migration, told how by the note and the notice in its brief. The shipping gate fails the batch
+  (`BatchFailure.BaseConflict`, whose flag card carries the detail, with no second regenerate card), and a Retry reads
+  the notice again. A ship with no gate brings no base in, but a lane's launch may have, so it asks too
+  (`standingOnly`). A pull request's catch-up pushes nothing, puts the merge back as for any stopped catch-up, keeps
+  no notice, and the one catch-up card says why.
 - **Telling the batch:** a migration whose tag changed goes on the batch's `migrations-renumbered` notice, old tag
   to new, kept across later merges (a migration moved twice shows its first tag and its last) in the notice's
   `record`. The gate's note says the same. The runner puts the notice's body in the brief of every later session

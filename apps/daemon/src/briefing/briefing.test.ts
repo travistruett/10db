@@ -155,6 +155,16 @@ describe('buildSessionPrompt', () => {
     );
   });
 
+  it("carries what the batch's notice says of migrations a merge lost, and nothing when none was", () => {
+    const said = '- 0042_x (its file is in abc^1)';
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, uncarried: said })).toContain(
+      said,
+    );
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, uncarried: null })).toBe(
+      buildSessionPrompt({ ...base, action: { kind: 'start' } }),
+    );
+  });
+
   it('names the task on its own line, lists criteria and claims, and states the rules', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain('Task: Add the badge\n');

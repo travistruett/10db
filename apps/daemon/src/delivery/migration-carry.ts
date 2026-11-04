@@ -1,5 +1,14 @@
-import { closeSync, constants, openSync, readFileSync, realpathSync, writeSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  ftruncateSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
+import { basename, join } from 'node:path';
 import type { Git } from '../git';
 import { journalTags, ownTags, parseTag } from './migration-numbers';
 import type { RenumberedMigration } from './notices';
@@ -96,6 +105,25 @@ export interface Carried {
   readonly missing: CarriedMigration | null;
 }
 
+/**
+ * Runs `use` on `path`, opened with `flags`, once it is known to be a regular file with no other name.
+ * The generators ran the repository's scripts and this runs in the daemon, outside the sandbox, on its
+ * one event loop, so nothing they left is trusted: without `O_NONBLOCK` opening a FIFO would stop the
+ * whole daemon, and a hard link would reach a file outside the worktree. `O_TRUNC` can't be among
+ * `flags`: it would act before the check.
+ */
+function withPlainFile<T>(path: string, flags: number, use: (fd: number, size: number) => T): T {
+  const fd = openSync(path, flags | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile()) throw new Error(`${basename(path)} is not a regular file`);
+    if (stat.nlink !== 1) throw new Error(`${basename(path)} has another hard link`);
+    return use(fd, stat.size);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Reads the worktree's journal, which the generators just wrote: it must hold the base's migrations, then `migrations`. */
 export function carriedSoFar(
   repo: string,
@@ -104,7 +132,12 @@ export function carriedSoFar(
 ): Carried {
   let tags: string[] | null;
   try {
-    tags = journalTags(readFileSync(join(repo, JOURNAL), 'utf8'));
+    tags = journalTags(
+      withPlainFile(join(repo, JOURNAL), constants.O_RDONLY, (fd, size) => {
+        if (size > META_MAX_BYTES) throw new Error('the journal is too large');
+        return readFileSync(fd, 'utf8');
+      }),
+    );
   } catch {
     tags = null;
   }
@@ -130,9 +163,45 @@ export function carriedSoFar(
 }
 
 /**
- * Puts each custom migration's SQL from `tip`, byte for byte, over the stub `--custom` wrote. The
- * generators ran the repository's scripts, so nothing there is trusted: a link in the file's place
- * or in the path to it refuses the write. Resolves with the migration it could not write, and why.
+ * The tags of the `.sql` files in `dropped` that the branch at `tip` added: a file the common ancestor
+ * with `from` already had came off because the base removed it, such as a baseline it regenerated, and
+ * a name drizzle-kit wouldn't write is no migration.
+ */
+export async function addedTags(
+  git: Pick<Git, 'blobAt' | 'mergeBase'>,
+  repo: string,
+  tip: string,
+  from: string,
+  dropped: readonly string[],
+): Promise<string[]> {
+  const ancestor = await git.mergeBase(repo, tip, from);
+  const tags: string[] = [];
+  for (const file of dropped.filter((f) => f.endsWith('.sql'))) {
+    const tag = basename(file, '.sql');
+    if (parseTag(tag) === null) continue;
+    if (ancestor === null || (await git.blobAt(repo, ancestor, file)) === null) tags.push(tag);
+  }
+  return tags;
+}
+
+/** Those of `tags` whose name the journal at `rev` doesn't hold: all of them when it can't be read. */
+export async function absentFrom(
+  git: Pick<Git, 'fileAt'>,
+  repo: string,
+  rev: string,
+  tags: readonly string[],
+): Promise<string[]> {
+  const found = await git.fileAt(repo, rev, JOURNAL, META_MAX_BYTES);
+  const names = new Set(
+    (journalTags(found.kind === 'file' ? found.text : null) ?? []).map((t) => parseTag(t)?.name),
+  );
+  return tags.filter((tag) => !names.has(parseTag(tag)?.name));
+}
+
+/**
+ * Puts each custom migration's SQL from `tip`, byte for byte, over the stub `--custom` wrote. A link
+ * in the path to the file, or anything but a plain file in its place (`withPlainFile`), refuses the
+ * write. Resolves with the migration it could not write, and why.
  */
 export async function copyCustomSql(
   git: Pick<Git, 'bytesAt'>,
@@ -153,15 +222,10 @@ export async function copyCustomSql(
       if (sql === null) return { tag: migration.tag, why: 'its SQL could not be read' };
       if (`${realpathSync(dir)}/` !== join(realpathSync(repo), MIGRATIONS_DIR))
         return { tag: migration.tag, why: 'a link lies in the path to its file' };
-      const fd = openSync(
-        join(dir, `${tag}.sql`),
-        constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
-      );
-      try {
-        writeSync(fd, sql);
-      } finally {
-        closeSync(fd);
-      }
+      withPlainFile(join(dir, `${tag}.sql`), constants.O_WRONLY, (fd) => {
+        ftruncateSync(fd);
+        writeFileSync(fd, sql);
+      });
     } catch (error) {
       return {
         tag: migration.tag,

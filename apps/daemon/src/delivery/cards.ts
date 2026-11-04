@@ -786,6 +786,15 @@ export const shipCards = {
    * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
    * failure would have said nothing of the batch's code. Retry installs again before the gate.
    */
+  /** `note` names the migrations a merge of the base lost and says how to re-create them. */
+  migrationsLost: (batch: BatchDto, note: string): ShipFailure => ({
+    failure: BatchFailure.BaseConflict,
+    card: {
+      title: `${notShipped(batch)}: merging ${batch.baseBranch} lost a migration of the batch's`,
+      body: `${note}\n\nNo gate ran and nothing was pushed. Re-create the migration on the batch's branch and commit it.\n\n${RETRY}`,
+      detail: answers(batch),
+    },
+  }),
   installBroken: (batch: BatchDto, note: string): ShipFailure => ({
     failure: BatchFailure.InstallBroken,
     card: {

@@ -5116,6 +5116,25 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
         expect(cards.map((card) => card.body)).toEqual([expect.stringContaining('(.: tsx)')]);
       });
 
+      it('counts a migration the base merge lost as a failed gate, so a fix session re-creates it, with no gate run', async () => {
+        const order: string[] = [];
+        const restore = watchGates(order);
+        const note = 'The merge of origin/main left this branch without 0042_x.';
+        const { workstream } = await run(
+          () => [[write('src/api/a.txt'), commit('op-wt-base-7', ['src/api/a.txt']), turn]],
+          {
+            baseUpdates: recordingBaseUpdates({ kind: 'uncarried', head: 'abc', note }, order),
+          },
+        ).finally(restore);
+        expect(order).not.toContain('gate spawned');
+        const row = ws(workstream.id);
+        expect(row).toMatchObject({ state: 'QUEUED', attempt: 1 });
+        expect(row.nextAction.kind).toBe('fix');
+        const evidence = listEvidence(engine.store.db, workstream.id);
+        expect(evidence).toHaveLength(1);
+        expect(evidence[0]?.summary).toContain(note);
+      });
+
       it('sends the work back to a session that resolves the conflict markers the base merge left, running no gate and raising no card, then gates the merged branch', async () => {
         const order: string[] = [];
         const options: (BeforeGateOptions | undefined)[] = [];

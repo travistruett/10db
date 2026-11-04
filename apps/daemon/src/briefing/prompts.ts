@@ -59,6 +59,8 @@ export interface PromptInput {
   readonly denials?: readonly Denial[];
   /** What the batch's notice says of migrations a merge of its base renumbered, when any were. */
   readonly renumbered?: string | null;
+  /** What the batch's notice says of migrations a merge of its base lost, while any are missing. */
+  readonly uncarried?: string | null;
 }
 
 /** A call the builder denied, and the note they gave. */
@@ -481,6 +483,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     renderKnowledge(input.contextPack),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
     ...(input.renumbered ? ['', input.renumbered] : []),
+    ...(input.uncarried ? ['', input.uncarried] : []),
     '',
     actionSection(input),
   ].join('\n');

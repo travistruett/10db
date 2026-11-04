@@ -1,14 +1,22 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  linkSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchWorkstream } from '@10db/db';
+import { getBatch, listWorkstreams, patchProject, patchWorkstream } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates } from './index';
-import { schemaOf } from './migration-carry';
+import { addedTags, schemaOf } from './migration-carry';
 import { NOTICE_KEY } from './notices';
 import type { CarriedMigration } from './worktree-generated';
 
@@ -172,6 +180,34 @@ describe('telling a --custom migration by its snapshot', () => {
   });
 });
 
+describe('which files a merge dropped are migrations the branch added', () => {
+  const ancestor = 'the-merge-base';
+  const git = {
+    mergeBase: () => Promise.resolve(ancestor),
+    blobAt: (_repo: string, rev: string, file: string) =>
+      Promise.resolve(rev === ancestor && file.endsWith('0000_old.sql') ? 'blob' : null),
+  };
+
+  it("leaves out what both sides had, such as a baseline the base regenerated, and what isn't a migration", async () => {
+    expect(
+      await addedTags(git, 'repo', 'tip', 'base', [
+        `${DB}/0000_old.sql`,
+        `${DB}/0001_mine.sql`,
+        `${DB}/notes.sql`,
+        `${DB}/meta/0001_snapshot.json`,
+      ]),
+    ).toEqual(['0001_mine']);
+  });
+
+  it('keeps them all when the histories share nothing', async () => {
+    expect(
+      await addedTags({ ...git, mergeBase: () => Promise.resolve(null) }, 'repo', 'tip', 'base', [
+        `${DB}/0000_old.sql`,
+      ]),
+    ).toEqual(['0000_old']);
+  });
+});
+
 describe('carrying a batch over when main and the batch both added migrations', () => {
   afterEach(() => {
     h.close();
@@ -241,7 +277,7 @@ describe('carrying a batch over when main and the batch both added migrations', 
       generators: drizzle({ failAt: 'mine_backfill' }),
     }).beforeGate(batch.id, signal);
 
-    if (update.kind !== 'merged') throw new Error(`merged expected, got ${update.kind}`);
+    if (update.kind !== 'uncarried') throw new Error(`uncarried expected, got ${update.kind}`);
     // The merge's head: no commit of regenerated files on top of it.
     expect(update.head).toBe(headOf(path));
     expect(
@@ -257,7 +293,133 @@ describe('carrying a batch over when main and the batch both added migrations', 
     const card = h.only(h.cards());
     expect(card.body).toContain('0002_mine_backfill');
     expect(card.body).not.toContain('`0001_mine`');
+    // Nothing renumbered: all the lane hears is what the merge lost, the migration before it included.
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice.key).toBe(NOTICE_KEY.migrationsUncarried);
+    expect(notice.body).toContain('0001_mine');
+    expect(notice.body).toContain('0002_mine_backfill');
+    expect(update.note).toContain('0002_mine_backfill');
+  });
+
+  it('stops the gate for a custom migration alone, whose loss no snapshot would show', async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(h.only(h.cards()).body).toContain('0001_mine_backfill');
+  });
+
+  it('refuses every later gate until the branch holds the migration again, then clears what it said', async () => {
+    const sql = 'update a;\n';
+    const batch = await bothSidesAdded([{ tag: '0001_mine_backfill', sql, custom: true }]);
+    const updates = createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    });
+    await updates.beforeGate(batch.id, signal);
+
+    const again = await updates.beforeGate(batch.id, signal);
+    if (again.kind !== 'uncarried') throw new Error(`uncarried expected, got ${again.kind}`);
+    expect(again.note).toContain('0001_mine_backfill');
+    expect(again.head).toBe(headOf(pathOf(batch)));
+    expect(h.cards()).toHaveLength(1);
+
+    // The lane re-creates it after main's, under its name.
+    await commitOnBatch(batch, `${DB}/0002_mine_backfill.sql`, sql);
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_mine_backfill'));
+    expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    expect(h.cards()).toEqual([]);
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
+  it('keeps refusing while one migration is back and another is not, and names only that one', async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine', sql: 'alter table a add b;\n' },
+      { tag: '0002_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    const updates = createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    });
+    await updates.beforeGate(batch.id, signal);
+    await commitOnBatch(batch, `${DB}/0002_mine.sql`, 'alter table a add b;\n');
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_mine'));
+
+    const update = await updates.beforeGate(batch.id, signal);
+
+    if (update.kind !== 'uncarried') throw new Error(`uncarried expected, got ${update.kind}`);
+    expect(update.note).toContain('0002_mine_backfill');
+    expect(update.note).not.toContain('0001_mine ');
+    expect(h.only(getBatch(h.store.db, batch.id).notices).body).not.toContain('0001_mine ');
+  });
+
+  it('stops the gate when the install fails, so the generators never ran', async () => {
+    const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'alter table a add b;\n' }]);
+    h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\n');
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      dependencies: { refresh: () => Promise.reject(new Error('the install blew up')) },
+      generators: drizzle(),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(h.only(h.cards()).body).toContain('0001_mine');
+  });
+
+  it('stops the gate when the generators throw', async () => {
+    const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'alter table a add b;\n' }]);
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: { regenerate: () => Promise.reject(new Error('no sandbox')) },
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(h.only(h.cards()).body).toContain('0001_mine');
+  });
+
+  it('does not ship a batch whose only migration is custom when the shipping gate could not carry it', async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    const failing = drizzle({ failAt: 'mine_backfill' });
+    vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation((input) =>
+      failing.regenerate(input),
+    );
+    h.settle(h.only(listWorkstreams(h.store.db, { batchId: batch.id })).id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id)).toMatchObject({
+      state: 'FAILED',
+      failure: 'base_conflict',
+    });
+    expect(h.origin$('for-each-ref', `refs/heads/${batch.branch ?? ''}`)).toBe('');
+    const card = h.only(h.cards());
+    expect(card.title).toContain('migration');
+    expect(card.body).toContain('0001_mine_backfill');
+    expect(card.body).toContain('Retry');
+  });
+
+  it("does not ship, with no gate to ask, what a lane's launch could not carry", async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
+    await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    }).beforeGate(batch.id, signal, { atLaunch: true });
+    h.settle(h.only(listWorkstreams(h.store.db, { batchId: batch.id })).id, 'DONE');
+    h.shipper.checkBatch(batch.id);
+    await h.jobs.idle();
+
+    expect(getBatch(h.store.db, batch.id).state).toBe('FAILED');
+    expect(h.origin$('for-each-ref', `refs/heads/${batch.branch ?? ''}`)).toBe('');
   });
 
   it('commits nothing and names the migration on a card when generating it makes no migration', async () => {
@@ -289,6 +451,61 @@ describe('carrying a batch over when main and the batch both added migrations', 
     }).beforeGate(batch.id, stop.signal);
 
     expect(h.only(h.cards()).body).toContain(`${DB}/0001_mine.sql`);
+    // The merge stands, and the next gate finds the branch holding the base.
+    expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('uncarried');
+  });
+
+  it('refuses a FIFO the generators left at a custom migration, without blocking on it', async () => {
+    const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'update a;\n', custom: true }]);
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({
+        afterRun: (at) => {
+          rmSync(join(at, DB, '0002_mine.sql'));
+          execFileSync('mkfifo', [join(at, DB, '0002_mine.sql')]);
+        },
+      }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(h.only(h.cards()).body).toContain('0001_mine');
+  });
+
+  it('refuses a FIFO the generators left at the journal, without blocking on it', async () => {
+    const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'alter table a add b;\n' }]);
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({
+        afterRun: (at) => {
+          rmSync(join(at, JOURNAL));
+          execFileSync('mkfifo', [join(at, JOURNAL)]);
+        },
+      }),
+    }).beforeGate(batch.id, signal);
+
+    expect(update.kind).toBe('uncarried');
+    expect(h.only(h.cards()).body).toContain('0001_mine');
+  });
+
+  it('truncates nothing through a hard link the generators left at a custom migration', async () => {
+    const batch = await bothSidesAdded([{ tag: '0001_mine', sql: 'update a;\n', custom: true }]);
+    const path = pathOf(batch);
+    const outside = join(path, '..', 'outside.txt');
+    writeFileSync(outside, 'untouched\n');
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({
+        afterRun: (at) => {
+          rmSync(join(at, DB, '0002_mine.sql'));
+          linkSync(outside, join(at, DB, '0002_mine.sql'));
+        },
+      }),
+    }).beforeGate(batch.id, signal);
+
+    expect(readFileSync(outside, 'utf8')).toBe('untouched\n');
+    expect(update.kind).toBe('uncarried');
+    expect(statusOf(path)).toBe('');
+    expect(h.only(h.cards()).body).toContain('0001_mine');
   });
 
   it("writes nothing through a link the generators left where a custom migration's SQL goes", async () => {

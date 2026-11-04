@@ -38,6 +38,7 @@ import {
   type WorkstreamId,
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
+  MIGRATIONS_UNCARRIED_NOTICE_KEY,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -1430,14 +1431,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         checkout,
         worktreeRoot: opts.worktreeRoot,
       });
-    const renumbered =
-      row.batchId === null
-        ? undefined
-        : getBatch(db, row.batchId).notices.find((n) => n.key === MIGRATIONS_RENUMBERED_NOTICE_KEY);
+    const batchNotices = row.batchId === null ? [] : getBatch(db, row.batchId).notices;
+    const noticeBody = (key: string): string | null =>
+      batchNotices.find((n) => n.key === key)?.body ?? null;
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
-      renumbered: renumbered?.body ?? null,
+      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
+      uncarried: noticeBody(MIGRATIONS_UNCARRIED_NOTICE_KEY),
       task,
       claims: claims(),
       action,
@@ -2357,10 +2358,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         before.update = update;
         // Markers left in the branch fail any gate; a session resolves them first.
         // A broken install fails any gate before it starts: its tools are not there.
+        // A lost migration fails none of its tools, so it stops the gate here.
         if (
           update.kind === 'aborted' ||
           update.kind === 'conflicted' ||
-          update.kind === 'install_broken'
+          update.kind === 'install_broken' ||
+          update.kind === 'uncarried'
         )
           return false;
         return clearToStart();
@@ -2502,6 +2505,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
       return;
     }
+    // A merge of the base lost a migration and the merge stands: no gate ran, and this counts as one
+    // that failed, so a fix session re-creates it, told how by the note and the batch's notice.
+    if (before.update?.kind === 'uncarried' && ctl.stopReason !== 'shutdown')
+      result = { ...result, exitCode: 1, aborted: false };
     // Shutdown killed the gate: record nothing. The workstream stays VERIFYING and recovery re-runs it.
     if (result.aborted) return;
     // A host the sandbox blocked is the builder's to allow; the card names it and the gate's evidence says so.
