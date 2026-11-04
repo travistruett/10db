@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
-import { ProjectDto, TaskDto } from '@10db/contracts';
+import { InboxItemDto, ProjectDto, TaskDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
@@ -11,6 +12,7 @@ import {
   isolatedGitEnv,
   NETWORK_ENV,
   tempDir,
+  waitForAsync,
 } from './fixtures';
 
 let data: { path: string; cleanup(): void };
@@ -35,7 +37,8 @@ const git = (dir: string, ...args: string[]) =>
     .toString()
     .trim();
 
-async function start(projectLanding?: 'merge' | 'hold') {
+/** Starts the daemon on the test's data directory; a second start finds what the first stored. */
+async function boot() {
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
@@ -47,7 +50,11 @@ async function start(projectLanding?: 'merge' | 'hold') {
     gh: new FakeGh(),
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
   });
-  const api = apiClient(daemon.url, daemon.token);
+  return apiClient(daemon.url, daemon.token);
+}
+
+async function start(projectLanding?: 'merge' | 'hold') {
+  const api = await boot();
   const project = await api.post('/projects', ProjectDto, {
     name: 'shop',
     repoPath: remote.repo.path,
@@ -155,6 +162,34 @@ describe('where a task lands, through the API', () => {
     );
     const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, TASK);
     expect(task.landing).toEqual({ kind: 'base' });
+  });
+
+  // Tasks made while `next` was the integration branch keep landing there once it is gone; only the
+  // start of the daemon moves them, so this goes through a restart.
+  it('moves an open task off a branch origin has lost when the daemon starts, and says so', async () => {
+    const first = await start();
+    git(remote.origin.path, 'branch', 'next', 'main');
+    const task = await first.api.post(`/projects/${first.project.id}/tasks`, TaskDto, {
+      ...TASK,
+      landing: { kind: 'branch', branch: 'next' },
+    });
+    await daemon?.stop();
+    daemon = null;
+    git(remote.origin.path, 'branch', '-D', 'next');
+
+    const api = await boot();
+
+    const moved = await waitForAsync(async () => {
+      const tasks = await api.get(`/projects/${first.project.id}/tasks`, z.array(TaskDto));
+      return tasks.find((t) => t.id === task.id && t.landing.kind === 'base');
+    });
+    expect(moved.landing).toEqual({ kind: 'base' });
+    const cards = (await api.get('/inbox?state=OPEN', z.array(InboxItemDto))).filter((item) =>
+      item.title.includes('no longer exists'),
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0]?.body).toContain(`Alpha (${task.id})`);
+    expect(cards[0]?.body).toContain('next');
   });
 
   it('does not ask origin about the project base branch', async () => {
