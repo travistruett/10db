@@ -333,6 +333,38 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(readPages(doc.storedPath, '1')).toEqual({ decision: 'allow' });
     });
 
+    it('is held to the 3 MiB reserve, three pages in all, when the inline budget is full', async () => {
+      // Nine 2 MiB pictures, three to a message, fill the 18 MiB inline budget.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`i${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn(`Fill ${String(turnNo)}`)).images).toHaveLength(3);
+      }
+      const doc = drop('small.pdf', tinyPdf());
+      await nextTurn('Now the PDF');
+      const pagesThatFit = READ_RESERVE_BYTES / READ_CHARGE_MAX_BYTES;
+      expect(pagesThatFit).toBe(3);
+
+      // Four pages pass the reserve; the refusal names the three that still fit.
+      const tooMany = readPages(doc.storedPath, '1-4');
+      expect(tooMany).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(tooMany)).toContain('up to 3 pages');
+      expect(reasonOf(tooMany)).toContain('"1-3"');
+      expect(spent()).toBe(0);
+
+      // Three pages in all are allowed, one Read or several; the next page is refused.
+      expect(readPages(doc.storedPath, '1-2')).toEqual({ decision: 'allow' });
+      const oneLeft = readPages(doc.storedPath, '3-4');
+      expect(oneLeft).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(oneLeft)).toContain('up to 1 pages');
+      expect(readPages(doc.storedPath, '3')).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(pagesThatFit * READ_CHARGE_MAX_BYTES);
+      const past = readPages(doc.storedPath, '4');
+      expect(past).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(past)).toMatch(/No room is left for more pages/);
+      expect(reasonOf(past)).not.toMatch(/up to \d+ pages/);
+    });
+
     it('shares one total with pictures, and a subagent’s Read is left uncounted', async () => {
       const doc = drop('two.pdf', tinyPdf());
       const big = dropBig();
