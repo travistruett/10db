@@ -17,17 +17,25 @@
   again, as it does for any first install that fails that way.
 - **Only a second broken install in a row is reported.** When the copy is not whole after the second pass, `beforeGate`
   answers `install_broken` exactly as before, so the runner's `install_broken` failure and card and the shipping
-  gate's `BatchFailure.InstallBroken` card are unchanged. Its note now says that two installs did not bring the
-  packages back.
-- **A failed install is not started over again by the gate.** `refresh` already starts over once when its install
-  fails and leaves the copy broken, and deliberately does not after a timeout (it would only wait again) or a
-  refused host (the same refusal would come back). `installOnce` marks a failed install `final`, and `install`
-  reports it as it is: a timeout or a refused host raises the `install_broken` card without a second install, and
-  any other failure runs at most two installs in one gate (`refresh`'s own pair), not four. The second pass
-  applies only to an install that exited zero and left the copy broken. `refresh` adds no retry of its own to a
-  start over it was asked for, since that install already is the start over from nothing, so that path runs two
-  installs as well. The card's note says only that the install did not bring the packages back when no start
-  over happened.
+  gate's `BatchFailure.InstallBroken` card are unchanged. Its note says what ran (`installsSaid`), from the count
+  of installs over both passes and whether one removed `node_modules`:
+  - none ran: "No install ran, so node_modules is as it was" (the reason follows, e.g. no trustworthy pnpm);
+  - one ran: "10db installed from the lockfile and that install did not bring them back", or, when it removed
+    `node_modules` first, "10db removed node_modules and installed from the lockfile, and that install did not
+    bring them back";
+  - two ran: "10db installed from the lockfile and then installed again by itself, and neither install brought
+    them back", or, when one removed `node_modules`, "... installed from the lockfile, then removed node_modules
+    and installed again by itself, and neither install brought them back".
+- **A gate runs two installs at most.** `refresh` already starts over once when its install fails and leaves the
+  copy broken, and deliberately does not after a timeout (it would only wait again) or a refused host (the same
+  refusal would come back). `installOnce` marks a failed install `final`, and `install` reports it as it is: a
+  timeout or a refused host raises the `install_broken` card without a second install, and any other failure
+  runs at most two installs in one gate (`refresh`'s own pair), not four. The same holds when `refresh`'s start
+  over exits zero and the copy is still broken: that result is `installed` with two installs, not `final`, but
+  the gate's second pass would be the same install from nothing a third time, so `install` reports it as it is
+  (no third install). The second pass applies only to an install that exited zero, with no start over of
+  `refresh`'s own, and left the copy broken. `refresh` adds no retry of its own to a start over it was asked
+  for, since that install already is the start over from nothing, so that path runs two installs as well.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. Both repairs
   leave it: the gate's second pass, and `refresh`'s own start over after a failed install left the copy broken.

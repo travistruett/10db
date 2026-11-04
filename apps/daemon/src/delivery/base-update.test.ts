@@ -463,6 +463,33 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       );
     });
 
+    it('runs no third install when refresh’s own start over exits zero and the copy is still broken', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      const spy = vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        await refresh(input);
+        // refresh's install failed and left the copy broken, and its start over exited zero: two
+        // installs, reported as `installed`, with the copy still broken (a pruned one stays so).
+        return {
+          kind: 'installed',
+          logPath: '/log',
+          durationMs: 1,
+          installs: 2,
+          startedOver: true,
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      // The gate does not remove node_modules and install a third time: refresh's start over was that.
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(update.kind).toBe('install_broken');
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(
+        /removed node_modules and installed again by itself, and neither install/,
+      );
+      expect(note).not.toMatch(/3 installs/);
+    });
+
     it('says no install ran, and why, when there is no trustworthy pnpm', async () => {
       const { batch } = await pruned();
       const tail =
@@ -484,6 +511,15 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(note).toMatch(/no install ran/i);
       expect(note).toContain('No trustworthy pnpm was found');
       expect(note).not.toMatch(/removed node_modules|installed again|did not bring them back/);
+      // The card words its Retry advice by this: a Retry meets the same refusal.
+      expect(update).toMatchObject({ kind: 'install_broken', noPnpm: true });
+    });
+
+    it('does not mark an install that ran and left the copy broken as having no pnpm', async () => {
+      const { batch } = await pruned();
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      expect(update).not.toHaveProperty('noPnpm');
     });
 
     it('raises the card without starting over when the first install was refused a host', async () => {

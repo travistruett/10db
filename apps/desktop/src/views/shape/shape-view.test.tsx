@@ -699,7 +699,7 @@ describe('Shape: the conversation', () => {
     });
   });
 
-  it('says a turn held by an update will run after it, until the drain ends or the turn starts', async () => {
+  it('says a turn held by an update is lost if the update installs, until the drain ends or the turn starts', async () => {
     const parked: ShapeViewDto = proposed([], {
       round: 0,
       turn: {
@@ -717,8 +717,13 @@ describe('Shape: the conversation', () => {
     );
     const { queryClient } = open(parked);
     const conversation = await screen.findByRole('region', { name: 'Conversation' });
-    const line = /waiting for an update to install.*will run after it/i;
-    expect(await within(conversation).findByText(line)).toBeTruthy();
+    const line = /waiting for an update to install/i;
+    const found = await within(conversation).findByText(line);
+    // An install restarts 10db and the held turn never runs; the line says so without promising
+    // "your message", since the held turn may be a Propose or a rehearsal.
+    expect(found.textContent).toMatch(/if the update installs.*won.t run.*(send|press).*again/i);
+    expect(found.textContent).toMatch(/if it doesn.t install.*runs/i);
+    expect(found.textContent).not.toMatch(/after it|your message/i);
     // The drain ends and the turn starts: the line goes.
     current = {
       ...parked,
