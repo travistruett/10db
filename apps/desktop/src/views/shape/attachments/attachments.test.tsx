@@ -314,6 +314,113 @@ describe('a Mermaid diagram', () => {
     expect(reached).toEqual([]);
   });
 
+  // At 'strict' Mermaid draws into a temporary element in document.body (it needs layout), so anything
+  // in it that loads would load while it is drawn. Watch the body for any such element.
+  /** Starts watching document.body; the returned function stops and lists the loaders seen. */
+  function watchLoaders(): () => string[] {
+    const seen: string[] = [];
+    const loads = (el: Element): void => {
+      const tag = el.tagName.toLowerCase();
+      const url =
+        el.getAttribute('href') ?? el.getAttribute('xlink:href') ?? el.getAttribute('src');
+      // A data: URL fetches nothing (the finished diagram is shown as one); anything else would.
+      if (
+        (tag === 'image' || tag === 'img' || tag === 'iframe') &&
+        url !== null &&
+        !url.startsWith('data:')
+      ) {
+        seen.push(`<${tag} ${url}>`);
+      }
+      // Mermaid's own CSS has url(#gradient); only a url() to something else, or an @import, loads.
+      const css = el.textContent;
+      const external = /@import|url\(\s*["']?(?!#)/i.exec(css);
+      if (tag === 'style' && external !== null) {
+        seen.push(`<style … ${css.slice(Math.max(0, external.index - 20), external.index + 60)}>`);
+      }
+    };
+    const scan = (node: Node): void => {
+      if (!(node instanceof Element)) return;
+      loads(node);
+      node.querySelectorAll('*').forEach(loads);
+    };
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        record.addedNodes.forEach(scan);
+        scan(record.target);
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+    // The image shape also does `new Image().src = url` on an element that is never in the document,
+    // which loads just the same, so watch every HTMLImageElement's src being set.
+    const proto = HTMLImageElement.prototype;
+    const original = Object.getOwnPropertyDescriptor(proto, 'src');
+    Object.defineProperty(proto, 'src', {
+      configurable: true,
+      get() {
+        return original?.get?.call(this) as string;
+      },
+      set(value: string) {
+        if (!value.startsWith('data:')) seen.push(`new Image().src = ${value}`);
+        original?.set?.call(this, value);
+      },
+    });
+    return () => {
+      if (original) Object.defineProperty(proto, 'src', original);
+      observer.takeRecords().forEach((record) => {
+        record.addedNodes.forEach(scan);
+        scan(record.target);
+      });
+      observer.disconnect();
+      return seen;
+    };
+  }
+
+  it('with an image shape is not drawn, and puts nothing that loads into the document', async () => {
+    const stop = watchLoaders();
+    const source = [
+      'flowchart LR',
+      '  A@{ img: "https://evil.example/pixel.png", label: "Hi" }',
+    ].join('\n');
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Pic" />);
+    await waitFor(() => {
+      expect(screen.getByText(/couldn’t be drawn/)).toBeTruthy();
+    });
+    expect(stop()).toEqual([]);
+    expect(reached).toEqual([]);
+  });
+
+  it('with a directive turning HTML labels on draws no HTML label into the document', async () => {
+    const stop = watchLoaders();
+    const source = [
+      '%%{init: {"htmlLabels": true, "flowchart": {"htmlLabels": true}}}%%',
+      'flowchart LR',
+      '  A["<img src=\'https://evil.example/pixel.png\'>"] --> B[Ship]',
+    ].join('\n');
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Html" />);
+    await screen.findByRole('img', { name: 'Diagram: Html' });
+    expect(stop()).toEqual([]);
+    expect(reached).toEqual([]);
+  });
+
+  it('with front-matter turning HTML labels on draws no HTML label into the document', async () => {
+    const stop = watchLoaders();
+    const source = [
+      '---',
+      'config:',
+      '  htmlLabels: true',
+      '  flowchart:',
+      '    htmlLabels: true',
+      '  themeCSS: "g { background: url(https://evil.example/t.png) }"',
+      '---',
+      'flowchart LR',
+      '  A["<img src=\'https://evil.example/pixel.png\'>"] --> B[Ship]',
+    ].join('\n');
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Front" />);
+    await screen.findByRole('img', { name: 'Diagram: Front' });
+    expect(stop()).toEqual([]);
+    expect(reached).toEqual([]);
+  });
+
   it('says so when the source does not parse, and shows nothing it made', async () => {
     renderWithDaemon(
       <AttachmentView

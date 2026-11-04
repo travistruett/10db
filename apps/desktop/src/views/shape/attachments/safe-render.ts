@@ -76,15 +76,56 @@ export async function chartSvg(spec: Readonly<Record<string, unknown>>): Promise
 
 let diagrams = 0;
 
+// At 'strict' Mermaid draws into a temporary element appended to document.body (it needs layout to
+// measure text) and removes it afterwards. While it is there, anything in it that loads does, so the
+// diagram may not contain a thing that loads:
+// - an image shape (`A@{ img: "https://…" }`) loads its URL (`new Image().src`, then an SVG <image>),
+//   even before anything is in the document: the source is refused;
+// - HTML labels (a label's <img>) and themeCSS (@import, url()) can be switched on by an init directive
+//   or front-matter config unless the key is in Mermaid's `secure` list, so both are added to it.
+//   Mermaid drops a secured key from a directive wherever it sits, so `flowchart.htmlLabels` goes too.
+const SECURE_KEYS = [
+  // Mermaid's own list.
+  'secure',
+  'securityLevel',
+  'startOnLoad',
+  'maxTextSize',
+  'suppressErrorRendering',
+  'maxEdges',
+  // Ours: the keys that bring a loading element or a stylesheet fetch into the temporary element.
+  'htmlLabels',
+  'themeCSS',
+];
+
+/** An image shape names a URL for Mermaid to draw: `A@{ img: "…" }`. */
+const IMAGE_SHAPE = /@\{[^}]*\bimg\b/i;
+
+/** Why a diagram isn't drawn, or null when its source holds no image shape. */
+export function diagramRefusal(source: string): string | null {
+  return IMAGE_SHAPE.test(source)
+    ? 'This diagram has an image shape, which names a URL, so it isn’t drawn.'
+    : null;
+}
+
 /** Draws a Mermaid diagram to SVG at securityLevel 'strict', with SVG text labels (no HTML in it). */
 export async function mermaidSvg(source: string, dark: boolean): Promise<string> {
+  const refusal = diagramRefusal(source);
+  if (refusal !== null) throw new Error(refusal);
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: 'strict',
     htmlLabels: false,
+    secure: SECURE_KEYS,
     theme: dark ? 'dark' : 'default',
   });
   diagrams += 1;
-  const { svg } = await mermaid.render(`shape-diagram-${String(diagrams)}`, source);
-  return svg;
+  const id = `shape-diagram-${String(diagrams)}`;
+  try {
+    const { svg } = await mermaid.render(id, source);
+    return svg;
+  } finally {
+    // A draw that throws leaves its temporary element in the body; take it out.
+    document.getElementById(id)?.remove();
+    document.getElementById(`d${id}`)?.remove();
+  }
 }
