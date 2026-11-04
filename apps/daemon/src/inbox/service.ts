@@ -55,6 +55,9 @@ import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { taskFieldsFromProposal } from './proposal-task';
 
+/** The detail key, and fold key prefix, of the flag that offers to deliver a stored answer again. */
+const REDELIVER_KEY = 'redeliverCard';
+
 /** Rejects an answer promise when the asking session stops waiting. */
 export class ParkedError extends Error {
   override readonly name = 'ParkedError';
@@ -420,11 +423,43 @@ export function createInboxService(deps: {
           note: 'Covered by the project rule just allowed on another lane’s card',
         });
       } catch (error) {
-        // Answered meanwhile: nothing to release. Any other failure leaves that card open for the builder;
-        // it must not fail the answer they already gave, which is stored and delivered.
+        // Answered meanwhile: nothing to release. Nothing here may fail the answer the builder already
+        // gave, which is stored and delivered.
         if (error instanceof ConflictError) continue;
         deps.log?.warn({ err: error, cardId: card.id }, 'could not release a covered edit card');
+        // Two outcomes. A failure before the answer committed leaves that card OPEN, still in the
+        // builder's list. A failure in delivery, after it committed, leaves it ANSWERED or DELIVERING:
+        // out of their list and redelivered only at a daemon start, so a flag card surfaces it, and
+        // answering the flag redelivers.
+        flagStuckDelivery(card);
       }
+    }
+  }
+
+  /**
+   * Raises a card for the builder when `card` was answered but its delivery did not finish, so the
+   * lane's wait does not outlast the failure unseen. A card still open needs none.
+   */
+  function flagStuckDelivery(card: InboxItemDto): void {
+    try {
+      const now = getInboxItem(deps.state.db, card.id);
+      if (now.state !== InboxState.Answered && now.state !== InboxState.Delivering) return;
+      deps.state.write((ctx) =>
+        flagCard(ctx, {
+          projectId: now.projectId,
+          workstreamId: now.targets[0]?.workstreamId ?? null,
+          title: 'An answer was stored but not delivered',
+          body: `The answer to “${now.title}” was recorded, but handing it to the lane failed, so the lane may still be waiting. Retry delivery once the cause is fixed.`,
+          detail: { [REDELIVER_KEY]: now.id },
+          foldKey: `${REDELIVER_KEY}:${now.id}`,
+          options: [
+            { label: 'Retry delivery', description: 'Hand the stored answer to the lane again' },
+          ],
+          recommendation: 'Retry delivery',
+        }),
+      );
+    } catch (error) {
+      deps.log?.warn({ err: error, cardId: card.id }, 'could not flag an undelivered answer');
     }
   }
 
@@ -481,8 +516,12 @@ export function createInboxService(deps: {
     answer(id, raw) {
       const answer = InboxAnswer.parse(raw);
       const current = getInboxItem(deps.state.db, id);
-      if (current.kind === InboxKind.Flag && current.state === InboxState.Open)
+      if (current.kind === InboxKind.Flag && current.state === InboxState.Open) {
+        // Throwing keeps the flag open, as it does for any flag whose answer cannot be acted on.
+        const stuck = current.detail?.[REDELIVER_KEY];
+        if (typeof stuck === 'string') service.redeliver(stuck as InboxItemId);
         deps.onFlagAnswer?.(current, answer);
+      }
       if (current.kind === InboxKind.Check && current.state === InboxState.Open) {
         assertKnownChoice(current, answer);
         // Send Back is the builder's note to the agent; without one the agent has nothing to act on.

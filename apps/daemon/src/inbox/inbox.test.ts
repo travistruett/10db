@@ -2621,6 +2621,50 @@ describe('permission broker in a sandboxed lane', () => {
         expect(warnings[0]?.fields).toMatchObject({ cardId: betaCard.id });
       });
 
+      it("raises a card for the builder when delivering the other lane's answer fails after it committed, and retries delivery when they answer it", async () => {
+        const failing: { id?: string } = {};
+        inbox = createInboxService({
+          state: {
+            db: state.db,
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx) as { id?: string; state?: string } | null;
+                // The write that closes the other lane's card after its answer was handed on.
+                if (
+                  failing.id !== undefined &&
+                  result?.id === failing.id &&
+                  result.state === 'RESOLVED'
+                )
+                  throw new Error('disk full');
+                return result as never;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: silentLogger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.id = betaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        await first;
+        // Its answer is stored but it never closed: it is no longer open, so a flag says so.
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'DELIVERING' });
+        const flags = openCards().filter((c) => c.kind === 'flag');
+        expect(flags).toHaveLength(1);
+        expect(flags[0]).toMatchObject({ projectId: b.project.id });
+        expect(flags[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+        // The cause is gone: answering the flag delivers the answer again.
+        delete failing.id;
+        const flag = flags[0];
+        if (flag === undefined) throw new Error('no flag');
+        inbox.answer(flag.id, { choice: flag.options[0]?.label ?? '' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'RESOLVED' });
+        expect(openCards()).toEqual([]);
+      });
+
       it("still returns the builder's answered card when listing the covered cards fails, leaving them open and logging it", async () => {
         const warnings: { fields: unknown; message: unknown }[] = [];
         const logger = {
