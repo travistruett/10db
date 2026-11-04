@@ -422,8 +422,10 @@ export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalI
 }
 
 /**
- * Detaches the questions stored under a task a plan removal cancels, so none points at a dead task.
- * Each stays stored and linked, now about nothing.
+ * Detaches the questions stored under a task that is being cancelled, so none points at a dead task.
+ * Each stays stored and linked, now about nothing. Every route that sets a task to Cancelled goes
+ * through it (`retireTask` in tasks.ts): a plan removal (a converted remove_task), the Board's
+ * Remove, Close of a failed or finished task, and Cancel task on a refused start card.
  */
 export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): void {
   ctx.tx

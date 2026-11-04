@@ -34,7 +34,6 @@ import {
   insertLandingGroup,
   insertPrinciple,
   insertShapeLink,
-  detachShapeQuestionsOfTask,
   insertShapeQuestion,
   insertSource,
   insertTask,
@@ -509,9 +508,8 @@ export function convertProposals(
   }
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {
     const removal: PlanRemoval = ShapeProposalBody.remove_task.parse(row.body);
+    // Cancelling detaches the questions stored under the task, so none points at it.
     cancelTask(ctx, removal.taskId);
-    // A question stored under the task must not keep pointing at it once it is cancelled.
-    detachShapeQuestionsOfTask(ctx, removal.taskId);
     made.set(row.id, { taskIds: [removal.taskId] });
   }
 
