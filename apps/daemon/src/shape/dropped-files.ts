@@ -189,8 +189,8 @@ export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<strin
 /**
  * The ids of the images among `shown` (the files a message names) that reach Claude as a path alone
  * when `sent` (the files whose images the message carries) go as `inlineImageIds` says after `spent`
- * bytes sent earlier: an image over the per-image cap, or one of `sent` the caps left out. A shown image
- * outside `sent` was sent earlier.
+ * bytes sent earlier: an image over the per-image cap or the API's pixel limit, or one of `sent` the caps
+ * left out. Any other shown image outside `sent` was sent earlier.
  */
 export function pathImageIds(
   shown: readonly FileSize[],

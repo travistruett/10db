@@ -300,13 +300,16 @@ else is refused on the input with the reason. Files are copied into the conversa
 data directory and kept as long as the conversation. Images reach the session as image content blocks; other
 files as a line naming the path, which the session reads with `Read`. **(spec's call: the limits)**
 
-The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
-image, so one oversize block would end every later turn. An image over 2 MiB, past 6 MiB of images in one
-message, or past 18 MiB of pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request
-about 6 MB), therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes
-itself. The conversation total is one budget for every picture a resumed request resends that the daemon sends
-itself: it counts each image already told that fits the 2 MiB cap, an upper bound on what went inline, and each
-screen kept (§5.5), and `see_screen` refuses a picture that would pass it. Twelve screens at their 1.5 MB most
+The API refuses an image over about 5 MB, an image over 8000 px on a side however few bytes it takes, and a
+request over 32 MB, and a resumed session resends every earlier image, so one oversize block would end every
+later turn. An image over 2 MiB, over 8000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
+pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request about 6 MB), therefore goes
+as a path line marked "too large to show inline; Read it", which `Read` resizes itself. The daemon reads the
+pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose header can't be read stays inline. The
+conversation total is one budget for every picture a resumed request resends that the daemon sends itself: it
+counts each image already told that fits the 2 MiB cap, an upper bound on what went inline since it includes an
+image sent as a path for its pixels, and each screen kept (§5.5), and `see_screen` refuses a picture that would
+pass it. Twelve screens at their 1.5 MB most
 fit inside the total, so it only limits them beside dropped images. A session started fresh (from a digest)
 resends no earlier block, so its first message starts at zero; later turns count the whole conversation again,
 which is the same upper bound. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and
