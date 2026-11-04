@@ -32,7 +32,7 @@ const OPTIONS: readonly InboxOption[] = [
   {
     label: BatchCardChoice.ShipWithout,
     description:
-      'Reverts its commits on the batch branch in one revert commit, then ships the rest. If the revert conflicts, nothing ships and a card names the files. Needs another finished task',
+      'Reverts its commits on the batch branch in one revert commit, then ships the finished tasks. Every other task that failed in this batch is left out too, so no rejected commits ship. If the revert conflicts, nothing ships and a card names the files. Needs another finished task',
   },
   {
     label: BatchCardChoice.Later,
@@ -57,8 +57,9 @@ export function batchCardFields(row: {
  * unfinished, in an open or a failed batch, or Retry in a batch that shipped) throws, so the card
  * stays open and the builder sees why. Ship anyway never reopens a failed batch: the option
  * promises a ship, and reopening is the strip's Retry. Ship anyway puts the failed task's commits
- * in the pull request; Ship without it reverts them first and refuses on the same grounds
- * (`Shipper.shipWithout`).
+ * in the pull request; Ship without it reverts them, and those of every other failed task of the
+ * batch, first, and refuses on the same grounds (`Shipper.shipWithout`). A card whose revert stopped
+ * (`leftOutCards`) carries this card's detail and choices, so the builder answers it the same way.
  */
 export function createBatchCardAnswers(deps: {
   /** Retries the workstream; `note` is the builder's, for the session the retry sends the work to. */

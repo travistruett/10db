@@ -123,8 +123,10 @@ the change while the project has unfinished work), and 10db instead:
    has a 30-minute limit; a fetch or a `gh` call gets 2 minutes. Merging stays with you.
 
 Every refusal (a dirty checkout, the wrong branch, no `origin`, `gh` missing or signed out, a failed gate, a
-rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry and
-Ship anyway, which ships the batch without that task once the rest is done or cancelled. A task's drawer on the
+rejected push) is an inbox card that says what to fix; nothing is pushed. A failed task's card offers Retry, Ship
+anyway, which ships the batch once the rest is done or cancelled with the failed task's commits still in the pull
+request, and Ship without it, which first reverts the commits of every failed task of the batch in one commit
+and ships the finished tasks; if the revert conflicts, nothing ships and a card names the files. A task's drawer on the
 board shows its branch and pull request, why the batch wasn't shipped, and offers Retry (when the batch failed),
 Ship anyway (when a task failed) and Abandon, which keeps the branch and cancels its unfinished tasks once
 nothing on it is running. Once a pull request merges, 10db deletes the task's local branch; a pull request

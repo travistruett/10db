@@ -104,6 +104,26 @@ describe('revertCommits', () => {
     expect(rawGit('rev-parse', 'HEAD')).toBe(before);
   });
 
+  it('writes nothing and names the files when undoing a commit would bring conflict markers back', async () => {
+    const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
+    commitFiles({ 'src/merged.txt': marked }, 'the base merge left markers');
+    const resolved = commitFiles({ 'src/merged.txt': 'a\nb\n' }, 'resolve the markers');
+    const before = rawGit('rev-parse', 'HEAD');
+
+    expect(await revert([resolved])).toEqual({ kind: 'markers', paths: ['src/merged.txt'] });
+    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
+    expect(readFileSync(join(repo.path, 'src/merged.txt'), 'utf8')).toBe('a\nb\n');
+  });
+
+  it('reverts a commit in a file that held markers before it and still does', async () => {
+    const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
+    commitFiles({ 'src/fixture.txt': marked }, 'a fixture that shows a conflict');
+    const edit = commitFiles({ 'src/fixture.txt': `${marked}more\n` }, 'alpha edits it');
+
+    expect(await revert([edit])).toMatchObject({ kind: 'reverted', paths: ['src/fixture.txt'] });
+    expect(readFileSync(join(repo.path, 'src/fixture.txt'), 'utf8')).toBe(marked);
+  });
+
   it('refuses a branch the checkout is not on, and a commit that is not on the branch', async () => {
     const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
     await expect(

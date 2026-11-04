@@ -1,27 +1,30 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ConflictError, InboxKind, mintId } from '@10db/contracts';
+import { ConflictError, InboxKind, mintId, type BatchId, type WorkstreamId } from '@10db/contracts';
 import {
   getBatch,
   getInboxItem,
   getWorkstream,
   insertToolOp,
   listWorkstreams,
+  setTaskStatus,
+  setWorkstreamNotice,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
-import { retryWorkstream } from '../team';
+import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
 import { batchCardFields, createBatchCardAnswers } from './index';
+import { leftOutNotices } from './notices';
 
 let h: DeliveryHarness;
 let inbox: InboxService;
 let retries: { id: string; note: string | undefined }[];
-beforeEach(() => {
-  retries = [];
-  h = createDeliveryHarness();
-  inbox = createInboxService({
+
+/** The inbox the builder answers through, with the card's answers wired to `h`. */
+function answering(): InboxService {
+  return createInboxService({
     state: h.state,
     onParkedAnswer: () => undefined,
     onFlagAnswer: createBatchCardAnswers({
@@ -32,10 +35,88 @@ beforeEach(() => {
       shipper: h.shipper,
     }),
   });
+}
+
+beforeEach(() => {
+  retries = [];
+  h = createDeliveryHarness();
+  inbox = answering();
 });
 afterEach(() => {
   h.close();
 });
+
+/** Records `path` as a commit `workstreamId` made through the commit tool. */
+function commitAs(workstreamId: WorkstreamId, path: string, content: string): string {
+  const sha = h.commit(path, content);
+  h.state.write((w) => {
+    insertToolOp(w, {
+      workstreamId,
+      sessionId: mintId('Session'),
+      opId: `op-${path}-${sha}`,
+      tool: 'commit',
+      result: { sha, alreadyCommitted: false },
+    });
+  });
+  return sha;
+}
+
+/** The failed card the runner raises for a run in a batch. */
+function failedCard(workstreamId: WorkstreamId, batchId: BatchId) {
+  const fields = batchCardFields({ id: workstreamId, batchId });
+  if (!fields) throw new Error('a batch member gets card actions');
+  return inbox.flag({
+    projectId: h.project.id,
+    workstreamId,
+    title: 'Workstream failed',
+    body: 'The review step rejected the work',
+    ...fields,
+  });
+}
+
+/** A batch of Alpha and Beta, both failed with commits, and Gamma, done. */
+async function twoFailedInBatch() {
+  const tasks = [h.addTask('Alpha'), h.addTask('Beta'), h.addTask('Gamma', { areas: ['ui'] })];
+  const started = h.only(
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: tasks.map((t) => t.id) }),
+  );
+  await h.jobs.idle();
+  const [a, b, c] = listWorkstreams(h.store.db, { batchId: started.id });
+  if (!a || !b || !c) throw new Error('three workstreams expected');
+  commitAs(a.id, 'src/api/alpha.txt', 'alpha\n');
+  commitAs(b.id, 'src/api/beta.txt', 'beta\n');
+  h.commit('src/ui/gamma.txt');
+  h.settle(c.id, 'DONE');
+  h.settle(a.id, 'FAILED');
+  h.settle(b.id, 'FAILED');
+  return { batchId: started.id, alpha: a.id, beta: b.id, betaTask: b.taskId };
+}
+
+/**
+ * Alpha finished with a commit and the shipping gate sent it to merge in the same batch, where that
+ * second run failed at its limit, having committed `merged`. Beta is done.
+ */
+async function failedInItsMerge(merged: (run: WorkstreamId) => void) {
+  const alpha = h.addTask('Alpha');
+  const other = h.addTask('Beta', { areas: ['ui'] });
+  const started = h.only(
+    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [alpha.id, other.id] }),
+  );
+  await h.jobs.idle();
+  const [a, b] = listWorkstreams(h.store.db, { batchId: started.id });
+  if (!a || !b) throw new Error('two workstreams expected');
+  commitAs(a.id, 'src/api/alpha.txt', 'alpha\n');
+  h.commit('src/ui/beta.txt');
+  h.settle(a.id, 'DONE');
+  const merge = h.state.write((w) => {
+    setTaskStatus(w, alpha.id, 'open');
+    return insertPlannedWorkstream(w, alpha.id, planForStart(w.tx, alpha.id), started.id);
+  });
+  merged(merge.id);
+  h.settle(merge.id, 'FAILED');
+  h.settle(b.id, 'DONE');
+  return { batchId: started.id, merge: merge.id, card: failedCard(merge.id, started.id) };
+}
 
 /**
  * A batch of Alpha (failed, with its card) and Beta (left in `beta`), with one commit on its branch.
@@ -101,6 +182,7 @@ describe('the failed workstream card', () => {
     const describe = (label: string) => card.options.find((o) => o.label === label)?.description;
     expect(describe('Ship anyway')).toMatch(/its commits will be in the pull request/i);
     expect(describe('Ship without it')).toMatch(/reverts its commits on the batch branch/i);
+    expect(describe('Ship without it')).toMatch(/every other task that failed .* is left out too/i);
   });
 
   it('retries the workstream, reopening a failed batch', async () => {
@@ -239,6 +321,188 @@ describe('the failed workstream card', () => {
       const blocked = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
       expect(blocked.body).toContain('- src/api/alpha.txt');
       expect(blocked.body).toMatch(/uncommitted/i);
+    });
+
+    it('offers Ship without it again on the card of a stopped revert, which ships with no failed-task file', async () => {
+      const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+      writeFileSync(join(h.repo, 'src/api/alpha.txt'), 'edited\n');
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+      const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+      expect(stopped.options.map((o) => o.label)).toEqual([
+        'Retry',
+        'Ship anyway',
+        'Ship without it',
+        'Later',
+      ]);
+      expect(stopped.body).not.toMatch(/ship again/i);
+      expect(stopped.body).toMatch(/answer Ship without it/);
+
+      writeFileSync(join(h.repo, 'src/api/alpha.txt'), 'alpha\n');
+      expect(inbox.answer(stopped.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.origin$('diff', '--name-only', 'main', shipped.branch ?? '')).toBe(
+        'src/ui/beta.txt',
+      );
+    });
+
+    it('says to answer it again on the conflict card too, never to ship again', async () => {
+      const { card } = await failedInBatch('DONE', { 'src/api/shared.txt': 'alpha\n' });
+      h.commit('src/api/shared.txt', 'alpha\nbeta\n');
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+      const conflict = h.only(h.cards().filter((c) => c.title.includes('conflict')));
+      expect(conflict.options.map((o) => o.label)).toContain('Ship without it');
+      expect(conflict.body).not.toMatch(/ship again/i);
+    });
+
+    it('leaves out every failed task in one revert commit naming them, and closes the other’s card', async () => {
+      const { batchId, alpha, beta } = await twoFailedInBatch();
+      const alphaCard = failedCard(alpha, batchId);
+      const betaCard = failedCard(beta, batchId);
+
+      expect(inbox.answer(alphaCard.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      const branch = shipped.branch ?? '';
+      expect(h.origin$('diff', '--name-only', 'main', branch)).toBe('src/ui/gamma.txt');
+      const subjects = h
+        .origin$('log', '--format=%s', `main..${branch}`)
+        .split('\n')
+        .filter((s) => s.startsWith('revert'));
+      expect(subjects).toEqual(['revert: leave out "Alpha", "Beta"']);
+      for (const id of [alpha, beta])
+        expect(getWorkstream(h.store.db, id).notice).toMatchObject({
+          key: 'left-out',
+          line: 'Left out of the pull request: its commit was reverted',
+        });
+      const body = h.gh.body(shipped.prUrl ?? '');
+      expect(body).toContain('- Alpha (failed, left out of this pull request)');
+      expect(body).toContain('- Beta (failed, left out of this pull request)');
+      expect(getInboxItem(h.store.db, betaCard.id).state).toBe('CANCELLED');
+    });
+
+    it('leaves out a superseded attempt’s commits with the failed task’s, and clears its notice', async () => {
+      const { batchId, alpha, betaTask } = await twoFailedInBatch();
+      h.state.write((w) => {
+        insertPlannedWorkstream(w, betaTask, planForStart(w.tx, betaTask), null);
+      });
+      h.shipper.checkBatch(batchId);
+      expect(h.only(getBatch(h.store.db, batchId).notices).key).toBe('superseded-attempt');
+
+      inbox.answer(failedCard(alpha, batchId).id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.origin$('diff', '--name-only', 'main', shipped.branch ?? '')).toBe(
+        'src/ui/gamma.txt',
+      );
+      expect(shipped.notices).toEqual([]);
+    });
+
+    it('reverts the commits of every run the task made in the batch, its merge run’s too', async () => {
+      const { card, batchId } = await failedInItsMerge((run) => {
+        commitAs(run, 'src/api/alpha-merge.txt', 'merge\n');
+      });
+
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      expect(h.origin$('diff', '--name-only', 'main', shipped.branch ?? '')).toBe(
+        'src/ui/beta.txt',
+      );
+    });
+
+    it('ships nothing and raises a card when the revert would bring conflict markers back', async () => {
+      const { card, batchId, merge } = await failedInItsMerge((run) => {
+        h.commit('src/api/merged.txt', '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n');
+        commitAs(run, 'src/api/merged.txt', 'a\nb\n');
+      });
+      const tip = h.git$('rev-parse', 'HEAD');
+
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+      expect(h.gh.prCreates()).toEqual([]);
+      expect(h.git$('rev-parse', 'HEAD')).toBe(tip);
+      expect(getWorkstream(h.store.db, merge).notice).toBeNull();
+      const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+      expect(stopped.title).toBe('Alpha was not left out: its commits resolved conflict markers');
+      expect(stopped.body).toContain('- src/api/merged.txt');
+      expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+    });
+
+    it('lets a batch reopened after a left-out run ship by itself once the rest is done', async () => {
+      const { batchId, failed } = await failedInBatch('WAITING_HUMAN');
+      h.state.write((w) => setWorkstreamNotice(w, failed, leftOutNotices.nothingToRevert()));
+      const beta = listWorkstreams(h.store.db, { batchId }).find(
+        (w) => w.state === 'WAITING_HUMAN',
+      );
+      if (!beta) throw new Error('Beta waits');
+
+      h.settle(beta.id, 'DONE');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+
+      expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+    });
+
+    it('takes the left-out notice off a run that is retried, so the pull request counts its work', async () => {
+      let gateFails = true;
+      h.close();
+      h = createDeliveryHarness(
+        {},
+        {
+          shipGate: (gate) => ({
+            run: async (request) => {
+              const result = await gate.run(request);
+              return gateFails ? { ...result, exitCode: 1 } : result;
+            },
+          }),
+        },
+      );
+      inbox = answering();
+      const { card, batchId, failed } = await failedInBatch('DONE', {
+        'src/api/alpha.txt': 'alpha\n',
+      });
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
+      expect(getWorkstream(h.store.db, failed).notice?.key).toBe('left-out');
+
+      gateFails = false;
+      retryWorkstream(h.state, failed);
+      expect(getWorkstream(h.store.db, failed).notice).toBeNull();
+
+      h.settle(failed, 'DONE');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+      const shipped = getBatch(h.store.db, batchId);
+      expect(shipped.state).toBe('SHIPPED');
+      const body = h.gh.body(shipped.prUrl ?? '');
+      expect(body).toContain('### Alpha');
+      expect(body).not.toContain('left out');
+    });
+
+    it('never calls a finished run left out, whatever notice it still carries', async () => {
+      const { batchId, failed } = await failedInBatch('DONE');
+      h.state.write((w) => setWorkstreamNotice(w, failed, leftOutNotices.nothingToRevert()));
+      h.settle(failed, 'DONE');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+
+      const body = h.gh.body(getBatch(h.store.db, batchId).prUrl ?? '');
+      expect(body).toContain('### Alpha');
+      expect(body).not.toContain('left out');
     });
 
     it('refuses while other work is unfinished, keeping the card open', async () => {

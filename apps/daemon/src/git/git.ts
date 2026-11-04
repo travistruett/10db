@@ -194,6 +194,8 @@ type CommitsReverted =
   | { readonly kind: 'nothing' }
   /** Later commits changed these files in ways that can't be undone cleanly; nothing was written. */
   | { readonly kind: 'conflict'; readonly paths: readonly string[] }
+  /** Undoing the commits would put conflict markers back in these files; nothing was written. */
+  | { readonly kind: 'markers'; readonly paths: readonly string[] }
   /** Uncommitted changes are in these files, which the revert writes; nothing was written. */
   | { readonly kind: 'blocked'; readonly changed: readonly string[] };
 
@@ -383,8 +385,10 @@ export interface Git {
    * Undoes `shas`, commits on `branch`, in one commit on it with `message`: each is reverted with a
    * three-way merge of its parent, newest first, so a later commit that built on one conflicts instead
    * of being overwritten. `repo` must have `branch` checked out. The files follow through
-   * `read-tree -m -u`, which keeps uncommitted changes elsewhere. A conflict, or an uncommitted change
-   * in a file the revert writes, writes nothing. A commit not on the branch, or a merge, is refused.
+   * `read-tree -m -u`, which keeps uncommitted changes elsewhere. A conflict, a file that would hold
+   * conflict markers it doesn't hold now (a merge session's commit resolved them), or an uncommitted
+   * change in a file the revert writes, writes nothing. A commit not on the branch, or a merge, is
+   * refused.
    */
   revertCommits(input: {
     readonly repo: string;
@@ -2087,6 +2091,14 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\0')
         .filter(Boolean)
         .sort();
+      const marked: string[] = [];
+      for (const path of paths) {
+        const after = await mergeableText(c, head, path).catch(() => null);
+        if (after === null || !hasConflictMarkers(after)) continue;
+        const before = await mergeableText(c, tip, path).catch(() => null);
+        if (before === null || !hasConflictMarkers(before)) marked.push(path);
+      }
+      if (marked.length > 0) return { kind: 'markers', paths: marked };
       const written = new Set(paths);
       const changed = (await changes(c)).filter((path) => written.has(path));
       if (changed.length > 0) return { kind: 'blocked', changed };

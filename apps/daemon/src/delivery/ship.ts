@@ -38,6 +38,7 @@ import {
   listPermissionRules,
   listToolOpResults,
   listWorkstreams,
+  openItemsForWorkstream,
   patchBatch,
   patchWorkstream,
   releaseClaims,
@@ -60,10 +61,11 @@ import {
   type RequiredChecks,
 } from '../github';
 import { insertPlannedWorkstream } from '../team';
-import { raiseGateHostCards } from '../inbox';
+import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
 import { gateNote, type BaseUpdate, type BaseUpdates } from './base-update';
+import { BATCH_CARD_DETAIL } from './batch-card';
 import { settleBranch } from './branch-cleanup';
 import {
   autoMergeOffKey,
@@ -184,11 +186,12 @@ export interface Shipper {
   /** A failed member's card: ships an open or failed batch whose work is settled, and never reopens one. */
   shipAnyway(batchId: BatchId): BatchDto;
   /**
-   * A failed member's card: reverts that run's commits on the batch's branch in one commit that names
-   * its task, marks the run as left out of the pull request, and ships the rest. Refused like
-   * `shipAnyway` while work is unfinished, and when no other task finished. The revert runs in the
-   * ship queue: one that conflicts, or meets uncommitted changes, ships nothing, leaves the branch
-   * and the batch as they were, and raises a card naming the files.
+   * A failed member's card: reverts the commits of that run's task, and of every other member that
+   * failed, on the batch's branch in one commit that names them, marks those runs as left out of the
+   * pull request, and ships the finished tasks. Refused like `shipAnyway` while work is unfinished,
+   * and when no task finished. The revert runs in the ship queue: one that conflicts, would bring
+   * conflict markers back, or meets uncommitted changes, ships nothing, leaves the branch and the
+   * batch as they were, and raises a card naming the files that can answer Ship without it again.
    */
   shipWithout(batchId: BatchId, workstreamId: WorkstreamId): BatchDto;
   abandon(batchId: BatchId): BatchDto;
@@ -231,6 +234,14 @@ function superseded(db: DbReader, member: WorkstreamDto): boolean {
 /** Whether the attempt committed through the commit tool, so its commits may be on the batch's branch. */
 function committed(db: DbReader, member: WorkstreamDto): boolean {
   return hasToolOp(db, member.id, McpToolName.Commit);
+}
+
+/**
+ * Whether Ship without it left this run out of the batch's pull request. Only a failed run is: one
+ * that ran again carries its work to the pull request whatever its notice says.
+ */
+function leftOut(member: WorkstreamDto): boolean {
+  return member.state === WorkstreamState.Failed && member.notice?.key === LEFT_OUT_NOTICE_KEY;
 }
 
 /**
@@ -719,7 +730,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         description: task.description,
         acceptanceCriteria: task.acceptanceCriteria,
         state: w.state,
-        leftOut: w.notice?.key === LEFT_OUT_NOTICE_KEY,
+        leftOut: leftOut(w),
       };
     });
     const sha = await deps.git.head(target.checkout);
@@ -1192,7 +1203,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (batch.state !== BatchState.Open) return false;
       const current = members(w.tx, batchId);
       const left = current
-        .filter((m) => superseded(w.tx, m) && committed(w.tx, m))
+        .filter((m) => superseded(w.tx, m) && committed(w.tx, m) && !leftOut(m))
         .map((m) => m.taskTitle);
       // Commits on the branch are the heavier warning, so they take the notice's one slot.
       const refused = current
@@ -1202,7 +1213,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
       else if (refused.length > 0)
         setBatchNotice(w, batchId, supersededNotices.refusedStart(refused));
       else clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
-      if (shipReadiness(current.map((m) => m.state)) !== ShipReadiness.Ready) return false;
+      // The builder chose to ship without a left-out run, and its commits are gone: it holds nothing up.
+      const held = current.filter((m) => !leftOut(m)).map((m) => m.state);
+      if (shipReadiness(held) !== ShipReadiness.Ready) return false;
       transitionBatch(w, batchId, {
         to: BatchState.Shipping,
         reason: 'every workstream is done or cancelled',
@@ -1278,20 +1291,25 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * The commits a run made through the commit tool that are still on the batch's branch, oldest
-   * first. Commits on a shared branch mix in other lanes', so the run's own tool-op records are what
-   * say which are its.
+   * The commits a failed run's task made through the commit tool that are still on the batch's
+   * branch, oldest first. Commits on a shared branch mix in other lanes', so the task's own tool-op
+   * records are what say which are its. They are read for every run of the task in the batch, because
+   * a finished task the shipping gate sends to merge gets a second run there, and a failure of that
+   * one is a failure of all of the task's work.
    */
   async function commitsOf(
+    batchId: BatchId,
     member: WorkstreamDto,
     checkout: string,
     branch: string,
   ): Promise<string[]> {
     const made: string[] = [];
-    for (const result of listToolOpResults(db, member.id, McpToolName.Commit)) {
-      const parsed = McpToolOutputs.commit.safeParse(result);
-      if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
-    }
+    const runs = listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
+    for (const run of runs)
+      for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
+        const parsed = McpToolOutputs.commit.safeParse(result);
+        if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
+      }
     const kept: string[] = [];
     for (const sha of made)
       if (
@@ -1303,10 +1321,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
-   * Ship without a failed run (`Shipper.shipWithout`), in the ship queue: its commits are undone in
-   * one commit, the run gets its notice and the batch moves to shipping in one write, and the ship
-   * then runs as any other. Nothing moves until the revert has worked; a revert that cannot is a card
-   * and the batch stays as it was.
+   * Ship without a failed run (`Shipper.shipWithout`), in the ship queue. The commits of every member
+   * that failed are undone in one commit, so one stopped revert leaves the branch whole and no other
+   * failed task's commits ride along with the finished work. Each run gets its notice and the batch
+   * moves to shipping in one write, which also closes the other runs' failed cards, and the ship then
+   * runs as any other. Nothing moves until the revert has worked; a revert that cannot is a card and
+   * the batch stays as it was.
    */
   async function leaveOut(
     batchId: BatchId,
@@ -1326,7 +1346,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
       deps.holdShips?.()
     )
       return;
-    const title = member.taskTitle;
+    const failed = members(db, batchId).filter(
+      (m) => m.state === WorkstreamState.Failed && !leftOut(m),
+    );
+    // An earlier Ship without it may have left the answered run out already; its gate failed since.
+    const titles = failed.length > 0 ? failed.map((m) => m.taskTitle) : [member.taskTitle];
+    const named = titles.map((t) => `"${t}"`).join(', ');
+    const attempt = { workstreamId, titles };
     const stopWith = (card: Card): void => {
       deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
       raise(deps.inbox, batch.projectId, card);
@@ -1339,7 +1365,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (stopped()) return;
         if (whole === 'refused') {
           stopWith(
-            leftOutCards.failed(batch, title, "the batch's worktree could not be made whole"),
+            leftOutCards.failed(batch, attempt, "the batch's worktree could not be made whole"),
           );
           return;
         }
@@ -1349,52 +1375,70 @@ export function createShipper(deps: ShipperDeps): Shipper {
         stopWith(
           leftOutCards.failed(
             batch,
-            title,
+            attempt,
             `The checkout is on ${current ?? 'a detached HEAD'}, the batch branch is ${branch ?? '(not cut)'}`,
           ),
         );
         return;
       }
-      const shas = await commitsOf(member, checkout, branch);
-      let notice = leftOutNotices.nothingToRevert();
+      const commits: { readonly run: WorkstreamDto; readonly shas: readonly string[] }[] = [];
+      for (const run of failed)
+        commits.push({ run, shas: await commitsOf(batchId, run, checkout, branch) });
+      const shas = commits.flatMap((c) => c.shas);
+      let revert: string | null = null;
       if (shas.length > 0) {
         const reverted = await deps.git.revertCommits({
           repo: checkout,
           branch,
           shas,
           message: [
-            `revert: leave out "${title}"`,
-            `10db reverted ${String(shas.length)} commit${shas.length === 1 ? '' : 's'} of the task "${title}", which failed in this batch, because the builder chose Ship without it:`,
-            shas.map((sha) => `- ${sha}`).join('\n'),
+            `revert: leave out ${named}`,
+            `10db reverted ${String(shas.length)} commit${shas.length === 1 ? '' : 's'} of ${named}, which failed in this batch, because the builder chose Ship without it:`,
+            commits.flatMap((c) => c.shas.map((sha) => `- ${sha} (${c.run.taskTitle})`)).join('\n'),
           ].join('\n\n'),
         });
         if (stopped()) return;
         if (reverted.kind === 'conflict') {
-          stopWith(leftOutCards.conflict(batch, title, reverted.paths));
+          stopWith(leftOutCards.conflict(batch, attempt, reverted.paths));
+          return;
+        }
+        if (reverted.kind === 'markers') {
+          stopWith(leftOutCards.markers(batch, attempt, reverted.paths));
           return;
         }
         if (reverted.kind === 'blocked') {
-          stopWith(leftOutCards.blocked(batch, title, reverted.changed));
+          stopWith(leftOutCards.blocked(batch, attempt, reverted.changed));
           return;
         }
-        if (reverted.kind === 'reverted')
-          notice = leftOutNotices.reverted(shas.length, reverted.head);
+        if (reverted.kind === 'reverted') revert = reverted.head;
       }
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
-        setWorkstreamNotice(w, workstreamId, notice);
+        for (const { run, shas: own } of commits)
+          setWorkstreamNotice(
+            w,
+            run.id,
+            revert !== null && own.length > 0
+              ? leftOutNotices.reverted(own.length, revert)
+              : leftOutNotices.nothingToRevert(),
+          );
+        // Every failed member's commits are gone now, so no attempt's are left for its notice to warn of.
+        clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
+        for (const run of failed)
+          for (const item of openItemsForWorkstream(w.tx, run.id))
+            if (item.detail?.[BATCH_CARD_DETAIL] !== undefined) withdrawCard(w, item.id);
         transitionBatch(w, batchId, {
           to: BatchState.Shipping,
           patch: { failure: null },
-          reason: `shipped without "${title}" by the builder`,
+          reason: `shipped without ${named} by the builder`,
         });
         return true;
       });
       if (moved) resume(batchId);
     } catch (error) {
       if (stopped()) return;
-      stopWith(leftOutCards.failed(batch, title, detailOf(error)));
+      stopWith(leftOutCards.failed(batch, attempt, detailOf(error)));
     }
   }
 
@@ -1822,7 +1866,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         throw new ConflictError(`That run did not fail in batch "${batch.title}"`);
       const unfinished = unfinishedWork(batch);
       if (unfinished) throw unfinished;
-      if (!all.some((m) => m.id !== workstreamId && m.state === WorkstreamState.Done))
+      if (!all.some((m) => m.state === WorkstreamState.Done))
         throw new ConflictError(
           `Nothing would be left to ship: no other task in batch "${batch.title}" finished`,
         );
