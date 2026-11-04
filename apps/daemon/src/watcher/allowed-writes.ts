@@ -174,9 +174,13 @@ function throughSymlink(root: string, path: string): boolean {
  * One look at every directory between `root` (excluded, see `throughSymlink`) and `path`: 'link' when one is
  * a symlink, otherwise a string naming each one's device, inode and change time to the nanosecond (empty
  * when there is none), or null when one is missing. The change time moves when the directory is renamed,
- * recreated, or has an entry added or removed, and no process can set it back, so two equal strings mean the
- * same directories were in place the whole time between the two looks. A directory that can't be looked at
- * throws: two refused looks prove nothing about what was there, so they must not read as two equal looks.
+ * swapped with a link, recreated, or has an entry added or removed, and no process can set it back, so two
+ * equal strings mean none of those happened to these directories between the two looks. That was observed on
+ * APFS (macOS, the data volume), including `renamex_np(RENAME_SWAP)` of a real directory with a symlink: each
+ * swap moved the directory's change time, in both directions, and left its modification time alone. Other
+ * filesystems were not checked, and the daemon does not check which filesystem a checkout is on. A directory
+ * that can't be looked at throws: two refused looks prove nothing about what was there, so they must not read
+ * as two equal looks.
  */
 function lookAtAncestors(root: string, path: string): string | null {
   const rel = relative(root, path);
@@ -208,17 +212,18 @@ function lookAtAncestors(root: string, path: string): string | null {
  * (`before`, with the device, inode and change time of each), after the read, and once more after the `lstat`
  * of the path, and the answer is 'yes' only when no look saw a link and every look saw the same. A directory
  * that was swapped, renamed away and back, or recreated at any moment in between has another change time
- * however the flips are timed. 'link': a directory above the file is a link. 'moved': the path is gone or
- * names another file (a rename over it is a real write, so the read is tried again), or a directory above it
- * changed.
+ * whatever the timing of the flips, because each such operation moves it and it can't be set back: the
+ * tests run the rename and symlink sequences on the filesystem they run on, and a `renamex_np(RENAME_SWAP)`
+ * of a directory with a symlink, run by hand on APFS, moved the directory's change time on every swap (Node
+ * has no `renamex_np`, so no test here runs it). 'link': a directory above the file is a link. 'moved': the
+ * path is gone or names another file (a rename over it is a real write, so the read is tried again), or a
+ * directory above it changed.
  *
  * The cost: adding or removing an entry in a directory above the file, such as a neighbouring file, also moves
  * its change time, so a neighbour written during the read makes this read 'moved'. `stampOrReason` reads again
  * (STAMP_ATTEMPTS times, each with fresh looks), so a one-off neighbouring write costs a second read and only
  * a directory written to throughout every attempt ends as 'changing'. A directory directly under `root` is
- * checked like any other; the files directly in `root` have no ancestor and are not affected. The change
- * time of a renamed or swapped directory moving on APFS, RENAME_SWAP included, is something to confirm there;
- * the tests here run the rename sequences on the filesystem they run on.
+ * checked like any other; the files directly in `root` have no ancestor and are not affected.
  */
 function descriptorIsAtPath(
   root: string,

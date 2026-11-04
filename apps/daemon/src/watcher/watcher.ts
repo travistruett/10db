@@ -528,12 +528,11 @@ export function createWatcher(deps: {
       }
       // The decision is made against the excused writes and cards as they are now, not as they were before
       // the reads: another checkout's batch may have used a card or excused a write meanwhile.
-      if (keysOf(path).length === 0 && unusedCardsOf(path).length === 0) continue;
-      // A path with no read gained its card during the second round: it fails closed, as an unreadable file.
-      const read = reads.get(path) ?? { reason: 'unreadable' as const };
       const keys = keysOf(path);
       const unusedCards = unusedCardsOf(path);
       if (keys.length === 0 && unusedCards.length === 0) continue;
+      // A path with no read gained its card during the second round: it fails closed, as an unreadable file.
+      const read = reads.get(path) ?? { reason: 'unreadable' as const };
       const stamp = 'stamp' in read ? read.stamp : null;
       if (stamp !== null && keys.some((k) => excusedWrites.get(k)?.stamp === stamp)) {
         allowed.add(path);

@@ -1,9 +1,10 @@
-import { posix } from 'node:path';
+import { isAbsolute, posix, resolve, sep } from 'node:path';
 import { ClaimKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { ENDLESS_FILES, runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
+import { realPathOf } from './paths';
 import { laneReadOnlyWords } from './read-only';
 import { firstUnread } from './unread-commands';
 import { unreadableHazard } from './unread-hazards';
@@ -189,9 +190,33 @@ function pathsOf(word: string): string[] | null {
   return paths;
 }
 
-/** A device that yields bytes forever: a foreground read of one spins until the Bash timeout. */
-function isEndlessFile(path: string): boolean {
-  return ENDLESS_FILES.has(posix.normalize(path));
+/**
+ * Whether a read of `real` may reach a device that yields bytes forever: it is one, or a directory
+ * that holds one (`/dev`, and `/` above it), which a recursive read walks into.
+ */
+function holdsEndlessFile(real: string): boolean {
+  const dir = real.endsWith('/') ? real : `${real}/`;
+  for (const file of ENDLESS_FILES) if (file === real || file.startsWith(dir)) return true;
+  return false;
+}
+
+/**
+ * A device that yields bytes forever, or a tree holding one: a foreground read spins until the Bash
+ * timeout. The path is read from the command's working directory (the lane's copy) as the kernel
+ * opens it, links followed, and with `..` collapsed as text first; either reading naming one counts,
+ * and so does a path that has no single real path, so a spelling is never a way past it.
+ */
+function isEndlessFile(path: string, cwd: string): boolean {
+  if (holdsEndlessFile(posix.normalize(path))) return true;
+  try {
+    const base = resolve(cwd);
+    return [
+      realPathOf(isAbsolute(path) ? path : `${base}${sep}${path}`),
+      realPathOf(resolve(base, path)),
+    ].some(holdsEndlessFile);
+  } catch {
+    return true;
+  }
 }
 
 /**
@@ -216,7 +241,9 @@ function onlyReads(input: GuardInput): boolean {
         const paths = pathsOf(word);
         if (paths === null) return false;
         for (const path of paths) {
-          if (path === '' || path.startsWith('~') || isEndlessFile(path)) return false;
+          if (path === '' || path.startsWith('~') || isEndlessFile(path, input.repoPath)) {
+            return false;
+          }
           if (input.fileAccess.read('LS', { path }) !== 'ok') return false;
         }
       }
