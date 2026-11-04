@@ -134,6 +134,138 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
   });
 
+  describe('when the packages of the copy it merges in do not resolve', () => {
+    const GENERATED = 'packages/contracts/generated';
+
+    /** Main's lockfile names left-pad, which every copy has until `pruned` removes it. */
+    function installable(): void {
+      h.commit('.gitignore', 'node_modules/\n');
+      h.commit(
+        'pnpm-lock.yaml',
+        [
+          'importers:',
+          '  .:',
+          '    dependencies:',
+          '      left-pad:',
+          '        specifier: 1.3.0',
+          '        version: 1.3.0',
+          '',
+        ].join('\n'),
+      );
+      h.git$('push', '-q', 'origin', 'main');
+      mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+    }
+
+    /** No install brings left-pad back now: the copies seeded from the checkout lack it too. */
+    function pruned(batch: BatchDto): void {
+      rmSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+      if (batch.worktreePath !== null)
+        rmSync(join(batch.worktreePath, 'node_modules', 'left-pad'), {
+          recursive: true,
+          force: true,
+        });
+    }
+
+    it.each([
+      ['no check is set', null],
+      ['a gate is set', { gateCommand: 'touch gate-ran' }],
+    ])(
+      'pushes nothing, raises one card naming the install and puts the merge back when %s',
+      async (_name, project) => {
+        installable();
+        const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+        const kept = batch.worktreePath ?? '';
+        h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+        conflicts(batch);
+        const before = onOrigin(batch.branch);
+        if (project !== null) h.state.write((c) => patchProject(c, h.project.id, project));
+        pruned(batch);
+
+        const now = await catchUp(batch);
+
+        expect(onOrigin(batch.branch)).toBe(before);
+        expect(existsSync(join(kept, 'gate-ran'))).toBe(false);
+        // (The kept worktree has its own card, from the ship.)
+        const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
+        expect(card.body).toContain('.: left-pad');
+        expect(card.body).toContain('nothing was pushed');
+        // This merge took no generated directory, so the card speaks of none.
+        expect(card.body).not.toContain('regenerated');
+        expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
+        expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+        expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
+      },
+    );
+
+    it('raises the one card, naming the generated directory it did not regenerate, and puts the merge back', async () => {
+      installable();
+      h.commit(
+        'packages/contracts/package.json',
+        `${JSON.stringify({ name: '@10db/contracts', scripts: { generate: 'tsx generate.ts' } })}\n`,
+      );
+      h.commit(`${GENERATED}/a.schema.json`, '{"v":0}\n');
+      h.git$('push', '-q', 'origin', 'main');
+      const batch = await shipped(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n');
+      h.teammatePush('main', `${GENERATED}/a.schema.json`, '{"v":"theirs"}\n');
+      conflicts(batch);
+      const before = onOrigin(batch.branch);
+      h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
+      pruned(batch);
+      const generators = vi.spyOn(h.ctx.generators, 'regenerate');
+
+      const now = await catchUp(batch);
+
+      expect(generators).not.toHaveBeenCalled();
+      expect(onOrigin(batch.branch)).toBe(before);
+      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+      const card = h.only(h.cards());
+      expect(card.title).toContain("conflicts with main and 10db couldn't update it");
+      expect(card.body).toContain('.: left-pad');
+      expect(card.body).toContain(`${GENERATED}/ could not be regenerated`);
+      expect(now.worktreePath).toBeNull();
+      expect(
+        h.logs
+          .lines()
+          .filter((l) => l['msg'] === 'generated files not regenerated after the base merged'),
+      ).toHaveLength(1);
+    });
+
+    it('raises the card naming the conflict when the base could not be merged at all', async () => {
+      installable();
+      const batch = await shipped('README.md', '# ours\n');
+      h.teammatePush('main', 'README.md', '# theirs\n');
+      conflicts(batch);
+      const before = onOrigin(batch.branch);
+      pruned(batch);
+
+      await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      const card = h.only(h.cards());
+      expect(card.body).toContain("10db couldn't settle them itself");
+      expect(card.body).toContain('README.md');
+      expect(card.body).not.toContain('left-pad');
+    });
+
+    it('raises no card when the branch holds the base, since there is no merge to stop', async () => {
+      installable();
+      const batch = await shipped();
+      conflicts(batch);
+      const before = onOrigin(batch.branch);
+      pruned(batch);
+
+      await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      expect(h.cards()).toEqual([]);
+      expect(
+        h.logs
+          .lines()
+          .filter((l) => l['msg'] === 'pull request conflicts but its branch holds the base'),
+      ).toHaveLength(1);
+    });
+  });
+
   it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
     const batch = await shipped();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
@@ -621,6 +753,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(onOrigin(batch.branch)).toBe(before);
     const card = h.only(h.cards());
     expect(card.title).toContain('conflicts with main');
+    expect(card.body).toContain("10db couldn't settle them itself");
     expect(card.body).toContain('README.md');
     expect(card.body).toContain('Update branch');
     // The card is the one thing said: neither of the two notices stands.
