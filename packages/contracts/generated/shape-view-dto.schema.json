@@ -233,6 +233,9 @@
                       },
                       "superseded": {
                         "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -721,6 +724,9 @@
                       },
                       "superseded": {
                         "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -979,6 +985,9 @@
                       },
                       "superseded": {
                         "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1185,6 +1194,9 @@
                       },
                       "superseded": {
                         "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1365,6 +1377,9 @@
                         "type": "boolean"
                       },
                       "superseded": {
+                        "type": "boolean"
+                      },
+                      "retired": {
                         "type": "boolean"
                       }
                     },
@@ -1578,6 +1593,9 @@
                         "type": "boolean"
                       },
                       "superseded": {
+                        "type": "boolean"
+                      },
+                      "retired": {
                         "type": "boolean"
                       }
                     },
@@ -1800,6 +1818,9 @@
                       },
                       "superseded": {
                         "type": "boolean"
+                      },
+                      "retired": {
+                        "type": "boolean"
                       }
                     },
                     "required": [
@@ -1989,6 +2010,9 @@
                         "type": "boolean"
                       },
                       "superseded": {
+                        "type": "boolean"
+                      },
+                      "retired": {
                         "type": "boolean"
                       }
                     },
