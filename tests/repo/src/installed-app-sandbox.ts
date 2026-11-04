@@ -187,7 +187,8 @@ const STUBS: Record<string, readonly string[]> = {
     'fi',
     'exec /bin/date "$@"',
   ],
-  // Fails the first STUB_MV_UNPACK_FAILS moves of a bundle out of an unpack folder.
+  // Fails the first STUB_MV_UNPACK_FAILS moves of a bundle out of an unpack folder, and with
+  // STUB_MV_NEXT_FAILS the move of a finished stage into place.
   mv: [
     'case "$1" in',
     '  */.unpack.*)',
@@ -195,8 +196,18 @@ const STUBS: Record<string, readonly string[]> = {
     `      ${count('mv-unpack')}`,
     '      [ "$n" -gt "$STUB_MV_UNPACK_FAILS" ] || exit 1',
     '    fi ;;',
+    '  *.next) [ -z "${STUB_MV_NEXT_FAILS:-}" ] || exit 1 ;;',
     'esac',
     'exec /bin/mv "$@"',
+  ],
+  // With STUB_CP_DMG_FAILS, a DMG copied somewhere runs out of room part way, as on a full disk.
+  cp: [
+    'if [ -n "${STUB_CP_DMG_FAILS:-}" ]; then',
+    '  case "$1" in',
+    '    *.dmg) echo partial > "$2/$(basename "$1")"; exit 1 ;;',
+    '  esac',
+    'fi',
+    'exec /bin/cp "$@"',
   ],
   xattr: ['exit 0'],
   // Asks the running app to quit and starts it again. A quit request through osascript (what ⌘Q does)

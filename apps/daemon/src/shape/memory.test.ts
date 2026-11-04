@@ -118,6 +118,14 @@ describe('find_records', () => {
     ]);
   });
 
+  it('finds a record from a whole question, not only its keywords', async () => {
+    const id = decide(c.project.id, 'Which board density?', 'Comfortable rows only');
+    const result = (await findRecordsTool('which board density should we use')) as {
+      records: unknown[];
+    };
+    expect(result.records).toEqual([expect.objectContaining({ id })]);
+  });
+
   it('says so when nothing was decided', async () => {
     expect(await findRecordsTool('anything')).toEqual({ records: [] });
     expect(listShapeMessages(c.store.db, c.shape.id).map((m) => m.body)).toEqual([

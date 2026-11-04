@@ -80,8 +80,8 @@ export interface ScriptInstaller {
   /**
    * Stages main's newest finished build unless it is the build of `running`, or of `skip` when given.
    * When it is the build already staged (`keep`), nothing is fetched, the folder stays, and the
-   * result names it. A failure leaves that folder as well, unless the stage had begun replacing it
-   * or was killed on purpose, and says so with `kept`.
+   * result names it. A failure leaves that folder as well, unless the stage was swapping the new
+   * build in or was killed on purpose, and says so with `kept`.
    */
   stage(
     target: UpdateTarget,
@@ -134,6 +134,8 @@ function readStatus(path: string): ScriptStatus | null {
  */
 export function createScriptInstaller(options: ScriptInstallerOptions): ScriptInstaller {
   const stageDir = join(options.workDir, 'stage');
+  /** Where the staging script puts a new build together, beside the one it may replace. */
+  const stageNextDir = `${stageDir}.next`;
   const stageStatus = join(options.workDir, 'stage-status.json');
   const applyStatus = join(options.workDir, 'status.json');
   const scriptIn = (root: string): string => join(root, 'scripts', 'release', 'install-app.sh');
@@ -160,9 +162,13 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
   let stopped = false;
   let current: StageRun | null = null;
 
-  /** Removes what a stage leaves but its status: its scratch folder, and the build unless it is kept. */
+  /**
+   * Removes what a stage leaves but its status: its scratch folder, a new build it did not finish
+   * (a killed script cleans up nothing), and the staged build unless it is kept.
+   */
   const removeStageFiles = (keepBuild: boolean): void => {
     rmSync(scratchDir, { recursive: true, force: true });
+    rmSync(stageNextDir, { recursive: true, force: true });
     if (!keepBuild) rmSync(stageDir, { recursive: true, force: true });
   };
   /** The same, where a throw would have nowhere to go but the event loop. */
@@ -195,9 +201,9 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
     let cancelled = false;
     /**
-     * Marks a failure that left the kept build: the script removes the commit first and writes it
-     * last, so a folder that still names `keep` is that build, whole. A stage killed on purpose
-     * keeps nothing, as the switch and a quit both forget the staged build.
+     * Marks a failure that left the kept build: the script builds the new one beside it and swaps
+     * it in whole, so a folder that still names `keep` is that build, whole. A stage killed on
+     * purpose keeps nothing, as the switch and a quit both forget the staged build.
      */
     const failedKeeping = (
       failure: Extract<StageResult, { ok: false }>,
@@ -475,6 +481,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
       clear() {
         rmSync(applyStatus, { force: true });
         rmSync(stageStatus, { force: true });
+        rmSync(stageNextDir, { recursive: true, force: true });
         rmSync(stageDir, { recursive: true, force: true });
       },
     },

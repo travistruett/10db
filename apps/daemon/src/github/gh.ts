@@ -469,6 +469,11 @@ export function summariseChecks(rollup: readonly CheckRollupEntry[]): {
   return { checks: rollup.length === 0 ? 'none' : 'passing', failingChecks };
 }
 
+/**
+ * The class of a gh call that exited non-zero: signed out, never reached GitHub, or an error GitHub
+ * answered with. Callers outside this module throw it so the reason survives to the builder.
+ */
+export { failure as ghFailureOf };
 function failure(args: readonly string[], out: GhOutput): GhError {
   if (out.exitCode === AUTH_REQUIRED_EXIT || SIGNED_OUT.test(out.stderr))
     return new GhError(

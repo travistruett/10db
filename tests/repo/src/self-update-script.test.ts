@@ -125,6 +125,23 @@ describe('install-app.sh --stage', () => {
     expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
     expect(existsSync(join(stageDir, 'older.dmg'))).toBe(false);
     expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
+    expect(existsSync(`${stageDir}.next`)).toBe(false);
+  });
+
+  it.each([
+    { name: 'copying the newer one in fails', env: { STUB_CP_DMG_FAILS: '1' } },
+    { name: 'the newer one cannot be moved into place', env: { STUB_MV_NEXT_FAILS: '1' } },
+  ])('leaves the staged build whole, and no second folder, when $name', ({ env }) => {
+    mkdirSync(stageDir, { recursive: true });
+    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
+    writeFileSync(join(stageDir, 'older.dmg'), 'older');
+    const result = stage(env, ['--running', OLDER, '--have', OLDER]);
+    expect(result.status).toBe(1);
+    expect(status()).toMatchObject({ ok: false, mode: 'stage', step: 'stage' });
+    expect(readFileSync(join(stageDir, 'older.dmg'), 'utf8')).toBe('older');
+    expect(existsSync(join(stageDir, DMG_NAME))).toBe(false);
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(OLDER);
+    expect(existsSync(`${stageDir}.next`)).toBe(false);
   });
 
   it('leaves the staged build as it is when the newer one fails its checksum', () => {

@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { GhError, GhFailure } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
 import {
@@ -425,13 +426,57 @@ describe('tick', () => {
   it('says it could not reach GitHub while the check fails, and stops saying it once one succeeds', async () => {
     const update = make();
     expect(update.status().problem).toBeNull();
-    world.head = new Error('offline');
+    world.head = new GhError(GhFailure.Unreachable, 'gh api failed: dial tcp: i/o timeout');
     expect(await update.tick()).toBe('unreachable');
     expect(update.status().problem?.kind).toBe('unreachable');
-    expect(update.status().problem?.message).toMatch(/signed out|offline/i);
+    expect(update.status().problem?.message).toMatch(/offline/i);
     world.head = RUNNING;
     expect(await update.tick()).toBe('current');
     expect(update.status().problem).toBeNull();
+  });
+
+  it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
+    const reasons: string[] = [];
+    for (const error of [
+      new GhError(GhFailure.SignedOut, 'gh is not signed in. Run gh auth login in a terminal.'),
+      new GhError(GhFailure.Unreachable, 'gh api failed (exit 1): error connecting to github.com'),
+      new GhError(GhFailure.Failed, 'gh api failed (exit 1): gh: Not Found (HTTP 404)'),
+    ]) {
+      world.head = error;
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      reasons.push(update.status().problem?.message ?? '');
+    }
+    expect(reasons[0]).toMatch(/signed out/i);
+    expect(reasons[0]).toMatch(/gh auth login/);
+    expect(reasons[1]).toMatch(/offline/i);
+    expect(reasons[1]).not.toMatch(/signed out/i);
+    expect(reasons[2]).toMatch(/HTTP 404/);
+    expect(reasons[2]).not.toMatch(/signed out|offline/i);
+    expect(new Set(reasons).size).toBe(3);
+  });
+
+  it('names the error GitHub answered when the comparison is what failed, and when gh is not installed or times out', async () => {
+    world.ahead = new GhError(GhFailure.Failed, 'gh api failed (exit 1): HTTP 403 rate limit');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/HTTP 403 rate limit/);
+    world.ahead = true;
+    world.head = new GhError(GhFailure.NotInstalled, 'no gh');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/not installed/i);
+    world.head = new GhError(GhFailure.Timeout, 'gh api gave no answer within 30 s');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/no answer/i);
+  });
+
+  it('does not blame sign-in or the network for a failure it cannot classify', async () => {
+    world.head = new Error('something odd');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    const message = update.status().problem?.message ?? '';
+    expect(message).toMatch(/something odd/);
+    expect(message).not.toMatch(/signed out|offline/i);
   });
 
   it('says nothing about GitHub while the switch is off', async () => {
@@ -1047,32 +1092,75 @@ describe('a waiting update drains the factory', () => {
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
     });
 
-    it.each(['download', 'verify-checksum'])(
-      'does not install the older build when the newer one failed at %s, and raises one card',
+    it.each(['download', 'verify-checksum', 'stage'])(
+      'installs the staged build when fetching it again fails at %s with main unchanged, and records no failure',
       async (step) => {
+        // NEW is staged for NEWER while lanes run; nothing is mid-session when the re-stage fails.
         const update = await stagedThenFailsAt(step);
+        world.busy = 0;
+        expect(await update.tick()).toBe('applying');
+        expect(world.stagedKeeping).toEqual([null, NEW]);
+        expect(world.calls).toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+          head: NEWER,
+          commit: NEW,
+        });
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+        expect(cards()).toEqual([]);
+        expect(update.status().problem).toBeNull();
+      },
+    );
+
+    /** NEW is staged for NEWER, then main moves on to a head whose newer build fails at `step`. */
+    async function stagedThenNewerHeadFailsAt(step: string) {
+      const update = await stagedThenFailsAt(step);
+      world.head = 'e'.repeat(40);
+      return update;
+    }
+
+    it.each(['download', 'verify-checksum'])(
+      'does not install the older build when the build for a newer head failed at %s, and raises one card',
+      async (step) => {
+        const update = await stagedThenNewerHeadFailsAt(step);
         world.busy = 0;
         expect(await update.tick()).toBe('failed');
         expect(await update.tick()).toBe('failed-before');
         expect(world.calls).not.toContain('apply');
         expect(cards()).toHaveLength(1);
-        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe(NEWER);
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe('e'.repeat(40));
       },
     );
 
     it('keeps the staged build for the next look once a newer one failed to fetch', async () => {
-      const update = await stagedThenFailsAt('download');
+      const update = await stagedThenNewerHeadFailsAt('download');
       world.busy = 0;
       await update.tick();
       // Main moves on and the newest finished build turns out to be the staged one after all.
-      world.head = 'e'.repeat(40);
+      world.head = 'f'.repeat(40);
       world.stage = () => Promise.resolve(STAGED_OK);
       expect(await update.tick()).toBe('applying');
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
     });
 
-    it('tries the build that failed to fetch again once the builder asks', async () => {
-      const update = await stagedThenFailsAt('download');
+    it('forgets the kept build when the builder retries through the switch, off and then on', async () => {
+      const update = await stagedThenNewerHeadFailsAt('download');
+      world.busy = 0;
+      expect(await update.tick()).toBe('failed');
+      // The route setSelfUpdate takes: retry() on every touch, then turnOff() when it goes off.
+      world.enabled = false;
+      update.retry();
+      await update.turnOff();
+      world.enabled = true;
+      update.retry();
+      world.stage = () =>
+        Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+      expect(await update.tick()).toBe('applying');
+      // Nothing is kept, so the next stage is not passed --have.
+      expect(world.stagedKeeping).toEqual([null, NEW, null]);
+    });
+
+    it('tries the build that failed to fetch again, keeping the staged one, on retry() alone', async () => {
+      const update = await stagedThenNewerHeadFailsAt('download');
       world.busy = 0;
       await update.tick();
       update.retry();
@@ -1081,7 +1169,7 @@ describe('a waiting update drains the factory', () => {
       expect(await update.tick()).toBe('applying');
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
       expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
-        head: NEWER,
+        head: 'e'.repeat(40),
         commit: NEWER,
       });
     });
@@ -1624,8 +1712,8 @@ describe('after make rollback-app', () => {
     // The newest finished build of main is still the one rolled back from: nothing was fetched.
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
+    expect(await update.tick()).toBe('no-newer-build');
     expect(world.stagedSkipping).toEqual([NEW, NEW]);
     expect(world.calls).not.toContain('apply');
   });
@@ -1635,7 +1723,7 @@ describe('after make rollback-app', () => {
     // A stage that fetched the rolled-back build anyway is dropped, so the next check looks again.
     world.stage = () => Promise.resolve(STAGED_OK);
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
     expect(world.calls).not.toContain('apply');
     world.stage = () =>
       Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
@@ -1646,7 +1734,7 @@ describe('after make rollback-app', () => {
     world.head = NEWER;
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
     world.stage = () =>
       Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
     expect(await update.tick()).toBe('applying');
@@ -1694,5 +1782,228 @@ describe('start', () => {
     clock.advance(600_000);
     await settled();
     expect(heads).toBe(2);
+  });
+});
+
+describe('why an available update is not installing', () => {
+  it('says nothing is held back while the update waits or installs', async () => {
+    const update = make();
+    expect(update.status().notInstalling).toBeNull();
+    world.busy = 1;
+    expect(await update.tick()).toBe('busy');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('says the update failed, also after a restart and with no project for a card', async () => {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+    const update = make({ cardProject: null });
+    expect(await update.tick()).toBe('failed');
+    expect(update.status().notInstalling).toBe('failed');
+    expect(await update.tick()).toBe('failed-before');
+    expect(update.status().notInstalling).toBe('failed');
+    const restarted = make();
+    expect(await restarted.tick()).toBe('failed-before');
+    expect(restarted.status().notInstalling).toBe('failed');
+  });
+
+  it('says the builder rolled back from the head, until main moves on', async () => {
+    world.rolledBackFrom = NEW;
+    const update = make();
+    update.settle();
+    expect(await update.tick()).toBe('rolled-back');
+    expect(update.status().notInstalling).toBe('rolled-back');
+    world.head = NEWER;
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('says the head has no finished build newer than the running one', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    expect(await update.tick()).toBe('no-newer-build');
+    expect(update.status().notInstalling).toBe('unbuilt');
+    world.stage = () => Promise.resolve(STAGED_OK);
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it('forgets it once main is the running commit', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    await update.tick();
+    expect(update.status().notInstalling).toBe('unbuilt');
+    world.head = RUNNING;
+    expect(await update.tick()).toBe('current');
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it.each<[string, () => void, string]>([
+    [
+      'a failed head',
+      () => {
+        world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+      },
+      'failed',
+    ],
+    [
+      'a head rolled back from',
+      () => {
+        world.rolledBackFrom = NEW;
+      },
+      'rolled-back',
+    ],
+  ])('forgets %s at once when the builder asks again', async (_name, arrange, reason) => {
+    arrange();
+    const update = make();
+    update.settle();
+    await update.tick();
+    expect(update.status().notInstalling).toBe(reason);
+    update.retry();
+    // No check has ended yet: the switch is the builder's answer to the line, so the line goes now.
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it.each<[string, () => void]>([
+    [
+      'skipped',
+      () => {
+        world.stage = () => Promise.resolve({ ok: true, current: true, commit: OLD_BUILD });
+      },
+    ],
+    [
+      'fetched',
+      () => {
+        world.stage = () => Promise.resolve({ ...STAGED_OK, commit: OLD_BUILD });
+      },
+    ],
+  ])(
+    'says a head has no build, not that it was rolled back from, when only the rolled-back build exists and the stage %s it',
+    async (_name, arrange) => {
+      world.rolledBackFrom = OLD_BUILD;
+      arrange();
+      const update = make();
+      update.settle();
+      expect(await update.tick()).toBe('no-newer-build');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe('unbuilt');
+    },
+  );
+
+  describe('when GitHub cannot be reached', () => {
+    const offline = new Error('gh is signed out');
+
+    it.each<[string, () => void, string]>([
+      [
+        'rolled-back',
+        () => {
+          world.rolledBackFrom = NEW;
+        },
+        'rolled-back',
+      ],
+      [
+        'unbuilt',
+        () => {
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+        },
+        'unbuilt',
+      ],
+    ])('keeps saying %s when the head cannot be read', async (_name, arrange, reason) => {
+      arrange();
+      const update = make();
+      update.settle();
+      await update.tick();
+      world.head = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe(reason);
+    });
+
+    it('keeps the reason when main cannot be compared with the running build', async () => {
+      world.rolledBackFrom = NEW;
+      const update = make();
+      update.settle();
+      await update.tick();
+      world.ahead = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().notInstalling).toBe('rolled-back');
+    });
+
+    it('says failed for an install that ended while the daemon ran, then GitHub went', async () => {
+      const update = make();
+      expect(await update.tick()).toBe('applying');
+      world.head = offline;
+      world.endScript();
+      await settled();
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe('failed');
+    });
+  });
+
+  it('says failed as soon as an install ends while the daemon runs, before the next check', async () => {
+    const update = make();
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+    world.endScript();
+    await settled();
+    expect(update.status().notInstalling).toBe('failed');
+  });
+
+  it.each<[string, () => void]>([
+    [
+      'failed',
+      () => {
+        world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+      },
+    ],
+    [
+      'was rolled back from',
+      () => {
+        world.rolledBackFrom = NEW;
+      },
+    ],
+    [
+      'had no build',
+      () => {
+        world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+      },
+    ],
+  ])('says nothing of the old head while a new one stages after it %s', async (_name, arrange) => {
+    arrange();
+    const update = make();
+    update.settle();
+    await update.tick();
+    expect(update.status().notInstalling).not.toBeNull();
+    world.head = NEWER;
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().availableCommit).toBe(NEWER);
+    expect(update.status().notInstalling).toBeNull();
+    finishStage({ ok: true, current: true, commit: RUNNING });
+    expect(await tick).toBe('no-newer-build');
+    expect(update.status().notInstalling).toBe('unbuilt');
+  });
+
+  it('keeps the head’s reason through a stage for the same head', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    await update.tick();
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().notInstalling).toBe('unbuilt');
+    finishStage({ ok: true, current: true, commit: RUNNING });
+    await tick;
   });
 });

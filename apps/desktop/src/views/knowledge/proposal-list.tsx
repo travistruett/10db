@@ -1,6 +1,7 @@
 import {
   KnowledgeScope,
   KnowledgeState,
+  matchesSearch,
   type ProposalDto,
   type ProposalKind,
 } from '@10db/contracts';
@@ -28,11 +29,11 @@ function matches(p: ProposalDto, filter: FilterState): boolean {
   const place = placeOf(p);
   if (filter.scope !== null && place.scope !== filter.scope) return false;
   if (filter.scope === KnowledgeScope.Area && place.area !== filter.area) return false;
-  const words = filter.q.toLowerCase().split(/\s+/).filter(Boolean);
-  const text = [p.title, p.body, p.principle?.statement, p.principle?.topicKey]
-    .join(' ')
-    .toLowerCase();
-  return words.every((w) => text.includes(w));
+  // The same rule as the daemon's search of the other tabs: every word starts some word of the text.
+  return matchesSearch(
+    [p.title, p.body, p.principle?.statement, p.principle?.topicKey].join(' '),
+    filter.q,
+  );
 }
 
 /** Pending proposals. Their text comes from agents and answers, so it is shown as text only. */

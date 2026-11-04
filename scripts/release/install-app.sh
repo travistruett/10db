@@ -137,6 +137,7 @@ work="$(mktemp -d "${TMPDIR:-/tmp}/10db-install.XXXXXX")"
 mount="$(mktemp -d "${TMPDIR:-/tmp}/10db-install-mount.XXXXXX")"
 gh_err="$work/gh.err"
 mounted=0
+stage_next="" # the new build, until it is whole and swapped into the stage folder
 backup_dir=""
 backup_done=0
 previous_zip=""
@@ -185,6 +186,7 @@ cleanup() {
   if [ "$mounted" -eq 1 ]; then detach_dmg > /dev/null 2>&1; fi
   rmdir "$mount" 2> /dev/null
   rm -rf "$work"
+  if [ -n "$stage_next" ]; then rm -rf "$stage_next"; fi
   if [ -n "$backup_dir" ] && [ "$backup_done" -eq 0 ]; then rm -rf "$backup_dir"; fi
   if [ -n "$previous_zip" ]; then rm -f "$previous_zip.partial"; fi
   if [ "$installed" -eq 0 ]; then
@@ -422,18 +424,24 @@ actual="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
 
 if [ "$mode" = stage ]; then
   step=stage
-  # A build kept from an earlier stage (--have) is replaced whole, so the folder never holds two DMGs.
-  # Its commit goes first, and the new one is written last: a folder that names a commit holds all of it.
-  if [ -n "$have_commit" ] && [ -f "$stage_dir/commit" ]; then
-    rm -f "$stage_dir/commit"
-    rm -rf "$stage_dir"
-  fi
-  mkdir -p "$stage_dir/scripts/release" || fail "could not create $stage_dir"
+  # The new build is put together beside the folder and swapped in once whole, its commit written last
+  # of all: a folder that names a commit holds all of it, and a build kept from an earlier stage (--have)
+  # stays whole, and installable, whatever stops this copy (a full disk, the deadline's kill).
+  stage_next="$stage_dir.next"
+  rm -rf "$stage_next"
+  mkdir -p "$stage_next/scripts/release" || fail "could not create $stage_next"
   # The app that is installed may be replaced while --apply runs, so the apply half runs from here.
-  cp scripts/release/install-app.sh scripts/release/installed-app.sh "$stage_dir/scripts/release/" \
-    && cp "$dmg" "$stage_dir/" && cp "$sums" "$stage_dir/SHA256SUMS" \
-    && printf '%s\n' "$head" > "$stage_dir/commit" \
-    || fail "could not copy the build into $stage_dir"
+  cp scripts/release/install-app.sh scripts/release/installed-app.sh "$stage_next/scripts/release/" \
+    && cp "$dmg" "$stage_next/" && cp "$sums" "$stage_next/SHA256SUMS" \
+    && printf '%s\n' "$head" > "$stage_next/commit" \
+    || fail "could not copy the build into $stage_next"
+  # Two renames in one filesystem: the kept build leaves whole, and comes back if the new one can't go in.
+  replaced="$work/replaced"
+  if [ -e "$stage_dir" ]; then mv "$stage_dir" "$replaced" || fail "could not move $stage_dir aside"; fi
+  if ! mv "$stage_next" "$stage_dir"; then
+    if [ -e "$replaced" ]; then mv "$replaced" "$stage_dir"; fi
+    fail "could not move the build into $stage_dir"
+  fi
   step=done
   echo "Staged the build of $ref at commit $head (GitHub run $run_id) in $stage_dir."
   exit 0

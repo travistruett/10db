@@ -134,6 +134,11 @@ describe('find_knowledge', () => {
     expect(ids(find({ scope: 'project' })).toSorted()).toEqual([d.id, p.id].toSorted());
   });
 
+  it('finds a record from a whole question, not only its keywords', () => {
+    const d = decide();
+    expect(ids(find({ q: 'which queue should we use' }))).toEqual([d.id]);
+  });
+
   it('leaves out replaced records until history is asked for', () => {
     const first = decide();
     const second = call(BuilderToolName.SupersedeKnowledge, {

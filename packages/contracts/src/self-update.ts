@@ -31,6 +31,14 @@ export const SelfUpdateBlockerDto = z.object({
 export type SelfUpdateBlockerDto = z.infer<typeof SelfUpdateBlockerDto>;
 
 /**
+ * Why an available update does not wait for an idle moment: `failed` (its update failed and is not
+ * tried again until main moves on or the builder touches the switch), `rolled-back` (the builder
+ * rolled back from it), `unbuilt` (it has no finished build newer than the running one yet).
+ */
+export const SelfUpdateNotInstalling = z.enum(['failed', 'rolled-back', 'unbuilt']);
+export type SelfUpdateNotInstalling = z.infer<typeof SelfUpdateNotInstalling>;
+
+/**
  * `GET /settings/self-update`: whether 10db installs main's build by itself, and which commits are
  * involved. One setting for the whole app, on until the builder turns it off. What it follows is
  * not a setting: it is the repository the app was built for.
@@ -44,6 +52,12 @@ export const SelfUpdateStatusDto = z.object({
   runningCommit: CommitSha.nullable(),
   /** The commit at the head of main when 10db last saw it ahead of the running one; null otherwise. */
   availableCommit: CommitSha.nullable(),
+  /**
+   * Why `availableCommit` is not going to install: null while it waits, drains or installs, and with
+   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt` the daemon
+   * remembers it, and drains the moment a build is staged.
+   */
+  notInstalling: SelfUpdateNotInstalling.nullable(),
   /** Minutes a staged build waits for an idle moment before the factory drains for it. */
   waitMinutes: z.number().int().min(0),
   /** When the staged build began to wait; null with no staged build. */
