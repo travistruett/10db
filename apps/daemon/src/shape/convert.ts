@@ -263,6 +263,12 @@ export function convertProposals(
     } else if (row.kind === 'question') {
       const about = ShapeProposalBody.question.parse(row.body).about;
       // A question belongs to a goal or task that is converted already or is converted with it.
+      if (about !== undefined && world.removedTasks.has(about) && !owners.has(about)) {
+        errors.push(
+          `${row.key} is about ${about}, which was removed, so it cannot hold a question`,
+        );
+        continue;
+      }
       if (about === undefined || world.convertedTasks.has(about) || goalIds.has(about)) continue;
       const goal = rows.find((r) => r.kind === 'goal' && r.key === about && r.state === 'pending');
       const owner =

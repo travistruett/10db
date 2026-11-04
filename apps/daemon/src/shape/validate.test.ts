@@ -29,6 +29,7 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
     ['held-task', held],
     ['landed-task', landed],
   ]),
+  removedTasks: new Set(),
   convertedGoals: new Set([convertedGoal]),
   basisProblem: (id) => (id === finished ? null : `${id} is not a finished task of this project`),
   decisionProblem: (id) =>
@@ -377,6 +378,20 @@ describe('a plan that breaks a rule', () => {
     expect(check({ questions: [question] }, world({ storedKeys: new Set(['stored']) }))).toEqual([
       expect.stringMatching(/Question 1, about: stored is not a goal or task/),
     ]);
+  });
+
+  it('refuses a question about a converted task a removal cancelled, saying it was removed', () => {
+    const question = {
+      key: 'q',
+      text: 'Who pays?',
+      for: 'finance',
+      about: 'earlier-task',
+      sourceMessageIds: [message],
+    };
+    expect(check({ questions: [question] })).toEqual([]);
+    expect(
+      check({ questions: [question] }, world({ removedTasks: new Set(['earlier-task']) })),
+    ).toEqual([expect.stringMatching(/Question 1, about: earlier-task was removed/)]);
   });
 
   it('accepts a question about a stored goal or task that is still live', () => {

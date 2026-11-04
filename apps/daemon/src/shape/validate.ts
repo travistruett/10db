@@ -39,6 +39,8 @@ export interface PlanWorld {
   readonly citable: ReadonlySet<ShapeMessageId>;
   /** Tasks this conversation already converted, by the key they were proposed under. */
   readonly convertedTasks: ReadonlyMap<string, TaskId>;
+  /** Keys in `convertedTasks` whose task a converted removal cancelled. */
+  readonly removedTasks: ReadonlySet<string>;
   readonly convertedGoals: ReadonlySet<GoalId>;
   /** Why this task cannot be a basis, or null when it is a finished task of the project. */
   basisProblem(id: TaskId): string | null;
@@ -270,6 +272,12 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
   );
   draft.questions.forEach((q, i) => {
     if (q.about === undefined) return;
+    if (world.removedTasks.has(q.about) && !taskKeys.has(q.about)) {
+      errors.push(
+        `Question ${String(i + 1)}, about: ${q.about} was removed, so it cannot hold a question; a question can only be about a goal or task that is still in the plan`,
+      );
+      return;
+    }
     if (
       knownTask(q.about) ||
       goalKeys.has(q.about) ||

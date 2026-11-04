@@ -780,6 +780,65 @@ describe('additions, changes and removals', () => {
     expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
   });
 
+  it('refuses to propose a question about a task a converted removal cancelled', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'seats')] });
+    converted('seats');
+    const task = taskTitled('Task seats');
+    const m2 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }] });
+    converted(`remove:${task.id}`);
+
+    const m3 = c.say('Who pays for it?');
+    const out = write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({
+          questions: [
+            {
+              key: 'who-pays',
+              text: 'Who pays for the extra seats?',
+              for: 'finance',
+              about: 'seats',
+              sourceMessageIds: [m3],
+            },
+          ],
+        }),
+      ),
+    );
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: seats was removed/),
+    ]);
+  });
+
+  it('refuses Convert of a question about a task a converted removal cancelled, saying it was removed', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'seats')] });
+    converted('seats');
+    const task = taskTitled('Task seats');
+    const m2 = c.say('Drop it, and who pays?');
+    propose({
+      removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }],
+      questions: [
+        {
+          key: 'who-pays',
+          text: 'Who pays for the extra seats?',
+          for: 'finance',
+          about: 'seats',
+          sourceMessageIds: [m2],
+        },
+      ],
+    });
+    converted(`remove:${task.id}`);
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/who-pays is about seats, which was removed/),
+    ]);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+    expect(rowOf('who-pays').state).toBe(ShapeProposalState.Pending);
+  });
+
   it('leaves nothing behind when a write fails part-way', () => {
     const m = c.say();
     propose({
