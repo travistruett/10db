@@ -1,4 +1,4 @@
-import { KnowledgeScope } from '@10db/contracts';
+import { clampKnowledgeSearch, KNOWLEDGE_SEARCH_MAX_LENGTH, KnowledgeScope } from '@10db/contracts';
 import { Group, Select, Switch, TextInput } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
 
@@ -10,9 +10,6 @@ export interface FilterState {
 }
 
 export const NO_FILTERS: FilterState = { scope: null, area: null, q: '', history: false };
-
-/** The most the list route accepts in `q` (KnowledgeListQuery); a longer search would get a 400. */
-const MAX_SEARCH_LENGTH = 200;
 
 const ALL = 'all';
 const AREA_PREFIX = 'area:';
@@ -51,11 +48,12 @@ export function KnowledgeFilters({
         placeholder="Search"
         size="sm"
         w={260}
-        maxLength={MAX_SEARCH_LENGTH}
+        maxLength={KNOWLEDGE_SEARCH_MAX_LENGTH}
         leftSection={<IconSearch size={16} stroke={1.5} />}
         value={value.q}
         onChange={(e) => {
-          onChange({ ...value, q: e.currentTarget.value });
+          // maxLength may count graphemes in the Tauri webview (WebKit), so cap in code as well.
+          onChange({ ...value, q: clampKnowledgeSearch(e.currentTarget.value) });
         }}
       />
       <Select

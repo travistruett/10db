@@ -1,4 +1,5 @@
 import {
+  KNOWLEDGE_SEARCH_MAX_LENGTH,
   mintId,
   type DecisionItem,
   type KnowledgeScope,
@@ -240,7 +241,19 @@ describe('KnowledgeView', () => {
     serve({ principles: [principleItem()] });
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    expect(screen.getByRole('textbox', { name: 'Search' }).getAttribute('maxlength')).toBe('200');
+    expect(screen.getByRole('textbox', { name: 'Search' }).getAttribute('maxlength')).toBe(
+      String(KNOWLEDGE_SEARCH_MAX_LENGTH),
+    );
+  });
+
+  it('caps a pasted search in code too, since a webview may count maxlength in graphemes', async () => {
+    serve({ principles: [principleItem()] });
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    const box = screen.getByRole('textbox', { name: 'Search' });
+    fireEvent.change(box, { target: { value: '😀'.repeat(200) } });
+    expect((box as HTMLInputElement).value.length).toBeLessThanOrEqual(KNOWLEDGE_SEARCH_MAX_LENGTH);
+    expect((box as HTMLInputElement).value.length).toBeGreaterThan(0);
   });
 
   it('says so when search is unavailable instead of reporting nothing found', async () => {
