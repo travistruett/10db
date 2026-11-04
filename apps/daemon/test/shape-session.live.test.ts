@@ -32,7 +32,7 @@ import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
 import {
-  READ_PICTURE_CHARGE_MAX_BYTES,
+  READ_CHARGE_MAX_BYTES,
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
@@ -438,7 +438,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
   }, 180_000);
 
   // Shape spec §5.4: what a picture read with Read adds to a request the session resends. The hook charges
-  // a Read at most READ_PICTURE_CHARGE_MAX_BYTES (read-budget.ts); this reads the picture Claude Code put in
+  // a Read at most READ_CHARGE_MAX_BYTES (read-budget.ts); this reads the picture Claude Code put in
   // the session's own transcript file, which is what it resends, and fails if it is larger. It prints the
   // sizes it found so the allowance can be set from them.
   it('returns a read picture within the size the hook charges for it', async () => {
@@ -464,7 +464,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       );
       // All three: the allowance is proven by the large pictures, not by the small one alone.
       expect(sizes).toHaveLength(3);
-      for (const size of sizes) expect(size).toBeLessThanOrEqual(READ_PICTURE_CHARGE_MAX_BYTES);
+      for (const size of sizes) expect(size).toBeLessThanOrEqual(READ_CHARGE_MAX_BYTES);
     } finally {
       repo.cleanup();
       rmSync(filesDir, { recursive: true, force: true });
@@ -472,7 +472,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
   }, 240_000);
 
   // Shape spec §5.4: what a PDF Read adds to a request the session resends. The hook charges a page
-  // READ_PICTURE_CHARGE_MAX_BYTES and refuses a Read that names no pages (read-budget.ts). These find what
+  // READ_CHARGE_MAX_BYTES and refuses a Read that names no pages (read-budget.ts). These find what
   // Claude Code stored for the Read and print it, so the charge can be set from it.
   it('returns the pages of a many-page PDF within the charge for each page', async () => {
     const repo = createTempRepo();
@@ -494,7 +494,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       expect(blocks).toHaveLength(3);
       for (const block of blocks) {
         expect(block.type).toBe('image');
-        expect(block.bytes).toBeLessThanOrEqual(READ_PICTURE_CHARGE_MAX_BYTES);
+        expect(block.bytes).toBeLessThanOrEqual(READ_CHARGE_MAX_BYTES);
       }
     } finally {
       repo.cleanup();
@@ -521,7 +521,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       );
       expect(blocks).not.toHaveLength(0);
       const gained = blocks.reduce((sum, block) => sum + block.bytes, 0);
-      expect(gained).toBeLessThanOrEqual(3 * READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(gained).toBeLessThanOrEqual(3 * READ_CHARGE_MAX_BYTES);
     } finally {
       repo.cleanup();
       rmSync(filesDir, { recursive: true, force: true });
