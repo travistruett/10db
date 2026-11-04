@@ -423,6 +423,15 @@ export interface Git {
   /** Whether the object store of `repo` holds commit `sha`. */
   hasCommit(repo: string, sha: string): Promise<boolean>;
   /**
+   * The commits in the history of `branch` (the most recent 200) whose message opens with `prefix`,
+   * oldest first, each with its whole message. How a caller finds what 10db's own commits say.
+   */
+  commitsWithSubject(
+    repo: string,
+    branch: string,
+    prefix: string,
+  ): Promise<{ readonly sha: string; readonly message: string }[]>;
+  /**
    * Fetches commit `sha` from origin's recorded fetch URL into the object store, naming no ref and
    * touching no branch or checkout: what GitHub made on a pull request (a branch update) and nobody
    * pulled. Throws a GitNetworkError when origin can't be asked or does not give it.
@@ -2604,6 +2613,27 @@ export function createGit(opts: GitOptions = {}): Git {
       return (
         OBJECT_ID.test(sha) && (await revParse(await pinned(repo), `${sha}^{commit}`)) !== null
       );
+    },
+    async commitsWithSubject(repo, branch, prefix) {
+      const c = await pinned(repo);
+      const out = await git(c, [
+        'log',
+        '--no-show-signature',
+        '--no-mailmap',
+        '-n',
+        String(OP_SEARCH_DEPTH),
+        '--fixed-strings',
+        `--grep=${prefix}`,
+        '--format=%H%x1f%B%x1e',
+        `refs/heads/${branch}`,
+        '--',
+      ]);
+      const found: { sha: string; message: string }[] = [];
+      for (const record of out.split('\x1e')) {
+        const [sha, message] = record.trim().split('\x1f');
+        if (sha && OBJECT_ID.test(sha) && message?.startsWith(prefix)) found.push({ sha, message });
+      }
+      return found.reverse();
     },
     async fetchCommit(repo, sha, net) {
       return serialized(fetches, realpathSync(repo), () => fetchCommitOnce(repo, sha, net));

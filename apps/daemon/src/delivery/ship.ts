@@ -128,6 +128,9 @@ import { ensureWorktreeWhole, reopenWorktreeBatch } from './worktree-repair';
  */
 const CATCH_UP_RETRY_MS = 30 * 60_000;
 
+/** How the message of a Ship without it's revert commit opens; `undoneOnBranch` finds them by it. */
+const LEFT_OUT_SUBJECT = 'revert: leave out ';
+
 /** How long a merge GitHub refused waits before 10db asks again while the pull request stays clean. */
 const MERGE_RETRY_MS = 10 * 60_000;
 
@@ -1428,6 +1431,31 @@ export function createShipper(deps: ShipperDeps): Shipper {
   }
 
   /**
+   * The revert that undid each commit, read from the branch: every Ship without it's revert commit
+   * lists what it undid as `- <sha> (<title>)`. A card or a notice can be missing after a failed write,
+   * and an ancestor of a revert is not a commit it undid, so the branch itself is what says. Where
+   * several reverts list a commit the newest is kept, and `order` ranks the reverts oldest first.
+   * A listed commit that is not in the revert's own history is ignored.
+   */
+  async function undoneOnBranch(
+    checkout: string,
+    branch: string,
+  ): Promise<{ readonly by: Map<string, string>; readonly order: Map<string, number> }> {
+    const by = new Map<string, string>();
+    const order = new Map<string, number>();
+    const reverts = await deps.git.commitsWithSubject(checkout, branch, LEFT_OUT_SUBJECT);
+    for (const [index, revert] of reverts.entries()) {
+      order.set(revert.sha, index);
+      for (const line of revert.message.split('\n')) {
+        const sha = /^- ([0-9a-f]{40}) \(/.exec(line)?.[1];
+        if (sha !== undefined && (await deps.git.isAncestor(checkout, sha, revert.sha)))
+          by.set(sha, revert.sha);
+      }
+    }
+    return { by, order };
+  }
+
+  /**
    * Ship without a failed run (`Shipper.shipWithout`), in the ship queue. The commits of every member
    * that failed are undone in one commit, so one stopped revert leaves the branch whole and no other
    * failed task's commits ride along with the finished work. Each run gets its notice and the batch
@@ -1439,11 +1467,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * left on the branch without getting as far as the notices. Another card of the batch may be the
    * one answered (a task started
    * into the batch later failed), and its detail names none, so the batch's open left-out card, which
-   * holds the revert, is read as well. The revert's commits are not asked of git again: undoing
+   * holds the revert, is read as well. Which commits an earlier revert undid is read from the branch
+   * (`undoneOnBranch`), not from either card: those are not asked of git again, because undoing
    * commits that built on each other once more conflicts with the tip that no longer has them. They
-   * count as this answer's, under that revert. A commit it does not cover is reverted as usual. A
-   * revert no longer on the branch covers nothing, so the commits are reverted as if it had never
-   * been made.
+   * count as this answer's, under the revert that undid them, and a run's notice counts all of them.
+   * A commit no revert listed is reverted as usual, whether or not it is an ancestor of a revert.
+   * A card's revert still only decides what the cards this answer raises say it left on the branch.
    */
   async function leaveOut(
     batchId: BatchId,
@@ -1579,22 +1608,37 @@ export function createShipper(deps: ShipperDeps): Shipper {
           ? earlier.revert
           : null;
       if (standing === null) attempt = { ...attempt, revert: null, covers: [] };
+      // What the branch says earlier reverts undid, whichever card was answered and whether or not a
+      // card or notice names the revert.
+      const undone = await undoneOnBranch(checkout, branch);
       const commits: {
         readonly run: WorkstreamDto;
         /** Its commits this answer reverts. */
         readonly shas: readonly string[];
-        /** How many of its commits the earlier revert covers. */
+        /** How many of its commits an earlier revert undid. */
         readonly covered: number;
+        /** The newest earlier revert that undid one of them. */
+        readonly coveredBy: string | null;
         /** The revert of an earlier answer that its record names and the branch still holds. */
         readonly prior: string | null;
       }[] = [];
       for (const run of failed) {
         const left: string[] = [];
         let covered = 0;
-        for (const sha of await commitsOf(batchId, run, checkout, branch))
-          if (standing !== null && (await deps.git.isAncestor(checkout, sha, standing)))
-            covered += 1;
-          else left.push(sha);
+        let coveredBy: string | null = null;
+        for (const sha of await commitsOf(batchId, run, checkout, branch)) {
+          const by = undone.by.get(sha);
+          if (by === undefined) {
+            left.push(sha);
+            continue;
+          }
+          covered += 1;
+          if (
+            coveredBy === null ||
+            (undone.order.get(by) ?? 0) > (undone.order.get(coveredBy) ?? 0)
+          )
+            coveredBy = by;
+        }
         // A run left out before and retried keeps its revert on the branch. If this answer reverts
         // nothing of it, as when the retry committed nothing, its notice still names that revert, so
         // the next Retry tells the session.
@@ -1610,7 +1654,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
           (await deps.git.isAncestor(checkout, record, `refs/heads/${branch}`))
             ? record
             : null;
-        commits.push({ run, shas: left, covered, prior });
+        commits.push({ run, shas: left, covered, coveredBy, prior });
+      }
+      // A revert on the branch that no card named still stands for the cards this answer raises.
+      if (standing === null) {
+        let newest: string | null = null;
+        for (const { coveredBy } of commits)
+          if (
+            coveredBy !== null &&
+            (newest === null ||
+              (undone.order.get(coveredBy) ?? 0) > (undone.order.get(newest) ?? 0))
+          )
+            newest = coveredBy;
+        if (newest !== null)
+          attempt = {
+            ...attempt,
+            revert: newest,
+            covers: commits.filter((c) => c.covered > 0).map((c) => c.run.id),
+          };
       }
       const shas = commits.flatMap((c) => c.shas);
       if (shas.length > 0) {
@@ -1656,14 +1717,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
-        for (const { run, shas: own, covered, prior } of commits)
+        for (const { run, shas: own, covered, coveredBy, prior } of commits)
           setWorkstreamNotice(
             w,
             run.id,
             revert !== null && own.length > 0
-              ? leftOutNotices.reverted(own.length, revert)
-              : standing !== null && covered > 0
-                ? leftOutNotices.reverted(covered, standing)
+              ? leftOutNotices.reverted(own.length + covered, revert)
+              : coveredBy !== null
+                ? leftOutNotices.reverted(covered, coveredBy)
                 : prior !== null
                   ? leftOutNotices.alreadyReverted(prior)
                   : leftOutNotices.nothingToRevert(),

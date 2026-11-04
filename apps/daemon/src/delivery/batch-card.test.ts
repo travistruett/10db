@@ -953,9 +953,10 @@ describe('the failed workstream card', () => {
         // Newest first, on the batch's branch: the ship may have left the checkout on another.
         const reverts = h.git$('log', '--all', '--grep=leave out', '--format=%H').split('\n');
         expect(reverts).toHaveLength(2);
-        expect(getWorkstream(h.store.db, failed).notice?.body).toContain(
-          `Revert commit: ${reverts[0] ?? ''}`,
-        );
+        const notice = getWorkstream(h.store.db, failed).notice;
+        expect(notice?.body).toContain(`Revert commit: ${reverts[0] ?? ''}`);
+        // Both of its commits are undone: the first revert's and this one's.
+        expect(notice?.line).toMatch(/its 2 commits were reverted/);
       });
 
       it('keeps the revert on the card when the second answer stops as well', async () => {
@@ -1070,6 +1071,93 @@ describe('the failed workstream card', () => {
 
           const folded = h.only(h.cards().filter((c) => c.title.includes('revert')));
           expect(folded.detail).toMatchObject({ batchCard: { revert } });
+        });
+
+        it('reverts a finished task’s commit the revert did not undo when its merge run fails after it', async () => {
+          const { asked } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          const [, beta] = listWorkstreams(h.store.db, { batchId: made.batchId });
+          if (!beta) throw new Error('Beta expected');
+          // Beta finished with this commit before the revert, which does not touch it.
+          const finished = commitAs(beta.id, 'src/ui/beta-done.txt', 'done\n');
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const first = h.git$('rev-parse', 'HEAD');
+          expect(asked).toHaveLength(1);
+          const merge = h.state.write((w) => {
+            setTaskStatus(w, beta.taskId, 'open');
+            return insertPlannedWorkstream(
+              w,
+              beta.taskId,
+              planForStart(w.tx, beta.taskId),
+              made.batchId,
+            );
+          });
+          h.settle(merge.id, 'FAILED');
+          // Beta's task has a failed run now, so another task has to be the one that finished.
+          const gamma = h.addTask('Gamma', { areas: ['ui'] });
+          const gammaRun = h.state.write((w) =>
+            insertPlannedWorkstream(w, gamma.id, planForStart(w.tx, gamma.id), made.batchId),
+          );
+          h.settle(gammaRun.id, 'DONE');
+          const plain = batchCardFields({ id: merge.id, batchId: made.batchId });
+          if (!plain) throw new Error('a batch member gets card actions');
+          const other = inbox.flag({
+            projectId: h.project.id,
+            workstreamId: merge.id,
+            title: 'Workstream failed: Beta',
+            body: 'The merge failed',
+            ...plain,
+          });
+
+          inbox.answer(other.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          // Alpha's commit is covered by the first revert; Beta's is not, so only it is reverted now.
+          expect(asked).toHaveLength(2);
+          expect(asked[1]).toEqual([finished]);
+          const shipped = getBatch(h.store.db, made.batchId);
+          expect(shipped.state).toBe('SHIPPED');
+          expect(h.origin$('diff', '--name-only', 'main', shipped.branch ?? '')).toBe(
+            'src/ui/beta.txt',
+          );
+          const mergeNotice = getWorkstream(h.store.db, merge.id).notice;
+          expect(mergeNotice?.line).toMatch(/its commit was reverted/);
+          expect(mergeNotice?.body).not.toContain(first);
+          expect(getWorkstream(h.store.db, made.failed).notice?.body).toContain(
+            `Revert commit: ${first}`,
+          );
+        });
+
+        it('gets past commits that built on each other when the revert is on no card', async () => {
+          const { asked } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'one\n' });
+          commitAs(made.failed, 'src/api/alpha.txt', 'two\n');
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          // The card holding the revert is closed, so no answer carries its id.
+          const open = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          inbox.answer(open.id, { choice: 'Later' });
+          const plain = batchCardFields({ id: made.failed, batchId: made.batchId });
+          if (!plain) throw new Error('a batch member gets card actions');
+          const other = inbox.flag({
+            projectId: h.project.id,
+            workstreamId: made.failed,
+            title: 'Workstream failed: Alpha again',
+            body: 'The gate failed 4 times',
+            ...plain,
+          });
+
+          inbox.answer(other.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          expect(h.cards().filter((c) => c.title.includes('conflict'))).toEqual([]);
+          expect(asked).toHaveLength(1);
+          expect(getBatch(h.store.db, made.batchId).state).toBe('SHIPPED');
+          const notice = getWorkstream(h.store.db, made.failed).notice;
+          expect(notice?.line).toMatch(/its 2 commits were reverted/);
+          expect(notice?.body).toContain(`Revert commit: ${revert}`);
         });
 
         /** A task started into the batch after the revert, failed with a commit on the branch. */

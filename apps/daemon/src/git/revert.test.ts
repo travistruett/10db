@@ -143,3 +143,24 @@ describe('revertCommits', () => {
     await expect(revert(['0'.repeat(40)])).rejects.toThrow(InvalidError);
   });
 });
+
+describe('commitsWithSubject', () => {
+  it('lists the commits of the branch whose message opens with the prefix, oldest first, whole', async () => {
+    const alpha = commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
+    const beta = commitFiles({ 'src/beta.txt': 'beta\n' }, 'beta');
+    const first = await revert([alpha]);
+    commitFiles({ 'src/gamma.txt': 'gamma\n' }, 'mentions revert: leave out in passing');
+    const second = await revert([beta]);
+    if (first.kind !== 'reverted' || second.kind !== 'reverted') throw new Error('reverted');
+
+    const found = await git.commitsWithSubject(repo.path, 'work', 'revert: leave out');
+
+    expect(found.map((c) => c.sha)).toEqual([first.head, second.head]);
+    expect(found[0]?.message).toContain('revert: leave out "Alpha"');
+  });
+
+  it('finds nothing when no commit opens with the prefix', async () => {
+    commitFiles({ 'src/alpha.txt': 'alpha\n' }, 'alpha');
+    expect(await git.commitsWithSubject(repo.path, 'work', 'revert: leave out')).toEqual([]);
+  });
+});
