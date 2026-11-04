@@ -45,6 +45,16 @@ export type ReadAccess =
 export function outsideCopyRefusal(path: string, ctx: FileAccessContext): string {
   return `${path} is in the worktrees folder but outside this lane's copy. The copy is ${ctx.checkout}; build paths from it (or use relative paths), never from the worktrees folder.`;
 }
+
+/** Whether real path `real` is at or under the worktrees folder and not in the lane's own copy. */
+export function isOutsideCopy(
+  real: string,
+  ctx: Pick<FileAccessContext, 'checkout' | 'worktreeRoot'>,
+): boolean {
+  const under = (root: string) => spellings(root).some((dir) => isEqualOrUnder(real, dir));
+  return ctx.worktreeRoot !== undefined && under(ctx.worktreeRoot) && !under(ctx.checkout);
+}
+
 /** `unresolvable` is a path that no single real path can be named for (a link loop, `..` past a missing part, a part that cannot be examined). */
 /** `sandbox-temp` is under the sandbox temp root but outside this session's own temp dir. */
 export type WriteAccess =
@@ -214,12 +224,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (tree && roots.some((root) => isEqualOrUnder(root, real))) return 'contains-protected';
   if (spellings(ctx.checkout).some((root) => isEqualOrUnder(real, root))) return 'inside';
   if (isOwnTaskOutput(real, ctx)) return 'allowed';
-  if (
-    ctx.worktreeRoot !== undefined &&
-    spellings(ctx.worktreeRoot).some((root) => isEqualOrUnder(real, root))
-  ) {
-    return 'outside-copy';
-  }
+  if (isOutsideCopy(real, ctx)) return 'outside-copy';
   if (ctx.readList.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) return 'allowed';
   return 'ask';
 }

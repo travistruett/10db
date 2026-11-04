@@ -1057,6 +1057,52 @@ describe('runner', () => {
     expect(engine.adapter.prompts[0]?.prompt).not.toContain('The builder denied');
   });
 
+  it('leaves a denied read of the worktrees folder outside the copy out of the prompt and the compaction message', async () => {
+    const worktreeRoot = '/worktrees/67a1ebdc';
+    const outside = `${worktreeRoot}/10db-b83cc7/scripts/gate.sh`;
+    engine = await createTestEngine(
+      {
+        Alpha: [[{ do: 'compact' }, { do: 'await_message', contains: 'context pack' }, turn]],
+      },
+      {},
+      { worktreeRoot },
+    );
+    const { task, workstream } = engine.addTask('Alpha');
+    const denied = (toolName: string, summary: string): void => {
+      engine.state.write((ctx) => {
+        const item = insertInboxItem(ctx, {
+          projectId: task.projectId,
+          kind: 'permission',
+          title: `Allow ${toolName}?`,
+          body: summary,
+          options: [{ label: 'deny', description: '' }],
+          recommendation: null,
+          category: 'product',
+          urgency: 'normal',
+          detail: { toolName, summary },
+          foldKey: null,
+          targets: [{ workstreamId: workstream.id, sessionId: null }],
+        });
+        updateInboxItem(ctx, item.id, { state: 'ANSWERED', answer: { choice: 'deny' } });
+      });
+    };
+    denied('Read', outside);
+    denied('Read', '/etc/hosts');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const told = [
+      engine.adapter.prompts[0]?.prompt ?? '',
+      ...engine.adapter.sent.map((message) => message.text),
+    ];
+    expect(told).toHaveLength(2);
+    for (const text of told) {
+      expect(text).toContain('Read: /etc/hosts');
+      expect(text).not.toContain(worktreeRoot);
+    }
+  });
+
   it('runs the gate in the session environment, never the daemon process environment', async () => {
     process.env['TENDB_PROBE'] = 'leaked';
     try {
@@ -4069,6 +4115,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       tmpRoot,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
+      worktreeRoot: join(probeRoot, 'w'),
       ...(processes === undefined ? {} : { processes }),
     });
     const inputs: LaneSessionInput[] = [];

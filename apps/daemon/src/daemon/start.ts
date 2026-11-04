@@ -893,6 +893,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
+    worktreeRoot,
     hold: startHold,
     laneTempDirs,
     state,

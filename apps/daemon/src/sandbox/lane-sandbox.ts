@@ -134,7 +134,7 @@ export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
    * Where the daemon makes lane copies. The file tools refuse (no card) a path under it that is not
    * in the session's own copy.
    */
-  readonly worktreeRoot?: string;
+  readonly worktreeRoot: string;
 }
 
 /** What the log is told when a session's process watch fails, by what it could not do. */
@@ -314,7 +314,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           readList,
           configDir: input.configDir,
           sandboxTemp: { root: tmpRoot, own: tmpDir },
-          ...(deps.worktreeRoot === undefined ? {} : { worktreeRoot: deps.worktreeRoot }),
+          worktreeRoot: deps.worktreeRoot,
           get providerSessionId() {
             return providerSessionId;
           },

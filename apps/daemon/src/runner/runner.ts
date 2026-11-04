@@ -90,6 +90,7 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+  denialsForLane,
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -258,6 +259,8 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
+  readonly worktreeRoot: string;
   /**
    * While this holds (the Mac is overloaded, or an update drains the factory) no session or task gate
    * starts: each waits here, before anything is built or launched and before a gate takes its batch's
@@ -1405,9 +1408,14 @@ export function createRunner(opts: RunnerOptions): Runner {
           ? outstandingFixEvidence(db, row)
           : null;
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
+    const denialsToTell = () =>
+      denialsForLane(deniedPermissionsForWorkstream(db, id), {
+        checkout,
+        worktreeRoot: opts.worktreeRoot,
+      });
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
-      denials: deniedPermissionsForWorkstream(db, id),
+      denials: denialsToTell(),
       task,
       claims: claims(),
       action,
@@ -1842,10 +1850,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
             });
             handle.send(
-              compactionReinjection(
-                buildContextPack(db, getWorkstream(db, id)),
-                deniedPermissionsForWorkstream(db, id),
-              ),
+              compactionReinjection(buildContextPack(db, getWorkstream(db, id)), denialsToTell()),
             );
             break;
           case 'rate_limit':

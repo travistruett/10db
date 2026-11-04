@@ -64,6 +64,7 @@ function sandbox(
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
     runtime: FAKE_SRT,
+    worktreeRoot: join(dataDir, 'worktrees'),
   });
 }
 
@@ -1113,6 +1114,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
+      worktreeRoot: join(dataDir, 'worktrees'),
       processes: {
         table: () =>
           tableFails

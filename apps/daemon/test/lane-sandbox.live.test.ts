@@ -299,6 +299,7 @@ async function runLane(opts: {
     loginConfigDir: launcher.loginConfigDir(),
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
+    worktreeRoot: join(opts.dataDir, 'worktrees'),
   });
   let laneSession: LaneSession | null = null;
   try {
