@@ -2440,6 +2440,75 @@ describe('a required check GitHub cancelled', () => {
         await round(w);
         expect(h.gh.reruns).toEqual(['77', '88']);
       });
+
+      describe('when a required check fails and none is cancelled', () => {
+        const failed = (...names: string[]) => ({
+          state: 'failing' as const,
+          failing: names.map((n) => job(n)),
+          pending: [],
+          cancelled: [],
+        });
+
+        it('does not say 10db runs another check once the run it waited for ends in a failure', async () => {
+          const { id, prUrl, w } = watching();
+          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+          w.start();
+          await w.idle();
+          h.gh.failRerunOf.set(
+            '88',
+            new GhError('failed', 'run 88 cannot be rerun; already running'),
+          );
+          await round(w);
+          expect(rerunNoticeOf(id)?.body).toContain('as soon as GitHub allows');
+
+          h.gh.setRequiredChecks(prUrl, failed('lint'));
+          await round(w);
+          const body = rerunNoticeOf(id)?.body ?? '';
+          expect(body).toBeTruthy();
+          expect(body).not.toContain('as soon as GitHub allows');
+          expect(body).not.toContain('beside this one');
+          // A failing check starts no rerun, and none follows it.
+          for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
+          expect(h.gh.reruns).toEqual(['77']);
+        });
+
+        it('takes the cancelled-check notice off when the refused check fails instead', async () => {
+          const { id, prUrl, w } = watching();
+          await rerunOfDesktopOnly(w, prUrl);
+          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+          await round(w);
+          h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
+          await round(w);
+          expect(noticeOf(id)?.line).toContain('could not run');
+          expect(rerunNoticeOf(id)?.body).toContain('will not ask again');
+
+          h.gh.setRequiredChecks(prUrl, failed('lint'));
+          await round(w);
+          expect(noticeOf(id)).toBeUndefined();
+          const body = rerunNoticeOf(id)?.body ?? '';
+          expect(body).toBeTruthy();
+          expect(body).not.toContain('beside this one');
+          expect(body).not.toContain('will not ask again');
+          expect(h.gh.reruns).toEqual(['77']);
+        });
+
+        it('still leaves a failing check with another one cancelled alone, and runs nothing', async () => {
+          const { id, prUrl, w } = watching();
+          h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+          w.start();
+          await w.idle();
+          h.gh.failRerunOf.set(
+            '88',
+            new GhError('failed', 'run 88 cannot be rerun; already running'),
+          );
+          await round(w);
+          const before = rerunNoticeOf(id)?.body;
+          h.gh.setRequiredChecks(prUrl, { ...failed('build'), cancelled: [job('lint', '88')] });
+          for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
+          expect(rerunNoticeOf(id)?.body).toBe(before);
+          expect(h.gh.reruns).toEqual(['77']);
+        });
+      });
     });
   });
 
