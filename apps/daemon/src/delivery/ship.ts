@@ -727,30 +727,34 @@ export function createShipper(deps: ShipperDeps): Shipper {
     signal: AbortSignal,
   ): Promise<string> {
     const tasks = [];
+    const subjects = [];
     const current = members(db, batch.id);
-    // The tasks the title must not name: the pull request holds no work of theirs. A superseded
-    // attempt that committed nothing is no member, but the batch may still carry its name.
-    const noWork: { title: string; state: WorkstreamState; leftOut: true }[] = [];
-    for (const w of latestPerTask(listWorkstreams(db, { batchId: batch.id })))
-      if (!current.some((m) => m.taskId === w.taskId))
-        noWork.push({ title: w.taskTitle, state: w.state, leftOut: true });
-    for (const w of current) {
-      // A cancelled task's work is in the pull request only when its commits are on the branch.
-      if (
-        w.state === WorkstreamState.Cancelled &&
-        (await commitsOf(batch.id, w, target.checkout, target.branch)).length === 0
-      )
-        noWork.push({ title: w.taskTitle, state: w.state, leftOut: true });
+    for (const w of latestPerTask(listWorkstreams(db, { batchId: batch.id }))) {
+      const member = current.some((m) => m.id === w.id);
       const task = getTask(db, w.taskId);
-      tasks.push({
-        title: w.taskTitle,
-        description: task.description,
-        acceptanceCriteria: task.acceptanceCriteria,
-        state: w.state,
-        // A retried run whose commits are still reverted has no work in the branch, so the body must
-        // not list its task as finished.
-        leftOut: leftOut(w) || (await revertedAway(batch.id, w, target)),
-      });
+      // A retried run whose commits are still reverted has no work in the branch, so the body must
+      // not list its task as finished.
+      const out = leftOut(w) || (await revertedAway(batch.id, w, target));
+      // A task that left the batch may still name it, whether or not its run stayed a member (a
+      // superseded attempt stays one until its replacement is cut, and closing a task leaves its failed
+      // run in place). Its work is in the pull request only if a run of it has commits on the branch.
+      const left =
+        !member ||
+        superseded(db, w) ||
+        w.state === WorkstreamState.Cancelled ||
+        task.status === TaskStatus.Cancelled;
+      const noWork =
+        out ||
+        (left && (await commitsOf(batch.id, w, target.checkout, target.branch)).length === 0);
+      subjects.push({ title: w.taskTitle, state: w.state, noWork });
+      if (member)
+        tasks.push({
+          title: w.taskTitle,
+          description: task.description,
+          acceptanceCriteria: task.acceptanceCriteria,
+          state: w.state,
+          leftOut: out,
+        });
     }
     const sha = await deps.git.head(target.checkout);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
@@ -781,10 +785,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             target,
             sha,
           ),
-          prSubject(batch.title, [
-            ...tasks.filter((t) => !noWork.some((n) => n.title === t.title)),
-            ...noWork,
-          ]),
+          prSubject(batch.title, subjects),
         ),
         bodyFile: file,
       },

@@ -99,11 +99,11 @@ async function twoFailedInBatch() {
  * Alpha finished with a commit and the shipping gate sent it to merge in the same batch, where that
  * second run failed at its limit, having committed `merged`. Beta is done.
  */
-async function failedInItsMerge(merged: (run: WorkstreamId) => void) {
+async function failedInItsMerge(merged: (run: WorkstreamId) => void, batchTitle = 'Greetings') {
   const alpha = h.addTask('Alpha');
   const other = h.addTask('Beta', { areas: ['ui'] });
   const started = h.only(
-    h.starter.startBatch(h.project.id, { title: 'Greetings', taskIds: [alpha.id, other.id] }),
+    h.starter.startBatch(h.project.id, { title: batchTitle, taskIds: [alpha.id, other.id] }),
   );
   await h.jobs.idle();
   const [a, b] = listWorkstreams(h.store.db, { batchId: started.id });
@@ -276,6 +276,59 @@ describe('the failed workstream card', () => {
       const alpha = listWorkstreams(h.store.db, { batchId }).find((w) => w.taskTitle === 'Alpha');
       if (!alpha) throw new Error('Alpha is a member');
       h.settle(alpha.id, 'CANCELLED');
+      h.shipper.checkBatch(batchId);
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
+    });
+
+    it('stays the name of a superseded attempt whose commits Ship anyway puts in', async () => {
+      const { card, failed } = await failedInBatch(
+        'DONE',
+        { 'src/api/alpha.txt': 'alpha\n' },
+        'Alpha',
+      );
+      const alphaTask = getWorkstream(h.store.db, failed).taskId;
+      h.state.write((w) => {
+        insertPlannedWorkstream(w, alphaTask, planForStart(w.tx, alphaTask), null);
+      });
+      inbox.answer(card.id, { choice: 'Ship anyway' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
+    });
+
+    it('is not the name of a closed task that committed nothing', async () => {
+      const { card, failed } = await failedInBatch('DONE', {}, 'Alpha');
+      const alphaTask = getWorkstream(h.store.db, failed).taskId;
+      h.state.write((w) => {
+        setTaskStatus(w, alphaTask, 'cancelled');
+      });
+      inbox.answer(card.id, { choice: 'Ship anyway' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+    });
+
+    it('stays the name of a closed task whose commits Ship anyway puts in', async () => {
+      const { card, failed } = await failedInBatch(
+        'DONE',
+        { 'src/api/alpha.txt': 'alpha\n' },
+        'Alpha',
+      );
+      const alphaTask = getWorkstream(h.store.db, failed).taskId;
+      h.state.write((w) => {
+        setTaskStatus(w, alphaTask, 'cancelled');
+      });
+      inbox.answer(card.id, { choice: 'Ship anyway' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
+    });
+
+    it('stays the name of a task started over when an earlier run’s work is on the branch', async () => {
+      // The merge run failed having committed nothing, so it drops out, but the first run's commit stays.
+      const { batchId, merge } = await failedInItsMerge(() => undefined, 'Alpha');
+      const alphaTask = getWorkstream(h.store.db, merge).taskId;
+      h.state.write((w) => {
+        insertPlannedWorkstream(w, alphaTask, planForStart(w.tx, alphaTask), null);
+      });
       h.shipper.checkBatch(batchId);
       await h.jobs.idle();
       expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
