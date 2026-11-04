@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProposalId,
   SessionId,
+  ShapeId,
   SourceId,
   WorkstreamId,
 } from './ids';
@@ -276,8 +277,18 @@ export const ProvenanceDto = z.object({
       note: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * The 10db session that wrote the record. A session runs a workstream or a Shape conversation, exactly
+   * one: a lane session has `workstreamId` and `taskTitle`, a Shape session has `shapeId` and `shapeTitle`.
+   */
   session: z
-    .object({ id: SessionId, workstreamId: WorkstreamId, taskTitle: z.string().nullable() })
+    .object({
+      id: SessionId,
+      workstreamId: WorkstreamId.nullable(),
+      shapeId: ShapeId.nullable(),
+      taskTitle: z.string().nullable(),
+      shapeTitle: z.string().nullable(),
+    })
     .nullable(),
   quote: z.string().nullable(),
   speaker: z.string().nullable(),

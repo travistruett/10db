@@ -17,6 +17,7 @@ import {
   getPrinciple,
   getPrincipleRow,
   getSession,
+  getShape,
   getSource,
   getWorkstream,
   type DbReader,
@@ -72,16 +73,19 @@ function describeSource(db: DbReader, a: Attribution): Common {
   // A builder source's sessionId is the tool's own, not one of 10db's; only other sources name 10db's.
   const sessionId = builder ? null : SessionId.safeParse(ref['sessionId']);
   const workstreamId = WorkstreamId.safeParse(ref['workstreamId']);
+  // A session runs a workstream or a Shape conversation, exactly one; the session row says which.
   const session = sessionId?.success
     ? orNull(() => {
-        const workstream = workstreamId.success
-          ? workstreamId.data
-          : getSession(db, sessionId.data).workstreamId;
-        if (workstream === null) return null;
+        const row = getSession(db, sessionId.data);
+        const workstream = workstreamId.success ? workstreamId.data : row.workstreamId;
+        const shape = workstream === null ? row.shapeId : null;
         return {
           id: sessionId.data,
           workstreamId: workstream,
-          taskTitle: orNull(() => getWorkstream(db, workstream).taskTitle),
+          shapeId: shape,
+          taskTitle:
+            workstream === null ? null : orNull(() => getWorkstream(db, workstream).taskTitle),
+          shapeTitle: shape === null ? null : orNull(() => getShape(db, shape).title),
         };
       })
     : null;
