@@ -82,7 +82,16 @@ export type BaseUpdate =
    * task's code is not at fault: the runner does not count an attempt
    * (`decisions/2026-11-03-a-broken-install-is-not-a-failed-gate.md`).
    */
-  | { readonly kind: 'install_broken'; readonly note: string }
+  | {
+      readonly kind: 'install_broken';
+      readonly note: string;
+      /**
+       * The head the merge wrote, before the install, when this update made one (generated
+       * directories waiting for a regeneration that did not run are in it as the base had them). A
+       * caller that does not push puts the branch back from it.
+       */
+      readonly head?: string;
+    }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
 
@@ -1128,6 +1137,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             merged.note,
             `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile${installed.final === true && installed.startedOver !== true ? ' and that install did not bring them back' : ', then removed node_modules and installed again by itself, and neither install brought them back'}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
+        ...(merged.kind === 'merged' ? { head: merged.head } : {}),
       };
     }
     switch (merged.kind) {

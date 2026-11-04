@@ -1759,6 +1759,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
         // since the install and the generators run long enough for the builder to commit meanwhile.
         if (update.kind === 'merged') wrote = update.head;
+        // A broken install still left its merge on the branch: it goes back with the others.
+        else if (update.kind === 'install_broken' && update.head !== undefined) wrote = update.head;
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
@@ -1779,6 +1781,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
         if (brought.held?.reason === 'conflict')
           stop({ kind: 'conflict', paths: brought.held.paths });
         else stop({ kind: 'other', why: brought.note });
+        return;
+      }
+      if (brought.kind === 'install_broken') {
+        // The packages do not resolve, so the generators did not run and no check could start: a
+        // merge whose generated directories were never regenerated is not pushed, and goes back.
+        stop({
+          kind: 'other',
+          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed: the merge's generated directories could not be regenerated.`,
+        });
         return;
       }
       if (brought.kind === 'up_to_date') {

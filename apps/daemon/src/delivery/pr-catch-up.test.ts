@@ -13,12 +13,33 @@ vi.setConfig({ testTimeout: 120_000 });
 let h: DeliveryHarness;
 /** Whether a waiting update drains the factory. */
 let draining: boolean;
+/** Whether a catch-up's base update answers that the copy's install is broken, after its real merge. */
+let installBroken: boolean;
+const BROKEN_NOTE =
+  'The install in this copy is broken: 3 of 9 dependencies do not resolve (.: tsx).';
 beforeEach(() => {
   draining = false;
+  installBroken = false;
   // The tests settle work and ask the shipper themselves.
   h = createDeliveryHarness(
     { workspaceMode: 'worktree' },
-    { trigger: false, holdShips: () => draining },
+    {
+      trigger: false,
+      holdShips: () => draining,
+      shipBaseUpdates: (real) => ({
+        ...real,
+        beforeGate: async (batchId, signal, options) => {
+          const update = await real.beforeGate(batchId, signal, options);
+          if (!installBroken || options?.forPullRequest !== true) return update;
+          // As the real update answers when the install after its merge is broken: the merge it wrote stays.
+          return {
+            kind: 'install_broken',
+            note: BROKEN_NOTE,
+            ...(update.kind === 'merged' ? { head: update.head } : {}),
+          };
+        },
+      }),
+    },
   );
   h.commit('src/index.ts', "import a from './a';\nexport {};\n");
   h.git$('push', '-q', 'origin', 'main');
@@ -133,6 +154,33 @@ describe('a shipped pull request that conflicts with its base', () => {
     // 10db's merge, which it did not push, is not left on the local branch.
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
   });
+
+  it.each([
+    ['no check is set', null],
+    ['a gate is set', { gateCommand: 'touch gate-ran' }],
+  ])(
+    'pushes nothing, raises one card naming the install and puts the merge back when the install is broken and %s',
+    async (_name, project) => {
+      const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+      const kept = batch.worktreePath ?? '';
+      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+      conflicts(batch);
+      const before = onOrigin(batch.branch);
+      if (project !== null) h.state.write((c) => patchProject(c, h.project.id, project));
+      installBroken = true;
+
+      const now = await catchUp(batch);
+
+      expect(onOrigin(batch.branch)).toBe(before);
+      expect(existsSync(join(kept, 'gate-ran'))).toBe(false);
+      // (The kept worktree has its own card, from the ship.)
+      const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
+      expect(card.body).toContain('.: tsx');
+      expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
+      expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+      expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
+    },
+  );
 
   it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
     const batch = await shipped();
