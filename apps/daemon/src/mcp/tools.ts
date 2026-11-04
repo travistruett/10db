@@ -4,10 +4,13 @@ import {
   EventType,
   FOLLOW_UPS_HEADING,
   InvalidError,
+  KnowledgeKindFilter,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   McpToolName,
   McpToolOutputs,
+  PrincipleDraft,
+  ProposalKind,
   QuestionCategory,
   REVIEW_ROLES,
   StepRole,
@@ -39,6 +42,7 @@ import {
   patchWorkstream,
   releaseClaim,
   searchDecisions,
+  searchPrinciples,
   type ClaimRow,
   type Json,
 } from '@10db/db';
@@ -54,6 +58,7 @@ import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
 import type { InboxService, WaitObserver } from '../inbox';
+import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
 import {
   CLAIM_POLL_MS,
@@ -95,13 +100,13 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   get_context:
     'Your context pack: the task, acceptance criteria, your claims, the latest handoff, any answer waiting for you, and relevant decisions.',
   find_knowledge:
-    'Search recorded decisions in scope for this project. Returns an explicit empty result when nothing matches.',
+    'Search the current decisions and confirmed principles that apply to this project, each labelled with its scope and area. Set kind to decision or principle to search one shelf; limit applies to each shelf. Returns an explicit empty result when nothing matches.',
   ask_human:
     'Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. 10db adds a "Park the task" choice to every card; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.',
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS); after that the call is refused.',
@@ -132,6 +137,13 @@ export function createToolHandlers(
       project: getProject(db, workstream.projectId),
       task: getTask(db, workstream.taskId),
     };
+  };
+
+  /** Refuses an area name the calling project doesn't have, naming the ones it has. */
+  const requireArea = (area: string): void => {
+    const names = context().project.areas.map((a) => a.name);
+    if (!names.includes(area))
+      throw new InvalidError(`No area named ${area} in this project. Areas: ${names.join(', ')}`);
   };
 
   /** Returns the recorded result for a repeated opId; throws if the opId belonged to another tool. */
@@ -219,9 +231,21 @@ export function createToolHandlers(
   return {
     get_context: () => Promise.resolve(buildContextPack(db, getWorkstream(db, workstreamId))),
 
-    find_knowledge: ({ query, limit }) => {
-      const results = searchDecisions(db, context().project.id, query, limit);
-      return Promise.resolve({ results, empty: results.length === 0 });
+    find_knowledge: ({ query, limit, kind }) => {
+      const projectId = context().project.id;
+      // The limit applies to each shelf. Only current records are searched: a proposed, superseded,
+      // retired or withdrawn one never reaches an agent.
+      const results =
+        kind === KnowledgeKindFilter.Principle ? [] : searchDecisions(db, projectId, query, limit);
+      const principles =
+        kind === KnowledgeKindFilter.Decision
+          ? []
+          : searchPrinciples(db, projectId, query, limit).map(principleHit);
+      return Promise.resolve({
+        results,
+        principles,
+        empty: results.length === 0 && principles.length === 0,
+      });
     },
 
     ask_human: async (input) => {
@@ -273,6 +297,7 @@ export function createToolHandlers(
         throw new InvalidError(
           'The area field is only for decisions with scope "area"; omit it for project scope.',
         );
+      if (input.area !== undefined) requireArea(input.area);
       const { project } = context();
       return Promise.resolve(
         deps.state.write((ctx) => {
@@ -296,9 +321,33 @@ export function createToolHandlers(
       const done = prior(input.opId, McpToolName.Propose);
       if (done !== undefined) return Promise.resolve(McpToolOutputs.propose.parse(done));
       const { project } = context();
+      if (input.principle && input.kind !== ProposalKind.Principle)
+        throw new InvalidError('The principle field is only for proposals of kind "principle".');
+      if (input.principle?.area !== undefined) requireArea(input.principle.area);
+      let draft: PrincipleDraft | null = null;
+      if (input.kind === ProposalKind.Principle) {
+        // With no draft, the body is the statement when it is short enough to be one.
+        const parsed = PrincipleDraft.safeParse(input.principle ?? { statement: input.body });
+        if (!parsed.success)
+          throw new InvalidError(
+            'A principle proposal needs the principle field, or a body of at most 500 characters to use as its statement.',
+          );
+        draft = parsed.data;
+      }
       return Promise.resolve(
         deps.state.write((ctx) => {
           const sourceId = insertSource(ctx, 'agent', { sessionId, workstreamId });
+          if (draft) {
+            const { proposalId, principle } = proposePrinciple(ctx, {
+              projectId: project.id,
+              title: input.title,
+              body: input.body,
+              draft,
+              sourceId,
+              speaker: `agent:${sessionId}`,
+            });
+            return record('propose', input.opId, { proposalId, principleId: principle.id }, ctx);
+          }
           const proposalId = insertProposal(ctx, {
             projectId: project.id,
             kind: input.kind,
@@ -322,7 +371,7 @@ export function createToolHandlers(
             foldKey: null,
             targets: [],
           });
-          return record('propose', input.opId, { proposalId }, ctx);
+          return record('propose', input.opId, { proposalId, principleId: null }, ctx);
         }),
       );
     },

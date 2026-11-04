@@ -1,6 +1,16 @@
 import type { ContextPack, HandoffDto, NextAction, StepResult } from '@10db/contracts';
 import { mintId } from '@10db/contracts';
-import { createTestStore, insertDecision, insertSource } from '@10db/db';
+import {
+  acquireClaims,
+  createTestStore,
+  insertDecision,
+  insertPrinciple,
+  insertSource,
+  retirePrinciple,
+  supersedeDecision,
+  withdrawDecision,
+  type NewPrinciple,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedWorkstream } from '../../test/fixtures';
 import { readOnlyShellRefusal } from '../guard';
@@ -55,22 +65,58 @@ const emptyPack: ContextPack = {
   claims: [],
   handoff: null,
   pendingAnswer: null,
-  knowledge: { decisions: [], budgetUsed: 0, droppedCount: 0, empty: true },
+  knowledge: {
+    policies: [],
+    heuristics: [],
+    decisions: [],
+    budget: 1500,
+    budgetUsed: 0,
+    dropped: { policies: 0, heuristics: 0, decisions: 0 },
+    droppedCount: 0,
+    empty: true,
+  },
 };
+const policyId = mintId('Principle');
+const heuristicId = mintId('Principle');
+const decisionId = mintId('Decision');
 const packWithDecision: ContextPack = {
   ...emptyPack,
   knowledge: {
+    ...emptyPack.knowledge,
+    policies: [
+      {
+        kind: 'principle',
+        id: policyId,
+        statement: 'Never sleep in tests',
+        principleKind: 'policy',
+        topicKey: 'testing.no-sleeps',
+        scope: 'project',
+        area: null,
+      },
+    ],
+    heuristics: [
+      {
+        kind: 'principle',
+        id: heuristicId,
+        statement: 'Prefer Mantine components',
+        principleKind: 'heuristic',
+        topicKey: 'ui.mantine',
+        scope: 'you',
+        area: null,
+      },
+    ],
     decisions: [
       {
         kind: 'decision',
-        id: mintId('Decision'),
+        id: decisionId,
         question: 'Which badge library?',
         choice: 'Mantine Badge',
         rationale: 'Already in the stack',
+        scope: 'area',
+        area: 'ui',
       },
     ],
-    budgetUsed: 12,
-    droppedCount: 0,
+    budgetUsed: 30,
     empty: false,
   },
 };
@@ -347,25 +393,94 @@ describe('buildSessionPrompt', () => {
     expect(full).not.toContain('No recorded decisions');
   });
 
-  it('does not claim nothing applies when every decision exceeded the budget', () => {
+  it('renders policies, then heuristics, then decisions, each with its id and scope', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      contextPack: packWithDecision,
+      action: { kind: 'start' },
+    });
+    const policy = prompt.indexOf(
+      `- [testing.no-sleeps] Never sleep in tests {${policyId}, project}`,
+    );
+    const heuristic = prompt.indexOf(
+      `- [ui.mantine] Prefer Mantine components {${heuristicId}, you}`,
+    );
+    const decision = prompt.indexOf(
+      `- Which badge library? -> Mantine Badge (Already in the stack) {${decisionId}, area:ui}`,
+    );
+    expect(policy).toBeGreaterThan(prompt.indexOf('Policies (you must follow these'));
+    expect(heuristic).toBeGreaterThan(policy);
+    expect(decision).toBeGreaterThan(heuristic);
+  });
+
+  it('says what each shelf dropped, and never claims nothing applies when the budget hid it', () => {
     const prompt = buildSessionPrompt({
       ...base,
       contextPack: {
         ...emptyPack,
-        knowledge: { decisions: [], budgetUsed: 0, droppedCount: 3, empty: true },
+        knowledge: {
+          ...emptyPack.knowledge,
+          dropped: { policies: 1, heuristics: 0, decisions: 2 },
+          droppedCount: 3,
+        },
       },
       action: { kind: 'start' },
     });
-    expect(prompt).toContain('3 recorded decisions exceeded the budget');
+    expect(prompt).toContain(
+      '3 records exceeded the budget (policies: 1, heuristics: 0, decisions: 2)',
+    );
     expect(prompt).toContain('find_knowledge');
     expect(prompt).not.toContain('No recorded decisions');
   });
 
-  it('asks for write_handoff in the nudge and re-injects the pack after compaction', () => {
+  it('says what was left out beside what fit', () => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      contextPack: {
+        ...packWithDecision,
+        knowledge: {
+          ...packWithDecision.knowledge,
+          dropped: { policies: 0, heuristics: 1, decisions: 0 },
+          droppedCount: 1,
+        },
+      },
+      action: { kind: 'start' },
+    });
+    expect(prompt).toContain('Never sleep in tests');
+    expect(prompt).toContain(
+      '1 records exceeded the budget (policies: 0, heuristics: 1, decisions: 0)',
+    );
+  });
+
+  it('asks for write_handoff in the nudge and re-injects the rendered pack after compaction', () => {
     expect(HANDOFF_NUDGE).toContain('write_handoff');
     expect(renderHandoff(handoff)).toContain('Next action: Write the render test');
-    expect(compactionReinjection(packWithDecision)).toContain('context pack');
-    expect(compactionReinjection(packWithDecision)).toContain('Mantine Badge');
+    const text = compactionReinjection({ ...packWithDecision, handoff });
+    expect(text).toContain('context pack');
+    expect(text).toContain('Task: Add the badge');
+    expect(text).toContain(`- [testing.no-sleeps] Never sleep in tests {${policyId}, project}`);
+    expect(text).toContain('Mantine Badge');
+    expect(text).toContain('Next action: Write the render test');
+    expect(text).not.toContain('"knowledge"');
+  });
+
+  it('re-injects the same knowledge text the first prompt carried', () => {
+    const first = buildSessionPrompt({
+      ...base,
+      contextPack: packWithDecision,
+      action: { kind: 'start' },
+    });
+    const again = compactionReinjection(packWithDecision);
+    const knowledge = [
+      'Policies (you must follow these):',
+      `- [testing.no-sleeps] Never sleep in tests {${policyId}, project}`,
+      'Heuristics (prefer these):',
+      `- [ui.mantine] Prefer Mantine components {${heuristicId}, you}`,
+      'Recorded decisions:',
+      `- Which badge library? -> Mantine Badge (Already in the stack) {${decisionId}, area:ui}`,
+    ].join('\n');
+    expect(first).toContain(knowledge);
+    expect(again).toContain(knowledge);
   });
 });
 
@@ -380,42 +495,140 @@ describe('buildContextPack', () => {
   const recordDecision = (
     projectId: Parameters<typeof insertDecision>[1]['projectId'],
     question: string,
-    choice = 'x'.repeat(300),
+    over: Partial<Parameters<typeof insertDecision>[1]> = {},
   ) =>
-    store.write((ctx) => {
-      const sourceId = insertSource(ctx, 'builder', {});
+    store.write((ctx) =>
       insertDecision(ctx, {
         projectId,
         question,
-        choice,
+        choice: 'x'.repeat(300),
         rationale: 'r',
         decidedBy: 'me',
         scope: 'project',
         area: null,
-        sourceId,
-      });
-    });
+        sourceId: insertSource(ctx, 'builder', {}),
+        ...over,
+      }),
+    ).value;
+
+  const rule = (
+    target: NewPrinciple['target'],
+    topicKey: string,
+    over: Partial<NewPrinciple> = {},
+  ) =>
+    store.write((ctx) =>
+      insertPrinciple(ctx, {
+        target,
+        statement: `Rule ${topicKey}`,
+        kind: 'policy',
+        topicKey,
+        status: 'confirmed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote: null,
+        speaker: 'me',
+        confirmedBy: 'me',
+        ...over,
+      }),
+    ).value;
+
+  const keys = (pack: ContextPack) =>
+    [...pack.knowledge.policies, ...pack.knowledge.heuristics].map((p) => p.topicKey);
 
   it('says so when there is no knowledge', () => {
     const { workstream } = seedWorkstream(store);
     const pack = buildContextPack(store.db, workstream);
-    expect(pack.knowledge).toEqual({ decisions: [], budgetUsed: 0, droppedCount: 0, empty: true });
+    expect(pack.knowledge).toEqual(emptyPack.knowledge);
     expect(pack.task.title).toBe('Alpha');
   });
 
-  it('fills the budget with relevant decisions and counts what it dropped', () => {
+  it('packs only records that apply to this project and the task’s areas', () => {
+    const { project, workstream } = seedWorkstream(store, { areas: ['api'] });
+    const other = seedWorkstream(store, { title: 'Other' }).project;
+    rule({ scope: 'you' }, 'mine');
+    rule({ scope: 'project', projectId: project.id }, 'ours');
+    rule({ scope: 'area', projectId: project.id, area: 'api' }, 'api-rule');
+    rule({ scope: 'area', projectId: project.id, area: 'ui' }, 'ui-rule');
+    rule({ scope: 'project', projectId: other.id }, 'theirs');
+    recordDecision(project.id, 'Which icons for the ui?', {
+      scope: 'area',
+      area: 'ui',
+      choice: 'tabler',
+    });
+    const pack = buildContextPack(store.db, workstream);
+    expect(keys(pack)).toEqual(['api-rule', 'ours', 'mine']);
+    expect(pack.knowledge.decisions).toEqual([]);
+  });
+
+  it('briefs a builder-wide policy in every project', () => {
+    const first = seedWorkstream(store, { title: 'First' });
+    const second = seedWorkstream(store, { title: 'Second' });
+    rule({ scope: 'you' }, 'mine');
+    expect(keys(buildContextPack(store.db, first.workstream))).toEqual(['mine']);
+    expect(keys(buildContextPack(store.db, second.workstream))).toEqual(['mine']);
+  });
+
+  it('widens the areas to a live area claim', () => {
+    const { project, workstream } = seedWorkstream(store, { areas: ['api'] });
+    rule({ scope: 'area', projectId: project.id, area: 'ui' }, 'ui-rule');
+    expect(keys(buildContextPack(store.db, workstream))).toEqual([]);
+    store.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: workstream.id,
+        requests: [{ kind: 'area', name: 'ui' }],
+        leaseExpiresAt: ctx.now,
+      }),
+    );
+    expect(keys(buildContextPack(store.db, workstream))).toEqual(['ui-rule']);
+  });
+
+  it('packs no superseded, withdrawn, retired or proposed record', () => {
+    const { project, workstream } = seedWorkstream(store, { title: 'Alpha queue' });
+    const target = { scope: 'project' as const, projectId: project.id };
+    rule(target, 'a', { statement: 'Old a' });
+    rule(target, 'a', { statement: 'New a' });
+    const retired = rule(target, 'b');
+    store.write((ctx) => retirePrinciple(ctx, retired.id, 'me', 'old'));
+    rule(target, 'c', { status: 'proposed', confirmedBy: null });
+    const old = recordDecision(project.id, 'Which queue?', { choice: 'BullMQ' });
+    store.write((ctx) =>
+      supersedeDecision(ctx, old, {
+        projectId: project.id,
+        question: 'Which queue?',
+        choice: 'pg-boss',
+        rationale: 'one database',
+        decidedBy: 'me',
+        scope: 'project',
+        area: null,
+        sourceId: insertSource(ctx, 'builder', {}),
+      }),
+    );
+    const gone = recordDecision(project.id, 'Which queue runner?', { choice: 'cron' });
+    store.write((ctx) => {
+      withdrawDecision(ctx, gone, { by: 'me', reason: 'mistake' });
+    });
+    const pack = buildContextPack(store.db, workstream);
+    expect(pack.knowledge.policies.map((p) => p.statement)).toEqual(['New a']);
+    expect(pack.knowledge.decisions.map((d) => d.choice)).toEqual(['pg-boss']);
+  });
+
+  it('fills the budget and counts what each shelf dropped', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 5; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
-    const pack = buildContextPack(store.db, workstream, 700);
-    expect(pack.knowledge.decisions.length).toBeGreaterThan(0);
-    expect(pack.knowledge.decisions.length + pack.knowledge.droppedCount).toBe(5);
+    rule({ scope: 'project', projectId: project.id }, 'p', { statement: 'y'.repeat(100) });
+    const pack = buildContextPack(store.db, workstream, 200);
+    expect(pack.knowledge.policies).toHaveLength(1);
+    expect(pack.knowledge.decisions.length + pack.knowledge.dropped.decisions).toBe(5);
+    expect(pack.knowledge.dropped.decisions).toBeGreaterThan(0);
+    expect(pack.knowledge.droppedCount).toBe(pack.knowledge.dropped.decisions);
+    expect(pack.knowledge.budget).toBe(200);
+    expect(pack.knowledge.budgetUsed).toBeLessThanOrEqual(200);
     expect(pack.knowledge.empty).toBe(false);
-    expect(pack.knowledge.budgetUsed).toBeLessThanOrEqual(Math.ceil(700 / 4));
   });
 
   it('falls back to recent decisions when nothing matches the task', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha' });
-    recordDecision(project.id, 'Unrelated zebra topic', 'stripes');
+    recordDecision(project.id, 'Unrelated zebra topic', { choice: 'stripes' });
     const pack = buildContextPack(store.db, workstream);
     expect(pack.knowledge.decisions.map((d) => d.question)).toEqual(['Unrelated zebra topic']);
     expect(pack.knowledge.empty).toBe(false);
@@ -424,9 +637,32 @@ describe('buildContextPack', () => {
   it('is deterministic for the same state', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha badge' });
     for (let i = 0; i < 3; i += 1) recordDecision(project.id, `Badge question ${String(i)}`);
-    expect(buildContextPack(store.db, workstream, 600)).toEqual(
-      buildContextPack(store.db, workstream, 600),
+    rule({ scope: 'project', projectId: project.id }, 'p');
+    expect(buildContextPack(store.db, workstream, 250)).toEqual(
+      buildContextPack(store.db, workstream, 250),
     );
+  });
+
+  it('still briefs from policies and the newest decisions when the decision search index is broken', () => {
+    const { project, workstream } = seedWorkstream(store, {
+      title: 'Alpha queue',
+      areas: ['api'],
+    });
+    rule({ scope: 'project', projectId: project.id }, 'p');
+    recordDecision(project.id, 'Which router?', {
+      choice: 'hono',
+      scope: 'area',
+      area: 'api',
+    });
+    recordDecision(project.id, 'Which queue?', { choice: 'pg-boss' });
+    // Defensive mode keeps FTS5 shadow tables read-only; unsafe mode lets the test corrupt one, as an
+    // index the startup check could not rebuild would be. Its MATCH now throws SQLITE_CORRUPT_VTAB.
+    store.db.$client.unsafeMode(true);
+    store.db.$client.exec('DROP TABLE decisions_fts_data; CREATE TABLE decisions_fts_data(x)');
+    store.db.$client.unsafeMode(false);
+    const pack = buildContextPack(store.db, workstream);
+    expect(pack.knowledge.policies.map((p) => p.topicKey)).toEqual(['p']);
+    expect(pack.knowledge.decisions.map((d) => d.choice)).toEqual(['hono', 'pg-boss']);
   });
 });
 

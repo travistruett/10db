@@ -38,6 +38,7 @@ import type {
   InboxState,
   InboxTarget,
   JudgeCallId,
+  KnowledgeScope,
   LandingGroupId,
   JudgeDecision,
   JudgeOutcome,
@@ -49,6 +50,9 @@ import type {
   PermissionRuleId,
   PersonaId,
   PersonId,
+  PrincipleId,
+  PrincipleKind,
+  PrincipleStatus,
   ProfileSource,
   ProjectId,
   ProjectLanding,
@@ -89,6 +93,7 @@ import type {
   ShapeReviewer,
   ShapeMessageAuthor,
   ShapeMessageId,
+  ShapeQuestionId,
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalId,
@@ -450,6 +455,10 @@ export const proposals = sqliteTable('proposals', {
   body: text('body').notNull(),
   status: text('status').$type<'pending' | 'accepted' | 'rejected'>().notNull(),
   rationale: text('rationale'),
+  /** The proposed principle, for a principle proposal. */
+  principleId: text('principle_id')
+    .$type<PrincipleId>()
+    .references((): AnySQLiteColumn => principles.id),
   sourceId: text('source_id')
     .$type<SourceId>()
     .notNull()
@@ -708,33 +717,98 @@ export const evidence = sqliteTable('evidence', {
   createdAt: createdAt(),
 });
 
-export const decisions = sqliteTable('decisions', {
-  id: text('id').$type<DecisionId>().primaryKey(),
-  projectId: text('project_id')
-    .$type<ProjectId>()
-    .references(() => projects.id),
-  question: text('question').notNull(),
-  choice: text('choice').notNull(),
-  rationale: text('rationale').notNull(),
-  decidedBy: text('decided_by').notNull(),
-  scope: text('scope').$type<'you' | 'project' | 'area'>().notNull(),
-  area: text('area'),
-  supersedesId: text('supersedes_id').$type<DecisionId>(),
-  sourceId: text('source_id')
-    .$type<SourceId>()
-    .notNull()
-    .references(() => sources.id),
-  /**
-   * A withdrawn decision is a tombstone: the row stays, search and the context pack skip it.
-   * `withdrawDecision` writes all three together and refuses an empty reason; no CHECK enforces it,
-   * since adding one rebuilds the table and drops its full-text triggers.
-   */
-  withdrawnAt: text('withdrawn_at'),
-  withdrawnBy: text('withdrawn_by'),
-  withdrawnReason: text('withdrawn_reason'),
-  createdAt: createdAt(),
-  updatedAt: updatedAt(),
-});
+export const decisions = sqliteTable(
+  'decisions',
+  {
+    id: text('id').$type<DecisionId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    question: text('question').notNull(),
+    choice: text('choice').notNull(),
+    rationale: text('rationale').notNull(),
+    decidedBy: text('decided_by').notNull(),
+    scope: text('scope').$type<KnowledgeScope>().notNull(),
+    area: text('area'),
+    supersedesId: text('supersedes_id').$type<DecisionId>(),
+    sourceId: text('source_id')
+      .$type<SourceId>()
+      .notNull()
+      .references(() => sources.id),
+    /**
+     * A withdrawn decision is a tombstone: the row stays, search and the context pack skip it.
+     * `withdrawDecision` writes all three together and refuses an empty reason; no CHECK enforces it,
+     * since adding one rebuilds the table and drops its full-text triggers.
+     */
+    withdrawnAt: text('withdrawn_at'),
+    withdrawnBy: text('withdrawn_by'),
+    withdrawnReason: text('withdrawn_reason'),
+    /** Where the withdrawal came from, when the write named a source. */
+    withdrawnSourceId: text('withdrawn_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  // Every read derives state by looking up a successor through supersedes_id.
+  (t) => [index('decisions_supersedes_idx').on(t.supersedesId)],
+);
+
+/**
+ * Spec §4 `principles`. A row's state (current, superseded, …) is derived on read, never stored.
+ * Like `decisions`, the withdrawn columns carry no CHECK: adding one rebuilds the table and drops
+ * its full-text triggers, so the code that writes them enforces the reason.
+ */
+export const principles = sqliteTable(
+  'principles',
+  {
+    id: text('id').$type<PrincipleId>().primaryKey(),
+    /** Null for a `you` principle, which applies in every project. */
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    scope: text('scope').$type<KnowledgeScope>().notNull(),
+    area: text('area'),
+    statement: text('statement').notNull(),
+    /** Why the rule holds; shown beside the statement, not searched. */
+    rationale: text('rationale'),
+    kind: text('kind').$type<PrincipleKind>().notNull(),
+    topicKey: text('topic_key').notNull(),
+    status: text('status').$type<PrincipleStatus>().notNull(),
+    supersedesId: text('supersedes_id').$type<PrincipleId>(),
+    sourceId: text('source_id')
+      .$type<SourceId>()
+      .notNull()
+      .references(() => sources.id),
+    sourceQuote: text('source_quote'),
+    speaker: text('speaker'),
+    confirmedBy: text('confirmed_by'),
+    confirmedAt: text('confirmed_at'),
+    /** Where the confirmation came from, when the write named a source; `source_id` is the proposal's own. */
+    confirmedSourceId: text('confirmed_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
+    retiredAt: text('retired_at'),
+    retiredBy: text('retired_by'),
+    retiredReason: text('retired_reason'),
+    retiredSourceId: text('retired_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
+    withdrawnAt: text('withdrawn_at'),
+    withdrawnBy: text('withdrawn_by'),
+    withdrawnReason: text('withdrawn_reason'),
+    withdrawnSourceId: text('withdrawn_source_id')
+      .$type<SourceId>()
+      .references(() => sources.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('principles_topic_idx').on(t.topicKey, t.scope, t.projectId, t.area),
+    // Every read derives state by looking up a successor through supersedes_id.
+    index('principles_supersedes_idx').on(t.supersedesId),
+  ],
+);
 
 export const deviations = sqliteTable('deviations', {
   id: text('id').$type<DeviationId>().primaryKey(),
@@ -1143,6 +1217,12 @@ export const shapeLinks = sqliteTable(
     decisionId: text('decision_id')
       .$type<DecisionId>()
       .references(() => decisions.id),
+    principleId: text('principle_id')
+      .$type<PrincipleId>()
+      .references(() => principles.id),
+    questionId: text('question_id')
+      .$type<ShapeQuestionId>()
+      .references(() => shapeQuestions.id),
     /** When a turn told Claude this task finished outside its size; null until then. */
     sizeToldAt: text('size_told_at'),
     createdAt: createdAt(),
@@ -1152,9 +1232,44 @@ export const shapeLinks = sqliteTable(
     index('shape_links_task_idx').on(t.taskId),
     check(
       'shape_links_one_target',
-      sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) = 1`,
+      sql`(${t.goalId} IS NOT NULL) + (${t.taskId} IS NOT NULL) + (${t.decisionId} IS NOT NULL) + (${t.principleId} IS NOT NULL) + (${t.questionId} IS NOT NULL) = 1`,
     ),
   ],
+);
+
+/**
+ * A question a conversation's plan holds for a role or a person (Shape spec §13), stored when Convert
+ * writes it and linked to the goal or task it belongs to. Nothing is sent: goals phase 3 sends them.
+ */
+export const shapeQuestions = sqliteTable(
+  'shape_questions',
+  {
+    id: text('id').$type<ShapeQuestionId>().primaryKey(),
+    shapeId: text('shape_id')
+      .$type<ShapeId>()
+      .notNull()
+      .references(() => shapes.id),
+    proposalId: text('proposal_id')
+      .$type<ShapeProposalId>()
+      .notNull()
+      .references(() => shapeProposals.id),
+    key: text('key').notNull(),
+    text: text('text').notNull(),
+    /** The role or person the question is for. */
+    forWho: text('for_who').notNull(),
+    sourceMessageIds: text('source_message_ids', { mode: 'json' })
+      .$type<ShapeMessageId[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index('shape_questions_shape_idx').on(t.shapeId, t.key)],
 );
 
 /**

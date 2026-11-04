@@ -10,6 +10,9 @@ import {
   ShapeMessageId,
   TaskId,
 } from './ids';
+import { TopicKey } from './knowledge';
+import { KnowledgeScope, PrincipleKind } from './states';
+import { SeeScreenInput } from './shape-screens';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
 // Contracts only; the daemon module that runs a conversation comes in later tasks.
@@ -48,6 +51,8 @@ export const ShapeMessageKind = {
   Digest: 'digest',
   Event: 'event',
   Notice: 'notice',
+  /** A screenshot the session took with `see_screen` (§5.5); its body is a ScreenMessageBody. */
+  Screen: 'screen',
 } as const;
 export type ShapeMessageKind = ValueOf<typeof ShapeMessageKind>;
 
@@ -80,8 +85,9 @@ export type Ceremony = ValueOf<typeof Ceremony>;
 export const TaskSize = { S: 'S', M: 'M', L: 'L', XL: 'XL' } as const;
 export type TaskSize = ValueOf<typeof TaskSize>;
 
-export const RecordScope = { You: 'you', Project: 'project', Area: 'area' } as const;
-export type RecordScope = ValueOf<typeof RecordScope>;
+/** The same vocabulary as the knowledge scope, kept in one place (`states.ts`). */
+export const RecordScope = KnowledgeScope;
+export type RecordScope = KnowledgeScope;
 
 // --- PlanDraft (§6) -----------------------------------------------------------------------------
 
@@ -195,8 +201,13 @@ export const PlanPrincipleRecord = z
     kind: z.literal('principle'),
     statement: z.string().min(1),
     rationale: z.string().min(1),
+    /** `policy`, `heuristic` or `belief`; Convert gives a record that names none `policy`. */
+    principleKind: z.enum(PrincipleKind).optional(),
+    /** The key the principle replaces the current one by; Convert makes one from the statement when absent. */
+    topicKey: TopicKey.optional(),
   })
   .refine(areaMatchesScope, AREA_SCOPE);
+export type PlanPrincipleRecord = z.infer<typeof PlanPrincipleRecord>;
 
 export const PlanRecord = z.discriminatedUnion('kind', [PlanDecisionRecord, PlanPrincipleRecord]);
 export type PlanRecord = z.infer<typeof PlanRecord>;
@@ -206,6 +217,8 @@ export const PlanQuestion = z.object({
   text: z.string().min(1),
   /** A role or a person. */
   for: z.string().min(1),
+  /** The key of the goal or task the question belongs to; Convert stores it under that goal or task. */
+  about: BriefKey.optional(),
   sourceMessageIds: SourceMessageIds,
 });
 export type PlanQuestion = z.infer<typeof PlanQuestion>;
@@ -305,6 +318,7 @@ export const ShapeToolName = {
   ReportFinding: 'report_finding',
   ResolveFinding: 'resolve_finding',
   FindRecords: 'find_records',
+  SeeScreen: 'see_screen',
 } as const;
 export type ShapeToolName = ValueOf<typeof ShapeToolName>;
 
@@ -411,4 +425,5 @@ export const ShapeToolInputs = {
   }),
   resolve_finding: z.object({ findingId: ShapeFindingId, how: HowResolved }),
   find_records: z.object({ query: z.string().min(1) }),
+  see_screen: SeeScreenInput,
 } as const satisfies Record<ShapeToolName, z.ZodType>;

@@ -6,6 +6,7 @@ import {
   type SupportedAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
+import type { SignInState } from './sign-in-check';
 
 /** What Claude Code reports about the account a session runs on (`accountInfo()`). */
 export interface SeenAccount {
@@ -123,14 +124,30 @@ export function missingAccountRefusal(
   expect: AccountExpectation,
   why: string,
   printed?: string,
+  signIn?: SignInState,
 ): AccountRefusal | null {
-  return expect.kind === AccountKind.ClaudeSubscription
-    ? {
-        problem: AccountProblem.SignedOut,
-        message: `${why} for account "${expect.label}", which looks signed out${printed ? `. ${printed}` : ''}`,
-        seenIdentity: null,
-      }
-    : null;
+  if (expect.kind !== AccountKind.ClaudeSubscription) return null;
+  const tail = printed ? `. ${printed}` : '';
+  const who = `${why} for account "${expect.label}"`;
+  // `claude auth status` settles it: only "not signed in" is a sign-out. Anything else is a slow start.
+  if (signIn === 'signed_in' || signIn === 'unknown')
+    return {
+      problem: AccountProblem.StartTimeout,
+      message: `${who}, but ${
+        signIn === 'signed_in'
+          ? 'claude auth status says it is signed in'
+          : 'claude auth status gave no answer'
+      }, so its starts kept timing out${tail}`,
+      seenIdentity: null,
+    };
+  return {
+    problem: AccountProblem.SignedOut,
+    message:
+      signIn === 'signed_out'
+        ? `${who}, and claude auth status says it is not signed in, so it looks signed out${tail}`
+        : `${who}, which looks signed out${tail}`,
+    seenIdentity: null,
+  };
 }
 
 /** How much of what Claude Code printed a card quotes: the end, where the cause usually is. */
@@ -154,14 +171,21 @@ function oneLine(raw: string): string {
  * `printed` holds one entry per start, the text its stderr held.
  */
 export function noAccountWhy(
-  waitMs: number,
+  waitMs: number | readonly number[],
   printed: readonly string[],
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
-  const wait = `Claude Code reported no account within ${String(waitMs / 1_000)} s`;
+  const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];
+  const seconds = waits.map((ms) => `${String(ms / 1_000)} s`);
+  const last = seconds.pop();
+  const said = `Claude Code reported no account`;
+  const wait =
+    seconds.length === 0
+      ? `${said} within ${last ?? '0 s'}`
+      : `${said} on each of ${String(starts)} starts (waiting ${seconds.join(', ')} and ${last ?? ''})`;
   const seen = [...new Set(printed.map(oneLine).filter((line) => line !== ''))];
   return {
-    why: starts > 1 ? `${wait} on each of ${String(starts)} starts` : wait,
+    why: starts > 1 && seconds.length === 0 ? `${wait} on each of ${String(starts)} starts` : wait,
     printed:
       seen.length === 0
         ? 'Claude Code printed nothing'

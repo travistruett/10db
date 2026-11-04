@@ -25,6 +25,7 @@ import {
   EvidenceKind,
   InboxKind,
   InboxState,
+  KnowledgeScope,
   Provider,
   QuestionCategory,
   RiskTag,
@@ -37,6 +38,9 @@ import { DEFAULT_PROJECT_LANDING, ProjectLanding, TaskLanding } from './landing'
 import { WorkstreamStep } from './steps';
 
 const Name = z.string().regex(/^[a-z][a-z0-9-]*$/, 'lowercase letters, digits and hyphens');
+
+/** An area's name, as a project's area vocabulary spells it. */
+export const AreaName = Name;
 const Timestamp = z.iso.datetime();
 
 const CONTROL_CHARACTER = /\p{Cc}/u;
@@ -682,9 +686,23 @@ export type WorkstreamDto = z.infer<typeof WorkstreamDto>;
 export const InboxOption = z.object({ label: z.string().min(1).max(80), description: z.string() });
 export type InboxOption = z.infer<typeof InboxOption>;
 
+/** Recording an answer as a decision at a target; an area scope names its area, any other scope none. */
+export const DecisionRecording = z
+  .object({ scope: z.enum(KnowledgeScope), area: AreaName.nullable() })
+  .refine((r) => (r.scope === KnowledgeScope.Area) === (r.area !== null), {
+    message: 'area is required for scope "area" and only allowed there',
+    path: ['area'],
+  });
+export type DecisionRecording = z.infer<typeof DecisionRecording>;
+
 export const InboxAnswer = z.object({
   choice: z.string().min(1),
   note: z.string().max(4000).optional(),
+  /**
+   * Omitted: a product, design or engineering question is recorded as a project decision (spec §7).
+   * Null: not recorded. A recording: recorded at that target, whatever the question's category.
+   */
+  record: DecisionRecording.nullable().optional(),
 });
 export type InboxAnswer = z.infer<typeof InboxAnswer>;
 

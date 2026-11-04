@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { insertBatch, getBatch } from './batches';
 import { getProject, patchProject } from './projects';
 import type { Store } from './store';
-import { getTask, insertTask, patchTask } from './tasks';
+import { getTask, insertTask, patchTask, resetTaskLanding } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream } from './workstreams';
 
@@ -116,6 +116,19 @@ describe("a task's landing", () => {
       store.write((ctx) => patchTask(ctx, task.id, { landing: { kind: 'base' } })),
     ).toThrow(ConflictError);
     expect(getTask(store.db, task.id).landing).toEqual({ kind: 'hold' });
+  });
+
+  it('can be reset for a task that has run, which a builder edit cannot', () => {
+    const p = seedProject(store);
+    const task = store.write((ctx) =>
+      insertTask(ctx, p.id, { ...TASK, landing: { kind: 'branch', branch: 'next' } }),
+    ).value;
+    store.write((ctx) => insertWorkstream(ctx, task.id));
+    const reset = store.write((ctx) => resetTaskLanding(ctx, task.id, { kind: 'base' })).value;
+    expect(reset.landing).toEqual({ kind: 'base' });
+    expect(getTask(store.db, task.id).landing).toEqual({ kind: 'base' });
+    const held = store.write((ctx) => resetTaskLanding(ctx, task.id, { kind: 'hold' })).value;
+    expect(held.landing).toEqual({ kind: 'hold' });
   });
 
   it('still lets a started task change its other fields', () => {

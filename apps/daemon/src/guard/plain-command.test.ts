@@ -78,4 +78,20 @@ describe('plainCommandWords', () => {
   ])('$name', ({ command, expected }) => {
     expect(plainCommandWords(command)).toEqual(expected);
   });
+
+  describe('with optionGlobs', () => {
+    it.each<[string, string, string[][] | null]>([
+      [
+        'a glob in an option value',
+        'grep -r x src --include=*.ts',
+        [['grep', '-r', 'x', 'src', '--include=*.ts']],
+      ],
+      ['a glob before any =', 'grep -r* x', null],
+      ['a glob in a path word', 'ls *', null],
+      ['a glob in the command word', 'l* a', null],
+      ['a glob after an = in a word that is not an option', 'ls a=*.ts', null],
+    ])('%s', (_name, command, expected) => {
+      expect(plainCommandWords(command, { optionGlobs: true })).toEqual(expected);
+    });
+  });
 });

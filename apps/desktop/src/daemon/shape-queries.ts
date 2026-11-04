@@ -9,6 +9,7 @@ import {
   ShapeRehearseResult,
   ShapeViewDto,
   type DecisionId,
+  type PrincipleId,
   type GoalId,
   type ProjectId,
   type ShapeFindingId,
@@ -54,6 +55,42 @@ export function useShapeView(shapeId: ShapeId | null) {
         ? readJson(await client.shapes[':shapeId'].$get({ param: { shapeId } }), ShapeViewDto)
         : Promise.reject(new Error('Open a conversation first.')),
     enabled: shapeId !== null,
+  });
+}
+
+/** A picture as a data URL: the window's CSP allows images from `self` and `data:`, not from `blob:`. */
+function dataUrlOf(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      // `readAsDataURL` always leaves a string.
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('The screenshot could not be read'));
+    };
+    reader.onerror = () => {
+      reject(new Error('The screenshot could not be read'));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+/**
+ * A screenshot Plan took (§5.5), by the name its transcript row gives it, as a data URL. Kept pictures
+ * never change, so one is read once; it is not under `shapeKeys.all`, which a `shape.changed` asks again.
+ */
+export function useShapeScreen(shapeId: ShapeId, name: string) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: ['shape-screens', shapeId, name] as const,
+    queryFn: async (): Promise<string> => {
+      const res = await client.shapes[':shapeId'].screens[':name'].$get({
+        param: { shapeId, name },
+      });
+      if (!res.ok) throw new Error(`The daemon answered HTTP ${String(res.status)}`);
+      return dataUrlOf(await res.blob());
+    },
+    staleTime: Infinity,
+    gcTime: 5 * 60_000,
   });
 }
 
@@ -297,6 +334,24 @@ export function useUploadShapeFile() {
           },
         ),
         ShapeFileDto,
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Withdraw Principle…: a tombstone with the builder's reason; the principle leaves searches and context. */
+export function useWithdrawPrinciple(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly principleId: PrincipleId; readonly reason: string }) => {
+      await readJson(
+        await client.shapes[':shapeId'].principles[':principleId'].withdraw.$post({
+          param: { shapeId, principleId: input.principleId },
+          json: { reason: input.reason },
+        }),
+        z.null(),
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),

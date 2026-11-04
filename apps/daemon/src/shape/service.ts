@@ -12,6 +12,7 @@ import {
   shapeFileKind,
   SessionMode,
   type DecisionId,
+  type PrincipleId,
   type Effort,
   type GoalId,
   type ProjectId,
@@ -58,6 +59,7 @@ import {
 import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
+import { principlesBrief } from '../knowledge';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
@@ -74,7 +76,7 @@ import {
   oneWayNamesOf,
   type TrackedFiles,
 } from './ceremony';
-import { judgeShapeCall, type ShapeAccess } from './confinement';
+import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { buildDigest } from './digest';
 import {
@@ -108,8 +110,9 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
+import type { ScreenService } from '../screens';
 import { createShapeToolHandlers } from './tools';
-import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
+import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateNote } from './converted-state';
 import { untoldMissized, type UntoldMissized } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
@@ -146,6 +149,8 @@ export interface ShapeServiceDeps {
   readonly jev?: ShapeJev;
   /** The files git tracks in a checkout, for the ceremony rule's one-way paths (§7); `git ls-files` by default. */
   readonly trackedFiles?: TrackedFiles;
+  /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered to a session without it. */
+  readonly screens?: Pick<ScreenService, 'see'>;
 }
 
 /** A file as the input hands it over: the name and type the browser reported, and its bytes. */
@@ -220,6 +225,11 @@ export interface ShapeService {
   removeDraftGoal(goalId: GoalId): void;
   /** Withdraw Decision…: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
+  /**
+   * Withdraw Principle…: a principle the conversation wrote, with the builder's reason; the same
+   * withdrawal the knowledge routes make. Throws ConflictError once a later principle replaced it.
+   */
+  withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
    * Converts the selected proposals. Refused with a `ConflictError` while a turn runs, unless the
    * caller asks to interrupt it. Holds the queue while it writes.
@@ -398,6 +408,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     createShapeToolHandlers(
       {
         state,
+        ...(deps.screens === undefined ? {} : { screens: deps.screens }),
         world: worldOfShape,
         onProposal: (id, accepted) => {
           const rt = runtimeOf(id);
@@ -577,6 +588,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const resumeId = getShapeSdkSessionId(state.db, shapeId);
     const transcript = listShapeMessages(state.db, shapeId);
     const parts: string[] = [];
+    // A session with nothing to resume, a new conversation's or one moved on at 70%, is told the
+    // standing rules; a resumed one heard them in its first turn.
+    if (resumeId === null) {
+      const brief = principlesBrief(state.db, shape.projectId);
+      if (brief !== '') parts.push(brief);
+    }
     // No session to resume, and Claude has spoken: a session that lost it starts from the digest,
     // which is stored so what it saw is on record.
     const spoken = transcript.some(
@@ -661,6 +678,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             ShapeMessageKind.Tool,
             `${req.toolName} · refused · ${verdict.reason}`,
           );
+        else {
+          // Research (§5.2): the question and every search and fetch shows, so the builder sees
+          // what left the machine.
+          const line = researchLine(req.toolName, req.input);
+          if (line !== null) say(shapeId, ShapeMessageAuthor.Claude, ShapeMessageKind.Tool, line);
+        }
         return verdict;
       },
     };
@@ -1069,6 +1092,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     withdrawDecision(shapeId, decisionId, reason) {
       state.write((ctx) => {
         withdrawConvertedDecision(ctx, shapeId, decisionId, reason);
+        ctx.emit({
+          type: EventType.ShapeChanged,
+          entityType: 'shape',
+          entityId: shapeId,
+          data: { projectId: getShape(ctx.tx, shapeId).projectId },
+        });
+      });
+    },
+
+    withdrawPrinciple(shapeId, principleId, reason) {
+      state.write((ctx) => {
+        withdrawConvertedPrinciple(ctx, shapeId, principleId, reason);
         ctx.emit({
           type: EventType.ShapeChanged,
           entityType: 'shape',

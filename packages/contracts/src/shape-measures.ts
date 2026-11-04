@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { DecisionId, ShapeProposalId, TaskId } from './ids';
+import { DecisionId, PrincipleId, ShapeProposalId, TaskId } from './ids';
 import { JudgeDecision } from './judge';
 import { TaskSize } from './shape';
+import { PrincipleKind } from './states';
 
 // Shape spec docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md §8 (sizes, lane time and
 // calibration), §5.5 (find_records) and §9 (Jev's decisions, the opt-in and shadow scoring).
@@ -97,8 +98,8 @@ export type ShapeMeasuresDto = z.infer<typeof ShapeMeasuresDto>;
 export const ShapeJevSettingDto = z.object({ enabled: z.boolean() });
 export type ShapeJevSettingDto = z.infer<typeof ShapeJevSettingDto>;
 
-/** One `find_records` hit: a current decision with the date it was made (§5.5). */
-export const RecordHit = z.object({
+/** A current decision `find_records` found, with the date it was made (§5.5). */
+export const DecisionRecordHit = z.object({
   kind: z.literal('decision'),
   id: DecisionId,
   question: z.string(),
@@ -108,4 +109,25 @@ export const RecordHit = z.object({
   scope: z.string(),
   createdAt: z.iso.datetime(),
 });
+export type DecisionRecordHit = z.infer<typeof DecisionRecordHit>;
+
+/** A current principle `find_records` found, with the date it was made. */
+export const PrincipleRecordHit = z.object({
+  kind: z.literal('principle'),
+  id: PrincipleId,
+  statement: z.string(),
+  rationale: z.string().nullable(),
+  /** `policy`, `heuristic` or `belief`; named apart from `kind`, which tells the two hits apart. */
+  principleKind: z.enum(PrincipleKind),
+  topicKey: z.string(),
+  /** `you` for a builder-wide principle, else `project` or `area`. */
+  scope: z.string(),
+  /** The area of an `area` principle; null for the others. */
+  area: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+});
+export type PrincipleRecordHit = z.infer<typeof PrincipleRecordHit>;
+
+/** One `find_records` hit: a current decision or principle (§5.5). */
+export const RecordHit = z.discriminatedUnion('kind', [DecisionRecordHit, PrincipleRecordHit]);
 export type RecordHit = z.infer<typeof RecordHit>;

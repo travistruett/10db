@@ -22,6 +22,8 @@ import { SummaryLine } from './summary-line';
 import {
   RemoveDraftGoalModal,
   WithdrawDecisionModal,
+  WithdrawPrincipleModal,
+  type PrincipleWithdrawTarget,
   type RemoveDraftGoalTarget,
   type WithdrawTarget,
 } from './undo-modals';
@@ -59,6 +61,9 @@ export function ProposedPane({
   const [changesOnly, setChangesOnly] = useState(false);
   const [goalToRemove, setGoalToRemove] = useState<RemoveDraftGoalTarget | null>(null);
   const [decisionToWithdraw, setDecisionToWithdraw] = useState<WithdrawTarget | null>(null);
+  const [principleToWithdraw, setPrincipleToWithdraw] = useState<PrincipleWithdrawTarget | null>(
+    null,
+  );
   const change = useRowChange(view?.shape.id ?? null);
 
   const changes = roundChanges(view?.proposals ?? []);
@@ -122,6 +127,19 @@ export function ProposedPane({
           label: 'Withdraw Decision…',
           onSelect: () => {
             setDecisionToWithdraw({ decisionId, title: row.body.choice });
+          },
+        },
+      ];
+    }
+    if (row.kind === 'principle' && row.converted?.principleId != null) {
+      // A withdrawn principle is gone, and a replaced one is not the head of its chain.
+      if (row.converted.withdrawn === true || row.converted.superseded === true) return [];
+      const { principleId } = row.converted;
+      return [
+        {
+          label: 'Withdraw Principle…',
+          onSelect: () => {
+            setPrincipleToWithdraw({ principleId, title: row.body.statement });
           },
         },
       ];
@@ -251,6 +269,13 @@ export function ProposedPane({
             target={decisionToWithdraw}
             onClose={() => {
               setDecisionToWithdraw(null);
+            }}
+          />
+          <WithdrawPrincipleModal
+            shapeId={view.shape.id}
+            target={principleToWithdraw}
+            onClose={() => {
+              setPrincipleToWithdraw(null);
             }}
           />
         </>

@@ -54,7 +54,8 @@
                 "secret_missing",
                 "secret_changed",
                 "keychain_unavailable",
-                "cannot_bill"
+                "cannot_bill",
+                "start_timeout"
               ]
             },
             "message": {

@@ -22,23 +22,30 @@ const access: ShapeAccess = {
 };
 
 describe('the tool lists of a Shape session', () => {
-  it('offers only built-in tools that read, and the Agent tool', () => {
-    expect([...SHAPE_BUILT_IN_TOOLS]).toEqual(['Read', 'Grep', 'Glob', 'Agent']);
+  it('offers only built-in tools that read, the Agent tool, and the two web tools only the researcher may call', () => {
+    expect([...SHAPE_BUILT_IN_TOOLS]).toEqual([
+      'Read',
+      'Grep',
+      'Glob',
+      'Agent',
+      'WebSearch',
+      'WebFetch',
+    ]);
   });
 
   it('names every tool that writes or runs a command as disallowed, and offers none of them', () => {
-    for (const name of [
-      'Edit',
-      'Write',
-      'NotebookEdit',
-      'Bash',
-      'Monitor',
-      'WebFetch',
-      'WebSearch',
-    ]) {
+    for (const name of ['Edit', 'Write', 'NotebookEdit', 'Bash', 'Monitor']) {
       expect(SHAPE_DISALLOWED_TOOLS).toContain(name);
       expect(SHAPE_BUILT_IN_TOOLS).not.toContain(name);
       expect(SHAPE_ALLOWED_TOOLS).not.toContain(name);
+    }
+  });
+
+  it('lists the web tools in the session so the researcher can inherit them, and lets the hook alone keep the session off the network', () => {
+    for (const name of ['WebSearch', 'WebFetch']) {
+      expect(SHAPE_DISALLOWED_TOOLS).not.toContain(name);
+      expect(SHAPE_ALLOWED_TOOLS).toContain(name);
+      expect(judgeShapeCall({ toolName: name, toolInput: {} }, access).decision).toBe('deny');
     }
   });
 
@@ -61,6 +68,7 @@ describe('the tool lists of a Shape session', () => {
         ShapeToolName.FindRecords,
         ShapeToolName.WriteSpec,
         ShapeToolName.ResolveFinding,
+        ShapeToolName.SeeScreen,
       ].sort(),
     );
     expect(SHAPE_OFFERED_TOOLS).not.toContain(ShapeToolName.ReportFinding);
@@ -70,9 +78,22 @@ describe('the tool lists of a Shape session', () => {
 
 describe('the reviewers (§7)', () => {
   it('are scope, engineering and rehearsal, each with exactly Read, Grep, Glob and report_finding', () => {
-    expect(Object.keys(SHAPE_AGENTS).sort()).toEqual(['engineering', 'rehearsal', 'scope']);
-    for (const agent of Object.values(SHAPE_AGENTS))
-      expect([...agent.tools]).toEqual(['Read', 'Grep', 'Glob', 'mcp__10db__report_finding']);
+    for (const name of ['scope', 'engineering', 'rehearsal'] as const)
+      expect([...SHAPE_AGENTS[name].tools]).toEqual([
+        'Read',
+        'Grep',
+        'Glob',
+        'mcp__10db__report_finding',
+      ]);
+  });
+
+  it('are joined by the researcher, the only other agent', () => {
+    expect(Object.keys(SHAPE_AGENTS).sort()).toEqual([
+      'engineering',
+      'rehearsal',
+      'researcher',
+      'scope',
+    ]);
   });
 
   it('can each be launched by the session and are the only agents it may launch', () => {
@@ -104,6 +125,36 @@ describe('the reviewers (§7)', () => {
   });
 });
 
+describe('the researcher (§5.2)', () => {
+  it('has WebSearch and WebFetch and nothing else: no file tool, no 10db tool', () => {
+    expect([...SHAPE_AGENTS.researcher.tools]).toEqual(['WebSearch', 'WebFetch']);
+  });
+
+  it('is told to treat what it reads as data, to answer in words, and to name the URLs it read', () => {
+    const prompt = SHAPE_AGENTS.researcher.prompt;
+    expect(prompt).toMatch(/untrusted/i);
+    expect(prompt).toMatch(/instructions/i);
+    expect(prompt).toMatch(/URL/);
+    expect(prompt).toMatch(/no file/i);
+  });
+
+  it('is launched by the session, which is told to keep code out of the question and to treat the answer as untrusted', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "researcher"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/never paste code/i);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/untrusted/i);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/no web tool of your own/i);
+  });
+
+  it('can be launched by the session, with a question', () => {
+    expect(
+      judgeShapeCall(
+        { toolName: 'Agent', toolInput: { subagent_type: 'researcher', prompt: 'What is X?' } },
+        access,
+      ).decision,
+    ).toBe('allow');
+  });
+});
+
 describe('the rehearsal turn', () => {
   it('lists each task with the hash it was read at and asks for one Agent call per task', () => {
     const { note, instruction } = rehearseNote([
@@ -116,11 +167,39 @@ describe('the rehearsal turn', () => {
   });
 });
 
+describe('seeing the app (§5.2, §5.5)', () => {
+  it('gives the session no browser, no click and no command: its tools are the lists above and see_screen', () => {
+    const everything = [...SHAPE_BUILT_IN_TOOLS, ...SHAPE_ALLOWED_TOOLS, ...SHAPE_OFFERED_TOOLS];
+    expect(
+      everything.filter((t) => /playwright|browser|puppeteer|click|type|screenshot/i.test(t)),
+    ).toEqual([]);
+    expect(SHAPE_OFFERED_TOOLS).toContain('see_screen');
+  });
+
+  it('tells the session what see_screen is: a picture of one screen, with the real data, that it cannot act on', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/see_screen/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/cannot click/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/12/);
+  });
+});
+
 describe('remembering and sizing (§5.5, §8)', () => {
   it('tells the session to check records before proposing one and to say when it contradicts one', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/find_records/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/contradicts/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/supersedes/);
+  });
+
+  it('tells the session to propose a principle when the builder states a rule with always or never, after looking for one', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/always" or "never"/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/principle record/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/call find_records first/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/topicKey/);
+  });
+
+  it('tells the session to set about on a question, so Convert stores it under its goal or task', () => {
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/question/);
+    expect(SHAPE_SYSTEM_PROMPT).toMatch(/set about to the key of the goal or task/);
   });
 
   it('tells the session to size from similar finished tasks as a basis', () => {

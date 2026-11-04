@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
+import { laneReadOnlyWords } from './read-only';
 import { firstUnread } from './unread-commands';
 import { unreadableHazard } from './unread-hazards';
 
@@ -110,7 +111,7 @@ function mayRunHazard(command: string, hazards: readonly HazardDef[]): string | 
  * Why a call the guard allows must still reach 10db's permission broker, or null when Claude Code's
  * permission mode may decide it.
  */
-function brokerAsk(input: GuardInput): string | null {
+function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   const judged = BROKER_JUDGES[input.toolName];
   if (judged !== undefined) return judged;
   if (actsOutsideSandboxProxy(input.toolName)) {
@@ -154,11 +155,52 @@ function brokerAsk(input: GuardInput): string | null {
       hazard.commands.length > 0 &&
       !input.claims.some((c) => c.kind === ClaimKind.Hazard && c.name === hazard.name),
   );
-  if (unclaimed.length === 0) return null;
+  // A line made only of read-only commands names no program outside that closed set, so none of
+  // them is a hazard, however a word such as `"[v]itest"` looks to the scanner.
+  if (unclaimed.length === 0 || onlyReads) return null;
   const part = mayRunHazard(command, unclaimed);
   if (part === null) return null;
   const names = unclaimed.map((hazard) => `"${hazard.name}"`).join(', ');
   return `10db can't read whether "${part}" runs a hazard this task hasn't claimed (${names}), so the builder is asked. Spell the command out in plain words, or claim the hazard first.`;
+}
+
+const READS_ONLY =
+  'Every part of this command only reads (decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md).';
+
+/** An option's path (`--file=/x`) or a plain word, as the path it may name. */
+function pathOf(word: string): string {
+  const value = /^--?[A-Za-z][\w-]*=(.*)$/s.exec(word)?.[1];
+  return value ?? word;
+}
+
+/**
+ * Whether a sandboxed lane's Bash command is made only of read-only commands and names no path a
+ * lane may never read. It has no `cd` (a relative path would then mean another directory) and
+ * every word is judged as a path the way the file tools' reads are, so a secret file, a protected
+ * directory and a search over one stay with today's judgement. A path outside the paths a lane may
+ * read without asking is not judged here: the sandbox's read policy confines Bash to the paths it
+ * lists, so a read outside them fails inside the sandbox whatever the classifier thinks.
+ */
+function onlyReads(input: GuardInput): boolean {
+  if (input.toolName !== 'Bash' || input.fileAccess === undefined) return false;
+  const command = stringField(input.toolInput, 'command');
+  if (command === null) return false;
+  const segments = laneReadOnlyWords(command);
+  if (segments === null) return false;
+  try {
+    for (const [cmd = '', ...args] of segments) {
+      if (cmd === 'cd') return false;
+      for (const word of args) {
+        if (word === '' || (word.startsWith('-') && !word.includes('='))) continue;
+        const path = pathOf(word);
+        if (path === '' || path.startsWith('~')) return false;
+        if (input.fileAccess.read('LS', { path }) !== 'ok') return false;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 /**
@@ -180,6 +222,8 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
         'allowed_domains would let the command reach hosts the project does not list with no card. Run it without allowed_domains: a host the project does not list raises a card for the builder when the command reaches it.',
     };
   }
-  const reason = brokerAsk(input);
-  return reason === null ? verdict : { decision: 'ask', reason };
+  const reads = onlyReads(input);
+  const reason = brokerAsk(input, reads);
+  if (reason !== null) return { decision: 'ask', reason };
+  return reads ? { decision: 'allow', settled: READS_ONLY } : verdict;
 }

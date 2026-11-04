@@ -9,15 +9,9 @@ import {
   openItemsForWorkstream,
   updateInboxItem,
 } from './inbox';
-import {
-  getProposal,
-  insertDecision,
-  insertProposal,
-  insertSource,
-  listRecentDecisions,
-  resolveProposal,
-  searchDecisions,
-} from './knowledge';
+import { insertDecision, listRecentDecisions } from './decisions';
+import { getProposal, insertProposal, insertSource, resolveProposal } from './knowledge';
+import { searchDecisions } from './knowledge-search';
 import { insertPermissionRule, listPermissionRules } from './permission-rules';
 import type { Store } from './store';
 import { createTestStore, seedProject } from './test-support';

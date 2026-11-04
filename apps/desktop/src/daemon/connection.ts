@@ -5,6 +5,8 @@ import { isTauri } from '../desktop/tauri';
 export interface DaemonConnection {
   readonly url: string;
   readonly token: string;
+  /** A screen being drawn for a session (Shape spec §5.5): the client sends reads only. */
+  readonly readOnly?: boolean;
 }
 
 export type ConnectionResolver = () => Promise<DaemonConnection>;

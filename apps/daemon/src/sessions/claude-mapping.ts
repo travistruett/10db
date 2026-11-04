@@ -176,9 +176,21 @@ export function toPermissionResult(
   };
 }
 
-/** An `ask` sends the call to canUseTool, past any allow rule and auto mode's classifier. */
+/**
+ * An `ask` sends the call to canUseTool, past any allow rule and auto mode's classifier. A settled
+ * `allow` approves the call in the hook, so no classifier or card follows; a bare one has no opinion.
+ */
 export function toHookOutput(verdict: GuardVerdict): HookJSONOutput {
-  if (verdict.decision === 'allow') return {};
+  if (verdict.decision === 'allow') {
+    if (verdict.settled === undefined) return {};
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+        permissionDecisionReason: verdict.settled,
+      },
+    };
+  }
   return {
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',

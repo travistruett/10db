@@ -4,20 +4,27 @@ import {
   ShapeProposalState,
   ShapeState,
   TaskStatus,
+  topicKeyFrom,
   type TaskId,
 } from '@10db/contracts';
 import {
+  findRecords,
   getDecision,
+  getPrinciple,
   getShape,
   getTask,
   insertWorkstream,
   listGoalTasks,
+  listInbox,
   listLandingGroups,
+  listPrinciples,
   listShapeLinks,
   listShapeProposals,
+  listShapeQuestions,
   listTasks,
   listWorkstreams,
   searchDecisions,
+  searchPrinciples,
   insertDecision,
   insertSource,
   type WriteContext,
@@ -243,18 +250,6 @@ describe('a partial selection', () => {
       ok: false,
     });
   });
-
-  it('refuses a kind it cannot write yet, by name', () => {
-    const m = c.say();
-    propose({
-      looseTasks: [loose(m, 'a')],
-      questions: [{ key: 'ask', text: 'When?', for: 'Ana', sourceMessageIds: [m] }],
-    });
-    const out = convert('a', 'ask');
-    expect(out).toMatchObject({ ok: false });
-    expect(out.ok ? [] : out.errors).toEqual([expect.stringContaining('ask')]);
-    expect(tasks()).toEqual([]);
-  });
 });
 
 describe('a second Convert of the same proposals', () => {
@@ -320,6 +315,171 @@ describe('records', () => {
       projectId: null,
       scope: 'you',
     });
+  });
+});
+
+const principleOf = (m: string, key: string, extra: Record<string, unknown> = {}) => ({
+  key,
+  kind: 'principle',
+  scope: 'project',
+  statement: 'Never sleep in tests',
+  rationale: 'Sleeps make the suite flaky.',
+  sourceMessageIds: [m],
+  ...extra,
+});
+
+describe('principle records', () => {
+  it('writes a confirmed principle by the builder, linked to its proposal, defaulting to a policy', () => {
+    const m = c.say('Never sleep in tests.');
+    propose({ records: [principleOf(m, 'no-sleeps')] });
+    const out = converted('no-sleeps');
+    const principleId = must(out.results[0]?.principleId, 'the principle');
+    expect(getPrinciple(c.store.db, principleId)).toMatchObject({
+      statement: 'Never sleep in tests',
+      rationale: 'Sleeps make the suite flaky.',
+      kind: 'policy',
+      topicKey: topicKeyFrom('Never sleep in tests'),
+      scope: 'project',
+      projectId: c.project.id,
+      status: 'confirmed',
+      state: 'current',
+      confirmedBy: 'me',
+    });
+    const link = must(
+      listShapeLinks(c.store.db, c.shape.id).find((l) => l.principleId === principleId),
+      'the link',
+    );
+    expect(link).toMatchObject({ key: 'no-sleeps', goalId: null, taskId: null, decisionId: null });
+    expect(searchPrinciples(c.store.db, c.project.id, 'sleep', 5).map((p) => p.id)).toEqual([
+      principleId,
+    ]);
+  });
+
+  it('keeps the kind, topic key and builder-wide scope the record names', () => {
+    const m = c.say();
+    propose({
+      records: [
+        principleOf(m, 'prefer-small', {
+          scope: 'you',
+          principleKind: 'heuristic',
+          topicKey: 'tasks.small',
+          statement: 'Prefer small tasks',
+        }),
+      ],
+    });
+    const out = converted('prefer-small');
+    expect(
+      getPrinciple(c.store.db, must(out.results[0]?.principleId, 'the principle')),
+    ).toMatchObject({ kind: 'heuristic', topicKey: 'tasks.small', scope: 'you', projectId: null });
+  });
+
+  it('replaces the current principle with the same topic key and scope, which leaves find_records', () => {
+    const m = c.say();
+    propose({ records: [principleOf(m, 'first', { topicKey: 'tests.sleep' })] });
+    const first = must(converted('first').results[0]?.principleId, 'the first principle');
+    propose({
+      records: [
+        principleOf(m, 'first', { topicKey: 'tests.sleep' }),
+        principleOf(m, 'second', {
+          topicKey: 'tests.sleep',
+          statement: 'Never sleep in tests; wait on a condition',
+        }),
+      ],
+    });
+    const second = must(converted('second').results[0]?.principleId, 'the second principle');
+    expect(getPrinciple(c.store.db, first)).toMatchObject({
+      state: 'superseded',
+      supersededById: second,
+    });
+    expect(getPrinciple(c.store.db, second)).toMatchObject({
+      state: 'current',
+      supersedesId: first,
+    });
+    expect(
+      listPrinciples(c.store.db, { projectId: c.project.id, history: true }).map((p) => p.id),
+    ).toEqual(expect.arrayContaining([first, second]));
+    expect(findRecords(c.store.db, c.project.id, 'sleep', 10).map((r) => r.id)).toEqual([second]);
+  });
+
+  it('answers the same results again without writing a second principle', () => {
+    const m = c.say();
+    propose({ records: [principleOf(m, 'no-sleeps')] });
+    const first = converted('no-sleeps');
+    const again = converted('no-sleeps');
+    expect(again.createdNow).toBe(0);
+    expect(again.results).toEqual(first.results);
+    expect(listPrinciples(c.store.db, { projectId: c.project.id, history: true })).toHaveLength(1);
+  });
+
+  it('refuses an area principle for an area the project does not have, writing nothing', () => {
+    const m = c.say();
+    propose({ records: [principleOf(m, 'nowhere', { scope: 'area', area: 'billing' })] });
+    const out = convert('nowhere');
+    expect(out).toMatchObject({ ok: false });
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/nowhere.*no area named billing/),
+    ]);
+    expect(listPrinciples(c.store.db, { projectId: c.project.id, history: true })).toEqual([]);
+  });
+});
+
+describe('question records', () => {
+  const questionOf = (m: string, key: string, extra: Record<string, unknown> = {}) => ({
+    key,
+    text: 'Who pays for the extra seats?',
+    for: 'finance',
+    sourceMessageIds: [m],
+    ...extra,
+  });
+
+  it('stores the question under the task it is about, linked to its proposal, and sends nothing', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'seats')],
+      questions: [questionOf(m, 'who-pays', { about: 'seats' })],
+    });
+    const out = converted('seats', 'who-pays');
+    const task = taskTitled('Task seats');
+    const [question] = listShapeQuestions(c.store.db, c.shape.id);
+    expect(question).toMatchObject({
+      key: 'who-pays',
+      text: 'Who pays for the extra seats?',
+      forWho: 'finance',
+      sourceMessageIds: [m],
+      taskId: task.id,
+      goalId: null,
+    });
+    expect(out.results.find((r) => r.key === 'who-pays')?.questionId).toBe(question?.id);
+    expect(
+      listShapeLinks(c.store.db, c.shape.id).find((l) => l.questionId === question?.id),
+    ).toMatchObject({ key: 'who-pays', taskId: null });
+    expect(listInbox(c.store.db, { projectId: c.project.id })).toEqual([]);
+  });
+
+  it('stores a question about a goal, and a question about nothing', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'density', ['d1'])],
+      questions: [questionOf(m, 'q-goal', { about: 'density' }), questionOf(m, 'q-free')],
+    });
+    const out = converted('density', 'q-goal', 'q-free');
+    const goalId = must(out.results.find((r) => r.key === 'density')?.goalId, 'the goal');
+    const stored = listShapeQuestions(c.store.db, c.shape.id);
+    expect(stored.find((q) => q.key === 'q-goal')).toMatchObject({ goalId, taskId: null });
+    expect(stored.find((q) => q.key === 'q-free')).toMatchObject({ goalId: null, taskId: null });
+  });
+
+  it('refuses a question about a task that is not selected, naming it', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'seats')],
+      questions: [questionOf(m, 'who-pays', { about: 'seats' })],
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/who-pays is about Task seats, which isn't selected/),
+    ]);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
   });
 });
 

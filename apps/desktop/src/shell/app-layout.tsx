@@ -1,5 +1,6 @@
 import { AppShell, Badge, Divider, Group, NavLink, VisuallyHidden } from '@mantine/core';
 import {
+  IconBulb,
   IconBuildingFactory2,
   IconInbox,
   IconLayoutKanban,
@@ -10,6 +11,9 @@ import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-route
 import { useDaemonStatus } from '../daemon/provider';
 import { useInbox } from '../daemon/queries';
 import { useDesktopSync } from '../desktop/sync';
+import { useRenderMode } from '../screens/render-context';
+import { RenderLayout } from '../screens/render-layout';
+import { ScreenRenderHost } from '../screens/screen-render-host';
 import { BuildCommit } from './build-commit';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
@@ -28,6 +32,7 @@ const NAV = [
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
   { to: '/shape', label: 'Plan', icon: IconRoute },
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
+  { to: '/knowledge', label: 'Knowledge', icon: IconBulb },
   { to: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;
 
@@ -42,7 +47,12 @@ function InboxBadge({ count }: { readonly count: number }) {
   );
 }
 
+/** The shell, or in a frame the window draws a screen in (Shape spec §5.5), the screen alone. */
 export function AppLayout() {
+  return useRenderMode() === null ? <FullLayout /> : <RenderLayout />;
+}
+
+function FullLayout() {
   useDesktopSync();
   const status = useDaemonStatus();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -114,6 +124,7 @@ export function AppLayout() {
       </AppShell.Navbar>
       {/* A column, so a view can take the height the alerts above it leave rather than assume it. */}
       <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
+        {status.kind === 'connected' && <ScreenRenderHost />}
         {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
         <SystemAlert />
         <Outlet />

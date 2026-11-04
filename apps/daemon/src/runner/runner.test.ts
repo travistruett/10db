@@ -31,6 +31,8 @@ import {
   insertBatch,
   insertInboxItem,
   insertJudgeCall,
+  insertPrinciple,
+  insertSource,
   listJudgeCalls,
   patchJudgeConfig,
   laneTimesOf,
@@ -730,6 +732,12 @@ describe('runner', () => {
     expect(engine.adapter.prompts[1]).toMatchObject({ resume: first?.providerSessionId });
     expect(engine.adapter.prompts[1]?.prompt).toContain('Answer: Yes');
     expect(second?.exitReason).toBe('step_done');
+    // Every session's prompt carries the pack, a resumed conversation's included.
+    expect(
+      listEventsAfter(engine.store.db, 0, 1000)
+        .filter((e) => e.type === 'context.packed')
+        .map((e) => e.data['reason']),
+    ).toEqual(['start', 'resume']);
   });
 
   describe('Park the task, answered on a lane question', () => {
@@ -2198,6 +2206,51 @@ describe('runner', () => {
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
     expect(engine.store.db.select().from(schema.deviations).all()).toHaveLength(1);
+  });
+
+  it('briefs a session with the policy in scope and records the pack at start and after compaction', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          { do: 'compact' },
+          { do: 'await_message', contains: '- [testing.no-sleeps] Never sleep in tests' },
+          turn,
+        ],
+      ],
+    });
+    engine.state.write((ctx) =>
+      insertPrinciple(ctx, {
+        target: { scope: 'project', projectId: engine.project.id },
+        statement: 'Never sleep in tests',
+        kind: 'policy',
+        topicKey: 'testing.no-sleeps',
+        status: 'confirmed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote: null,
+        speaker: 'me',
+        confirmedBy: 'me',
+      }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    expect(engine.adapter.prompts[0]?.prompt).toContain(
+      '- [testing.no-sleeps] Never sleep in tests',
+    );
+    const packed = listEventsAfter(engine.store.db, 0, 1000).filter(
+      (e) => e.type === 'context.packed',
+    );
+    expect(packed.map((e) => e.data['reason'])).toEqual(['start', 'compaction']);
+    expect(packed[0]?.data).toMatchObject({
+      workstreamId: workstream.id,
+      budget: 1500,
+      dropped: { policies: 0, heuristics: 0, decisions: 0 },
+    });
+    expect(packed[1]?.data).toMatchObject({
+      budget: 1500,
+      principles: packed[0]?.data['principles'],
+    });
   });
 
   it('runs the after-session check once per session, and survives it throwing', async () => {

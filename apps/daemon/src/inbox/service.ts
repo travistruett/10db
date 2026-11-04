@@ -1,9 +1,9 @@
 import { createHash } from 'node:crypto';
 import {
+  CARD_PROPOSED_PRINCIPLES,
   CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
-  DECISION_CATEGORIES,
   InboxAnswer,
   InboxAnswerRefused,
   InboxKind,
@@ -31,6 +31,7 @@ import {
   getInboxItem,
   getProject,
   getProposal,
+  getProposalDto,
   getTask,
   getWorkstreamRow,
   insertDecision,
@@ -46,6 +47,8 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
+import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
+import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
@@ -75,6 +78,8 @@ interface AskInput {
   readonly signal: AbortSignal;
   /** The card folds only with the same lane's identical asks, never with another lane's. */
   readonly foldPerLane?: boolean;
+  /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
+  readonly escalated?: boolean;
 }
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
@@ -192,13 +197,22 @@ function optionsForTargets(
 function foldKeyFor(
   input: Pick<
     AskInput,
-    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane'
+    | 'projectId'
+    | 'workstreamId'
+    | 'kind'
+    | 'title'
+    | 'body'
+    | 'options'
+    | 'foldPerLane'
+    | 'escalated'
   >,
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
     input.projectId,
     ...(input.foldPerLane === true ? [input.workstreamId] : []),
+    // A call Claude Code handed to a person never shares a card with an ordinary ask.
+    ...(input.escalated === true ? ['escalated'] : []),
     input.kind,
     norm(input.title),
     norm(input.body),
@@ -276,6 +290,12 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
 function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
   const proposalId = ProposalId.safeParse(item.detail?.['proposalId']);
   if (!proposalId.success) return;
+  // A principle proposal's choices are verdicts on its principle, which the knowledge module applies.
+  const withPrinciple = getProposalDto(ctx.tx, proposalId.data);
+  if (withPrinciple.principle) {
+    applyPrincipleCard(ctx, withPrinciple, answer);
+    return;
+  }
   const proposal = getProposal(ctx.tx, proposalId.data);
   if (proposal.status !== 'pending') {
     throw new ConflictError(`Proposal ${proposal.id} is already ${proposal.status}`);
@@ -316,6 +336,8 @@ export function createInboxService(deps: {
    * it is stopped, not told. It must not throw; it logs what it could not do.
    */
   onParkAnswer?(item: InboxItemDto): void;
+  /** Where a failure that must not fail the builder's answer is logged. */
+  readonly log?: Logger;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -390,7 +412,10 @@ export function createInboxService(deps: {
           note: 'Covered by the project rule just allowed on another lane’s card',
         });
       } catch (error) {
-        if (!(error instanceof ConflictError)) throw error;
+        // Answered meanwhile: nothing to release. Any other failure leaves that card open for the builder;
+        // it must not fail the answer they already gave, which is stored and delivered.
+        if (error instanceof ConflictError) continue;
+        deps.log?.warn({ err: error, cardId: card.id }, 'could not release a covered edit card');
       }
     }
   }
@@ -471,26 +496,20 @@ export function createInboxService(deps: {
         const parks = parksTask(item, answer);
         const closesDirectly =
           parks || (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
-        const updated = updateInboxItem(ctx, id, {
+        let updated = updateInboxItem(ctx, id, {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
           answer,
         });
-        if (
-          !parks &&
-          item.kind === InboxKind.Question &&
-          DECISION_CATEGORIES.includes(item.category)
-        ) {
-          const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: id });
-          insertDecision(ctx, {
-            projectId: item.projectId,
-            question: item.title,
-            choice: answer.choice,
-            rationale: answer.note ?? 'Answered in the inbox',
-            decidedBy: 'me',
-            scope: 'project',
-            area: null,
-            sourceId,
-          });
+        if (!parks && item.kind === InboxKind.Question) {
+          // Inside this transaction: an area the project lacks refuses the answer and the card stays open.
+          recordAnswerDecision(ctx, updated, answer, getProject(ctx.tx, item.projectId));
+          const proposed = proposeStandingRules(ctx, updated, answer);
+          // The resolved card says a principle was proposed and links to it.
+          if (proposed.length > 0) {
+            updated = updateInboxItem(ctx, id, {
+              detail: { ...updated.detail, [CARD_PROPOSED_PRINCIPLES]: proposed },
+            });
+          }
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);

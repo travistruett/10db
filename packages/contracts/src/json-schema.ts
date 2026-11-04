@@ -62,6 +62,30 @@ import {
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
+import {
+  DecisionDto,
+  DecisionInput,
+  PrincipleDraft,
+  PrincipleDto,
+  PrincipleInput,
+  ProposalAccept,
+  ProposalDto,
+  ProposalReject,
+  ProvenanceDto,
+  ReasonInput,
+} from './knowledge';
+import {
+  DecisionEdit,
+  DecisionWrite,
+  KnowledgeDryRunDto,
+  KnowledgeItemDto,
+  KnowledgeListDto,
+  KnowledgeSource,
+  PrincipleEdit,
+  PrincipleWrite,
+  ProposalVerdictAccept,
+  ProposalVerdictReject,
+} from './knowledge-api';
 import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
@@ -190,6 +214,26 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,
+  'decision-input': DecisionInput,
+  'decision-dto': DecisionDto,
+  'principle-draft': PrincipleDraft,
+  'principle-input': PrincipleInput,
+  'principle-dto': PrincipleDto,
+  'reason-input': ReasonInput,
+  'proposal-dto': ProposalDto,
+  'proposal-accept': ProposalAccept,
+  'proposal-reject': ProposalReject,
+  'provenance-dto': ProvenanceDto,
+  'knowledge-list-dto': KnowledgeListDto,
+  'knowledge-item-dto': KnowledgeItemDto,
+  'knowledge-dry-run-dto': KnowledgeDryRunDto,
+  'knowledge-source': KnowledgeSource,
+  'decision-write': DecisionWrite,
+  'decision-edit': DecisionEdit,
+  'principle-write': PrincipleWrite,
+  'principle-edit': PrincipleEdit,
+  'proposal-verdict-accept': ProposalVerdictAccept,
+  'proposal-verdict-reject': ProposalVerdictReject,
   'person-dto': PersonDto,
   'person-input': PersonInput,
   'persona-dto': PersonaDto,

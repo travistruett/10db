@@ -28,7 +28,8 @@
         "edit",
         "digest",
         "event",
-        "notice"
+        "notice",
+        "screen"
       ]
     },
     "body": {

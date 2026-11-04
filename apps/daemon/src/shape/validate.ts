@@ -251,9 +251,24 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     sources(`Removal ${String(i + 1)}`, `remove:${r.taskId}`, r.sourceMessageIds);
   });
 
-  // Records: what a record supersedes must be a current decision that applies here.
+  // Questions: the goal or task one is about must be in this plan or already stored.
+  const goalKeys = new Set(draft.goals.map((g) => g.key));
+  draft.questions.forEach((q, i) => {
+    if (q.about === undefined) return;
+    if (!knownTask(q.about) && !goalKeys.has(q.about) && !world.storedSources.has(q.about))
+      errors.push(`Question ${String(i + 1)}, about: no proposal has the key ${q.about}`);
+  });
+
+  // Records: what a decision supersedes must be a current decision that applies here, and a
+  // principle names no predecessor, since Convert replaces the current one with its key and scope.
   draft.records.forEach((r, i) => {
     if (r.supersedes === undefined) return;
+    if (r.kind === 'principle') {
+      errors.push(
+        `Record ${String(i + 1)}, supersedes: a principle supersedes by topic key and scope; drop supersedes and give the topicKey of the one it replaces`,
+      );
+      return;
+    }
     const problem = world.decisionProblem(r.supersedes);
     if (problem !== null) errors.push(`Record ${String(i + 1)}, supersedes: ${problem}`);
   });

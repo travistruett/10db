@@ -10,6 +10,7 @@ import {
   type InboxOption,
   type InboxTarget,
   type ProjectId,
+  type ProposalId,
   type QuestionCategory,
   type Urgency,
   type WorkstreamId,
@@ -143,6 +144,25 @@ export function findOpenByFoldKey(
         eq(schema.inboxItems.projectId, projectId),
         eq(schema.inboxItems.foldKey, foldKey),
         eq(schema.inboxItems.state, InboxState.Open),
+      ),
+    )
+    .get();
+  return row ? toDto(row) : undefined;
+}
+
+/** The open card that asks the builder about a proposal, if it is still open. */
+export function findOpenProposalCard(
+  db: DbReader,
+  proposalId: ProposalId,
+): InboxItemDto | undefined {
+  const row = db
+    .select()
+    .from(schema.inboxItems)
+    .where(
+      and(
+        eq(schema.inboxItems.kind, 'proposal'),
+        eq(schema.inboxItems.state, InboxState.Open),
+        sql`json_extract(${schema.inboxItems.detail}, '$.proposalId') = ${proposalId}`,
       ),
     )
     .get();

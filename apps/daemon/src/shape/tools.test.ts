@@ -10,6 +10,7 @@ import { getShape, listShapeMessages, listShapeProposals, patchShape } from '@10
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { looseDraft, seedConversation, type ConversationFixture } from './conversation-fixture';
+import { ToolImages } from '../mcp';
 import { createShapeToolHandlers } from './tools';
 
 // Shape spec §5.5, §6: note_heard and propose_plan, which is refused until the first Propose.
@@ -119,6 +120,29 @@ describe('the tool set', () => {
       'similar_tasks',
       'write_spec',
     ]);
+  });
+
+  it('offers see_screen only when 10db can draw a screen', async () => {
+    expect(tools().see_screen).toBeUndefined();
+    const seen: unknown[] = [];
+    const picture = new ToolImages('The Board', []);
+    const handlers = createShapeToolHandlers(
+      {
+        state,
+        screens: {
+          see: (shapeId, input) => {
+            seen.push([shapeId, input]);
+            return Promise.resolve(picture);
+          },
+        },
+      },
+      c.shape.id,
+    );
+    const handler = handlers.see_screen;
+    if (!handler) throw new Error('no see_screen');
+    const input = ShapeToolInputs.see_screen.parse({ screen: 'board', width: 900 });
+    expect(await handler(input)).toBe(picture);
+    expect(seen).toEqual([[c.shape.id, { screen: 'board', width: 900, height: 900 }]]);
   });
 
   it('answers similar_tasks with nothing when no finished task is alike, and says so', async () => {

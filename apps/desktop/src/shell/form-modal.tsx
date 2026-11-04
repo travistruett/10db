@@ -19,7 +19,10 @@ export interface FormModalProps {
   readonly size?: MantineSize;
   /** The actions, right-aligned in a footer that never scrolls away. */
   readonly actions: ReactNode;
-  /** Why the last submit failed; it sits beside the actions that caused it. */
+  /**
+   * Why the last submit failed, always in full: beside the actions that caused it, or on its own
+   * line above them when it doesn't fit there.
+   */
   readonly error?: string | null;
   readonly children: ReactNode;
 }
@@ -67,7 +70,6 @@ export function FormModal({
         </Box>
         <Group
           justify="space-between"
-          wrap="nowrap"
           px="md"
           py="sm"
           style={{
@@ -79,7 +81,13 @@ export function FormModal({
             transition: 'box-shadow 200ms ease',
           }}
         >
-          <Group gap="xs" wrap="nowrap" role="alert" style={{ minWidth: 0 }}>
+          <Group
+            gap="xs"
+            wrap="nowrap"
+            align="flex-start"
+            role="alert"
+            style={{ minWidth: 0, maxWidth: '100%' }}
+          >
             {error ? (
               <>
                 <IconAlertTriangle
@@ -88,13 +96,14 @@ export function FormModal({
                   color="var(--mantine-color-red-filled)"
                   style={{ flex: 'none' }}
                 />
-                <Text size="sm" c="red" lineClamp={2} title={error}>
+                <Text size="sm" c="red" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                   {error}
                 </Text>
               </>
             ) : null}
           </Group>
-          <Group gap="sm" wrap="nowrap" style={{ flex: 'none' }}>
+          {/* Kept right when a long error takes the line above them. */}
+          <Group gap="sm" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
             {actions}
           </Group>
         </Group>
