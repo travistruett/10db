@@ -10,6 +10,10 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   reconnecting and version-mismatch states. Use `useDaemon()` and the hooks in `src/daemon/queries.ts`.
 - One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
 - `pnpm dev` (`scripts/dev.sh`) shares one random token, kept in `.dev/ui-token`, between the daemon and Vite.
+- `pnpm dev` and `pnpm dev:factory` serve the UI from Vite, which has no CSP of its own; `vite.config.ts` sends the
+  window's `img-src` (read from `src-tauri/tauri.conf.json` by `window-csp.ts`, so the two cannot drift), so an image
+  or stylesheet `url()` from elsewhere is stopped there as in the app. Only `img-src`: Vite needs inline scripts and
+  its own websocket. `e2e/window-csp.spec.ts` checks it in WebKit; jsdom has no CSP.
 - MSW 3 intercepts jsdom's `WebSocket` as is; no extra environment option is needed.
 - Hooks, query keys and fixtures are scoped per backend entity (`daemon/<entity>-queries.ts`, `test/<entity>-fixtures.ts`), accounts first. An account secret is sent by `daemon/account-secret.ts`, never through TanStack Query, and never kept in UI state.
 - Server state lives in TanStack Query; routes are code-based TanStack Router in `src/router.tsx`.
