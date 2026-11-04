@@ -277,9 +277,36 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
     });
 
-    it('says the install is broken, and runs no gate, when the install does not bring the packages back', async () => {
+    it('starts over once more by itself when the install leaves the copy broken, and the gate runs with a notice that says so', async () => {
+      const { batch, path } = await pruned();
+      h.pnpm.makes({ 'node_modules/.pnpm/leftover2/x.js': '1\n' });
+      // Call 1 was the cut's, 2 the install before the gate (it brings nothing back), 3 the repair.
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
+        kind: 'up_to_date',
+        note: null,
+      });
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(existsSync(join(path, 'node_modules', 'left-pad'))).toBe(true);
+      expect(existsSync(join(path, 'node_modules', '.pnpm', 'leftover2'))).toBe(true);
+      const notice = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+      expect(notice.line).toMatch(/install in this copy was repaired at /i);
+      expect(notice.line).toContain(h.ctx.clock.now().toISOString().slice(0, 16).replace('T', ' '));
+    });
+
+    it('raises no notice when the first install brings the packages back', async () => {
+      const { batch } = await pruned();
+      h.pnpm.makes({ 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+    });
+
+    it('says the install is broken, and runs no gate, when two installs in a row do not bring the packages back', async () => {
       const { batch } = await pruned();
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
       expect(update.kind).toBe('install_broken');
       expect(update.kind === 'install_broken' && update.note).toMatch(
         /install in this copy is broken: 1 of 1 dependencies.*\(\.: left-pad\).*no fix attempt was counted/s,

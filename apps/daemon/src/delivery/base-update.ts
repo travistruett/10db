@@ -23,7 +23,7 @@ import {
 import { checkInstall, describeBroken } from './install-health';
 import { installedLockfile, recordInstall } from './installed-lockfile';
 import { journalDirs, takenNumbers, type TakenNumber } from './migration-numbers';
-import { baseNotices, NOTICE_KEY } from './notices';
+import { baseNotices, installNotices, NOTICE_KEY } from './notices';
 import { mergeRef, startRef } from './start-refs';
 import { PNPM_LOCKFILE, raiseInstallHostCards } from './worktree-dependencies';
 import { generatedIn } from './worktree-generated';
@@ -911,6 +911,34 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     path: string,
     signal: AbortSignal,
   ): Promise<Installed> {
+    const first = await installOnce(batch, project, path, signal, false);
+    if (first.kind !== 'done' || first.broken === undefined) return first;
+    // The first recovery is automatic: remove node_modules, install from nothing, and let the step
+    // run if that resolves. Only a second broken install in a row is reported
+    // (`decisions/2026-11-03-a-broken-install-repairs-itself-once.md`).
+    ctx.logger.warn(
+      { batchId: batch.id, unresolved: first.broken },
+      'worktree install left the copy broken; starting over once',
+    );
+    const second = await installOnce(batch, project, path, signal, true);
+    if (second.kind === 'done' && second.broken === undefined) {
+      try {
+        showNotice(ctx.state, batch.id, installNotices.repaired(first.broken, ctx.clock.now()));
+      } catch (error) {
+        ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'install notice not written');
+      }
+    }
+    return second;
+  }
+
+  /** One install, and the check after it; `again` removes `node_modules` first whatever it holds. */
+  async function installOnce(
+    batch: BatchDto,
+    project: ProjectDto,
+    path: string,
+    signal: AbortSignal,
+    again: boolean,
+  ): Promise<Installed> {
     try {
       const lockfile = await ctx.git.blobAt(path, 'HEAD', PNPM_LOCKFILE);
       if (lockfile === null) return { kind: 'done', ok: true, note: null };
@@ -921,7 +949,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       // gate's tools cannot start from. A project with neither was never installed, and is left so.
       const expected = existsSync(join(path, 'node_modules')) || recorded !== null;
       const before = expected ? checkInstall(path) : { kind: 'not_pnpm' as const };
-      if (lockfile === recorded && before.kind !== 'broken')
+      if (lockfile === recorded && before.kind !== 'broken' && !again)
         return { kind: 'done', ok: true, note: null };
       if (before.kind === 'broken')
         ctx.logger.warn(
@@ -934,7 +962,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         path,
         signal,
         // A broken copy is one an install is expected for, even when its node_modules is gone.
-        ...(before.kind === 'broken' ? { seeded: false } : {}),
+        ...(before.kind === 'broken' || again ? { seeded: false } : {}),
+        ...(again ? { startOver: true as const } : {}),
       });
       await recordInstall(ctx, batch.id, path, installed);
       const after = expected && installed.kind !== 'aborted' ? checkInstall(path) : null;
@@ -1070,7 +1099,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note:
           joined(
             merged.note,
-            `The install in this copy is broken: ${installed.broken}. 10db installed again from the lockfile and it did not bring them back${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
+            `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile, then removed node_modules and installed again by itself, and neither install brought them back${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
       };
     }

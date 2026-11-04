@@ -1,0 +1,29 @@
+# A broken install starts over and installs once more by itself, and raises a card only if that is broken too
+
+- **Date:** 2026-11-03
+- **Amends:** `2026-11-03-a-broken-install-is-not-a-failed-gate.md` (what a broken install before a gate does first)
+
+## Decision
+
+- **One automatic recovery.** In the base update's install (`base-update.ts` `install`), when an install leaves the
+  copy's packages unresolved, 10db removes `node_modules` and installs again (`refresh` with `startOver`, which
+  removes `node_modules` whatever its state), then checks again. If the packages now resolve, the step goes on: the
+  gate starts, or the shipping gate runs, with no card and no attempt counted. The same code serves the task's
+  gate and the shipping gate, since both call `beforeGate`.
+- **Only a second broken install in a row is reported.** When the second install is broken too, `beforeGate`
+  answers `install_broken` exactly as before, so the runner's `install_broken` failure and card and the shipping
+  gate's `BatchFailure.InstallBroken` card are unchanged. Its note now says that two installs did not bring the
+  packages back.
+- **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
+  shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. The next
+  repair replaces it with its own time. The time is the delivery context's clock.
+
+## Why
+
+On 2026-11-03 every Retry on an `install_broken` card succeeded, so the card only added a wait for a person
+without telling 10db anything it could not do itself. The Retry did what the recovery now does: the next gate
+checked the copy, started over and installed. A second broken install in a row is evidence that a rerun will not
+help, which is what a card for a person is for.
+
+Reading the first install's result inside the same gate, not rerunning the whole step from the runner, keeps one
+code path for the verify and shipping gates and spends no attempt, event or gate slot on the repair.

@@ -647,6 +647,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
+    clock,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
       gateTimeoutMs: limits.gateTimeoutMs,
