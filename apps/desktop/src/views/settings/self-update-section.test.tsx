@@ -431,6 +431,25 @@ describe('a waiting update in Settings', () => {
     });
   });
 
+  it('says nothing is staged and the build is fetched once GitHub answers, not that it is being fetched', async () => {
+    serving(status({ availableCommit: NEWER, notInstalling: 'unreachable' }));
+    renderApp('/settings/updates');
+    const note = await screen.findByRole('status', { name: 'Update status' });
+    expect(note.textContent).toMatch(/nothing is staged/i);
+    expect(note.textContent).toMatch(/fetches the build of 9f8e7d6 once GitHub answers/i);
+    expect(note.textContent).not.toMatch(/is fetching/);
+    expect(note.textContent).not.toMatch(/is waiting/);
+    expect(note.textContent).not.toMatch(/mid-session/);
+    expect(screen.getByText('Update not staged')).toBeTruthy();
+    expect(screen.queryByText('Update being fetched')).toBeNull();
+    expect(screen.queryByText('Update waiting')).toBeNull();
+    // Install Now is remembered: the factory drains the moment the build is staged.
+    fireEvent.click(screen.getByRole('button', { name: 'Install Now' }));
+    await waitFor(() => {
+      expect(installNows.count).toBe(1);
+    });
+  });
+
   it('offers no Install Now with the switch off', async () => {
     serving(status({ enabled: false, isDefault: false, availableCommit: NEWER }));
     renderApp('/settings/updates');

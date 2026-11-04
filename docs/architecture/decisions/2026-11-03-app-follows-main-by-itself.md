@@ -151,6 +151,10 @@ factory (`self-update/drain.ts`) until the app has installed:
   `fetching` is the one reason taken from a check under way rather than a finished one: while a head with nothing
   staged has its build fetched, or waited for while GitHub still builds it (many minutes), nothing waits for an idle
   moment yet. It shows only when no other reason holds and ends when the build is staged or the check ends.
+  `unreachable` is the case where no check runs and no staged build can install because GitHub could not be asked:
+  none is staged, or the kept one is held back because its own install or the fetch of a newer build failed. Settings
+  says nothing is staged for that head and that 10db fetches the build once GitHub answers, rather than that it is
+  fetching or waiting for an idle moment.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.

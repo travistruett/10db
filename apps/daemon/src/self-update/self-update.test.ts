@@ -450,6 +450,21 @@ describe('tick', () => {
     }
   });
 
+  it('does not call the machine offline for a connection cut off with EOF, and quotes gh', async () => {
+    for (const text of [
+      'gh api failed (exit 1): EOF',
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r/compare/a...b": EOF',
+    ]) {
+      world.head = new GhError(GhFailure.Unreachable, text);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      const message = update.status().problem?.message ?? '';
+      expect(message).toMatch(/lost its connection to GitHub/i);
+      expect(message).toContain(text);
+      expect(message).not.toMatch(/offline/i);
+    }
+  });
+
   it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
     const reasons: string[] = [];
     for (const error of [
@@ -632,7 +647,8 @@ describe('tick', () => {
     expect(status.availableCommit).toBe(NEW);
     expect(status.problem?.kind).toBe('unreachable');
     expect(status.waitingSince).toBeNull();
-    expect(status.notInstalling).not.toBeNull();
+    // No check runs, so nothing is being fetched: nothing is staged and GitHub has to answer first.
+    expect(status.notInstalling).toBe('unreachable');
   });
 
   it('says the same when GitHub then stops answering for the head too', async () => {
@@ -642,7 +658,7 @@ describe('tick', () => {
     expect(await update.tick()).toBe('unreachable');
     world.head = new Error('offline');
     expect(await update.tick()).toBe('unreachable');
-    expect(update.status().notInstalling).not.toBeNull();
+    expect(update.status().notInstalling).toBe('unreachable');
   });
 });
 
@@ -1096,6 +1112,27 @@ describe('a waiting update drains the factory', () => {
       expect(update.status().draining).toBe(false);
     });
 
+    it.each(['find-commit', 'find-build'])(
+      'does not say a build staged for the failed head waits for an idle moment when main moves and the look fails at %s',
+      async (step) => {
+        world.busy = 1;
+        const update = make();
+        await update.tick();
+        world.busy = 0;
+        world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+        expect(await update.tick()).toBe('failed');
+        // The new head clears the failure, so only the staged build's head says it is held back.
+        world.head = NEWER;
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        expect(world.calls.filter((call) => call === 'apply')).toEqual(['apply']);
+        const status = update.status();
+        expect(status.availableCommit).toBe(NEWER);
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).toBe('unreachable');
+      },
+    );
+
     /** Drains for a build, then main moves on and the build fetched for it can't be compared. */
     async function drainedThenLostNewBuild() {
       world.busy = 1;
@@ -1289,6 +1326,16 @@ describe('a waiting update drains the factory', () => {
       expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
     });
 
+    it('does not say the held-back build waits for an idle moment when GitHub goes away after retry()', async () => {
+      const update = await retriedAfterNewerHeadFailed();
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      const status = update.status();
+      expect(status.availableCommit).toBe('e'.repeat(40));
+      expect(status.problem?.kind).toBe('unreachable');
+      expect(status.notInstalling).toBe('unreachable');
+    });
+
     it.each(['find-commit', 'find-build'])(
       'does not install the older build when the look fails at %s after retry(), and records nothing',
       async (step) => {
@@ -1298,6 +1345,19 @@ describe('a waiting update drains the factory', () => {
         expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
         expect(world.calls).not.toContain('apply');
         expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      },
+    );
+
+    it.each(['find-commit', 'find-build'])(
+      'does not say the held-back build waits for an idle moment when the look fails at %s after retry()',
+      async (step) => {
+        const update = await retriedAfterNewerHeadFailed();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        const status = update.status();
+        expect(status.availableCommit).toBe('e'.repeat(40));
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).toBe('unreachable');
       },
     );
 
@@ -2112,7 +2172,7 @@ describe('why an available update is not installing', () => {
         expect(status.availableCommit).toBe(NEW);
         expect(status.waitingSince).toBeNull();
         expect(status.problem?.kind).toBe('unreachable');
-        expect(status.notInstalling).not.toBeNull();
+        expect(status.notInstalling).toBe('unreachable');
       },
     );
 
@@ -2130,7 +2190,7 @@ describe('why an available update is not installing', () => {
       world.head = offline;
       expect(await update.tick()).toBe('unreachable');
       expect(update.status().availableCommit).toBe(NEWER);
-      expect(update.status().notInstalling).not.toBeNull();
+      expect(update.status().notInstalling).toBe('unreachable');
     });
 
     it('still says the update waits while a staged build goes on waiting', async () => {
