@@ -290,6 +290,52 @@ describe('the PostToolUse hook', () => {
   });
 });
 
+describe('the PostToolUseFailure hook', () => {
+  async function failureHook(toolFailed?: (req: ShapeToolRequest) => void) {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec(toolFailed === undefined ? {} : { toolFailed }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    const hook = run.options?.hooks?.PostToolUseFailure?.[0]?.hooks[0];
+    if (!hook) throw new Error('no PostToolUseFailure hook');
+    return (input: Record<string, unknown>) =>
+      hook({ hook_event_name: 'PostToolUseFailure', ...input } as never, undefined, {
+        signal: new AbortController().signal,
+      });
+  }
+
+  it('tells the session which call failed, with the subagent’s id', async () => {
+    const seen: unknown[] = [];
+    const call = await failureHook((req) => seen.push(req));
+    await call({
+      tool_name: 'Read',
+      tool_input: { file_path: 'a.png' },
+      error: 'no such file',
+      agent_id: 'agent-7',
+      agent_type: 'scope',
+    });
+    expect(seen).toEqual([
+      {
+        toolName: 'Read',
+        input: { file_path: 'a.png' },
+        agentId: 'agent-7',
+        agentType: 'scope',
+      },
+    ]);
+  });
+
+  it('lets the call be when the listener throws, and when there is none', async () => {
+    const throwing = await failureHook(() => {
+      throw new Error('boom');
+    });
+    expect(await throwing({ tool_name: 'Read', tool_input: {}, error: 'x' })).toEqual({});
+    const none = await failureHook(undefined);
+    expect(await none({ tool_name: 'Read', tool_input: {}, error: 'x' })).toEqual({});
+  });
+});
+
 describe('the session’s run', () => {
   it('reports the turn, its tokens and the context used', async () => {
     const { query } = fakeQuery();

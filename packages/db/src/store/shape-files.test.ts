@@ -12,6 +12,7 @@ import {
   listUntoldShapeFiles,
   markShapeFilesInline,
   markShapeFilesTold,
+  markShapeFilesUnreadableTold,
   seedProject,
   type Store,
 } from './index';
@@ -84,6 +85,22 @@ describe('shape files', () => {
       markShapeFilesTold(ctx, []);
     });
     expect(listUntoldShapeFiles(store.db, shapeId)).toHaveLength(1);
+  });
+
+  it('marks the images a notice named, one file of a name at a time, keeping the first time', () => {
+    const a = store.write((ctx) => insertShapeFile(ctx, file('pasted.png'))).value;
+    const b = store.write((ctx) => insertShapeFile(ctx, file('pasted.png'))).value;
+    expect(a.unreadableToldAt).toBeNull();
+    const at = store.write((ctx) => {
+      markShapeFilesUnreadableTold(ctx, [a.id]);
+      return ctx.now;
+    }).value;
+    expect(getShapeFile(store.db, a.id).unreadableToldAt).toBe(at);
+    expect(getShapeFile(store.db, b.id).unreadableToldAt).toBeNull();
+    store.write((ctx) => {
+      markShapeFilesUnreadableTold(ctx, []);
+    });
+    expect(getShapeFile(store.db, b.id).unreadableToldAt).toBeNull();
   });
 
   it('marks the files a turn sent inline, and a fresh session clears the others first', () => {

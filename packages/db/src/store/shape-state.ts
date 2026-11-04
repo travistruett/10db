@@ -233,6 +233,7 @@ export function insertShapeFile(
     ...input,
     toldAt: null,
     inlineSent: false,
+    unreadableToldAt: null,
     createdAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeFiles).values(row).run();
@@ -278,6 +279,16 @@ export function markShapeFilesTold(ctx: WriteContext, ids: readonly ShapeFileId[
     .update(schema.shapeFiles)
     .set({ toldAt: ctx.now })
     .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.toldAt)))
+    .run();
+}
+
+/** Records that a notice named these images as ones Claude can't Read; one already named keeps its first time. */
+export function markShapeFilesUnreadableTold(ctx: WriteContext, ids: readonly ShapeFileId[]): void {
+  if (ids.length === 0) return;
+  ctx.tx
+    .update(schema.shapeFiles)
+    .set({ unreadableToldAt: ctx.now })
+    .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.unreadableToldAt)))
     .run();
 }
 
