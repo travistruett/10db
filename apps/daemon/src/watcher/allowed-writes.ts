@@ -173,9 +173,10 @@ function throughSymlink(root: string, path: string): boolean {
 /**
  * One look at every directory between `root` (excluded, see `throughSymlink`) and `path`: 'link' when one is
  * a symlink, otherwise a string naming each one's device, inode and change time to the nanosecond (empty
- * when there is none), or null when one is missing or can't be looked at. The change time moves when the
- * directory is renamed, recreated, or has an entry added or removed, and no process can set it back, so two
- * equal strings mean the same directories were in place the whole time between the two looks.
+ * when there is none), or null when one is missing. The change time moves when the directory is renamed,
+ * recreated, or has an entry added or removed, and no process can set it back, so two equal strings mean the
+ * same directories were in place the whole time between the two looks. A directory that can't be looked at
+ * throws: two refused looks prove nothing about what was there, so they must not read as two equal looks.
  */
 function lookAtAncestors(root: string, path: string): string | null {
   const rel = relative(root, path);
@@ -189,8 +190,9 @@ function lookAtAncestors(root: string, path: string): string | null {
       const at = lstatSync(dir, { bigint: true });
       if (at.isSymbolicLink()) return 'link';
       seen.push(`${String(at.dev)}.${String(at.ino)}.${String(at.ctimeNs)}`);
-    } catch {
-      return null;
+    } catch (error) {
+      if (isMissing(error)) return null;
+      throw error;
     }
   }
   return seen.join(':');
@@ -239,14 +241,38 @@ function descriptorIsAtPath(
   return at.isFile() && at.dev === fd.dev && at.ino === fd.ino ? 'yes' : 'moved';
 }
 
-/** Whether anything is at `path` (not following a link at the path itself). */
-function pathExists(path: string): boolean {
+/** Whether a filesystem error says the path isn't there: not a refused look, which says nothing. */
+function isMissing(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/**
+ * The deletion stamp for a path whose open just failed as missing, or why there is none. The failure proves
+ * nothing alone: the open may have gone through a directory a lane swapped for a link to a place without the
+ * file, and `deletionStamp` follows links. So it gets the proof `descriptorIsAtPath` gives a read: the ancestors
+ * as they were just before the open (`before`) must be as they are once the `lstat` of the path and the stamp
+ * are done. Any link at that last look is 'not-a-file'; any change is 'changing', and the next read looks again,
+ * which is also how a real deletion made between the looks gets its stamp. A directory missing at both looks is
+ * a real deletion too: its files are not there, however a lane flipped it meanwhile, and the stamp is the
+ * nearest ancestor that is there. Refused looks throw, so they count as 'unreadable', never as gone.
+ */
+function stampOfMissing(
+  root: string,
+  path: string,
+  before: string | null,
+): { stamp: string } | { skip: 'not-a-file' | 'changing' | 'unreadable' } {
   try {
     lstatSync(path);
-    return true;
-  } catch {
-    return false;
+    return { skip: 'changing' };
+  } catch (error) {
+    if (!isMissing(error)) throw error;
   }
+  const stamp = deletionStamp(root, path);
+  const last = lookAtAncestors(root, path);
+  if (last === 'link') return { skip: 'not-a-file' };
+  if (last !== before) return { skip: 'changing' };
+  return stamp === null ? { skip: 'unreadable' } : { stamp };
 }
 
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
@@ -274,14 +300,14 @@ export const STAMP_BUDGET_MS = 30_000;
  * asynchronous, a chunk at a time, so the event loop turns between chunks, and it stops at the size the first
  * `fstat` gave: a file that keeps growing is 'changing', not endless. The result is 'not-a-file' for anything
  * but a regular file, 'changing' when the file changed while it was read, 'too-large' when `deadline` (a
- * `performance.now()` time) passed before the hash was done, and the stamp otherwise. Other errors, ENOENT
- * included, are thrown.
+ * `performance.now()` time) passed before the hash was done, and the stamp otherwise. A path the open finds
+ * missing goes to `stampOfMissing`. Other errors are thrown.
  */
 async function readStamp(
   root: string,
   path: string,
   deadline: number,
-): Promise<{ stamp: string } | { skip: 'not-a-file' | 'changing' | 'too-large' }> {
+): Promise<{ stamp: string } | { skip: UnstampedReason }> {
   // The ancestors as they are before the open: `descriptorIsAtPath` refuses the read if any changed since.
   const ancestors = lookAtAncestors(root, path);
   if (ancestors === 'link') return { skip: 'not-a-file' };
@@ -290,6 +316,7 @@ async function readStamp(
     handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') return { skip: 'not-a-file' };
+    if (isMissing(error)) return stampOfMissing(root, path, ancestors);
     throw error;
   }
   try {
@@ -362,21 +389,13 @@ export async function stampOrReason(
   const path = resolve(root, rel);
   const deadline = performance.now() + budgetMs;
   for (let attempt = 0; attempt < STAMP_ATTEMPTS; attempt++) {
-    if (throughSymlink(root, path)) return { reason: 'not-a-file' };
     try {
+      if (throughSymlink(root, path)) return { reason: 'not-a-file' };
       const read = await readStamp(root, path, deadline);
       if ('stamp' in read) return read;
       if (read.skip !== 'changing') return { reason: read.skip };
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code !== 'ENOENT' && code !== 'ENOTDIR') return { reason: 'unreadable' };
-      // The open may have failed through a directory a lane swapped for a link (to a directory without the
-      // file) after the check above: the file is not gone, and `deletionStamp` follows links. A link still in
-      // place is a non-file; one put back means the path leads to something again, so read it again.
-      if (throughSymlink(root, path)) return { reason: 'not-a-file' };
-      if (pathExists(path)) continue;
-      const stamp = deletionStamp(root, path);
-      return stamp === null ? { reason: 'unreadable' } : { stamp };
+    } catch {
+      return { reason: 'unreadable' };
     }
   }
   return { reason: 'changing' };

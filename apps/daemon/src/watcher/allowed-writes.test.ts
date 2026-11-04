@@ -58,9 +58,11 @@ vi.mock('node:fs', async (importOriginal) => {
     lstatSync: ((path: fs.PathLike, options: fs.StatOptions) => {
       if (path === moving.watched) moving.pathStats++;
       if (path === race.path) race.beforePathLstat?.();
-      const result = real.lstatSync(path, options);
-      if (path === race.path) race.afterPathLstat?.();
-      return result;
+      try {
+        return real.lstatSync(path, options);
+      } finally {
+        if (path === race.path) race.afterPathLstat?.();
+      }
     }) as typeof fs.lstatSync,
   };
 });
@@ -475,6 +477,142 @@ describe('stampOrReason', () => {
       const result = await stampOrReason(root, 'sub/file.txt');
       expect('stamp' in result && result.stamp.startsWith('gone:sub:')).toBe(true);
     });
+
+    it('still gives a deletion stamp when the directory above the file is gone too', async () => {
+      race.beforeOpen = null;
+      rmSync(join(root, 'sub'), { recursive: true });
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result && result.stamp.startsWith('gone::')).toBe(true);
+    });
+
+    it.each([
+      ['the file', 'gone:sub:', 'sub/file.txt'],
+      ['its directory', 'gone::', 'sub'],
+    ])('stamps %s deleted just before the open, on the next read', async (_, prefix, removed) => {
+      race.beforeOpen = () => {
+        race.beforeOpen = null;
+        rmSync(join(root, removed), { recursive: true });
+      };
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result && result.stamp.startsWith(prefix)).toBe(true);
+    });
+  });
+
+  // A lane that keeps flipping `sub` by rename beats any single look after the failed open, and an open or an
+  // `lstat` through a link says nothing about the file. The link leads to a directory without the file (the open
+  // fails ENOENT) or to a regular file (ENOTDIR).
+  describe.each([
+    ['a directory without the file', 'empty'],
+    ['a regular file', 'plain'],
+  ])('a directory flipped by rename around a failed open, to a link to %s', (_, target) => {
+    beforeEach(() => {
+      mkdirSync(join(root, 'empty'));
+      writeFileSync(join(root, 'plain'), 'not a directory');
+      mkdirSync(join(root, 'sub'));
+      writeFileSync(join(root, 'sub/file.txt'), 'live');
+      race.path = join(root, 'sub/file.txt');
+    });
+
+    const isLink = (): boolean => lstatSync(join(root, 'sub')).isSymbolicLink();
+    function toLink(): void {
+      if (isLink()) return;
+      renameSync(join(root, 'sub'), join(root, 'sub.orig'));
+      symlinkSync(join(root, target), join(root, 'sub'));
+    }
+    function toDir(): void {
+      if (!isLink()) return;
+      rmSync(join(root, 'sub'));
+      renameSync(join(root, 'sub.orig'), join(root, 'sub'));
+    }
+
+    it('gives no deletion stamp when the link is left in place', async () => {
+      race.beforeOpen = toLink;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no deletion stamp when the directory is put back', async () => {
+      race.beforeOpen = toLink;
+      race.afterFailedOpen = toDir;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+
+    it('gives no deletion stamp when the link is back at the lstat of the path', async () => {
+      race.beforeOpen = toLink;
+      race.afterFailedOpen = toDir;
+      race.beforePathLstat = toLink;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no deletion stamp when the directory is put back again after that lstat', async () => {
+      race.beforeOpen = toLink;
+      race.afterFailedOpen = toDir;
+      race.beforePathLstat = toLink;
+      race.afterPathLstat = toDir;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+
+    it('stamps the file once the lane stops flipping', async () => {
+      race.beforeOpen = () => {
+        race.beforeOpen = null;
+        toLink();
+      };
+      race.afterFailedOpen = toDir;
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result && !result.stamp.startsWith('gone:')).toBe(true);
+    });
+
+    // Permission denials cannot happen as root.
+    const asRoot = process.getuid?.() === 0;
+
+    it.skipIf(asRoot)(
+      'says unreadable when the directory comes back with no permissions: not looked at is not gone',
+      async () => {
+        race.beforeOpen = toLink;
+        race.afterFailedOpen = () => {
+          toDir();
+          chmodSync(join(root, 'sub'), 0o000);
+        };
+        try {
+          expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'unreadable' });
+        } finally {
+          chmodSync(join(root, 'sub'), 0o755);
+        }
+      },
+    );
+
+    it.skipIf(asRoot)(
+      'says unreadable when a directory above can be looked at by no look: two refused looks are not equal',
+      async () => {
+        // Every look of the ancestors is refused at `locked/sub`, while the open and the lstat of the path get in
+        // and go through the link.
+        const locked = join(root, 'locked');
+        mkdirSync(locked);
+        renameSync(join(root, 'sub'), join(locked, 'sub'));
+        const path = join(locked, 'sub/file.txt');
+        race.path = path;
+        race.beforeOpen = () => {
+          chmodSync(locked, 0o755);
+          renameSync(join(locked, 'sub'), join(root, 'sub.orig'));
+          symlinkSync(join(root, target), join(locked, 'sub'));
+        };
+        const refuse = (): void => {
+          chmodSync(locked, 0o000);
+        };
+        race.afterFailedOpen = refuse;
+        race.beforePathLstat = () => {
+          chmodSync(locked, 0o755);
+        };
+        race.afterPathLstat = refuse;
+        refuse();
+        try {
+          expect(await stampOrReason(root, 'locked/sub/file.txt')).toEqual({
+            reason: 'unreadable',
+          });
+        } finally {
+          chmodSync(locked, 0o755);
+        }
+      },
+    );
   });
 
   // A lane that swaps `sub` by rename keeps the same directory inode, so looking at the ancestors once before
