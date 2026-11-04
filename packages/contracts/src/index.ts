@@ -33,6 +33,7 @@ export * from './shape-files';
 export * from './shape-measures';
 export * from './shape-preview';
 export * from './shape-review';
+export * from './shape-screens';
 export * from './shape-view';
 export * from './states';
 export * from './steps';
