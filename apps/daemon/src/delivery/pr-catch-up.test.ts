@@ -231,6 +231,97 @@ describe('a shipped pull request that conflicts with its base', () => {
       ).toHaveLength(1);
     });
 
+    describe('when the generators of a merged generated directory report a problem', () => {
+      /** The batch and main changed one generated file, and main's lockfile moved; the worktree is the catch-up's own. */
+      async function generatedConflict(
+        gateCommand: string | null,
+        keepWorktree: boolean,
+      ): Promise<BatchDto> {
+        h.commit(
+          'packages/contracts/package.json',
+          `${JSON.stringify({ name: '@10db/contracts', scripts: { generate: 'tsx generate.ts' } })}\n`,
+        );
+        h.commit(`${GENERATED}/a.schema.json`, '{"v":0}\n');
+        h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
+        h.git$('push', '-q', 'origin', 'main');
+        const batch = await shipped(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n', {
+          keepWorktree,
+        });
+        h.teammatePush('main', `${GENERATED}/a.schema.json`, '{"v":"theirs"}\n');
+        h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\n# changed\n');
+        conflicts(batch);
+        h.state.write((c) => patchProject(c, h.project.id, { gateCommand }));
+        return batch;
+      }
+
+      const failing = (): void => {
+        vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(({ path }) =>
+          Promise.resolve({
+            kind: 'failed',
+            exitCode: 1,
+            timedOut: false,
+            tail: '',
+            logPath: join(path, 'generate.log'),
+          }),
+        );
+      };
+
+      const unchanged = (): void => {
+        vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(({ path }) =>
+          Promise.resolve({ kind: 'done', logPath: join(path, 'generate.log') }),
+        );
+      };
+
+      const installFails = (): void => {
+        vi.spyOn(h.ctx.dependencies, 'refresh').mockRejectedValue(new Error('the install failed'));
+      };
+
+      // A failed install is met in the worktree 10db makes too, so that case keeps the batch's own.
+      const PROBLEMS = [
+        ['the generators exit non-zero', 'regenerating them failed (exit 1)', failing, false],
+        ['the generators change nothing', 'regenerating changed nothing', unchanged, false],
+        [
+          'the install the merged lockfile needs fails',
+          'the install the merged lockfile needs failed',
+          installFails,
+          true,
+        ],
+      ] as const;
+      const CHECKS = [
+        ['no check is set', null],
+        ['a gate is set', 'true'],
+      ] as const;
+
+      it.each(
+        PROBLEMS.flatMap(([problem, why, setUp, kept]) =>
+          CHECKS.map(
+            ([check, gateCommand]) => [problem, check, why, setUp, kept, gateCommand] as const,
+          ),
+        ),
+      )(
+        'pushes nothing, puts the merge back and raises one card when %s and %s',
+        async (_problem, _check, why, setUp, kept, gateCommand) => {
+          const batch = await generatedConflict(gateCommand, kept);
+          setUp();
+          const before = onOrigin(batch.branch);
+
+          const now = await catchUp(batch);
+
+          expect(onOrigin(batch.branch)).toBe(before);
+          expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
+          // (A kept worktree has its own card, from the ship.)
+          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+          expect(card.title).toContain("conflicts with main and 10db couldn't update it");
+          expect(card.body).toContain(why);
+          expect(card.body).toContain(`${GENERATED}/`);
+          // The worktree the catch-up made is gone, and no card tells the builder to regenerate in it.
+          if (!kept) expect(now.worktreePath).toBeNull();
+          expect(card.body).not.toContain('Regenerate them in the worktree');
+          expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
+        },
+      );
+    });
+
     it('raises the card naming the conflict when the base could not be merged at all', async () => {
       installable();
       const batch = await shipped('README.md', '# ours\n');
@@ -690,12 +781,12 @@ describe('a shipped pull request that conflicts with its base', () => {
 
       /**
        * Main holds 0000_init and 0001_theirs; the shipped batch's 0001_mine collides with it. With
-       * `otherDirectory` both also changed a generated directory the generators then leave as it is,
-       * a problem that loses no migration.
+       * `otherDirectory` both also changed a generated directory, which the generators write again
+       * unless `leftAsIs`: a problem that loses no migration, and stops the catch-up.
        */
       async function renumbering(
         gate: string | null,
-        { otherDirectory = false } = {},
+        { otherDirectory = false, leftAsIs = false } = {},
       ): Promise<BatchDto> {
         h.commit(
           'packages/db/package.json',
@@ -743,6 +834,8 @@ describe('a shipped pull request that conflicts with its base', () => {
             );
           }
           writeFileSync(file, journal(...tags));
+          if (otherDirectory && !leftAsIs)
+            writeFileSync(join(path, SCHEMAS, 'a.schema.json'), '{"v":"regenerated"}\n');
           return Promise.resolve({ kind: 'done', logPath: join(path, 'generate.log') });
         });
         return batch;
@@ -779,7 +872,7 @@ describe('a shipped pull request that conflicts with its base', () => {
         expect(notice.body).toContain('0001_mine → 0002_mine');
       });
 
-      it('lists what was pushed when another generated directory came back unchanged', async () => {
+      it('lists what was pushed when another generated directory was regenerated too', async () => {
         const batch = await renumbering(null, { otherDirectory: true });
 
         const now = await catchUp(batch);
@@ -790,6 +883,28 @@ describe('a shipped pull request that conflicts with its base', () => {
         const notice = h.only(now.notices.filter((n) => n.key === NOTICE_KEY.migrationsRenumbered));
         expect(notice.body).toContain('0001_mine → 0002_mine');
       });
+
+      it.each([
+        ['no check is set', null],
+        ['a gate is set', 'true'],
+      ])(
+        'lists nothing and pushes nothing when another generated directory came back unchanged and %s',
+        async (_name, gate) => {
+          const batch = await renumbering(gate, { otherDirectory: true, leftAsIs: true });
+          const pushed = onOrigin(batch.branch);
+
+          await catchUp(batch);
+
+          expect(onOrigin(batch.branch)).toBe(pushed);
+          expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
+          // (The kept worktree has its own card, from the ship.)
+          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+          expect(card.title).toContain("couldn't update it");
+          expect(card.body).toContain(`${SCHEMAS}/`);
+          expect(card.body).toContain('regenerating changed nothing');
+          expect(renumbered(batch)).toEqual([]);
+        },
+      );
 
       it('is left as it was when such a merge fails its check and is put back', async () => {
         const batch = await renumbering('false', { otherDirectory: true });

@@ -90,6 +90,15 @@ export type BaseUpdate =
    */
   | { readonly kind: 'uncarried'; readonly head: string; readonly note: string }
   /**
+   * Answered only for a pull request's catch-up: the merge took generated directories from the base
+   * and the regeneration reported a problem (the install it needs failed, a generator failed, it
+   * changed nothing, or it lost a file of the branch's), so the merge at `head` lacks the batch's own
+   * changes there. The caller puts it back and pushes nothing, with or without a check; `note` says
+   * what went wrong and is the whole of what the builder is told, since no regenerate card is raised
+   * for a merge that is put back.
+   */
+  | { readonly kind: 'unregenerated'; readonly head: string; readonly note: string }
+  /**
    * The gate tests the branch as it is; `note` says why. `held`, asked for the migrations hazard or
    * for a pull request only, says what in the branch kept the base out.
    */
@@ -215,6 +224,7 @@ export function gateNote(update: BaseUpdate): string | null {
     case 'conflicted':
     case 'install_broken':
     case 'uncarried':
+    case 'unregenerated':
       return update.note;
     case 'aborted':
       return null;
@@ -694,6 +704,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly head: string;
         readonly note: string | null;
         readonly uncarried?: true;
+        /** A pull request's catch-up whose regeneration reported a problem that lost no migration. */
+        readonly unregenerated?: true;
         /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
         readonly renumbered?: readonly RenumberedMigration[];
       }
@@ -751,7 +763,19 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       }) as const;
     if (problem === null) return stands(null);
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
-    if (lost === null) return stands(unregenerated(batch, path, merged, problem));
+    if (lost === null) {
+      // The generated directories are the base's, without the batch's changes in them: a catch-up
+      // pushes nothing, so its merge goes back and its own card says why. No regenerate card is
+      // raised, which would name a worktree the catch-up removes and a merge it rewinds.
+      if (forPullRequest)
+        return {
+          kind: 'done',
+          head,
+          unregenerated: true,
+          note: unregenerated(batch, path, merged, problem, { lost: true, card: false }),
+        };
+      return stands(unregenerated(batch, path, merged, problem));
+    }
     return {
       kind: 'done',
       head,
@@ -1511,6 +1535,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       // The merge step never says so: only the install, above, and a later check do.
       case 'install_broken':
       case 'uncarried':
+      case 'unregenerated':
         return merged;
       case 'merged': {
         if (pending === null) return { ...merged, note: joined(merged.note, installed.note) };
@@ -1531,6 +1556,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         const note = joined(merged.note, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
           return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
+        if (regenerated.unregenerated === true)
+          return { kind: 'unregenerated', head: regenerated.head, note: note ?? '' };
         return {
           ...merged,
           head: regenerated.head,

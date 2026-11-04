@@ -1778,7 +1778,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
         // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
         // since the install and the generators run long enough for the builder to commit meanwhile.
-        if (update.kind === 'merged' || update.kind === 'uncarried') wrote = update.head;
+        if (
+          update.kind === 'merged' ||
+          update.kind === 'uncarried' ||
+          update.kind === 'unregenerated'
+        )
+          wrote = update.head;
         // A broken install still left its merge on the branch: it goes back with the others.
         else if (update.kind === 'install_broken' && update.head !== undefined) wrote = update.head;
         return update.kind === 'merged';
@@ -1823,6 +1828,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       if (brought.kind === 'uncarried') {
         stop({ kind: 'other', why: `10db pushed nothing. ${brought.note}` });
+        return;
+      }
+      if (brought.kind === 'unregenerated') {
+        // The merge has the base's generated directories, without the batch's changes in them: with
+        // or without a check, it is not pushed, and goes back with the others.
+        stop({
+          kind: 'other',
+          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed; 10db put its merge back.`,
+        });
         return;
       }
       if (check !== null) {
