@@ -10,7 +10,12 @@
   removes `node_modules` whatever its state), then checks again. If the packages now resolve, the step goes on: the
   gate starts, or the shipping gate runs, with no card and no attempt counted. The same code serves the task's
   gate and the shipping gate, since both call `beforeGate`.
-- **Only a second broken install in a row is reported.** When the second install is broken too, `beforeGate`
+- **The check after the second pass reads the copy.** `install` calls `checkInstall` itself, whatever the second
+  pass answered: that pass can throw, or skip its own check when a failed first install took `node_modules` and the
+  recorded lockfile with it. Only a whole copy goes on. A second install that exits non-zero with every link whole
+  counts as repaired: the packages resolve, the gate runs with the failure in its note, and the next gate installs
+  again, as it does for any first install that fails that way.
+- **Only a second broken install in a row is reported.** When the copy is not whole after the second pass, `beforeGate`
   answers `install_broken` exactly as before, so the runner's `install_broken` failure and card and the shipping
   gate's `BatchFailure.InstallBroken` card are unchanged. Its note now says that two installs did not bring the
   packages back.

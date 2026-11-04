@@ -921,12 +921,22 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       'worktree install left the copy broken; starting over once',
     );
     const second = await installOnce(batch, project, path, signal, true);
-    if (second.kind === 'done' && second.broken === undefined) {
-      try {
-        showNotice(ctx.state, batch.id, installNotices.repaired(first.broken, ctx.clock.now()));
-      } catch (error) {
-        ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'install notice not written');
-      }
+    if (second.kind !== 'done') return second;
+    // What the second pass answers can't say the copy is whole: it may have thrown, or found no
+    // node_modules to expect anything of. So the copy itself is asked, and only a whole one goes on.
+    // An install that exited non-zero with every link whole goes on too, with its failure in the note.
+    const after = checkInstall(path);
+    if (after.kind !== 'whole') {
+      return {
+        ...second,
+        ok: false,
+        broken: after.kind === 'broken' ? describeBroken(after) : first.broken,
+      };
+    }
+    try {
+      showNotice(ctx.state, batch.id, installNotices.repaired(first.broken, ctx.clock.now()));
+    } catch (error) {
+      ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'install notice not written');
     }
     return second;
   }
