@@ -399,6 +399,7 @@ export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalI
  * Lets go of a goal and its tasks as they are removed (Shape spec §11). A question stored under any
  * of them is deleted with its link and its proposal is pending again, so it converts anew with the
  * goal; every other link to those tasks goes too, so no later Convert resolves a key to a removed task.
+ * Attachments of the goal or its tasks are detached, not deleted.
  */
 export function releaseShapeLinksOfGoal(
   ctx: WriteContext,
@@ -423,5 +424,17 @@ export function releaseShapeLinksOfGoal(
   ctx.tx
     .delete(schema.shapeLinks)
     .where(inArray(schema.shapeLinks.taskId, [...taskIds]))
+    .run();
+  // A spec, eval or diagram stays with the conversation, kept by the proposal's key and attached to
+  // no goal or task, so Convert links it to the new goal; it must not hold the goal row it leaves.
+  ctx.tx
+    .update(schema.shapeAttachments)
+    .set({ goalId: null, updatedAt: ctx.now })
+    .where(eq(schema.shapeAttachments.goalId, goalId))
+    .run();
+  ctx.tx
+    .update(schema.shapeAttachments)
+    .set({ taskId: null, updatedAt: ctx.now })
+    .where(inArray(schema.shapeAttachments.taskId, [...taskIds]))
     .run();
 }

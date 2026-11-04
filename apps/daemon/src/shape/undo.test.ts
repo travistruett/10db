@@ -18,6 +18,7 @@ import {
   getPrinciple,
   getShape,
   insertWorkstream,
+  listShapeAttachments,
   listShapeLinks,
   listShapeProposals,
   listShapeQuestions,
@@ -122,6 +123,52 @@ describe('Remove Draft Goal', () => {
     expect(listShapeProposals(c.store.db, c.shape.id).find((r) => r.key === 'g')?.state).toBe(
       ShapeProposalState.Accepted,
     );
+  });
+
+  it('removes a goal that has an eval, and the eval follows the goal when converted anew', () => {
+    const m = c.say();
+    const draft = PlanDraft.parse({
+      goals: [
+        {
+          key: 'g',
+          title: 'Goal',
+          objective: 'Do it.',
+          ceremony: 'direct',
+          sourceMessageIds: [m],
+          eval: {
+            objective: 'Fewer clicks',
+            baseline: ['12 clicks today'],
+            models: ['claude-opus-5-5'],
+            constraints: ['No new dependencies'],
+          },
+          tasks: [{ key: 'g1', title: 'Only task', areas: ['api'], size: 'S' }],
+        },
+      ],
+    });
+    write((ctx) => reconcileDraft(ctx, c.shape.id, draft));
+    const ids = listShapeProposals(c.store.db, c.shape.id).map((r) => r.id);
+    const first = write((ctx) => convertProposals(ctx, c.shape.id, ids));
+    if (!first.ok) throw new Error(first.errors.join('; '));
+    const goalId = must(first.results.find((r) => r.key === 'g')?.goalId, 'the goal id');
+    expect(listShapeAttachments(c.store.db, c.shape.id).map((a) => a.goalId)).toEqual([goalId]);
+
+    write((ctx) => {
+      removeDraftGoalOf(ctx, c.shape.id, goalId);
+    });
+    expect(() => getGoal(c.store.db, goalId)).toThrow(NotFoundError);
+    // The eval stays with the conversation, attached to no goal.
+    const kept = listShapeAttachments(c.store.db, c.shape.id);
+    expect(kept.map((a) => [a.kind, a.goalId, a.taskId])).toEqual([['eval', null, null]]);
+
+    const pending = listShapeProposals(c.store.db, c.shape.id)
+      .filter((r) => r.state === ShapeProposalState.Pending)
+      .map((r) => r.id);
+    const second = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+    if (!second.ok) throw new Error(second.errors.join('; '));
+    const newGoalId = must(second.results.find((r) => r.key === 'g')?.goalId, 'the new goal id');
+    expect(newGoalId).not.toBe(goalId);
+    const again = listShapeAttachments(c.store.db, c.shape.id);
+    expect(again.map((a) => [a.kind, a.goalId])).toEqual([['eval', newGoalId]]);
   });
 
   describe('with a question converted under it', () => {
