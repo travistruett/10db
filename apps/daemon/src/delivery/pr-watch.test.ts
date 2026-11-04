@@ -2543,6 +2543,33 @@ describe('a required check GitHub cancelled', () => {
     expect(noticeOf(id)).toBeUndefined();
   });
 
+  // A notice stored by a daemon from before the `record` field names no head. Nothing stored says
+  // which head it was for (the batch holds no head of its pull request), so 10db cannot tell it from
+  // one for the current head: it is read as 'stopped' and left to go when the checks clear. A rerun
+  // on a guess would run a head's check twice.
+  it('leaves a stored cancelled notice that names no head standing after a restart, and runs nothing', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    h.state.write((write) => {
+      setBatchNotice(write, id, {
+        tone: 'warning',
+        key: 'checks-cancelled',
+        line: 'Required check "desktop" was cancelled and 10db could not run it again',
+        body: 'GitHub cancelled a check that main requires.',
+      });
+    });
+    w.start();
+    await w.idle();
+    for (let i = 0; i < GRACE_ROUNDS + 3; i++) await round(w);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)?.line).toContain('could not run');
+
+    // Once the check clears, the notice goes with it.
+    h.gh.setRequiredChecks(prUrl, running('desktop'));
+    await round(w);
+    expect(noticeOf(id)).toBeUndefined();
+  });
+
   it('keeps a stopped notice of the same head after a restart', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, cancelled('desktop'));

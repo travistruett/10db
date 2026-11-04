@@ -670,6 +670,9 @@ export function createPrWatch(input: {
     const storedCancelled = getBatch(ctx.state.db, root.id).notices.find(
       (n) => n.key === NOTICE_KEY.checksCancelled,
     );
+    // A notice with no head (stored by a daemon from before the record field) is left alone: the
+    // batch stores no head of its pull request to compare it with, so it is read as 'stopped' below
+    // and goes when the checks clear. Rerunning on a guess could run a head's check twice.
     const storedFor = storedCancelled === undefined ? null : cancelledNoticeHead(storedCancelled);
     if (storedFor !== null && storedFor !== read.headSha) clearCancelledNotice(root.id);
     const storedNotices = getBatch(ctx.state.db, root.id).notices;
