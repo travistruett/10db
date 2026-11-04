@@ -93,6 +93,7 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       // A round supersedes every other pending row its draft leaves out.
       ...pinned.filter((r) => r.kind === 'goal' || r.kind === 'task').map((r) => r.key),
     ]),
+    pinnedTasks: new Set(pinned.filter((r) => r.kind === 'task').map((r) => r.key)),
     pinnedGoalTasks: new Map(
       pinned.filter((r) => r.kind === 'goal').map((r) => [r.key, tasksInside(r)]),
     ),

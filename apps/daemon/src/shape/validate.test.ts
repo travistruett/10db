@@ -47,6 +47,7 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
   storedSources: new Set(),
   storedKeys: new Set(),
   storedEfforts: new Set(),
+  pinnedTasks: new Set(),
   pinnedGoalTasks: new Map(),
   draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
   placeOf: (id) =>
@@ -470,7 +471,7 @@ describe('a plan that breaks a rule', () => {
 
     it.each<[string, Record<string, unknown>, Partial<PlanWorld>]>([
       ['the draft proposes it again', { looseTasks: [loose('earlier-task')] }, {}],
-      ['a pinned row keeps it', {}, { storedEfforts: new Set(['earlier-task']) }],
+      ['a pinned task keeps it', {}, { pinnedTasks: new Set(['earlier-task']) }],
       [
         'a pinned goal the draft leaves out keeps it',
         {},
@@ -490,6 +491,23 @@ describe('a plan that breaks a rule', () => {
           removedWorld(over),
         ),
       ).toEqual([]);
+    });
+
+    it('refuses it when only a goal holds the key: a goal can hold a question, not a dependency', () => {
+      expect(
+        check(
+          {
+            looseTasks: [loose('after', { dependsOn: ['earlier-task'] })],
+            landings: [
+              { key: 'l', title: 'L', keys: ['earlier-task'], sourceMessageIds: [message] },
+            ],
+          },
+          removedWorld({ storedEfforts: new Set(['earlier-task']) }),
+        ),
+      ).toEqual([
+        expect.stringMatching(/Loose task 1, depends on: earlier-task was removed/),
+        expect.stringMatching(/Landing 1, keys: earlier-task was removed/),
+      ]);
     });
   });
 

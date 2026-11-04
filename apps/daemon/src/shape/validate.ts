@@ -57,6 +57,8 @@ export interface PlanWorld {
    * pinned pending rows, which this round keeps. Converted tasks are in `convertedTasks`.
    */
   readonly storedEfforts: ReadonlySet<string>;
+  /** Keys of the pinned pending task rows: the tasks among `storedEfforts`. */
+  readonly pinnedTasks: ReadonlySet<string>;
   /**
    * The stored tasks of each pinned pending goal, by goal key. This round keeps them only if the draft
    * leaves the goal out: a goal it restates has the merged draft's tasks instead.
@@ -160,10 +162,11 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     ...world.removedTasks,
     ...removedKeys(world.convertedTasks, new Set(draft.removals.map((r) => r.taskId))),
   ]);
-  const heldLive = (key: string): boolean =>
-    taskKeys.has(key) || world.storedEfforts.has(key) || keptGoalTasks.has(key);
-  /** A key whose converted task a removal cancelled, and nothing live holds now. */
-  const cancelled = (key: string): boolean => removed.has(key) && !heldLive(key);
+  /** A key a dependency or landing can name: unlike a question, those need a task, not a goal. */
+  const liveTask = (key: string): boolean =>
+    taskKeys.has(key) || world.pinnedTasks.has(key) || keptGoalTasks.has(key);
+  /** A key whose converted task a removal cancelled, and no live task holds now. */
+  const cancelled = (key: string): boolean => removed.has(key) && !liveTask(key);
   const knownTask = (key: string): boolean => taskKeys.has(key) || world.convertedTasks.has(key);
   const dependency = (label: string, field: string, keys: readonly string[], own: string): void => {
     for (const key of keys) {

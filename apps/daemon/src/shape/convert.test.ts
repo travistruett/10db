@@ -1045,6 +1045,65 @@ describe('additions, changes and removals', () => {
     expect(taskTitled('Task after').dependsOn).toEqual([g1?.id]);
   });
 
+  it('puts a landing of a removed key a pending task took again on that task, once it is selected', () => {
+    const removed = removedGoalTask();
+    const m = c.say('Bring it back, and land it.');
+    propose({
+      looseTasks: [loose(m, 'g1')],
+      landings: [{ key: 'l1', title: 'Back again', keys: ['g1'], sourceMessageIds: [m] }],
+    });
+
+    const out = convert('l1');
+    expect(out.ok ? [] : out.errors).toEqual(["Back again includes Task g1, which isn't selected"]);
+
+    const landing = converted('g1', 'l1').results.find((r) => r.key === 'l1');
+    const g1 = must(
+      tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+      'the new task',
+    );
+    expect(landing?.taskIds).toEqual([g1.id]);
+    expect(g1.landingGroupId).toEqual(expect.any(String));
+    expect(getTask(c.store.db, removed.id).landingGroupId ?? null).toBeNull();
+  });
+
+  describe('a removed key only a goal holds again', () => {
+    const refusals = (m: string): string[] => {
+      const out = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          PlanDraft.parse({
+            looseTasks: [loose(m, 'after', { dependsOn: ['g1'] })],
+            landings: [{ key: 'l1', title: 'Goal', keys: ['g1'], sourceMessageIds: [m] }],
+          }),
+        ),
+      );
+      return out.ok ? [] : [...out.errors];
+    };
+    const removedKeyRefusals = [
+      expect.stringMatching(/Loose task 1, depends on: g1 was removed/),
+      expect.stringMatching(/Landing 1, keys: g1 was removed/),
+    ];
+
+    it('is refused at propose when a converted goal holds it', () => {
+      removedGoalTask();
+      const m = c.say('A goal for it.');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])] });
+      converted('g1');
+      expect(refusals(c.say('Something after it.'))).toEqual(removedKeyRefusals);
+    });
+
+    it('is refused at propose when a pinned pending goal holds it', () => {
+      removedGoalTask();
+      const m = c.say('A goal for it.');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])] });
+      write((ctx) => {
+        editProposal(ctx, rowOf('g1').id, { title: 'Pinned goal' });
+      });
+      expect(refusals(c.say('Something after it.'))).toEqual(removedKeyRefusals);
+    });
+  });
+
   it('puts a question on a goal that took a removed task’s key, not on the cancelled task', () => {
     removedGoalTask();
     const m = c.say('A goal for it, and who pays?');
