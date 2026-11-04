@@ -6,6 +6,7 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
@@ -4358,6 +4359,66 @@ describe('the session guard', () => {
     expect(decision('Bash', { command: 'SUB=add; pnpm $SUB left-pad@1.3.0' })).toBe('ask');
     expect(decision('WebFetch', { url: 'https://example.net/', prompt: 'x' })).toBe('ask');
     expect(decision('Bash', { command: 'pnpm test' })).toBe('allow');
+    await engine.runner.cancel(workstream.id);
+  });
+});
+
+// A stand-in lane session, not the `lane sandbox` probe below: the probe needs the shared `/tmp`
+// and skips in a sandboxed gate, and this hop must be held there too. The judge is the real one.
+describe("a lane's settled read-only line", () => {
+  let root: ReturnType<typeof tempDir>;
+  beforeEach(() => {
+    root = tempDir('settled');
+  });
+  afterEach(() => {
+    root.cleanup();
+  });
+
+  const standInSandbox = (): LaneSandbox => ({
+    forSession: (input) =>
+      Promise.resolve({
+        spec: {} as LaneSession['spec'],
+        fileAccess: {
+          checkout: input.project.repoPath,
+          home: root.path,
+          protectedReads: [],
+          readList: [],
+          configDir: input.configDir,
+          providerSessionId: null,
+          sandboxTemp: { root: root.path, own: root.path },
+        },
+        tmpDir: root.path,
+        commandEnv: {},
+        mcpServers: {},
+        mcpFailures: [],
+        setProviderSession: () => undefined,
+        trackProcesses: () => Promise.resolve(true),
+        endProcesses: () => Promise.resolve(),
+        dispose: () => undefined,
+      }),
+  });
+
+  it("is judged from the hook's cwd, which an earlier call's cd moved", async () => {
+    engine = await createTestEngine(
+      { Alpha: [[{ do: 'hang' }]] },
+      {},
+      { laneSandbox: standInSandbox() },
+    );
+    const specs: SessionSpec[] = [];
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const spec = await waitFor(() => specs[0]);
+    const apps = join(spec.cwd, 'apps');
+    mkdirSync(apps);
+    symlinkSync('/dev/zero', join(apps, 'zero-link'));
+    const cat = { toolName: 'Bash', input: { command: 'cat zero-link' } };
+    // Without the hook's cwd the word is read from the copy's root, where no such link exists.
+    expect(spec.preToolUse(cat)).toHaveProperty('settled');
+    expect(spec.preToolUse({ ...cat, cwd: apps })).not.toHaveProperty('settled');
     await engine.runner.cancel(workstream.id);
   });
 });
