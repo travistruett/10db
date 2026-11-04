@@ -374,6 +374,8 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
           kind: 'failed',
           exitCode: 124,
           timedOut: true,
+          installs: 1,
+          startedOver: false,
           tail: 'timed out',
           logPath: '/log',
           blockedHosts: [],
@@ -384,6 +386,77 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind).toBe('install_broken');
       expect(update.kind === 'install_broken' && update.note).toMatch(/timed out/);
       expect(update.kind === 'install_broken' && update.note).not.toMatch(/installed again/);
+    });
+
+    it('says two installs ran when refresh’s own start over timed out', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        await refresh(input);
+        return {
+          kind: 'failed',
+          exitCode: 124,
+          timedOut: true,
+          installs: 2,
+          startedOver: true,
+          tail: 'timed out',
+          logPath: '/log',
+          blockedHosts: [],
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(
+        /removed node_modules and installed again by itself, and neither install/,
+      );
+      expect(note).toMatch(/timed out/);
+    });
+
+    it('says two installs ran when the gate’s start over timed out after a first install that exited zero', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        const result = await refresh(input);
+        if (input.startOver !== true) return result;
+        return {
+          kind: 'failed',
+          exitCode: 124,
+          timedOut: true,
+          installs: 1,
+          startedOver: true,
+          tail: 'timed out',
+          logPath: '/log',
+          blockedHosts: [],
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(
+        /removed node_modules and installed again by itself, and neither install/,
+      );
+    });
+
+    it('says no install ran, and why, when there is no trustworthy pnpm', async () => {
+      const { batch } = await pruned();
+      const tail =
+        "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
+      const spy = vi.spyOn(h.ctx.dependencies, 'refresh').mockResolvedValue({
+        kind: 'failed',
+        exitCode: 127,
+        timedOut: false,
+        installs: 0,
+        startedOver: false,
+        tail,
+        logPath: '/log',
+        blockedHosts: [],
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(update.kind).toBe('install_broken');
+      const note = update.kind === 'install_broken' ? update.note : '';
+      expect(note).toMatch(/no install ran/i);
+      expect(note).toContain('No trustworthy pnpm was found');
+      expect(note).not.toMatch(/removed node_modules|installed again|did not bring them back/);
     });
 
     it('raises the card without starting over when the first install was refused a host', async () => {

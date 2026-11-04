@@ -568,6 +568,122 @@ describe('refreshing a worktree’s dependencies', () => {
     expect(result.tail).toContain('No trustworthy pnpm');
     expect(result.blockedHosts).toEqual([]);
     expect(existsSync(calls)).toBe(false);
+    // No install ran and nothing was removed.
+    expect(result).toMatchObject({ installs: 0, startedOver: false });
+    expect(existsSync(join(worktree, 'node_modules'))).toBe(true);
+  });
+
+  describe('what a failed refresh says it did', () => {
+    /** A pnpm that always fails and removes `left-pad`; from its second run on it also runs `after`. */
+    function failingPnpm(after: string): void {
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nn=$(wc -l < '${calls}')\nrm -rf node_modules/left-pad\nif [ "$n" -ge 2 ]; then ${after}; fi\nexit 1\n`,
+      );
+      chmodSync(join(bin, 'pnpm'), 0o755);
+    }
+
+    it('counts one install, and no start over, for an install that failed with the packages in place', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      const result = await refresh(dependencies({ FAKE_PNPM_EXIT: '7' }));
+      expect(result).toMatchObject({ kind: 'failed', installs: 1, startedOver: false });
+    });
+
+    it('counts two installs and a start over when the start over times out', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      failingPnpm('sleep 30');
+      const result = await refresh(dependencies({}, 1_000));
+      expect(result).toMatchObject({
+        kind: 'failed',
+        timedOut: true,
+        installs: 2,
+        startedOver: true,
+      });
+    });
+
+    it('counts two installs and a start over when the start over is refused a host', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nrm -rf node_modules/left-pad\nexit 1\n`,
+      );
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      let runs = 0;
+      const real = createGateRunner({ sandbox: null, logger: silentLogger });
+      const gate: GateRunner = {
+        run: async (request) => {
+          runs += 1;
+          const result = await real.run(request);
+          return runs === 2 ? { ...result, blockedHosts: ['registry.npmjs.org'] } : result;
+        },
+      };
+      const deps = createWorktreeDependencies({
+        gate,
+        clock: new ManualClock(),
+        dataDir: join(tmp.path, 'data'),
+        sessionEnv: () => ({
+          PATH: `${bin}:/usr/bin:/bin`,
+          pnpm_config_store_dir: join(tmp.path, 'store'),
+        }),
+        resolvePnpm: () => Promise.resolve(join(bin, 'pnpm')),
+        rules: () => [],
+        checkouts: () => [],
+        timeoutMs: 20_000,
+      });
+      expect(await refresh(deps)).toMatchObject({
+        kind: 'failed',
+        blockedHosts: ['registry.npmjs.org'],
+        installs: 2,
+        startedOver: true,
+      });
+    });
+
+    it('counts a start over the caller asked for as one install that started over', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      const result = await dependencies().refresh({
+        batch,
+        project,
+        path: worktree,
+        signal,
+        startOver: true,
+      });
+      expect(result).toMatchObject({ kind: 'failed', installs: 1, startedOver: true });
+    });
+
+    it('counts a retry that had no node_modules to remove as two installs with no start over', async () => {
+      writeFileSync(
+        join(worktree, 'pnpm-lock.yaml'),
+        "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.0.0\n        version: 1.0.0\n",
+      );
+      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nexit 1\n`);
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      const result = await dependencies().refresh({
+        batch,
+        project,
+        path: worktree,
+        signal,
+        seeded: false,
+      });
+      expect(result).toMatchObject({ kind: 'failed', installs: 2, startedOver: false });
+    });
+
+    it('counts the installs of one that succeeded after a start over', async () => {
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      // Fails the first time, pruning left-pad; works the second.
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nif [ "$(wc -l < '${calls}')" -le 1 ]; then rm -rf node_modules/left-pad; exit 1; fi\nmkdir -p node_modules/left-pad\n`,
+      );
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      expect(await refresh(dependencies())).toMatchObject({
+        kind: 'installed',
+        installs: 2,
+        startedOver: true,
+      });
+    });
   });
 
   // The real pnpm: what a repository's own files must not decide.
@@ -655,6 +771,8 @@ describe('raiseInstallHostCards', () => {
           tail: 'error',
           logPath: '/dev/null',
           timedOut: false,
+          installs: 1,
+          startedOver: false,
           blockedHosts: ['index.crates.io'],
         },
       );

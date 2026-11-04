@@ -73,11 +73,17 @@ export type DependencyRefresh =
       readonly durationMs: number;
       /** The copy's `node_modules` was removed first, so whatever install scripts had built went with it. */
       readonly startedOver: boolean;
+      /** How many installs this call ran: 2 when a first one failed and left the copy broken. */
+      readonly installs: number;
     }
   | {
       readonly kind: 'failed';
       readonly exitCode: number;
       readonly timedOut: boolean;
+      /** How many installs this call ran: 0 when it found no trustworthy pnpm, 2 after a retry. */
+      readonly installs: number;
+      /** The copy's `node_modules` was removed, so the failed install started from nothing. */
+      readonly startedOver: boolean;
       /** The end of the install's output. */
       readonly tail: string;
       readonly logPath: string;
@@ -199,7 +205,16 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
         mkdirSync(dirname(logPath), { recursive: true });
         writeFileSync(logPath, `${tail}\n`);
-        return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
+        return {
+          kind: 'failed',
+          exitCode: 127,
+          timedOut: false,
+          installs: 0,
+          startedOver: false,
+          tail,
+          logPath,
+          blockedHosts: [],
+        };
       }
       let startedOver = false;
       // Why node_modules was removed, written to the log of the install that follows (the daemon's
@@ -276,6 +291,8 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
             kind: 'failed',
             exitCode: result.exitCode,
             timedOut: result.timedOut,
+            installs: attempt,
+            startedOver,
             tail: result.tail,
             logPath: result.logPath,
             blockedHosts: result.blockedHosts,
@@ -285,6 +302,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           logPath: result.logPath,
           durationMs: result.durationMs,
           startedOver,
+          installs: attempt,
         };
       };
       const first = await install();
