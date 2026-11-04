@@ -76,6 +76,9 @@ export type ConvertOutcome =
     }
   | { readonly ok: false; readonly errors: readonly string[] };
 
+/** Why a task's areas can't change because a join of it is pending, or null when none is. */
+export type JoiningProblem = (taskId: TaskId) => string | null;
+
 /** Where a principle record applies: the builder, the project, or one of its areas. */
 function principleTarget(record: PlanPrincipleRecord, projectId: ProjectId): KnowledgeTarget {
   switch (record.scope) {
@@ -163,6 +166,7 @@ export function convertProposals(
   ctx: WriteContext,
   shapeId: ShapeId,
   proposalIds: readonly ShapeProposalId[],
+  joiningProblem: JoiningProblem = () => null,
 ): ConvertOutcome {
   const rows = listShapeProposals(ctx.tx, shapeId);
   const byId = new Map(rows.map((r) => [r.id, r]));
@@ -281,7 +285,14 @@ export function convertProposals(
         errors.push(`${row.key} is about ${owner.title}, which isn't selected`);
     } else if (row.kind === 'change_task' || row.kind === 'remove_task') {
       const body = ShapeProposalBody[row.kind].parse(row.body);
-      const problem = world.unstartedProblem(body.taskId);
+      // A join still pending has written no workstream, so it reads as unstarted, and the areas and
+      // placement it would write here would collide with it (task placement spec, P3).
+      const problem =
+        world.unstartedProblem(body.taskId) ??
+        (row.kind === 'change_task' &&
+        ShapeProposalBody.change_task.parse(row.body).areas !== undefined
+          ? joiningProblem(body.taskId)
+          : null);
       if (problem !== null) errors.push(`${row.key}: ${problem}`);
     }
   }

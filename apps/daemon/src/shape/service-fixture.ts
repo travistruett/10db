@@ -9,6 +9,7 @@ import { FakeAdapter } from '../sessions';
 import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
+import type { JoiningProblem } from './convert';
 import { createShapeService, type ShapeService } from './service';
 
 /** A conversation served by a real shape service on the fake adapter, with a files directory of its own. */
@@ -27,7 +28,7 @@ export interface ServiceFixture {
 }
 
 export function createServiceFixture(
-  opts: { trackedFiles?: TrackedFiles; hold?: Hold } = {},
+  opts: { trackedFiles?: TrackedFiles; hold?: Hold; joiningProblem?: JoiningProblem } = {},
 ): ServiceFixture {
   const c = seedConversation();
   const bus = createEventBus();
@@ -43,6 +44,7 @@ export function createServiceFixture(
       clock: new ManualClock(),
       log: silentLogger,
       filesDir,
+      joiningProblem: opts.joiningProblem ?? (() => null),
       ...(opts.hold === undefined ? {} : { hold: opts.hold }),
       // No git in a test: the project's checkout is not a repository, so nothing is one-way unless asked.
       trackedFiles: opts.trackedFiles ?? (() => []),

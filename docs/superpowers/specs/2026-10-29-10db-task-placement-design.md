@@ -139,8 +139,9 @@ batch. The guard stops a task from running twice, but not that. So the start clo
 - **A join** (a shared start into the `OPEN` batch, or a fix task sent with `batchId`) can't insert early. Its batch
   is open, so the scheduler would launch a `QUEUED` workstream before the join's checks (the batch's branch, and
   unmerged dependencies on GitHub) finish. Instead the starter keeps each pending join's task ids in memory, from
-  the request until the join job writes or refuses. `checkStartable` refuses those tasks, and so does a placement
-  patch through the daemon's task service (`daemon/services.ts`). The set ends with the process, as the job does.
+  the request until the join job writes or refuses. `checkStartable` refuses those tasks, and so do a placement
+  patch through the daemon's task service (`daemon/services.ts`) and a Shape conversion that changes their areas
+  (`shape/convert.ts`). The set ends with the process, as the job does.
   Without the set, a join that loses this race fails its whole write and refuses every task in it, though it
   never switches the checkout. During the window the stored placement is the one the join will use, so the badge
   is still right.

@@ -920,6 +920,62 @@ describe('placement', () => {
       placementReason: 'chosen by the builder',
     });
   });
+
+  it('puts a task added to a converted goal in a separate copy, with a reason', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    const goalId = must(converted('g').results[0]?.goalId, 'the goal id');
+    const m2 = c.say('One more, for the schema.');
+    propose({
+      additions: [loose(m2, 'extra', { areas: ['migrations'], goalId })],
+    });
+    converted('extra');
+    expect(taskTitled('Task extra')).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches migrations',
+    });
+  });
+
+  // Task placement spec P3: a join still pending has not written, so its task's placement can't move.
+  describe('while a join of the task is pending', () => {
+    /** A converted task, and a pending change of the given fields to it. */
+    const changing = (fields: Record<string, unknown>) => {
+      const m = c.say();
+      propose({ looseTasks: [loose(m, 'a')] });
+      converted('a');
+      const id = taskTitled('Task a').id;
+      const m2 = c.say('It touches the lockfile.');
+      propose({ changes: [{ taskId: id, ...fields, sourceMessageIds: [m2] }] });
+      return id;
+    };
+    const convertWhileJoining = (id: TaskId) =>
+      write((ctx) =>
+        convertProposals(ctx, c.shape.id, [rowOf(`change:${id}`).id], (task) =>
+          task === id ? 'Task a is joining a batch' : null,
+        ),
+      );
+
+    it("refuses a change of the task's areas and writes nothing", () => {
+      const id = changing({ areas: ['api', 'deps'], title: 'Renamed' });
+      expect(convertWhileJoining(id)).toEqual({
+        ok: false,
+        errors: [`change:${id}: Task a is joining a batch`],
+      });
+      expect(getTask(c.store.db, id)).toMatchObject({
+        title: 'Task a',
+        areas: ['api'],
+        workspaceMode: 'shared',
+        placementReason: null,
+      });
+      expect(rowOf(`change:${id}`).state).toBe(ShapeProposalState.Pending);
+    });
+
+    it('allows a change that leaves the areas alone', () => {
+      const id = changing({ title: 'Renamed' });
+      expect(convertWhileJoining(id).ok).toBe(true);
+      expect(getTask(c.store.db, id).title).toBe('Renamed');
+    });
+  });
 });
 
 describe('landings (§10.4)', () => {

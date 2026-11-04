@@ -80,6 +80,8 @@ export interface BatchStarter {
    * placement is the one the join will use (task placement spec §5). The store checks the rest.
    */
   refuseIfJoining(taskId: TaskId): void;
+  /** What `refuseIfJoining` would refuse with, for a caller that reports refusals together. */
+  joiningProblem(taskId: TaskId): string | null;
   /**
    * Throws what `startTask` would refuse, as if the batch `ending` had already ended, and writes
    * nothing (a refusal's card is raised as the start's own would be). Starting over checks this
@@ -139,14 +141,19 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     ctx.jobs.run(jobKey(batch, JobQueue.Cut), run);
   }
 
+  const joiningText = (task: TaskDto): string =>
+    `${task.title} is joining a batch; where it works and its areas can't change, and it can't start again, until it has joined or been refused`;
+
   function joiningRefusal(task: TaskDto): ConflictError {
-    return new ConflictError(
-      `${task.title} is joining a batch; where it works and its areas can't change, and it can't start again, until it has joined or been refused`,
-    );
+    return new ConflictError(joiningText(task));
   }
 
   function refuseIfJoining(taskId: TaskId): void {
     if (joining.has(taskId)) throw joiningRefusal(getTask(db, taskId));
+  }
+
+  function joiningProblem(taskId: TaskId): string | null {
+    return joining.has(taskId) ? joiningText(getTask(db, taskId)) : null;
   }
 
   function reopen(batchId: BatchId): void {
@@ -678,6 +685,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       return batch;
     },
     refuseIfJoining,
+    joiningProblem,
     refuseStart(taskId, ending) {
       const task = getTask(db, taskId);
       const project = getProject(db, task.projectId);
