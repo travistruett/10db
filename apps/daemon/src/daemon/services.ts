@@ -10,7 +10,6 @@ import {
   ProjectLanding,
   type ProjectDto,
   type ProjectPatch,
-  WorkspaceMode,
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
@@ -95,7 +94,7 @@ import {
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
-import { proposeCandidates, resolveStepPlan, retryWorkstream, startTaskWithPlan } from '../team';
+import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import type { ShapeApiServices } from './shape-services';
@@ -287,8 +286,7 @@ export function createServices(deps: {
     },
     workstreamChanges: (id) => workstreamChanges({ db, git: deps.git }, id),
     retryWorkstream(id, note) {
-      const ws = retryWorkstream(deps.state, id, note);
-      if (ws.batchId !== null) deps.starter.reopen(ws.batchId);
+      const ws = deps.starter.retry(id, note);
       deps.scheduler.requestTick();
       return ws;
     },
@@ -409,12 +407,12 @@ export function createServices(deps: {
               });
         // A join still pending has not written yet, so the move would collide with it.
         // The same holds for any move the rule makes: a task the builder placed never moves, and one with
-        // no reason moves only to a copy.
+        // no reason moves only when the rule matched.
         if (
           proposed !== undefined &&
           proposed.workspaceMode !== task.workspaceMode &&
           task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
-          (task.placementReason !== null || proposed.workspaceMode === WorkspaceMode.Worktree)
+          (task.placementReason !== null || proposed.reason !== null)
         )
           deps.starter.refuseIfJoining(id);
         return patchTask(ctx, id, patch, proposed);

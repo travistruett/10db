@@ -173,4 +173,32 @@ describe('a placement patch through the task service during a pending join', () 
     expect(patched.workspaceMode).toBe(WorkspaceMode.Worktree);
     expect(getTask(h.store.db, beta.id).workspaceMode).toBe(WorkspaceMode.Worktree);
   });
+
+  describe('in a project whose default is a separate copy', () => {
+    beforeEach(() => {
+      h.close();
+      h = createDeliveryHarness({ workspaceMode: WorkspaceMode.Worktree }, { trigger: false });
+    });
+
+    it('leaves a shared task where it is when the rule does not match', async () => {
+      const task = h.addTask('Alpha', { workspaceMode: WorkspaceMode.Shared });
+      const patched = await taskService().patchTask(task.id, { riskTags: [RiskTag.Security] });
+      expect(patched).toMatchObject({
+        workspaceMode: WorkspaceMode.Shared,
+        placementReason: null,
+      });
+    });
+
+    it('accepts a tag the rule ignores while a shared task is joining', async () => {
+      const { beta, release } = await pendingJoin();
+      const patched = await taskService().patchTask(beta.id, { riskTags: [RiskTag.Security] });
+      expect(patched).toMatchObject({
+        riskTags: [RiskTag.Security],
+        workspaceMode: WorkspaceMode.Shared,
+        placementReason: null,
+      });
+      release();
+      await h.jobs.idle();
+    });
+  });
 });

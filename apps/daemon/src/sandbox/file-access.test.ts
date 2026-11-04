@@ -477,6 +477,46 @@ describe('writeAccess', () => {
   });
 });
 
+describe('a path in the worktrees folder outside the lane’s copy', () => {
+  // `checkout` is root/work/repo and its neighbour `sibling` is root/work/other: the worktrees
+  // folder is root/work, as when every batch's copy lies under one project folder.
+  const withFolder = () => context({ worktreeRoot: join(root, 'work') });
+
+  it('is its own verdict, for a file, the folder and a search of the folder', () => {
+    const ctx = withFolder();
+    expect(readAccess(join(sibling, 'secret'), ctx).access).toBe('outside-copy');
+    expect(readAccess(join(root, 'work', 'src', 'a.ts'), ctx).access).toBe('outside-copy');
+    expect(readAccess(join(root, 'work'), ctx, true).access).toBe('outside-copy');
+    expect(readAccess(join(checkout, 'src', 'a.ts'), ctx).access).toBe('inside');
+    expect(readAccess(checkout, ctx, true).access).toBe('inside');
+  });
+
+  it('is judged by its real path, so a link from the copy does not open it', () => {
+    symlinkSync(sibling, join(checkout, 'peer'));
+    expect(readAccess(join(checkout, 'peer', 'secret'), withFolder()).access).toBe('outside-copy');
+  });
+
+  it('is asked about as before when no worktrees folder is known', () => {
+    expect(readAccess(join(sibling, 'secret'), context()).access).toBe('ask');
+  });
+
+  it('is refused at once by the judge, naming the copy, for Read, Grep and Glob', () => {
+    const judge = fileAccessJudge(withFolder());
+    const refusal = {
+      refuse: `${join(root, 'work', 'src', 'a.ts')} is in the worktrees folder but outside this lane's copy. The copy is ${checkout}; build paths from it (or use relative paths), never from the worktrees folder.`,
+    };
+    expect(judge.read('Read', { file_path: join(root, 'work', 'src', 'a.ts') })).toEqual(refusal);
+    expect(judge.read('Grep', { path: join(root, 'work', 'src', 'a.ts') })).toEqual(refusal);
+    expect(
+      judge.read('Glob', { pattern: '*.ts', path: join(root, 'work', 'src', 'a.ts') }),
+    ).toEqual(refusal);
+    expect(judge.read('Glob', { pattern: `${join(root, 'work', 'src')}/**/*.ts` })).toEqual({
+      refuse: expect.stringContaining(`The copy is ${checkout}`) as string,
+    });
+    expect(judge.read('Read', { file_path: join(checkout, 'src', 'a.ts') })).toBe('ok');
+  });
+});
+
 describe('fileAccessJudge in the guard', () => {
   const guard = (fileAccess: FileAccessJudge, toolName: string, toolInput: unknown) =>
     judgeToolUse({

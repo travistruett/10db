@@ -90,7 +90,12 @@ import {
   buildContextPack,
   buildSessionPrompt,
   compactionReinjection,
+<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
   contextPackedEvent,
+||||||| 90ec8bb
+=======
+  denialsForLane,
+>>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
   HANDOFF_FIRM_NUDGE,
   HANDOFF_FIRM_NUDGE_ACCOUNT,
   HANDOFF_NUDGE,
@@ -260,9 +265,12 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
+  readonly worktreeRoot: string;
   /**
-   * While the Mac is overloaded no session starts: each one waits here, before anything is built or
-   * launched, and a stop or cancel ends the wait.
+   * While this holds (the Mac is overloaded, or an update drains the factory) no session or task gate
+   * starts: each waits here, before anything is built or launched and before a gate takes its batch's
+   * turn or a slot, and a stop or cancel ends the wait. Nothing that runs is stopped.
    */
   readonly hold?: Hold;
   /**
@@ -1406,9 +1414,14 @@ export function createRunner(opts: RunnerOptions): Runner {
           ? outstandingFixEvidence(db, row)
           : null;
     const evidence = evidenceId ? getEvidence(db, evidenceId) : null;
+    const denialsToTell = () =>
+      denialsForLane(deniedPermissionsForWorkstream(db, id), {
+        checkout,
+        worktreeRoot: opts.worktreeRoot,
+      });
     const prompt = buildSessionPrompt({
       sandboxed: Boolean(opts.laneSandbox),
-      denials: deniedPermissionsForWorkstream(db, id),
+      denials: denialsToTell(),
       task,
       claims: claims(),
       action,
@@ -1526,7 +1539,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       return { kind: 'stopped', reason: stopping, providerSessionId: savedResumeId };
     }
     // The project moved while this lane waited for its start: give the slot back and start over there.
-    if (getProject(db, row.projectId).accountId !== ctl.accountId) {
+    // So does a hold that came on meanwhile: starting over is what waits for it, with the slot free.
+    if (getProject(db, row.projectId).accountId !== ctl.accountId || opts.hold?.holding()) {
       dispose();
       releaseStart();
       return { kind: 'moved' };
@@ -1852,7 +1866,20 @@ export function createRunner(opts: RunnerOptions): Runner {
               });
               ctx.emit(contextPackedEvent(session.id, id, pack, PackReason.Compaction));
             });
+<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
             handle.send(compactionReinjection(pack, deniedPermissionsForWorkstream(db, id)));
+||||||| 90ec8bb
+            handle.send(
+              compactionReinjection(
+                buildContextPack(db, getWorkstream(db, id)),
+                deniedPermissionsForWorkstream(db, id),
+              ),
+            );
+=======
+            handle.send(
+              compactionReinjection(buildContextPack(db, getWorkstream(db, id)), denialsToTell()),
+            );
+>>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
             break;
           }
           case 'rate_limit':
@@ -2306,27 +2333,35 @@ export function createRunner(opts: RunnerOptions): Runner {
     let recording: Promise<void> = Promise.resolve();
     // Set once the gate holds its slot and starts; only a started gate records gate.finished.
     let gateStarted = false;
+    // Set when the hold came on while the gate waited for its batch's turn or a slot.
+    let heldAgain = false;
+    // A function, so the check after the gate is not narrowed to the value it had before it.
+    const wasHeldAgain = (): boolean => heldAgain;
+    const clearToStart = (): boolean => {
+      heldAgain = opts.hold?.holding() ?? false;
+      return !heldAgain;
+    };
     const logPath = join(opts.dataDir, 'logs', 'gate', `${id}-${String(run)}.log`);
     opts.logger.info({ workstreamId: id, command: gateCommand, logPath }, 'gate started');
     const request: GateRequest = {
-      ...(batchId === null
-        ? {}
-        : {
-            beforeStart: async () => {
-              // A task's gate has a session to send when the base's conflicts need one.
-              const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal, {
-                inSession: true,
-              });
-              before.update = update;
-              // Markers left in the branch fail any gate; a session resolves them first.
-              // A broken install fails any gate before it starts: its tools are not there.
-              return (
-                update.kind !== 'aborted' &&
-                update.kind !== 'conflicted' &&
-                update.kind !== 'install_broken'
-              );
-            },
-          }),
+      beforeStart: async () => {
+        if (!clearToStart()) return false;
+        if (batchId === null) return true;
+        // A task's gate has a session to send when the base's conflicts need one.
+        const update = await opts.baseUpdates.beforeGate(batchId, gateAbort.signal, {
+          inSession: true,
+        });
+        before.update = update;
+        // Markers left in the branch fail any gate; a session resolves them first.
+        // A broken install fails any gate before it starts: its tools are not there.
+        if (
+          update.kind === 'aborted' ||
+          update.kind === 'conflicted' ||
+          update.kind === 'install_broken'
+        )
+          return false;
+        return clearToStart();
+      },
       project: projectAtCheckout(project, checkout),
       command: gateCommand,
       logPath,
@@ -2363,12 +2398,21 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       },
     };
-    // One gate of a batch at a time: its gates share the batch's checkout.
-    const result =
-      batchId === null
-        ? await opts.gate.run(request)
-        : ((await opts.baseUpdates.gate(batchId, gateAbort.signal, () => opts.gate.run(request))) ??
-          stoppedWaiting(logPath));
+    let result: GateResult;
+    do {
+      heldAgain = false;
+      // Before the batch's turn and a slot, and it comes back here if the hold returns before the
+      // gate starts: a held gate keeps neither, since sibling gates, a running session's install or
+      // migrations claim, and a ship all wait behind the turn, and an update waits for them.
+      await opts.hold?.untilClear(gateAbort.signal);
+      // One gate of a batch at a time: its gates share the batch's checkout.
+      result =
+        batchId === null
+          ? await opts.gate.run(request)
+          : ((await opts.baseUpdates.gate(batchId, gateAbort.signal, () =>
+              opts.gate.run(request),
+            )) ?? stoppedWaiting(logPath));
+    } while (wasHeldAgain());
     ctl.gateAbort = null;
     opts.logger.info(
       {

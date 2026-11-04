@@ -1,4 +1,4 @@
-import { WorkspaceMode } from '@10db/contracts';
+import { ConflictError, WorkspaceMode, type TaskDto, type WorkstreamDto } from '@10db/contracts';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -11,6 +11,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { jobKey, JobQueue } from '../delivery';
 import { createServices } from './services';
 
 let h: DeliveryHarness;
@@ -24,8 +25,9 @@ afterEach(() => {
 });
 
 /**
- * The daemon's task service. Only startTask runs here, and it reads the state store, the batch
- * starter, the shipper, the inbox and the scheduler, so those are the real ones (the scheduler a stub).
+ * The daemon's task service. Only startTask and retryWorkstream run here, and they read the state
+ * store, the batch starter, the shipper, the inbox and the scheduler, so those are the real ones (the
+ * scheduler a stub).
  */
 function startService() {
   const wiring = {
@@ -35,7 +37,7 @@ function startService() {
     inbox: h.inbox,
     scheduler: { requestTick: () => undefined },
   };
-  // A cast at a test boundary: startTask touches nothing else of the deps.
+  // A cast at a test boundary: these touch nothing else of the deps.
   return createServices(wiring as unknown as Parameters<typeof createServices>[0]);
 }
 
@@ -120,5 +122,78 @@ describe('a fresh start of one task of a shared batch through the task service',
     h.state.write((w) => cancelRefusedStartTask(w, alpha.id));
 
     expect(getBatch(h.store.db, batchId).state).not.toBe('OPEN');
+  });
+});
+
+describe('running a failed attempt again while the task is joining its batch', () => {
+  /** Holds the queue `key` until the returned release runs, so a job queued behind it stays pending. */
+  function hold(key: string): () => void {
+    let release = (): void => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.jobs.run(key, () => gate);
+    return release;
+  }
+
+  /** Beta failed in an OPEN batch that also holds Alpha, and started over: its join is pending. */
+  async function joining() {
+    const alpha = h.addTask('Alpha');
+    const beta = h.addTask('Beta', { areas: ['ui'] });
+    const started = h.only(
+      h.starter.startBatch(h.project.id, { title: 'Both', taskIds: [alpha.id, beta.id] }),
+    );
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    const failed = h.only(
+      listWorkstreams(h.store.db, { batchId: batch.id }).filter((w) => w.taskId === beta.id),
+    );
+    h.settle(failed.id, 'FAILED');
+    const release = hold(jobKey(batch, JobQueue.Cut));
+    startService().startTask(beta.id, { fresh: true });
+    return { batch, beta, failed, release };
+  }
+
+  const attempts: { name: string; again: (task: TaskDto, run: WorkstreamDto) => unknown }[] = [
+    {
+      name: 'Start without fresh',
+      again: (task) => startService().startTask(task.id),
+    },
+    {
+      name: 'Retry on the board or a failure card',
+      again: (_task, run) => startService().retryWorkstream(run.id),
+    },
+  ];
+
+  it.each(attempts)('$name is refused, and the join still writes', async ({ again }) => {
+    const { batch, beta, failed, release } = await joining();
+
+    expect(() => again(beta, failed)).toThrow(ConflictError);
+    expect(() => again(beta, failed)).toThrow(/Beta.*joining/);
+    expect(getWorkstream(h.store.db, failed.id).state).toBe('FAILED');
+
+    release();
+    await h.jobs.idle();
+
+    const joined = getTask(h.store.db, beta.id).workstreamId;
+    expect(joined).not.toBe(failed.id);
+    if (joined === null) throw new Error('the join wrote a workstream');
+    expect(getWorkstream(h.store.db, joined)).toMatchObject({
+      batchId: batch.id,
+      state: 'QUEUED',
+    });
+  });
+
+  it.each(attempts)('$name works again once the join refuses', async ({ again }) => {
+    const { batch, beta, failed, release } = await joining();
+    // The checkout moved off the batch's branch, so the join refuses and writes nothing.
+    h.git$('switch', '-q', 'main');
+    release();
+    await h.jobs.idle();
+    expect(listWorkstreams(h.store.db, { batchId: batch.id })).toHaveLength(2);
+
+    again(beta, failed);
+
+    expect(getWorkstream(h.store.db, failed.id).state).toBe('QUEUED');
   });
 });

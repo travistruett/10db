@@ -62,6 +62,7 @@ import {
 } from './goals';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
+<<<<<<< 6f7ed3e1c0aeeb20c7aec4bc61ffbf3255f17419
 import {
   DecisionDto,
   DecisionInput,
@@ -87,6 +88,11 @@ import {
   ProposalVerdictReject,
 } from './knowledge-api';
 import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
+||||||| 90ec8bb
+import { SelfUpdateInput, SelfUpdateStatusDto } from './self-update';
+=======
+import { SelfUpdateInput, SelfUpdateStatusDto, SelfUpdateWaitInput } from './self-update';
+>>>>>>> 1c3c2c96cfe74800bd8406637876ab23b9ebbc3b
 import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
@@ -186,6 +192,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'keep-awake-input': KeepAwakeInput,
   'self-update-input': SelfUpdateInput,
   'self-update-status-dto': SelfUpdateStatusDto,
+  'self-update-wait-input': SelfUpdateWaitInput,
   'lane-permissions-dto': LanePermissionsDto,
   'mcp-server-review': McpServerReview,
   'mcp-server-status-dto': McpServerStatusDto,

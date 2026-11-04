@@ -141,6 +141,10 @@ export interface SelfUpdateServices {
   selfUpdateStatus(): SelfUpdateStatusDto;
   /** Turns it on or off for the whole app; null goes back to the default. */
   setSelfUpdate(enabled: boolean | null): SelfUpdateStatusDto;
+  /** How many minutes a staged update waits before the factory drains for it; null is the default. */
+  setSelfUpdateWait(minutes: number | null): SelfUpdateStatusDto;
+  /** Install Now: the staged update drains the factory at once. */
+  installNow(): SelfUpdateStatusDto;
 }
 
 /** Removing a task that hasn't run. */

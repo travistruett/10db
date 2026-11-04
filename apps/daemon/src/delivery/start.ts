@@ -18,6 +18,8 @@ import {
   type StepPlanDto,
   type TaskDto,
   type TaskId,
+  type WorkstreamDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   deleteCuttingBatch,
@@ -36,7 +38,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
-import { insertPlannedWorkstream, planForStart } from '../team';
+import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
@@ -91,6 +93,12 @@ export interface BatchStarter {
    */
   recut(batchId: BatchId): void;
   /**
+   * Every Retry of a failed workstream, whichever screen asked: the run goes back to the queue and
+   * its batch reopens (`reopen`). Refused while a join of its task is pending, since the join writes
+   * a new run for the task and one-active-workstream would then refuse the join.
+   */
+  retry(id: WorkstreamId, note?: string): WorkstreamDto;
+  /**
    * After a workstream Retry: a FAILED worktree batch reopens in the cut queue once its worktree is
    * whole. Any other batch is left as it is.
    */
@@ -135,6 +143,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     return new ConflictError(
       `${task.title} is joining a batch; where it works and its areas can't change, and it can't start again, until it has joined or been refused`,
     );
+  }
+
+  function refuseIfJoining(taskId: TaskId): void {
+    if (joining.has(taskId)) throw joiningRefusal(getTask(db, taskId));
+  }
+
+  function reopen(batchId: BatchId): void {
+    const batch = getBatch(db, batchId);
+    if (batch.state === BatchState.Failed && batch.worktreePath !== null)
+      reopenWorktreeBatch(ctx, batchId, 'a workstream was retried');
   }
 
   /** One part of a start: what it writes, in the start's one transaction, and the job it queues after. */
@@ -659,9 +677,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       if (!batch) throw new InvalidError(`Task ${task.title} did not start`);
       return batch;
     },
-    refuseIfJoining(taskId) {
-      if (joining.has(taskId)) throw joiningRefusal(getTask(db, taskId));
-    },
+    refuseIfJoining,
     refuseStart(taskId, ending) {
       const task = getTask(db, taskId);
       const project = getProject(db, task.projectId);
@@ -689,10 +705,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           : cutWorktree(ctx, batchId, ids, signal, sameStart),
       );
     },
-    reopen(batchId) {
-      const batch = getBatch(db, batchId);
-      if (batch.state === BatchState.Failed && batch.worktreePath !== null)
-        reopenWorktreeBatch(ctx, batchId, 'a workstream was retried');
+    retry(id, note) {
+      refuseIfJoining(getWorkstreamRow(db, id).taskId);
+      const retried = retryWorkstream(ctx.state, id, note);
+      if (retried.batchId !== null) reopen(retried.batchId);
+      return retried;
     },
+    reopen,
   };
 }

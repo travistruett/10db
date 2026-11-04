@@ -2361,6 +2361,26 @@ describe('permission broker in a sandboxed lane', () => {
     expect(openCards()).toHaveLength(2);
   });
 
+  it.each([
+    ['Read', (path: string) => ({ file_path: join(path, 'notes.txt') })],
+    ['Grep', (path: string) => ({ pattern: 'x', path })],
+    ['Glob', (path: string) => ({ pattern: '*.txt', path })],
+  ])(
+    'refuses a %s of the worktrees folder outside the lane’s copy at once, with no card',
+    async (toolName, inputFor) => {
+      const ws = seedWorkstream(base);
+      fileAccess = { ...fileAccess, worktreeRoot: join(root, 'work') };
+      const decision = await sandboxed(ws)(
+        request(toolName, inputFor(join(root, 'work', 'other'))),
+      );
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message: expect.stringContaining(`The copy is ${fileAccess.checkout}`) as string,
+      });
+      expect(openCards()).toEqual([]);
+    },
+  );
+
   it.each<{ name: string; toolName: string; input: Record<string, unknown>; fails?: boolean }>([
     { name: 'a Read with no file path', toolName: 'Read', input: {} },
     { name: 'an Edit with no file path', toolName: 'Edit', input: { old_string: 'a' } },

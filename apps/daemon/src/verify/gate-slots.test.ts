@@ -193,6 +193,7 @@ describe('gate slots', () => {
           open();
         },
         hold: {
+          holding: () => overloaded,
           untilClear: (signal?: AbortSignal) => {
             asked.push(signal);
             if (!overloaded) return Promise.resolve(true);

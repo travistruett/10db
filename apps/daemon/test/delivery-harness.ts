@@ -265,6 +265,8 @@ export function createDeliveryHarness(
     readonly pnpmVersion?: string;
     /** What the shipper reads to say a failed gate ran while the Mac was overloaded. */
     readonly load?: Pick<LoadGuard, 'overloadedSince'>;
+    /** True while a waiting update drains the factory: no batch moves to shipping. */
+    readonly holdShips?: () => boolean;
     /** Wraps the shipping gate's runner, as a test that needs a gate result the sandbox gives. */
     readonly shipGate?: (gate: GateRunner) => GateRunner;
     /** Wraps the shipper's base updates, as a test that needs an update the real copy can't give. */
@@ -358,6 +360,7 @@ export function createDeliveryHarness(
       identifyProcess: (pid) => systemProcesses.identify(pid),
       isRunning: (id) => running.has(id),
       ...(opts.load ? { load: opts.load } : {}),
+      ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
     });
   let shipper = makeShipper();
   const unsubscribe =

@@ -200,9 +200,11 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
 
 - `disallowedTools` carries a `Read(...)` rule for each protected read the session doesn't need, and for each
   secret file. `ask` rules make Claude Code ask before an Edit or Write of a path it protects from sandboxed Bash.
-- The broker decides reads outside the checkout on the real path. It refuses protected reads with no card and
-  asks about the rest, naming every real path that needs asking. Read, Grep and Glob run without a card only
-  inside the checkout and the project's read list. The sandbox temp root (`/private/tmp`), all but the
+- The broker decides reads outside the checkout on the real path. It refuses protected reads, and reads under
+  the worktrees folder outside the session's own copy, with no card, and asks about the rest, naming every real
+  path that needs asking. Read, Grep and Glob run without a card only inside the checkout and the project's read
+  list, and the worktrees check runs before the read list, so a stored Read rule under that folder doesn't open
+  it (decision `2026-11-03-a-path-outside-the-lanes-copy-is-refused-not-carded.md`). The sandbox temp root (`/private/tmp`), all but the
   session's own temp dir, is a protected read: it holds every other session's temp dir and sealed files, an MCP
   server's approved variables among them.
 - Claude Code applies its own `disallowedTools` deny rules first (live: a Read of a space-named protected
