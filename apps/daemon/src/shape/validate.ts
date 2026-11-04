@@ -39,6 +39,8 @@ export interface PlanWorld {
   readonly citable: ReadonlySet<ShapeMessageId>;
   /** Tasks this conversation already converted, by the key they were proposed under. */
   readonly convertedTasks: ReadonlyMap<string, TaskId>;
+  /** Keys in `convertedTasks` whose task a converted removal cancelled. */
+  readonly removedTasks: ReadonlySet<string>;
   readonly convertedGoals: ReadonlySet<GoalId>;
   /** Why this task cannot be a basis, or null when it is a finished task of the project. */
   basisProblem(id: TaskId): string | null;
@@ -67,6 +69,12 @@ export interface PlanWorld {
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}${n === 1 ? '' : 's'}`;
+
+/** The keys of converted tasks among these removed ids: a removal names a task by id, not by key. */
+export const removedKeys = (
+  convertedTasks: ReadonlyMap<string, TaskId>,
+  removedIds: ReadonlySet<TaskId>,
+): string[] => [...convertedTasks].filter(([, id]) => removedIds.has(id)).map(([key]) => key);
 
 /** A task of the draft, as the cycle check sees it. */
 interface Node {
@@ -268,15 +276,27 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
   const keptGoalTasks = new Set(
     [...world.pinnedGoalTasks].flatMap(([goal, tasks]) => (goalKeys.has(goal) ? [] : tasks)),
   );
+  // A removed task's key stays in `convertedTasks`, so only something live under the key answers it.
+  const removed = new Set([
+    ...world.removedTasks,
+    ...removedKeys(world.convertedTasks, new Set(draft.removals.map((r) => r.taskId))),
+  ]);
   draft.questions.forEach((q, i) => {
     if (q.about === undefined) return;
     if (
-      knownTask(q.about) ||
+      taskKeys.has(q.about) ||
       goalKeys.has(q.about) ||
       world.storedEfforts.has(q.about) ||
       keptGoalTasks.has(q.about)
     )
       return;
+    if (removed.has(q.about)) {
+      errors.push(
+        `Question ${String(i + 1)}, about: ${q.about} was removed, so it cannot hold a question; a question can only be about a goal or task that is still in the plan`,
+      );
+      return;
+    }
+    if (world.convertedTasks.has(q.about)) return;
     errors.push(
       world.storedKeys.has(q.about)
         ? `Question ${String(i + 1)}, about: ${q.about} is not a goal or task that is still in the plan; a question can only be about a goal or task`
