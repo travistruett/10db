@@ -18,7 +18,9 @@ Starting the task over in the same batch is read the same way. In a shared proje
 left-out run whose batch holds other tasks keeps the batch, and the start joins it (`findUnfinishedBatch` takes a
 failed batch too). The joined run is inserted by `insertJoinedWorkstream`, which gives its session the same
 builder note as a retry and sets it as the step's fix. The revert is read from an earlier run's `left-out` or
-`reverted-work` notice when no note exists (a left-out run never retried), and from the notes otherwise. A joined
+`reverted-work` notice when no note exists (a left-out run never retried), and from the notes otherwise. A
+`left-out` notice that names a revert wins over a note: a retry swaps it for `reverted-work` in the write that adds
+the note, so a run still holding it was left out after that note. A joined
 run is therefore one that was told. Runs started before this change have no note: when their task has only a
 `left-out` notice behind it, the task is listed as not done unless a told run committed, which errs towards saying
 less was shipped.

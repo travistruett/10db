@@ -40,20 +40,24 @@ export function lastRevertTold(
 }
 
 /**
- * The revert a run's record names, and whether its session was told. A retry's note is the record of
- * a told run. A run that was left out and never retried has only its notice, which names the revert
- * the same way; a task started over in the same batch finds that revert there.
+ * The latest revert a run's record names, and whether its session was ever told of one. A retry's note
+ * is the record of a told run, and a run that was left out and never retried has only its notice, which
+ * names the revert the same way; a task started over in the same batch finds that revert there.
+ *
+ * A `left-out` notice that names a revert is newer than any note: a retry swaps that notice for
+ * `reverted-work` in the write that adds the note, so a run still holding it was left out after its last
+ * note, and its commits made after that note are in this revert. The run still counts as told: a commit
+ * it makes after this revert was made knowing the work had been undone before.
  */
 export function revertOfRun(run: {
   readonly notice: Notice | null;
   readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
 }): { readonly revert: string; readonly told: boolean } | null {
   const noted = lastRevertTold(run.evidence);
-  if (noted !== null) return { revert: noted, told: true };
-  const key = run.notice?.key;
-  const revert =
-    key === LEFT_OUT_NOTICE_KEY || key === REVERTED_NOTICE_KEY ? revertCommitOf(run.notice) : null;
-  return revert === null ? null : { revert, told: false };
+  const leftOut = run.notice?.key === LEFT_OUT_NOTICE_KEY ? revertCommitOf(run.notice) : null;
+  const carried = run.notice?.key === REVERTED_NOTICE_KEY ? revertCommitOf(run.notice) : null;
+  const revert = leftOut ?? noted ?? carried;
+  return revert === null ? null : { revert, told: noted !== null };
 }
 
 /** The notice a retried run keeps while its commits stay reverted. */

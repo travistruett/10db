@@ -1325,7 +1325,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
   ): Promise<boolean> {
     // The notes the sessions were given are the record: a wait may have replaced a run's notice, and a
     // merge run has neither. A run left out and never retried has only its notice, which names the same
-    // revert. A later run's record is a later revert, so the last one is the latest.
+    // revert. A run left out again holds a later revert than its own note, and `revertOfRun` reads that
+    // one. A later run started from the revert before it, so the last record is the latest.
     const records = runsOf(batchId, member).flatMap((run) => {
       const record = revertOfRun({ notice: run.notice, evidence: listEvidence(db, run.id) });
       return record === null ? [] : [{ run, ...record }];
