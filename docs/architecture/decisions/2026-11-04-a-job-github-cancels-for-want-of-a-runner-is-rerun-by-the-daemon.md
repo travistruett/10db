@@ -7,7 +7,8 @@
 
 The pull request watch reruns a required job that GitHub cancelled because no hosted runner picked it
 up. The test is `Gh.jobHadNoRunner` (two `gh api` reads of the cancelled check's job id): the job is
-`cancelled`, has no runner (`runner_id`, `runner_name` null) and no steps, and its check run has an
+`cancelled`, has no runner (`runner_id` null or 0, `runner_name` null or empty: GitHub sends either for a
+job that never ran) and no steps, and its check run has an
 annotation saying "was not acquired by Runner of type hosted". A job that had a runner or ran a step, and a
 run a person cancelled (no such annotation), are not this case and stay with the ordinary cancelled-check
 rule (rerun once, from the second read in a row).

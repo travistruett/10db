@@ -723,13 +723,10 @@ export function createGh(exec: GhExec): Gh {
       const jobArgs = ['api', `repos/${repo}/actions/jobs/${jobId}`];
       actionsId('job', jobId, jobArgs);
       const job = parseOutput(ActionsJobView, jobArgs, await ok(jobArgs, call));
-      if (
-        job.conclusion !== 'cancelled' ||
-        (job.steps ?? []).length > 0 ||
-        (job.runner_id ?? null) !== null ||
-        (job.runner_name ?? null) !== null
-      )
-        return false;
+      // GitHub reports a job that never got a runner as runner_id 0 and runner_name "" as
+      // often as null, so all three read as no runner.
+      const hadRunner = (job.runner_id ?? 0) !== 0 || (job.runner_name ?? '') !== '';
+      if (job.conclusion !== 'cancelled' || (job.steps ?? []).length > 0 || hadRunner) return false;
       const noteArgs = ['api', `repos/${repo}/check-runs/${jobId}/annotations`];
       const notes = parseOutput(AnnotationsView, noteArgs, await ok(noteArgs, call));
       return notes.some((note) => NOT_ACQUIRED.test(note.message ?? ''));

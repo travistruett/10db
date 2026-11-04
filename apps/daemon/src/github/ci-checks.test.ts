@@ -690,6 +690,21 @@ describe('Gh.jobHadNoRunner', () => {
     await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
   });
 
+  it("is true for GitHub's empty runner values (runner_id 0, runner_name '')", async () => {
+    const { gh: client } = api(
+      { ...cancelledJob, runner_id: 0, runner_name: '', runner_group_id: 0, runner_group_name: '' },
+      [{ annotation_level: 'failure', message: NOT_ACQUIRED }],
+    );
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+  });
+
+  it('is true when the runner fields are missing', async () => {
+    const { gh: client } = api({ status: 'completed', conclusion: 'cancelled', steps: [] }, [
+      { message: NOT_ACQUIRED },
+    ]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+  });
+
   it('is false for a job a person cancelled (no such annotation)', async () => {
     const { gh: client } = api(cancelledJob, [{ message: 'The run was canceled by @octocat.' }]);
     await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
@@ -710,6 +725,10 @@ describe('Gh.jobHadNoRunner', () => {
       [{ message: NOT_ACQUIRED }],
     );
     await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+    const named = api({ ...cancelledJob, runner_id: 0, runner_name: 'GitHub Actions 12' }, [
+      { message: NOT_ACQUIRED },
+    ]);
+    await expect(named.gh.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
   });
 
   it('is false for a job that is not cancelled', async () => {
