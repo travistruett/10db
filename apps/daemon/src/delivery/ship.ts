@@ -111,7 +111,7 @@ import {
 } from './notices';
 import { readPrScopes, scopeOf } from './pr-scopes';
 import type { RetryMergeOptions } from './pr-watch';
-import { prBody, prTitle, titlePrefix } from './pr-text';
+import { prBody, prSubject, prTitle, titlePrefix } from './pr-text';
 import { readPrTemplate } from './pr-template';
 import { retireWorktree } from './worktree-cleanup';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -762,7 +762,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             target,
             sha,
           ),
-          batch.title,
+          prSubject(batch.title, tasks),
         ),
         bodyFile: file,
       },

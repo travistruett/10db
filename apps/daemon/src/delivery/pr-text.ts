@@ -39,6 +39,28 @@ export function prTitle(prefix: string, title: string): string {
   return `${prefix}: ${cut}`;
 }
 
+/**
+ * What the pull request's title says its change is: the batch's title, unless the batch is named
+ * after a task Ship without it left out. The title becomes the squash commit, so it must not name
+ * work the pull request doesn't contain; the first task whose work is in it (a finished one first)
+ * stands in. With none left in, the batch's title is all there is.
+ */
+export function prSubject(
+  batchTitle: string,
+  tasks: readonly {
+    readonly title: string;
+    readonly state: WorkstreamState;
+    readonly leftOut?: boolean;
+  }[],
+): string {
+  // The way prTitle reads a title: trimmed, without a trailing full stop, case aside.
+  const key = (title: string): string => title.trim().replace(/\.+$/, '').trim().toLowerCase();
+  const same = (a: string, b: string): boolean => key(a) === key(b);
+  if (!tasks.some((t) => t.leftOut === true && same(t.title, batchTitle))) return batchTitle;
+  const kept = tasks.filter((t) => t.leftOut !== true && !same(t.title, batchTitle));
+  return (kept.find((t) => t.state === WorkstreamState.Done) ?? kept[0])?.title ?? batchTitle;
+}
+
 /** One task of the batch, as the PR body shows it. */
 export interface PrBodyTask {
   readonly title: string;

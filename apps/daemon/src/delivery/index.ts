@@ -21,7 +21,7 @@ export { createBatchStarter, type BatchStarter } from './start';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
-export { prBody, prTitle, titlePrefix } from './pr-text';
+export { prBody, prSubject, prTitle, titlePrefix } from './pr-text';
 export { createShipper, type Shipper } from './ship';
 export { subscribeShipTrigger } from './trigger';
 export { createPrWatch, subscribePrWatch, type PrWatch } from './pr-watch';

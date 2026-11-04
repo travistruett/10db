@@ -125,12 +125,13 @@ async function failedInItsMerge(merged: (run: WorkstreamId) => void) {
 async function failedInBatch(
   beta: 'WAITING_HUMAN' | 'DONE' | 'CANCELLED',
   alphaFiles: Record<string, string> = {},
+  batchTitle = 'Greetings',
 ) {
   const alpha = h.addTask('Alpha');
   const other = h.addTask('Beta', { areas: ['ui'] });
   const started = h.only(
     h.starter.startBatch(h.project.id, {
-      title: 'Greetings',
+      title: batchTitle,
       taskIds: [alpha.id, other.id],
     }),
   );
@@ -271,6 +272,28 @@ describe('the failed workstream card', () => {
       const body = h.gh.body(shipped.prUrl ?? '');
       expect(body).toContain('- Alpha (failed, left out of this pull request)');
       expect(body).not.toContain('### Alpha');
+    });
+
+    it('does not title the pull request after the task it left out', async () => {
+      const { card, batchId } = await failedInBatch('DONE', {}, 'Alpha');
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): beta']);
+    });
+
+    it('keeps the batch’s title when it is not the left-out task’s name', async () => {
+      const { card } = await failedInBatch('DONE');
+      inbox.answer(card.id, { choice: 'Ship without it' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): greetings']);
+    });
+
+    it('keeps a batch named after the failed task when Ship anyway puts its commits in', async () => {
+      const { card } = await failedInBatch('DONE', {}, 'Alpha');
+      inbox.answer(card.id, { choice: 'Ship anyway' });
+      await h.jobs.idle();
+      expect(h.gh.prCreates().map((c) => c.title)).toEqual(['feat(app): alpha']);
     });
 
     it('ships the rest, with no revert commit, when the failed task committed nothing', async () => {
