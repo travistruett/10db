@@ -40,6 +40,49 @@ describe('Root', () => {
     fetched.mockRestore();
   });
 
+  it('keeps the bad value and the advice inside the 300 characters a refusal takes, with real-length ids on the task screen', async () => {
+    const id = (prefix: string): string => `${prefix}_01a1a490-526d-7115-9bb2-d21c0d0d3271`;
+    expect(id('prj')).toHaveLength(40);
+    const search = new URLSearchParams({
+      render: 'secret-token',
+      daemon: 'http://localhost:4317',
+      project: id('prj'),
+      screen: 'task',
+      shape: id('shp'),
+      task: id('tsk'),
+    }).toString();
+    render(<Root search={`?${search}`} app={() => <div>the app</div>} />);
+    await waitFor(() => {
+      expect(heard).toHaveLength(1);
+    });
+    const reason = heard[0]?.reason ?? '';
+    expect(reason.length).toBeLessThanOrEqual(300);
+    expect(reason).toContain('daemon=http://localhost:4317');
+    expect(reason).toContain(`task=${id('tsk')}`);
+    expect(reason).toContain('http://127.0.0.1:<port>');
+    expect(reason.endsWith('.')).toBe(true);
+  });
+
+  it('keeps the advice and stays inside 300 characters when every value is as long as it may be', async () => {
+    const long = 'x'.repeat(200);
+    const search = new URLSearchParams({
+      render: 'secret-token',
+      daemon: long,
+      project: long,
+      screen: long,
+      shape: long,
+      task: long,
+    }).toString();
+    render(<Root search={`?${search}`} app={() => <div>the app</div>} />);
+    await waitFor(() => {
+      expect(heard).toHaveLength(1);
+    });
+    const reason = heard[0]?.reason ?? '';
+    expect(reason.length).toBeLessThanOrEqual(300);
+    expect(reason).toContain('http://127.0.0.1:<port>');
+    expect(reason).toContain('daemon=xxx');
+  });
+
   it('says nothing to its parent for a page that is not a frame', () => {
     render(<Root search="" app={() => <div>the app</div>} />);
     expect(heard).toEqual([]);
