@@ -585,6 +585,38 @@ describe('MCP tools', () => {
       });
     });
 
+    it('states each risk once on the card of a tagged proposal when the limit is zero', async () => {
+      const s = await seedSession();
+      state.write((ctx) => {
+        setSmallProposalLimit(ctx, s.project.id, 0);
+      });
+      await s.call('propose', {
+        opId: 'op-prop-0007',
+        ...small,
+        title: 'Tighten the security and auth checks',
+        riskTags: ['security'],
+      });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]?.body).toMatch(
+        /\n\nRaised as a card because it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
+      );
+    });
+
+    it('states each risk once on the card of a tagged change_task proposal', async () => {
+      const s = await seedSession();
+      await s.call('propose', {
+        opId: 'op-prop-0008',
+        ...small,
+        kind: 'change_task',
+        title: 'Tighten the security and auth checks',
+        riskTags: ['security'],
+      });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]?.body).toMatch(
+        /\n\nRaised as a card because it carries the security risk tag, and it is not a new task, and it names the auth risk\.$/,
+      );
+    });
+
     it('sends every proposal to the Inbox when the project’s limit is zero', async () => {
       const s = await seedSession();
       state.write((ctx) => {
