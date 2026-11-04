@@ -91,6 +91,23 @@ async function catchUp(batch: BatchDto): Promise<BatchDto> {
   return getBatch(h.store.db, batch.id);
 }
 
+/** The card is raised before the rewind, which may leave the merge where it is. */
+const SAYS_PUT_BACK = /put (its|the) merge back|merge (was|is) put back/;
+
+/** The builder commits while the install reads the merged lockfile at HEAD, before the generators. */
+const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
+  const read = h.git.blobAt.bind(h.git);
+  let committed = false;
+  vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+    if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+      committed = true;
+      await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+    }
+    return read(repo, rev, file);
+  });
+  return () => committed;
+};
+
 describe('a shipped pull request that conflicts with its base', () => {
   it('has the base merged into it, settled conflicts named, pushed, and no card', async () => {
     const batch = await shipped();
@@ -192,11 +209,63 @@ describe('a shipped pull request that conflicts with its base', () => {
         expect(card.body).toContain('nothing was pushed');
         // This merge took no generated directory, so the card speaks of none.
         expect(card.body).not.toContain('regenerated');
+        // The kept lines are named, with no commit to find them in and no word on where the merge is.
+        expect(card.body).toContain("src/index.ts (kept both sides' added lines)");
+        expect(card.body).not.toContain('The merge commit lists them');
+        expect(card.body).not.toMatch(SAYS_PUT_BACK);
         expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
         expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
         expect(h.git$('-C', kept, 'rev-parse', 'HEAD')).toBe(before);
       },
     );
+
+    /** The batch and main each added a line to one file, and the copy's packages no longer resolve. */
+    async function keptLinesOnBrokenInstall(keepWorktree: boolean): Promise<BatchDto> {
+      installable();
+      const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree });
+      h.teammatePush('main', 'src/index.ts', BOTH.theirs);
+      conflicts(batch);
+      pruned(batch);
+      return batch;
+    }
+
+    it('does not say the kept-lines merge went back when the builder commits during the install', async () => {
+      const batch = await keptLinesOnBrokenInstall(true);
+      const branch = batch.branch ?? '';
+      const before = onOrigin(branch);
+      const committed = commitsDuringInstall(batch);
+
+      await catchUp(batch);
+
+      expect(committed()).toBe(true);
+      // The merge stays, under the builder's commit.
+      const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+      expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
+      expect(h.git$('log', '-1', '--format=%P', `${tip}~1`)).toContain(before);
+      expect(onOrigin(branch)).toBe(before);
+      const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
+      expect(card.body).toContain('.: left-pad');
+      expect(card.body).toContain('src/index.ts');
+      expect(card.body).toContain('nothing was pushed');
+      expect(card.body).not.toMatch(SAYS_PUT_BACK);
+    });
+
+    it("does not say the kept-lines merge went back when it can't be", async () => {
+      const batch = await keptLinesOnBrokenInstall(false);
+      const branch = batch.branch ?? '';
+      const before = onOrigin(branch);
+      vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
+
+      await catchUp(batch);
+
+      expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
+      expect(onOrigin(branch)).toBe(before);
+      const card = h.only(h.cards());
+      expect(card.body).toContain('.: left-pad');
+      expect(card.body).toContain('src/index.ts');
+      expect(card.body).toContain('nothing was pushed');
+      expect(card.body).not.toMatch(SAYS_PUT_BACK);
+    });
 
     it('raises the one card, naming the generated directory it did not regenerate, and puts the merge back', async () => {
       installable();
@@ -294,8 +363,6 @@ describe('a shipped pull request that conflicts with its base', () => {
         ['no check is set', null],
         ['a gate is set', 'true'],
       ] as const;
-      /** The card is raised before the rewind, which may leave the merge where it is. */
-      const SAYS_PUT_BACK = /put (its|the) merge back|merge (was|is) put back/;
 
       it.each(
         PROBLEMS.flatMap(([problem, why, setUp, kept]) =>
@@ -327,20 +394,6 @@ describe('a shipped pull request that conflicts with its base', () => {
           expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
         },
       );
-
-      /** The builder commits while the install reads the merged lockfile at HEAD, before the generators. */
-      const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
-        const read = h.git.blobAt.bind(h.git);
-        let committed = false;
-        vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
-          if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
-            committed = true;
-            await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
-          }
-          return read(repo, rev, file);
-        });
-        return () => committed;
-      };
 
       /** The builder commits while the generators run. */
       const commitsDuringGenerators = (batch: BatchDto): (() => boolean) => {

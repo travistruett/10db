@@ -330,10 +330,10 @@ interface Merging {
    */
   readonly regeneratedNote?: string | null;
   /**
-   * `update`'s note as a catch-up words it when a broken install stops it and the merge goes back
-   * off the branch; only a catch-up's merge that settled conflicts has one.
+   * `update`'s note as a catch-up words it when a broken install stops it, which says nothing of
+   * where the merge is; only a catch-up's merge that settled conflicts has one.
    */
-  readonly putBackNote?: string | null;
+  readonly stoppedNote?: string | null;
 }
 
 /** What kept a merge's generated directories from being regenerated. */
@@ -493,21 +493,21 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   /**
    * What the gate's note says about the conflicts a merge settled; null when it settled none. A
    * generated directory is only taken from the base when the merge is made, so it is said to be
-   * regenerated (`regenerated`) only once its regeneration has made it, and the merge that goes back
-   * is not said to be listed anywhere. A merge that `goesBack` (a catch-up's, stopped by a broken
-   * install) is no longer on the branch when the note is read, so it is said to have been made and
-   * put back, and no commit is pointed to.
+   * regenerated (`regenerated`) only once its regeneration has made it, and a merge not yet whole is
+   * not said to be listed anywhere. A `stopped` merge (a catch-up's, stopped by a broken install) has
+   * its card raised before the rewind, which leaves a merge under a builder's commit or when it
+   * fails: the note says what the merge settled, and neither points to it nor says where it is.
    */
   function settledNote(
     batch: BatchDto,
     merged: SettledMerge,
     regenerated: boolean,
-    goesBack = false,
+    stopped = false,
   ): string | null {
     const resolved = merged.resolved ?? [];
     if (resolved.length === 0) return null;
     // Said once: a merge with directories to regenerate asks for both wordings.
-    if (regenerated && !goesBack)
+    if (regenerated && !stopped)
       ctx.logger.info(
         { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
         'base conflicts settled',
@@ -519,8 +519,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         return `${r.path} (${regenerated ? 'regenerated from its sources' : `taken from ${origin}, not regenerated`})`;
       })
       .join(', ');
-    if (goesBack)
-      return `10db's merge of ${origin} into this branch settled its conflicts with it: ${said}. That merge is put back, so no commit on the branch lists them.`;
+    if (stopped)
+      return `10db's merge of ${origin} into this branch settled its conflicts with it: ${said}.`;
     const lead = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}.`;
     return regenerated ? `${lead} The merge commit lists them.` : lead;
   }
@@ -1335,9 +1335,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       },
       regenerate: waiting ? merged : null,
       ...(waiting ? { regeneratedNote: joined(settledNote(batch, merged, true), unmoved) } : {}),
-      // A catch-up stopped by a broken install puts this merge back: its card cannot point to it.
+      // A catch-up stopped by a broken install doesn't push this merge: its card cannot point to it.
       ...(forPullRequest
-        ? { putBackNote: joined(settledNote(batch, merged, !waiting, true), unmoved) }
+        ? { stoppedNote: joined(settledNote(batch, merged, !waiting, true), unmoved) }
         : {}),
     };
   }
@@ -1598,7 +1598,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note:
           joined(
             forPullRequest && merged.kind === 'merged'
-              ? (merging.putBackNote ?? merged.note)
+              ? (merging.stoppedNote ?? merged.note)
               : merged.note,
             `The install in this copy is broken: ${installed.broken}. ${installsSaid(installed.installs ?? 0, installed.startedOver === true)}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',

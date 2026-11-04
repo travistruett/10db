@@ -1081,7 +1081,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         expect(note).toContain('The merge commit lists them.');
       });
 
-      it("does not point a catch-up's card to a merge commit that goes back", async () => {
+      it("does not point a catch-up's card to a merge commit, or say where the merge went", async () => {
         const batch = await brokenAfterKeptLines();
         const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, {
           forPullRequest: true,
@@ -1092,6 +1092,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         expect(note).toContain('install in this copy is broken');
         expect(note).not.toContain('The merge commit lists them');
         expect(note).not.toContain('10db merged origin/main into this branch');
+        expect(note).not.toContain('put back');
       });
     });
 
