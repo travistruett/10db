@@ -8,15 +8,15 @@ import { INLINE_CONVERSATION_MAX_BYTES } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
 import {
-  READ_PICTURE_CHARGE_MAX_BYTES,
-  READ_PICTURES_RESERVE_BYTES,
+  READ_CHARGE_MAX_BYTES,
+  READ_RESERVE_BYTES,
   measuredMediaBytes,
-  readPictureBytesSpent,
-  readPictureLine,
+  readBytesSpent,
+  readCountedLine,
 } from './read-budget';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
-// Shape spec §5.4: a picture Claude pulls in with Read is a tool result a resumed session resends, beside
+// Shape spec §5.4: a picture or PDF Claude pulls in with Read is a tool result a resumed session resends, beside
 // the pictures the daemon sends itself. The preToolUse hook counts it and refuses what would pass the total.
 
 const MB = 1024 * 1024;
@@ -24,10 +24,10 @@ const MB = 1024 * 1024;
 const REQUEST_LIMIT = 32_000_000;
 const onTheWire = (bytes: number): number => Math.ceil((bytes * 4) / 3);
 /** What inline pictures and Read pictures may add together, and how many 1 MiB Reads a session with no inline picture holds. */
-const POOL = INLINE_CONVERSATION_MAX_BYTES + READ_PICTURES_RESERVE_BYTES;
-const EMPTY_ROOM = Math.floor(POOL / READ_PICTURE_CHARGE_MAX_BYTES);
+const POOL = INLINE_CONVERSATION_MAX_BYTES + READ_RESERVE_BYTES;
+const EMPTY_ROOM = Math.floor(POOL / READ_CHARGE_MAX_BYTES);
 /** What a full inline budget leaves Reads. */
-const FULL_INLINE_ROOM = Math.floor(READ_PICTURES_RESERVE_BYTES / READ_PICTURE_CHARGE_MAX_BYTES);
+const FULL_INLINE_ROOM = Math.floor(READ_RESERVE_BYTES / READ_CHARGE_MAX_BYTES);
 /** A base64 string of this many decoded bytes, as a Read's result carries a picture. */
 const base64Of = (bytes: number): string => Buffer.alloc(bytes, 7).toString('base64');
 const imageResult = (bytes: number) => ({
@@ -73,7 +73,7 @@ const readPages = (path: string, pages: unknown, n = 0, agentId?: string) =>
   readInput({ file_path: path, pages }, n, agentId);
 const reasonOf = (answer: ReturnType<typeof read>): string =>
   answer.decision === 'deny' ? answer.reason : '';
-const spent = () => readPictureBytesSpent(listShapeMessages(f.c.store.db, shapeId()));
+const spent = () => readBytesSpent(listShapeMessages(f.c.store.db, shapeId()));
 
 describe('the pictures a Shape session pulls in with Read', () => {
   it('and the inline pictures share a pool that fits the request limit, with room for text', () => {
@@ -105,7 +105,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       /pictures .*Read.*32 MB|too many pictures/i,
     );
     // What the request would carry stays under the limit, text left out.
-    const charged = allowed * READ_PICTURE_CHARGE_MAX_BYTES;
+    const charged = allowed * READ_CHARGE_MAX_BYTES;
     expect(onTheWire(9 * 2 * MB) + onTheWire(charged)).toBeLessThan(REQUEST_LIMIT);
   });
 
@@ -186,7 +186,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       const doc = drop('small.pdf', tinyPdf());
       await nextTurn('Hello');
       expect(readPages(doc.storedPath, pages)).toEqual({ decision: 'allow' });
-      expect(spent()).toBe(count * READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(count * READ_CHARGE_MAX_BYTES);
     });
 
     it('stays under the limit however small the PDF and however many ranges are asked for', async () => {
@@ -265,9 +265,9 @@ describe('the pictures a Shape session pulls in with Read', () => {
 
   it('count a path with a line break in it', () => {
     // The transcript line carries the path as Claude spelled it; a break must not hide the count.
-    const line = readPictureLine('/repo/a\nb.png', 1_000);
+    const line = readCountedLine('/repo/a\nb.png', 1_000);
     const message = { kind: ShapeMessageKind.Tool, body: line } as ShapeMessageDto;
-    expect(readPictureBytesSpent([message])).toBe(1_000);
+    expect(readBytesSpent([message])).toBe(1_000);
   });
 
   it('are still counted after the daemon restarts and the session is resumed', async () => {
@@ -444,7 +444,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       const big = drop('big.png', wholePng(5 * MB));
       await nextTurn('Hello');
       expect(read(big.storedPath)).toEqual({ decision: 'allow' });
-      expect(spent()).toBe(READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(READ_CHARGE_MAX_BYTES);
       measure(big.storedPath, imageResult(300_000));
       expect(spent()).toBe(300_000);
     });
@@ -459,7 +459,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
         allowed += 1;
       }
       // A Read is let in while the allowance, not yet measured, still fits in what the measured ones left.
-      expect(allowed).toBe(Math.floor((POOL - READ_PICTURE_CHARGE_MAX_BYTES) / 100_000) + 1);
+      expect(allowed).toBe(Math.floor((POOL - READ_CHARGE_MAX_BYTES) / 100_000) + 1);
       expect(allowed).toBeGreaterThan(EMPTY_ROOM * 5);
       expect(spent()).toBe(allowed * 100_000);
     });
@@ -480,7 +480,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       measure(big.storedPath, { type: 'parts', file: { filePath: big.storedPath, count: 3 } });
       measure(big.storedPath, imageResult(10), 0, 'agent-1');
       measure(doc.storedPath, imageResult(10));
-      expect(spent()).toBe(READ_PICTURE_CHARGE_MAX_BYTES);
+      expect(spent()).toBe(READ_CHARGE_MAX_BYTES);
     });
 
     it('is counted after a restart', async () => {

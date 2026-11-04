@@ -44,10 +44,10 @@ export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
  * an inline picture may use whatever the Reads leave, so a conversation that has spent little of one can
  * spend more of the other and the sum still stays under the limit.
  */
-export const READ_PICTURES_RESERVE_BYTES = 3 * MIB;
+export const READ_RESERVE_BYTES = 3 * MIB;
 
-/** The pool inline pictures and Read pictures draw on together. */
-export const PICTURE_POOL_BYTES = INLINE_CONVERSATION_MAX_BYTES + READ_PICTURES_RESERVE_BYTES;
+/** The pool inline pictures and Read pictures and PDFs draw on together. */
+export const PICTURE_POOL_BYTES = INLINE_CONVERSATION_MAX_BYTES + READ_RESERVE_BYTES;
 
 /** The transcript line that starts a session with nothing to resume and no digest to say so. */
 export const FRESH_START_LINE = 'Session · started fresh';
@@ -70,7 +70,7 @@ export function liveMessages(messages: readonly ShapeMessageDto[]): readonly Sha
 export type ReadKind = 'picture' | 'PDF';
 
 /** The dimmed transcript line that records a counted Read; `readBytesSpent` reads it back. */
-export const readPictureLine = (path: string, charge: number, kind: ReadKind = 'picture'): string =>
+export const readCountedLine = (path: string, charge: number, kind: ReadKind = 'picture'): string =>
   `Read · ${path} · ${kind} · ${String(charge)} bytes counted`;
 
 /** The line that replaces a Read's counted charge with the bytes it was measured to return. */
@@ -187,7 +187,5 @@ export function inlinePictureBytes(state: StateStore, filesRoot: string, shapeId
  */
 export function inlineBytesSpent(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
   const reads = readBytesSpent(listShapeMessages(state.db, shapeId));
-  return (
-    inlinePictureBytes(state, filesRoot, shapeId) + Math.max(0, reads - READ_PICTURES_RESERVE_BYTES)
-  );
+  return inlinePictureBytes(state, filesRoot, shapeId) + Math.max(0, reads - READ_RESERVE_BYTES);
 }

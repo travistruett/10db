@@ -83,12 +83,12 @@ import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   measuredMediaBytes,
-  readPictureBytesSpent,
+  readBytesSpent,
   readCharge,
   readCeiling,
+  readCountedLine,
   readMeasuredLine,
-  readPictureLine,
-  readPictureRefusal,
+  readRefusal,
   unreadableImages,
   unreadableImagesNotice,
 } from './read-budget';
@@ -613,7 +613,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
-    const reads = fresh ? 0 : readPictureBytesSpent(listShapeMessages(state.db, shapeId));
+    const reads = fresh ? 0 : readBytesSpent(listShapeMessages(state.db, shapeId));
     const names = unreadableImages(paths, readCeiling(inline) - reads);
     if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
   };
@@ -782,19 +782,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           },
           access,
         );
-        // A picture the session itself Reads is resent with every later request (§5.4); a subagent's
+        // A picture or PDF the session itself Reads is resent with every later request (§5.4); a subagent's
         // reaches the session as text, so only the session's own Reads are counted.
-        const picture =
+        const readPath =
           verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
             ? stringField(req.input, 'file_path')
             : null;
         const charged =
-          picture === null ? null : readCharge(picture, stringField(req.input, 'pages'), access);
-        if (picture !== null && charged !== null && charged.bytes > 0) {
-          const refusal = readPictureRefusal(
-            picture,
+          readPath === null ? null : readCharge(readPath, stringField(req.input, 'pages'), access);
+        if (readPath !== null && charged !== null && charged.bytes > 0) {
+          const refusal = readRefusal(
+            readPath,
             charged.bytes,
-            readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+            readBytesSpent(listShapeMessages(state.db, shapeId)),
             // Reads get whatever the inline pictures leave of the pool they share.
             readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
             charged.kind,
@@ -805,7 +805,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               shapeId,
               ShapeMessageAuthor.Claude,
               ShapeMessageKind.Tool,
-              readPictureLine(picture, charged.bytes, charged.kind),
+              readCountedLine(readPath, charged.bytes, charged.kind),
             );
         }
         if (verdict.decision === 'deny')

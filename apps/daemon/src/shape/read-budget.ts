@@ -1,13 +1,12 @@
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { ShapeMessageDto } from '@10db/contracts';
 import { expandHome } from '../sandbox';
 import {
   PICTURE_POOL_BYTES,
-  READ_PICTURES_RESERVE_BYTES,
+  READ_RESERVE_BYTES,
   readBytesSpent,
+  readCountedLine,
   readMeasuredLine,
-  readPictureLine,
   type ReadKind,
 } from '../screens';
 import type { ShapeAccess } from './confinement';
@@ -18,8 +17,9 @@ import type { ShapeAccess } from './confinement';
 // API's 32 MB request limit room for text. The daemon never sees a Read's result before it runs, so it
 // counts the Read in the PreToolUse hook and refuses the one that would pass what the inline pictures leave
 // of the pool; the PostToolUse hook then replaces the allowance with the size the result really had.
+// Everything here counts Reads of pictures and of PDFs alike; a name that says "read" means either kind.
 
-export { READ_PICTURES_RESERVE_BYTES, readPictureLine, type ReadKind };
+export { READ_RESERVE_BYTES, readBytesSpent, readCountedLine, type ReadKind };
 
 const MIB = 1024 * 1024;
 
@@ -28,10 +28,10 @@ const MIB = 1024 * 1024;
  * of inline pictures: what they leave of the pool, never less than the reserve a full inline budget leaves.
  */
 export const readCeiling = (inlineSpent: number): number =>
-  Math.max(READ_PICTURES_RESERVE_BYTES, PICTURE_POOL_BYTES - inlineSpent);
+  Math.max(READ_RESERVE_BYTES, PICTURE_POOL_BYTES - inlineSpent);
 
 /**
- * The most one Read picture is charged before its result is measured. Claude Code resizes a picture it
+ * The most one Read picture, or one page of a Read PDF, is charged before its result is measured. Claude Code resizes a picture it
  * reads to at most about 2000 px a side and re-encodes it, so what it returns is not the file's size; this
  * is the allowance for it, and a smaller file is charged its own size, which resizing does not make larger.
  * The PostToolUse hook replaces it with the measured size of what came back (`measuredMediaBytes`); a
@@ -39,7 +39,7 @@ export const readCeiling = (inlineSpent: number): number =>
  * (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up task
  * tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
  */
-export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
+export const READ_CHARGE_MAX_BYTES = 1 * MIB;
 
 /**
  * The bytes before base64 of the pictures and documents a Read's result carries: every `base64` string in
@@ -111,8 +111,8 @@ export function readCharge(
       kind,
       bytes:
         kind === 'PDF'
-          ? pagesCharged(pages) * READ_PICTURE_CHARGE_MAX_BYTES
-          : Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES),
+          ? pagesCharged(pages) * READ_CHARGE_MAX_BYTES
+          : Math.min(stat.size, READ_CHARGE_MAX_BYTES),
     };
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
@@ -133,7 +133,7 @@ export function unreadableImages(
   let left = room;
   const names: string[] = [];
   for (const file of files) {
-    const charge = Math.min(file.size, READ_PICTURE_CHARGE_MAX_BYTES);
+    const charge = Math.min(file.size, READ_CHARGE_MAX_BYTES);
     if (charge <= left) left -= charge;
     else names.push(file.name);
   }
@@ -150,13 +150,6 @@ export const unreadableImagesNotice = (names: readonly string[]): string =>
   `Tell Claude which picture matters most so it Reads that one first, or send ` +
   `${names.length === 1 ? 'it' : 'them'} in a new conversation.`;
 
-/**
- * The bytes of Read pictures the live session carries: the counted lines after the latest digest or
- * fresh-start line, which mark where the session began (§5.5).
- */
-export const readPictureBytesSpent = (messages: readonly ShapeMessageDto[]): number =>
-  readBytesSpent(messages);
-
 /** The line that corrects a Read's counted charge to what its result measured. */
 export { readMeasuredLine };
 
@@ -164,7 +157,7 @@ export { readMeasuredLine };
  * Why a Read is refused, or null when it fits within `ceiling` (`readCeiling`) beside the pictures and
  * PDFs already read.
  */
-export function readPictureRefusal(
+export function readRefusal(
   path: string,
   charge: number,
   spent: number,
@@ -173,10 +166,7 @@ export function readPictureRefusal(
 ): string | null {
   if (spent + charge <= ceiling) return null;
   if (kind === 'PDF') {
-    const room = Math.min(
-      PDF_PAGES_MAX,
-      Math.floor((ceiling - spent) / READ_PICTURE_CHARGE_MAX_BYTES),
-    );
+    const room = Math.min(PDF_PAGES_MAX, Math.floor((ceiling - spent) / READ_CHARGE_MAX_BYTES));
     const next =
       room > 0
         ? `Read it again with \`pages\` naming one page or range, such as "1-${String(room)}": up to ${String(room)} pages fit`
