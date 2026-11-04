@@ -40,8 +40,9 @@ const SELECT_PRINCIPLE = sql`
          ELSE ${KnowledgeState.Current} END AS state,
     p.supersedes_id AS supersedesId, ${SUCCESSOR} AS supersededById, p.source_id AS sourceId,
     p.source_quote AS sourceQuote, p.speaker AS speaker, p.confirmed_by AS confirmedBy,
-    p.confirmed_at AS confirmedAt, p.retired_at AS retiredAt, p.retired_reason AS retiredReason,
-    p.withdrawn_at AS withdrawnAt, p.withdrawn_reason AS withdrawnReason,
+    p.confirmed_at AS confirmedAt, p.retired_at AS retiredAt, p.retired_by AS retiredBy,
+    p.retired_reason AS retiredReason, p.withdrawn_at AS withdrawnAt, p.withdrawn_by AS withdrawnBy,
+    p.withdrawn_reason AS withdrawnReason,
     p.created_at AS createdAt, p.updated_at AS updatedAt
   FROM principles p`;
 
@@ -67,7 +68,7 @@ export function getPrinciple(db: DbReader, id: PrincipleId): PrincipleDto {
   return row;
 }
 
-/** The stored row, for the columns a `PrincipleDto` leaves out: who retired or withdrew it. */
+/** The stored row, for the columns a `PrincipleDto` leaves out: the source ids of its actions. */
 export function getPrincipleRow(
   db: DbReader,
   id: PrincipleId,
