@@ -33,6 +33,13 @@ const swapped = vi.hoisted(() => ({
   blockingOpens: 0,
   opens: 0,
 }));
+// A test can also run code at `race.path` just before and just after its open, the window in which a lane
+// swaps a directory above the file between a real directory and a link.
+const race = vi.hoisted(() => ({
+  path: null as string | null,
+  beforeOpen: null as (() => void) | null,
+  afterOpen: null as (() => void) | null,
+}));
 vi.mock('node:fs', async (importOriginal) => {
   const real = await importOriginal<typeof fs>();
   return {
@@ -59,7 +66,9 @@ vi.mock('node:fs/promises', async (importOriginal) => {
           throw new Error('open of a FIFO would block');
         }
       }
+      if (path === race.path) race.beforeOpen?.();
       const handle = await real.open(path, flags);
+      if (path === race.path) race.afterOpen?.();
       if (path !== moving.path) return handle;
       moving.opens++;
       // Each stat of the file reports a later modification time than the one before.
@@ -107,6 +116,9 @@ describe('stampOrReason', () => {
     moving.stats = 0;
     moving.opens = 0;
     moving.pathStats = 0;
+    race.path = null;
+    race.beforeOpen = null;
+    race.afterOpen = null;
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
@@ -170,7 +182,9 @@ describe('stampOrReason', () => {
     writeFileSync(join(root, 'plain.txt'), 'hello');
     moving.watched = join(root, 'plain.txt');
     expect('stamp' in (await stampOrReason(root, 'plain.txt'))).toBe(true);
-    expect(moving.pathStats).toBe(0);
+    // One lookup, after the read: `lstat` of the path to compare its device and inode with the descriptor's.
+    // The type and the times in the stamp come from the descriptor alone.
+    expect(moving.pathStats).toBe(1);
   });
 
   describe('a large file', () => {
@@ -350,6 +364,49 @@ describe('stampOrReason', () => {
       const viaLink = join(root, 'checkout-link');
       symlinkSync(root, viaLink);
       expect('stamp' in (await stampOrReason(viaLink, 'real/file.txt'))).toBe(true);
+    });
+  });
+
+  // The ancestor check is synchronous, the open is not: a lane that flips `sub` between a real directory and a
+  // link to another directory can have the open land on the link. The descriptor is then checked against the
+  // path and its ancestors once the read is done.
+  describe('a directory swapped for a link between the ancestor check and the open', () => {
+    beforeEach(() => {
+      mkdirSync(join(root, 'real'));
+      writeFileSync(join(root, 'real/file.txt'), 'secret through the link');
+      putDir('inside the checkout');
+      race.path = join(root, 'sub/file.txt');
+      // The link goes in just before the open, so the open reaches real/file.txt through it. The lane keeps
+      // flipping, so every read of the file meets the swap.
+      race.beforeOpen = () => {
+        rmSync(join(root, 'sub'), { recursive: true, force: true });
+        symlinkSync(join(root, 'real'), join(root, 'sub'));
+      };
+    });
+
+    /** `sub` as a real directory holding `file.txt` with `text`: a new directory, so another inode. */
+    function putDir(text: string): void {
+      rmSync(join(root, 'sub'), { recursive: true, force: true });
+      mkdirSync(join(root, 'sub'));
+      writeFileSync(join(root, 'sub/file.txt'), text);
+    }
+
+    it('gives no stamp when the link is left in place', async () => {
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no stamp when the directory is put back after the open', async () => {
+      race.afterOpen = () => {
+        putDir('inside the checkout');
+      };
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+
+    it('gives no stamp when a copy of the file is put back after the open', async () => {
+      race.afterOpen = () => {
+        putDir('secret through the link');
+      };
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
     });
   });
 });
