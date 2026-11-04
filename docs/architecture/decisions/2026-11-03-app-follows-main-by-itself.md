@@ -46,7 +46,10 @@ one quit instead of two. While lanes are busy and the head has not moved, it doe
 **When it installs.** Only when nothing is mid-session: no lane holding a session (`countLanes`'s states, and a
 `WAITING_HUMAN` workstream with a live session), no workstream with a gate process, no batch `CUTTING` or
 `SHIPPING` (`countMidSession`, `packages/db`), and no delivery job queued or running (`DeliveryJobs.pending()`: a
-ship, checkout return or cleanup is a job before it is a row). Queued, held, paused and waiting work does not
+ship, checkout return or cleanup is a job before it is a row), and no shaping conversation with a turn running or
+queued (`ShapeService.turnsInProgress()`, counted once per conversation). A shape session is no workstream, and a
+quit mid-turn would cut off the answer the builder is waiting on; the drain does not park it, so it ends with the
+turn. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
