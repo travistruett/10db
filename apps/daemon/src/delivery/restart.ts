@@ -9,7 +9,6 @@ import {
 import { getBatch, getTask, getWorkstream, listWorkstreams } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
-import { retryWorkstream } from '../team';
 import type { BatchStarter } from './start';
 import type { Shipper } from './ship';
 
@@ -53,8 +52,7 @@ export function createFailedRestarts(deps: {
     continueRun(taskId) {
       const failed = failedRun(taskId);
       if (!failed) return null;
-      const retried = retryWorkstream(deps.state, failed.workstream.id);
-      deps.starter.reopen(failed.batch.id);
+      const retried = deps.starter.retry(failed.workstream.id);
       // The run is going again: the card that offered Retry for its failure has been answered.
       deps.inbox.cancelForWorkstream(failed.workstream.id);
       return retried;

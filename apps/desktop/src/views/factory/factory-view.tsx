@@ -4,6 +4,7 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
+import { UpdateDrainNote } from './update-drain-note';
 
 /** Factory: the project's goals, each opening to its digest, sessions and pull requests (goals spec §8). */
 export function FactoryView() {
@@ -25,6 +26,7 @@ function Factory() {
             <Title order={2}>Factory</Title>
             <BenchmarkSyncNote />
           </Group>
+          <UpdateDrainNote />
           <Text size="sm" c="dimmed">
             Goals 10db is pursuing in this project
           </Text>

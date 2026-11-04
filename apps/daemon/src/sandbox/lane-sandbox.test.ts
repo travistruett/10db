@@ -64,6 +64,7 @@ function sandbox(
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
     runtime: FAKE_SRT,
+    worktreeRoot: join(dataDir, 'worktrees'),
   });
 }
 
@@ -693,6 +694,28 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('gives the file tools the worktrees folder, so a path outside the lane’s copy is refused', async () => {
+    const worktreeRoot = join(root, 'worktrees');
+    const session = await createLaneSandbox({
+      home,
+      dataDir,
+      loginConfigDir: null,
+      tmpRoot,
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      worktreeRoot,
+    }).forSession(input());
+    try {
+      expect(session.fileAccess.worktreeRoot).toBe(worktreeRoot);
+      expect(readAccess(join(worktreeRoot, 'p', 'apps', 'a.ts'), session.fileAccess).access).toBe(
+        'outside-copy',
+      );
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("protects the login shell's config dir too", async () => {
     const login = join(home, '.config', 'claude-login');
     const session = await sandbox({ loginConfigDir: login }).forSession(input());
@@ -1091,6 +1114,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
+      worktreeRoot: join(dataDir, 'worktrees'),
       processes: {
         table: () =>
           tableFails

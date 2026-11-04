@@ -19,8 +19,11 @@ import {
 const RUNNING = 'a'.repeat(40);
 const NEW = 'b'.repeat(40);
 const NEWER = 'c'.repeat(40);
+/** A build that finished before the head's: the one the builder rolled back from. */
+const OLD_BUILD = 'd'.repeat(40);
 const STAGED = { dir: '/data/self-update/stage', commit: NEW };
 const STAGED_OK: StageResult = { ok: true, current: false, ...STAGED };
+const WAIT_LIMIT_MS = 15 * 60_000;
 
 let close: () => void;
 let state: StateStore;
@@ -32,8 +35,8 @@ interface World {
   head: string | Error;
   /** Whether main's head is ahead of the running commit, as GitHub's comparison says. */
   ahead: boolean | Error;
-  /** Whether the staged build is ahead of the running commit. */
-  stagedAhead: boolean;
+  /** Whether the staged build is ahead of the running commit; an error when GitHub can't say. */
+  stagedAhead: boolean | Error;
   /** The repositories and running commits stage was asked about. */
   stagedFrom: string[];
   stagedFor: string[];
@@ -50,7 +53,13 @@ interface World {
   rolledBackFrom: string | null;
   /** Called as the installer's apply is: a throw here is a synchronous throw from apply. */
   apply: () => { readonly ok: true } | Extract<ApplyResult, { ok: false }>;
+  /** Settles when apply answers: until then the install is starting. */
+  applyAnswers: Promise<void>;
   busy: number;
+  /** How long a staged build waits for an idle moment before the factory drains for it. */
+  waitLimitMs: number;
+  /** When the drain began, as the update told the factory; null while it does not drain. */
+  drainedSince: Date | null;
   /** What the work count becomes once new work is paused: a lane that started in between. */
   busyAfterPause: number | null;
   /** Settles once the scheduler is stopped and has finished the tick it was in. */
@@ -91,7 +100,9 @@ function make(
           ? Promise.reject(world.ahead)
           : Promise.resolve(world.ahead);
       }
-      return Promise.resolve(world.stagedAhead);
+      return world.stagedAhead instanceof Error
+        ? Promise.reject(world.stagedAhead)
+        : Promise.resolve(world.stagedAhead);
     },
     stage: (target, running, skip) => {
       world.calls.push('stage');
@@ -118,13 +129,24 @@ function make(
     apply: () => {
       world.calls.push('apply');
       const result = world.apply();
-      if (!result.ok) return Promise.resolve(result);
+      if (!result.ok) return world.applyAnswers.then(() => result);
       const ended = new Promise<void>((resolve) => {
         world.endScript = resolve;
       });
-      return Promise.resolve({ ...result, ended });
+      return world.applyAnswers.then(() => ({ ...result, ended }));
     },
     midSession: () => world.busy,
+    waitLimitMs: () => world.waitLimitMs,
+    drain: {
+      begin: (since) => {
+        world.calls.push('drain');
+        world.drainedSince = since;
+      },
+      end: () => {
+        world.calls.push('undrain');
+        world.drainedSince = null;
+      },
+    },
     pause: () => {
       world.calls.push('pause');
       if (world.busyAfterPause !== null) world.busy = world.busyAfterPause;
@@ -166,7 +188,10 @@ beforeEach(() => {
     enabled: true,
     rolledBackFrom: null,
     apply: () => ({ ok: true }),
+    applyAnswers: Promise.resolve(),
     busy: 0,
+    waitLimitMs: WAIT_LIMIT_MS,
+    drainedSince: null,
     busyAfterPause: null,
     status: null,
     endScript: () => undefined,
@@ -382,6 +407,439 @@ describe('tick', () => {
     expect(cards()).toEqual([]);
     world.head = NEW;
     expect(await update.tick()).toBe('applying');
+  });
+});
+
+describe('a waiting update drains the factory', () => {
+  it('waits quietly while the update has waited less than the limit', async () => {
+    world.busy = 3;
+    const update = make();
+    await update.tick();
+    clock.advance(WAIT_LIMIT_MS - 1);
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).not.toContain('drain');
+    expect(update.status().draining).toBe(false);
+  });
+
+  it('says since when the update has waited', async () => {
+    world.busy = 3;
+    const update = make();
+    expect(update.status().waitingSince).toBeNull();
+    const stagedAt = clock.now();
+    await update.tick();
+    expect(update.status().waitingSince).toEqual(stagedAt);
+    clock.advance(60_000);
+    await update.tick();
+    expect(update.status().waitingSince).toEqual(stagedAt);
+  });
+
+  it('starts the drain once the update has waited the limit, and says since when', async () => {
+    world.busy = 3;
+    const update = make();
+    await update.tick();
+    clock.advance(WAIT_LIMIT_MS);
+    const drainStart = clock.now();
+    expect(await update.tick()).toBe('draining');
+    expect(world.calls).toEqual(['stage', 'drain']);
+    expect(world.drainedSince).toEqual(drainStart);
+    expect(update.status().draining).toBe(true);
+    expect(update.status().drainingSince).toEqual(drainStart);
+    // Another look while it drains does not start it again.
+    clock.advance(60_000);
+    expect(await update.tick()).toBe('draining');
+    expect(world.calls).toEqual(['stage', 'drain']);
+    expect(update.status().drainingSince).toEqual(drainStart);
+  });
+
+  it('drains at once with a limit of 0 minutes', async () => {
+    world.busy = 1;
+    world.waitLimitMs = 0;
+    expect(await make().tick()).toBe('draining');
+  });
+
+  it('installs when the running steps have finished, and keeps holding new work until the relaunch', async () => {
+    world.busy = 3;
+    const update = make();
+    await update.tick();
+    clock.advance(WAIT_LIMIT_MS);
+    await update.tick();
+    world.busy = 1;
+    expect(await update.tick()).toBe('draining');
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls).toEqual(['stage', 'drain', 'pause', 'apply']);
+    expect(update.status().draining).toBe(true);
+  });
+
+  it('lets lanes start again when the install does not start', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    world.busy = 0;
+    world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+    expect(await update.tick()).toBe('failed');
+    expect(world.calls).toEqual(['stage', 'drain', 'pause', 'apply', 'resume', 'undrain']);
+    expect(update.status().draining).toBe(false);
+    expect(update.status().waitingSince).toBeNull();
+  });
+
+  it('lets lanes start again when the install script ends with this daemon still running', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    world.busy = 0;
+    await update.tick();
+    world.status = { ok: false, step: 'quit', message: 'would not quit', commit: NEW };
+    world.endScript();
+    await waitFor(() => world.calls.includes('undrain'));
+    expect(update.status().draining).toBe(false);
+  });
+
+  it('keeps draining when a lane started between the idle check and the pause', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    world.busy = 0;
+    world.busyAfterPause = 1;
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).not.toContain('undrain');
+  });
+
+  it('cancels the drain when the switch is turned off', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    expect(update.status().draining).toBe(true);
+    await update.turnOff();
+    expect(world.calls).toContain('undrain');
+    expect(update.status().draining).toBe(false);
+    expect(update.status().waitingSince).toBeNull();
+  });
+
+  it('cancels the drain when a check finds the switch off', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    world.enabled = false;
+    expect(await update.tick()).toBe('off');
+    expect(update.status().draining).toBe(false);
+  });
+
+  it('cancels the drain when main is back at the running commit', async () => {
+    world.busy = 3;
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    world.head = RUNNING;
+    expect(await update.tick()).toBe('current');
+    expect(update.status().draining).toBe(false);
+    expect(update.status().waitingSince).toBeNull();
+  });
+
+  describe('once the install has started', () => {
+    /** Drains for a lane, which ends, so the next check starts the install. */
+    async function installing() {
+      world.busy = 1;
+      world.waitLimitMs = 0;
+      const update = make();
+      await update.tick();
+      world.busy = 0;
+      return update;
+    }
+
+    it('holds lanes back when the switch is turned off as the install starts: the quit would cut them off', async () => {
+      let answer: () => void = () => undefined;
+      world.applyAnswers = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      const update = await installing();
+      const check = update.tick();
+      await waitFor(() => world.calls.includes('apply'));
+      world.enabled = false;
+      await update.turnOff();
+      expect(update.status().draining).toBe(true);
+      expect(world.calls).not.toContain('undrain');
+      answer();
+      expect(await check).toBe('applying');
+      expect(update.status().draining).toBe(true);
+      expect(world.calls).not.toContain('undrain');
+    });
+
+    it('holds lanes back when the switch is turned off with the install script running', async () => {
+      const update = await installing();
+      expect(await update.tick()).toBe('applying');
+      world.enabled = false;
+      await update.turnOff();
+      expect(update.status().draining).toBe(true);
+      expect(world.calls).not.toContain('undrain');
+      // A check while the script runs changes nothing.
+      expect(await update.tick()).toBe('working');
+      expect(world.calls).not.toContain('undrain');
+    });
+
+    it('lets lanes start again when the switch was turned off and the install then ends with this daemon running', async () => {
+      const update = await installing();
+      await update.tick();
+      world.enabled = false;
+      await update.turnOff();
+      world.status = { ok: false, step: 'quit', message: 'would not quit', commit: NEW };
+      world.endScript();
+      await waitFor(() => world.calls.includes('undrain'));
+      expect(update.status().draining).toBe(false);
+    });
+
+    it('lets lanes start again when the switch was turned off and the install then does not start', async () => {
+      let answer: () => void = () => undefined;
+      world.applyAnswers = new Promise<void>((resolve) => {
+        answer = resolve;
+      });
+      world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+      const update = await installing();
+      const check = update.tick();
+      await waitFor(() => world.calls.includes('apply'));
+      world.enabled = false;
+      await update.turnOff();
+      expect(update.status().draining).toBe(true);
+      answer();
+      expect(await check).toBe('failed');
+      expect(update.status().draining).toBe(false);
+      expect(world.calls).toContain('undrain');
+    });
+
+    it('turns off as ever when the install did not start: the next one is not held up', async () => {
+      world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+      const update = await installing();
+      expect(await update.tick()).toBe('failed');
+      world.busy = 1;
+      world.apply = () => ({ ok: true });
+      world.head = NEWER;
+      expect(await update.tick()).toBe('draining');
+      world.enabled = false;
+      await update.turnOff();
+      expect(update.status().draining).toBe(false);
+    });
+  });
+
+  describe('while GitHub cannot be reached', () => {
+    const lost: readonly (readonly [string, () => void])[] = [
+      [
+        'the head of main',
+        () => {
+          world.head = new Error('offline');
+        },
+      ],
+      [
+        'how main compares',
+        () => {
+          world.ahead = new Error('offline');
+        },
+      ],
+    ];
+
+    it.each(lost)(
+      'installs the staged build once the running steps end, unable to ask %s',
+      async (_name, lose) => {
+        world.busy = 1;
+        world.waitLimitMs = 0;
+        const update = make();
+        expect(await update.tick()).toBe('draining');
+        lose();
+        expect(await update.tick()).toBe('draining');
+        expect(world.calls).not.toContain('undrain');
+        world.busy = 0;
+        expect(await update.tick()).toBe('applying');
+        expect(world.calls).toEqual(['stage', 'drain', 'pause', 'apply']);
+      },
+    );
+
+    it('starts the drain for a staged build that has waited the limit', async () => {
+      world.busy = 1;
+      const update = make();
+      await update.tick();
+      clock.advance(WAIT_LIMIT_MS);
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('draining');
+    });
+
+    it('installs a staged build at an idle moment, with no drain', async () => {
+      world.busy = 1;
+      const update = make();
+      await update.tick();
+      world.head = new Error('offline');
+      world.busy = 0;
+      expect(await update.tick()).toBe('applying');
+    });
+
+    it('does not try a staged build again once its install failed', async () => {
+      world.busy = 1;
+      world.waitLimitMs = 0;
+      const update = make();
+      await update.tick();
+      world.busy = 0;
+      world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+      expect(await update.tick()).toBe('failed');
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      expect(world.calls.filter((call) => call === 'apply')).toEqual(['apply']);
+      expect(update.status().draining).toBe(false);
+    });
+
+    /** Drains for a build, then main moves on and the build fetched for it can't be compared. */
+    async function drainedThenLostNewBuild() {
+      world.busy = 1;
+      const update = make();
+      await update.tick();
+      clock.advance(WAIT_LIMIT_MS);
+      await update.tick();
+      world.head = NEWER;
+      world.stagedAhead = new Error('offline');
+      return update;
+    }
+
+    it('ends the drain when the build fetched for a newer head cannot be compared: nothing is left to install', async () => {
+      const update = await drainedThenLostNewBuild();
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().draining).toBe(false);
+      expect(world.calls).toContain('undrain');
+    });
+
+    it('keeps the time the update has waited through that, and drains again at once with the next build', async () => {
+      const stagedAt = clock.now();
+      const update = await drainedThenLostNewBuild();
+      await update.tick();
+      expect(update.status().waitingSince).toEqual(stagedAt);
+      world.stagedAhead = true;
+      expect(await update.tick()).toBe('draining');
+      expect(update.status().waitingSince).toEqual(stagedAt);
+    });
+  });
+
+  describe('Install Now', () => {
+    it('drains at once, though the update has waited no time', async () => {
+      world.busy = 3;
+      const update = make();
+      await update.tick();
+      const drainStart = clock.now();
+      update.installNow();
+      expect(world.calls).toEqual(['stage', 'drain']);
+      expect(update.status().drainingSince).toEqual(drainStart);
+      // The check it starts finds the drain on and the work still running.
+      await settled();
+      expect(world.calls).toEqual(['stage', 'drain']);
+    });
+
+    it('installs on the check it starts when the running steps have finished', async () => {
+      world.busy = 3;
+      const update = make();
+      await update.tick();
+      world.busy = 0;
+      update.installNow();
+      await waitFor(() => world.calls.includes('apply'));
+      expect(world.calls).toEqual(['stage', 'pause', 'apply']);
+    });
+
+    it('does nothing when there is no update', async () => {
+      world.head = RUNNING;
+      const update = make();
+      await update.tick();
+      update.installNow();
+      expect(world.calls).toEqual([]);
+      expect(update.status().draining).toBe(false);
+    });
+
+    it('drains as soon as the build is staged when it was asked for before', async () => {
+      world.busy = 3;
+      let finish: (result: StageResult) => void = () => undefined;
+      world.stage = () =>
+        new Promise<StageResult>((resolve) => {
+          finish = resolve;
+        });
+      const update = make();
+      const first = update.tick();
+      await waitFor(() => world.calls.includes('stage'));
+      // An update is known to be available (main is ahead) but still being fetched.
+      update.installNow();
+      expect(world.calls).toEqual(['stage']);
+      finish(STAGED_OK);
+      expect(await first).toBe('draining');
+    });
+
+    const NOT_YET: readonly (readonly [string, () => void])[] = [
+      [
+        'the newest finished build is the one that runs',
+        () => {
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+        },
+      ],
+      [
+        'the newest finished build is not ahead of the running one',
+        () => {
+          world.stage = () => Promise.resolve({ ...STAGED_OK, commit: OLD_BUILD });
+          world.stagedAhead = false;
+        },
+      ],
+      [
+        'the newest finished build is the one the builder rolled back from, and the stage skipped it',
+        () => {
+          world.rolledBackFrom = OLD_BUILD;
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: OLD_BUILD });
+        },
+      ],
+      [
+        'the newest finished build is the one the builder rolled back from, and the stage fetched it',
+        () => {
+          world.rolledBackFrom = OLD_BUILD;
+          world.stage = () => Promise.resolve({ ...STAGED_OK, commit: OLD_BUILD });
+        },
+      ],
+    ];
+
+    it.each(NOT_YET)('is remembered while %s', async (_name, noBuildYet) => {
+      world.busy = 3;
+      noBuildYet();
+      const update = make();
+      update.settle();
+      await update.tick();
+      expect(update.status().availableCommit).toBe(NEW);
+      update.installNow();
+      await settled();
+      expect(update.status().draining).toBe(false);
+      // The build is staged at last: the update has waited no time, yet the factory drains.
+      world.stage = () => Promise.resolve(STAGED_OK);
+      world.stagedAhead = true;
+      expect(await update.tick()).toBe('draining');
+    });
+
+    it('is forgotten when main is back at the running commit', async () => {
+      world.busy = 3;
+      const update = make();
+      await update.tick();
+      update.installNow();
+      await settled();
+      world.head = RUNNING;
+      expect(await update.tick()).toBe('current');
+      world.head = NEW;
+      expect(await update.tick()).toBe('busy');
+      expect(update.status().draining).toBe(false);
+    });
+
+    it('is forgotten when the switch is turned off', async () => {
+      world.busy = 3;
+      const update = make();
+      await update.tick();
+      update.installNow();
+      world.enabled = false;
+      await update.turnOff();
+      await settled();
+      world.enabled = true;
+      expect(await update.tick()).toBe('busy');
+      expect(update.status().draining).toBe(false);
+    });
   });
 });
 

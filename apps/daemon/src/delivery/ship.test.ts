@@ -666,6 +666,99 @@ describe('shipping', () => {
   });
 });
 
+describe('a waiting update that drains the factory', () => {
+  it('starts no ship while it drains, and ships the batch once lanes may start again', async () => {
+    let draining = true;
+    h = createDeliveryHarness({}, { holdShips: () => draining });
+    const { batch } = await openBatch('Held', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    const held = await finishAll(batch);
+    // Every member is done, yet the batch stays open: nothing is pushed or opened.
+    expect(held.state).toBe('OPEN');
+    expect(onOrigin(batch.branch)).toBeNull();
+    expect(h.gh.prCreates()).toEqual([]);
+    expect(h.jobs.pending()).toBe(0);
+
+    draining = false;
+    h.shipper.checkOpenBatches();
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+    expect(h.gh.prCreates()).toHaveLength(1);
+  });
+
+  it('does not stop a ship that began before the drain', async () => {
+    let draining = false;
+    h = createDeliveryHarness({}, { holdShips: () => draining });
+    const { batch } = await openBatch('Running', 'Alpha');
+    h.commit('src/api/alpha.txt');
+    for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
+    draining = true;
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+  });
+
+  describe('a ship the builder asks for', () => {
+    const ASKS: readonly (readonly [string, (id: BatchDto['id']) => BatchDto])[] = [
+      ['Ship anyway or Retry on the Board', (id) => h.shipper.ship(id)],
+      ['Ship anyway on a failed task’s card', (id) => h.shipper.shipAnyway(id)],
+    ];
+
+    /** Refuses `ask` while it drains, leaves the batch as it was, and ships it once it ended. */
+    async function refusedThenShipped(
+      batch: BatchDto,
+      state: BatchDto['state'],
+      ask: (id: BatchDto['id']) => BatchDto,
+      endDrain: () => void,
+    ) {
+      expect(() => ask(batch.id)).toThrow(ConflictError);
+      expect(() => ask(batch.id)).toThrow(/waiting update/);
+      expect(getBatch(h.store.db, batch.id).state).toBe(state);
+      expect(h.jobs.pending()).toBe(0);
+      expect(h.gh.prCreates()).toEqual([]);
+
+      endDrain();
+      expect(ask(batch.id).state).toBe('SHIPPING');
+      await h.jobs.idle();
+      expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+    }
+
+    it.each(ASKS)('refuses %s for an open batch while it drains', async (_name, ask) => {
+      let draining = true;
+      h = createDeliveryHarness({}, { holdShips: () => draining });
+      const { batch, workstreams } = await openBatch('Held', 'Alpha');
+      h.commit('src/api/alpha.txt');
+      h.settle(h.only(workstreams).id, 'FAILED');
+      await refusedThenShipped(batch, 'OPEN', ask, () => {
+        draining = false;
+      });
+    });
+
+    it.each(ASKS)('refuses %s for a failed batch while it drains', async (_name, ask) => {
+      let draining = true;
+      h = createDeliveryHarness({}, { holdShips: () => draining });
+      const { batch, workstreams } = await openBatch('Held', 'Alpha');
+      h.commit('src/api/alpha.txt');
+      h.settle(h.only(workstreams).id, 'DONE');
+      h.state.write((c) =>
+        transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
+      );
+      await refusedThenShipped(batch, 'FAILED', ask, () => {
+        draining = false;
+      });
+    });
+
+    it('lets Retry reopen a failed batch with unfinished work: that ships nothing', async () => {
+      h = createDeliveryHarness({}, { holdShips: () => true });
+      const { batch } = await openBatch('Held', 'Alpha');
+      h.commit('src/api/alpha.txt');
+      h.state.write((c) =>
+        transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
+      );
+      expect(h.shipper.ship(batch.id)).toMatchObject({ state: 'OPEN', failure: null });
+    });
+  });
+});
+
 describe('the push', () => {
   it("ships without running the clone's pre-push hook, which a lane can write", async () => {
     h = createDeliveryHarness();

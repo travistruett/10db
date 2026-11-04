@@ -43,6 +43,7 @@ import {
   RetryInput,
   RoutingRulesInput,
   SelfUpdateInput,
+  SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
   ShapeConvertInput,
@@ -833,6 +834,18 @@ export function createApp(deps: ApiDeps) {
         return c.json(deps.selfUpdate.setSelfUpdate(c.req.valid('json').enabled));
       },
     )
+    .put(
+      '/settings/self-update/wait',
+      validator('json', (value): SelfUpdateWaitInput => SelfUpdateWaitInput.parse(value)),
+      (c) => {
+        if (!deps.selfUpdate) return c.json({ error: 'not_implemented' }, 501);
+        return c.json(deps.selfUpdate.setSelfUpdateWait(c.req.valid('json').minutes));
+      },
+    )
+    .post('/settings/self-update/install-now', (c) => {
+      if (!deps.selfUpdate) return c.json({ error: 'not_implemented' }, 501);
+      return c.json(deps.selfUpdate.installNow());
+    })
     .get('/settings/keep-awake', (c) => c.json(deps.services.keepAwake()))
     .put(
       '/settings/keep-awake',

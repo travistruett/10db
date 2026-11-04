@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { CommitSha, HealthResponse, SelfUpdateInput, SelfUpdateStatusDto } from './index';
+import {
+  CommitSha,
+  HealthResponse,
+  SelfUpdateInput,
+  SelfUpdateStatusDto,
+  SelfUpdateWaitInput,
+} from './index';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 
@@ -44,14 +50,40 @@ describe('SelfUpdateInput', () => {
   });
 });
 
+describe('SelfUpdateWaitInput', () => {
+  it.each([0, 15, 1440, null])('takes %s minutes', (minutes) => {
+    expect(SelfUpdateWaitInput.parse({ minutes })).toEqual({ minutes });
+  });
+
+  it.each([-1, 1.5, 1441, '15'])('refuses %j', (minutes) => {
+    expect(SelfUpdateWaitInput.safeParse({ minutes }).success).toBe(false);
+  });
+});
+
 describe('SelfUpdateStatusDto', () => {
-  it('describes the switch and the commits', () => {
-    const status = {
-      enabled: true,
-      isDefault: true,
-      runningCommit: SHA,
-      availableCommit: null,
-    };
+  const status = {
+    enabled: true,
+    isDefault: true,
+    runningCommit: SHA,
+    availableCommit: null,
+    waitMinutes: 15,
+    waitingSince: null,
+    draining: false,
+    drainingSince: null,
+  };
+
+  it('describes the switch, the commits and the wait', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
+  });
+
+  it('says since when an update waits and drains', () => {
+    const draining = {
+      ...status,
+      availableCommit: SHA,
+      waitingSince: '2026-11-03T12:00:00.000Z',
+      draining: true,
+      drainingSince: '2026-11-03T12:15:00.000Z',
+    };
+    expect(SelfUpdateStatusDto.parse(draining)).toEqual(draining);
   });
 });

@@ -285,6 +285,16 @@ describe('task placement', () => {
         placementReason: null,
       });
     });
+
+    it('a copy proposed with no reason leaves a shared task with no reason where it is', () => {
+      // The project's default is a separate copy, so the rule answers worktree without matching.
+      const task = addTask(project().id, { workspaceMode: 'shared' });
+      const unmatched = { workspaceMode: 'worktree', reason: null } as const;
+      expect(edit(task.id, unmatched)).toMatchObject({
+        workspaceMode: 'shared',
+        placementReason: null,
+      });
+    });
   });
 
   it('a placement patch is refused in a project with local delivery', () => {

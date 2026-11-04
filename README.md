@@ -38,6 +38,10 @@ Status: under construction. The design is in
   waiting tasks carry on afterwards). It quits, backs up the database, keeps the old app as above and opens the
   new one, so `make rollback-app` works the same. The header shows the commit the app runs, and Settings >
   Updates turns the self-update off; turning it off also stops a download under way, and nothing installs after.
+  An update that has waited past a limit (15 minutes unless you change it in Settings > Updates) pauses the factory:
+  10db starts no new step, session, gate or ship, lets what runs finish, then installs, and the lanes resume after
+  the restart. Nothing running is stopped. Settings and the Factory view say an update is waiting or draining and
+  since when; Install Now starts the pause at once, and turning the self-update off cancels it.
   When a build or install fails, the app keeps running (or the previous app is put back), the lanes resume, and
   one card in the Inbox names the failing step.
 - `make rollback-app` unzips that app into place and keeps the one it replaces as the zip, so running it again
