@@ -2261,6 +2261,25 @@ describe('complete_step', () => {
       for (const task of filed) expect(result?.summary).toContain(`${task.id} ${task.title}`);
     });
 
+    it('files them even after the step has filed the shared cap, and does not use up that cap', async () => {
+      const s = await onStep('review');
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1)
+        await s.call('file_follow_up', {
+          opId: `op-step-cap-${String(i).padStart(2, '0')}`,
+          title: `Left over ${String(i)}`,
+          description: 'Not done.',
+        });
+      const result = await s.call('complete_step', {
+        opId: 'op-step-0016',
+        summary: 'Fixed as asked.',
+        verdict: 'approve',
+        followUps,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.json).toMatchObject({ followUps: [{}, {}] });
+      expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS + followUps.length);
+    });
+
     it('files them once on an opId replay', async () => {
       const s = await onStep('review');
       const args = { opId: 'op-step-0011', summary: 'Fine.', verdict: 'approve', followUps };
