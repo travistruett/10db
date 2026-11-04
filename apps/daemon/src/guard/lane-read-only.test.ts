@@ -101,6 +101,26 @@ describe('laneReadOnlyWords', () => {
     expect(readOnlyShellRefusal(command)).not.toBeNull();
   });
 
+  it.each<[string, string, string]>([
+    ['git grep -eOption', 'git grep -eOption', '-e O'],
+    ['git grep -O', 'git grep -O less x', 'git grep -O'],
+    ['git diff --output', 'git diff --output=x', '--output'],
+    ['git log --out (abbreviated)', 'git log --out=x', '--output'],
+    ['git diff --ext-diff', 'git diff --ext-diff', '--ext-diff'],
+    ['git diff --ext (abbreviated)', 'git diff --ext', '--ext-diff'],
+    ['git diff --textconv', 'git diff --textconv', '--textconv'],
+    ['git grep --textconv', 'git grep --textconv x', '--textconv'],
+  ])('%s is refused with a message that says why', (_name, command, mention) => {
+    expect(readOnlyShellRefusal(command)).toContain(mention);
+  });
+
+  it('keeps the generic message for a command that is not read-only git', () => {
+    expect(readOnlyShellRefusal('git checkout -- a.ts')).toContain(
+      'shell accepts only plain words',
+    );
+    expect(readOnlyShellRefusal('rm a')).toContain('shell accepts only plain words');
+  });
+
   it('adds ps for lanes without widening the read-only steps', () => {
     expect(laneReadOnlyWords('ps aux')).not.toBeNull();
     expect(readOnlyShellRefusal('ps aux')).not.toBeNull();
