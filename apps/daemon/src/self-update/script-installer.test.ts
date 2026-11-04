@@ -1,9 +1,9 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SELF_UPDATE_SWITCH } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
-import { SELF_UPDATE_SWITCH } from './blocker';
 import { createScriptInstaller, type ScriptInstaller } from './script-installer';
 
 const COMMIT = 'd'.repeat(40);

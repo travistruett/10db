@@ -1,4 +1,9 @@
-import { BatchState, WorkstreamState as S, type WorkstreamId } from '@10db/contracts';
+import {
+  BatchState,
+  WorkstreamState as S,
+  type SessionId,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { insertBatch, transitionBatch } from './batches';
 import type { Store } from './store';
@@ -6,6 +11,7 @@ import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import {
   countMidSession,
+  countWaitingOnCard,
   insertWorkstream,
   patchWorkstream,
   transitionWorkstream,
@@ -59,6 +65,46 @@ describe('countMidSession', () => {
       patchWorkstream(ctx, id, null, { gatePid: 4242, gatePidStart: 'x' });
     });
     expect(countMidSession(store.db)).toBe(1);
+  });
+
+  describe('a lane waiting on a card', () => {
+    function waitingOnCard(): WorkstreamId {
+      const id = workstream();
+      moveThrough(id, [S.Starting, S.Running]);
+      store.write((ctx) => {
+        patchWorkstream(ctx, id, null, {
+          currentSessionId: 'ses_01a00000-0000-7000-8000-000000000001' as SessionId,
+        });
+        transitionWorkstream(ctx, id, { to: S.WaitingHuman, fence: null });
+      });
+      return id;
+    }
+
+    it('counts while its session is live, unless the caller leaves such lanes out', () => {
+      waitingOnCard();
+      expect(countMidSession(store.db)).toBe(1);
+      expect(countMidSession(store.db, { waitingOnCard: true })).toBe(1);
+      expect(countMidSession(store.db, { waitingOnCard: false })).toBe(0);
+      expect(countWaitingOnCard(store.db)).toBe(1);
+    });
+
+    it('is not counted twice when it also runs a gate, and a gate still counts without it', () => {
+      const id = waitingOnCard();
+      store.write((ctx) => {
+        patchWorkstream(ctx, id, null, { gatePid: 4242, gatePidStart: 'x' });
+      });
+      expect(countMidSession(store.db, { waitingOnCard: false })).toBe(1);
+      expect(countWaitingOnCard(store.db)).toBe(0);
+    });
+
+    it('is no wait at all once its session is gone: recovery keeps its place', () => {
+      const id = waitingOnCard();
+      store.write((ctx) => {
+        patchWorkstream(ctx, id, null, { currentSessionId: null });
+      });
+      expect(countMidSession(store.db)).toBe(0);
+      expect(countWaitingOnCard(store.db)).toBe(0);
+    });
   });
 
   it('counts a batch that is being cut', () => {

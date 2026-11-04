@@ -295,6 +295,11 @@ export interface Runner {
   stopAll(reason: StopReason): Promise<void>;
   isRunning(id: WorkstreamId): boolean;
   /**
+   * Whether the lane waits for the start hold (an overloaded Mac, the update drain) before its next
+   * session or its gate: it keeps its claims and frees none until the hold clears.
+   */
+  isParked(id: WorkstreamId): boolean;
+  /**
    * Asks the project's lanes whose session runs on the account to hand off; a lane already asked isn't
    * asked again. A lane between sessions, or waiting for its start slot, needs no nudge: its next
    * session runs where the project is now.
@@ -493,6 +498,8 @@ interface Control {
   gateAbort: AbortController | null;
   /** Set while the lane waits for an overloaded Mac to calm down before it starts a session. */
   holdAbort: AbortController | null;
+  /** True while the lane waits for the hold (a session's or the gate's) to clear: it has begun nothing. */
+  parked: boolean;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   done: Promise<void>;
@@ -1390,10 +1397,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (opts.hold) {
       const holding = new AbortController();
       ctl.holdAbort = holding;
+      ctl.parked = true;
       try {
         await opts.hold.untilClear(holding.signal);
       } finally {
         ctl.holdAbort = null;
+        ctl.parked = false;
       }
       const stoppedWhileHeld = stopRequested(ctl);
       if (stoppedWhileHeld)
@@ -2392,7 +2401,12 @@ export function createRunner(opts: RunnerOptions): Runner {
       // Before the batch's turn and a slot, and it comes back here if the hold returns before the
       // gate starts: a held gate keeps neither, since sibling gates, a running session's install or
       // migrations claim, and a ship all wait behind the turn, and an update waits for them.
-      await opts.hold?.untilClear(gateAbort.signal);
+      ctl.parked = opts.hold !== undefined;
+      try {
+        await opts.hold?.untilClear(gateAbort.signal);
+      } finally {
+        ctl.parked = false;
+      }
       // One gate of a batch at a time: its gates share the batch's checkout.
       result =
         batchId === null
@@ -2810,6 +2824,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         requestHandoff: null,
         gateAbort: null,
         holdAbort: null,
+        parked: false,
         endWaits: null,
         done: Promise.resolve(),
       };
@@ -2848,6 +2863,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       await Promise.all([...active.keys()].map((id) => runner.stop(id, reason)));
     },
     isRunning: (id) => active.has(id),
+    isParked: (id) => active.get(id)?.parked === true,
     handOff(projectId, accountId, reason) {
       for (const c of active.values())
         if (c.projectId === projectId && c.accountId === accountId)

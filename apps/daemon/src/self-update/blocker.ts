@@ -1,9 +1,6 @@
 import type { SelfUpdateBlockerDto } from '@10db/contracts';
 import type { BuildInfo } from './build-info';
 
-/** The switch's label in Settings; cards and messages name it exactly. */
-export const SELF_UPDATE_SWITCH = 'Update 10db by itself';
-
 /**
  * Why this app can never update itself, whatever the switch says, or null when it can. These are
  * facts about the install, known at start: a run from source, a build that knows no repository, a

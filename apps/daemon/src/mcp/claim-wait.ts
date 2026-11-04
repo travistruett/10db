@@ -52,6 +52,8 @@ export type ClaimResult =
       readonly instruction: string;
       /** The refusal tells the agent about claims the builder made its task yield (`ClaimWaits.yielded`). */
       readonly yielded: boolean;
+      /** The holder is parked for the update: true only now, so the answer is not kept under the opId. */
+      readonly parked: boolean;
     };
 
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
@@ -101,10 +103,28 @@ export class ClaimWaits {
   readonly #yields = new Map<WorkstreamId, Yielded>();
   readonly #cancelled = new Set<WorkstreamId>();
   readonly #onWait: () => void;
+  readonly #parked: (holder: WorkstreamId) => boolean;
 
-  /** `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again. */
-  constructor(opts: { readonly onWait?: () => void } = {}) {
+  /**
+   * `onWait` runs when a wait starts waiting on a holder; the daemon asks the scheduler to look again.
+   * `parked` says whether a holder is held back by the update drain (see `holderParked`).
+   */
+  constructor(
+    opts: {
+      readonly onWait?: () => void;
+      readonly parked?: (holder: WorkstreamId) => boolean;
+    } = {},
+  ) {
     this.#onWait = opts.onWait ?? (() => undefined);
+    this.#parked = opts.parked ?? (() => false);
+  }
+
+  /**
+   * Whether `holder` starts nothing until the update installs, so it frees no claim in time: a wait on
+   * it would keep its own session running, and the update waits for that session to end.
+   */
+  holderParked(holder: WorkstreamId): boolean {
+    return this.#parked(holder);
   }
 
   /** Joins the wait for this claim, or starts one; the returned wait's `done` never rejects unhandled. */
@@ -390,7 +410,27 @@ export function yieldRefusal(
     heldBy: null,
     inboxId: given.inboxId,
     yielded: true,
+    parked: false,
     instruction: `The builder answered a claim deadlock: this task gave up ${list}, which was released so the other task could go on. You no longer hold ${list}: edit nothing there until request_claim grants it to you again. You did not get ${asked.kind} ${asked.name} either. Call request_claim with a new opId for each claim you still need.`,
+  };
+}
+
+/**
+ * The refusal for a claim held by a task the update drain has parked. It shows no wait and raises no
+ * card, and request_claim answers it without recording it under the opId, because it holds only for now:
+ * a later call with the same opId asks again. The agent is told to write a handoff before it ends its
+ * turn, since a turn that ends without one finishes the step and sends unfinished work to the gate. The
+ * handoff's fresh session waits at the hold, so no session is cut off by the update, and the task asks
+ * again in that session after the update.
+ */
+function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
+  return {
+    granted: false,
+    heldBy,
+    inboxId: null,
+    yielded: false,
+    parked: true,
+    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. If you can finish without it, carry on. Otherwise commit any changes you have, call write_handoff naming what is left, and end your turn: a fresh session of this step continues after the update and can ask again then.`,
   };
 }
 
@@ -468,6 +508,9 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         return grantedFrom(a, outcome.claims);
       }
       const holder = outcome.conflict.heldBy;
+      // A holder the update drain parked frees nothing until the update has installed, and the update
+      // waits for this session to end: refuse instead of waiting, and the session ends by itself.
+      if (waits.holderParked(holder)) return parkedRefusal(a, holder);
       const changed = holder !== heldBy;
       if (changed || wait.inboxId !== null) {
         if (!waits.waitsOn(holder, a.workstreamId, ended)) {
