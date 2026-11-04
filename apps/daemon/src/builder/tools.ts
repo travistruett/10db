@@ -18,6 +18,7 @@ import {
   PrincipleId,
   PrincipleWrite,
   ProposalListQuery,
+  SearchMatch,
   TaskInput,
   TaskMove,
   TaskPatch,
@@ -244,7 +245,12 @@ export function createBuilderTools(
       const { projectId, history, ...query } = BuilderToolInputs.search_knowledge.parse(args);
       return services.listKnowledge(
         projectId,
-        KnowledgeListQuery.parse({ ...defined(query), history: history === true ? '1' : '0' }),
+        // Its text comes from Claude, often a whole question, not from someone typing in the view.
+        KnowledgeListQuery.parse({
+          ...defined(query),
+          match: SearchMatch.AnyWord,
+          history: history === true ? '1' : '0',
+        }),
       );
     },
     [BuilderToolName.SaveDecision]: (args) => {

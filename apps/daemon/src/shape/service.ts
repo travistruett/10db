@@ -352,6 +352,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const idleMs = deps.idleMs ?? IDLE_MS;
   const contextLimit = deps.contextLimitPct ?? CONTEXT_LIMIT_PCT;
   const runtimes = new Map<ShapeId, Runtime>();
+  /** Set by `close`: a turn queued after it is reported as never run, not started. */
+  let closed = false;
 
   const runtimeOf = (shapeId: ShapeId): Runtime => {
     let rt = runtimes.get(shapeId);
@@ -858,6 +860,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     run = (async () => {
       try {
         while (rt.queue.length > 0 && !rt.held) {
+          // Closed: the daemon is stopping, and the hold letting go on its way out must not start a
+          // session for a message that arrived after `close` emptied the queue.
+          if (closed) {
+            for (const turn of rt.queue.splice(0)) notice(shapeId, turn.neverRan);
+            break;
+          }
           // A drain starts nothing new: wait, then look again, as the queue or Convert's hold may
           // have changed meanwhile.
           if (deps.hold?.holding() === true) {
@@ -1215,6 +1223,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     async close() {
+      closed = true;
       // Every queue before any session: a session closing below must not let another conversation's
       // turn start, and no write may wait on a session that is slow to stop.
       for (const [shapeId, rt] of runtimes) {

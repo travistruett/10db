@@ -25,6 +25,12 @@ const short = (commit: string): string => commit.slice(0, SHORT);
 export function updateProgressText(data: SelfUpdateStatusDto): string | null {
   if (!data.enabled || data.availableCommit === null) return null;
   const build = short(data.availableCommit);
+  if (data.notInstalling === 'failed')
+    return `The update to ${build} failed, so 10db is not installing it. It tries again when main has a newer commit; to try now, turn "Update 10db by itself" off and on.`;
+  if (data.notInstalling === 'rolled-back')
+    return `You rolled back from ${build}, so 10db is not installing it. It installs the next finished build, once main has a newer commit; to try ${build} again now, turn "Update 10db by itself" off and on.`;
+  if (data.notInstalling === 'unbuilt')
+    return `${build} has no finished build yet, so there is nothing to install. 10db looks again every minute and installs it when its build finishes.`;
   const waitsFor = updateWaitsFor(data);
   if (data.draining && data.drainingSince !== null)
     return `Draining since ${absoluteTime(data.drainingSince)}: 10db is starting no new steps, sessions, gates or ships while the running steps finish, then it installs ${build} and restarts. Lanes that were queued pick up again after. ${waitsFor}`;
@@ -53,8 +59,15 @@ export function SelfUpdateSection() {
         : `Running ${short(data.runningCommit)}.`;
   const blocker = data?.blocker ?? null;
   const progress = data === undefined ? null : updateProgressText(data);
+  const notInstalling = data?.notInstalling ?? null;
+  // Unlike these, a head with no build yet takes Install Now: the daemon drains once it is staged.
+  const refused = notInstalling === 'failed' || notInstalling === 'rolled-back';
   const canInstallNow =
-    data !== undefined && data.enabled && data.availableCommit !== null && !data.draining;
+    data !== undefined &&
+    data.enabled &&
+    data.availableCommit !== null &&
+    !refused &&
+    !data.draining;
   return (
     <SettingsCard>
       <SettingRow
@@ -92,7 +105,13 @@ export function SelfUpdateSection() {
       ) : null}
       {progress !== null ? (
         <SettingRow
-          label="Update waiting"
+          label={
+            refused
+              ? 'Update not installing'
+              : notInstalling === 'unbuilt'
+                ? 'Update has no build yet'
+                : 'Update waiting'
+          }
           description={
             <Text size="sm" c="dimmed" role="status" aria-label="Update status">
               {progress}

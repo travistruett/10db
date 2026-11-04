@@ -1,6 +1,7 @@
+import { posix } from 'node:path';
 import { ClaimKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
-import { runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
+import { ENDLESS_FILES, runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { laneReadOnlyWords } from './read-only';
@@ -167,10 +168,30 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
 const READS_ONLY =
   'Every part of this command only reads (decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md).';
 
-/** An option's path (`--file=/x`) or a plain word, as the path it may name. */
-function pathOf(word: string): string {
-  const value = /^--?[A-Za-z][\w-]*=(.*)$/s.exec(word)?.[1];
-  return value ?? word;
+/** A word longer than this is not split into the paths it may hold; the call keeps today's judgement. */
+const MAX_OPTION_WORD = 256;
+
+/**
+ * The paths a word may name, or null for a word too long to split. A plain word is one path. A long
+ * option names one only after its `=`. A short option's value may be attached (`-f/x`, `-nf/x`,
+ * `-A3`) and the guard knows no program's options, so every tail of the word counts as a path: a
+ * letter or two judged as a relative path is harmless, and none is missed.
+ */
+function pathsOf(word: string): string[] | null {
+  if (word.startsWith('--')) {
+    const value = /^--[A-Za-z][\w-]*=(.*)$/s.exec(word)?.[1];
+    return value === undefined ? [] : [value];
+  }
+  if (!word.startsWith('-') || word.length === 1) return [word];
+  if (word.length > MAX_OPTION_WORD) return null;
+  const paths: string[] = [];
+  for (let at = 1; at < word.length; at += 1) paths.push(word.slice(at));
+  return paths;
+}
+
+/** A device that yields bytes forever: a foreground read of one spins until the Bash timeout. */
+function isEndlessFile(path: string): boolean {
+  return ENDLESS_FILES.has(posix.normalize(path));
 }
 
 /**
@@ -191,10 +212,13 @@ function onlyReads(input: GuardInput): boolean {
     for (const [cmd = '', ...args] of segments) {
       if (cmd === 'cd') return false;
       for (const word of args) {
-        if (word === '' || (word.startsWith('-') && !word.includes('='))) continue;
-        const path = pathOf(word);
-        if (path === '' || path.startsWith('~')) return false;
-        if (input.fileAccess.read('LS', { path }) !== 'ok') return false;
+        if (word === '') continue;
+        const paths = pathsOf(word);
+        if (paths === null) return false;
+        for (const path of paths) {
+          if (path === '' || path.startsWith('~') || isEndlessFile(path)) return false;
+          if (input.fileAccess.read('LS', { path }) !== 'ok') return false;
+        }
       }
     }
   } catch {

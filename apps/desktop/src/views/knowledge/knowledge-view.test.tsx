@@ -123,6 +123,45 @@ describe('KnowledgeView', () => {
     });
   });
 
+  it('keeps the listed rows on screen while a changed filter loads', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
+        calls += 1;
+        if (new URL(request.url).searchParams.has('q')) await gate;
+        return HttpResponse.json(knowledgeList([principleItem({ statement: 'Prefer small PRs' })]));
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    await waitFor(() => {
+      expect(calls).toBeGreaterThan(1);
+    });
+    expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
+    expect(screen.queryByLabelText('Loading principles')).toBeNull();
+    release();
+    await waitFor(() => {
+      expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
+    });
+  });
+
+  it('stops the search box at the 200 characters the route accepts', async () => {
+    serve({ principles: [principleItem()] });
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    expect(screen.getByRole('textbox', { name: 'Search' }).getAttribute('maxlength')).toBe('200');
+  });
+
   it('says so when search is unavailable instead of reporting nothing found', async () => {
     server.use(
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
@@ -136,6 +175,51 @@ describe('KnowledgeView', () => {
     );
     renderApp('/knowledge');
     expect(await screen.findByText('Search is unavailable: x')).toBeTruthy();
+    expect(screen.queryByText(/match\./)).toBeNull();
+  });
+
+  it('says so with a search and does not read the empty answer as no match', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), ({ request }) => {
+        const searched = new URL(request.url).searchParams.has('q');
+        return HttpResponse.json(
+          knowledgeList(searched ? [] : [principleItem()], {
+            search: { available: false, message: 'Search is unavailable: x' },
+          }),
+        );
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    expect(await screen.findByText('Search is unavailable: x')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole('table', { name: 'Principles' })).toBeNull();
+    });
+    expect(screen.queryByText('No principles match.')).toBeNull();
+  });
+
+  it('still lists the records without a search when search is unavailable', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), () =>
+        HttpResponse.json(
+          knowledgeList([principleItem({ statement: 'Prefer small PRs' })], {
+            search: { available: false, message: 'Search is unavailable: x' },
+          }),
+        ),
+      ),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    expect(await screen.findByText('Prefer small PRs')).toBeTruthy();
+    expect(screen.getByText('Search is unavailable: x')).toBeTruthy();
   });
 
   it('filters by You, Project or one area, and shows history with each record’s state', async () => {
@@ -244,6 +328,40 @@ describe('KnowledgeView', () => {
         target: { value: 'nothing says this' },
       });
       expect(await screen.findByText('No proposal matches.')).toBeTruthy();
+    });
+
+    it('finds a proposal from a partly typed word, but not from the middle of one', async () => {
+      serve({ proposals });
+      renderApp('/knowledge');
+      await openProposals();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'dep free' },
+      });
+      await waitFor(() => {
+        expect(shown()).toEqual(['Whole project']);
+      });
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: 'eeze' },
+      });
+      expect(await screen.findByText('No proposal matches.')).toBeTruthy();
+    });
+
+    it('reads a search with no word as no search on every tab', async () => {
+      const { asked } = serve({ proposals });
+      renderApp('/knowledge');
+      expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: '-' },
+      });
+      await waitFor(() => {
+        expect(asked.at(-1)?.get('q')).toBe('-');
+      });
+      expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+      expect(screen.queryByText('No principles match.')).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: 'Decisions' }));
+      expect(await screen.findByText(/^No decisions yet/)).toBeTruthy();
+      expect(screen.queryByText('No decisions match.')).toBeNull();
+      await openProposals();
     });
 
     it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
@@ -495,6 +613,42 @@ describe('KnowledgeView', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
     expect(await within(drawer).findByText(/Retired by an agent on 16 Oct 2026/)).toBeTruthy();
     expect(within(drawer).getByText('We use fake timers now')).toBeTruthy();
+  });
+
+  describe('names the tool behind a retire, withdrawal or confirmation', () => {
+    const at = '2026-10-16T09:30:00.000Z';
+    it.each([
+      ['claude_code', 'Claude Code'],
+      ['builder_mcp', 'Claude Code'],
+      ['some_other_tool', 'some_other_tool'],
+    ])('through %s reads "through %s"', async (via, name) => {
+      const principle = principleItem({ state: 'retired', statement: 'Retired rule' });
+      serve({ principles: [principle] });
+      const source = { via, sessionId: null, cwd: null, recordedAt: at, quote: null };
+      server.use(
+        http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+          HttpResponse.json(
+            provenanceDto({
+              id: principle.id,
+              state: 'retired',
+              confirmedBy: 'me',
+              confirmedAt: at,
+              confirmedSource: source,
+              retired: { at, by: 'me', reason: 'Old', source },
+              withdrawn: { at, by: 'me', reason: 'Wrong', source },
+            }),
+          ),
+        ),
+      );
+      renderApp('/knowledge');
+      fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
+      const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+      for (const verb of ['Retired', 'Withdrawn', 'Confirmed']) {
+        expect(
+          await within(drawer).findByText(new RegExp(`^${verb} by you on .* through ${name}$`)),
+        ).toBeTruthy();
+      }
+    });
   });
 
   describe('names the session that wrote a record', () => {

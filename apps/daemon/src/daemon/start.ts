@@ -1225,6 +1225,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         ...selfUpdateSetting(state.db),
         runningCommit: build?.commit ?? null,
         availableCommit: progress?.availableCommit ?? null,
+        notInstalling: progress?.notInstalling ?? null,
         waitMinutes: selfUpdateWaitMinutes(state.db),
         waitingSince: progress?.waitingSince?.toISOString() ?? null,
         draining: progress?.draining ?? false,

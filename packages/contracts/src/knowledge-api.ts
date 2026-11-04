@@ -9,6 +9,7 @@ import {
   TopicKey,
   DecisionInput,
 } from './knowledge';
+import { SearchMatch } from './knowledge-search';
 import { KnowledgeScope, PrincipleKind, ProposalStatus } from './states';
 
 // The builder-facing knowledge routes (docs/knowledge-api.md): one list of a project's decisions and
@@ -86,6 +87,7 @@ export const KNOWLEDGE_LIST_LIMIT = 100;
 /** The query string of `GET /projects/:projectId/knowledge`. */
 export const KnowledgeListQuery = z.strictObject({
   q: z.string().trim().max(200).optional(),
+  match: z.enum(SearchMatch).optional(),
   kind: KnowledgeListKind.optional(),
   scope: z.enum(KnowledgeScope).optional(),
   area: AreaName.optional(),

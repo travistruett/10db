@@ -34,7 +34,7 @@ Status: under construction. The design is in
 - The installed app also follows main by itself
   ([decision](docs/architecture/decisions/2026-11-03-app-follows-main-by-itself.md)). Each minute 10db checks main's
   head; when it is ahead of the commit the app runs, 10db fetches main's newest finished build while you work and
-  installs it once nothing is mid-session: no lane running, no gate, no batch being cut or shipped (queued and
+  installs it once nothing is mid-session: no lane running, no gate, no batch being cut or shipped, no shaping turn under way (queued and
   waiting tasks carry on afterwards). It quits, backs up the database, keeps the old app as above and opens the
   new one, so `make rollback-app` works the same. The header shows the commit the app runs, and Settings >
   Updates turns the self-update off; turning it off also stops a download under way, and nothing installs after.
