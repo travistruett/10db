@@ -1496,6 +1496,7 @@ describe('FactoryView human-touch panel', () => {
     tasksRan: 0,
     cardsPerTask: null,
     waitingMinutes: 0,
+    failedMinutes: 0,
     ...overrides,
   });
 
@@ -1520,6 +1521,7 @@ describe('FactoryView human-touch panel', () => {
           tasksRan: 24,
           cardsPerTask: 2.5,
           waitingMinutes: 137.4,
+          failedMinutes: 484.6,
         }),
         day({ day: '2026-11-02' }),
       ]),
@@ -1535,9 +1537,22 @@ describe('FactoryView human-touch panel', () => {
         .getAllByRole('cell')
         .map((c) => c.textContent),
     );
-    expect(busy).toEqual(['Nov 3', '15', '10', '19', '14', '2', '0', '0', '60', '2.5', '137 min']);
+    expect(busy).toEqual([
+      'Nov 3',
+      '15',
+      '10',
+      '19',
+      '14',
+      '2',
+      '0',
+      '0',
+      '60',
+      '2.5',
+      '137 min',
+      '485 min',
+    ]);
     // A day with no task running has no cards per task to show.
-    expect(quiet).toEqual(['Nov 2', '0', '0', '0', '0', '0', '0', '0', '0', '–', '0 min']);
+    expect(quiet).toEqual(['Nov 2', '0', '0', '0', '0', '0', '0', '0', '0', '–', '0 min', '0 min']);
     expect(
       within(table)
         .getAllByRole('columnheader')
@@ -1553,8 +1568,13 @@ describe('FactoryView human-touch panel', () => {
       'Check',
       'Cards',
       'Per task',
-      'Waited',
+      'Waited on an answer',
+      'Waited on a retry',
     ]);
+    // The description says which waiting each figure counts, so failures are not mistaken for excluded.
+    expect(
+      screen.getByText(/minutes work waited on an answer.*minutes a failed run waited for a retry/),
+    ).toBeTruthy();
   });
 
   it('says so when the human-touch numbers cannot be loaded', async () => {

@@ -77,6 +77,31 @@ export function countStepToolOps(
   );
 }
 
+/**
+ * What each call of a tool recorded in the workstream's current step returned, counted the same way
+ * as countStepToolOps (every session after the step's `sessionFloor`).
+ */
+export function listStepToolOpResults(
+  db: DbReader,
+  ws: StepPosition & { readonly id: WorkstreamId },
+  tool: string,
+): Json[] {
+  const floor = currentStep(ws).sessionFloor;
+  return db
+    .select({ result: schema.toolOps.result })
+    .from(schema.toolOps)
+    .innerJoin(schema.sessions, eq(schema.sessions.id, schema.toolOps.sessionId))
+    .where(
+      and(
+        eq(schema.toolOps.workstreamId, ws.id),
+        eq(schema.toolOps.tool, tool),
+        gt(schema.sessions.sequence, floor),
+      ),
+    )
+    .all()
+    .map((row) => row.result);
+}
+
 export function insertToolOp(
   ctx: WriteContext,
   input: {
