@@ -16,7 +16,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates } from './index';
-import { addedTags, schemaOf } from './migration-carry';
+import { addedTags } from './migration-carry';
 import { NOTICE_KEY } from './notices';
 import type { CarriedMigration } from './worktree-generated';
 
@@ -115,7 +115,7 @@ async function bothSidesAdded(
 /**
  * What the package's `generate` does in a worktree, at the process boundary: each step takes the next
  * free number, a custom one writes drizzle-kit's stub, and a generated one writes what the schema
- * adds: only the first has anything to write, since the schema is already the merged one.
+ * adds. `migration-steps.test.ts` runs the real one.
  */
 function drizzle(
   input: {
@@ -132,7 +132,6 @@ function drizzle(
       const tags = (
         JSON.parse(readFileSync(file, 'utf8')) as { entries: { tag: string }[] }
       ).entries.map((e) => e.tag);
-      let pending = true;
       for (const { name, custom } of migrations) {
         if (name === input.failAt)
           return Promise.resolve({
@@ -142,8 +141,6 @@ function drizzle(
             tail: 'drizzle-kit failed',
             logPath: join(path, 'generate.log'),
           });
-        if (!custom && !pending) continue;
-        if (!custom) pending = false;
         const number = String(tags.length).padStart(4, '0');
         const tag = `${number}_${name}`;
         tags.push(tag);
@@ -156,29 +153,6 @@ function drizzle(
     },
   };
 }
-
-describe('telling a --custom migration by its snapshot', () => {
-  const snapshotAt = (number: string): string =>
-    readFileSync(
-      join(import.meta.dirname, '../../../..', DB, `meta/${number}_snapshot.json`),
-      'utf8',
-    );
-
-  it("reads this repository's baseline custom migration as repeating the snapshot before it", () => {
-    expect(schemaOf(snapshotAt('0000'))).toBe(schemaOf(snapshotAt('0001')));
-  });
-
-  it('ignores ids, bookkeeping and key order, and sees a changed schema', () => {
-    const schema = schemaOf('{"id":"a","_meta":{"x":1},"tables":{"t":{"p":1,"q":2}}}');
-    expect(schemaOf('{"tables":{"t":{"q":2,"p":1}},"id":"b","prevId":"a"}')).toBe(schema);
-    expect(schemaOf('{"id":"b","tables":{"t":{"p":1,"q":3}}}')).not.toBe(schema);
-  });
-
-  it('is no schema at all for what is not a snapshot', () => {
-    expect(schemaOf('[]')).toBeNull();
-    expect(schemaOf('not json')).toBeNull();
-  });
-});
 
 describe('which files a merge dropped are migrations the branch added', () => {
   const ancestor = 'the-merge-base';
@@ -422,19 +396,26 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(h.origin$('for-each-ref', `refs/heads/${batch.branch ?? ''}`)).toBe('');
   });
 
-  it('commits nothing and names the migration on a card when generating it makes no migration', async () => {
+  it("commits nothing and names the migration on a card when the schema of a step can't be told", async () => {
+    // Two generated migrations, whose snapshots here hold no schema a step could be made from.
     const batch = await bothSidesAdded([
       { tag: '0001_mine', sql: 'alter table a add b;\n' },
       { tag: '0002_second', sql: 'alter table a add d;\n' },
     ]);
     const path = pathOf(batch);
-    await createBaseUpdates({ ...h.ctx, generators: drizzle() }).beforeGate(batch.id, signal);
+    const calls: (readonly CarriedMigration[])[] = [];
+    const update = await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ calls }),
+    }).beforeGate(batch.id, signal);
 
+    expect(update.kind).toBe('uncarried');
+    expect(calls).toEqual([]);
     expect(statusOf(path)).toBe('');
     expect(existsSync(join(path, DB, '0002_mine.sql'))).toBe(false);
     const card = h.only(h.cards());
-    expect(card.body).toContain('0002_second');
-    expect(card.body).toContain('made no migration');
+    expect(card.body).toContain('0001_mine');
+    expect(card.body).toContain('a schema for its step could not be made');
   });
 
   it('names what the merge dropped on the card when the run is stopped before it re-creates it', async () => {
