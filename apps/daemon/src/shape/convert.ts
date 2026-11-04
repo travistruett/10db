@@ -48,14 +48,8 @@ import {
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
-<<<<<<< 5f0460003c524d4cac71a3021efa63dff1b3e33d
 import { proposePlacement } from '../placement';
-import { buildPlanWorld } from './world';
-||||||| f9acd4b
-import { buildPlanWorld } from './world';
-=======
 import { buildPlanWorld, tasksInside } from './world';
->>>>>>> 4075881c92c44cddec82374a1fc645e4219a52bd
 
 // Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
 // questions in the caller's transaction, so a refusal or a failure leaves nothing behind, and it
