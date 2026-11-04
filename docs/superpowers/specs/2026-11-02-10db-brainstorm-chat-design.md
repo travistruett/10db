@@ -340,13 +340,20 @@ never spoke) writes when the transcript holds screens or Reads. So it survives a
 zero. A subagent's Read is not counted: its result reaches the session as text.
 
 **How many path-sent images a session can Read.** An image over 1 MiB (a Retina screenshot over 2000 px is the usual
-one) is charged the 1 MiB allowance until its Read is measured, so a session can Read as many of them as whole MiB are
-left in the 21 MiB pool: **21 with no inline picture, and 3 once the 18 MiB inline budget is full**, one fewer for each
-MiB the inline pictures and earlier Reads have taken. Four dropped 2880 x 1800 PNGs of over 1 MiB each can all be Read
-in a conversation that has not filled the inline budget. Where a path image would be refused, the builder is told as the
-turn is sent, not when Claude's Read is refused: a notice names the images (`Claude won't be able to Read <names>`)
-that, charged in order against what the pool leaves the live session's Reads, do not fit, and says to send a smaller
-copy. A measurement lowers the charge afterwards, so the notice is an upper bound on what is lost.
+one) is charged the 1 MiB allowance until its Read is measured. Before any Read is measured, a session can Read as many
+of them as whole MiB are left in the 21 MiB pool: **21 with no inline picture, and 3 once the 18 MiB inline budget is
+full**, one fewer for each MiB the inline pictures and earlier Reads have taken. Four dropped 2880 x 1800 PNGs of over
+1 MiB each can all be Read in a conversation that has not filled the inline budget, if each Read returns at most 1 MiB.
+Those counts are what the allowance gives, not a promise: a measurement replaces the charge in either direction, and
+what a resized Retina picture weighs is unmeasured (follow-up tsk_01a1a578-91d9-7591-beb2-36336144c589).
+
+Where a path image would be refused, the builder is told as the turn is sent, not when Claude's Read is refused: a
+notice (`Claude probably won't be able to Read <names>`) names the images that, charged in order against what the pool
+leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures, and to tell Claude
+which picture matters most so it Reads that one first, or to send them in a new conversation, which starts its own
+pool. A smaller copy is no remedy once the inline budget is full: it goes as a path too and is refused with no room
+left. The notice is an estimate, for the same reason as the counts: a Read that measures over the allowance can get an
+image the notice didn't name refused, and one that measures under it can leave room for one it did name.
 
 A Read of a `.pdf` (a dropped one is up to 20 MB, 20 a conversation) is charged to the same total, by the page and
 not by the file: Read returns either the whole file as a document block or pages rendered to pictures, the SDK's types

@@ -391,21 +391,35 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(told[0]).toContain('shot3.png');
       expect(told[0]).not.toMatch(/shot[012]\.png/);
       expect(told[0]).toMatch(/won't be able to Read/);
+      // The session is out of room, not the image: a smaller copy goes as a path and is refused too.
+      expect(told[0]).toMatch(/out of room for pictures/);
+      expect(told[0]).toMatch(/Tell Claude which picture matters most/);
+      expect(told[0]).toMatch(/new conversation/);
+      expect(told[0]).not.toMatch(/smaller copy|too large/);
+    });
+
+    it('can still have a named one Read, when Claude is told to take it first', async () => {
+      await fillInline();
+      const files = Array.from({ length: 4 }, (_, i) =>
+        drop(`shot${String(i)}.png`, retina(MB + 200_000)),
+      );
+      await nextTurn('Look at these');
+      const answers = [files[3], files[0], files[1], files[2]].map((file) =>
+        read(must(file, 'a dropped file').storedPath),
+      );
+      expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'allow', 'deny']);
     });
 
     it('count the pictures already Read against what a session can Read', async () => {
       const big = drop('big.png', wholePng(5 * MB));
       await nextTurn('Hello');
       for (let i = 0; i < EMPTY_ROOM - 2; i += 1) read(big.storedPath);
-      const files = Array.from({ length: 3 }, (_, i) =>
-        drop(`shot${String(i)}.png`, retina(MB + 200_000)),
-      );
+      for (let i = 0; i < 3; i += 1) drop(`shot${String(i)}.png`, retina(MB + 200_000));
       await nextTurn('Look at these');
       const told = notices().filter((body) => /shot\d\.png/.test(body));
       expect(told).toHaveLength(1);
       expect(told[0]).toContain('shot2.png');
       expect(told[0]).not.toMatch(/shot[01]\.png/);
-      expect(files).toHaveLength(3);
     });
   });
 

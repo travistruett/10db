@@ -140,11 +140,15 @@ export function unreadableImages(
   return names;
 }
 
-/** What the builder is told about images Claude was pointed at but a Read would refuse. */
+/**
+ * What the builder is told about images Claude was pointed at but a Read would refuse. It is an estimate, so
+ * it says "probably": measured Reads can leave more room or less. The session is what ran out, not the image,
+ * so a smaller copy is no remedy: it goes as a path too once the inline budget is full, and is refused.
+ */
 export const unreadableImagesNotice = (names: readonly string[]): string =>
-  `Claude won't be able to Read ${names.join(', ')}: ${names.length === 1 ? 'it is' : 'they are'} too large to ` +
-  `show inline and a conversation can only carry so many pictures it Reads. Send a smaller copy to have ` +
-  `${names.length === 1 ? 'it' : 'them'} seen.`;
+  `Claude probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures. ` +
+  `Tell Claude which picture matters most so it Reads that one first, or send ` +
+  `${names.length === 1 ? 'it' : 'them'} in a new conversation.`;
 
 /**
  * The bytes of Read pictures the live session carries: the counted lines after the latest digest or
