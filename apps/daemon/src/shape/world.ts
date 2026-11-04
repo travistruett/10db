@@ -68,6 +68,9 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       .map((m) => m.id),
   );
   const proposals = listShapeProposals(db, shapeId);
+  const pinned = proposals.filter(
+    (r) => r.state === ShapeProposalState.Pending && r.pinned.length > 0,
+  );
   return {
     areaNames: [...project.areas.map((a) => a.name), ...project.hazards.map((h) => h.name)],
     people: listPeople(db),
@@ -80,15 +83,11 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       // Decided from the links: an addition Remove Draft Goal took back stays Accepted, linkless.
       ...links.filter((l) => l.goalId !== null).map((l) => l.key),
       // A round supersedes every other pending row its draft leaves out.
-      ...proposals
-        .filter(
-          (r) =>
-            (r.kind === 'goal' || r.kind === 'task') &&
-            r.state === ShapeProposalState.Pending &&
-            r.pinned.length > 0,
-        )
-        .flatMap((r) => [r.key, ...tasksInside(r)]),
+      ...pinned.filter((r) => r.kind === 'goal' || r.kind === 'task').map((r) => r.key),
     ]),
+    pinnedGoalTasks: new Map(
+      pinned.filter((r) => r.kind === 'goal').map((r) => [r.key, tasksInside(r)]),
+    ),
     draftPlace: {
       // What `insertTask` gives a task with no placement named: the project's own.
       place:

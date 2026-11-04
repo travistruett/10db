@@ -55,6 +55,11 @@ export interface PlanWorld {
    * pinned pending rows, which this round keeps. Converted tasks are in `convertedTasks`.
    */
   readonly storedEfforts: ReadonlySet<string>;
+  /**
+   * The stored tasks of each pinned pending goal, by goal key. This round keeps them only if the draft
+   * leaves the goal out: a goal it restates has the merged draft's tasks instead.
+   */
+  readonly pinnedGoalTasks: ReadonlyMap<string, readonly string[]>;
   /** The place and landing a task still in the draft gets when converted: the project's defaults. */
   readonly draftPlace: TaskPlace;
   /** Where a task Convert made works and lands now; null when it is not a task of the project. */
@@ -260,9 +265,18 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
 
   // Questions: the goal or task one is about must be in this plan, converted, or kept by this round.
   const goalKeys = new Set(draft.goals.map((g) => g.key));
+  const keptGoalTasks = new Set(
+    [...world.pinnedGoalTasks].flatMap(([goal, tasks]) => (goalKeys.has(goal) ? [] : tasks)),
+  );
   draft.questions.forEach((q, i) => {
     if (q.about === undefined) return;
-    if (knownTask(q.about) || goalKeys.has(q.about) || world.storedEfforts.has(q.about)) return;
+    if (
+      knownTask(q.about) ||
+      goalKeys.has(q.about) ||
+      world.storedEfforts.has(q.about) ||
+      keptGoalTasks.has(q.about)
+    )
+      return;
     errors.push(
       world.storedKeys.has(q.about)
         ? `Question ${String(i + 1)}, about: ${q.about} is not a goal or task that is still in the plan; a question can only be about a goal or task`

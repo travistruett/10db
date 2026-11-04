@@ -46,6 +46,7 @@ const world = (over: Partial<PlanWorld> = {}): PlanWorld => ({
   storedSources: new Set(),
   storedKeys: new Set(),
   storedEfforts: new Set(),
+  pinnedGoalTasks: new Map(),
   draftPlace: { place: 'worktree', lands: 'merges into main when checks pass', landingGroup: null },
   placeOf: (id) =>
     id === converted
@@ -395,6 +396,21 @@ describe('a plan that breaks a rule', () => {
         world({ storedKeys: new Set(['stored']), storedEfforts: new Set(['stored']) }),
       ),
     ).toEqual([]);
+  });
+
+  it('counts a pinned goal’s stored tasks only when the draft leaves that goal out', () => {
+    const questions = [
+      { key: 'q', text: 'Who pays?', for: 'finance', about: 'g1', sourceMessageIds: [message] },
+    ];
+    const stored = world({
+      storedKeys: new Set(['g', 'g1']),
+      storedEfforts: new Set(['g']),
+      pinnedGoalTasks: new Map([['g', ['g1']]]),
+    });
+    expect(check({ questions }, stored)).toEqual([]);
+    expect(check({ goals: [goal('g', [task('g2')])], questions }, stored)).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
   });
 
   it('lets a row without sources keep the ones it has stored', () => {

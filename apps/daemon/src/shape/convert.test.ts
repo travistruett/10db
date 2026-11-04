@@ -38,7 +38,7 @@ import { createKnowledgeServices } from '../daemon';
 import { createEventBus, createStateStore } from '../events';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
-import { dropProposal, editProposal, reconcileDraft } from './rounds';
+import { dropProposal, editProposal, reconcileDraft, restoreProposal } from './rounds';
 
 // Shape spec §11: Convert is one transaction, refuses a partial selection by name, is idempotent,
 // and starts nothing.
@@ -536,12 +536,12 @@ describe('question records', () => {
   });
 
   // A stored proposal that is not a live goal or task cannot hold a question.
-  const askAbout = (m: string, about: string) =>
+  const askAbout = (m: string, about: string, draft: Record<string, unknown> = {}) =>
     write((ctx) =>
       reconcileDraft(
         ctx,
         c.shape.id,
-        PlanDraft.parse({ questions: [questionOf(m, 'who-pays', { about })] }),
+        PlanDraft.parse({ ...draft, questions: [questionOf(m, 'who-pays', { about })] }),
       ),
     );
 
@@ -615,6 +615,41 @@ describe('question records', () => {
     expect(askAbout(m, about)).toMatchObject({ ok: true });
     expect(rowOf(pinned).state).toBe(ShapeProposalState.Pending);
     converted(pinned, 'who-pays');
+    expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['who-pays']);
+  });
+
+  // A restated goal keeps the draft's tasks, whatever is pinned on the goal itself.
+  it('refuses to propose a question about a task a pinned goal loses when restated', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1', 'g2'])] });
+    write((ctx) => {
+      editProposal(ctx, rowOf('g').id, { title: 'Pinned title' });
+    });
+    const out = askAbout(m, 'g1', { goals: [goalOf(m, 'g', ['g2'])] });
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
+  });
+
+  it.each<[string, (ctx: WriteContext) => void]>([
+    [
+      'its own pin',
+      (ctx) => {
+        editProposal(ctx, rowOf('g').id, { 'tasks.g1.title': 'Pinned task' });
+      },
+    ],
+    [
+      'the pin on the whole goal',
+      (ctx) => {
+        restoreProposal(ctx, rowOf('g').id);
+      },
+    ],
+  ])('takes a question about a task a restated goal keeps by %s', (_, pin) => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1', 'g2'])] });
+    write(pin);
+    expect(askAbout(m, 'g1', { goals: [goalOf(m, 'g', ['g2'])] })).toMatchObject({ ok: true });
+    converted('g', 'who-pays');
     expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['who-pays']);
   });
 
