@@ -1,6 +1,7 @@
 import { BoardStatus, TaskStatus, type GoalSummaryDto, type TaskDto } from '@10db/contracts';
-import { Box, Button, Group, Text } from '@mantine/core';
-import { IconChevronRight } from '@tabler/icons-react';
+import { ActionIcon, Box, Button, Group, Menu, Text } from '@mantine/core';
+import { IconChevronRight, IconDots, IconTrash } from '@tabler/icons-react';
+import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
 import { GOAL_STATUS_LOOK } from './goal-status';
 
 /** The goal's open tasks sitting in Ready: what Start Ready… would propose. */
@@ -39,6 +40,7 @@ interface GoalLineProps {
  */
 export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLineProps) {
   const look = GOAL_STATUS_LOOK[summary.digest.status];
+  const removal = useRemoveDraftGoalAction(summary);
   return (
     <Group gap="sm" wrap="nowrap" data-testid="goal-line">
       <Box
@@ -66,6 +68,27 @@ export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLi
       >
         Open in Factory
       </Button>
+      {removal.offer === 'available' ? (
+        <>
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <ActionIcon variant="subtle" color="gray" aria-label="More goal actions">
+                <IconDots size={16} stroke={1.5} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item
+                color="red"
+                leftSection={<IconTrash size={16} stroke={1.5} />}
+                onClick={removal.open}
+              >
+                Remove Draft Goal…
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+          {removal.modal}
+        </>
+      ) : null}
     </Group>
   );
 }

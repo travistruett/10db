@@ -19,8 +19,10 @@
   `useAdoptGoal`); Factory's primary is Shape Work…, a link to `/shape`. The adopt route stays.
 - **The Proposed rows are buttons over regions**, as Factory's goal rows are, so Enter opens a row and ↑/↓ move
   between them with a roving tab stop. The spec's Enter-edits, P and W belong to slice 2, when rows edit.
-- **Remove Draft Goal and Withdraw Decision… sit on the converted row's menu in the sidebar.** The Board's goal
-  drawer and menu do not call `remove-draft` yet.
+- **Remove Draft Goal and Withdraw Decision… sit on the converted row's menu in the sidebar.** Remove Draft Goal
+  is also in the Board's goal line menu and in Factory's open goal (the Board has no goal drawer), behind the
+  same confirm. It is offered only for a draft goal a conversation made (`GET /goals/:id/shape`) whose digest
+  status is Not started; a conversation's goal with a task that has run says why in Factory instead.
 - **Model text is plain text.** No markdown renderer is a dependency, so chat and row text show as text with
   line breaks and are never markup.
 - **The transcript is a virtual list.** `@tanstack/react-virtual` (the builder's choice, pinned at 3.14.25, the
