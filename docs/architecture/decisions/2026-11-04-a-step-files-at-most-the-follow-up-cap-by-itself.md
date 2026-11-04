@@ -49,5 +49,5 @@ file twenty through them. A card, not a refusal, past the cap on `propose`, beca
 - Cards a step raises past the cap are not themselves capped; they are what the builder is meant to see.
 - `complete_step`'s `followUps` do not share the cap. A review, plan review or QA step can file them with no card
   and no refusal; the schema limits them to `MAX_FOLLOW_UPS` per call, on its own. They are not counted in
-  `stepFilings`, do not use up the cap, and still work once the cap is reached. Such a step can therefore file up
-  to `MAX_FOLLOW_UPS` more on top of the cap, twenty in all.
+  `stepFilings`, do not use up the cap, and still work once the cap is reached. Such a step can therefore file
+  more on top of the cap: up to `MAX_FOLLOW_UPS` for each `complete_step` call, and nothing limits the calls.
