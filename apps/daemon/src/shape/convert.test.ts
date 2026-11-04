@@ -24,6 +24,8 @@ import {
   listShapeQuestions,
   listTasks,
   listWorkstreams,
+  patchProject,
+  patchTask,
   searchDecisions,
   searchPrinciples,
   insertDecision,
@@ -618,6 +620,83 @@ describe('additions, changes and removals', () => {
     }).toThrow(/dropped/);
     propose(change('Renamed differently'));
     expect(rowOf(`change:${id}`).state).toBe(ShapeProposalState.Pending);
+  });
+});
+
+// Task placement spec P2: the rule runs when a task is made and when its areas are edited, whichever
+// door the task comes through, so Convert places what it makes and what it changes.
+describe('placement', () => {
+  beforeEach(() => {
+    write((ctx) => patchProject(ctx, c.project.id, { delivery: 'pull_request' }));
+  });
+
+  it('puts a loose task with an isolated area in a separate copy, with a reason', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'a', { areas: ['migrations'] }), loose(m, 'b')] });
+    converted('a', 'b');
+    expect(taskTitled('Task a')).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches migrations',
+    });
+    expect(taskTitled('Task b')).toMatchObject({ workspaceMode: 'shared', placementReason: null });
+  });
+
+  it("puts a goal's task with an isolated area in a separate copy, with a reason", () => {
+    const m = c.say();
+    propose({
+      goals: [
+        goalOf(m, 'g', ['g1', 'g2'], {
+          tasks: [
+            { key: 'g1', title: 'Lock', areas: ['deps'], size: 'S' },
+            { key: 'g2', title: 'Plain', areas: ['api'], size: 'S' },
+          ],
+        }),
+      ],
+    });
+    converted('g');
+    expect(taskTitled('Lock')).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches deps',
+    });
+    expect(taskTitled('Plain')).toMatchObject({ workspaceMode: 'shared', placementReason: null });
+  });
+
+  it('leaves a task shared in a project with local delivery', () => {
+    write((ctx) => patchProject(ctx, c.project.id, { delivery: 'local' }));
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'a', { areas: ['migrations'] })] });
+    converted('a');
+    expect(taskTitled('Task a')).toMatchObject({ workspaceMode: 'shared', placementReason: null });
+  });
+
+  it('moves an unstarted task to a separate copy when a change adds an isolated area', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'a')] });
+    converted('a');
+    const id = taskTitled('Task a').id;
+    expect(getTask(c.store.db, id)).toMatchObject({ workspaceMode: 'shared' });
+    const m2 = c.say('It touches the lockfile.');
+    propose({ changes: [{ taskId: id, areas: ['api', 'deps'], sourceMessageIds: [m2] }] });
+    converted(`change:${id}`);
+    expect(getTask(c.store.db, id)).toMatchObject({
+      workspaceMode: 'worktree',
+      placementReason: 'touches deps',
+    });
+  });
+
+  it('leaves a task the builder placed where the builder put it', () => {
+    const m = c.say();
+    propose({ looseTasks: [loose(m, 'a')] });
+    converted('a');
+    const id = taskTitled('Task a').id;
+    write((ctx) => patchTask(ctx, id, { workspaceMode: 'shared' }));
+    const m2 = c.say('It touches the lockfile.');
+    propose({ changes: [{ taskId: id, areas: ['deps'], sourceMessageIds: [m2] }] });
+    converted(`change:${id}`);
+    expect(getTask(c.store.db, id)).toMatchObject({
+      workspaceMode: 'shared',
+      placementReason: 'chosen by the builder',
+    });
   });
 });
 

@@ -223,6 +223,7 @@ export function insertGoalTask(
     readonly areas: readonly string[];
     readonly dependsOn: readonly TaskId[];
   },
+  placement?: Placement,
 ): TaskDto {
   const project = getProject(ctx.tx, projectId);
   refuseUnknownAreas(project, input.areas);
@@ -237,8 +238,7 @@ export function insertGoalTask(
     riskTags: [],
     flowId: null,
     landing: taskLandingFor(project),
-    workspaceMode: placementFor(project, undefined),
-    reason: null,
+    ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     proposalId: null,
     goalId,
   });

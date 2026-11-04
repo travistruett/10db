@@ -22,7 +22,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { getTask, insertGoalTask } from './tasks';
+import { getTask, insertGoalTask, type Placement } from './tasks';
 import { BUILDER_HANDLE, getPerson } from './team';
 
 // Goals spec docs/superpowers/specs/2026-10-29-10db-goals-design.md §4, §5, §8 (phase 1).
@@ -41,6 +41,11 @@ export interface GoalInsert {
   readonly outsideKeys?: ReadonlyMap<string, TaskId>;
   /** For a brief task's key, the outside keys it also depends on (a draft's `dependsOnOutside`). */
   readonly dependsOnOutside?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Where a brief task works, given its areas: the daemon's placement rule (`proposePlacement`).
+   * Absent means the project's default with no reason.
+   */
+  readonly placeTask?: (areas: readonly string[]) => Placement;
 }
 
 /** What `insertGoal` wrote: the goal, and the task it made for each brief key, in the order written. */
@@ -86,19 +91,25 @@ export function insertGoal(
 
   const taskIds = new Map<string, TaskId>();
   for (const task of inDependencyOrder(brief.tasks)) {
-    const written = insertGoalTask(ctx, projectId, goalId, {
-      title: task.title,
-      headline: task.headline,
-      why: task.why,
-      description: task.description,
-      acceptanceCriteria: task.criteria,
-      areas: task.areas,
-      // inDependencyOrder put every task this one depends on before it.
-      dependsOn: [
-        ...task.depends_on.flatMap((key) => taskIds.get(key) ?? []),
-        ...(outside.get(task.key) ?? []),
-      ],
-    });
+    const written = insertGoalTask(
+      ctx,
+      projectId,
+      goalId,
+      {
+        title: task.title,
+        headline: task.headline,
+        why: task.why,
+        description: task.description,
+        acceptanceCriteria: task.criteria,
+        areas: task.areas,
+        // inDependencyOrder put every task this one depends on before it.
+        dependsOn: [
+          ...task.depends_on.flatMap((key) => taskIds.get(key) ?? []),
+          ...(outside.get(task.key) ?? []),
+        ],
+      },
+      input.placeTask?.(task.areas),
+    );
     taskIds.set(task.key, written.id);
   }
 
