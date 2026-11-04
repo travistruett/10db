@@ -29,7 +29,8 @@ if (!reply) {
 }
 process.stdout.write(reply.stdout ?? '');
 process.stderr.write(reply.stderr ?? '');
-process.exit(reply.status ?? 0);
+// Not process.exit, which would cut off output still draining to a pipe.
+process.exitCode = reply.status ?? 0;
 `;
 
 /** Runs a Node script with the fake gh first on PATH; returns its result and every gh call made. */
