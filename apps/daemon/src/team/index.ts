@@ -1,6 +1,7 @@
 export { proposeCandidates } from './candidates';
 export { seedTeam } from './seed';
 export {
+  actionEntering,
   insertJoinedWorkstream,
   insertPlannedWorkstream,
   planForStart,

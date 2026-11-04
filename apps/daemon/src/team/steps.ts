@@ -8,8 +8,10 @@ import {
   NEW_TASK_NO_AREAS,
   StepRole,
   TaskStatus,
+  ToolAccess,
   WorkstreamState,
   type BatchId,
+  type NextAction,
   type Notice,
   type StepPlanDto,
   type TaskId,
@@ -41,12 +43,14 @@ import {
   transitionBatch,
   transitionWorkstream,
   type DbReader,
+  type WorkstreamRow,
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
 import {
   lastRevertNoteAt,
+  lastRevertTold,
   revertCommitOf,
   revertOfRun,
   revertedWorkNote,
@@ -136,6 +140,8 @@ export function insertPlannedWorkstream(
  * builder note, as the step's fix. The new run is then one that was told, and a commit it makes after
  * the revert brings the task's work back in the pull request. Only a start puts a run here: a merge
  * run the shipping gate sends to a finished task goes through `insertPlannedWorkstream` and is not told.
+ * A run that starts on a read-only plan step is told what happened, and `actionEntering` asks its
+ * implement step to redo the work.
  */
 export function insertJoinedWorkstream(
   ctx: WriteContext,
@@ -149,18 +155,44 @@ export function insertJoinedWorkstream(
   for (const run of earlier)
     revert =
       revertOfRun({ notice: run.notice, evidence: listEvidence(ctx.tx, run.id) })?.revert ?? revert;
-  if (revert === null) return ws;
-  const note = insertEvidence(ctx, {
-    workstreamId: ws.id,
+  const [first] = plan.steps;
+  if (revert === null || !first) return ws;
+  const note = insertBuilderNote(ctx, ws.id, revertedWorkNote(revert, first));
+  patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: note.id } });
+  return getWorkstream(ctx.tx, ws.id);
+}
+
+function insertBuilderNote(ctx: WriteContext, workstreamId: WorkstreamId, summary: string) {
+  return insertEvidence(ctx, {
+    workstreamId,
     kind: 'builder',
     command: null,
     exitCode: null,
-    summary: revertedWorkNote(revert),
+    summary,
     logPath: null,
     commitShas: [],
   });
-  patchWorkstream(ctx, ws.id, null, { nextAction: { kind: 'fix', evidenceId: note.id } });
-  return getWorkstream(ctx.tx, ws.id);
+}
+
+/**
+ * What step `to` starts on when the run moves forward into it. An implement step that follows a plan
+ * is entered long after the retry or start that told the run of a revert, and it is the step that has
+ * to redo the work, so it gets the note as its fix, stamped in the write that enters it. Once an
+ * implement step has started since the note, that step was told and any commit it made stands.
+ */
+export function actionEntering(ctx: WriteContext, row: WorkstreamRow, to: number): NextAction {
+  const step = row.steps[to];
+  if (step?.role !== StepRole.Implement) return { kind: 'start' };
+  const evidence = listEvidence(ctx.tx, row.id);
+  const revert = lastRevertTold(evidence);
+  const since = lastRevertNoteAt(evidence);
+  if (revert === null || since === null) return { kind: 'start' };
+  const told = row.steps.some(
+    (s) => s.role === StepRole.Implement && s.startedAt !== null && s.startedAt >= since,
+  );
+  if (told) return { kind: 'start' };
+  const note = insertBuilderNote(ctx, row.id, revertedWorkNote(revert, step));
+  return { kind: 'fix', evidenceId: note.id };
 }
 
 /** Starts a task in local delivery: its plan, then its workstream. */
@@ -245,30 +277,25 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
     const revert = revertStillOn(ctx.tx, row);
     if (revert) setWorkstreamNotice(ctx, id, revertedWorkNotice(revert));
     else if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
-    // The builder's note is a fix for whichever step runs next, as when they send the work back. It
-    // is stamped in the same write that starts that step, so a fresh session still finds it outstanding.
-    const text = [note?.trim() ?? '', revert ? revertedWorkNote(revert) : '']
-      .filter((part) => part !== '')
-      .join('\n\n');
-    const evidence =
-      text === ''
-        ? null
-        : insertEvidence(ctx, {
-            workstreamId: id,
-            kind: 'builder',
-            command: null,
-            exitCode: null,
-            summary: text,
-            logPath: null,
-            commitShas: [],
-          });
     // A revert note is for the step that can commit: a read-only step cannot redo the work, and its
     // rejection would send the work back to the implement step without the note. So a retry that
     // tells of a revert restarts the implement step before a read-only one, as a rejection would.
+    // A step before the first implement step restarts as usual, told only what happened, and the
+    // implement step gets the note when the run enters it (`actionEntering`).
     const reworkAt =
       retryTargetAfterRejection(row.steps, row.stepIndex) ??
       (revert ? implementBefore(row.steps, row.stepIndex) : null);
     const reworked = reworkAt === null ? undefined : row.steps[reworkAt];
+    const runsNext = reworked ?? row.steps[row.stepIndex];
+    // The builder's note is a fix for whichever step runs next, as when they send the work back. It
+    // is stamped in the same write that starts that step, so a fresh session still finds it outstanding.
+    const text = [
+      note?.trim() ?? '',
+      revert ? revertedWorkNote(revert, runsNext ?? { tools: ToolAccess.Edit }) : '',
+    ]
+      .filter((part) => part !== '')
+      .join('\n\n');
+    const evidence = text === '' ? null : insertBuilderNote(ctx, id, text);
     if (reworkAt !== null && reworked) {
       // A reviewer's rejection used the attempts up: the step that did the work runs again, as when
       // the rejection sent it back, with the review's notes and the builder's note if they gave one.

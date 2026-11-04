@@ -25,6 +25,12 @@ run is therefore one that was told. Runs started before this change have no note
 `left-out` notice behind it, the task is listed as not done unless a told run committed, which errs towards saying
 less was shipped.
 
+The step that can commit is the one asked to redo the work. A retry at a read-only step with an implement step
+before it restarts that implement step. A step that runs before the first implement step (a plan or plan review,
+on a retry or on a joined run's start) restarts as usual and gets a note that says only what happened, since it
+cannot commit. When the run then moves forward into its implement step, that step gets the full note as its fix,
+unless an implement step has started since the last note.
+
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
 

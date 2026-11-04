@@ -2,7 +2,9 @@ import {
   LEFT_OUT_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
+  ToolAccess,
   type Notice,
+  type WorkstreamStep,
 } from '@10db/contracts';
 
 /**
@@ -89,11 +91,16 @@ export function revertedWorkNotice(revert: string): Notice {
   };
 }
 
-/** What the retried run's session is told, in the builder's note slot, so it knows its commits are gone. */
-export function revertedWorkNote(revert: string): string {
-  return [
-    `Your earlier commits on this batch's branch were reverted: the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`,
-    `Redo the work and commit it with the commit tool; the reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed. A run that commits nothing new is left out of the pull request as not done.`,
-    revertCommitLine(revert),
-  ].join('\n\n');
+/**
+ * What a session is told, in the builder's note slot, so it knows the run's commits are gone. A step
+ * that can commit is asked to redo the work; a read-only step can't, so it is told only what happened,
+ * and the implement step gets the full note when the run enters it (`actionEntering`).
+ */
+export function revertedWorkNote(revert: string, step: Pick<WorkstreamStep, 'tools'>): string {
+  const undone = `Your earlier commits on this batch's branch were reverted: the builder chose Ship without it after this run failed, and 10db undid them in commit ${revert}. They are not in the branch's files now.`;
+  const next =
+    step.tools === ToolAccess.ReadOnly
+      ? `This work still has to be done again, and the step that can commit is told so when it runs. The reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed.`
+      : `Redo the work and commit it with the commit tool; the reverted commits are still in the branch's history, so \`git show ${revert}\` lists them and you can read what they changed. A run that commits nothing new is left out of the pull request as not done.`;
+  return [undone, next, revertCommitLine(revert)].join('\n\n');
 }

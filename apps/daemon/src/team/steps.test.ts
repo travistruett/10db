@@ -41,7 +41,14 @@ import { revertCommitLine } from './reverted-work';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { outstandingFixEvidence } from '../runner';
 import { seedTeam } from './seed';
-import { resolveStepPlan, retryWorkstream, startTaskWithPlan } from './steps';
+import {
+  actionEntering,
+  insertJoinedWorkstream,
+  insertPlannedWorkstream,
+  resolveStepPlan,
+  retryWorkstream,
+  startTaskWithPlan,
+} from './steps';
 
 let state: StateStore;
 let close: () => void;
@@ -460,6 +467,84 @@ describe('retryWorkstream', () => {
       const notes = builderNotes(ws.id);
       expect(notes).toHaveLength(2);
       expect(notes[1]?.summary).toContain(SECOND_REVERT);
+    });
+
+    const REDO = 'Redo the work and commit it with the commit tool';
+    /** Four criteria keep the full flow's plan step, so the run starts on a read-only step. */
+    const fullFlowPlan = (taskId: TaskId) => {
+      state.write((ctx) =>
+        patchTask(ctx, taskId, {
+          flowId: flowId('full'),
+          acceptanceCriteria: ['a', 'b', 'c', 'd'],
+        }),
+      );
+      const plan = resolveStepPlan(state.db, taskId);
+      expect(plan.steps[0]?.role).toBe('plan');
+      return plan;
+    };
+    const implementAt = (id: WorkstreamId) =>
+      getWorkstreamRow(state.db, id).steps.findIndex((s) => s.role === 'implement');
+
+    it('tells a run started again at its plan step at the implement step too', () => {
+      const task = addTask();
+      const plan = fullFlowPlan(task.id);
+      const batch = state.write((ctx) => {
+        const row = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+        const left = insertPlannedWorkstream(ctx, task.id, plan, row.id);
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, left.id, { to, fence: null });
+        setWorkstreamNotice(ctx, left.id, leftOut(REVERT));
+        return row;
+      });
+      const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batch.id));
+      const [told] = builderNotes(joined.id);
+      expect(joined.nextAction).toEqual({ kind: 'fix', evidenceId: told?.id });
+      expect(told?.summary).toContain(REVERT);
+      expect(told?.summary).not.toContain(REDO);
+
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, joined.id), implementAt(joined.id)),
+      );
+      const fix = builderNotes(joined.id).at(-1);
+      expect(action).toEqual({ kind: 'fix', evidenceId: fix?.id });
+      expect(fix?.summary).toContain(REDO);
+      expect(fix?.summary).toContain(REVERT);
+    });
+
+    it('starts an implement step as usual when no note told of a revert', () => {
+      const task = addTask();
+      const plan = fullFlowPlan(task.id);
+      const ws = state.write((ctx) => insertPlannedWorkstream(ctx, task.id, plan, null));
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), implementAt(ws.id)),
+      );
+      expect(action).toEqual({ kind: 'start' });
+      expect(builderNotes(ws.id)).toEqual([]);
+    });
+
+    it('does not tell a later implement step once one has started since the note', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      const retried = retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, ws.id);
+        const [first] = row.steps;
+        if (!first) throw new Error('no step');
+        const second = { ...first, startedAt: null, status: 'pending' as const };
+        patchWorkstream(ctx, ws.id, null, { steps: [...row.steps, second] });
+      });
+      const before = builderNotes(ws.id).length;
+      const action = state.write((ctx) =>
+        actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), retried.steps.length),
+      );
+      expect(action).toEqual({ kind: 'start' });
+      expect(builderNotes(ws.id)).toHaveLength(before);
+    });
+
+    it('does not tell a step entered that is not an implement step', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      const action = state.write((ctx) => actionEntering(ctx, getWorkstreamRow(ctx.tx, ws.id), 1));
+      expect(action).toEqual({ kind: 'start' });
     });
   });
 
