@@ -85,9 +85,14 @@ export function ConversationPane({
       propose.mutate(shapeId);
     }
   };
+  const queued = view?.turn.queued ?? 0;
+  // The longest the queue has been since Stop was pressed. The view has no turn id and `running`
+  // stays true from one queued turn to the next, so the queue falling is what says a turn ended.
+  const queuedSinceStop = useRef(0);
   const doStop = (): void => {
     if (shapeId !== null) {
       if (propose.isError) propose.reset();
+      queuedSinceStop.current = queued;
       stop.mutate(shapeId);
     }
   };
@@ -97,9 +102,10 @@ export function ConversationPane({
   const stopRefused = stop.isError;
   const resetStop = stop.reset;
   useEffect(() => {
-    if (stopRefused && !answering) resetStop();
-  }, [stopRefused, answering, resetStop]);
-  // The latest mutations, for a send that finishes after they changed.
+    if (queued > queuedSinceStop.current) queuedSinceStop.current = queued;
+    if (stopRefused && (!answering || queued < queuedSinceStop.current)) resetStop();
+  }, [stopRefused, answering, queued, resetStop]);
+  // The latest mutations, for a send that started before they changed.
   const latest = useRef({ propose, stop });
   useEffect(() => {
     latest.current = { propose, stop };
@@ -184,13 +190,16 @@ export function ConversationPane({
           return problems;
         }}
         onSend={async (text) => {
+          const before = latest.current;
           const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
-          // The daemon took the message, so an earlier refusal of Propose or Stop is out of date.
-          // Only a refusal that has arrived is cleared: a Propose or Stop still in flight keeps its
+          // The daemon took the message, so a refusal of Propose or Stop from before the send is out
+          // of date. Only that one is cleared: `mutateAsync` settles after the refetch, so a refusal
+          // that arrived during the send is news, and a Propose or Stop still in flight keeps its
           // observer, so its loading state lasts and a refusal that comes later is shown.
-          if (latest.current.propose.isError) latest.current.propose.reset();
-          if (latest.current.stop.isError) latest.current.stop.reset();
+          const { propose: nowPropose, stop: nowStop } = latest.current;
+          if (nowPropose.isError && nowPropose.error === before.propose.error) nowPropose.reset();
+          if (nowStop.isError && nowStop.error === before.stop.error) nowStop.reset();
           if (shapeId === null) onOpened(id);
         }}
         onPropose={doPropose}
