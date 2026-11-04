@@ -383,9 +383,6 @@ function deadlock(a: Asking, heldBy: WorkstreamId, waits: ClaimWaits): InboxItem
     foldKey: deadlockKey(a),
     refresh: true,
   });
-  // A repeat that folds keeps the options it was raised with; another holder needs other answers.
-  if (card.options.map((o) => o.label).join('\n') !== options.map((o) => o.label).join('\n'))
-    a.inbox.reword(card.id, body, { options, detail: { heldBy, ...detail } });
   return card.id;
 }
 
