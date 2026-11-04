@@ -542,6 +542,42 @@ describe('KnowledgeView', () => {
     expect(within(drawer).getByText('We use fake timers now')).toBeTruthy();
   });
 
+  describe('names the tool behind a retire, withdrawal or confirmation', () => {
+    const at = '2026-10-16T09:30:00.000Z';
+    it.each([
+      ['claude_code', 'Claude Code'],
+      ['builder_mcp', 'Claude Code'],
+      ['some_other_tool', 'some_other_tool'],
+    ])('through %s reads "through %s"', async (via, name) => {
+      const principle = principleItem({ state: 'retired', statement: 'Retired rule' });
+      serve({ principles: [principle] });
+      const source = { via, sessionId: null, cwd: null, recordedAt: at, quote: null };
+      server.use(
+        http.get(daemonUrl(`/principles/${principle.id}/provenance`), () =>
+          HttpResponse.json(
+            provenanceDto({
+              id: principle.id,
+              state: 'retired',
+              confirmedBy: 'me',
+              confirmedAt: at,
+              confirmedSource: source,
+              retired: { at, by: 'me', reason: 'Old', source },
+              withdrawn: { at, by: 'me', reason: 'Wrong', source },
+            }),
+          ),
+        ),
+      );
+      renderApp('/knowledge');
+      fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
+      const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
+      for (const verb of ['Retired', 'Withdrawn', 'Confirmed']) {
+        expect(
+          await within(drawer).findByText(new RegExp(`^${verb} by you on .* through ${name}$`)),
+        ).toBeTruthy();
+      }
+    });
+  });
+
   describe('names the session that wrote a record', () => {
     const shapeId = mintId('Shape');
     const workstreamId = mintId('Workstream');
