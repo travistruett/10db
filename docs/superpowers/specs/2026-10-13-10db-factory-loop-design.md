@@ -412,6 +412,15 @@ becomes an instruction.
 
 ## 9. Knowledge and the context pack
 
+_Update: built as `docs/architecture/05-knowledge.md` describes, for decisions and principles. **Built:** the
+shelves and scopes, the context pack (policies, heuristics, then decisions, by area match and search, in a
+1500-token budget; `budget_used`, `dropped_count`, truncation and emptiness stated), injection at managed
+session start, resume and emergency compaction (each a `context.packed` event), inbox answers becoming
+decisions, always/never statements becoming principle proposals with a choice of scope (a word detector until
+the PM exists), provenance and withdrawn tombstones. **Designed, not built:** facts and the pack's facts
+shelf, the `SessionStart` hook for terminal sessions, repeat questions answered from existing records, the
+"review this principle?" card after two signed overrides, and the external knowledge adapter._
+
 - **Shelves and scope:** decisions, principles and facts (§4), each scoped to you, a project or an area.
   Agents may only *propose* principles, and proposals always reach the builder's inbox. Facts are written only
   by the builder or by confirmed proposals; there is no automatic extraction.
@@ -459,6 +468,9 @@ becomes an instruction.
 - **Inbox:** one queue across projects, filtered by mine, by teammate or by project, and answerable from the
   keyboard.
 - **Knowledge:** decisions, principles and pending proposals, filtered by scope. Bulk confirm for imports.
+  _Update: built, apart from bulk confirm (no import exists yet) and facts: Principles, Decisions and
+  Proposals tabs, search, a scope filter, History, a provenance drawer, and record, edit, retire, withdraw
+  and decide-a-proposal actions (`docs/architecture/05-knowledge.md`)._
 - **Settings:**
   - Per project: team bindings, routing rules, budget ceiling, areas and hazards, gate command and billing
     mode.

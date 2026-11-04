@@ -314,6 +314,112 @@
     "knowledge": {
       "type": "object",
       "properties": {
+        "policies": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "principle"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "principleKind": {
+                "type": "string",
+                "enum": [
+                  "policy",
+                  "heuristic",
+                  "belief"
+                ]
+              },
+              "topicKey": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "you",
+                  "project",
+                  "area"
+                ]
+              },
+              "area": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "statement",
+              "principleKind",
+              "topicKey",
+              "scope",
+              "area"
+            ]
+          }
+        },
+        "heuristics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "const": "principle"
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^pri_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "statement": {
+                "type": "string"
+              },
+              "principleKind": {
+                "type": "string",
+                "enum": [
+                  "policy",
+                  "heuristic",
+                  "belief"
+                ]
+              },
+              "topicKey": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "you",
+                  "project",
+                  "area"
+                ]
+              },
+              "area": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "kind",
+              "id",
+              "statement",
+              "principleKind",
+              "topicKey",
+              "scope",
+              "area"
+            ]
+          }
+        },
         "decisions": {
           "type": "array",
           "items": {
@@ -335,6 +441,20 @@
               },
               "rationale": {
                 "type": "string"
+              },
+              "scope": {
+                "type": "string",
+                "enum": [
+                  "you",
+                  "project",
+                  "area"
+                ]
+              },
+              "area": {
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -342,14 +462,46 @@
               "id",
               "question",
               "choice",
-              "rationale"
+              "rationale",
+              "scope",
+              "area"
             ]
           }
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": -9007199254740991,
+          "maximum": 9007199254740991
         },
         "budgetUsed": {
           "type": "integer",
           "minimum": -9007199254740991,
           "maximum": 9007199254740991
+        },
+        "dropped": {
+          "type": "object",
+          "properties": {
+            "policies": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "heuristics": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "decisions": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "policies",
+            "heuristics",
+            "decisions"
+          ]
         },
         "droppedCount": {
           "type": "integer",
@@ -361,8 +513,12 @@
         }
       },
       "required": [
+        "policies",
+        "heuristics",
         "decisions",
+        "budget",
         "budgetUsed",
+        "dropped",
         "droppedCount",
         "empty"
       ]

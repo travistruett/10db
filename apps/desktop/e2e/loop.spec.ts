@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
@@ -10,7 +10,7 @@ const Changes = z.object({ commits: z.array(z.string()) });
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
-const VIEWS = ['Board', 'Factory', 'Inbox', 'Settings'] as const;
+const VIEWS = ['Board', 'Factory', 'Inbox', 'Knowledge', 'Settings'] as const;
 
 /** The Board has no page heading, so its link in the sidebar marks it as the open view. */
 async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
@@ -27,6 +27,8 @@ async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<voi
     return;
   }
   await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
+  // Axe must not scan a list that is still loading.
+  if (view === 'Knowledge') await expect(page.getByLabel(/^Loading /)).toHaveCount(0);
 }
 
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
@@ -34,6 +36,20 @@ async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
     .getByRole('link', { name: new RegExp(`^(Back to )?${view}( \\d+ open cards?)?$`) })
     .click();
   await expectView(page, view);
+}
+
+/**
+ * Visible with none of its text clipped; a line clamp leaves the rest in the DOM, out of sight.
+ * The pixel of slack allows for rounding, far less than a clipped line.
+ */
+async function expectFullyShown(text: Locator): Promise<void> {
+  await expect(text).toBeVisible();
+  const clipped = await text.evaluate(
+    (element) =>
+      element.scrollHeight > element.clientHeight + 1 ||
+      element.scrollWidth > element.clientWidth + 1,
+  );
+  expect(clipped).toBe(false);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -58,6 +74,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     },
   });
   expect(created.ok()).toBe(true);
+  const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -169,6 +186,31 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(/^Goals are outcomes 10db pursues/)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Not in a goal/ })).toHaveCount(0);
   await expectAccessible(page, 'factory, no goals, dark');
+
+  // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
+  // without a reload, with where it came from.
+  await open(page, 'Knowledge');
+  await page.getByRole('tab', { name: 'Decisions' }).click();
+  const written = await request.post(`${daemonUrl}/projects/${projectId}/decisions`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      question: 'Which greeting file?',
+      choice: 'hello.txt',
+      rationale: 'The gate looks for it.',
+      source: { via: 'claude_code', quote: 'keep it hello.txt' },
+    },
+  });
+  expect(written.ok()).toBe(true);
+  const decisions = page.getByRole('table', { name: 'Decisions' });
+  await expect(decisions.getByText('hello.txt')).toBeVisible();
+  await expectAccessible(page, 'knowledge, decisions, dark');
+  await decisions.getByRole('button', { name: /^Where .* came from$/ }).click();
+  const provenance = page.getByRole('dialog', { name: 'Where it came from' });
+  await expect(provenance.getByText('Claude Code')).toBeVisible();
+  await expect(provenance.getByText('keep it hello.txt')).toBeVisible();
+  await expectAccessible(page, 'knowledge, provenance, dark');
+  await page.keyboard.press('Escape');
+  await expect(provenance).toBeHidden();
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
@@ -301,4 +343,151 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
       .getByText('Needs a secret'),
   ).toBeVisible();
   await expectAccessible(page, 'settings, accounts, light');
+});
+
+test('records, edits, retires and withdraws knowledge, and a reload loses nothing', async ({
+  page,
+}) => {
+  // The loop test left the `e2e` project and one decision in it.
+  await page.goto('/board');
+  await open(page, 'Knowledge');
+  await expectAccessible(page, 'knowledge, principles, dark');
+
+  // A policy for the project, written by the builder, then edited: the old text moves to History.
+  await page.getByRole('button', { name: 'New Principle' }).click();
+  const newPrinciple = page.getByRole('dialog', { name: 'New Principle' });
+  await newPrinciple.getByLabel('Statement').fill('Never sleep in tests');
+  await newPrinciple.getByLabel('Kind').click();
+  await page.getByRole('option', { name: 'Policy' }).click();
+  await expect(newPrinciple.getByLabel('Topic key')).toHaveValue('never-sleep-in-tests');
+  await expectAccessible(page, 'knowledge, new principle, dark');
+  await newPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expect(newPrinciple).toBeHidden();
+  const principles = page.getByRole('table', { name: 'Principles' });
+  await expect(principles.getByText('Never sleep in tests')).toBeVisible();
+
+  await principles.getByRole('button', { name: 'Actions for never-sleep-in-tests' }).click();
+  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  const editPrinciple = page.getByRole('dialog', { name: 'Edit Principle' });
+  await expect(editPrinciple.getByLabel('Topic key')).toHaveValue('never-sleep-in-tests');
+  await editPrinciple.getByLabel('Statement').fill('Tests never sleep');
+  await editPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expect(editPrinciple).toBeHidden();
+  await expect(principles.getByText('Tests never sleep')).toBeVisible();
+  await expect(principles.getByText('Never sleep in tests')).toBeHidden();
+
+  // A key another principle holds is refused, and a dialog's messages are readable without a hover.
+  await page.getByRole('button', { name: 'New Principle' }).click();
+  await newPrinciple.getByLabel('Statement').fill('Keep functions small');
+  await newPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expect(newPrinciple).toBeHidden();
+  await principles.getByRole('button', { name: 'Actions for keep-functions-small' }).click();
+  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  await editPrinciple.getByLabel('Topic key').fill('Not A Key');
+  await editPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expectFullyShown(editPrinciple.getByRole('alert').getByText(/testing\.no-sleeps\)\.$/));
+  await editPrinciple.getByLabel('Topic key').fill('never-sleep-in-tests');
+  await editPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expectFullyShown(
+    editPrinciple
+      .getByRole('alert')
+      .getByText(/already holds the key never-sleep-in-tests .* supersede or retire it first$/),
+  );
+  await editPrinciple.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editPrinciple).toBeHidden();
+
+  await page.getByRole('switch', { name: 'History' }).check();
+  await expect(principles.getByText('Superseded')).toBeVisible();
+  await expect(principles.getByText('Never sleep in tests')).toBeVisible();
+
+  // Each version's provenance links to the other.
+  await principles
+    .getByRole('row', { name: /Tests never sleep/ })
+    .getByRole('button', { name: /^Where .* came from$/ })
+    .click();
+  const drawer = page.getByRole('dialog', { name: 'Where it came from' });
+  await expect(drawer.getByText('The app')).toBeVisible();
+  await drawer.getByRole('button', { name: 'Replaced: Never sleep in tests' }).click();
+  await expect(
+    drawer.getByRole('button', { name: 'Replaced by: Tests never sleep' }),
+  ).toBeVisible();
+  await expectAccessible(page, 'knowledge, provenance, dark');
+  await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+
+  // The older version cannot be withdrawn: its dialog names the newest one.
+  await principles
+    .getByRole('row', { name: /Never sleep in tests/ })
+    .getByRole('button', { name: /^Actions for / })
+    .click();
+  await page.getByRole('menuitem', { name: 'Withdraw…' }).click();
+  const older = page.getByRole('dialog', { name: 'Withdraw Principle' });
+  await expect(older.getByText(/has a newer version/)).toBeVisible();
+  await expect(older.getByText('Tests never sleep')).toBeVisible();
+  await older.getByRole('button', { name: 'Cancel' }).click();
+  await expect(older).toBeHidden();
+
+  // Retire the current one with a reason.
+  await principles
+    .getByRole('row', { name: /Tests never sleep/ })
+    .getByRole('button', { name: 'Actions for never-sleep-in-tests' })
+    .click();
+  await page.getByRole('menuitem', { name: 'Retire…' }).click();
+  const retire = page.getByRole('dialog', { name: 'Retire Principle' });
+  await retire.getByRole('button', { name: 'Retire' }).click();
+  await expect(retire.getByText('Say why.')).toBeVisible();
+  await retire.getByLabel('Reason').fill('Fake timers make waiting free');
+  await retire.getByRole('button', { name: 'Retire' }).click();
+  await expect(retire).toBeHidden();
+  await expect(principles.getByText('Retired')).toBeVisible();
+
+  // A decision at the project, edited, then the edit withdrawn: the first answer is current again.
+  await page.getByRole('tab', { name: 'Decisions' }).click();
+  await page.getByRole('button', { name: 'New Decision' }).click();
+  const record = page.getByRole('dialog', { name: 'New Decision' });
+  await record.getByLabel('Question').fill('Which greeting style?');
+  await record.getByLabel('Choice').fill('Howdy');
+  await record.getByLabel('Rationale').fill('Friendly');
+  await record.getByRole('button', { name: 'Record' }).click();
+  await expect(record).toBeHidden();
+  const decisions = page.getByRole('table', { name: 'Decisions' });
+  await expect(decisions.getByText('Howdy')).toBeVisible();
+
+  await decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }).click();
+  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  const edit = page.getByRole('dialog', { name: 'Edit Decision' });
+  await edit.getByLabel('Choice').fill('Hello');
+  await edit.getByRole('button', { name: 'Save' }).click();
+  await expect(edit).toBeHidden();
+  await expect(decisions.getByText('Hello', { exact: true })).toBeVisible();
+  await expect(decisions.getByText('Superseded')).toBeVisible();
+
+  await decisions
+    .getByRole('row', { name: /Hello/ })
+    .getByRole('button', { name: 'Actions for "Which greeting style?"' })
+    .click();
+  await page.getByRole('menuitem', { name: 'Withdraw…' }).click();
+  const withdraw = page.getByRole('dialog', { name: 'Withdraw Decision' });
+  await expect(
+    withdraw.getByText(/leaves briefings and search\. It stays under History with your reason\./),
+  ).toBeVisible();
+  await withdraw.getByLabel('Reason').fill('Hello is too formal');
+  await withdraw.getByRole('button', { name: 'Withdraw' }).click();
+  await expect(withdraw).toBeHidden();
+  await expect(decisions.getByText('Withdrawn')).toBeVisible();
+  await expect(decisions.getByRole('row', { name: /Howdy/ }).getByText('Current')).toBeVisible();
+
+  // Reopening the window loses nothing: every record, its state and its history.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Knowledge', level: 2 })).toBeVisible();
+  await page.getByRole('switch', { name: 'History' }).check();
+  const reloadedPrinciples = page.getByRole('table', { name: 'Principles' });
+  await expect(reloadedPrinciples.getByText('Retired')).toBeVisible();
+  await expect(reloadedPrinciples.getByText('Superseded')).toBeVisible();
+  await page.getByRole('tab', { name: 'Decisions' }).click();
+  const reloadedDecisions = page.getByRole('table', { name: 'Decisions' });
+  await expect(reloadedDecisions.getByText('Withdrawn')).toBeVisible();
+  await expect(
+    reloadedDecisions.getByRole('row', { name: /Howdy/ }).getByText('Current'),
+  ).toBeVisible();
 });

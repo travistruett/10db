@@ -1,19 +1,29 @@
 import {
+  KnowledgeScope,
+  PrincipleKind,
+  PrincipleStatus,
   ShapeProposalBody,
   ShapeProposalState,
   ShapeState,
+  topicKeyFrom,
   type DecisionId,
   type GoalBrief,
   type GoalId,
+  type KnowledgeTarget,
   type PlanChange,
   type PlanGoal,
+  type PlanPrincipleRecord,
   type PlanRemoval,
+  type PrincipleId,
+  type ProjectId,
   type ShapeId,
   type ShapeProposalId,
   type ShapeProposalKind,
+  type ShapeQuestionId,
   type TaskId,
 } from '@10db/contracts';
 import {
+  BUILDER_HANDLE,
   cancelTask,
   getProject,
   getShape,
@@ -21,7 +31,9 @@ import {
   insertGoal,
   insertGoalTask,
   insertLandingGroup,
+  insertPrinciple,
   insertShapeLink,
+  insertShapeQuestion,
   insertSource,
   insertTask,
   linkShapeAttachments,
@@ -36,8 +48,9 @@ import {
 } from '@10db/db';
 import { buildPlanWorld } from './world';
 
-// Shape spec §11. Convert writes the selected proposals into goals, tasks and decisions in the
-// caller's transaction, so a refusal or a failure leaves nothing behind, and it starts nothing.
+// Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
+// questions in the caller's transaction, so a refusal or a failure leaves nothing behind, and it
+// starts nothing.
 
 /** What one proposal became. */
 export interface ConvertedRow {
@@ -46,6 +59,8 @@ export interface ConvertedRow {
   readonly goalId?: GoalId;
   readonly taskIds: readonly TaskId[];
   readonly decisionId?: DecisionId;
+  readonly principleId?: PrincipleId;
+  readonly questionId?: ShapeQuestionId;
 }
 
 export type ConvertOutcome =
@@ -58,15 +73,19 @@ export type ConvertOutcome =
     }
   | { readonly ok: false; readonly errors: readonly string[] };
 
-/** The kinds Convert writes today; principles and questions come with their tables. */
-const WRITTEN: ReadonlySet<ShapeProposalKind> = new Set([
-  'goal',
-  'task',
-  'landing',
-  'decision',
-  'change_task',
-  'remove_task',
-]);
+/** Where a principle record applies: the builder, the project, or one of its areas. */
+function principleTarget(record: PlanPrincipleRecord, projectId: ProjectId): KnowledgeTarget {
+  switch (record.scope) {
+    case KnowledgeScope.You:
+      return { scope: KnowledgeScope.You };
+    case KnowledgeScope.Project:
+      return { scope: KnowledgeScope.Project, projectId };
+    case KnowledgeScope.Area:
+      // The record names its area (the contract refuses an area scope without one), and Convert has
+      // already checked the project has it.
+      return { scope: KnowledgeScope.Area, projectId, area: record.area ?? '' };
+  }
+}
 
 /** A task a proposal holds, by its key: the title to name it by, and the row it is in. */
 interface Owner {
@@ -134,8 +153,6 @@ export function convertProposals(
   for (const id of new Set(proposalIds)) {
     const row = byId.get(id);
     if (row === undefined) errors.push(`${id} is not a proposal of this conversation`);
-    else if (!WRITTEN.has(row.kind))
-      errors.push(`${row.key} is a ${row.kind}, which Convert cannot write yet`);
     else if (row.state !== ShapeProposalState.Pending && row.state !== ShapeProposalState.Accepted)
       errors.push(`${row.key} is ${row.state}, so it cannot be converted`);
     else selected.push(row);
@@ -202,13 +219,39 @@ export function convertProposals(
     }
   }
 
-  // Records, changes and removals are judged again as they stand now.
+  const project = getProject(ctx.tx, getShape(ctx.tx, shapeId).projectId);
+  const goalIds = new Map<string, GoalId>();
+  for (const link of listShapeLinks(ctx.tx, shapeId))
+    if (link.goalId !== null) goalIds.set(link.key, link.goalId);
+
+  // Records, questions, changes and removals are judged again as they stand now.
   for (const row of pending) {
     if (row.kind === 'decision') {
       const record = ShapeProposalBody.decision.parse(row.body);
       const problem =
         record.supersedes === undefined ? null : world.decisionProblem(record.supersedes);
       if (problem !== null) errors.push(`${row.key} supersedes ${problem}`);
+    } else if (row.kind === 'principle') {
+      const record = ShapeProposalBody.principle.parse(row.body);
+      if (
+        record.scope === KnowledgeScope.Area &&
+        !project.areas.some((a) => a.name === record.area)
+      )
+        errors.push(`${row.key}: ${project.name} has no area named ${record.area ?? ''}`);
+    } else if (row.kind === 'question') {
+      const about = ShapeProposalBody.question.parse(row.body).about;
+      // A question belongs to a goal or task that is converted already or is converted with it.
+      if (about === undefined || world.convertedTasks.has(about) || goalIds.has(about)) continue;
+      const goal = rows.find((r) => r.kind === 'goal' && r.key === about && r.state === 'pending');
+      const owner =
+        owners.get(about) ??
+        (goal === undefined
+          ? undefined
+          : { title: ShapeProposalBody.goal.parse(goal.body).title, row: goal });
+      if (owner === undefined)
+        errors.push(`${row.key} is about ${about}, and no proposal has that key`);
+      else if (!selectedIds.has(owner.row.id))
+        errors.push(`${row.key} is about ${owner.title}, which isn't selected`);
     } else if (row.kind === 'change_task' || row.kind === 'remove_task') {
       const body = ShapeProposalBody[row.kind].parse(row.body);
       const problem = world.unstartedProblem(body.taskId);
@@ -224,11 +267,16 @@ export function convertProposals(
   if (errors.length > 0 || 'cycle' in sorted) return { ok: false, errors };
 
   // Writes.
-  const project = getProject(ctx.tx, getShape(ctx.tx, shapeId).projectId);
   const taskIds = new Map<string, TaskId>(world.convertedTasks);
   const made = new Map<
     ShapeProposalId,
-    { goalId?: GoalId; taskIds: TaskId[]; decisionId?: DecisionId }
+    {
+      goalId?: GoalId;
+      taskIds: TaskId[];
+      decisionId?: DecisionId;
+      principleId?: PrincipleId;
+      questionId?: ShapeQuestionId;
+    }
   >();
 
   for (const row of sorted.order) {
@@ -245,6 +293,7 @@ export function convertProposals(
         dependsOnOutside: outside,
       });
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, goalId: written.goal.id });
+      goalIds.set(row.key, written.goal.id);
       const ids: TaskId[] = [];
       for (const [key, id] of written.taskIds) {
         taskIds.set(key, id);
@@ -320,6 +369,45 @@ export function convertProposals(
     made.set(row.id, { taskIds: [], decisionId: id });
   }
 
+  // Converting is the builder's own confirmation, so a principle is written confirmed. It replaces
+  // the current one with the same topic key and scope, which `insertPrinciple` finds.
+  for (const row of pending.filter((r) => r.kind === 'principle')) {
+    const record = ShapeProposalBody.principle.parse(row.body);
+    const principle = insertPrinciple(ctx, {
+      target: principleTarget(record, project.id),
+      statement: record.statement,
+      rationale: record.rationale,
+      kind: record.principleKind ?? PrincipleKind.Policy,
+      topicKey: record.topicKey ?? topicKeyFrom(record.statement),
+      status: PrincipleStatus.Confirmed,
+      sourceId: insertSource(ctx, 'builder', { shapeId, proposalKey: row.key }),
+      sourceQuote: null,
+      speaker: BUILDER_HANDLE,
+      confirmedBy: BUILDER_HANDLE,
+    });
+    insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, principleId: principle.id });
+    made.set(row.id, { taskIds: [], principleId: principle.id });
+  }
+
+  // A question is only stored, under the goal or task it is about; nothing is sent.
+  for (const row of pending.filter((r) => r.kind === 'question')) {
+    const question = ShapeProposalBody.question.parse(row.body);
+    const goalId = question.about === undefined ? undefined : goalIds.get(question.about);
+    const taskId = question.about === undefined ? undefined : taskIds.get(question.about);
+    const stored = insertShapeQuestion(ctx, {
+      shapeId,
+      proposalId: row.id,
+      key: row.key,
+      text: question.text,
+      forWho: question.for,
+      sourceMessageIds: question.sourceMessageIds ?? [],
+      ...(goalId === undefined ? {} : { goalId }),
+      ...(taskId === undefined ? {} : { taskId }),
+    });
+    insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, questionId: stored.id });
+    made.set(row.id, { taskIds: [], questionId: stored.id });
+  }
+
   for (const row of pending.filter((r) => r.kind === 'change_task')) {
     const change: PlanChange = ShapeProposalBody.change_task.parse(row.body);
     patchTask(ctx, change.taskId, {
@@ -352,12 +440,16 @@ export function convertProposals(
     const mine = listShapeLinks(ctx.tx, shapeId).filter((l) => l.proposalId === row.id);
     const goalId = mine.find((l) => l.goalId !== null)?.goalId;
     const decisionId = mine.find((l) => l.decisionId !== null)?.decisionId;
+    const principleId = mine.find((l) => l.principleId !== null)?.principleId;
+    const questionId = mine.find((l) => l.questionId !== null)?.questionId;
     return {
       key: row.key,
       kind: row.kind,
       taskIds: mine.flatMap((l) => (l.taskId === null ? [] : [l.taskId])),
       ...(goalId ? { goalId } : {}),
       ...(decisionId ? { decisionId } : {}),
+      ...(principleId ? { principleId } : {}),
+      ...(questionId ? { questionId } : {}),
     };
   });
   return { ok: true, createdNow: pending.length, results };

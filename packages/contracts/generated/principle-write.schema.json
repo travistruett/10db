@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "scope": {
+      "description": "you, project or area. Default: project.",
+      "type": "string",
+      "enum": [
+        "you",
+        "project",
+        "area"
+      ]
+    },
+    "area": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "statement": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500
+    },
+    "kind": {
+      "description": "Default: heuristic.",
+      "type": "string",
+      "enum": [
+        "policy",
+        "heuristic",
+        "belief"
+      ]
+    },
+    "topicKey": {
+      "description": "Default: made from the statement.",
+      "type": "string",
+      "maxLength": 80,
+      "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "quote": {
+      "type": "string",
+      "maxLength": 2000
+    },
+    "source": {
+      "type": "object",
+      "properties": {
+        "via": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60,
+          "description": "The tool that wrote it, such as claude_code."
+        },
+        "sessionId": {
+          "description": "The tool's own session id.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "quote": {
+          "description": "The builder's own words.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "via"
+      ],
+      "additionalProperties": false
+    },
+    "dryRun": {
+      "description": "Write nothing; answer what would be written.",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "statement"
+  ],
+  "additionalProperties": false
+}

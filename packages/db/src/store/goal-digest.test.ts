@@ -36,7 +36,8 @@ import {
 import { insertBoardColumn } from './board-columns';
 import { insertGoal, lastGoalView, VISIT_MAX_MS } from './goals';
 import { insertInboxItem } from './inbox';
-import { insertDecision, insertDeviation, insertSource } from './knowledge';
+import { insertDecision } from './decisions';
+import { insertDeviation, insertSource } from './knowledge';
 import { insertSession, updateSessionUsage } from './sessions';
 import type { Store } from './store';
 import { insertTask, setTaskStatus } from './tasks';

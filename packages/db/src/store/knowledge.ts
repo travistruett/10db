@@ -1,24 +1,23 @@
 import {
-  ConflictError,
   EventType,
-  InvalidError,
-  KnowledgeHit,
   mintId,
   NotFoundError,
-  RecordHit,
-  type DecisionId,
   type DeviationId,
+  type PrincipleId,
   type ProjectId,
+  type ProposalDto,
   type ProposalId,
   type ProposalKind,
+  type ProposalStatus,
   type Severity,
   type SourceId,
   type SourceKind,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, desc, eq, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
+import { getPrinciple } from './principles';
 import type { DbReader, WriteContext } from './store';
 
 export function insertSource(
@@ -31,94 +30,13 @@ export function insertSource(
   return id;
 }
 
-export interface NewDecision {
-  readonly projectId: ProjectId | null;
-  readonly question: string;
-  readonly choice: string;
-  readonly rationale: string;
-  readonly decidedBy: string;
-  readonly scope: 'you' | 'project' | 'area';
-  readonly area: string | null;
-  readonly sourceId: SourceId;
-  /** The decision this one replaces; absent or null for a new chain. */
-  readonly supersedesId?: DecisionId | null;
-}
+export type SourceRow = typeof schema.sources.$inferSelect;
 
-export function insertDecision(ctx: WriteContext, input: NewDecision): DecisionId {
-  const id = mintId('Decision');
-  ctx.tx
-    .insert(schema.decisions)
-    .values({
-      id,
-      ...input,
-      supersedesId: input.supersedesId ?? null,
-      createdAt: ctx.now,
-      updatedAt: ctx.now,
-    })
-    .run();
-  ctx.emit({
-    type: EventType.DecisionRecorded,
-    entityType: 'decision',
-    entityId: id,
-    data: { projectId: input.projectId, question: input.question },
-  });
-  return id;
-}
-
-export type DecisionRow = typeof schema.decisions.$inferSelect;
-
-export function getDecision(db: DbReader, id: DecisionId): DecisionRow {
-  const row = db.select().from(schema.decisions).where(eq(schema.decisions.id, id)).get();
-  if (!row) throw new NotFoundError('decision', id);
+/** The `sources` row a record points at, for its provenance. */
+export function getSource(db: DbReader, id: SourceId): SourceRow {
+  const row = db.select().from(schema.sources).where(eq(schema.sources.id, id)).get();
+  if (!row) throw new NotFoundError('source', id);
   return row;
-}
-
-/** The decision that replaced this one and has not been withdrawn, or null when this is the head. */
-export function decisionSuccessor(db: DbReader, id: DecisionId): DecisionId | null {
-  return (
-    db
-      .select({ id: schema.decisions.id })
-      .from(schema.decisions)
-      .where(and(eq(schema.decisions.supersedesId, id), isNull(schema.decisions.withdrawnAt)))
-      .get()?.id ?? null
-  );
-}
-
-/**
- * Withdraws a decision: the row stays as a tombstone with who, when and why, and search and the
- * context pack skip it. Only the head of a supersede chain can be withdrawn, so withdrawing a link
- * never makes its predecessor current beside its successor (M3 plan K1, K3; Shape spec §11).
- */
-export function withdrawDecision(
-  ctx: WriteContext,
-  id: DecisionId,
-  input: { readonly by: string; readonly reason: string },
-): void {
-  const reason = input.reason.trim();
-  if (reason === '') throw new InvalidError('Say why the decision is withdrawn');
-  const decision = getDecision(ctx.tx, id);
-  if (decision.withdrawnAt !== null) throw new ConflictError('This decision is already withdrawn');
-  const successor = decisionSuccessor(ctx.tx, id);
-  if (successor !== null)
-    throw new ConflictError(
-      `A later decision (${successor}) supersedes this one; withdraw that one first`,
-    );
-  ctx.tx
-    .update(schema.decisions)
-    .set({
-      withdrawnAt: ctx.now,
-      withdrawnBy: input.by,
-      withdrawnReason: reason,
-      updatedAt: ctx.now,
-    })
-    .where(eq(schema.decisions.id, id))
-    .run();
-  ctx.emit({
-    type: EventType.DecisionWithdrawn,
-    entityType: 'decision',
-    entityId: id,
-    data: { projectId: decision.projectId, reason },
-  });
 }
 
 export function insertDeviation(
@@ -154,6 +72,8 @@ export function insertProposal(
     readonly title: string;
     readonly body: string;
     readonly sourceId: SourceId;
+    /** The proposed principle, for a principle proposal. */
+    readonly principleId?: PrincipleId | null;
   },
 ): ProposalId {
   const id = mintId('Proposal');
@@ -162,6 +82,7 @@ export function insertProposal(
     .values({
       id,
       ...input,
+      principleId: input.principleId ?? null,
       status: 'pending',
       rationale: null,
       createdAt: ctx.now,
@@ -178,12 +99,51 @@ export function insertProposal(
 }
 
 export type ProposalRow = typeof schema.proposals.$inferSelect;
-export type ProposalStatus = ProposalRow['status'];
 
 export function getProposal(db: DbReader, id: ProposalId): ProposalRow {
   const row = db.select().from(schema.proposals).where(eq(schema.proposals.id, id)).get();
   if (!row) throw new NotFoundError('proposal', id);
   return row;
+}
+
+function toProposalDto(db: DbReader, row: ProposalRow): ProposalDto {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    kind: row.kind,
+    title: row.title,
+    body: row.body,
+    status: row.status,
+    rationale: row.rationale,
+    principle: row.principleId ? getPrinciple(db, row.principleId) : null,
+    sourceId: row.sourceId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/** A proposal with its proposed principle, if it has one. */
+export function getProposalDto(db: DbReader, id: ProposalId): ProposalDto {
+  return toProposalDto(db, getProposal(db, id));
+}
+
+/** A project's proposals in one status, oldest first, as the inbox orders them. */
+export function listProposals(
+  db: DbReader,
+  filter: { readonly projectId: ProjectId; readonly status: ProposalStatus },
+): ProposalDto[] {
+  return db
+    .select()
+    .from(schema.proposals)
+    .where(
+      and(
+        eq(schema.proposals.projectId, filter.projectId),
+        eq(schema.proposals.status, filter.status),
+      ),
+    )
+    .orderBy(asc(schema.proposals.id))
+    .all()
+    .map((row) => toProposalDto(db, row));
 }
 
 /** Records the builder's verdict on a proposal (spec §4: status plus the accept/reject rationale). */
@@ -207,90 +167,4 @@ export function resolveProposal(
     entityId: id,
     data: { status: verdict.status },
   });
-}
-
-/** Turns free text into an FTS5 query of quoted terms joined by OR, so user text is never parsed as syntax. */
-function ftsQuery(text: string): string | null {
-  const terms = text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-  return terms.length === 0 ? null : terms.map((t) => `"${t}"`).join(' OR ');
-}
-
-export function searchDecisions(
-  db: DbReader,
-  projectId: ProjectId,
-  query: string,
-  limit: number,
-): KnowledgeHit[] {
-  const match = ftsQuery(query);
-  if (match === null) return [];
-  // Rows are parsed against the contract so a schema drift fails here rather than downstream.
-  const rows = db.all(sql`
-    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice, d.rationale AS rationale
-    FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
-    WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
-      AND d.withdrawn_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM decisions s WHERE s.supersedes_id = d.id AND s.withdrawn_at IS NULL
-      )
-    ORDER BY bm25(decisions_fts), d.id
-    LIMIT ${limit}
-  `);
-  return KnowledgeHit.array().parse(rows);
-}
-
-/**
- * Shape's `find_records` (spec §5.5): the current decisions that apply to the project (its own and
- * the builder-wide `you` ones) matching the query, each with its scope and the date it was made, so
- * the conversation can cite it ("Decided 2026-10-30: …"). Withdrawn and superseded ones are left out.
- */
-export function findRecords(
-  db: DbReader,
-  projectId: ProjectId,
-  query: string,
-  limit: number,
-): RecordHit[] {
-  const match = ftsQuery(query);
-  if (match === null) return [];
-  const rows = db.all(sql`
-    SELECT 'decision' AS kind, d.id AS id, d.question AS question, d.choice AS choice,
-      d.rationale AS rationale, d.scope AS scope, d.created_at AS createdAt
-    FROM decisions_fts f JOIN decisions d ON d.rowid = f.rowid
-    WHERE decisions_fts MATCH ${match} AND (d.project_id = ${projectId} OR d.project_id IS NULL)
-      AND d.withdrawn_at IS NULL
-      AND NOT EXISTS (
-        SELECT 1 FROM decisions s WHERE s.supersedes_id = d.id AND s.withdrawn_at IS NULL
-      )
-    ORDER BY bm25(decisions_fts), d.id
-    LIMIT ${limit}
-  `);
-  return RecordHit.array().parse(rows);
-}
-
-export function listRecentDecisions(
-  db: DbReader,
-  projectId: ProjectId,
-  limit: number,
-): KnowledgeHit[] {
-  return db
-    .select({
-      id: schema.decisions.id,
-      question: schema.decisions.question,
-      choice: schema.decisions.choice,
-      rationale: schema.decisions.rationale,
-    })
-    .from(schema.decisions)
-    .where(
-      and(
-        or(eq(schema.decisions.projectId, projectId), isNull(schema.decisions.projectId)),
-        isNull(schema.decisions.withdrawnAt),
-        // A decision a later one replaced is history, not context.
-        sql`NOT EXISTS (
-          SELECT 1 FROM decisions s WHERE s.supersedes_id = ${schema.decisions.id} AND s.withdrawn_at IS NULL
-        )`,
-      ),
-    )
-    .orderBy(desc(schema.decisions.id))
-    .limit(limit)
-    .all()
-    .map((r) => ({ kind: 'decision', ...r }));
 }

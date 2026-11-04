@@ -1,7 +1,11 @@
-import type { DecisionId, GoalId, ShapeId } from '@10db/contracts';
+import type { DecisionId, GoalId, PrincipleId, ShapeId } from '@10db/contracts';
 import { Button, Stack, Text, Textarea } from '@mantine/core';
 import { useState } from 'react';
-import { useRemoveDraftGoal, useWithdrawDecision } from '../../daemon/shape-queries';
+import {
+  useRemoveDraftGoal,
+  useWithdrawDecision,
+  useWithdrawPrinciple,
+} from '../../daemon/shape-queries';
 import { FormModal } from '../../shell/form-modal';
 
 export interface RemoveDraftGoalTarget {
@@ -65,54 +69,66 @@ export interface WithdrawTarget {
   readonly title: string;
 }
 
-/** Withdraw Decision…: the decision leaves searches and context packs; the builder says why. */
-export function WithdrawDecisionModal({
-  shapeId,
-  target,
+export interface PrincipleWithdrawTarget {
+  readonly principleId: PrincipleId;
+  readonly title: string;
+}
+
+/** The reason form both withdrawals share: the record leaves searches and context packs, and the builder says why. */
+function WithdrawReasonModal({
+  noun,
+  title,
+  opened,
+  pending,
+  error,
+  onSubmit,
+  onReset,
   onClose,
 }: {
-  readonly shapeId: ShapeId;
-  readonly target: WithdrawTarget | null;
+  /** `Decision` or `Principle`: names the modal and its button. */
+  readonly noun: string;
+  /** The record's own words, quoted in the sentence under the title. */
+  readonly title: string;
+  readonly opened: boolean;
+  readonly pending: boolean;
+  readonly error: string | null;
+  readonly onSubmit: (reason: string, done: () => void) => void;
+  readonly onReset: () => void;
   readonly onClose: () => void;
 }) {
   const [reason, setReason] = useState('');
-  const withdraw = useWithdrawDecision(shapeId);
   const close = () => {
-    withdraw.reset();
+    onReset();
     setReason('');
     onClose();
   };
   return (
     <FormModal
-      opened={target !== null}
+      opened={opened}
       onClose={close}
-      title="Withdraw Decision"
+      title={`Withdraw ${noun}`}
       size="md"
-      error={withdraw.error?.message ?? null}
+      error={error}
       actions={
         <>
           <Button variant="default" onClick={close}>
             Cancel
           </Button>
           <Button
-            loading={withdraw.isPending}
+            loading={pending}
             disabled={reason.trim() === ''}
             onClick={() => {
-              if (target)
-                withdraw.mutate(
-                  { decisionId: target.decisionId, reason: reason.trim() },
-                  { onSuccess: close },
-                );
+              onSubmit(reason.trim(), close);
             }}
           >
-            Withdraw Decision
+            {`Withdraw ${noun}`}
           </Button>
         </>
       }
     >
       <Stack gap="sm">
         <Text size="sm">
-          {target === null ? '' : `“${target.title}” leaves searches and what sessions are told.`}
+          {opened ? `“${title}” leaves searches and what sessions are told.` : ''}
         </Text>
         <Textarea
           label="Reason"
@@ -126,5 +142,60 @@ export function WithdrawDecisionModal({
         />
       </Stack>
     </FormModal>
+  );
+}
+
+/** Withdraw Decision…: the decision leaves searches and context packs; the builder says why. */
+export function WithdrawDecisionModal({
+  shapeId,
+  target,
+  onClose,
+}: {
+  readonly shapeId: ShapeId;
+  readonly target: WithdrawTarget | null;
+  readonly onClose: () => void;
+}) {
+  const withdraw = useWithdrawDecision(shapeId);
+  return (
+    <WithdrawReasonModal
+      noun="Decision"
+      title={target?.title ?? ''}
+      opened={target !== null}
+      pending={withdraw.isPending}
+      error={withdraw.error?.message ?? null}
+      onSubmit={(reason, done) => {
+        if (target) withdraw.mutate({ decisionId: target.decisionId, reason }, { onSuccess: done });
+      }}
+      onReset={withdraw.reset}
+      onClose={onClose}
+    />
+  );
+}
+
+/** Withdraw Principle…: the principle leaves searches and context packs; the builder says why. */
+export function WithdrawPrincipleModal({
+  shapeId,
+  target,
+  onClose,
+}: {
+  readonly shapeId: ShapeId;
+  readonly target: PrincipleWithdrawTarget | null;
+  readonly onClose: () => void;
+}) {
+  const withdraw = useWithdrawPrinciple(shapeId);
+  return (
+    <WithdrawReasonModal
+      noun="Principle"
+      title={target?.title ?? ''}
+      opened={target !== null}
+      pending={withdraw.isPending}
+      error={withdraw.error?.message ?? null}
+      onSubmit={(reason, done) => {
+        if (target)
+          withdraw.mutate({ principleId: target.principleId, reason }, { onSuccess: done });
+      }}
+      onReset={withdraw.reset}
+      onClose={onClose}
+    />
   );
 }

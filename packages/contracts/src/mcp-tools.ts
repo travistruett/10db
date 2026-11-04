@@ -8,11 +8,22 @@ import {
   EvidenceId,
   HandoffId,
   InboxItemId,
+  PrincipleId,
   ProposalId,
   TaskId,
   WorkstreamId,
 } from './ids';
-import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency, Verdict } from './states';
+import { PrincipleDraft } from './knowledge';
+import {
+  ClaimKind,
+  KnowledgeScope,
+  PrincipleKind,
+  ProposalKind,
+  QuestionCategory,
+  Severity,
+  Urgency,
+  Verdict,
+} from './states';
 import { MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
@@ -43,8 +54,29 @@ export const KnowledgeHit = z.object({
   question: z.string(),
   choice: z.string(),
   rationale: z.string(),
+  scope: z.enum(KnowledgeScope),
+  area: z.string().nullable(),
 });
 export type KnowledgeHit = z.infer<typeof KnowledgeHit>;
+
+export const PrincipleHit = z.object({
+  kind: z.literal('principle'),
+  id: PrincipleId,
+  statement: z.string(),
+  principleKind: z.enum(PrincipleKind),
+  topicKey: z.string(),
+  scope: z.enum(KnowledgeScope),
+  area: z.string().nullable(),
+});
+export type PrincipleHit = z.infer<typeof PrincipleHit>;
+
+/** Which shelf `find_knowledge` searches. */
+export const KnowledgeKindFilter = {
+  Any: 'any',
+  Decision: 'decision',
+  Principle: 'principle',
+} as const;
+export type KnowledgeKindFilter = (typeof KnowledgeKindFilter)[keyof typeof KnowledgeKindFilter];
 
 export const ContextPack = z.object({
   task: z.object({
@@ -58,8 +90,14 @@ export const ContextPack = z.object({
     .object({ question: z.string(), answer: z.string(), note: z.string().nullable() })
     .nullable(),
   knowledge: z.object({
+    policies: z.array(PrincipleHit),
+    heuristics: z.array(PrincipleHit),
     decisions: z.array(KnowledgeHit),
+    /** The budget in estimated tokens, and how much of it the shelves used (spec §9 `budget_used`). */
+    budget: z.int(),
     budgetUsed: z.int(),
+    /** What each shelf left out for want of room (spec §9 `dropped_count`, per shelf). */
+    dropped: z.object({ policies: z.int(), heuristics: z.int(), decisions: z.int() }),
     droppedCount: z.int(),
     empty: z.boolean(),
   }),
@@ -95,7 +133,19 @@ export type RemainingWorkInput = z.infer<typeof RemainingWorkInput>;
 
 export const McpToolInputs = {
   get_context: z.object({}),
-  find_knowledge: z.object({ query: z.string().min(1), limit: z.int().min(1).max(20).default(5) }),
+  find_knowledge: z.object({
+    query: z.string().min(1),
+    limit: z
+      .int()
+      .min(1)
+      .max(20)
+      .default(5)
+      .describe('The most results per shelf: up to this many decisions and this many principles.'),
+    kind: z
+      .enum(KnowledgeKindFilter)
+      .default(KnowledgeKindFilter.Any)
+      .describe('Search only decisions, only principles, or both.'),
+  }),
   ask_human: z.object({
     opId: OpId,
     category: z.enum(QuestionCategory),
@@ -119,6 +169,9 @@ export const McpToolInputs = {
     kind: z.enum(ProposalKind),
     title: z.string().min(1),
     body: z.string().min(1),
+    principle: PrincipleDraft.optional().describe(
+      'For kind "principle": the rule itself. Without it, the body is used as the statement.',
+    ),
   }),
   report_deviation: z.object({
     opId: OpId,
@@ -170,10 +223,16 @@ export const McpToolInputs = {
 
 export const McpToolOutputs = {
   get_context: ContextPack,
-  find_knowledge: z.object({ results: z.array(KnowledgeHit), empty: z.boolean() }),
+  find_knowledge: z.object({
+    results: z.array(KnowledgeHit),
+    /** Absent in a result recorded before principles were searchable. */
+    principles: z.array(PrincipleHit).default([]),
+    empty: z.boolean(),
+  }),
   ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
   record_decision: z.object({ decisionId: DecisionId }),
-  propose: z.object({ proposalId: ProposalId }),
+  // A result recorded before principles existed has no principleId; it still parses.
+  propose: z.object({ proposalId: ProposalId, principleId: PrincipleId.nullable().default(null) }),
   report_deviation: z.object({ deviationId: DeviationId }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [

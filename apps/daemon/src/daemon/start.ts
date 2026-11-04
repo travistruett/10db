@@ -105,6 +105,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService, createParkAnswers } from '../inbox';
+import { repairKnowledgeIndex } from '../knowledge';
 import { createKeepAwake, systemCaffeinate, type CaffeinateSpawner } from '../keep-awake';
 import { createLaneTempDirs, createLoadMonitor, type LoadMonitorOptions } from '../load';
 import { createLogger, fileDestination, rotateLogFile, type Logger } from '../log';
@@ -121,6 +122,7 @@ import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../re
 import { offeredProfiles, roleDefault } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
+import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
 import {
   applyCheckAnswer,
@@ -361,6 +363,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     await backupDatabase(db, backupsDir, 'pre-migrate', startedAt);
   }
   migrateDatabase(db, migrationsDir);
+  // An index out of step with its table is rebuilt and logged; one that can't be rebuilt leaves search
+  // off (the list route says so) and the daemon running. No card: it asks the builder nothing.
+  const knowledgeIndex = repairKnowledgeIndex(db, logger.child({ component: 'knowledge' }));
 
   // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
   // the daemon's own is refused before anything else starts.
@@ -1063,6 +1068,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       off: opts.judgeOff === true,
     }),
     shape: createShapeServices({ shape, state, clock }),
+    knowledge: createKnowledgeServices({
+      state,
+      searchAvailable: knowledgeIndex.failed.length === 0,
+    }),
     starter,
     shipper,
     accounts: accountService,

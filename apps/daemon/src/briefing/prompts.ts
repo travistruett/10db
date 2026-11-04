@@ -13,6 +13,7 @@ import {
   type TaskDto,
   Verdict,
 } from '@10db/contracts';
+import { renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 
@@ -250,19 +251,25 @@ export function renderHandoff(h: HandoffDto): string {
   ].join('\n');
 }
 
+/**
+ * The knowledge in the pack as rules a session can cite (spec §9): policies, heuristics, then the
+ * decisions for the task, each with its id and scope; what the budget left out is counted per shelf.
+ * The bootstrap prompt and the post-compaction re-injection both use it, so they read the same.
+ */
 function renderKnowledge(pack: ContextPack): string {
-  const { decisions, droppedCount, empty } = pack.knowledge;
-  if (empty && droppedCount > 0) {
-    return `${String(droppedCount)} recorded decisions exceeded the budget and are not shown; call get_context or find_knowledge for them.`;
-  }
-  if (empty)
-    return 'No recorded decisions apply to this task yet. Call get_context to refresh later.';
-  const lines = decisions.map((d) => `${d.question} -> ${d.choice} (${d.rationale})`);
+  const k = pack.knowledge;
   const omitted =
-    droppedCount > 0
-      ? `\n${String(droppedCount)} more omitted; call get_context or find_knowledge for them.`
-      : '';
-  return `Recorded decisions:\n${bullets(lines)}${omitted}`;
+    k.droppedCount > 0
+      ? `${String(k.droppedCount)} records exceeded the budget (policies: ${String(k.dropped.policies)}, heuristics: ${String(k.dropped.heuristics)}, decisions: ${String(k.dropped.decisions)}); call find_knowledge for them.`
+      : null;
+  if (k.empty)
+    return (
+      omitted ??
+      'No recorded decisions or principles apply to this task yet. Call find_knowledge if you need one.'
+    );
+  return [...renderRules(k), ...renderDecisions(k.decisions), ...(omitted ? [omitted] : [])].join(
+    '\n',
+  );
 }
 
 /**
@@ -476,7 +483,22 @@ export function buildSessionPrompt(input: PromptInput): string {
   ].join('\n');
 }
 
+/** The pack again after an emergency compaction (spec §5.3), with the knowledge text the session started with. */
 export function compactionReinjection(pack: ContextPack, denials: readonly Denial[] = []): string {
-  const again = `10db: your conversation was compacted. Here is your context pack again:\n${JSON.stringify(pack, null, 2)}`;
+  const claims = pack.claims.map((c) => `${c.kind} ${c.name}`).join(', ') || '(none)';
+  const again = [
+    '10db: your conversation was compacted. Here is your context pack again:',
+    '',
+    `Task: ${pack.task.title}`,
+    pack.task.description,
+    '',
+    'Acceptance criteria:',
+    bullets(pack.task.acceptanceCriteria),
+    '',
+    `Your claims: ${claims}.`,
+    '',
+    renderKnowledge(pack),
+    ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),
+  ].join('\n');
   return denials.length === 0 ? again : [again, '', ...renderDenials(denials)].join('\n');
 }
