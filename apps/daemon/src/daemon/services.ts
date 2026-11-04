@@ -24,6 +24,8 @@ import {
   getGoal,
   getMcpApproval,
   getProject,
+  getSmallProposalLimit,
+  setSmallProposalLimit,
   getTask,
   getTeam,
   getWorkstream,
@@ -35,6 +37,7 @@ import {
   insertProject,
   insertTask,
   latestEventSeq,
+  humanTouchDays,
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
@@ -65,6 +68,7 @@ import {
   setTeam,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
+import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
@@ -103,6 +107,7 @@ import { checkoutConflictsWithRoot } from './worktree-root';
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
   readonly state: StateStore;
+  readonly clock: Clock;
   readonly bus: EventBus;
   readonly runner: Runner;
   readonly scheduler: Scheduler;
@@ -272,6 +277,10 @@ export function createServices(deps: {
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
     listGoals: (projectId) => listGoalSummaries(db, projectId),
+    humanTouch: (projectId) => {
+      getProject(db, projectId);
+      return { days: humanTouchDays(db, projectId, deps.clock.now()) };
+    },
     // The view mark advances in the same transaction that reads the window it closes.
     openGoalDigest: (goalId) => deps.state.write((ctx) => openGoalDigest(ctx, goalId)),
     shipBatch: (id) => deps.shipper.ship(id),
@@ -384,6 +393,17 @@ export function createServices(deps: {
     },
     setRoutingRules: (projectId, input) =>
       deps.state.write((ctx) => setRoutingRules(ctx, projectId, input)),
+    getSmallProposalLimit(projectId) {
+      getProject(db, projectId);
+      return { limit: getSmallProposalLimit(db, projectId) };
+    },
+    setSmallProposalLimit(projectId, input) {
+      deps.state.write((ctx) => {
+        getProject(ctx.tx, projectId);
+        setSmallProposalLimit(ctx, projectId, input.limit);
+      });
+      return { limit: input.limit };
+    },
     removeTask: (id) => deps.state.write((ctx) => cancelTask(ctx, id)),
     getTask: (id) => getTask(db, id),
     getWorkstream: (id) => getWorkstream(db, id),

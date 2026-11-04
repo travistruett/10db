@@ -78,6 +78,15 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     () => call('Read', { file_path: join(dataDir, 'db.sqlite') }),
   ],
   ['a Read outside the checkout', () => call('Read', { file_path: path('outside/notes.txt') })],
+  // A lane reads the system's documentation without a card; that allowance stops at lanes.
+  ['a Read of a manual page', () => call('Read', { file_path: '/usr/share/man/man1/ps.1' })],
+  ['a Grep of the system docs', () => call('Grep', { pattern: 'x', path: '/usr/share/doc' })],
+  ['a Glob of the manual pages', () => call('Glob', { pattern: '*', path: '/usr/share/man' })],
+  [
+    'a reviewer’s Read of a manual page',
+    () =>
+      call('Read', { file_path: '/usr/share/man/man1/ps.1' }, { agentId: 'a', agentType: 'scope' }),
+  ],
   [
     'a Read through a directory link out',
     () => call('Read', { file_path: path('checkout/link-out/notes.txt') }),
@@ -118,6 +127,24 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     () => call('Agent', { subagent_type: 'general-purpose', prompt: 'x' }),
   ],
   ['an Agent with no type', () => call('Agent', { prompt: 'x' })],
+  // isolation makes a worktree (a write) or runs the agent where this hook never sees its calls.
+  ...(['worktree', 'remote'] as const).flatMap((isolation) => [
+    ...['scope', 'engineering', 'rehearsal', 'general-purpose'].map(
+      (type) =>
+        [
+          `an Agent for ${type} with isolation ${isolation}`,
+          () => call('Agent', { subagent_type: type, prompt: 'x', isolation }),
+        ] as const,
+    ),
+    [
+      `an Agent for the researcher with isolation ${isolation}`,
+      () => call('Agent', { subagent_type: 'researcher', prompt: 'a question', isolation }),
+    ] as const,
+  ]),
+  [
+    'an Agent for a reviewer with an unknown isolation',
+    () => call('Agent', { subagent_type: 'scope', prompt: 'x', isolation: 'sandbox' }),
+  ],
   ['a lane tool, commit', () => call('mcp__10db__commit', { paths: ['a'] })],
   ['a lane tool, request_claim', () => call('mcp__10db__request_claim', { name: 'api' })],
   ['another server’s tool', () => call('mcp__elsewhere__tool', {})],

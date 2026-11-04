@@ -165,6 +165,21 @@ describe('a frame the window draws a screen in', () => {
     expect(requests.map((r) => r.path)).not.toContain(`/shapes/${shape.id}/screens/0001.png`);
   });
 
+  it('draws a screen whose data quotes the crash text, which is not a crash', async () => {
+    const quoting = taskDto({
+      projectId: project.id,
+      title: 'Fix: Something went wrong in Plan. shown twice',
+      boardStatus: 'ready',
+    });
+    serve(http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([quoting])));
+    render(<RenderApp params={params} />);
+    expect(await screen.findByText(/Something went wrong in Plan\./)).toBeTruthy();
+    await waitFor(() => {
+      expect(heard).toHaveLength(1);
+    });
+    expect(heard[0]).toEqual({ source: 'tendb-screen', kind: 'ready' });
+  });
+
   it('draws only the conversation’s own project’s cards on the Inbox', async () => {
     const other = projectViewDto({ id: mintId('Project'), name: 'other' });
     serve(

@@ -20,6 +20,7 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
+import { goalKeys } from './goal-queries';
 import { useDaemon } from './provider';
 
 export const shapeKeys = {
@@ -269,7 +270,13 @@ export function useRemoveDraftGoal() {
         z.null(),
       );
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+    // The goal and its tasks are gone, so the Board and Factory ask again alongside the conversation.
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+        queryClient.invalidateQueries({ queryKey: goalKeys.all }),
+        queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+      ]),
   });
 }
 

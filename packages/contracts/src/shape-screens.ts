@@ -19,7 +19,8 @@ export type ScreenName = ValueOf<typeof ScreenName>;
 
 /**
  * The window a screen is drawn in. The bounds keep an image inside what a model reads well and the
- * API takes (at most 2000 px a side when many images are sent), and keep one image small.
+ * API takes (at most 2000 px a side when many images are sent), and keep one image small. A dropped
+ * image over that goes as a path, so a conversation's pictures stay inside it (INLINE_IMAGE_MAX_SIDE).
  */
 export const SCREEN_WIDTH = { min: 480, max: 1600, default: 1200 } as const;
 export const SCREEN_HEIGHT = { min: 400, max: 2000, default: 900 } as const;

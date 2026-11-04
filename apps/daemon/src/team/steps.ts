@@ -2,6 +2,7 @@ import {
   ConflictError,
   BatchState,
   InvalidError,
+  LEFT_OUT_NOTICE_KEY,
   NEW_TASK_NO_AREAS,
   TaskStatus,
   WorkstreamState,
@@ -28,6 +29,7 @@ import {
   listModelProfiles,
   listPersonas,
   patchWorkstream,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   type DbReader,
@@ -122,7 +124,8 @@ export function startTaskWithPlan(state: StateStore, taskId: TaskId): Workstream
  * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
  * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
  * only while the batch is OPEN or FAILED, and a FAILED batch reopens (batch delivery spec §4), except
- * a worktree batch: it stays FAILED until delivery has made its worktree whole and reopens it.
+ * a worktree batch: it stays FAILED until delivery has made its worktree whole and reopens it. A run
+ * left out of the batch's pull request (Ship without it) stops being left out in the same write.
  * When a reviewer's rejection failed it, the retry runs the step the rejection goes back to instead,
  * with the review's notes. The builder's `note`, when they give one, reaches the step that runs next
  * whatever failed it, and the retry starts the send-back count over
@@ -155,6 +158,8 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
         patch: { failure: null },
         reason: 'a workstream was retried',
       });
+    // Its work may go in the pull request now, so "left out" is no longer true of this run.
+    if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
     // The builder's note is a fix for whichever step runs next, as when they send the work back. It
     // is stamped in the same write that starts that step, so a fresh session still finds it outstanding.
     const text = note?.trim() ?? '';

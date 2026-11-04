@@ -1,12 +1,14 @@
-import { EventType } from '@10db/contracts';
+import { DEFAULT_SMALL_PROPOSAL_LIMIT, EventType } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as schema from '../schema';
+import { listBoardColumns } from './board-columns';
 import { listEventsAfter } from './events';
 import { insertProposal, insertSource } from './knowledge';
+import { getSmallProposalLimit, setSmallProposalLimit } from './small-proposal-limit';
 import type { Store } from './store';
-import { insertTask, insertTaskFromProposal, listTasks } from './tasks';
+import { insertTask, insertTaskFromProposal, listTasks, proposalSourceTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream } from './workstreams';
 
@@ -163,6 +165,51 @@ describe('insertTaskFromProposal', () => {
       ),
     ).toThrow(z.ZodError);
     expect(listTasks(store.db, project.id)).toEqual([]);
+  });
+});
+
+describe('insertTaskFromProposal into the Icebox', () => {
+  it('parks the task in the Icebox column when asked, and leaves it planned otherwise', () => {
+    const project = seedProject(store);
+    const parked = store.write((ctx) =>
+      insertTaskFromProposal(ctx, {
+        proposalId: seedProposal(project.id),
+        projectId: project.id,
+        title: 'Add caching',
+        description: 'Cache the query.',
+        parkInIcebox: true,
+      }),
+    ).value;
+    const icebox = listBoardColumns(store.db, project.id).find((c) => c.name === 'Icebox');
+    expect(icebox).toBeDefined();
+    expect(parked.boardColumnId).toBe(icebox?.id);
+    expect(file(project.id, seedProposal(project.id)).boardColumnId).toBeNull();
+  });
+});
+
+describe('proposalSourceTask', () => {
+  it('answers the task whose lane raised the proposal, and null for any other source', () => {
+    const project = seedProject(store);
+    const raiser = store.write((ctx) =>
+      insertTask(ctx, project.id, { title: 'Raiser', acceptanceCriteria: ['a'], areas: ['api'] }),
+    ).value;
+    const workstream = store.write((ctx) => insertWorkstream(ctx, raiser.id)).value;
+    const fromLane = seedProposal(project.id, { sessionId: 'ses_x', workstreamId: workstream.id });
+    expect(proposalSourceTask(store.db, fromLane)?.id).toBe(raiser.id);
+    expect(proposalSourceTask(store.db, seedProposal(project.id))).toBeNull();
+  });
+});
+
+describe('the small proposal limit', () => {
+  it('is the default until set, is kept per project, and zero is a real value', () => {
+    const a = seedProject(store);
+    const b = seedProject(store, { name: 'other' });
+    expect(getSmallProposalLimit(store.db, a.id)).toBe(DEFAULT_SMALL_PROPOSAL_LIMIT);
+    store.write((ctx) => {
+      setSmallProposalLimit(ctx, a.id, 0);
+    });
+    expect(getSmallProposalLimit(store.db, a.id)).toBe(0);
+    expect(getSmallProposalLimit(store.db, b.id)).toBe(DEFAULT_SMALL_PROPOSAL_LIMIT);
   });
 });
 

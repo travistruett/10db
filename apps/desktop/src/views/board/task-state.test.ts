@@ -1,4 +1,4 @@
-import { mintId, PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
+import { LEFT_OUT_NOTICE_KEY, mintId, PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
 import { canRetryRun, failureLine, taskNotices, taskState } from './task-state';
@@ -499,6 +499,20 @@ describe('taskState', () => {
         conflict,
       ]);
       expect(taskNotices(undefined, batch)).toEqual([]);
+    });
+
+    it('keeps the notice of a failed run its batch shipped without, and no other', () => {
+      const leftOut = {
+        key: LEFT_OUT_NOTICE_KEY,
+        tone: 'info' as const,
+        line: 'Left out of the pull request: its commit was reverted',
+        body: 'This run failed, and you chose Ship without it.',
+      };
+      const batch = batchDto({ state: 'SHIPPED', notices: [conflict] });
+      expect(taskNotices(workstreamDto({ state: 'FAILED', notice: leftOut }), batch)).toEqual([
+        leftOut,
+      ]);
+      expect(taskNotices(workstreamDto({ state: 'FAILED', notice: waiting }), batch)).toEqual([]);
     });
 
     it('keeps the question and answer of a run the builder parked, though it was cancelled', () => {

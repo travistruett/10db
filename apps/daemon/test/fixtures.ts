@@ -1,5 +1,13 @@
-import { execFileSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import {
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDto, TaskDto, WorkstreamDto } from '@10db/contracts';
@@ -42,6 +50,52 @@ export function tempDir(prefix: string): TempDir {
     cleanup: () => {
       rmSync(path, { recursive: true, force: true });
     },
+  };
+}
+
+/** How much of a check's output 10db keeps: `TAIL_BYTES` in `src/verify/gate-runner.ts`. */
+const CHECK_TAIL_CHARS = 4096;
+
+/** What `failedRepoCheck` hands back: where the check ran, and what 10db read from it. */
+interface FailedRepoCheck {
+  readonly checkout: string;
+  readonly exitCode: number;
+  readonly tail: string;
+}
+
+/**
+ * Runs this repository's own step check, scripts/check-changed.mjs, on a small workspace with a stub
+ * `pnpm` whose vitest fails printing `testLog` and whose every other command passes. So a test reads
+ * what `make check-changed` (or, with `--precheck`, `make precheck`) really leaves: the end of its
+ * output and its logs in the checkout.
+ */
+export function failedRepoCheck(testLog: string, flags: readonly string[] = []): FailedRepoCheck {
+  const checkout = tempDir('repo-check').path;
+  for (const dir of ['scripts', 'bin', 'apps/x/src', 'docs'])
+    mkdirSync(join(checkout, dir), { recursive: true });
+  cpSync(
+    join(import.meta.dirname, '../../../scripts/check-changed.mjs'),
+    join(checkout, 'scripts/check-changed.mjs'),
+  );
+  writeFileSync(join(checkout, 'apps/x/package.json'), '{"name":"x"}');
+  writeFileSync(join(checkout, 'apps/x/src/a.ts'), 'export {};\n');
+  writeFileSync(join(checkout, 'docs/a.md'), 'a\n');
+  writeFileSync(join(checkout, 'test-output.txt'), testLog);
+  const pnpm = join(checkout, 'bin/pnpm');
+  writeFileSync(
+    pnpm,
+    `#!/bin/sh\ncase "$1 $2 $3" in\n  "exec vitest run") /bin/cat '${join(checkout, 'test-output.txt')}'; exit 1 ;;\nesac\n`,
+  );
+  chmodSync(pnpm, 0o755);
+  const result = spawnSync(
+    process.execPath,
+    ['scripts/check-changed.mjs', ...flags, '--', 'apps/x/src/a.ts', 'docs/a.md'],
+    { cwd: checkout, encoding: 'utf8', env: { PATH: join(checkout, 'bin') } },
+  );
+  return {
+    checkout,
+    exitCode: result.status ?? 1,
+    tail: `${result.stdout}${result.stderr}`.slice(-CHECK_TAIL_CHARS),
   };
 }
 

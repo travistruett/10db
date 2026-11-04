@@ -4,6 +4,7 @@ import {
   copyFileSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -440,6 +441,94 @@ describe('scripts/check-changed.mjs --precheck, run', () => {
     expect(run.stdout).toContain('no base branch to diff against');
     expect(run.commands.filter((c) => c.startsWith('bash'))).toEqual([]);
     expect([...run.commands].sort()).toEqual(EVERY_PACKAGE_STEPS);
+  });
+
+  /** Runs a copy with a `pnpm` that fails `fails`' commands; every changed file is `apps/x/…`. */
+  function runFailing(fails: string, files: string[], flags: string[] = []) {
+    const dir = mkdtempSync(join(tmpdir(), 'check-changed-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'scripts'));
+    mkdirSync(join(dir, 'bin'));
+    mkdirSync(join(dir, 'apps/x/src'), { recursive: true });
+    copyFileSync(
+      join(repoRoot, 'scripts/check-changed.mjs'),
+      join(dir, 'scripts/check-changed.mjs'),
+    );
+    writeFileSync(
+      join(dir, 'apps/x/package.json'),
+      JSON.stringify({ name: '@10db/x', scripts: { drift: 'true' } }),
+    );
+    for (const file of files) writeFileSync(join(dir, file), 'export {};\n');
+    mkdirSync(join(dir, '.gate'));
+    writeFileSync(join(dir, '.gate/rust.log'), 'left by an earlier run\n');
+    writeFileSync(
+      join(dir, 'bin/pnpm'),
+      `#!/bin/sh\ncase "$*" in\n  ${fails}) echo "the step's output"; exit 1 ;;\nesac\n`,
+    );
+    chmodSync(join(dir, 'bin/pnpm'), 0o755);
+    const result = spawnSync(
+      process.execPath,
+      ['scripts/check-changed.mjs', ...flags, '--', ...files],
+      { cwd: dir, encoding: 'utf8', env: { PATH: join(dir, 'bin') } },
+    );
+    return { dir, status: result.status, stdout: result.stdout };
+  }
+
+  it('names each failing step and its log as the gate does, the summary line last', () => {
+    const run = runFailing('exec\\ vitest*', ['apps/x/src/a.ts']);
+    expect(run.status).toBe(1);
+    expect(run.stdout).toContain(
+      '\nFAILED test: pnpm exec vitest run --passWithNoTests apps/x/ (log .gate/test.log)\n',
+    );
+    expect(run.stdout.trimEnd().split('\n').at(-1)).toMatch(/^CHECK-CHANGED FAIL: test \(\d+s\)$/);
+    expect(readFileSync(join(run.dir, '.gate/test.log'), 'utf8')).toBe("the step's output\n");
+  });
+
+  it('leaves only the logs of its own run in .gate/', () => {
+    const run = runFailing('exec\\ vitest*', ['apps/x/src/a.ts']);
+    expect(readdirSync(join(run.dir, '.gate')).sort()).toEqual([
+      'drift-10db-x.log',
+      'format.log',
+      'lint.log',
+      'test.log',
+    ]);
+  });
+
+  it('gives a step whose name has a space a FAILED line the fix brief can read', () => {
+    const run = runFailing('--filter*drift', ['apps/x/src/a.ts']);
+    expect(run.stdout).toContain(
+      '\nFAILED drift-10db-x: pnpm --filter @10db/x run drift (log .gate/drift-10db-x.log)\n',
+    );
+  });
+
+  it('prints no FAILED line for a run that passes', () => {
+    const run = runFailing('nothing', ['apps/x/src/a.ts']);
+    expect(run.status).toBe(0);
+    expect(run.stdout).not.toContain('FAILED');
+  });
+
+  it('keeps the FAILED line of a step with hundreds of files short, so the next ones stay in the tail 10db reads', () => {
+    const files = Array.from(
+      { length: 400 },
+      (_, n) => `apps/x/src/a-file-with-quite-a-long-name-${String(n)}.ts`,
+    );
+    const run = runFailing('exec\\ prettier*|exec\\ vitest*', files);
+    const failed = run.stdout.split('\n').filter((line) => line.startsWith('FAILED '));
+    expect(failed).toEqual([
+      'FAILED format: node scripts/check-changed.mjs (log .gate/format.log)',
+      'FAILED test: pnpm exec vitest run --passWithNoTests apps/x/ (log .gate/test.log)',
+    ]);
+  });
+
+  it('names the pre-check to rerun when a step of the pre-check has too long a command', () => {
+    const files = Array.from(
+      { length: 400 },
+      (_, n) => `apps/x/src/a-file-with-quite-a-long-name-${String(n)}.ts`,
+    );
+    const run = runFailing('exec\\ prettier*', files, ['--precheck']);
+    expect(run.stdout).toContain(
+      '\nFAILED format: node scripts/check-changed.mjs --precheck (log .gate/format.log)\n',
+    );
   });
 
   it('does run the gate for the same unplaced file without --precheck', () => {

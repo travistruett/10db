@@ -62,7 +62,8 @@ conversation. The session gets no browser, no click and no command.
     A control shows the dump does see a write.
 - **Refusals say why.** A screen that cannot be drawn is the tool's error with a reason, never a blank or broken
   image: no window is open (nothing asked for work lately), the window is hidden, the frame did not finish loading
-  in 15 s, the screen failed to load (a 401 or 5xx on its data), the view crashed, the capture failed or came out
+  in 15 s, the screen failed to load (a 401 or 5xx on its data), the view crashed, the capture failed, used up what
+  the load left of the draw's 19 s (a budget from the draw's start, a little inside the daemon's 20 s) or came out
   one flat colour, the picture is not a whole PNG or JPEG by its bytes (a PNG to its IEND, a JPEG to its EOI), is
   not the size it says, is larger than the window asked for, or is too large to keep; the task is not in this
   project; the conversation already holds 12 screens, or has no room left in the picture total it shares with
@@ -70,7 +71,7 @@ conversation. The session gets no browser, no click and no command.
 - **A hidden window refuses at once, from the window.** Closing 10db's window only hides it (spec §3), and a
   hidden window keeps long-polling, so the daemon cannot tell it from a visible one. A hidden WebKit page runs no
   animation frame, which `html-to-image` waits on (from WebKit's behaviour, not observed here), so a capture there
-  would hang until the 15 s timeout and blame the screen. The host checks `document.visibilityState` before it
+  would hang until the draw's 19 s ran out and blame the screen. The host checks `document.visibilityState` before it
   draws, and refuses with a reason that tells the session to ask the builder to bring 10db forward; a window
   hidden part-way through a draw gets the same reason, not the timeout's.
 - **Image budget and context.** One picture is at most the window asked for (so at most 1600 × 2000, inside
