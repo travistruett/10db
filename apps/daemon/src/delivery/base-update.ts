@@ -329,6 +329,11 @@ interface Merging {
    * `update`'s note, until then, says only that they were taken from the base.
    */
   readonly regeneratedNote?: string | null;
+  /**
+   * `update`'s note as a catch-up words it when a broken install stops it and the merge goes back
+   * off the branch; only a catch-up's merge that settled conflicts has one.
+   */
+  readonly putBackNote?: string | null;
 }
 
 /** What kept a merge's generated directories from being regenerated. */
@@ -489,13 +494,20 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
    * What the gate's note says about the conflicts a merge settled; null when it settled none. A
    * generated directory is only taken from the base when the merge is made, so it is said to be
    * regenerated (`regenerated`) only once its regeneration has made it, and the merge that goes back
-   * is not said to be listed anywhere.
+   * is not said to be listed anywhere. A merge that `goesBack` (a catch-up's, stopped by a broken
+   * install) is no longer on the branch when the note is read, so it is said to have been made and
+   * put back, and no commit is pointed to.
    */
-  function settledNote(batch: BatchDto, merged: SettledMerge, regenerated: boolean): string | null {
+  function settledNote(
+    batch: BatchDto,
+    merged: SettledMerge,
+    regenerated: boolean,
+    goesBack = false,
+  ): string | null {
     const resolved = merged.resolved ?? [];
     if (resolved.length === 0) return null;
     // Said once: a merge with directories to regenerate asks for both wordings.
-    if (regenerated)
+    if (regenerated && !goesBack)
       ctx.logger.info(
         { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
         'base conflicts settled',
@@ -507,6 +519,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         return `${r.path} (${regenerated ? 'regenerated from its sources' : `taken from ${origin}, not regenerated`})`;
       })
       .join(', ');
+    if (goesBack)
+      return `10db's merge of ${origin} into this branch settled its conflicts with it: ${said}. That merge is put back, so no commit on the branch lists them.`;
     const lead = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}.`;
     return regenerated ? `${lead} The merge commit lists them.` : lead;
   }
@@ -1321,6 +1335,10 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       },
       regenerate: waiting ? merged : null,
       ...(waiting ? { regeneratedNote: joined(settledNote(batch, merged, true), unmoved) } : {}),
+      // A catch-up stopped by a broken install puts this merge back: its card cannot point to it.
+      ...(forPullRequest
+        ? { putBackNote: joined(settledNote(batch, merged, !waiting, true), unmoved) }
+        : {}),
     };
   }
 
@@ -1579,7 +1597,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         kind: 'install_broken',
         note:
           joined(
-            merged.note,
+            forPullRequest && merged.kind === 'merged'
+              ? (merging.putBackNote ?? merged.note)
+              : merged.note,
             `The install in this copy is broken: ${installed.broken}. ${installsSaid(installed.installs ?? 0, installed.startedOver === true)}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
         ...(merged.kind === 'merged' ? { head: merged.head } : {}),

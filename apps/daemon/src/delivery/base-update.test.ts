@@ -1037,6 +1037,64 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       });
     });
 
+    describe('when the install is broken after a merge that settled only kept lines', () => {
+      /** Both sides added a line to `src/index.ts`, the lockfile names left-pad, and the copy then loses it. */
+      async function brokenAfterKeptLines(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        h.commit('.gitignore', 'node_modules/\n');
+        h.commit(
+          'pnpm-lock.yaml',
+          [
+            'importers:',
+            '  .:',
+            '    dependencies:',
+            '      left-pad:',
+            '        specifier: 1.3.0',
+            '        version: 1.3.0',
+            '',
+          ].join('\n'),
+        );
+        mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+        h.commit('src/index.ts', "import a from './a';\nexport {};\n");
+        h.git$('push', '-q', 'origin', 'main');
+        const { batch } = await opened();
+        await commitOnBatch(
+          batch,
+          'src/index.ts',
+          "import a from './a';\nimport b from './b';\nexport {};\n",
+        );
+        h.teammatePush(
+          'main',
+          'src/index.ts',
+          "import a from './a';\nimport c from './c';\nexport {};\n",
+        );
+        rmSync(join(pathOf(batch), 'node_modules', 'left-pad'), { recursive: true, force: true });
+        return batch;
+      }
+
+      it('points a gate to the merge commit that lists the files', async () => {
+        const batch = await brokenAfterKeptLines();
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('install_broken');
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain("src/index.ts (kept both sides' added lines)");
+        expect(note).toContain('The merge commit lists them.');
+      });
+
+      it("does not point a catch-up's card to a merge commit that goes back", async () => {
+        const batch = await brokenAfterKeptLines();
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, {
+          forPullRequest: true,
+        });
+        expect(update.kind).toBe('install_broken');
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain("src/index.ts (kept both sides' added lines)");
+        expect(note).toContain('install in this copy is broken');
+        expect(note).not.toContain('The merge commit lists them');
+        expect(note).not.toContain('10db merged origin/main into this branch');
+      });
+    });
+
     it('regenerates generated files from their sources and commits them after the merge', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();
