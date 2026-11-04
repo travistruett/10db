@@ -1,7 +1,24 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { HealthResponse, PROTOCOL_VERSION, renderJsonSchemas } from './index';
+import {
+  HealthResponse,
+  McpToolOutputs,
+  mintId,
+  PROTOCOL_VERSION,
+  renderJsonSchemas,
+} from './index';
+
+describe('McpToolOutputs.propose', () => {
+  it('still parses a result recorded before either id existed', () => {
+    const proposalId = mintId('Proposal');
+    expect(McpToolOutputs.propose.parse({ proposalId })).toEqual({
+      proposalId,
+      taskId: null,
+      principleId: null,
+    });
+  });
+});
 
 describe('HealthResponse', () => {
   it('accepts a well-formed health payload', () => {

@@ -13,19 +13,6 @@ import {
   TaskId,
   WorkstreamId,
 } from './ids';
-<<<<<<< 754c4abfad643cb825faa5154fa981b97e81efe2
-import {
-  ClaimKind,
-  ProposalKind,
-  QuestionCategory,
-  RiskTag,
-  Severity,
-  Urgency,
-  Verdict,
-} from './states';
-||||||| 122e914
-import { ClaimKind, ProposalKind, QuestionCategory, Severity, Urgency, Verdict } from './states';
-=======
 import { PrincipleDraft } from './knowledge';
 import {
   ClaimKind,
@@ -33,11 +20,11 @@ import {
   PrincipleKind,
   ProposalKind,
   QuestionCategory,
+  RiskTag,
   Severity,
   Urgency,
   Verdict,
 } from './states';
->>>>>>> 83a19a13be65c163a1206bcd7444120346aa67b7
 import { MAX_STEP_SUMMARY } from './steps';
 
 const OpId = z
@@ -183,7 +170,6 @@ export const McpToolInputs = {
     kind: z.enum(ProposalKind),
     title: z.string().min(1),
     body: z.string().min(1),
-<<<<<<< 754c4abfad643cb825faa5154fa981b97e81efe2
     /**
      * The risks the proposed work carries. A small new-task proposal with none is filed to the Icebox
      * without a card; one with a tag always raises a card.
@@ -191,12 +177,9 @@ export const McpToolInputs = {
     riskTags: z.array(z.enum(RiskTag)).optional(),
     /** Set when the work must join a batch that is already running; a person decides that. */
     joinsRunningBatch: z.boolean().optional(),
-||||||| 122e914
-=======
     principle: PrincipleDraft.optional().describe(
       'For kind "principle": the rule itself. Without it, the body is used as the statement.',
     ),
->>>>>>> 83a19a13be65c163a1206bcd7444120346aa67b7
   }),
   report_deviation: z.object({
     opId: OpId,
@@ -256,18 +239,13 @@ export const McpToolOutputs = {
   }),
   ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
   record_decision: z.object({ decisionId: DecisionId }),
-<<<<<<< 754c4abfad643cb825faa5154fa981b97e81efe2
+  // A result recorded before self-filing or principles has neither id; it still parses.
   propose: z.object({
     proposalId: ProposalId,
     /** The task 10db filed to the Icebox by itself; null when a card was raised for a person. */
-    taskId: TaskId.nullable(),
+    taskId: TaskId.nullable().default(null),
+    principleId: PrincipleId.nullable().default(null),
   }),
-||||||| 122e914
-  propose: z.object({ proposalId: ProposalId }),
-=======
-  // A result recorded before principles existed has no principleId; it still parses.
-  propose: z.object({ proposalId: ProposalId, principleId: PrincipleId.nullable().default(null) }),
->>>>>>> 83a19a13be65c163a1206bcd7444120346aa67b7
   report_deviation: z.object({ deviationId: DeviationId }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [

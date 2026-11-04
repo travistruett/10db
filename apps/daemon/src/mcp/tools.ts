@@ -108,13 +108,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-<<<<<<< 754c4abfad643cb825faa5154fa981b97e81efe2
-    'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card.',
-||||||| 122e914
-    'Propose a new task, a task change, or a principle. Proposals go to the builder; nothing changes until accepted.',
-=======
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself.',
->>>>>>> 83a19a13be65c163a1206bcd7444120346aa67b7
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
     'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS); after that the call is refused.',
@@ -354,7 +348,12 @@ export function createToolHandlers(
               sourceId,
               speaker: `agent:${sessionId}`,
             });
-            return record('propose', input.opId, { proposalId, principleId: principle.id }, ctx);
+            return record(
+              'propose',
+              input.opId,
+              { proposalId, taskId: null, principleId: principle.id },
+              ctx,
+            );
           }
           const proposalId = insertProposal(ctx, {
             projectId: project.id,
@@ -374,7 +373,12 @@ export function createToolHandlers(
           if (filing.file) {
             // A small proposal with no risk tag: the card would guard nothing the Icebox does not.
             const task = fileProposalByItself(ctx, proposalId);
-            return record('propose', input.opId, { proposalId, taskId: task.id }, ctx);
+            return record(
+              'propose',
+              input.opId,
+              { proposalId, taskId: task.id, principleId: null },
+              ctx,
+            );
           }
           insertInboxItem(ctx, {
             projectId: project.id,
@@ -392,13 +396,12 @@ export function createToolHandlers(
             foldKey: null,
             targets: [],
           });
-<<<<<<< 754c4abfad643cb825faa5154fa981b97e81efe2
-          return record('propose', input.opId, { proposalId, taskId: null }, ctx);
-||||||| 122e914
-          return record('propose', input.opId, { proposalId }, ctx);
-=======
-          return record('propose', input.opId, { proposalId, principleId: null }, ctx);
->>>>>>> 83a19a13be65c163a1206bcd7444120346aa67b7
+          return record(
+            'propose',
+            input.opId,
+            { proposalId, taskId: null, principleId: null },
+            ctx,
+          );
         }),
       );
     },
