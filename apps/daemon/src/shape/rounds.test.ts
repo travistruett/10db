@@ -61,6 +61,30 @@ describe('a round', () => {
     expect(row('a').round).toBe(2);
   });
 
+  it('refuses a key stated under another kind than its stored row, and writes nothing', () => {
+    const m = c.say();
+    propose(looseDraft(m, 'a'));
+    const before = rows();
+    const asGoal = {
+      goals: [
+        {
+          key: 'a',
+          title: 'Goal',
+          objective: 'Do it.',
+          ceremony: 'direct',
+          sourceMessageIds: [m],
+          tasks: [{ key: 'a1', title: 'Only task', areas: ['api'], size: 'S' }],
+        },
+      ],
+    };
+    expect(propose(asGoal)).toEqual({
+      ok: false,
+      errors: ['a: stored as a task, so it cannot be stated as a goal; use another key'],
+    });
+    expect(rows()).toEqual(before);
+    expect(getShape(c.store.db, c.shape.id).round).toBe(1);
+  });
+
   it('marks nothing for a row the draft restates unchanged', () => {
     const m = c.say();
     propose(looseDraft(m, 'a'));

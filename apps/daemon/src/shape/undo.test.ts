@@ -28,6 +28,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { attach } from './attach';
 import { convertProposals } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { reconcileDraft } from './rounds';
@@ -171,6 +172,105 @@ describe('Remove Draft Goal', () => {
     expect(again.map((a) => [a.kind, a.goalId])).toEqual([['eval', newGoalId]]);
   });
 
+  describe('with a diagram attached by id', () => {
+    const diagram = { kind: 'mermaid', source: 'graph TD; A-->B' } as const;
+
+    it.each(['goal', 'task'] as const)(
+      'returns a diagram attached by %s id to its proposal row, and relinks it on a new Convert',
+      (by) => {
+        const { goalId, taskIds } = convertedGoalAndDecision();
+        const id = by === 'goal' ? goalId : must(taskIds[0], 'the task id');
+        write((ctx) =>
+          attach(ctx, c.shape.id, {
+            target: by === 'goal' ? { goalId: goalId } : { taskId: id as TaskId },
+            attachment: diagram,
+          }),
+        );
+        expect(listShapeAttachments(c.store.db, c.shape.id).map((a) => a.key)).toEqual([id]);
+
+        write((ctx) => {
+          removeDraftGoalOf(ctx, c.shape.id, goalId);
+        });
+        // The diagram is keyed by the row it was attached to, and attached to no goal or task.
+        const wanted = by === 'goal' ? 'g' : 'g1';
+        expect(
+          listShapeAttachments(c.store.db, c.shape.id).map((a) => [a.key, a.goalId, a.taskId]),
+        ).toEqual([[wanted, null, null]]);
+
+        const pending = listShapeProposals(c.store.db, c.shape.id)
+          .filter((r) => r.state === ShapeProposalState.Pending)
+          .map((r) => r.id);
+        const second = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+        if (!second.ok) throw new Error(second.errors.join('; '));
+        const goal = must(
+          second.results.find((r) => r.key === 'g'),
+          'the new goal',
+        );
+        const [a] = listShapeAttachments(c.store.db, c.shape.id);
+        expect(a).toMatchObject(
+          by === 'goal'
+            ? { key: 'g', goalId: goal.goalId, taskId: null }
+            : { key: 'g1', goalId: null, taskId: goal.taskIds[0] },
+        );
+      },
+    );
+
+    it('returns a diagram on a task added to the goal later to that task row, and relinks it when proposed again', () => {
+      const { goalId } = convertedGoalAndDecision();
+      const m = c.say();
+      const addition = (goal: GoalId) => ({
+        key: 'extra',
+        title: 'Extra',
+        criteria: ['It works'],
+        areas: ['api'],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: [m],
+        goalId: goal,
+      });
+      const convertPending = () => {
+        const pending = listShapeProposals(c.store.db, c.shape.id)
+          .filter((r) => r.state === ShapeProposalState.Pending)
+          .map((r) => r.id);
+        const out = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+        if (!out.ok) throw new Error(out.errors.join('; '));
+        return out;
+      };
+      const proposed = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition(goalId)] })),
+      );
+      if (!proposed.ok) throw new Error(proposed.errors.join('; '));
+      const added = convertPending();
+      const taskId = must(added.results.find((r) => r.key === 'extra')?.taskIds[0], 'the task id');
+      write((ctx) => attach(ctx, c.shape.id, { target: { taskId }, attachment: diagram }));
+
+      write((ctx) => {
+        removeDraftGoalOf(ctx, c.shape.id, goalId);
+      });
+      // The diagram is on the addition's own row, which the goal's proposal row does not hold.
+      expect(
+        listShapeAttachments(c.store.db, c.shape.id).map((a) => [a.key, a.goalId, a.taskId]),
+      ).toEqual([['extra', null, null]]);
+
+      const newGoalId = must(
+        convertPending().results.find((r) => r.key === 'g')?.goalId,
+        'the new goal id',
+      );
+      const again = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition(newGoalId)] })),
+      );
+      if (!again.ok) throw new Error(again.errors.join('; '));
+      const newTaskId = must(
+        convertPending().results.find((r) => r.key === 'extra')?.taskIds[0],
+        'the new task id',
+      );
+      expect(newTaskId).not.toBe(taskId);
+      expect(listShapeAttachments(c.store.db, c.shape.id)).toMatchObject([
+        { key: 'extra', goalId: null, taskId: newTaskId },
+      ]);
+    });
+  });
+
   describe('with a question converted under it', () => {
     function convertedWithQuestion(about: string): GoalId {
       const m = c.say();
@@ -284,6 +384,57 @@ describe('Remove Draft Goal', () => {
           expect.stringMatching(/Question 1, about: extra is not a goal or task/),
         ]);
       }
+    });
+
+    it('refuses a taken-back task’s key stated as a goal, and writes nothing', () => {
+      const goalId = convertedWithQuestion('density');
+      const m = c.say();
+      const addition = {
+        key: 'extra',
+        title: 'Extra',
+        criteria: ['It works'],
+        areas: ['api'],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: [m],
+        goalId,
+      };
+      write((ctx) => reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition] })));
+      const selected = listShapeProposals(c.store.db, c.shape.id)
+        .filter((r) => r.state === ShapeProposalState.Pending)
+        .map((r) => r.id);
+      const converted = write((ctx) => convertProposals(ctx, c.shape.id, selected));
+      if (!converted.ok) throw new Error(converted.errors.join('; '));
+      write((ctx) => {
+        removeDraftGoalOf(ctx, c.shape.id, goalId);
+      });
+      const before = listShapeProposals(c.store.db, c.shape.id);
+      const round = getShape(c.store.db, c.shape.id).round;
+
+      const refused = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          PlanDraft.parse({
+            goals: [
+              {
+                key: 'extra',
+                title: 'Extra goal',
+                objective: 'Do it.',
+                ceremony: 'direct',
+                sourceMessageIds: [m],
+                tasks: [{ key: 'x1', title: 'Only task', areas: ['api'], size: 'S' }],
+              },
+            ],
+          }),
+        ),
+      );
+      expect(refused).toEqual({
+        ok: false,
+        errors: ['extra: stored as a task, so it cannot be stated as a goal; use another key'],
+      });
+      expect(listShapeProposals(c.store.db, c.shape.id)).toEqual(before);
+      expect(getShape(c.store.db, c.shape.id).round).toBe(round);
     });
 
     it('lets a task added to the removed goal be proposed again under its key, and the question converts with it', () => {
