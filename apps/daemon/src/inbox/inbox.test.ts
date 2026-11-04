@@ -2313,6 +2313,27 @@ describe('permission broker in a sandboxed lane', () => {
         expect(open[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
       });
 
+      it('keeps an escalated Edit on its own card, apart from an identical ordinary Edit in the same lane', async () => {
+        const a = seedWorkstream(base);
+        const b = seedWorkstream(base, { project: a.project, title: 'Beta' });
+        writeFileSync(file(), '{"a":1}');
+        const input = { file_path: file(), old_string: '"a":1', new_string: '"a":2' };
+        const first = sandboxed(a)(request('Edit', input));
+        const ordinary = sandboxed(b)(request('Edit', input));
+        void sandboxed(b)(request('Edit', input, true)).catch(() => undefined);
+        const betaCards = openCards().filter((c) => c.targets[0]?.workstreamId === b.workstream.id);
+        expect(betaCards).toHaveLength(2);
+        const alphaCard = openCards().find((c) => c.targets[0]?.workstreamId === a.workstream.id);
+        if (alphaCard === undefined) throw new Error('no card for Alpha');
+        inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(await ordinary).toEqual({ behavior: 'allow' });
+        const open = openCards();
+        expect(open).toHaveLength(1);
+        expect(open[0]?.targets[0]?.workstreamId).toBe(b.workstream.id);
+        expect(open[0]?.detail).toMatchObject({ escalated: true });
+      });
+
       it('leaves the other lane’s card open for allow_once', () => {
         const { a, cardOf } = twoLanes();
         inbox.answer(cardOf(a).id, { choice: 'allow_once' });

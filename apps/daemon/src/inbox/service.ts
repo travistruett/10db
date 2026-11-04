@@ -76,6 +76,8 @@ interface AskInput {
   readonly signal: AbortSignal;
   /** The card folds only with the same lane's identical asks, never with another lane's. */
   readonly foldPerLane?: boolean;
+  /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
+  readonly escalated?: boolean;
 }
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
@@ -193,13 +195,22 @@ function optionsForTargets(
 function foldKeyFor(
   input: Pick<
     AskInput,
-    'projectId' | 'workstreamId' | 'kind' | 'title' | 'body' | 'options' | 'foldPerLane'
+    | 'projectId'
+    | 'workstreamId'
+    | 'kind'
+    | 'title'
+    | 'body'
+    | 'options'
+    | 'foldPerLane'
+    | 'escalated'
   >,
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
     input.projectId,
     ...(input.foldPerLane === true ? [input.workstreamId] : []),
+    // A call Claude Code handed to a person never shares a card with an ordinary ask.
+    ...(input.escalated === true ? ['escalated'] : []),
     input.kind,
     norm(input.title),
     norm(input.body),
