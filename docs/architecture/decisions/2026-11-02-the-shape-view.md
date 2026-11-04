@@ -19,14 +19,24 @@
   `useAdoptGoal`); Factory's primary is Shape Work…, a link to `/shape`. The adopt route stays.
 - **The Proposed rows are buttons over regions**, as Factory's goal rows are, so Enter opens a row and ↑/↓ move
   between them with a roving tab stop. The spec's Enter-edits, P and W belong to slice 2, when rows edit.
-- **Remove Draft Goal and Withdraw Decision… sit on the converted row's menu in the sidebar.** The Board's goal
-  drawer and menu do not call `remove-draft` yet.
+- **Remove Draft Goal and Withdraw Decision… sit on the converted row's menu in the sidebar.** Remove Draft Goal
+  is also in the Board's goal line menu and in Factory's open goal (the Board has no goal drawer), behind the
+  same confirm. It is offered only for a goal a conversation made (`GET /goals/:id/shape`) whose digest status
+  is Not started (`goal.state` stays Draft for life, so it says nothing here). A conversation's goal with a task
+  that has started says why in Factory instead, except a Shipping or Done goal, whose work is finished.
 - **Model text is plain text.** No markdown renderer is a dependency, so chat and row text show as text with
   line breaks and are never markup.
-- **No virtualization library.** A new dependency waits on the builder, so each transcript block and row takes
-  `content-visibility: auto`, which keeps off-screen blocks from being laid out. A real virtual list is a
-  follow-up if a long conversation still drags.
-- **The header shows no token count**, because the view carries none; the spec's "88k tokens" waits on a field.
+- **The transcript is a virtual list.** `@tanstack/react-virtual` (the builder's choice, pinned at 3.14.25, the
+  newest `minimumReleaseAge` allows) mounts only the blocks near the viewport, measuring each as it mounts. Why?
+  and stick-to-bottom go through the virtualizer, since their block may not be mounted. The cost is that ⌘F and a
+  drag-select reach mounted text only. Blocks are not memoized: about twenty mount at a time, and a new message
+  rebuilds every block object anyway. `content-visibility: auto` stays on the Proposed rows, which are few.
+  `e2e/shape.spec.ts` checks 2,000 messages in WebKit; a sandboxed gate skips e2e, so CI is what runs it.
+- **The header shows the conversation's tokens** ("88k tokens", through the factory's `formatTokens`), from
+  `ShapeViewDto.tokens`: the input and output tokens summed over the conversation's `sessions` rows
+  (`shapeTokens`), the rows per-project usage reads. Cached tokens are a subset of input, so they are not added.
+  It is read with the rest of the view, and a turn's end announces `shape.changed` after its usage is written, so
+  the header updates as turns finish. Nothing shows before the first turn.
 - **The Proposed summary counts what is pending**, with converted rows counted apart; the pull-request count is
   the number of landings, and hours and open findings come with their slices.
 

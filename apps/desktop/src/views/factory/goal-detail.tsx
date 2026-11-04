@@ -1,9 +1,10 @@
 import type { GoalSummaryDto, WorkstreamDto, WorkstreamId } from '@10db/contracts';
-import { Button, Divider, Group, Stack } from '@mantine/core';
+import { Button, Divider, Group, Stack, Text } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { OpenConversation } from '../shape/open-conversation';
+import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BatchSheet } from '../board/batch/batch-sheet';
 import {
@@ -43,6 +44,7 @@ export function GoalDetail({ summary, opened }: GoalDetailProps) {
   const { goal, digest } = summary;
   const { project } = useSelectedProject();
   const [starting, setStarting] = useState(false);
+  const removal = useRemoveDraftGoalAction(summary);
   const navigate = useNavigate();
   const tasks = useTasks(project?.id ?? null);
   const sessions = useSessions((ws) => goal.taskIds.includes(ws.taskId));
@@ -93,7 +95,24 @@ export function GoalDetail({ summary, opened }: GoalDetailProps) {
             void navigate({ to: '/shape/$shapeId', params: { shapeId } });
           }}
         />
+        {removal.offer === 'available' ? (
+          <Button
+            variant="subtle"
+            color="red"
+            size="compact-sm"
+            style={{ alignSelf: 'flex-start' }}
+            onClick={removal.open}
+          >
+            Remove Draft Goal…
+          </Button>
+        ) : null}
+        {removal.offer === 'started' ? (
+          <Text size="xs" c="dimmed">
+            Remove Draft Goal needs every task unstarted; a task of this goal has started.
+          </Text>
+        ) : null}
       </Stack>
+      {removal.modal}
       <GoalFooter digest={digest} />
       {starting && project ? (
         <BatchSheet

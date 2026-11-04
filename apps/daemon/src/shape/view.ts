@@ -27,6 +27,7 @@ import {
   listShapeLinks,
   listShapeMessages,
   listShapeProposals,
+  shapeTokens,
   type DbReader,
   type ShapeFileRow,
   type ShapeFindingRow,
@@ -244,5 +245,6 @@ export function buildShapeView(
     })),
     preview: buildPreview(db, shapeId, now),
     attachments: attachmentsOf(db, shapeId),
+    tokens: shapeTokens(db, shapeId),
   };
 }

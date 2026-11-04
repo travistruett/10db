@@ -103,6 +103,18 @@ export type ShapeDismissInput = z.infer<typeof ShapeDismissInput>;
 export const OneWayPathsDto = z.object({ paths: z.array(z.string().min(1).max(200)).max(64) });
 export type OneWayPathsDto = z.infer<typeof OneWayPathsDto>;
 
+/**
+ * The size of a lane's proposal, title and body in characters, up to which 10db files a new task to
+ * the Icebox by itself when it carries no risk tag. Settings › General; zero sends every proposal to
+ * the Inbox.
+ */
+export const DEFAULT_SMALL_PROPOSAL_LIMIT = 1200;
+export const MAX_SMALL_PROPOSAL_LIMIT = 20_000;
+export const SmallProposalLimitDto = z.object({
+  limit: z.int().min(0).max(MAX_SMALL_PROPOSAL_LIMIT),
+});
+export type SmallProposalLimitDto = z.infer<typeof SmallProposalLimitDto>;
+
 /** The goals spec's one-way class paths for 10db itself, used for a project that has them and sets none. */
 export const DEFAULT_ONE_WAY_PATHS = [
   'packages/db/src/schema.ts',

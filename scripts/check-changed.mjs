@@ -18,6 +18,11 @@
 // file, or has no base, it runs those steps over every package instead of the gate: it never runs
 // scripts/gate.sh. CI runs every test.
 //
+// Each step's output is printed and goes to .gate/<step>.log, and each failing step gets a line
+// naming the command that reruns it and its log, as the gate's do, which 10db reads to brief a fix
+// session and to rerun failing tests ("FAILED test: pnpm exec vitest run … (log .gate/test.log)").
+// Those lines come just before the summary line, in the end of the output 10db keeps.
+//
 // Usage:
 //   node scripts/check-changed.mjs                  run the check
 //   node scripts/check-changed.mjs --precheck       run the pre-check (knip and the docs rule tests; no other tests, Rust or e2e)
@@ -25,7 +30,7 @@
 //                                                    print the plan as JSON and run nothing; the
 //                                                    files replace the git diff
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { globSync, lstatSync, readFileSync } from 'node:fs';
+import { globSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
@@ -333,16 +338,34 @@ function run(s) {
   });
 }
 
+const LOG_DIR = '.gate';
+
+/** Logs from an earlier run would otherwise sit beside this run's, and a skipped step leaves none. */
+function clearLogs() {
+  rmSync(join(root, LOG_DIR), { recursive: true, force: true });
+  mkdirSync(join(root, LOG_DIR));
+}
+
+/**
+ * The name a step has in its log's file and its FAILED line, which allows no space.
+ * @param {string} name
+ */
+function logName(name) {
+  return name.replace(/[^\w.-]+/g, '-');
+}
+
 /** @param {StepResult} r @param {Step} s */
 function report(r, s) {
+  writeFileSync(join(root, LOG_DIR, `${logName(r.name)}.log`), r.output);
   console.log(`\n▶ ${r.name}: ${[s.command, ...s.args].join(' ')}`);
   process.stdout.write(r.output === '' || r.output.endsWith('\n') ? r.output : `${r.output}\n`);
   console.log(`${r.ok ? '✔' : '✘'} ${r.name} (${String(r.seconds)}s)`);
 }
 
 /**
- * Runs the steps together and reports each in order; returns the names of those that failed.
+ * Runs the steps together and reports each in order; returns those that failed.
  * @param {Step[]} steps
+ * @returns {Promise<Step[]>}
  */
 async function runTogether(steps) {
   const results = await Promise.all(steps.map(run));
@@ -350,7 +373,7 @@ async function runTogether(steps) {
     const r = results[i];
     if (r) report(r, s);
   });
-  return results.filter((r) => !r.ok).map((r) => r.name);
+  return steps.filter((_, i) => results[i]?.ok === false);
 }
 
 /** @returns {Step} the gate's knip step: whole-repo, a few seconds */
@@ -378,6 +401,7 @@ function repoDocTestsStep(tests) {
 async function runPrecheckEverywhere(reason) {
   console.log(`check-changed: pre-check over every package (${reason})`);
   const began = Date.now();
+  clearLogs();
   const pnpmRun = (/** @type {string} */ name) => ({
     name,
     command: 'pnpm',
@@ -395,13 +419,31 @@ async function runPrecheckEverywhere(reason) {
   finish(failed, began);
 }
 
-/** @param {string[]} failed @param {number} began */
+/**
+ * Past this a step's FAILED line names the whole check instead of its own command. The format and
+ * lint commands list every changed file, and one such line could push the lines of the other failing
+ * steps out of the end of the output 10db keeps, and 10db would take the rest for all that failed.
+ */
+const FAILED_COMMAND_MAX = 200;
+
+/** @param {Step} s */
+function failedLine(s) {
+  const command = [s.command, ...s.args].join(' ');
+  const check = `node scripts/check-changed.mjs${process.argv.includes('--precheck') ? ' --precheck' : ''}`;
+  const rerun = command.length > FAILED_COMMAND_MAX ? check : command;
+  const name = logName(s.name);
+  return `FAILED ${name}: ${rerun} (log ${LOG_DIR}/${name}.log)`;
+}
+
+/** @param {Step[]} failed @param {number} began */
 function finish(failed, began) {
   const seconds = Math.round((Date.now() - began) / 1000);
   if (failed.length === 0) {
     console.log(`\nCHECK-CHANGED PASS (${String(seconds)}s)`);
   } else {
-    console.log(`\nCHECK-CHANGED FAIL: ${failed.join(' ')} (${String(seconds)}s)`);
+    console.log(`\n${failed.map(failedLine).join('\n')}`);
+    const names = failed.map((s) => s.name).join(' ');
+    console.log(`CHECK-CHANGED FAIL: ${names} (${String(seconds)}s)`);
     process.exit(1);
   }
 }
@@ -455,6 +497,7 @@ async function main() {
     console.log('CHECK-CHANGED PASS nothing changed');
     return;
   }
+  clearLogs();
   console.log(
     `check-changed: changed ${plan.changed.join(', ') || '(no package)'}; checking ${plan.affected.join(', ')}`,
   );

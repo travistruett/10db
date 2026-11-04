@@ -7,6 +7,7 @@ import {
   TaskStatus,
   type ProjectId,
   type ShapeId,
+  type ShapeLinkId,
   type ShapeTaskSizeDto,
   type SizingMeasureDto,
   type TaskId,
@@ -21,6 +22,7 @@ import {
   listShapes,
   listProjects,
   type DbReader,
+  type ShapeLinkRow,
   type ShapeProposalRow,
 } from '@10db/db';
 
@@ -128,6 +130,8 @@ function derive(
 
 interface Sized extends Derived {
   readonly task: ProposedTask;
+  /** What Convert made of the task, once it has. */
+  readonly link: ShapeLinkRow | null;
   readonly taskId: TaskId | null;
   readonly actualHours: number | null;
 }
@@ -142,15 +146,16 @@ function sizedTasks(db: DbReader, shapeId: ShapeId): Sized[] {
     for (const task of proposedTasks(row)) {
       const derived = derive(db, task, buckets);
       if (derived === null) continue;
-      const taskId =
-        links.find((l) => l.proposalId === row.id && l.key === task.key && l.taskId !== null)
-          ?.taskId ?? null;
+      const link =
+        links.find((l) => l.proposalId === row.id && l.key === task.key && l.taskId !== null) ??
+        null;
+      const taskId = link?.taskId ?? null;
       let actualHours: number | null = null;
       if (taskId !== null && getTask(db, taskId).status === TaskStatus.Done) {
         const lane = laneTimesOf(db, [taskId]).get(taskId);
         actualHours = lane === undefined ? null : lane.minutes / 60;
       }
-      out.push({ ...derived, task, taskId, actualHours });
+      out.push({ ...derived, task, link, taskId, actualHours });
     }
   }
   return out;
@@ -168,6 +173,60 @@ export function buildSizes(db: DbReader, shapeId: ShapeId): ShapeTaskSizeDto[] {
     actualHours: s.actualHours,
     missized: s.actualHours !== null && !withinOneBucket(s.size, bucketOf(s.actualHours)),
   }));
+}
+
+/** Hours as the builder reads them: at most one decimal, no trailing zero. */
+function hoursText(hours: number): string {
+  return String(Math.round(hours * 10) / 10);
+}
+
+/** The converted tasks that finished more than one bucket from their size. */
+function missizedTasks(db: DbReader, shapeId: ShapeId): Sized[] {
+  return sizedTasks(db, shapeId).filter(
+    (s) =>
+      s.taskId !== null &&
+      s.actualHours !== null &&
+      !withinOneBucket(s.size, bucketOf(s.actualHours)),
+  );
+}
+
+function missizedText(db: DbReader, off: readonly Sized[]): string[] {
+  if (off.length === 0) return [];
+  return [
+    'Finished outside their size by more than one bucket; account for it when re-planning similar work:',
+    ...off.map(
+      (s) =>
+        `- ${s.task.key} → task ${s.taskId ?? ''} "${s.taskId === null ? '' : getTask(db, s.taskId).title}" — sized ${s.size} (~${hoursText(s.hours)} h), took ${hoursText(s.actualHours ?? 0)} h of lane time`,
+    ),
+  ];
+}
+
+/**
+ * What a fresh session's digest says (§8, §12): every mis-sized task, each with its size and its
+ * actual. Empty when none is, so a note is written only when there is something to account for.
+ */
+export function missizedLines(db: DbReader, shapeId: ShapeId): string[] {
+  return missizedText(db, missizedTasks(db, shapeId));
+}
+
+/** What the next turn has to say about sizes, and the links to mark told once it has been sent. */
+export interface UntoldMissized {
+  readonly lines: readonly string[];
+  readonly linkIds: readonly ShapeLinkId[];
+}
+
+/**
+ * The mis-sized tasks Claude has not been told about (§8, §12), however the conversation was
+ * opened. `shape_links.size_told_at` says who has been, so a restart neither loses nor repeats one.
+ */
+export function untoldMissized(db: DbReader, shapeId: ShapeId): UntoldMissized {
+  const untold = missizedTasks(db, shapeId).filter(
+    (s) => s.link !== null && s.link.sizeToldAt === null,
+  );
+  return {
+    lines: missizedText(db, untold),
+    linkIds: untold.flatMap((s) => (s.link === null ? [] : [s.link.id])),
+  };
 }
 
 /**

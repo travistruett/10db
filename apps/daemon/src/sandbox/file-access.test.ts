@@ -17,6 +17,7 @@ import {
   protectedReads,
   readAccess,
   readPathsOf,
+  SYSTEM_DOC_ROOTS,
   writeAccess,
   type FileAccessContext,
   type ReadAccess,
@@ -45,6 +46,8 @@ function context(overrides: Partial<FileAccessContext> = {}): FileAccessContext 
     ...overrides,
   };
 }
+
+const systemDocs = (): Partial<FileAccessContext> => ({ systemDocRoots: SYSTEM_DOC_ROOTS });
 
 beforeEach(() => {
   root = realpathSync(mkdtempSync(join(tmpdir(), '10db-fa-')));
@@ -263,6 +266,35 @@ describe('readAccess', () => {
       path: () => join(sibling, 'secret'),
       context: () => ({ readList: [sibling] }),
       expected: 'allowed',
+    },
+    {
+      name: 'a manual page under /usr/share/man',
+      path: () => '/usr/share/man/man1/ps.1',
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: 'the manual directory itself, searched as a tree',
+      path: () => '/usr/share/man',
+      context: systemDocs,
+      expected: 'allowed',
+    },
+    {
+      name: 'a manual page in a context that did not opt in to the system docs',
+      path: () => '/usr/share/man/man1/ps.1',
+      expected: 'ask',
+    },
+    {
+      name: 'a path that only starts like the manual directory',
+      path: () => '/usr/share/manual/secret',
+      context: systemDocs,
+      expected: 'ask',
+    },
+    {
+      name: 'the manual directory reached by a .. out of it',
+      path: () => '/usr/share/man/../../../etc/hosts',
+      context: systemDocs,
+      expected: 'ask',
     },
     {
       name: "the session's own tool result",

@@ -4,6 +4,7 @@ import { useGoals } from '../../daemon/goal-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
+import { HumanTouchPanel } from './human-touch-panel';
 import { UpdateDrainNote } from './update-drain-note';
 
 /** Factory: the project's goals, each opening to its digest, sessions and pull requests (goals spec §8). */
@@ -49,6 +50,7 @@ function Factory() {
         </Text>
       ) : null}
       {goals.isSuccess ? <GoalList list={goals.data} linkedGoalId={linkedGoalId} /> : null}
+      <HumanTouchPanel projectId={project?.id ?? null} />
     </Stack>
   );
 }

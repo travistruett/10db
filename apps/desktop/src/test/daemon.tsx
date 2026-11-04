@@ -70,6 +70,9 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/goals', base), () =>
       HttpResponse.json({ goals: [], ungrouped: null }),
     ),
+    http.get(daemonUrl('/projects/:projectId/human-touch', base), () =>
+      HttpResponse.json({ days: [] }),
+    ),
     // The nav lists the project's conversations on every screen.
     http.get(daemonUrl('/projects/:projectId/shapes', base), () => HttpResponse.json([])),
     // Settings › General reads the project's Jev opt-in (Shape spec §9); off, as for every project.
@@ -79,6 +82,10 @@ export function baseHandlers(
     // and the one-way paths that force a spec (§7); none set.
     http.get(daemonUrl('/projects/:projectId/one-way-paths', base), () =>
       HttpResponse.json({ paths: [] }),
+    ),
+    // and the size up to which a lane's proposal is filed to the Icebox without a card.
+    http.get(daemonUrl('/projects/:projectId/small-proposal-limit', base), () =>
+      HttpResponse.json({ limit: 1200 }),
     ),
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),

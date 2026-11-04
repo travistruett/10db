@@ -22,6 +22,10 @@ describe('ViewBoundary', () => {
     );
     expect(screen.getByText('Something went wrong in Factory.')).toBeTruthy();
     expect(screen.getByText('kaboom')).toBeTruthy();
+    // A drawn screen finds a crash by this mark, not by the words, which a task title can quote.
+    const marked = document.querySelector('[data-view-crash]');
+    expect(marked?.getAttribute('data-view-crash')).toBe('Factory');
+    expect(marked?.getAttribute('data-view-crash-message')).toBe('kaboom');
     shouldCrash.mockReturnValue(false);
     fireEvent.click(screen.getByRole('button', { name: 'Reload view' }));
     expect(screen.getByText('Back to normal')).toBeTruthy();

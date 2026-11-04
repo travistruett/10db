@@ -58,7 +58,7 @@ import {
   removeNetworkHost,
   storableRule,
 } from '../permissions';
-import { protectedReads, type FileAccessContext } from '../sandbox';
+import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
 import {
   createInboxService,
   createPermissionBroker,
@@ -1060,6 +1060,7 @@ describe('permission broker in a sandboxed lane', () => {
         configDirs: [configDir],
       }),
       readList: [join(root, 'work', 'listed')],
+      systemDocRoots: SYSTEM_DOC_ROOTS,
       configDir,
       providerSessionId: 'own-id',
       sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
@@ -2292,6 +2293,43 @@ describe('permission broker in a sandboxed lane', () => {
       behavior: 'allow',
     });
     expect(openCards()).toEqual([]);
+  });
+
+  it("reads the system's manual pages with Read, Grep and Glob and no card", async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    for (const [tool, input] of [
+      ['Read', { file_path: '/usr/share/man/man1/ps.1' }],
+      ['Grep', { pattern: 'signal', path: '/usr/share/man/man1/pkill.1' }],
+      ['Grep', { pattern: 'signal', path: '/usr/share/man' }],
+      ['Glob', { pattern: 'man1/p*.1', path: '/usr/share/man' }],
+      ['Glob', { pattern: '/usr/share/man/man1/p*.1' }],
+    ] as const) {
+      expect(await decide(request(tool, input)), `${tool} ${JSON.stringify(input)}`).toEqual({
+        behavior: 'allow',
+      });
+    }
+    expect(openCards()).toEqual([]);
+  });
+
+  it('still cards a read under the home directory outside the copy, and a write to the manual pages', async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    void decide(request('Read', { file_path: join(fileAccess.home, 'notes.txt') })).catch(
+      () => undefined,
+    );
+    expect(onlyOpenCard().kind).toBe('permission');
+    inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+    await settle();
+    // The manual-page rule reads only; an Edit or Write there is never allowed without a person.
+    for (const tool of ['Edit', 'Write'] as const) {
+      void decide(request(tool, { file_path: '/usr/share/man/man1/ps.1' })).catch(() => undefined);
+      await settle();
+      const card = onlyOpenCard();
+      expect(card.kind, tool).toBe('permission');
+      inbox.answer(card.id, { choice: 'deny' });
+      await settle();
+    }
   });
 
   it('cards a read outside the checkout, naming the real path, and stores the grant for every read tool', async () => {

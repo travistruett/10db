@@ -34,6 +34,7 @@ import type {
   GoalDto,
   GoalId,
   GoalListDto,
+  HumanTouchDto,
   InboxAnswer,
   InboxItemDto,
   InboxItemId,
@@ -68,6 +69,7 @@ import type {
   RoutingRulesInput,
   SelfUpdateStatusDto,
   OneWayPathsDto,
+  SmallProposalLimitDto,
   ShapeConvertInput,
   ShapeConvertResult,
   ShapeDismissInput,
@@ -229,6 +231,11 @@ export interface ApiServices {
    */
   listGoals(projectId: ProjectId): GoalListDto;
   /**
+   * How often a person was needed in the project over the last 14 days, today first. Throws
+   * NotFoundError for an unknown project.
+   */
+  humanTouch(projectId: ProjectId): HumanTouchDto;
+  /**
    * The goal's digest for the builder opening it: Δ rows run from the previous view, and the view
    * advances to now. Throws NotFoundError for an unknown goal.
    */
@@ -297,6 +304,12 @@ export interface ApiServices {
   /** Settings › General: the paths a task in needs a spec (Shape §7); the 10db defaults until the builder sets them. */
   getOneWayPaths(projectId: ProjectId): OneWayPathsDto;
   setOneWayPaths(projectId: ProjectId, input: OneWayPathsDto): OneWayPathsDto;
+  /**
+   * Settings › General: how large a lane's proposal can be, in characters, for 10db to file it to the
+   * Icebox without an Inbox card. Zero sends every proposal to the Inbox.
+   */
+  getSmallProposalLimit(projectId: ProjectId): SmallProposalLimitDto;
+  setSmallProposalLimit(projectId: ProjectId, input: SmallProposalLimitDto): SmallProposalLimitDto;
   /** Rehearse, and opening the Convert modal with an unrehearsed task (spec §7). */
   rehearseShape(shapeId: ShapeId, input: ShapeRehearseInput): ShapeRehearseResult;
   /** The builder dismisses a finding or a rehearsal question. */

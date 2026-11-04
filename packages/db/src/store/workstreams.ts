@@ -7,6 +7,7 @@ import {
   LANE_STATES,
   mintId,
   NotFoundError,
+  LEFT_OUT_NOTICE_KEY,
   PARKED_NOTICE_KEY,
   TaskStatus,
   WorkstreamState,
@@ -378,7 +379,8 @@ export function setWorkstreamNotice(
 
 /**
  * Clears every run's notice, as a daemon start does: the waits they describe ended with the last one.
- * A parked run keeps its own: it records what the builder answered, not a wait.
+ * A parked run keeps its own: it records what the builder answered, not a wait. So does a run left
+ * out of its batch's pull request.
  */
 export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
   const rows = ctx.tx
@@ -386,7 +388,9 @@ export function clearWorkstreamNotices(ctx: WriteContext): WorkstreamId[] {
     .from(schema.workstreams)
     .where(isNotNull(schema.workstreams.notice))
     .all()
-    .filter((row) => row.notice?.key !== PARKED_NOTICE_KEY);
+    .filter(
+      (row) => row.notice?.key !== PARKED_NOTICE_KEY && row.notice?.key !== LEFT_OUT_NOTICE_KEY,
+    );
   for (const row of rows) {
     ctx.tx
       .update(schema.workstreams)

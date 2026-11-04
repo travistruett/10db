@@ -1,4 +1,93 @@
-import { InvalidError } from '@10db/contracts';
+import {
+  InvalidError,
+  ProposalKind,
+  RiskTag,
+  type ProposalId,
+  type TaskDto,
+} from '@10db/contracts';
+import {
+  getProject,
+  getProposal,
+  insertTaskFromProposal,
+  proposalSourceTask,
+  resolveProposal,
+  type WriteContext,
+} from '@10db/db';
+import { proposePlacement } from '../placement';
+
+/**
+ * The words of a proposal that name a risk when the lane left the tag off. Whole words only, so
+ * "author" is not "auth"; a miss costs a card nobody needed, and a hit on a harmless word does too, but
+ * a risk filed without a card costs more.
+ */
+const RISK_WORDS: Readonly<Record<RiskTag, RegExp>> = {
+  [RiskTag.Security]: /\b(security|vulnerab\w*|credentials?|secrets?)\b/i,
+  [RiskTag.Auth]: /\b(auth|authn|authz|authenticat\w*|authoriz\w*|authoris\w*|oauth|passwords?)\b/i,
+  [RiskTag.Migration]: /\bmigrat\w*\b/i,
+  [RiskTag.Dependency]: /\b(dependenc\w*|lockfile|package\.json|pnpm-lock\S*)\b/i,
+};
+
+/**
+ * Files a pending new-task proposal to the Icebox without a card and marks it accepted, in the
+ * caller's write. The task's description opens with a line, shown in the task drawer, saying 10db filed
+ * it and which task's lane proposed it.
+ */
+export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId): TaskDto {
+  const proposal = getProposal(ctx.tx, proposalId);
+  const lane = proposalSourceTask(ctx.tx, proposalId);
+  const fields = taskFieldsFromProposal(proposal);
+  const origin = lane
+    ? `proposed by the lane working on the task "${lane.title}" (${lane.id})`
+    : 'proposed by a lane';
+  const task = insertTaskFromProposal(
+    ctx,
+    {
+      proposalId,
+      projectId: proposal.projectId,
+      title: fields.title,
+      description: `Filed by 10db without an Inbox card, ${origin}. It is small and carries no risk tag.\n\n${fields.description}`,
+      parkInIcebox: true,
+    },
+    proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags: [] }),
+  );
+  resolveProposal(ctx, proposalId, {
+    status: 'accepted',
+    rationale: 'Filed by 10db: small and no risk tag',
+  });
+  return task;
+}
+
+/** Whether 10db files a lane's proposal itself, and why not when it does not. */
+export type ProposalFiling =
+  { readonly file: true } | { readonly file: false; readonly reason: string };
+
+/**
+ * Decides whether a lane's proposal is filed to the Icebox without a card. Only a new-task proposal
+ * can be, and only when the project's limit is above zero, it is no longer than the limit (title and
+ * body in characters), it declares no risk tag, its text names none, and it does not ask to join a
+ * running batch. Anything else raises the card a person answers.
+ */
+export function proposalFiling(proposal: {
+  readonly kind: ProposalKind;
+  readonly title: string;
+  readonly body: string;
+  readonly riskTags?: readonly RiskTag[] | undefined;
+  readonly joinsRunningBatch?: boolean | undefined;
+  readonly limit: number;
+}): ProposalFiling {
+  if (proposal.kind !== ProposalKind.NewTask) return { file: false, reason: 'is not a new task' };
+  if (proposal.limit <= 0) return { file: false, reason: 'self-filing is off' };
+  const [declared] = proposal.riskTags ?? [];
+  if (declared !== undefined) return { file: false, reason: `carries the ${declared} risk tag` };
+  if (proposal.joinsRunningBatch === true)
+    return { file: false, reason: 'asks to join a running batch' };
+  const text = `${proposal.title}\n${proposal.body}`;
+  for (const tag of Object.values(RiskTag))
+    if (RISK_WORDS[tag].test(text)) return { file: false, reason: `names the ${tag} risk` };
+  if (proposal.title.length + proposal.body.length > proposal.limit)
+    return { file: false, reason: 'over the limit' };
+  return { file: true };
+}
 
 /** The longest task title the contract accepts (the Title rule in @10db/contracts). */
 const TITLE_MAX = 200;

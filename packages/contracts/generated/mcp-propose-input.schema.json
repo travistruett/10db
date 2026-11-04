@@ -24,6 +24,21 @@
       "type": "string",
       "minLength": 1
     },
+    "riskTags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "security",
+          "auth",
+          "migration",
+          "dependency"
+        ]
+      }
+    },
+    "joinsRunningBatch": {
+      "type": "boolean"
+    },
     "principle": {
       "description": "For kind \"principle\": the rule itself. Without it, the body is used as the statement.",
       "type": "object",

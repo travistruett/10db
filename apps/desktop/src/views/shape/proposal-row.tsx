@@ -5,7 +5,7 @@ import {
   type ShapeTaskSizeDto,
 } from '@10db/contracts';
 import { ActionIcon, Box, Button, Group, Menu, Text, UnstyledButton } from '@mantine/core';
-import { IconClockExclamation, IconDots, IconPencil, IconPin } from '@tabler/icons-react';
+import { IconDots, IconPencil, IconPin } from '@tabler/icons-react';
 import { useRef, useState, type KeyboardEvent } from 'react';
 import type { RowChange } from '../../daemon/shape-queries';
 import { RowAttachments } from './attachments/row-attachments';
@@ -14,7 +14,8 @@ import type { RowReview } from './review-lines';
 import { ReviewLines } from './review-notes';
 import { RowDetails } from './row-details';
 import { RowEditor } from './row-editor';
-import { goalHoursLine, sizeLine } from './size-line';
+import { goalHoursLine } from './size-line';
+import { SizeLineText } from './task-size-line';
 import { editableFields } from './row-editing';
 
 /** Marks a row's button, so ↑/↓ finds its siblings. */
@@ -84,26 +85,9 @@ function SizeLines({
   }
   return (
     <>
-      {sizes.map((s) => {
-        const line = sizeLine(s);
-        return (
-          <Text key={s.key} size="xs" c="dimmed">
-            {line.text}
-            {line.flagged ? (
-              <>
-                {' '}
-                <IconClockExclamation
-                  size={14}
-                  stroke={1.5}
-                  role="img"
-                  aria-label="Outside its size by more than one bucket"
-                  style={{ verticalAlign: '-2px' }}
-                />
-              </>
-            ) : null}
-          </Text>
-        );
-      })}
+      {sizes.map((s) => (
+        <SizeLineText key={s.key} size={s} />
+      ))}
     </>
   );
 }

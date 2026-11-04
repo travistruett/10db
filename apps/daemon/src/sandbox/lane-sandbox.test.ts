@@ -716,6 +716,17 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it("lets the lane read the system's documentation, and only that, without asking", async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(readAccess('/usr/share/man/man1/ps.1', session.fileAccess).access).toBe('allowed');
+      expect(readAccess('/usr/share/doc', session.fileAccess, true).access).toBe('allowed');
+      expect(readAccess(join(home, 'notes.txt'), session.fileAccess).access).toBe('ask');
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("protects the login shell's config dir too", async () => {
     const login = join(home, '.config', 'claude-login');
     const session = await sandbox({ loginConfigDir: login }).forSession(input());

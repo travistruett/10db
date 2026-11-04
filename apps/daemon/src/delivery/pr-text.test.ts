@@ -161,6 +161,29 @@ describe('prTitle', () => {
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 
 describe('prBody', () => {
+  it('leaves a task the builder shipped without out of "What and why" and names it under "Not done"', () => {
+    const body = prBody({
+      batch: { id: mintId('Batch') },
+      tasks: [
+        { title: 'Alpha', description: 'Alpha work.', acceptanceCriteria: [], state: 'DONE' },
+        {
+          title: 'Beta',
+          description: 'Beta work.',
+          acceptanceCriteria: [],
+          state: 'FAILED',
+          leftOut: true,
+        },
+      ],
+      gate: { command: null },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+    expect(body).toContain('### Alpha\n\nAlpha work.');
+    expect(body).not.toContain('Beta work.');
+    expect(body).not.toContain('### Beta');
+    expect(body).toContain('Not done:\n\n- Beta (failed, left out of this pull request)');
+  });
+
   it('gives each task its description and criteria, cites what they name, and links CI for the head', () => {
     const id = mintId('Batch');
     const body = prBody({

@@ -1,8 +1,9 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { isShapeImage, shapeFileKind, type ShapeId } from '@10db/contracts';
 import { listShapeFiles } from '@10db/db';
 import type { StateStore } from '../events';
+import { readImageSize } from './image-check';
 
 // Shape spec §5.4. A resumed session resends every earlier image with each request, whether it arrived in
 // a message or as a see_screen result, so dropped images and screens share one budget.
@@ -10,7 +11,15 @@ import type { StateStore } from '../events';
 const MIB = 1024 * 1024;
 
 /** The largest image sent as a content block: 2 MiB is under 3 MB as base64. */
-export const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
+const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
+
+/**
+ * The longest side of an image sent as a content block. The API takes at most 2000 px a side when a
+ * request holds more than 20 images, and a conversation's screens (12) and dropped images (20) can pass
+ * that together, so a request that failed on it would fail every later turn too. Claude Code is not
+ * known to shrink an image block, so a larger one goes as a path, which `Read` resizes.
+ */
+const INLINE_IMAGE_MAX_SIDE = 2000;
 
 /**
  * The most image bytes a whole conversation carries, dropped images and screens together. Base64 grows
@@ -35,17 +44,37 @@ const keptScreenBytes = (dir: string): number => {
 };
 
 /**
+ * Whether the stored image is within the side cap. One whose size can't be read (cut short, or not
+ * what its name says) is not: it would be sent blind, and a model refusing it ends every turn.
+ */
+function withinSideCap(storedPath: string): boolean {
+  try {
+    const size = readImageSize(readFileSync(storedPath));
+    return size !== null && Math.max(size.width, size.height) <= INLINE_IMAGE_MAX_SIDE;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An image too big, in bytes or in pixels, to be a content block on its own. The one rule for what goes
+ * inline and what is charged for it, so the two can't disagree.
+ */
+export const tooBigAlone = (file: {
+  readonly size: number;
+  readonly storedPath: string;
+}): boolean => file.size > INLINE_IMAGE_MAX_BYTES || !withinSideCap(file.storedPath);
+
+/**
  * The image bytes a conversation has already spent: every screen it keeps and every image Claude was told
- * of within the per-image cap. Which told images went as blocks depends on how they were batched into
- * turns, and a fresh session drops what came before it, so this is an upper bound, never an undercount.
- * `filesRoot` is the data directory's `shapes` folder.
+ * of that could have gone as a block. Which of those did depends on how they were batched into turns, and
+ * a fresh session drops what came before it, so this is an upper bound on what the daemon sent under
+ * today's caps. `filesRoot` is the data directory's `shapes` folder.
  */
 export function inlineBytesSpent(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
   const told = listShapeFiles(state.db, shapeId).reduce(
     (sum, file) =>
-      file.toldAt !== null && isImageName(file.name) && file.size <= INLINE_IMAGE_MAX_BYTES
-        ? sum + file.size
-        : sum,
+      file.toldAt !== null && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
     0,
   );
   return told + keptScreenBytes(join(filesRoot, shapeId, 'screens'));
