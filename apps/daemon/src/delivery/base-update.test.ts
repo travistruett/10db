@@ -316,6 +316,33 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
     });
 
+    it('names the head its merge wrote when the install after it is broken, and what the merge left unregenerated is nothing', async () => {
+      const { batch, path } = await pruned();
+      h.teammatePush('main', 'src/ui/teammate.txt');
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      const head = gitIn(path, 'rev-parse', 'HEAD');
+      expect(gitIn(path, 'log', '-1', '--format=%s')).toBe(
+        `Merge origin/main into ${batch.branch ?? ''}`,
+      );
+      expect(update).toMatchObject({ kind: 'install_broken', head });
+      expect(update).not.toHaveProperty('unregenerated');
+    });
+
+    it('answers install_broken with no head to a gate when no merge was made', async () => {
+      const { batch } = await pruned();
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(update.kind).toBe('install_broken');
+      expect(update).not.toHaveProperty('head');
+    });
+
+    it('answers a pull request with what the branch holds when no merge was made, whatever the install', async () => {
+      const { batch } = await pruned();
+      expect(
+        await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, { forPullRequest: true }),
+      ).toEqual({ kind: 'up_to_date', note: null });
+    });
+
     it('says the install is broken, with no notice, when both installs fail and leave no node_modules', async () => {
       const { batch, path } = await pruned();
       h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');

@@ -1784,11 +1784,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return;
       }
       if (brought.kind === 'install_broken') {
-        // The packages do not resolve, so the generators did not run and no check could start: a
-        // merge whose generated directories were never regenerated is not pushed, and goes back.
+        // Answered only for a merge this update made. The packages do not resolve, so no check could
+        // start and the generators did not run: the merge is not pushed, and goes back.
+        const left = brought.unregenerated ?? [];
         stop({
           kind: 'other',
-          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed: the merge's generated directories could not be regenerated.`,
+          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed.${left.length === 0 ? '' : ` The merge's generated directories ${left.join(', ')} could not be regenerated.`}`,
         });
         return;
       }

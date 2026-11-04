@@ -80,7 +80,9 @@ export type BaseUpdate =
    * The copy's packages do not match its lockfile even after the install ran again: some dependency
    * the lockfile names does not resolve, so the gate's tools could not start. No gate runs, and the
    * task's code is not at fault: the runner does not count an attempt
-   * (`decisions/2026-11-03-a-broken-install-is-not-a-failed-gate.md`).
+   * (`decisions/2026-11-03-a-broken-install-is-not-a-failed-gate.md`). Asked for a pull request, it
+   * is answered only for a merge this update made: with none there is nothing to stop, and the
+   * answer is what the branch holds.
    */
   | {
       readonly kind: 'install_broken';
@@ -91,6 +93,8 @@ export type BaseUpdate =
        * caller that does not push puts the branch back from it.
        */
       readonly head?: string;
+      /** The generated directories the merge took from the base, which no regeneration made again. */
+      readonly unregenerated?: readonly string[];
     }
   /** Shutdown or a cancel stopped it: no gate runs. */
   | { readonly kind: 'aborted' };
@@ -576,22 +580,26 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
 
   /**
    * Tells the builder, on one card, what kept the generated directories `merged` took from the base
-   * from being regenerated. Resolves with what the gate's note says of it.
+   * from being regenerated, unless `card` is false: a caller that puts the merge back has nothing
+   * for that card's instructions to act on, and says so on its own. Resolves with what the gate's
+   * note says of it.
    */
   function unregenerated(
     batch: BatchDto,
     path: string,
     merged: SettledMerge,
     problem: Unregenerated,
+    card = true,
   ): string {
     const dirs = (merged.regenerate ?? []).map((r) => r.dir);
     ctx.logger.warn(
       { batchId: batch.id, dirs, reason: problem.why, logPath: problem.logPath },
       'generated files not regenerated after the base merged',
     );
-    tell(batch, () => {
-      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
-    });
+    if (card)
+      tell(batch, () => {
+        raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
+      });
     return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${problem.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
   }
 
@@ -1122,14 +1130,20 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const installed = await install(batch, project, path, signal);
     if (installed.kind === 'aborted' || stopped()) return stop();
     // The packages still do not resolve what the lockfile names, so the gate's tools would not even
-    // start; the gate does not run, and the generated directories wait for a working install.
-    if (installed.broken !== undefined) {
+    // start; the gate does not run, and the generated directories wait for a working install. A
+    // pull request's catch-up only tests and pushes a merge, so with none the install stops nothing,
+    // and a merge it does stop goes back, with the catch-up's own card saying so.
+    const forPullRequest = options.forPullRequest === true;
+    if (installed.broken !== undefined && (!forPullRequest || merged.kind === 'merged')) {
+      const left = (pending?.regenerate ?? []).map((r) => r.dir);
       if (pending !== null)
-        unregenerated(batch, path, pending, {
-          why: 'the install is broken',
-          logPath: null,
-          restored: false,
-        });
+        unregenerated(
+          batch,
+          path,
+          pending,
+          { why: 'the install is broken', logPath: null, restored: false },
+          !forPullRequest,
+        );
       return {
         kind: 'install_broken',
         note:
@@ -1138,6 +1152,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             `The install in this copy is broken: ${installed.broken}. 10db installed from the lockfile${installed.final === true && installed.startedOver !== true ? ' and that install did not bring them back' : ', then removed node_modules and installed again by itself, and neither install brought them back'}${installed.note === null ? '' : ` (${installed.note})`}. This is the copy's packages, not the task's code, so no fix attempt was counted.`,
           ) ?? 'The install in this copy is broken.',
         ...(merged.kind === 'merged' ? { head: merged.head } : {}),
+        ...(left.length > 0 ? { unregenerated: left } : {}),
       };
     }
     switch (merged.kind) {
@@ -1145,7 +1160,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       case 'conflicted':
         return { ...merged, note: joined(merged.note, installed.note) ?? merged.note };
       case 'not_merged':
-        return { kind: 'not_merged', note: joined(merged.note, installed.note) ?? merged.note };
+        return { ...merged, note: joined(merged.note, installed.note) ?? merged.note };
       case 'up_to_date':
         return { ...merged, note: joined(merged.note, installed.note) };
       // The merge step never says so: only the install does, above.
