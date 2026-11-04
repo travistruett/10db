@@ -14,9 +14,15 @@ test("a page Vite serves carries the window's img-src and stops an image from el
   const response = await page.goto('/');
   expect(response?.headers()['content-security-policy']).toBe("img-src 'self' data:");
 
+  // The violation events stay on the page, in `window.cspBlocked`, and the test waits for them below.
+  // Each load goes to its own path so the two blocked URIs tell the loads apart.
+  const imageUrl = `${daemonUrl}/health/image`;
+  const styleUrl = `${daemonUrl}/health/style`;
+
   const outcome = await page.evaluate(
-    async ({ elsewhere, data }) => {
+    async ({ image: imageSrc, style: styleSrc, data }) => {
       const blocked: string[] = [];
+      (window as unknown as { cspBlocked: string[] }).cspBlocked = blocked;
       document.addEventListener('securitypolicyviolation', (event) => {
         blocked.push(`${event.violatedDirective} ${event.blockedURI}`);
       });
@@ -33,22 +39,35 @@ test("a page Vite serves carries the window's img-src and stops an image from el
         });
       // A stylesheet url() is an image load too.
       const style = document.createElement('style');
-      style.textContent = `body { background-image: url(${elsewhere}?css); }`;
+      style.textContent = `body { background-image: url(${styleSrc}); }`;
       document.head.append(style);
       document.body.getBoundingClientRect();
       const fromData = await load(data);
-      const fromElsewhere = await load(`${elsewhere}?image`);
-      // The violation events are queued; let them run.
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      return { fromData, fromElsewhere, blocked };
+      const fromElsewhere = await load(imageSrc);
+      return { fromData, fromElsewhere };
     },
     // Another origin than the page's: the daemon, which the page may fetch but not draw.
-    { elsewhere: `${daemonUrl}/health`, data: DATA_IMAGE },
+    { image: imageUrl, style: styleUrl, data: DATA_IMAGE },
   );
 
   expect(outcome.fromData).toBe(true);
   expect(outcome.fromElsewhere).toBe(false);
-  expect(
-    outcome.blocked.filter((entry) => entry.startsWith('img-src')).length,
-  ).toBeGreaterThanOrEqual(2);
+
+  // The violation events are queued after the loads settle: wait for them by condition.
+  const imgSrcBlocked = (): Promise<string[]> =>
+    page.evaluate(() =>
+      (window as unknown as { cspBlocked: string[] }).cspBlocked.filter((entry) =>
+        entry.startsWith('img-src '),
+      ),
+    );
+  await expect
+    .poll(async () => (await imgSrcBlocked()).some((entry) => entry.endsWith(imageUrl)), {
+      message: 'the new Image() load is reported blocked',
+    })
+    .toBe(true);
+  await expect
+    .poll(async () => (await imgSrcBlocked()).some((entry) => entry.endsWith(styleUrl)), {
+      message: 'the stylesheet url() load is reported blocked',
+    })
+    .toBe(true);
 });
