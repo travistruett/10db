@@ -39,6 +39,7 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  listStepToolOpResults,
   replaceToolOp,
   patchWorkstream,
   releaseClaim,
@@ -58,7 +59,7 @@ import {
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import { judgeToolUse, type ProtectedPath } from '../guard';
-import { fileProposalByItself, proposalFiling } from '../inbox';
+import { fileProposalByItself, proposalCardBody, proposalFiling } from '../inbox';
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
@@ -98,6 +99,25 @@ type In<K extends McpToolName> = z.output<(typeof McpToolInputs)[K]>;
 type Out<K extends McpToolName> = z.output<(typeof McpToolOutputs)[K]>;
 export type ToolHandlers = { [K in McpToolName]: (input: In<K>) => Promise<Out<K>> };
 
+/**
+ * How many tasks the workstream's current step has filed with no person involved: its file_follow_up
+ * calls, and its propose calls that 10db filed to the Icebox itself (a card or a principle has no
+ * taskId). The two share MAX_FOLLOW_UPS; a replayed opId is one record, so it counts once.
+ */
+function stepFilings(
+  db: Parameters<typeof countStepToolOps>[0],
+  ws: Parameters<typeof countStepToolOps>[1],
+): number {
+  const proposed = listStepToolOpResults(db, ws, McpToolName.Propose).filter(
+    (result) =>
+      typeof result === 'object' &&
+      result !== null &&
+      !Array.isArray(result) &&
+      typeof result['taskId'] === 'string',
+  ).length;
+  return proposed + countStepToolOps(db, ws, McpToolName.FileFollowUp);
+}
+
 export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   get_context:
     'Your context pack: the task, acceptance criteria, your claims, the latest handoff, any answer waiting for you, and relevant decisions.',
@@ -108,10 +128,10 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
-    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card.',
+    'Propose a new task, a task change, or a principle (with the principle field: statement, kind, topicKey, scope). Proposals go to the builder; nothing changes until accepted, and you never confirm a principle yourself. Exception: a small new-task proposal with no risk tag is filed to the Icebox by 10db itself, naming your task, with no Inbox card. Set riskTags (security, auth, migration, dependency) when the work carries one, and joinsRunningBatch when it must join a batch that is running; either raises the card. A step can have at most 10 tasks filed without a person, between this and file_follow_up; past that, a proposal raises the card.',
   report_deviation: 'Report a departure from the plan or a principle, with your signed reason.',
   file_follow_up:
-    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS); after that the call is refused.',
+    'File work that does not fit this task as a separate task in the Icebox column, naming this task in its description. Use it when a design or docs change would grow past about 300 lines: stop at a coherent point and file each remaining section. One call per task; the builder decides when it starts. A step can file at most 10 (MAX_FOLLOW_UPS), counting small proposals 10db files by itself; after that the call is refused.',
   request_claim:
     'Ask for an additional area or hazard claim before editing files in it. When another task holds it, this waits until it frees and returns granted: true, so do not carry on without it; the builder sees a card naming the holder and that you are waiting. A long wait answers granted: false with waiting: true before the call times out: call again with the same opId to keep waiting. granted: false with waiting: false means you did not get it: the builder made your task give up claims to end a deadlock (you no longer hold them), or, for the migrations hazard, your branch could not take its base first. Follow the instruction it returns.',
   install_dependencies:
@@ -369,6 +389,8 @@ export function createToolHandlers(
             riskTags: input.riskTags,
             joinsRunningBatch: input.joinsRunningBatch,
             limit: getSmallProposalLimit(ctx.tx, project.id),
+            stepCapReached:
+              stepFilings(ctx.tx, getWorkstreamRow(ctx.tx, workstreamId)) >= MAX_FOLLOW_UPS,
           });
           if (filing.file) {
             // A small proposal with no risk tag: the card would guard nothing the Icebox does not.
@@ -384,7 +406,7 @@ export function createToolHandlers(
             projectId: project.id,
             kind: 'proposal',
             title: input.title,
-            body: input.body,
+            body: proposalCardBody(input.body, filing.reason),
             options: [
               { label: 'accept', description: 'Accept the proposal' },
               { label: 'reject', description: 'Reject it' },
@@ -392,7 +414,8 @@ export function createToolHandlers(
             recommendation: null,
             category: QuestionCategory.Product,
             urgency: Urgency.Low,
-            detail: { proposalId },
+            // The declared risk tags ride on the card, so accepting it files a task that carries them.
+            detail: { proposalId, riskTags: [...new Set(input.riskTags ?? [])] },
             foldKey: null,
             targets: [],
           });
@@ -413,7 +436,7 @@ export function createToolHandlers(
         deps.state.write((ctx) => {
           // A step can span sessions (handoff, re-launch, recovery), so count the whole step's filings.
           const ws = getWorkstreamRow(ctx.tx, workstreamId);
-          if (countStepToolOps(ctx.tx, ws, McpToolName.FileFollowUp) >= MAX_FOLLOW_UPS)
+          if (stepFilings(ctx.tx, ws) >= MAX_FOLLOW_UPS)
             throw new InvalidError(
               `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks and you have filed that many. Stop filing; put what is left in your summary or handoff, and end your turn.`,
             );

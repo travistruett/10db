@@ -1047,6 +1047,7 @@ describe('goal routes', () => {
       tasksRan: 1,
       cardsPerTask: 1,
       waitingMinutes: 12.5,
+      failedMinutes: 480,
     };
     const services = stubServices({
       humanTouch: (id) => {

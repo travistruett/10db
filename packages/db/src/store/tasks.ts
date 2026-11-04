@@ -32,6 +32,7 @@ import {
   type ProjectDto,
   type ProjectId,
   type ProposalId,
+  type RiskTag,
   type TaskConfig,
   type TaskDto,
   type TaskId,
@@ -327,6 +328,8 @@ export function insertTaskFromProposal(
     readonly title: string;
     readonly description: string;
     readonly parkInIcebox?: boolean;
+    /** The risk tags the lane declared when it proposed the task; none when left out. */
+    readonly riskTags?: readonly RiskTag[];
   },
   placement?: Placement,
 ): TaskDto {
@@ -340,7 +343,7 @@ export function insertTaskFromProposal(
     acceptanceCriteria: [],
     areas: [...areasForProposal(ctx.tx, input.proposalId, project)],
     dependsOn: [],
-    riskTags: [],
+    riskTags: [...(input.riskTags ?? [])],
     flowId: null,
     proposalId: input.proposalId,
   });

@@ -1,19 +1,22 @@
 import {
+  BatchState as B,
   HUMAN_TOUCH_DAYS,
   InboxState,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState as S,
+  type BatchId,
   type InboxKind,
   type InboxItemId,
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { insertBatch, transitionBatch } from './batches';
 import { humanTouchDays } from './human-touch';
 import { insertInboxItem, updateInboxItem } from './inbox';
 import { endSession, insertSession } from './sessions';
 import type { Store } from './store';
-import { insertTask } from './tasks';
+import { closeTask, insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, transitionWorkstream } from './workstreams';
 
@@ -69,7 +72,7 @@ function move(id: WorkstreamId, to: S): void {
 }
 
 /** A task whose workstream is running, with a session started now. */
-function startRun(projectId: ProjectId, title: string) {
+function startRun(projectId: ProjectId, title: string, batchId: BatchId | null = null) {
   const task = store.write((ctx) =>
     insertTask(ctx, projectId, {
       title,
@@ -78,7 +81,7 @@ function startRun(projectId: ProjectId, title: string) {
       areas: ['api'],
     }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId })).value;
   move(ws.id, S.Starting);
   move(ws.id, S.Running);
   const session = store.write((ctx) =>
@@ -91,7 +94,27 @@ function startRun(projectId: ProjectId, title: string) {
       mcpTokenHash: `hash-${title}`,
     }),
   ).value;
-  return { workstreamId: ws.id, sessionId: session.id };
+  return { taskId: task.id, workstreamId: ws.id, sessionId: session.id };
+}
+
+/** A run that failed at 01:00 today with its failure card open, the clock left there. */
+function failAtOne(projectId: ProjectId, batchId: BatchId | null = null) {
+  at('2026-11-03T00:30:00.000Z');
+  const run = startRun(projectId, 'failed', batchId);
+  at('2026-11-03T01:00:00.000Z');
+  move(run.workstreamId, S.Failed);
+  const failure = card(
+    projectId,
+    'flag',
+    `${WORKSTREAM_FAILED_TITLE_PREFIX}failed`,
+    run.workstreamId,
+  );
+  return { ...run, failure };
+}
+
+function failedMinutesAtNoon(projectId: ProjectId): number | undefined {
+  at('2026-11-03T12:00:00.000Z');
+  return humanTouchDays(store.db, projectId, new Date(nowMs))[0]?.failedMinutes;
 }
 
 describe('humanTouchDays', () => {
@@ -168,6 +191,7 @@ describe('humanTouchDays', () => {
       tasksRan: 2,
       cardsPerTask: 2.5,
       waitingMinutes: 30,
+      failedMinutes: 0,
     });
     expect(by('2026-11-01')).toMatchObject({
       question: 1,
@@ -188,5 +212,125 @@ describe('humanTouchDays', () => {
       cardsPerTask: null,
       waitingMinutes: 0,
     });
+  });
+
+  it('counts the time a failure card sat open on a FAILED workstream apart from waitingMinutes', () => {
+    const project = seedProject(store);
+
+    // Fails at 22:00 on Nov 1 and is retried at 08:00 on Nov 2: 2 h on Nov 1, 8 h on Nov 2.
+    at('2026-11-01T21:00:00.000Z');
+    const overnight = startRun(project.id, 'overnight');
+    at('2026-11-01T22:00:00.000Z');
+    move(overnight.workstreamId, S.Failed);
+    const failure = card(
+      project.id,
+      'flag',
+      `${WORKSTREAM_FAILED_TITLE_PREFIX}overnight`,
+      overnight.workstreamId,
+    );
+    at('2026-11-02T08:00:00.000Z');
+    answer(failure);
+    move(overnight.workstreamId, S.Queued);
+
+    // Another card kind open on a FAILED workstream is not a failure card: it adds nothing.
+    at('2026-11-02T09:00:00.000Z');
+    const other = startRun(project.id, 'other');
+    at('2026-11-02T09:10:00.000Z');
+    move(other.workstreamId, S.Failed);
+    const question = card(project.id, 'question', 'Which?', other.workstreamId);
+    at('2026-11-02T09:40:00.000Z');
+    answer(question);
+
+    // Still failed with its card open: runs to now.
+    at('2026-11-03T01:00:00.000Z');
+    const still = startRun(project.id, 'still');
+    move(still.workstreamId, S.Failed);
+    card(project.id, 'flag', `${WORKSTREAM_FAILED_TITLE_PREFIX}still`, still.workstreamId);
+
+    at('2026-11-03T03:30:00.000Z');
+    const days = humanTouchDays(store.db, project.id, new Date(nowMs));
+    const by = (day: string) => days.find((d) => d.day === day);
+
+    expect(by('2026-11-01')).toMatchObject({ failedMinutes: 120, waitingMinutes: 0 });
+    expect(by('2026-11-02')).toMatchObject({ failedMinutes: 480, waitingMinutes: 0 });
+    expect(by('2026-11-03')).toMatchObject({ failedMinutes: 150, waitingMinutes: 0 });
+    expect(by('2026-10-25')).toMatchObject({ failedMinutes: 0 });
+  });
+
+  it('stops counting a failed run when its task is closed, though the card stays open', () => {
+    const project = seedProject(store);
+    const run = failAtOne(project.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    store.write((ctx) => closeTask(ctx, run.taskId));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(5);
+  });
+
+  it.each([
+    ['abandoned', [B.Abandoned]],
+    ['shipped without it', [B.Shipping, B.Shipped]],
+  ] as const)('stops counting a failed run when its batch is %s', (_name, states) => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    for (const to of states) store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(5);
+  });
+
+  it('keeps counting a failed run while its batch can still retry it', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+
+    at('2026-11-03T01:05:00.000Z');
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Failed }));
+
+    expect(failedMinutesAtNoon(project.id)).toBe(660);
+  });
+
+  it('reads the event log through an index, never a full scan', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+    at('2026-11-03T12:00:00.000Z');
+
+    const client = store.db.$client;
+    const prepare = client.prepare.bind(client);
+    const eventQueries: string[] = [];
+    const spy = vi.spyOn(client, 'prepare').mockImplementation((sql: string) => {
+      if (/from "events"/i.test(sql)) eventQueries.push(sql);
+      return prepare(sql);
+    });
+    humanTouchDays(store.db, project.id, new Date(nowMs));
+    spy.mockRestore();
+
+    // Card close, workstream state and task/batch end, the first two once for waiting and once for failed.
+    expect(eventQueries.length).toBeGreaterThanOrEqual(5);
+    for (const sql of eventQueries) {
+      const placeholders = Array.from({ length: sql.split('?').length - 1 }, () => 'x');
+      const plan = client
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...placeholders)
+        .map((row) => (row as { detail: string }).detail);
+      const events = plan.filter((detail) => /\bevents\b/.test(detail));
+      expect(events.length).toBeGreaterThan(0);
+      for (const detail of events) {
+        expect(detail).toContain('USING INDEX events_entity_idx');
+        expect(detail).not.toMatch(/^SCAN/);
+      }
+    }
   });
 });

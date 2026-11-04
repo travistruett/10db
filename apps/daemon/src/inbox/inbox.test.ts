@@ -14,6 +14,8 @@ import {
   PARK_TASK_CHOICE,
   ProposedPrinciples,
   STOCK_HAZARD_REVISIONS,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
+  WorkstreamState,
   type InboxItemDto,
   type InboxTarget,
   type ProposalId,
@@ -27,6 +29,7 @@ import {
   getProject,
   getProposal,
   getProposalDto,
+  humanTouchDays,
   insertInboxItem,
   insertPermissionRule,
   insertProposal,
@@ -36,15 +39,17 @@ import {
   listInbox,
   listPermissionRules,
   listTasks,
+  openItemsForWorkstream,
   patchProject,
   schema,
   searchDecisions,
   searchPrincipleIds,
   searchPrinciples,
   seedProject,
+  transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -278,6 +283,91 @@ describe('inbox questions', () => {
     inbox.cancelForWorkstream(ws.workstream.id);
     expect(getInboxItem(state.db, item.id).state).toBe('CANCELLED');
   });
+
+  it('keeps counting a failure card that Start cancels as time the run waited on a retry', () => {
+    let now = Date.parse('2026-11-03T00:30:00.000Z');
+    const test = createTestStore(() => new Date(now));
+    onTestFinished(test.close);
+    const clocked = createStateStore(test.store, createEventBus());
+    const service = createInboxService({ state: clocked, onParkedAnswer: () => undefined });
+    const ws = seedWorkstream(test.store);
+    const move = (to: WorkstreamState): void => {
+      clocked.write((ctx) => transitionWorkstream(ctx, ws.workstream.id, { to, fence: null }));
+    };
+    move(WorkstreamState.Starting);
+    move(WorkstreamState.Running);
+
+    now = Date.parse('2026-11-03T01:00:00.000Z');
+    move(WorkstreamState.Failed);
+    const card = service.flag({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      title: `${WORKSTREAM_FAILED_TITLE_PREFIX}Alpha`,
+      body: 'it stopped',
+    });
+
+    now = Date.parse('2026-11-03T08:00:00.000Z');
+    move(WorkstreamState.Queued);
+    service.cancelForWorkstream(ws.workstream.id);
+
+    expect(getInboxItem(clocked.db, card.id)).toMatchObject({
+      state: 'CANCELLED',
+      targets: [{ workstreamId: ws.workstream.id }],
+    });
+    now = Date.parse('2026-11-03T12:00:00.000Z');
+    expect(humanTouchDays(clocked.db, ws.project.id, new Date(now))[0]?.failedMinutes).toBe(420);
+    expect(openItemsForWorkstream(clocked.db, ws.workstream.id)).toEqual([]);
+  });
+
+  it('keeps the minutes a lane waited on a folded card after that lane is cancelled', () => {
+    let now = Date.parse('2026-11-03T00:30:00.000Z');
+    const test = createTestStore(() => new Date(now));
+    onTestFinished(test.close);
+    const clocked = createStateStore(test.store, createEventBus());
+    const service = createInboxService({ state: clocked, onParkedAnswer: () => undefined });
+    const a = seedWorkstream(test.store, { title: 'A' });
+    const b = seedWorkstream(test.store, { project: a.project, title: 'B' });
+    const move = (id: typeof a.workstream.id, to: WorkstreamState): void => {
+      clocked.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
+    };
+    for (const lane of [a, b]) {
+      move(lane.workstream.id, WorkstreamState.Starting);
+      move(lane.workstream.id, WorkstreamState.Running);
+    }
+
+    // Both lanes wait on one folded card from 01:00.
+    now = Date.parse('2026-11-03T01:00:00.000Z');
+    const askOn = (lane: typeof a) =>
+      service.ask({
+        projectId: lane.project.id,
+        workstreamId: lane.workstream.id,
+        sessionId: mintId('Session'),
+        kind: 'question',
+        title: 'Which color?',
+        body: 'For the badge',
+        options: [{ label: 'Teal', description: '' }],
+        recommendation: null,
+        category: 'design',
+        urgency: 'normal',
+        detail: null,
+        signal: new AbortController().signal,
+      });
+    const card = askOn(a).item;
+    expect(askOn(b).item.id).toBe(card.id);
+    move(a.workstream.id, WorkstreamState.WaitingHuman);
+    move(b.workstream.id, WorkstreamState.WaitingHuman);
+
+    // A is cancelled at 08:00, B is answered at 10:00.
+    now = Date.parse('2026-11-03T08:00:00.000Z');
+    service.cancelForWorkstream(a.workstream.id);
+    move(a.workstream.id, WorkstreamState.Cancelled);
+    now = Date.parse('2026-11-03T10:00:00.000Z');
+    service.answer(card.id, { choice: 'Teal' });
+    now = Date.parse('2026-11-03T12:00:00.000Z');
+
+    // A waited 7 hours and B 9: the card's change of targets takes nothing from A's 7.
+    expect(humanTouchDays(clocked.db, a.project.id, new Date(now))[0]?.waitingMinutes).toBe(960);
+  });
 });
 
 describe('proposal verdicts', () => {
@@ -286,6 +376,7 @@ describe('proposal verdicts', () => {
     kind: ProposalKind,
     title: string,
     body: string,
+    detail: Record<string, unknown> = {},
   ): { proposalId: ProposalId; card: InboxItemDto } {
     const proposalId = state.write((ctx) =>
       insertProposal(ctx, {
@@ -309,7 +400,7 @@ describe('proposal verdicts', () => {
         recommendation: null,
         category: 'product',
         urgency: 'low',
-        detail: { proposalId },
+        detail: { proposalId, ...detail },
         foldKey: null,
         targets: [],
       }),
@@ -350,6 +441,37 @@ describe('proposal verdicts', () => {
       });
     },
   );
+
+  it('files an accepted task with the risk tags the lane declared', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      riskTags: ['security', 'migration'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: ['security', 'migration'] },
+    );
+  });
+
+  it('files an accepted task with no risk tags when the card declares none', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.');
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: [] },
+    );
+  });
+
+  it('ignores a card whose declared risk tags are not risk tags', () => {
+    const ws = seedWorkstream(base);
+    const { card } = proposalCard(ws, 'new_task', 'Add caching', 'Cache the query.', {
+      riskTags: ['nonsense'],
+    });
+    inbox.answer(card.id, { choice: 'accept' });
+    expect(listTasks(state.db, ws.project.id).find((t) => t.title === 'Add caching')).toMatchObject(
+      { riskTags: [] },
+    );
+  });
 
   it('links the filed task to its proposal and the task.created event carries the link', () => {
     const ws = seedWorkstream(base);

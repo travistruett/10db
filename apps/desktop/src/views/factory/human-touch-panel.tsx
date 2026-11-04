@@ -27,7 +27,8 @@ const COLUMNS = [
   'Check',
   'Cards',
   'Per task',
-  'Waited',
+  'Waited on an answer',
+  'Waited on a retry',
 ] as const;
 
 function DayRow({ day }: { readonly day: HumanTouchDayDto }) {
@@ -44,13 +45,15 @@ function DayRow({ day }: { readonly day: HumanTouchDayDto }) {
       <Table.Td>{day.cards}</Table.Td>
       <Table.Td>{perTask(day.cardsPerTask)}</Table.Td>
       <Table.Td>{`${String(Math.round(day.waitingMinutes))} min`}</Table.Td>
+      <Table.Td>{`${String(Math.round(day.failedMinutes))} min`}</Table.Td>
     </Table.Tr>
   );
 }
 
 /**
  * How often a person was needed, per day for the last 14: the Inbox cards raised by kind, the cards per
- * task that ran, and the minutes work waited on an answer. Days are UTC days, today first.
+ * task that ran, the minutes work waited on an answer, and the minutes a failed run waited for a retry
+ * (apart, so each figure says one thing). Days are UTC days, today first.
  */
 export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId | null }) {
   const touch = useHumanTouch(projectId);
@@ -58,8 +61,8 @@ export function HumanTouchPanel({ projectId }: { readonly projectId: ProjectId |
     <Stack gap="xs">
       <Title order={3}>Human touch</Title>
       <Text size="sm" c="dimmed">
-        Cards raised each day, cards per task that ran, and minutes work waited on an answer (UTC
-        days)
+        Cards raised each day, cards per task that ran, minutes work waited on an answer, and
+        minutes a failed run waited for a retry, counted apart (UTC days)
       </Text>
       {touch.isError ? (
         <Alert color="red" title="Couldn't load how often a person was needed">

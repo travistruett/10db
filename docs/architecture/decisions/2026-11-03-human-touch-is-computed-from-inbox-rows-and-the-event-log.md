@@ -18,6 +18,20 @@ stored. For each day:
   open); a workstream is blocked from a `workstream.changed` event into `WAITING_HUMAN` to the next change. The
   overlap is cut at UTC midnight and added to each day. Cards open together on one workstream count once. A card
   answered while the task stayed `RUNNING` overlaps no blocked time and adds nothing.
+- **Failed minutes** (`failedMinutes`) are the same overlap for a failed run: the time a workstream-failure card (a
+  flag with the `WORKSTREAM_FAILED_TITLE_PREFIX` title) was open while the workstream it targets was in `FAILED`,
+  from its `workstream.changed` event into `FAILED` to the next change (now, while it is still failed). A run that
+  fails at 01:00 and is retried at 08:00 adds 7 hours, however the card closes: Retry, Start and Start over all end
+  it. Other cards open on a failed workstream add nothing here. The time also ends when the run can no longer be
+  retried, even though the card can stay open: at the `task.changed` event that closes its task, or the `batch.updated`
+  event that moves its batch to `SHIPPED`, `CLOSED` or `ABANDONED`. A failure card cancelled before cards kept their
+  targets (below) has lost its target, so it adds nothing. The builder decided this on 2026-11-03 (a failed run waiting for
+  Retry is waiting on a person) and chose a figure apart from `waitingMinutes`, so each number says one thing:
+  `waitingMinutes` stays `WAITING_HUMAN` time only, the panel shows the two as "Waited on an answer" and "Waited on a
+  retry", and the two never overlap because a workstream is in one state at a time.
+- **A cancelled card keeps its target.** `cancelForWorkstream` leaves `targets` on a card it cancels outright, because
+  these figures attribute a card's time through them. A card with other targets still loses the cancelled one and
+  stays open.
 
 ## Why
 
