@@ -1032,6 +1032,75 @@ describe('the failed workstream card', () => {
         expect(stopped.detail).toMatchObject({ batchCard: { revert: 'b'.repeat(40) } });
       });
 
+      describe('when the second answer stops before it reverts anything', () => {
+        /** The revert-kept card of a first answer whose write failed, and that revert's commit id. */
+        async function keptCard(ship: Parameters<typeof createDeliveryHarness>[1] = {}) {
+          revertsWithFailedWrite(ship);
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          const kept = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          return { ...made, revert, kept };
+        }
+
+        /** What a card that says the revert is on the branch holds, whichever stop raised it. */
+        function expectNamesRevert(card: { body: string; detail: unknown }, revert: string): void {
+          expect(card.body).not.toMatch(/branch is unchanged/);
+          expect(card.body).toContain(revert.slice(0, 9));
+          expect(card.body).not.toMatch(/put the commits of/);
+          expect(card.detail).toMatchObject({ batchCard: { revert } });
+        }
+
+        it('names the revert when the daemon is stopping', async () => {
+          const { kept, revert, batchId } = await keptCard();
+
+          inbox.answer(kept.id, { choice: 'Ship without it' });
+          await h.jobs.stop();
+
+          expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('stopping')));
+          expectNamesRevert(stopped, revert);
+          expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+        });
+
+        it('names the revert when a waiting update paused the ship', async () => {
+          let draining = false;
+          const { kept, revert } = await keptCard({ holdShips: () => draining });
+
+          inbox.answer(kept.id, { choice: 'Ship without it' });
+          draining = true;
+          await h.jobs.idle();
+
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('waiting update')));
+          expectNamesRevert(stopped, revert);
+        });
+
+        it('names the revert when the checkout is on another branch', async () => {
+          const { kept, revert } = await keptCard();
+          h.git$('checkout', '-b', 'elsewhere');
+
+          inbox.answer(kept.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+          expectNamesRevert(stopped, revert);
+        });
+
+        it('names the revert when the batch went on to ship by another way', async () => {
+          const { kept, revert, batchId } = await keptCard();
+
+          inbox.answer(kept.id, { choice: 'Ship without it' });
+          h.shipper.shipAnyway(batchId);
+          await h.jobs.idle();
+
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+          expect(stopped.body).toContain(revert.slice(0, 9));
+          expect(stopped.body).not.toMatch(/Ship without it changed nothing/);
+          expect(stopped.options).toEqual([]);
+        });
+      });
+
       it('words its answers for a branch that already holds the revert', async () => {
         revertsWithFailedWrite();
         const { card } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
