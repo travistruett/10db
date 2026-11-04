@@ -1,4 +1,5 @@
 import {
+  KnowledgeListDto,
   mintId,
   PlanDraft,
   ShapeProposalState,
@@ -29,7 +30,11 @@ import {
   insertSource,
   type WriteContext,
 } from '@10db/db';
+import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createApp, type ApiServices } from '../api';
+import { createKnowledgeServices } from '../daemon';
+import { createEventBus, createStateStore } from '../events';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { dropProposal, reconcileDraft } from './rounds';
@@ -399,6 +404,53 @@ describe('principle records', () => {
       listPrinciples(c.store.db, { projectId: c.project.id, history: true }).map((p) => p.id),
     ).toEqual(expect.arrayContaining([first, second]));
     expect(findRecords(c.store.db, c.project.id, 'sleep', 10).map((r) => r.id)).toEqual([second]);
+  });
+
+  it('answers the replaced principle superseded from GET knowledge with history on, and leaves it out without', async () => {
+    const m = c.say();
+    propose({ records: [principleOf(m, 'first', { topicKey: 'tests.sleep' })] });
+    const first = must(converted('first').results[0]?.principleId, 'the first principle');
+    propose({
+      records: [
+        principleOf(m, 'first', { topicKey: 'tests.sleep' }),
+        principleOf(m, 'second', { topicKey: 'tests.sleep', statement: 'Wait on a condition' }),
+      ],
+    });
+    const second = must(converted('second').results[0]?.principleId, 'the second principle');
+
+    // The real route over the real knowledge services, on the store Convert wrote to.
+    const token = 'convert-test-token';
+    const api = createApp({
+      onUnexpectedError: (error) => {
+        throw error;
+      },
+      startedAt: new Date('2026-11-03T12:00:00.000Z'),
+      allowedOrigins: [],
+      token,
+      services: createKnowledgeServices({
+        state: createStateStore(c.store, createEventBus()),
+        searchAvailable: true,
+      }) as unknown as ApiServices,
+      upgradeWebSocket: defineWebSocketHelper(() => new Response(null, { status: 426 })),
+      mcp: () => Promise.resolve(new Response('mcp')),
+      builderMcp: () => Promise.resolve(new Response('builder')),
+    });
+    const get = async (query: string) => {
+      const res = await api.request(`/projects/${c.project.id}/knowledge${query}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      expect(res.status).toBe(200);
+      return KnowledgeListDto.parse(await res.json());
+    };
+
+    const withHistory = await get('?history=1');
+    expect(withHistory.items.map((i) => [i.id, i.state])).toEqual(
+      expect.arrayContaining([
+        [first, 'superseded'],
+        [second, 'current'],
+      ]),
+    );
+    expect((await get('')).items.map((i) => i.id)).toEqual([second]);
   });
 
   it('answers the same results again without writing a second principle', () => {
