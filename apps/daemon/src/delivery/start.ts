@@ -38,7 +38,12 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
-import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
+import {
+  insertJoinedWorkstream,
+  insertPlannedWorkstream,
+  planForStart,
+  retryWorkstream,
+} from '../team';
 import { batchBranchName } from './branch-name';
 import { forTasks, startCards, wrongBranchCard, type Card, type StartRequest } from './cards';
 import { batchCheckout, lanesInProjectCheckout } from './checkout';
@@ -638,7 +643,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       }
       if (reopening) {
         const opened = await reopenWhenWhole(ctx, batchId, 'a fix task joined', signal, (w) => {
-          for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
+          for (const [taskId, plan] of plans) insertJoinedWorkstream(w, taskId, plan, batchId);
         });
         if (opened) resolveStartCards(db, ctx.inbox, project.id, plans.keys());
         else
@@ -660,7 +665,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
           });
         else if (now.state !== BatchState.Open)
           throw new ConflictError(`Batch "${now.title}" is ${now.state.toLowerCase()} now`);
-        for (const [taskId, plan] of plans) insertPlannedWorkstream(w, taskId, plan, batchId);
+        for (const [taskId, plan] of plans) insertJoinedWorkstream(w, taskId, plan, batchId);
       });
       resolveStartCards(db, ctx.inbox, project.id, plans.keys());
       ctx.onWorkQueued();

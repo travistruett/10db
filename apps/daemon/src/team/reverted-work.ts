@@ -1,4 +1,4 @@
-import { REVERTED_NOTICE_KEY, type Notice } from '@10db/contracts';
+import { LEFT_OUT_NOTICE_KEY, REVERTED_NOTICE_KEY, type Notice } from '@10db/contracts';
 
 /**
  * What a run keeps once its batch shipped without it (Ship without it) and the builder retried it: its
@@ -37,6 +37,23 @@ export function lastRevertTold(
   for (const row of evidence)
     if (row.kind === 'builder') found = revertCommitIn(row.summary) ?? found;
   return found;
+}
+
+/**
+ * The revert a run's record names, and whether its session was told. A retry's note is the record of
+ * a told run. A run that was left out and never retried has only its notice, which names the revert
+ * the same way; a task started over in the same batch finds that revert there.
+ */
+export function revertOfRun(run: {
+  readonly notice: Notice | null;
+  readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
+}): { readonly revert: string; readonly told: boolean } | null {
+  const noted = lastRevertTold(run.evidence);
+  if (noted !== null) return { revert: noted, told: true };
+  const key = run.notice?.key;
+  const revert =
+    key === LEFT_OUT_NOTICE_KEY || key === REVERTED_NOTICE_KEY ? revertCommitOf(run.notice) : null;
+  return revert === null ? null : { revert, told: false };
 }
 
 /** The notice a retried run keeps while its commits stay reverted. */

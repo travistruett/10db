@@ -14,6 +14,15 @@ The pull request reads those notes across all of the task's runs in the batch. A
 revert is listed as finished only if a run that was told made a commit that is on the branch and is not an
 ancestor of the latest revert. Otherwise the task is under Not done, even when its latest run reached `DONE`.
 
+Starting the task over in the same batch is read the same way. In a shared project, Start with fresh on a
+left-out run whose batch holds other tasks keeps the batch, and the start joins it (`findUnfinishedBatch` takes a
+failed batch too). The joined run is inserted by `insertJoinedWorkstream`, which gives its session the same
+builder note as a retry and sets it as the step's fix. The revert is read from an earlier run's `left-out` or
+`reverted-work` notice when no note exists (a left-out run never retried), and from the notes otherwise. A joined
+run is therefore one that was told. Runs started before this change have no note: when their task has only a
+`left-out` notice behind it, the task is listed as not done unless a told run committed, which errs towards saying
+less was shipped.
+
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
 
