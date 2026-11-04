@@ -60,6 +60,7 @@ beforeEach(() => {
   service = createShapeService({
     state,
     adapter,
+    joiningProblem: () => null,
     clock,
     filesDir: '/files',
     log: silentLogger,

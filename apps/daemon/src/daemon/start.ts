@@ -866,6 +866,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
+    joiningProblem: (taskId) => starter.joiningProblem(taskId),
     screens,
     // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
     // install would cut off one that began during the drain, or while the install starts.
