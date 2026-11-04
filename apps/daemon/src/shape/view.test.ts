@@ -8,7 +8,16 @@ import {
   type DaemonEvent,
   type ShapeId,
 } from '@10db/contracts';
-import { getShape, insertShape, listShapeProposals, patchShape, retirePrinciple } from '@10db/db';
+import {
+  getShape,
+  insertShape,
+  insertSource,
+  listShapeProposals,
+  patchShape,
+  retirePrinciple,
+  supersedeDecision,
+  withdrawDecision,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -392,5 +401,33 @@ describe('Remove Draft Goal and Withdraw Decision', () => {
     expect(
       service.view(shapeId).proposals.find((p) => p.kind === 'decision')?.converted?.withdrawn,
     ).toBe(true);
+  });
+
+  it('says a converted decision was replaced, until its replacement is withdrawn', async () => {
+    await converted();
+    const rowOf = () => service.view(shapeId).proposals.find((p) => p.kind === 'decision');
+    expect(rowOf()?.converted).toMatchObject({ superseded: false });
+    const decisionId = must(rowOf()?.converted?.decisionId, 'the decision id');
+    const { value: later } = c.store.write((ctx) =>
+      supersedeDecision(ctx, decisionId, {
+        projectId: service.view(shapeId).shape.projectId,
+        question: 'Which queue?',
+        choice: 'pg-boss',
+        rationale: 'One database.',
+        decidedBy: 'me',
+        scope: 'project',
+        area: null,
+        sourceId: insertSource(ctx, 'builder', {}),
+      }),
+    );
+    expect(rowOf()?.converted).toMatchObject({ superseded: true, withdrawn: false });
+
+    // Its replacement gone, the decision is current again and can be withdrawn.
+    c.store.write((ctx) => {
+      withdrawDecision(ctx, later, { by: 'me', reason: 'We went back' });
+    });
+    expect(rowOf()?.converted).toMatchObject({ superseded: false, withdrawn: false });
+    service.withdrawDecision(shapeId, decisionId, 'We chose differently');
+    expect(rowOf()?.converted).toMatchObject({ withdrawn: true });
   });
 });

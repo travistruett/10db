@@ -84,9 +84,26 @@ export type KnowledgeListKind = z.infer<typeof KnowledgeListKind>;
 
 export const KNOWLEDGE_LIST_LIMIT = 100;
 
+/** The most `q` may hold, in UTF-16 code units (what zod's `max` counts), not characters. */
+export const KNOWLEDGE_SEARCH_MAX_LENGTH = 200;
+
+/**
+ * `text` cut to at most KNOWLEDGE_SEARCH_MAX_LENGTH code units, never in the middle of a surrogate
+ * pair. A text input's `maxlength` may count graphemes (WebKit), so 150 emoji pass it yet exceed the
+ * limit; clamp what the input reports as well.
+ */
+export function clampKnowledgeSearch(text: string): string {
+  if (text.length <= KNOWLEDGE_SEARCH_MAX_LENGTH) return text;
+  let end = KNOWLEDGE_SEARCH_MAX_LENGTH;
+  const last = text.charCodeAt(end - 1);
+  // A high surrogate at the cut has lost its low half.
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return text.slice(0, end);
+}
+
 /** The query string of `GET /projects/:projectId/knowledge`. */
 export const KnowledgeListQuery = z.strictObject({
-  q: z.string().trim().max(200).optional(),
+  q: z.string().trim().max(KNOWLEDGE_SEARCH_MAX_LENGTH).optional(),
   match: z.enum(SearchMatch).optional(),
   kind: KnowledgeListKind.optional(),
   scope: z.enum(KnowledgeScope).optional(),

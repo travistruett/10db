@@ -9,7 +9,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { insertDecision } from './decisions';
 import { insertSource } from './knowledge';
-import { findRecords, searchDecisionIds, searchDecisions } from './knowledge-search';
+import {
+  checkKnowledgeIndex,
+  composeKnowledgeText,
+  findRecords,
+  searchDecisionIds,
+  searchDecisions,
+  searchPrincipleIds,
+} from './knowledge-search';
+import { confirmPrinciple, insertPrinciple } from './principles';
 import type { Store } from './store';
 import { createTestStore, seedProject } from './test-support';
 
@@ -93,6 +101,110 @@ describe('a typed search, the same in the daemon and on the Proposals tab', () =
     record('Never sleep');
     expect(typed('***')).toEqual([]);
     expect(typed(`"unterminated (NEAR OR`)).toEqual([]);
+  });
+});
+
+describe('text stored decomposed, found by a composed query', () => {
+  // Hangul as a macOS file name holds it (jamo), and й and ё as base letter plus combining mark.
+  const cases = [
+    { name: 'Hangul', text: '한글 검색', query: '한글' },
+    { name: 'a partly typed Hangul word', text: '한글 검색', query: '검' },
+    { name: 'Cyrillic й', text: 'чай', query: 'чай' },
+    { name: 'Cyrillic ё', text: 'ёлка', query: 'ёлка' },
+  ];
+  const savedPrinciple = (statement: string, topicKey: string, sourceQuote: string | null) =>
+    store.write((ctx) =>
+      insertPrinciple(ctx, {
+        target: { scope: 'project', projectId },
+        statement,
+        kind: 'policy',
+        topicKey,
+        status: 'confirmed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote,
+        speaker: 'me',
+        confirmedBy: 'me',
+      }),
+    ).value.id;
+  const principlesFor = (query: string) =>
+    searchPrincipleIds(store.db, { projectId, query, limit: 10, match: SearchMatch.AllPrefixes });
+
+  it.each(cases)('$name is found on decisions and principles', ({ text, query }) => {
+    const decomposed = text.normalize('NFD');
+    expect(decomposed).not.toBe(text);
+    const decision = record(decomposed);
+    const principle = savedPrinciple(decomposed, 'a.key', null);
+    expect(typed(query)).toEqual([decision]);
+    expect(typed(query.normalize('NFD'))).toEqual([decision]);
+    expect(principlesFor(query)).toEqual([principle]);
+    expect(principlesFor(query.normalize('NFD'))).toEqual([principle]);
+    expect(matchesSearch(decomposed, query)).toBe(true);
+  });
+
+  it('is found in the rationale, the choice, the topic key and the source quote', () => {
+    const id = store.write((ctx) =>
+      insertDecision(ctx, {
+        projectId,
+        question: 'q',
+        choice: '한글'.normalize('NFD'),
+        rationale: 'чай'.normalize('NFD'),
+        decidedBy: 'me',
+        scope: 'project',
+        area: null,
+        sourceId: insertSource(ctx, 'builder', {}),
+      }),
+    ).value;
+    expect(typed('한글')).toEqual([id]);
+    expect(typed('чай')).toEqual([id]);
+    const keyed = savedPrinciple('x', 'чай.한글'.normalize('NFD'), '검색'.normalize('NFD'));
+    expect(principlesFor('чай')).toEqual([keyed]);
+    expect(principlesFor('검색')).toEqual([keyed]);
+  });
+
+  it('is found after a principle is confirmed with decomposed edits', () => {
+    const proposed = store.write((ctx) =>
+      insertPrinciple(ctx, {
+        target: { scope: 'project', projectId },
+        statement: 'plain',
+        kind: 'policy',
+        topicKey: 'a.key',
+        status: 'proposed',
+        sourceId: insertSource(ctx, 'builder', {}),
+        sourceQuote: null,
+        speaker: 'me',
+        confirmedBy: null,
+      }),
+    ).value.id;
+    store.write((ctx) =>
+      confirmPrinciple(ctx, proposed, {
+        target: { scope: 'project', projectId },
+        statement: '한글'.normalize('NFD'),
+        topicKey: 'чай'.normalize('NFD'),
+        confirmedBy: 'me',
+      }),
+    );
+    expect(principlesFor('한글')).toEqual([proposed]);
+    expect(principlesFor('чай')).toEqual([proposed]);
+  });
+
+  it('composes rows stored before the write did, and reindexes them', () => {
+    const decision = record('한글');
+    const principle = savedPrinciple('чай', 'a.key', null);
+    const client = store.db.$client;
+    client
+      .prepare('UPDATE decisions SET question = ? WHERE id = ?')
+      .run('한글'.normalize('NFD'), decision);
+    client
+      .prepare('UPDATE principles SET statement = ? WHERE id = ?')
+      .run('чай'.normalize('NFD'), principle);
+    expect(typed('한글')).toEqual([]);
+    expect(principlesFor('чай')).toEqual([]);
+
+    expect(composeKnowledgeText(store.db)).toBe(2);
+    expect(typed('한글')).toEqual([decision]);
+    expect(principlesFor('чай')).toEqual([principle]);
+    expect(checkKnowledgeIndex(store.db)).toEqual([]);
+    expect(composeKnowledgeText(store.db)).toBe(0);
   });
 });
 
