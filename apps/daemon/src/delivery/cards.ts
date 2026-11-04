@@ -12,6 +12,7 @@ import {
   type RequiredCheckJobDto,
   type TaskDto,
   type TaskId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
 import {
@@ -22,6 +23,7 @@ import {
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
+import { batchCardFields } from './batch-card';
 import { maxCiFixes } from './ci-failure-action';
 import type { BlockedTask, UnmergedDependency } from './deps';
 import type { GateStepFailure } from './gate-failures';
@@ -1224,4 +1226,67 @@ export const branchCards = {
     foldKey: branchCardKey.withoutBatch,
     refresh: true,
   }),
+};
+
+/** The tasks a stopped Ship without it meant to leave out, and the failed run it was answered on. */
+export interface LeftOutAttempt {
+  readonly workstreamId: WorkstreamId;
+  readonly titles: readonly string[];
+}
+
+/**
+ * What every card of a stopped revert shares: it folds per batch, goes when the batch ships, and
+ * offers the failed task's own choices, so Ship without it can be answered again here. The first
+ * answer closed the failed card, and Ship anyway from the drawer reverts nothing.
+ */
+function leftOutCard(
+  batch: BatchDto,
+  attempt: LeftOutAttempt,
+  card: Pick<Card, 'title' | 'body'>,
+): Card {
+  return {
+    ...card,
+    foldKey: `left-out:${batch.id}`,
+    refresh: true,
+    resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+    ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }),
+  };
+}
+
+const leftOutSubject = (attempt: LeftOutAttempt): string =>
+  `${attempt.titles.join(', ')} ${attempt.titles.length === 1 ? 'was' : 'were'} not left out`;
+
+const leftOutNames = (attempt: LeftOutAttempt): string =>
+  attempt.titles.map((t) => `"${t}"`).join(', ');
+
+/** What the cards say last: how to go on, and what the other answer would do. */
+const leftOutAgain = (attempt: LeftOutAttempt): string =>
+  `answer Ship without it on this card. Ship anyway would put the commits of ${leftOutNames(attempt)} in the pull request.`;
+
+/** What Ship without it tells the builder when it could not revert a failed task's commits. */
+export const leftOutCards = {
+  /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
+  conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
+    leftOutCard(batch, attempt, {
+      title: `${leftOutSubject(attempt)}: reverting ${attempt.titles.length === 1 ? 'its' : 'their'} commits conflicts`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and later commits changed these files in ways that conflict with that:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Resolve it on the branch (revert the commits by hand, or start a fix task in the batch), then ${leftOutAgain(attempt)}`,
+    }),
+  /** A commit being undone resolved the conflict markers of a merge of the base, now in `paths`. */
+  markers: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
+    leftOutCard(batch, attempt, {
+      title: `${leftOutSubject(attempt)}: ${attempt.titles.length === 1 ? 'its' : 'their'} commits resolved conflict markers`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and one of them resolved the conflict markers a merge of ${batch.baseBranch} left in these files, so undoing it would put the markers back:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Retry the task, or resolve the conflict on the branch without its commits (start a fix task in the batch), then ${leftOutAgain(attempt)}`,
+    }),
+  /** Something else stopped the revert: `why` is git's or 10db's own words. */
+  failed: (batch: BatchDto, attempt: LeftOutAttempt, why: string): Card =>
+    leftOutCard(batch, attempt, {
+      title: `${leftOutSubject(attempt)}: ${why.split('\n')[0]?.slice(0, 200) ?? why}`,
+      body: `Ship without it could not revert the commits of ${leftOutNames(attempt)} on the batch's branch:\n\n${why.slice(0, 1500)}\n\nNothing was shipped and the branch is unchanged. Fix what it names, then ${leftOutAgain(attempt)}`,
+    }),
+  /** Uncommitted changes are in `paths`, which the revert writes. */
+  blocked: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
+    leftOutCard(batch, attempt, {
+      title: `${leftOutSubject(attempt)}: uncommitted changes are in the way`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch, which writes these files, and they have uncommitted changes:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Commit or discard the changes, then ${leftOutAgain(attempt)}`,
+    }),
 };

@@ -28,6 +28,8 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/workstreams' },
   { route: '/inbox' },
   { route: '/projects/:projectId/proposals' },
+  // Factory draws it: cards per task and minutes work waited on a person, per day. Database reads only.
+  { route: '/projects/:projectId/human-touch' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
@@ -51,6 +53,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/shape-jev': 'No screen draws a setting.',
   '/projects/:projectId/one-way-paths': 'No screen draws a setting.',
   '/projects/:projectId/network-hosts': 'No screen draws a setting.',
+  '/projects/:projectId/small-proposal-limit': 'No screen draws a setting.',
   '/projects/:projectId/team': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',

@@ -6,6 +6,7 @@ import {
   type GoalDigestDto,
   type GoalListDto,
   type GoalSummaryDto,
+  type HumanTouchDayDto,
   type TaskDto,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -1424,5 +1425,93 @@ describe('FactoryView waiting update', () => {
       await vi.advanceTimersByTimeAsync(10 * 60_000);
       expect(served.asked).toBe(asked);
     });
+  });
+});
+
+describe('FactoryView human-touch panel', () => {
+  const day = (overrides: Partial<HumanTouchDayDto>): HumanTouchDayDto => ({
+    day: '2026-11-03',
+    permission: 0,
+    question: 0,
+    workstreamFailed: 0,
+    flag: 0,
+    proposal: 0,
+    review: 0,
+    check: 0,
+    cards: 0,
+    tasksRan: 0,
+    cardsPerTask: null,
+    waitingMinutes: 0,
+    ...overrides,
+  });
+
+  function humanTouch(days: HumanTouchDayDto[]): RequestHandler {
+    return http.get(daemonUrl('/projects/:projectId/human-touch'), () =>
+      HttpResponse.json({ days }),
+    );
+  }
+
+  it('shows each day with its cards by kind, cards per task and the minutes work waited', async () => {
+    serve(
+      goals(goalListDto()),
+      humanTouch([
+        day({
+          day: '2026-11-03',
+          permission: 15,
+          question: 10,
+          workstreamFailed: 19,
+          flag: 14,
+          proposal: 2,
+          cards: 60,
+          tasksRan: 24,
+          cardsPerTask: 2.5,
+          waitingMinutes: 137.4,
+        }),
+        day({ day: '2026-11-02' }),
+      ]),
+    );
+    renderApp('/factory');
+
+    const table = await screen.findByRole('table', { name: 'How often a person was needed' });
+    const rows = within(table).getAllByRole('row');
+    // The header and one row per day, today first.
+    expect(rows).toHaveLength(3);
+    const [busy, quiet] = rows.slice(1).map((row) =>
+      within(row)
+        .getAllByRole('cell')
+        .map((c) => c.textContent),
+    );
+    expect(busy).toEqual(['Nov 3', '15', '10', '19', '14', '2', '0', '0', '60', '2.5', '137 min']);
+    // A day with no task running has no cards per task to show.
+    expect(quiet).toEqual(['Nov 2', '0', '0', '0', '0', '0', '0', '0', '0', '–', '0 min']);
+    expect(
+      within(table)
+        .getAllByRole('columnheader')
+        .map((h) => h.textContent),
+    ).toEqual([
+      'Day',
+      'Permission',
+      'Question',
+      'Workstream failed',
+      'Other flag',
+      'Proposal',
+      'Review',
+      'Check',
+      'Cards',
+      'Per task',
+      'Waited',
+    ]);
+  });
+
+  it('says so when the human-touch numbers cannot be loaded', async () => {
+    serve(
+      goals(goalListDto()),
+      http.get(daemonUrl('/projects/:projectId/human-touch'), () =>
+        HttpResponse.json({ error: 'internal', message: 'boom' }, { status: 500 }),
+      ),
+    );
+    renderApp('/factory');
+
+    expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
   });
 });

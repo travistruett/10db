@@ -1,6 +1,7 @@
 import {
   BatchState,
   FIX_ATTEMPT_LIMIT,
+  LEFT_OUT_NOTICE_KEY,
   PARKED_NOTICE_KEY,
   PullRequestChecks,
   PullRequestState,
@@ -301,7 +302,8 @@ function batchStands(batch: BatchDto): boolean {
  * The notices a task's card and drawer show besides its state: what its run waits for, such as another
  * task's hazard, then what its batch stands in, such as a conflict with its base. These ask the builder
  * nothing, so none is an Inbox card. None for a cancelled or failed run, which have their own say, but
- * a run the builder parked keeps the question they answered and what they said.
+ * a run the builder parked keeps the question they answered and what they said, and a failed run the
+ * batch shipped without keeps the notice that it was left out of the pull request.
  */
 export function taskNotices(
   workstream: WorkstreamDto | undefined,
@@ -310,7 +312,9 @@ export function taskNotices(
   if (!workstream) return [];
   if (workstream.state === S.Cancelled)
     return workstream.notice?.key === PARKED_NOTICE_KEY ? [workstream.notice] : [];
-  if (workstream.state === S.Failed) return [];
+  // A failed run has its own say, except where the builder shipped the batch without it.
+  if (workstream.state === S.Failed)
+    return workstream.notice?.key === LEFT_OUT_NOTICE_KEY ? [workstream.notice] : [];
   return [
     ...(workstream.notice ? [workstream.notice] : []),
     ...(batch && batchStands(batch) ? batch.notices : []),

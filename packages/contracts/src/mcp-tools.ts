@@ -20,6 +20,7 @@ import {
   PrincipleKind,
   ProposalKind,
   QuestionCategory,
+  RiskTag,
   Severity,
   Urgency,
   Verdict,
@@ -169,6 +170,13 @@ export const McpToolInputs = {
     kind: z.enum(ProposalKind),
     title: z.string().min(1),
     body: z.string().min(1),
+    /**
+     * The risks the proposed work carries. A small new-task proposal with none is filed to the Icebox
+     * without a card; one with a tag always raises a card.
+     */
+    riskTags: z.array(z.enum(RiskTag)).optional(),
+    /** Set when the work must join a batch that is already running; a person decides that. */
+    joinsRunningBatch: z.boolean().optional(),
     principle: PrincipleDraft.optional().describe(
       'For kind "principle": the rule itself. Without it, the body is used as the statement.',
     ),
@@ -231,8 +239,13 @@ export const McpToolOutputs = {
   }),
   ask_human: z.object({ inboxId: InboxItemId, answer: z.string(), note: z.string().nullable() }),
   record_decision: z.object({ decisionId: DecisionId }),
-  // A result recorded before principles existed has no principleId; it still parses.
-  propose: z.object({ proposalId: ProposalId, principleId: PrincipleId.nullable().default(null) }),
+  // A result recorded before self-filing or principles has neither id; it still parses.
+  propose: z.object({
+    proposalId: ProposalId,
+    /** The task 10db filed to the Icebox by itself; null when a card was raised for a person. */
+    taskId: TaskId.nullable().default(null),
+    principleId: PrincipleId.nullable().default(null),
+  }),
   report_deviation: z.object({ deviationId: DeviationId }),
   file_follow_up: z.object({ taskId: TaskId, title: z.string() }),
   request_claim: z.discriminatedUnion('granted', [

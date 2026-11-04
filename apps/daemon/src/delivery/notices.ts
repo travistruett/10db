@@ -1,6 +1,7 @@
-import type { BatchDto, Notice } from '@10db/contracts';
+import { LEFT_OUT_NOTICE_KEY, type BatchDto, type Notice } from '@10db/contracts';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
 import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
+import { flakeNote, type FlakyTest } from './flaky-tests';
 import type { GateStepFailure } from './gate-failures';
 import type { TakenNumber } from './migration-numbers';
 
@@ -24,6 +25,8 @@ export const NOTICE_KEY = {
   merge: 'pull-request-merge',
   /** The shipping gate failed once, in tests the batch didn't change, and passed when run again. */
   gateRerun: 'gate-rerun',
+  /** The shipping gate failed only in tests that passed when 10db ran just their files again. */
+  gateFlaky: 'gate-flaky',
   /** 10db merged the base into the open pull request's branch. */
   update: 'pull-request-update',
   /** The branch the batch lands in lacks commits the project's base branch has. */
@@ -95,6 +98,27 @@ export const supersededNotices = {
       body: `${named} failed in this batch and ${one ? 'was' : 'were'} started over, but that new start was refused, so nothing is running ${one ? 'it' : 'them'} now. This batch keeps the failed attempt${one ? '' : 's'} so ${one ? 'it' : 'they'} can still be retried, and doesn't ship by itself.\n\nStart ${one ? 'the task' : 'the tasks'} again to retry, or Ship anyway to ship the other tasks' work without ${one ? 'it' : 'them'}. Closing ${one ? 'the task' : 'the tasks'} lets the batch ship the rest by itself.`,
     };
   },
+};
+
+/**
+ * What a failed task's drawer says once its batch shipped without it (Ship without it): the run
+ * stays failed, and its work is not in the pull request.
+ */
+export const leftOutNotices = {
+  /** Its `count` commits on the batch's branch were undone in the one commit `revert`. */
+  reverted: (count: number, revert: string): Notice => ({
+    key: LEFT_OUT_NOTICE_KEY,
+    tone: 'info',
+    line: `Left out of the pull request: ${count === 1 ? 'its commit was' : `its ${String(count)} commits were`} reverted`,
+    body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits.`,
+  }),
+  /** It had no commit on the branch, so the pull request already lacked its work. */
+  nothingToRevert: (): Notice => ({
+    key: LEFT_OUT_NOTICE_KEY,
+    tone: 'info',
+    line: 'Left out of the pull request: it had no commits to revert',
+    body: "This run failed, and you chose Ship without it. It had no commits on the batch's branch that were still there, so 10db reverted nothing, and the pull request has none of this task's changes.\n\nTo run the task again, start it again.",
+  }),
 };
 
 /**
@@ -314,6 +338,13 @@ export const gateNotices = {
     tone: 'info',
     line: 'The gate passed when 10db ran it again',
     body: `The shipping gate's first run failed${inSteps(steps)}. ${RERAN}, and it passed, so the batch went on to ship. These tests may be flaky:\n${testLines(steps)}`,
+  }),
+  /** The failing test files passed when 10db ran just them again, and the batch went on to ship. */
+  flakyPassed: (tests: readonly FlakyTest[]): Notice => ({
+    key: NOTICE_KEY.gateFlaky,
+    tone: 'info',
+    line: 'The gate passed when 10db ran its failing test files again',
+    body: `${flakeNote(tests)}\n\nEach test file has a task in the Icebox.`,
   }),
 };
 

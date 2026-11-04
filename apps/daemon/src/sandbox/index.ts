@@ -33,6 +33,7 @@ export {
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
+  SYSTEM_DOC_ROOTS,
   writeAccess,
   type FileAccessContext,
   type ReadAccess,

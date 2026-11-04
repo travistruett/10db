@@ -3,7 +3,7 @@ import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
-import { claudeProtectedPaths, type FileAccessContext } from './file-access';
+import { claudeProtectedPaths, SYSTEM_DOC_ROOTS, type FileAccessContext } from './file-access';
 import {
   sandboxMcpServers,
   type McpSandboxes,
@@ -312,6 +312,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           protectedReads: protectedList,
           secretFiles,
           readList,
+          systemDocRoots: SYSTEM_DOC_ROOTS,
           configDir: input.configDir,
           sandboxTemp: { root: tmpRoot, own: tmpDir },
           worktreeRoot: deps.worktreeRoot,

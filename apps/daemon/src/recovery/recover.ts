@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATES,
   EventType,
+  WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
   WorkstreamState as S,
   type InboxItemId,
@@ -216,7 +217,7 @@ export async function recoverOnStartup(opts: {
       opts.inbox.flag({
         projectId: project.id,
         workstreamId: ws.id,
-        title: `Workstream failed: ${getTask(db, row.taskId).title}`,
+        title: `${WORKSTREAM_FAILED_TITLE_PREFIX}${getTask(db, row.taskId).title}`,
         body: `Recovery failed ${String(attempts)} times.`,
         ...batchCardFields(row),
       });

@@ -60,6 +60,7 @@ import {
   GoalDto,
   GoalListDto,
 } from './goals';
+import { HumanTouchDayDto, HumanTouchDto } from './human-touch';
 import { HandoffInput } from './handoff';
 import { HealthResponse } from './health';
 import {
@@ -110,6 +111,7 @@ import {
   ShapeDismissInput,
   ShapeRehearseInput,
   ShapeRehearseResult,
+  SmallProposalLimitDto,
 } from './shape-review';
 import { StepPlanDto } from './steps';
 import { WorkstreamChangesDto } from './workstream-changes';
@@ -253,6 +255,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'goal-digest-dto': GoalDigestDto,
   'goal-dto': GoalDto,
   'goal-list-dto': GoalListDto,
+  'human-touch-day-dto': HumanTouchDayDto,
+  'human-touch-dto': HumanTouchDto,
   'plan-draft': PlanDraft,
   'shape-dto': ShapeDto,
   'shape-message-dto': ShapeMessageDto,
@@ -269,6 +273,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-measures-dto': ShapeMeasuresDto,
   'shape-jev-setting-dto': ShapeJevSettingDto,
   'one-way-paths-dto': OneWayPathsDto,
+  'small-proposal-limit-dto': SmallProposalLimitDto,
   'shape-rehearse-input': ShapeRehearseInput,
   'shape-rehearse-result': ShapeRehearseResult,
   'shape-dismiss-input': ShapeDismissInput,

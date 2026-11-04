@@ -778,6 +778,13 @@ export function withParkedTasks(
 /** The key of the notice a parked run keeps for its task's drawer: the question and the builder's answer. */
 export const PARKED_NOTICE_KEY = 'parked-answer';
 
+/**
+ * The key of the notice a failed run keeps once its batch shipped without it (Ship without it): its
+ * task's drawer says the run was left out of the pull request. Like a parked run's, it records what
+ * the builder chose, not a wait, so a daemon start keeps it.
+ */
+export const LEFT_OUT_NOTICE_KEY = 'left-out';
+
 export const InboxTarget = z.object({
   workstreamId: WorkstreamId,
   sessionId: SessionId.nullable(),

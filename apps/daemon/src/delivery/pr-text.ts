@@ -45,6 +45,8 @@ export interface PrBodyTask {
   readonly description: string;
   readonly acceptanceCriteria: readonly string[];
   readonly state: WorkstreamState;
+  /** The builder chose Ship without it: its commits were reverted, so its work is not in the pull request. */
+  readonly leftOut?: boolean;
 }
 
 /**
@@ -78,19 +80,29 @@ const word = (state: WorkstreamState): string => state.toLowerCase();
  * rests on, which is the why a reviewer needs.
  */
 function whatAndWhy(tasks: readonly PrBodyTask[]): string {
-  const blocks = tasks.map((task) => {
-    const parts = [`### ${task.title}`];
-    if (task.description.trim() !== '') parts.push(task.description.trim());
-    if (task.acceptanceCriteria.length > 0)
-      parts.push(
-        ['Acceptance criteria:', '', ...task.acceptanceCriteria.map((c) => `- ${c}`)].join('\n'),
-      );
-    return parts.join('\n\n');
-  });
+  // A task left out has no work here to explain; "Not done" names it.
+  const blocks = tasks
+    .filter((t) => t.leftOut !== true)
+    .map((task) => {
+      const parts = [`### ${task.title}`];
+      if (task.description.trim() !== '') parts.push(task.description.trim());
+      if (task.acceptanceCriteria.length > 0)
+        parts.push(
+          ['Acceptance criteria:', '', ...task.acceptanceCriteria.map((c) => `- ${c}`)].join('\n'),
+        );
+      return parts.join('\n\n');
+    });
   const notDone = tasks.filter((t) => t.state !== WorkstreamState.Done);
   if (notDone.length > 0)
     blocks.push(
-      ['Not done:', '', ...notDone.map((t) => `- ${t.title} (${word(t.state)})`)].join('\n'),
+      [
+        'Not done:',
+        '',
+        ...notDone.map(
+          (t) =>
+            `- ${t.title} (${word(t.state)}${t.leftOut === true ? ', left out of this pull request' : ''})`,
+        ),
+      ].join('\n'),
     );
   return blocks.join('\n\n');
 }
