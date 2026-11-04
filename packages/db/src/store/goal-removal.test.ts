@@ -1,10 +1,13 @@
 import {
   CriterionCheck,
+  Effort,
   GoalState,
+  GoalStatus,
   NotFoundError,
   TaskHasDependentsError,
   TaskStartedError,
   TaskStatus,
+  WorkstreamState,
   mintId,
   type GoalId,
   type ProjectDto,
@@ -14,17 +17,22 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
   BUILDER_HANDLE,
+  cancelTask,
+  closeTask,
   createTestStore,
   getGoal,
   getTask,
+  goalDigest,
   insertGoal,
   insertPerson,
+  insertSession,
   insertTask,
   insertWorkstream,
   listGoalTasks,
   listTasks,
   removeDraftGoal,
   seedProject,
+  transitionWorkstream,
   type Store,
 } from './index';
 
@@ -88,6 +96,57 @@ describe('removeDraftGoal', () => {
     expect(() => remove(id)).toThrow(TaskStartedError);
     expect(getGoal(store.db, id).state).toBe(GoalState.Draft);
     expect(listTasks(store.db, project.id)).toHaveLength(2);
+  });
+
+  // The digest reads a goal as not started while a run was only queued, held or cancelled before
+  // any session, and the Remove Draft Goal action is offered then; the removal must agree.
+  it('removes a goal whose task had a run cancelled while queued, as the digest reads it as not started', () => {
+    const id = seedGoal();
+    const [first] = listGoalTasks(store.db, id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    store.write((ctx) =>
+      transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Cancelled, fence: null }),
+    );
+    expect(goalDigest(store.db, id, null).status).toBe(GoalStatus.NotStarted);
+    remove(id);
+    expect(() => getGoal(store.db, id)).toThrow(NotFoundError);
+    expect(listTasks(store.db, project.id)).toEqual([]);
+  });
+
+  it('refuses a goal whose task had a run cancelled after a session, as the digest reads it as started', () => {
+    const id = seedGoal();
+    const [first] = listGoalTasks(store.db, id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    store.write((ctx) => {
+      insertSession(ctx, {
+        workstreamId: ws.id,
+        provider: 'claude',
+        model: 'sonnet-5.5',
+        effort: Effort.High,
+        mode: 'managed',
+        mcpTokenHash: `hash-${ws.id}`,
+      });
+      transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Cancelled, fence: null });
+    });
+    expect(goalDigest(store.db, id, null).status).toBe(GoalStatus.Idle);
+    expect(() => remove(id)).toThrow(TaskStartedError);
+    expect(getGoal(store.db, id).state).toBe(GoalState.Draft);
+  });
+
+  it('removes a goal when the only task that ran was already removed, as the digest reads it as not started', () => {
+    const id = seedGoal();
+    const [first] = listGoalTasks(store.db, id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    store.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Failed])
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
+    });
+    const [, second] = listGoalTasks(store.db, id);
+    store.write((ctx) => cancelTask(ctx, second?.id ?? mintId('Task')));
+    store.write((ctx) => closeTask(ctx, first?.id ?? mintId('Task')));
+    expect(goalDigest(store.db, id, null).status).toBe(GoalStatus.NotStarted);
+    remove(id);
+    expect(() => getGoal(store.db, id)).toThrow(NotFoundError);
   });
 
   it('refuses while a task outside the goal waits on one of its tasks', () => {

@@ -639,6 +639,16 @@ export function cancelTask(ctx: WriteContext, id: TaskId): TaskDto {
 }
 
 /**
+ * Removes a task that never started, as `cancelTask` does, except that a latest run cancelled before
+ * it ever had a session (cancelled while queued, say) does not count as a start. That is the digest's
+ * reading of a goal as not started, so Remove Draft Goal, which the UI offers on that reading, uses it.
+ * A run that had a session, or any other run but a held one, is still refused.
+ */
+export function cancelNeverStartedTask(ctx: WriteContext, id: TaskId): TaskDto {
+  return removeUnstarted(ctx, id, true);
+}
+
+/**
  * Removes a task from a refused start's Cancel task answer: as `cancelTask`, except that a latest run
  * cancelled before it ever had a session does not count as a start. A pull-request start inserts its
  * runs with the CUTTING batch, and a refused cut cancels them with it, so the task never ran. A task

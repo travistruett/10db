@@ -336,16 +336,20 @@ function nextEntry(task: TaskRow, waitsOn: DigestNext['waitsOn']): DigestNext {
 /**
  * Whether any task of the goal has ever run: one is done, a workstream got past the queue (a run
  * that is only queued, held or cancelled before it began has not run), or a cancelled run made a session.
+ * Only tasks that are not removed count, as in Remove Draft Goal, which ignores a removed task
+ * however far it got; the daemon's refusal and the UI's offer share this definition of started.
  */
-function hasRun(db: DbReader, all: readonly TaskRow[], facts: Facts): boolean {
-  if (all.some((t) => t.status === TaskStatus.Done)) return true;
+function hasRun(db: DbReader, tasks: readonly TaskRow[], facts: Facts): boolean {
+  if (tasks.some((t) => t.status === TaskStatus.Done)) return true;
   const notRun: readonly WorkstreamState[] = [
     WorkstreamState.Queued,
     WorkstreamState.Held,
     WorkstreamState.Cancelled,
   ];
-  if (facts.workstreams.some((w) => !notRun.includes(w.state))) return true;
-  const cancelled = facts.workstreams
+  const live = new Set(tasks.map((t) => t.id));
+  const workstreams = facts.workstreams.filter((w) => live.has(w.taskId));
+  if (workstreams.some((w) => !notRun.includes(w.state))) return true;
+  const cancelled = workstreams
     .filter((w) => w.state === WorkstreamState.Cancelled)
     .map((w) => w.id);
   if (cancelled.length === 0) return false;
@@ -402,7 +406,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
     status = merged.length === done.length ? GoalStatus.Done : GoalStatus.Shipping;
-  } else status = hasRun(db, all, facts) ? GoalStatus.Idle : GoalStatus.NotStarted;
+  } else status = hasRun(db, tasks, facts) ? GoalStatus.Idle : GoalStatus.NotStarted;
 
   const openBatches = new Set<string>();
   for (const task of tasks) {
