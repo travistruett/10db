@@ -1,6 +1,7 @@
 export { proposeCandidates } from './candidates';
 export { seedTeam } from './seed';
 export {
+  actionEntering,
   insertJoinedWorkstream,
   insertPlannedWorkstream,
   planForStart,
@@ -8,7 +9,12 @@ export {
   retryWorkstream,
   startTaskWithPlan,
 } from './steps';
-export { revertCommitLine, revertOfRun } from './reverted-work';
+export {
+  commitResolvedMarkers,
+  commitResultAsStored,
+  revertCommitLine,
+  revertOfRun,
+} from './reverted-work';
 export {
   advanceSteps,
   countSendBack,

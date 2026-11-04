@@ -26,6 +26,7 @@ import {
   listBoardColumns,
   listInbox,
   listTasks,
+  listToolOpResults,
   patchWorkstream,
   releaseClaims,
   schema,
@@ -41,9 +42,11 @@ import {
   EventType,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
+  mintId,
   parseFindings,
   PrincipleId,
   type BatchId,
+  type NextAction,
   type ProjectDto,
   type WorkstreamId,
   type WorkstreamStep,
@@ -54,6 +57,7 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
+import { commitResolvedMarkers } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -806,6 +810,109 @@ describe('MCP tools', () => {
     expect(first.json).toMatchObject({ alreadyCommitted: false });
     expect(retry.json).toEqual(first.json);
     expect(commitCount()).toBe(2);
+  });
+
+  describe('a commit that resolves conflict markers', () => {
+    const MARKED = '<<<<<<< HEAD\nours\n||||||| base\n=======\ntheirs\n>>>>>>> origin/main\n';
+    /** The branch as the base merge leaves it: markers committed in src/api/a.ts. */
+    async function markersOnTheBranch(s: Awaited<ReturnType<typeof seedSession>>): Promise<void> {
+      writeRepoFile('src/api/a.ts', MARKED);
+      await s.call('commit', {
+        opId: 'op-commit-marked',
+        paths: ['src/api/a.ts'],
+        message: 'Stands in for the merge commit',
+      });
+    }
+    const recorded = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitResolvedMarkers);
+
+    it.each<[string, NextAction]>([
+      ['the first merge session', { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] }],
+      [
+        'a session the builder answered',
+        { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+      ],
+      [
+        'a session the usage limit paused',
+        { kind: 'resume', providerSessionId: 'p', reason: 'usage limit' },
+      ],
+      [
+        'a session after a handoff',
+        { kind: 'continue_from_handoff', handoffId: mintId('Handoff') },
+      ],
+      ['a session that left it uncommitted', { kind: 'uncommitted', paths: ['src/api/a.ts'] }],
+    ])('is recorded when %s commits it', async (_name, nextAction) => {
+      const s = await seedSession();
+      await markersOnTheBranch(s);
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, { nextAction });
+      });
+      writeRepoFile('src/api/a.ts', 'ours\ntheirs\n');
+      await s.call('commit', { opId: 'op-commit-resolve', paths: ['src/api/a.ts'], message: 'R' });
+      expect(recorded(s)).toEqual([false, true]);
+    });
+
+    it('does not mark work committed under a merge next action once the markers are resolved', async () => {
+      const s = await seedSession();
+      await markersOnTheBranch(s);
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          nextAction: { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
+        });
+      });
+      writeRepoFile('src/api/a.ts', 'ours\ntheirs\n');
+      await s.call('commit', { opId: 'op-commit-resolve', paths: ['src/api/a.ts'], message: 'R' });
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await s.call('commit', { opId: 'op-commit-work', paths: ['src/api/b.ts'], message: 'Work' });
+      expect(recorded(s)).toEqual([false, true, false]);
+    });
+
+    it('does not mark a commit that leaves the marked file alone, though markers remain', async () => {
+      const s = await seedSession();
+      await markersOnTheBranch(s);
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await s.call('commit', { opId: 'op-commit-work', paths: ['src/api/b.ts'], message: 'Work' });
+      expect(recorded(s)).toEqual([false, false]);
+    });
+
+    it('marks a resolution committed together with an adapted caller', async () => {
+      const s = await seedSession();
+      await markersOnTheBranch(s);
+      writeRepoFile('src/api/a.ts', 'ours\ntheirs\n');
+      writeRepoFile('src/api/caller.ts', 'export {}\n');
+      await s.call('commit', {
+        opId: 'op-commit-resolve',
+        paths: ['src/api/a.ts', 'src/api/caller.ts'],
+        message: 'R',
+      });
+      expect(recorded(s)).toEqual([false, true]);
+    });
+
+    it('marks a resolution the tool recovers after a crash, and answers the session as usual', async () => {
+      const s = await seedSession();
+      await markersOnTheBranch(s);
+      writeRepoFile('src/api/a.ts', 'ours\ntheirs\n');
+      const direct = await git.commit({
+        repo: repo.path,
+        paths: ['src/api/a.ts'],
+        message: 'R',
+        opId: 'op-crashed-02',
+        branch: 'main',
+      });
+      const viaTool = await s.call('commit', {
+        opId: 'op-crashed-02',
+        paths: ['src/api/a.ts'],
+        message: 'R',
+      });
+      expect(viaTool.json).toEqual({ sha: direct.sha, alreadyCommitted: true });
+      expect(recorded(s)).toEqual([false, true]);
+      const replay = await s.call('commit', {
+        opId: 'op-crashed-02',
+        paths: ['src/api/a.ts'],
+        message: 'R',
+      });
+      expect(replay.json).toEqual(viaTool.json);
+    });
   });
 
   it('recovers a commit made before a crash that never recorded its op', async () => {

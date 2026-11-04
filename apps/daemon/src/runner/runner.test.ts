@@ -14,10 +14,12 @@ import {
   ACCOUNT_CARD_DETAIL,
   ConflictError,
   InboxAnswerRefused,
+  LEFT_OUT_NOTICE_KEY,
   mintId,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   PARK_TASK_CHOICE,
   PARKED_NOTICE_KEY,
+  REVERT_COMMIT_LINE,
   ToolAccess,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
@@ -58,6 +60,7 @@ import {
   schema,
   seedAccount,
   setBatchNotice,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   updateInboxItem,
@@ -4057,6 +4060,88 @@ describe('flows', () => {
     expect(ws(workstream.id).failureReason).toBe(
       'The plan step ended without calling complete_step: its last turn ended normally.',
     );
+  });
+
+  describe('a run whose commits were reverted, retried before its implement step', () => {
+    const REVERT = 'a'.repeat(40);
+    const REDO = 'Redo the work and commit it with the commit tool';
+    const plan = (opId: string) => ({
+      do: 'mcp' as const,
+      tool: 'complete_step',
+      args: { opId, summary: 'PLAN', verdict: null },
+    });
+    const leaveOut = (id: WorkstreamId) => {
+      engine.state.write((ctx) => {
+        setWorkstreamNotice(ctx, id, {
+          key: LEFT_OUT_NOTICE_KEY,
+          tone: 'info',
+          line: 'Left out of the pull request: its commit was reverted',
+          body: `This run failed, and you chose Ship without it.\n\n${REVERT_COMMIT_LINE}${REVERT}`,
+        });
+      });
+    };
+    const promptFor = (step: string) =>
+      engine.adapter.prompts.find((p) => p.prompt.includes(`Your step: ${step}`))?.prompt ?? '';
+    const lastPromptFor = (step: string) =>
+      engine.adapter.prompts.findLast((p) => p.prompt.includes(`Your step: ${step}`))?.prompt ?? '';
+
+    it('tells the implement step when Retry restarted the plan step', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [turn, { do: 'await_message', contains: RESULT_NUDGE }, turn],
+          [plan('op-told-0001'), turn],
+          implement('op-told-0002'),
+          [approve('op-told-0003'), turn],
+          [approve('op-told-0004'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'full', criteria: 4 });
+      await until(workstream.id, (s) => s === 'FAILED');
+      leaveOut(workstream.id);
+      engine.retry(workstream.id);
+      await until(workstream.id, (s) => s === 'DONE');
+      const planning = lastPromptFor('1 of 4, plan');
+      expect(planning).toContain(REVERT);
+      expect(planning).not.toContain(REDO);
+      const building = promptFor('2 of 4, implement');
+      expect(building).toContain(REVERT);
+      expect(building).toContain(REDO);
+      expect(building).toContain('Address it, commit, and end your turn.');
+    });
+
+    it('tells the implement step when Retry went back to the plan after a plan review at the limit', async () => {
+      engine = await createTestEngine({
+        Alpha: [
+          [plan('op-told-0011'), turn],
+          [reject('op-told-0012', 'Needs more.'), turn],
+          [plan('op-told-0013'), turn],
+          [approve('op-told-0014'), turn],
+          implement('op-told-0015'),
+          [approve('op-told-0016'), turn],
+          [approve('op-told-0017'), turn],
+        ],
+      });
+      const { workstream } = engine.addTask('Alpha', ['api'], [], {
+        flow: 'full',
+        criteria: 4,
+        riskTags: ['security'],
+      });
+      engine.state.write((ctx) => {
+        patchWorkstream(ctx, workstream.id, null, {
+          attempt: DEFAULT_RUNNER_LIMITS.maxFixAttempts,
+        });
+      });
+      await until(workstream.id, (s) => s === 'FAILED');
+      expect(ws(workstream.id).stepIndex).toBe(1);
+      leaveOut(workstream.id);
+      expect(engine.retry(workstream.id).stepIndex).toBe(0);
+      await until(workstream.id, (s) => s === 'DONE');
+      expect(lastPromptFor('1 of 5, plan')).not.toContain(REDO);
+      expect(promptFor('2 of 5, plan_review')).not.toContain(REDO);
+      const building = promptFor('3 of 5, implement');
+      expect(building).toContain(REVERT);
+      expect(building).toContain(REDO);
+    });
   });
 
   it('resumes the step it was on after a crash', async () => {

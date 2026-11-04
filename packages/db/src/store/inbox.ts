@@ -205,7 +205,8 @@ export function updateInboxItem(
     readonly answer?: InboxAnswer;
     readonly targets?: readonly InboxTarget[];
     readonly options?: readonly InboxOption[];
-    readonly detail?: Record<string, Json>;
+    /** Null clears the detail. */
+    readonly detail?: Record<string, Json> | null;
   },
 ): InboxItemDto {
   // Drizzle's `.set()` wants a mutable array, so `targets` and `options` are copied rather than spread through.

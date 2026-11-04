@@ -3,6 +3,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   mintId,
   PARKED_NOTICE_KEY,
+  REVERTED_NOTICE_KEY,
   type BatchDto,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
@@ -101,6 +102,59 @@ describe('failureLine', () => {
     },
   ])('says $kind on step $stepIndex in plain words', ({ kind, steps, stepIndex, line }) => {
     expect(failureLine({ failureKind: kind, steps, stepIndex }, true)).toBe(line);
+  });
+
+  describe('a run whose commits were reverted', () => {
+    const revertSha = 'a'.repeat(40);
+    const notice = (key: string, body: string) => ({
+      key,
+      tone: 'info' as const,
+      line: 'x',
+      body,
+    });
+    const flow = reviewFlow({});
+
+    it('says Retry goes to the build step when the run was left out with a revert', () => {
+      const line = failureLine(
+        {
+          failureKind: 'no_result',
+          ...flow,
+          notice: notice(LEFT_OUT_NOTICE_KEY, `Left out.\n\nRevert commit: ${revertSha}`),
+        },
+        true,
+      );
+      expect(line).toBe(
+        'The review session stopped without reporting a result. Retry sends the work back to the build step and tells it its commits were reverted, and the review runs after it.',
+      );
+    });
+
+    it('does not promise the build step for a run left out with nothing reverted', () => {
+      expect(
+        failureLine(
+          {
+            failureKind: 'no_result',
+            ...flow,
+            notice: notice(LEFT_OUT_NOTICE_KEY, 'It had no commits.'),
+          },
+          true,
+        ),
+      ).toBe(
+        'The review session stopped without reporting a result. Retry runs the review step again.',
+      );
+    });
+
+    it('hedges for a retried run, which is sent back only if it has not committed since', () => {
+      const line = failureLine(
+        {
+          failureKind: 'no_result',
+          ...flow,
+          notice: notice(REVERTED_NOTICE_KEY, `Reverted.\n\nRevert commit: ${revertSha}`),
+        },
+        true,
+      );
+      expect(line).toContain('Retry sends the work back to the build step');
+      expect(line).toContain('unless the run has committed since');
+    });
   });
 
   it.each([
@@ -519,6 +573,19 @@ describe('taskState', () => {
         leftOut,
       ]);
       expect(taskNotices(workstreamDto({ state: 'FAILED', notice: waiting }), batch)).toEqual([]);
+    });
+
+    it('keeps the reverted-work notice of a retried run that failed again', () => {
+      const reverted = {
+        key: REVERTED_NOTICE_KEY,
+        tone: 'warning' as const,
+        line: 'Its earlier commits were reverted: only new commits are in the pull request',
+        body: 'You chose Ship without it for this run.',
+      };
+      const batch = batchDto({ state: 'OPEN', notices: [conflict] });
+      expect(taskNotices(workstreamDto({ state: 'FAILED', notice: reverted }), batch)).toEqual([
+        reverted,
+      ]);
     });
 
     describe('history', () => {
