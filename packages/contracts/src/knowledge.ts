@@ -302,6 +302,12 @@ export const ProvenanceDto = z.object({
       shapeTitle: z.string().nullable(),
     })
     .nullable(),
+  /**
+   * The Plan conversation a record was converted from: its source's `shapeId`, with the conversation's
+   * title. Null when the source names none, or names one that no longer exists. Not a session: the
+   * builder's conversion writes the record, so `session` stays null.
+   */
+  conversation: z.object({ id: ShapeId, title: z.string().nullable() }).nullable(),
   quote: z.string().nullable(),
   speaker: z.string().nullable(),
   confirmedBy: z.string().nullable(),
