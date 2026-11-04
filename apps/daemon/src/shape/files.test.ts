@@ -452,6 +452,51 @@ describe('a large dropped image', () => {
       ).toBe(true);
     });
 
+    describe('after a digest start, which carries no earlier picture', () => {
+      /** Keeps these screens, then moves the conversation on to a session started from the digest. */
+      const rollOverWith = async (count: number): Promise<void> => {
+        await nextTurn('Hello');
+        const screens = screensOf(drawn(1_500_000));
+        for (let n = 0; n < count; n += 1) await screens.see(shapeId(), window);
+        f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+        f.service.send(shapeId(), 'Full');
+        await f.service.settled(shapeId());
+      };
+
+      it('does not charge a later turn for the screens of the session before', async () => {
+        await rollOverWith(8);
+        drop('first.png', wholePng(2 * MB));
+        const first = await nextTurn('First');
+        expect(first.images).toHaveLength(1);
+        await f.restart();
+        for (let i = 0; i < 3; i += 1) drop(`later${String(i)}.png`, wholePng(2 * MB));
+        const later = await nextTurn('Later');
+        // About 2 MiB in this session, though the conversation keeps 11.4 MiB of older screens.
+        expect(later.images).toHaveLength(3);
+        expect(later.message).not.toMatch(/too large to show/);
+      });
+
+      it('does not refuse the screen the digest told Claude to take again', async () => {
+        await rollOverWith(11);
+        drop('first.png', wholePng(2 * MB));
+        await nextTurn('First');
+        await screensOf(drawn(1_500_000)).see(shapeId(), window);
+        expect(kept()).toHaveLength(12);
+      });
+
+      it('still charges the screens the new session took', async () => {
+        await rollOverWith(6);
+        await nextTurn('First');
+        const screens = screensOf(drawn(1_500_000));
+        for (let n = 0; n < 6; n += 1) await screens.see(shapeId(), window);
+        // 8.6 MiB of this session's screens leaves room for four more 2 MiB images, over two turns.
+        for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn('Three')).images).toHaveLength(3);
+        for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn('Three more')).images).toHaveLength(1);
+      });
+    });
+
     it('keeps nine dropped images and twelve asked-for screens under the total', async () => {
       const screens = screensOf(drawn(1_500_000));
       await spendTheTotal();
