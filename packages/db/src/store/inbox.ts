@@ -12,10 +12,11 @@ import {
   type ProjectId,
   type ProposalId,
   type QuestionCategory,
+  type TaskId,
   type Urgency,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
 import { assigneeFor } from './routing-rules';
@@ -246,6 +247,49 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
     .map(toDto);
+}
+
+/** A card the builder answered, as a reviewer of its task is shown it. */
+export interface AnsweredCard {
+  readonly id: InboxItemId;
+  readonly kind: InboxKind;
+  readonly question: string;
+  readonly choice: string;
+  readonly note: string | null;
+}
+
+/**
+ * The cards the builder answered on a task, oldest first: the question, the choice and the note. A
+ * permission card is left out (its denials are told to a session on their own) and so is a proposal
+ * (its answer files or drops a task, it decides nothing the task's work rests on). A card counts
+ * whichever of the task's runs it targets.
+ */
+export function answeredCardsForTask(db: DbReader, taskId: TaskId): AnsweredCard[] {
+  return db
+    .select()
+    .from(schema.inboxItems)
+    .where(
+      and(
+        inArray(schema.inboxItems.state, ANSWERED_STATES),
+        notInArray(schema.inboxItems.kind, ['permission', 'proposal']),
+        sql`EXISTS (SELECT 1 FROM json_each(${schema.inboxItems.targets}) AS t JOIN ${schema.workstreams} AS w ON w.id = json_extract(t.value, '$.workstreamId') WHERE w.task_id = ${taskId})`,
+      ),
+    )
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all()
+    .flatMap((row) =>
+      row.answer
+        ? [
+            {
+              id: row.id,
+              kind: row.kind,
+              question: row.title,
+              choice: row.answer.choice,
+              note: row.answer.note ?? null,
+            },
+          ]
+        : [],
+    );
 }
 
 /** A call the builder denied, as a later session of the workstream is told about it. */
