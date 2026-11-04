@@ -10,7 +10,7 @@ import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory } from '@tanstack/react-router';
 import { render } from '@testing-library/react';
-import { http, HttpResponse, ws, type HttpHandler, type WebSocketHandler } from 'msw';
+import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler } from 'msw';
 import { setupServer } from 'msw/node';
 import type { ReactElement } from 'react';
 import { App } from '../app';
@@ -54,6 +54,12 @@ export function baseHandlers(
     http.get(daemonUrl('/events/head', base), () =>
       HttpResponse.json(EventsHead.parse({ seq: opts.headSeq ?? 0 })),
     ),
+    // The window waits for a screen to draw for Plan (Shape spec §5.5); the daemon holds the ask open
+    // while none is wanted, and none is.
+    http.post(daemonUrl('/screens/claim', base), async () => {
+      await delay('infinite');
+      return new HttpResponse(null, { status: 204 });
+    }),
     http.get(daemonUrl('/accounts', base), () => HttpResponse.json([DEFAULT_ACCOUNT])),
     http.get(daemonUrl('/accounts/pauses', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/projects', base), () => HttpResponse.json([BASE_PROJECT])),

@@ -4,9 +4,23 @@ import { hc } from 'hono/client';
 import { z } from 'zod';
 import type { DaemonConnection } from './connection';
 
-/** The typed Hono client for one daemon connection; every call carries the UI token. */
+/**
+ * A fetch that sends only reads. A screen drawn for a session is read-only twice over: the daemon holds
+ * its token to GET routes, and this refuses anything else before it leaves the window.
+ */
+const readOnlyFetch: typeof fetch = (input, init) => {
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  return method === 'GET'
+    ? fetch(input, init)
+    : Promise.reject(new Error(`A screen is drawn read-only: ${method} was not sent`));
+};
+
+/** The typed Hono client for one daemon connection; every call carries the token it was given. */
 export function createDaemonClient(conn: DaemonConnection) {
-  return hc<AppType>(conn.url, { headers: { Authorization: `Bearer ${conn.token}` } });
+  return hc<AppType>(conn.url, {
+    headers: { Authorization: `Bearer ${conn.token}` },
+    ...(conn.readOnly === true ? { fetch: readOnlyFetch } : {}),
+  });
 }
 
 export type DaemonClient = ReturnType<typeof createDaemonClient>;

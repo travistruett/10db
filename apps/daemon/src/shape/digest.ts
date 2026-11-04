@@ -1,4 +1,9 @@
-import { ShapeMessageAuthor, ShapeMessageKind, type ShapeId } from '@10db/contracts';
+import {
+  ScreenMessageBody,
+  ShapeMessageAuthor,
+  ShapeMessageKind,
+  type ShapeId,
+} from '@10db/contracts';
 import {
   lastShapeMessages,
   listShapeLinks,
@@ -24,6 +29,26 @@ function titleOf(row: ShapeProposalRow): string {
 }
 
 /**
+ * A screenshot's row holds where the picture is kept, which means nothing to a fresh session, and the
+ * picture itself is not carried over (it would fill the new session's context again). The digest says
+ * one was taken and how to take it again.
+ */
+function screenLine(body: string): string {
+  const parsed = ScreenMessageBody.safeParse(safeJson(body));
+  return parsed.success
+    ? `[A screenshot of the ${parsed.data.screen} at ${String(parsed.data.width)}×${String(parsed.data.height)} was taken here; it is not in this session. Take it again with see_screen if you need it.]`
+    : '[A screenshot was taken here; it is not in this session.]';
+}
+
+function safeJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * What a fresh SDK session is told when the old one is gone or full: the latest messages as they
  * were said, the current proposals with where each came from, and what Convert made. Built from the
  * rows alone, so the same conversation always gives the same digest and what the new session saw is
@@ -42,7 +67,7 @@ export function buildDigest(db: DbReader, shapeId: ShapeId): string {
     // A proposal may cite a builder message or an engine event, so both keep their ids.
     const citable = m.author === ShapeMessageAuthor.Builder || m.kind === ShapeMessageKind.Event;
     const speaker = citable ? `[m:${m.id}]` : `(${m.author})`;
-    lines.push(`${speaker} ${m.body}`);
+    lines.push(`${speaker} ${m.kind === ShapeMessageKind.Screen ? screenLine(m.body) : m.body}`);
   }
   lines.push('', 'The proposals:');
   if (rows.length === 0) lines.push('Nothing is proposed yet.');

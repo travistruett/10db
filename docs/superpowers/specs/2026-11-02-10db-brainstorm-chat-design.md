@@ -214,19 +214,50 @@ MCP servers; it has no read-only mode.
 
 - `settingSources: []`, `strictMcpConfig`, and **no plugins** (not the harness plugin: its skills and personas are
   for lanes) **(spec's call)**. No project `.mcp.json` server loads.
-- `tools` lists exactly `Read`, `Grep`, `Glob`, `Agent` and the Shape tools; `disallowedTools` names `Edit`,
-  `Write`, `NotebookEdit`, `Bash`, `Monitor`, `WebFetch` and `WebSearch`. Permission mode `default` (not lanes'
-  auto); `canUseTool` denies by default. With no Bash, Monitor or MCP server process, the session runs no command
-  for a sandbox to hold.
+- `tools` lists exactly `Read`, `Grep`, `Glob`, `Agent`, `WebSearch`, `WebFetch` and the Shape tools; the last two
+  are listed only so the researcher (below) can inherit them, and the hook refuses them in the main session.
+  `disallowedTools` names `Edit`, `Write`, `NotebookEdit`, `Bash` and `Monitor`. Permission mode `default` (not
+  lanes' auto); `canUseTool` denies by default. With no Bash, Monitor or MCP server process, the session runs no
+  command for a sandbox to hold.
 - Path confinement runs in the **PreToolUse hook** through `judgePreToolUse` with a Shape mode of the file-access
   judge that answers **deny** where lanes' answers `ask`, so nothing reaches the broker or raises a card. It runs
   for the session and its subagents alike, so calls Claude Code settles before `canUseTool` are still judged. A file
   tool is allowed only on real paths under the project's checkout or the conversation's files directory (§5.4). A
   symlink out, a protected path, and a `Grep` or `Glob` of a directory holding one are refused, with a dimmed line
   in the conversation.
-- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7), passed as
-  programmatic agents, each on the session's own model; the built-in
+- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7) and the researcher
+  (below), passed as programmatic agents, each on the session's own model; the built-in
   general-purpose type is not offered.
+- **Research: a researcher agent that cannot read the project** (`decisions/2026-11-03-plan-researches-the-web-through-a-researcher.md`).
+  The session cannot touch the network; a fourth agent, `researcher`, has `WebSearch` and `WebFetch` and nothing
+  else (no file tool, no `Agent`, no 10db tool). The session gives it a question in words and gets text back with
+  the URLs it read. The split keeps the project's code off the network: the agent that reads the code never sends
+  a request, and the agent that does holds nothing to send but the question. The hook enforces it:
+  - `WebSearch` and `WebFetch` are allowed only with `agent_id` present and `agent_type` `researcher`; from the main
+    session or any other agent they are refused. `Read`, `Grep` and `Glob` are refused from the researcher for any
+    path, the checkout's and the files directory's alike.
+  - **The question is bounded, not filtered:** at most 1,500 characters (a query 300, a URL 2,000), no empty one. The
+    session is told to ask in general terms with no code, path or key. Every question, search and fetch shows
+    in the conversation as a dimmed line naming it, so the builder sees what left the machine.
+  - **A fetched page is untrusted.** The researcher treats pages as data and reports one that tries to steer it; the
+    session treats its answer as a claim, follows no request in it, and states what it relies on in its own words
+    with the URL, not in the page's. It is a prompt rule, backed by the builder accepting a plan before a lane runs
+    a task.
+  - **Hosts are open** except those that are not the public web: `WebFetch` must be `https` on 443, with no login in
+    the URL, and name a host with a dot that is not an IP address, `localhost` or under `.local`, `.internal` and
+    the like, which keeps it off the daemon's loopback port and the builder's network.
+  - **Tests, red first:** a `WebSearch` or `WebFetch` from the main session, scope, engineering and rehearsal is
+    refused, with a dimmed line; a `Read`, `Grep` or `Glob` from the researcher is refused for a checkout path and
+    a files-directory path; a fetch of `127.0.0.1`, `localhost`, a login URL and an `http` page is refused; each
+    allowed search and fetch writes its dimmed line. The live test (`TENDB_LIVE_CLAUDE=1`) shows that the
+    researcher inherits the session's web tools on the real SDK.
+- **Seeing the app: a screenshot tool, never a browser** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
+  The session sees 10db's own screens through `see_screen` (§5.5), which answers a picture. It gets no browser
+  tool and no MCP server other than 10db's, so nothing it holds can click, type, scroll or run a command: a
+  browser would add a process that runs commands, and one click in the real app can Hold a task, answer a card
+  or start work. `playwright`, `browser` and any `mcp__` tool other than `mcp__10db__*` are refused by the
+  hook as they are now. Tests, red first: a browser tool call and a made-up click or key tool are each refused;
+  `see_screen` is refused from the researcher and from each reviewer; the session's tool lists name no browser.
 - **Who is calling.** Subagents share the session's MCP connection, so the PreToolUse hook tells them apart: the
   SDK's hook input carries `agent_id` only inside a subagent, and `agent_type` names it. The hook refuses
   `report_finding` when `agent_id` is absent (the main session can't report findings or rehearsal marks), refuses
@@ -293,6 +324,62 @@ not by the token.
 | `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                                          |
 | `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                                                    |
 | `find_records(query)`                          | session            | read-only search over the decisions that apply to this project (`searchDecisions`: the project's and the builder-wide `you` ones), principles once they exist, and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
+| `see_screen(screen, taskId?, width?, height?)` | session            | a screenshot of one of 10db's own screens (`factory`, `board`, `inbox`, `plan`, or `task` with a `taskId`), at a window of 480 to 1600 by 400 to 2000 px (default 1200 by 900), with the project's real data as it is now; answers an image, or a refusal that says why (below)                                                                                    |
+
+**Seeing the app: `see_screen`** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
+**Built, not yet proven live** (see Open, below).
+
+- **The app's own window draws it, in a hidden frame of itself.** The installed app ships no browser engine of its
+  own for this (the e2e suite's Playwright WebKit is not in the bundle). A call becomes a request in the daemon's
+  broker; the window, which long-polls `POST /screens/claim`, loads the app in a hidden `<iframe>`
+  (`sandbox="allow-scripts allow-same-origin"`, `inert`, transparent, behind the window) at the screen's route,
+  waits until nothing is loading, draws the frame to an image with `html-to-image` and answers with it
+  (`POST /screens/:id/image`) or with why it could not (`…/refuse`). Nothing is stored for a request: asking
+  writes no row. Two refusals come at once. With no window asking for work (the app has quit), the daemon refuses.
+  A window that is hidden, closed (which only hides it, §3) or minimised keeps asking, and a hidden WebKit page
+  runs no animation frame, which the drawing waits on, so the window itself refuses when
+  `document.visibilityState` isn't `visible`, and the session asks the builder to bring 10db forward. A window
+  fully covered by another counts as hidden only if WebKit says so. Not chosen: a Tauri webview snapshot (needs `unsafe` Rust, which
+  `src-tauri` forbids; still the upgrade path behind the same capture seam), capturing the real window (shows only
+  what is on screen, needs Screen Recording) and downloading a WebKit build (a second browser the daemon drives).
+- **Live data, as it is now,** for the conversation's project; never a fixture. The Inbox reads every project's
+  cards, so a frame shows only that project's: a session held to one project sees nothing of another.
+- **It can change nothing.** The frame runs under a **render token**, minted for that one request and dead when it
+  is answered, which the daemon's auth middleware holds to `GET` of the routes a screen shows
+  (`screens/render-access.ts`): never a write, the digest (it moves a goal's last-opened mark, the 2026-11-02
+  design review's refused read), the event stream, `/mcp`, or a GET that probes the machine or runs a command
+  against an account or a lane (`/system`, an account's `identity`, a lane's `changes`). One allowed read runs a
+  command: `GET /shapes/:id`, the Plan screen's own view, lists the checkout's tracked files with `git ls-files`,
+  which reads the checkout and writes nothing. Every GET the daemon serves is named there, allowed or refused with a reason,
+  and a test fails for one that is in neither. A kept picture is refused too, so a Plan screen draws a line in each
+  screenshot's place, not the picture. The frame's own client sends reads only, and it draws the screen alone
+  (no shell, no stream, no write of the builder's remembered project). **Tests, red first:** with the token, every
+  allowed route answers and the database dump is identical before and after; each write, the digest, `/system`,
+  `identity`, `changes`, the stream and the screen routes answer 403; the token is dead once the request is
+  answered; a screenshot changes no task, batch, card, goal view mark, setting or decision; a control shows the
+  dump does see a settings write.
+- **What comes back is checked by its bytes** (a whole PNG or JPEG, to its IEND or EOI, with the size it says, no
+  larger than the window asked for, at most 1.5 MB; the window has already refused a drawing of one flat colour),
+  kept under the conversation's `screens/` directory, and written as a `screen`
+  transcript row that names it, with a dimmed `see_screen · board · 1200×900` line before it. **The builder sees
+  the same image the session was given:** the transcript draws the row as the picture (read with the UI token, as
+  a data URL). A picture that is wrong or blank, a screen that fails to load or does not finish in 15 s, a crashed
+  view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
+  `see_screen · refused · …` line), never a blank image.
+- **Budget.** At most 12 screens a conversation; each is at most 1600 by 2000 px; the system prompt says to ask for
+  the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
+  (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
+  not carried over.
+- **Open.** `e2e/see-screen.spec.ts` is written to run the real capture through the real host in Playwright WebKit
+  (Board and Plan: the picture in the conversation has the width asked for and many colours), the nearest thing to
+  WKWebView a script reaches. **It has not run yet.** A lane's sandbox can't launch WebKit, and a gate 10db runs
+  skips e2e (`TENDB_SANDBOX=1`), so a lane's GATE PASS says nothing about it. Its first run will be the `gate` job
+  in `.github/workflows/ci.yml`, on Linux WebKit in the Playwright image, not on macOS. Even then it asserts neither
+  that a picture is faithful nor that the installed app's CSP lets it work, so the Tauri window itself is still
+  checked by hand. That Claude Code hands the image block to the model is `test/shape-session.live.test.ts` under
+  `TENDB_LIVE_CLAUDE=1`, which a lane can't run. So is the refusal of a hidden window on a real one: the host's test
+  fakes `visibilityState`. Until those have been seen, treat `see_screen` as built and unproven live. Task
+  `tsk_01a18a08-e391` (a task's copy previewed live) can point the same frame and broker at its dev server.
 
 **Remembering.** The session is told to call `find_records` before proposing a record and when the builder's words
 touch something already decided, and to say so in chat when a proposal contradicts a recorded decision ("You

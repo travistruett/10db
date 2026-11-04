@@ -119,6 +119,7 @@ import {
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredProfiles, roleDefault } from '../routing';
+import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
 import { createShapeServices } from './shape-services';
 import {
@@ -480,6 +481,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       runner?.deliverParkedAnswer(target, item);
     },
     onParkAnswer: parkAnswers,
+    log: logger,
     onCheckAnswer: (ctx, item, answer) => {
       if (!runner) throw new RunnerNotStartedError();
       return applyCheckAnswer(runner, ctx, item, answer);
@@ -828,12 +830,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Shape conversations (spec §5): a read-only session per conversation on the project's account and
   // the `plan` role's model. The MCP address is known once the server listens, so it is read lazily.
+  // `see_screen` (§5.5): the window draws a screen on the daemon's request, held to reads by a token
+  // that belongs to that one request.
+  const screenBroker = createScreenBroker();
+  const screens = createScreens({
+    state,
+    broker: screenBroker,
+    filesDir: join(opts.dataDir, 'shapes'),
+  });
   const shape = createShapeService({
     state,
     adapter,
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
+    screens,
     jev: createShapeJev({
       state,
       judge,
@@ -1198,6 +1209,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     services,
     taskRemoval: services,
     builderMcp: createBuilderMcpHandler({ services, log: logger }),
+    screens: {
+      claim: (signal) => screenBroker.claim(signal),
+      deliver: (id, image) => screenBroker.deliver(id, image),
+      refuse: (id, reason) => screenBroker.refuse(id, reason),
+      tokenValid: (token) => screenBroker.tokenValid(token),
+      mayRead: renderMayRead,
+      image: (shapeId, name) => screens.image(shapeId, name),
+    },
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
