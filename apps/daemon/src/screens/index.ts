@@ -16,6 +16,7 @@ export {
   parseScreenBody,
   readAllowance,
   readBytesSpent,
+  readPictureCap,
   readCountedLine,
   readMeasuredLine,
   tooBigAlone,

@@ -10,6 +10,7 @@ import {
   readBytesSpent,
   readCountedLine,
   readMeasuredLine,
+  readPictureCap,
   unmeasuredRead,
   type ReadKind,
 } from '../screens';
@@ -20,7 +21,7 @@ import type { ShapeAccess } from './confinement';
 // itself (`screens/inline-budget.ts`). The two share one pool of 21 MiB, 28 MiB as base64, which leaves the
 // API's 32 MB request limit room for text. The daemon never sees a Read's result before it runs, so it
 // counts the Read in the PreToolUse hook and refuses the one that would pass what the inline pictures leave
-// of the pool; the PostToolUse hook then replaces the allowance with the size the result really had.
+// of the pool; the PostToolUse hook then replaces the charge with the size the result really had.
 // Everything here counts Reads of pictures and of PDFs alike; a name that says "read" means either kind.
 
 export {
@@ -30,6 +31,7 @@ export {
   readAllowance,
   readBytesSpent,
   readCountedLine,
+  readPictureCap,
   unmeasuredRead,
   type ReadKind,
 };
@@ -91,14 +93,15 @@ export function pagesCharged(pages: string | null): number {
 
 /**
  * What a Read of this path is charged: null for anything but a picture or PDF that exists. `pages` is the
- * Read's own `pages` value, which only a PDF uses. `allowance` is the most a picture or a page is charged
- * (`readAllowance` of the live session's transcript).
+ * Read's own `pages` value, which only a PDF uses. `allowance` is what a page is charged (`readAllowance` of
+ * the live session's transcript) and `pictureCap` the most a picture is (`readPictureCap`).
  */
 export function readCharge(
   path: string,
   pages: string | null,
   access: Pick<ShapeAccess, 'checkout' | 'home'>,
-  allowance: number = READ_CHARGE_MAX_BYTES,
+  allowance: number,
+  pictureCap: number,
 ): { kind: ReadKind; bytes: number } | null {
   const kind: ReadKind | null = PICTURE_NAME.test(path)
     ? 'picture'
@@ -111,7 +114,7 @@ export function readCharge(
     if (!stat.isFile()) return null;
     return {
       kind,
-      bytes: kind === 'PDF' ? pagesCharged(pages) * allowance : Math.min(stat.size, allowance),
+      bytes: kind === 'PDF' ? pagesCharged(pages) * allowance : Math.min(stat.size, pictureCap),
     };
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
@@ -121,19 +124,19 @@ export function readCharge(
 
 /**
  * The names of the images, among those that went to Claude as a path to Read, that a Read would be refused
- * for: each is charged as a Read charges it (its size, at most the allowance) in order against `room`, the
+ * for: each is charged as a Read charges it (its size, at most `pictureCap`) in order against `room`, the
  * bytes the live session's Reads have left (`readCeiling` less what they spent). An image that doesn't fit
  * is skipped, so a smaller one after it still counts as readable.
  */
 export function unreadableImages(
   files: readonly { readonly name: string; readonly size: number }[],
   room: number,
-  allowance: number = READ_CHARGE_MAX_BYTES,
+  pictureCap: number,
 ): string[] {
   let left = room;
   const names: string[] = [];
   for (const file of files) {
-    const charge = Math.min(file.size, allowance);
+    const charge = Math.min(file.size, pictureCap);
     if (charge <= left) left -= charge;
     else names.push(file.name);
   }
@@ -155,7 +158,8 @@ export { readMeasuredLine };
 
 /**
  * Why a Read is refused, or null when it fits within `ceiling` (`readCeiling`) beside the pictures and
- * PDFs already read.
+ * PDFs already read. A picture charged over `allowance` is one the session has no measurement for, so the
+ * reason says that a measurement can let it in.
  */
 export function readRefusal(
   path: string,
@@ -180,7 +184,10 @@ export function readRefusal(
   }
   return (
     `Too many pictures read in this conversation: ${path} would pass the total a resumed session can carry ` +
-    `under the API's 32 MB request limit. Work from the pictures already read, or ask the builder for a ` +
-    `smaller one.`
+    `under the API's 32 MB request limit. ` +
+    (charge > allowance
+      ? `Until a picture over 1 MiB has come back, each counts at its full file size: wait for the ones ` +
+        `already asked for, or Read a smaller one first, then try again.`
+      : `Work from the pictures already read, or ask the builder for a smaller one.`)
   );
 }

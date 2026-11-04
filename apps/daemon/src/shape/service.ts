@@ -87,6 +87,7 @@ import {
   readAllowance,
   readBytesSpent,
   readCharge,
+  readPictureCap,
   readCeiling,
   readCountedLine,
   readMeasuredLine,
@@ -620,7 +621,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const names = unreadableImages(
       paths,
       readCeiling(inline) - readBytesSpent(messages),
-      readAllowance(messages),
+      readPictureCap(messages),
     );
     if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
   };
@@ -796,13 +797,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             ? stringField(req.input, 'file_path')
             : null;
         const messages = readPath === null ? [] : listShapeMessages(state.db, shapeId);
-        // Reads in one message all pass here before any result is measured, so one not yet measured is
-        // charged at the largest size this session has measured, not at the allowance alone.
+        // Reads in one message all pass here before any result is measured, so a picture is charged a
+        // bound on its result: its file's size until a large one is measured, then the largest measured.
         const allowance = readAllowance(messages);
         const charged =
           readPath === null
             ? null
-            : readCharge(readPath, stringField(req.input, 'pages'), access, allowance);
+            : readCharge(
+                readPath,
+                stringField(req.input, 'pages'),
+                access,
+                allowance,
+                readPictureCap(messages),
+              );
         if (readPath !== null && charged !== null && charged.bytes > 0) {
           const refusal = readRefusal(
             readPath,
@@ -860,6 +867,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             counted.kind,
             Number.isFinite(pages) ? pages : undefined,
           ),
+        );
+      },
+      toolFailed: (req) => {
+        // A failed Read returned nothing, so it gives back what it was counted, which can be a whole file.
+        if (req.toolName !== 'Read' || req.agentId !== undefined) return;
+        const path = stringField(req.input, 'file_path');
+        if (path === null) return;
+        const counted = unmeasuredRead(listShapeMessages(state.db, shapeId), path);
+        if (counted === null) return;
+        say(
+          shapeId,
+          ShapeMessageAuthor.Claude,
+          ShapeMessageKind.Tool,
+          readMeasuredLine(path, 0, counted.counted, counted.kind),
         );
       },
     };

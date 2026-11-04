@@ -118,20 +118,22 @@ export function unmeasuredRead(
 }
 
 /**
- * The most one Read picture, or one page of a Read PDF, is charged before its result is measured, until the
- * session measures a larger one (`readAllowance`). Claude Code resizes a picture it reads to at most about
- * 2000 px a side and re-encodes it, so what it returns is not the file's size; this is the allowance for it,
- * and a smaller file is charged its own size, which resizing does not make larger. The PostToolUse hook
- * replaces it with the measured size of what came back (`measuredMediaBytes`); a result it can't measure
- * stays charged this. The live test (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run:
- * follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
+ * The most one page of a Read PDF is charged before its result is measured, and one Read picture once the
+ * session has measured a large one (`readPictureCap`), until the session measures a larger one
+ * (`readAllowance`). Claude Code resizes a picture it reads to at most about 2000 px a side and re-encodes
+ * it, so what it returns is not the file's size; this is the allowance for it, and a smaller file is charged
+ * its own size, which resizing does not make larger. The PostToolUse hook replaces the charge with the
+ * measured size of what came back (`measuredMediaBytes`); a result it can't measure stays charged what it
+ * was counted. The live test (`test/shape-session.live.test.ts`, `TENDB_LIVE_CLAUDE=1`) has not run: follow-up
+ * task tsk_01a1a578-91d9-7591-beb2-36336144c589 runs it.
  */
 export const READ_CHARGE_MAX_BYTES = 1 * MIB;
 
 /**
  * The largest a single Read picture, or a single page of a Read PDF, measured in the live session: 0 when
  * none has. A PDF's lines give their bytes over their pages; one written before pages were recorded covered
- * as many pages as 1 MiB each made up its counted charge.
+ * as many pages as 1 MiB each made up its counted charge. A page's share is rounded up: it is charged as a
+ * bound, and the transcript lines that carry a charge hold whole bytes.
  */
 export function largestReadMeasured(messages: readonly ShapeMessageDto[]): number {
   return liveMessages(messages).reduce((largest, message) => {
@@ -141,18 +143,42 @@ export function largestReadMeasured(messages: readonly ShapeMessageDto[]): numbe
     const bytes = Number(measured[2]);
     if (measured[1] !== 'PDF') return Math.max(largest, bytes);
     const pages = Number(measured[4] ?? Math.round(Number(measured[3]) / READ_CHARGE_MAX_BYTES));
-    return pages >= 1 ? Math.max(largest, bytes / pages) : largest;
+    return pages >= 1 ? Math.max(largest, Math.ceil(bytes / pages)) : largest;
   }, 0);
 }
 
 /**
- * What a Read picture, or a PDF page, is charged before its result is measured: the allowance, or the
- * largest the live session has measured when that is more. Reads issued together all pass PreToolUse before
- * any result is measured, so a session that has seen a Read return more than the allowance charges the
- * ones in flight at what it saw, not at the allowance.
+ * What a PDF page, or a picture once the session has measured one (`readPictureCap`), is charged before its
+ * result is measured: the allowance, or the largest the live session has measured when that is more. Reads
+ * issued together all pass PreToolUse before any result is measured, so a session that has seen a Read return
+ * more than the allowance charges the ones in flight at what it saw, not at the allowance.
  */
 export const readAllowance = (messages: readonly ShapeMessageDto[]): number =>
   Math.max(READ_CHARGE_MAX_BYTES, largestReadMeasured(messages));
+
+/**
+ * Whether the live session has measured what a picture over the allowance came back as. A smaller one says
+ * nothing about that: it is only charged its own size, and a failed Read (0 bytes) measured nothing.
+ */
+const largePictureMeasured = (messages: readonly ShapeMessageDto[]): boolean =>
+  liveMessages(messages).some((message) => {
+    if (message.kind !== ShapeMessageKind.Tool) return false;
+    const measured = MEASURED.exec(message.body);
+    return (
+      measured !== null &&
+      measured[1] === 'picture' &&
+      Number(measured[2]) > 0 &&
+      Number(measured[3]) > READ_CHARGE_MAX_BYTES
+    );
+  });
+
+/**
+ * The most a Read picture is charged before its result is measured. Until the session has seen what a large
+ * picture comes back as, nothing else bounds a batch, so there is no cap: a picture is charged its file's
+ * size, which resizing does not exceed. After that, it is `readAllowance`.
+ */
+export const readPictureCap = (messages: readonly ShapeMessageDto[]): number =>
+  largePictureMeasured(messages) ? readAllowance(messages) : Number.POSITIVE_INFINITY;
 
 /**
  * The bytes of Read pictures and PDF pages the live session carries, from its counted lines: a measured
