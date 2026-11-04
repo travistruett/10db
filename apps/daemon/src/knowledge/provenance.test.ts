@@ -1,7 +1,11 @@
-import type { ProjectDto } from '@10db/contracts';
+import { ProvenanceDto, ShapeOrigin, type ProjectDto } from '@10db/contracts';
 import {
   createTestStore,
+  insertSession,
+  insertShape,
   insertSource,
+  insertTask,
+  insertWorkstream,
   retirePrinciple,
   seedProject,
   withdrawDecision,
@@ -150,6 +154,63 @@ describe('provenance', () => {
     expect(principleProvenance(store.db, c.id)).toMatchObject({
       state: 'withdrawn',
       withdrawn: { by: 'me', reason: 'wrong' },
+    });
+  });
+
+  describe('a record whose source names a session', () => {
+    const sessionFields = {
+      provider: 'claude',
+      model: 'sonnet',
+      effort: 'medium',
+      mode: 'managed',
+      mcpTokenHash: 'h',
+    } as const;
+    const proposeFrom = (sessionId: string) =>
+      principleProvenance(
+        store.db,
+        store.write((ctx) =>
+          proposePrinciple(ctx, {
+            projectId: project.id,
+            title: 't',
+            body: 'b',
+            draft: { statement: 'Never sleep', kind: 'policy', scope: 'project', quote: 'flaky' },
+            sourceId: insertSource(ctx, 'agent', { sessionId }),
+            speaker: `agent:${sessionId}`,
+          }),
+        ).value.principle.id,
+      );
+
+    it('names the workstream of a lane session', () => {
+      const task = store.write((ctx) =>
+        insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['x'], areas: ['api'] }),
+      ).value;
+      const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+      const session = store.write((ctx) =>
+        insertSession(ctx, { workstreamId: workstream.id, ...sessionFields }),
+      ).value;
+      expect(ProvenanceDto.parse(proposeFrom(session.id)).session).toEqual({
+        id: session.id,
+        workstreamId: workstream.id,
+        shapeId: null,
+        taskTitle: 'A',
+        shapeTitle: null,
+      });
+    });
+
+    it('names the conversation of a Shape session, with no workstream', () => {
+      const shape = store.write((ctx) =>
+        insertShape(ctx, project.id, { title: 'Density', origin: ShapeOrigin.App }),
+      ).value;
+      const session = store.write((ctx) =>
+        insertSession(ctx, { shapeId: shape.id, ...sessionFields }),
+      ).value;
+      expect(ProvenanceDto.parse(proposeFrom(session.id)).session).toEqual({
+        id: session.id,
+        workstreamId: null,
+        shapeId: shape.id,
+        taskTitle: null,
+        shapeTitle: 'Density',
+      });
     });
   });
 

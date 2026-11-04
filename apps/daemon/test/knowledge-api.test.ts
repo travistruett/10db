@@ -2,8 +2,8 @@
 // answers are `any` here; the contract schemas the routes parse with are tested in packages/contracts.
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-argument, @typescript-eslint/restrict-template-expressions, @typescript-eslint/no-explicit-any */
 import { join } from 'node:path';
-import { mintId, ProjectDto, type KnowledgeItemDto } from '@10db/contracts';
-import { insertSource } from '@10db/db';
+import { mintId, ProjectDto, ShapeOrigin, type KnowledgeItemDto } from '@10db/contracts';
+import { insertSession, insertShape, insertSource } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -226,6 +226,47 @@ describe('writing and reading back', () => {
       quote: 'use BullMQ',
       by: 'me',
       recordedAt: expect.any(String),
+    });
+  });
+
+  it('names the Shape conversation of a record whose source is a Shape session, with no workstream', async () => {
+    const { project, state, call } = await start();
+    const shape = state.write((ctx) =>
+      insertShape(ctx, project.id, { title: 'Density', origin: ShapeOrigin.App }),
+    );
+    const session = state.write((ctx) =>
+      insertSession(ctx, {
+        shapeId: shape.id,
+        provider: 'claude',
+        model: 'sonnet',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'h',
+      }),
+    );
+    const { principle } = state.write((ctx) =>
+      proposePrinciple(ctx, {
+        projectId: project.id,
+        title: 'No sleeps',
+        body: 'b',
+        draft: {
+          statement: 'Never sleep in tests',
+          kind: 'policy',
+          scope: 'project',
+          topicKey: 'testing.no-sleeps',
+        },
+        sourceId: insertSource(ctx, 'agent', { sessionId: session.id }),
+        speaker: `agent:${session.id}`,
+      }),
+    );
+    const prov = await call('GET', `/principles/${principle.id}/provenance`);
+    expect(prov.status).toBe(200);
+    expect(prov.body.session).toEqual({
+      id: session.id,
+      workstreamId: null,
+      shapeId: shape.id,
+      taskTitle: null,
+      shapeTitle: 'Density',
     });
   });
 
