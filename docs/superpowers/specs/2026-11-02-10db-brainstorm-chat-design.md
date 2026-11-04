@@ -300,40 +300,25 @@ else is refused on the input with the reason. Files are copied into the conversa
 data directory and kept as long as the conversation. Images reach the session as image content blocks; other
 files as a line naming the path, which the session reads with `Read`. **(spec's call: the limits)**
 
-<<<<<<< 93738ab9eca1046a9861462b59e02b9d10fe8414
-The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
-image, so one oversize block would end every later turn. An image over 2 MiB, or past 6 MiB of images in one
-message, therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes itself.
-So does an image over 2000 px on either side, or one whose size the daemon can't read (a cut or mislabelled
-file): the API takes at most 2000 px a side once a request holds more than 20 images, and a conversation's
-screens (up to 12, §5.5) and dropped images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB
-sent as a block could fail that turn and every later one. The size is read from the file's own header (PNG, JPEG
-and WebP). The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks
-image blocks that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
-||||||| 83a19a1
-The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
-image, so one oversize block would end every later turn. An image over 2 MiB, or past 6 MiB of images in one
-message, therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes itself.
-The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
-that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
-=======
 The API refuses an image over about 5 MB, an image over 8000 px on a side however few bytes it takes, and a
 request over 32 MB, and a resumed session resends every earlier image, so one oversize block would end every
-later turn. An image over 2 MiB, over 8000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
+later turn. An image over 2 MiB, over 2000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
 pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request about 6 MB), therefore goes
-as a path line marked "too large to show inline; Read it", which `Read` resizes itself. The daemon reads the
-pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose header can't be read stays inline. The
-conversation total is one budget for every picture a resumed request resends that the daemon sends itself: it
-counts each image already told that fits the 2 MiB cap, an upper bound on what went inline since it includes an
-image sent as a path for its pixels, and each screen kept (§5.5), and `see_screen` refuses a picture that would
-pass it. Twelve screens at their 1.5 MB most
+as a path line marked "too large to show inline; Read it", which `Read` resizes itself. The 2000 px is the
+API's limit once a request holds more than 20 images: a conversation's screens (up to 12, §5.5) and dropped
+images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent as a block could fail that turn
+and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the
+pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose size can't be read (cut short, or not what
+its name says) goes as a path too, since it would be sent blind. The conversation total is one budget for every
+picture a resumed request resends that the daemon sends itself: it counts each image already told that fits the
+2 MiB cap, an upper bound on what went inline since it includes an image sent as a path for its pixels, and each
+screen kept (§5.5), and `see_screen` refuses a picture that would pass it. Twelve screens at their 1.5 MB most
 fit inside the total, so it only limits them beside dropped images. A session started fresh (from a digest)
 resends no earlier block, so its first message starts at zero; later turns count the whole conversation again,
 which is the same upper bound. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and
 this budget doesn't count, so nothing here promises it fits in the 6 MB left over.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
->>>>>>> 7bd48fdc156d7ecd81857be284588621434fee9b
 
 ### 5.5 Shape MCP tools
 

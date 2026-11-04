@@ -168,6 +168,8 @@ describe('a large dropped image', () => {
   const MB = 1024 * 1024;
   const sized = (head: Buffer, bytes: number): Buffer =>
     Buffer.concat([head, Buffer.alloc(bytes - head.length)]);
+  /** A whole 100×80 PNG of exactly this many bytes, which the daemon can read the size of. */
+  const wholePng = (bytes: number): Buffer => pngOfSize(100, 80, bytes - PNG.length - 12);
 
   it('goes as a path to Read, not an image block, so the turn can end', async () => {
     const stored = drop('big.png', sized(PNG, 12 * MB));
@@ -241,17 +243,7 @@ describe('a large dropped image', () => {
       expect(turn.message).toMatch(/too large to show.*Read/);
     });
 
-    it.each([
-      { name: 'a PNG at 8000', file: 'edge.png', bytes: png(8000, 8000) },
-      { name: 'a tall JPEG at 8000', file: 'edge.jpg', bytes: jpeg(1200, 8000) },
-      { name: 'a lossy WebP at 8000', file: 'edge.webp', bytes: webpLossy(8000, 600) },
-    ])('is still sent inline at the limit: $name', async ({ file, bytes }) => {
-      drop(file, bytes);
-      const turn = await nextTurn('Fits');
-      expect(turn.images).toHaveLength(1);
-      expect(turn.message).not.toMatch(/too large to show/);
-    });
-
+    // What the API takes up to 8000 px a side goes inline only within 2000 px: see the next describe.
     it('is named as a path while a normal image beside it is still sent inline', async () => {
       drop('long.png', png(1200, 9000));
       drop('small.png', PNG);
@@ -293,8 +285,7 @@ describe('a large dropped image', () => {
     const sent: number[] = [];
     const marked: number[] = [];
     for (let turnNo = 0; turnNo < 5; turnNo += 1) {
-      for (let i = 0; i < 3; i += 1)
-        drop(`t${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`t${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
       const turn = await nextTurn(`Turn ${String(turnNo)}`);
       sent.push(turn.images.length);
       marked.push(turn.message.match(/too large to show/g)?.length ?? 0);
@@ -311,7 +302,7 @@ describe('a large dropped image', () => {
   it('spends what is left of the conversation total on a smaller image, then stops', async () => {
     for (let turnNo = 0; turnNo < 3; turnNo += 1)
       for (let i = 0; i < 3; i += 1) {
-        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+        drop(`a${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
         if (i === 2) await nextTurn(`Turn ${String(turnNo)}`);
       }
     // 18 MiB spent: nothing more fits, not even a tiny image.
@@ -324,8 +315,7 @@ describe('a large dropped image', () => {
   /** Spends the whole conversation total: nine 2 MiB images over three turns, each told. */
   const spendTheTotal = async (): Promise<void> => {
     for (let turnNo = 0; turnNo < 3; turnNo += 1) {
-      for (let i = 0; i < 3; i += 1)
-        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`a${String(turnNo)}-${String(i)}.png`, wholePng(2 * MB));
       await nextTurn(`Turn ${String(turnNo)}`);
     }
   };
@@ -399,8 +389,8 @@ describe('a large dropped image', () => {
       for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
       expect(kept()).toHaveLength(12);
       // 16.8 MB of screens leaves about 2 MB: one more image fits, and a second does not.
-      drop('fits.png', sized(PNG, MB));
-      drop('over.png', sized(PNG, 1.5 * MB));
+      drop('fits.png', wholePng(MB));
+      drop('over.png', wholePng(1.5 * MB));
       const turn = await nextTurn('Both');
       expect(turn.images).toHaveLength(1);
       expect(turn.message).toMatch(/over\.png\) — too large to show inline; Read it/);
@@ -408,11 +398,11 @@ describe('a large dropped image', () => {
     });
 
     it('refuses a screen that would pass the total the dropped images left, saying why', async () => {
-      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('One');
-      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('Two');
-      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, sized(PNG, 2 * MB));
+      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, wholePng(2 * MB));
       await nextTurn('Three');
       // 16 MiB told: a 1.5 MB screen fits once.
       const screens = screensOf(drawn(1_500_000));
