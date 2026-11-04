@@ -2,7 +2,7 @@ import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@m
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { FILE_PICKER_ACCEPT } from './dropped-files';
-import { keepBoth, type LateOutcome } from './late-outcome';
+import { keepBoth, withoutSent, type LateOutcome } from './late-outcome';
 import { isSendKey } from './use-shape-keys';
 
 export interface ComposerProps {
@@ -97,7 +97,8 @@ export function Composer(props: ComposerProps) {
     setFailure(null);
     try {
       await props.onSend(text);
-      setDraft('');
+      // Only the text sent goes: a failed text restored while it was on its way stays.
+      setDraft((typed) => withoutSent(typed, text));
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
     } finally {
