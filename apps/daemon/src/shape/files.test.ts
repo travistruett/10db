@@ -548,6 +548,23 @@ describe('a large dropped image', () => {
       expect(carried).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
     });
 
+    it('takes screens in a conversation whose told images all went as paths for their pixels', async () => {
+      // Nine long screenshots of about 2 MiB: told, but none sent as a block, so none is carried.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`long${String(turnNo)}-${String(i)}.png`, pngOfSize(1200, 9000, 1.9 * MB));
+        const turn = await nextTurn(`Turn ${String(turnNo)}`);
+        expect(turn.images).toEqual([]);
+      }
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+      // A small image still fits beside the twelve screens.
+      drop('late.png', PNG);
+      const late = await nextTurn('One more');
+      expect(late.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+    });
+
     it('does not charge an image whose size cannot be read, which went as a path', async () => {
       const whole = pngOfSize(100, 80, 1.9 * MB);
       for (let i = 0; i < 9; i += 1) drop(`cut${String(i)}.png`, whole.subarray(0, -1));
