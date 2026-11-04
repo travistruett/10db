@@ -285,8 +285,8 @@ function installsSaid(installs: number, startedOver: boolean): string {
     return startedOver
       ? '10db removed node_modules and installed from the lockfile, and that install did not bring them back'
       : '10db installed from the lockfile and that install did not bring them back';
-  const count = installs === 2 ? 'neither install' : `none of the ${String(installs)} installs`;
-  return `10db installed from the lockfile${startedOver ? ', then removed node_modules and installed again by itself' : ' and then installed again by itself'}, and ${count} brought them back`;
+  // One gate runs two installs at most, so there is nothing past a pair to count.
+  return `10db installed from the lockfile${startedOver ? ', then removed node_modules and installed again by itself' : ' and then installed again by itself'}, and neither install brought them back`;
 }
 
 /** A merge that settled conflicts by itself. */
@@ -1260,10 +1260,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     if (first.kind !== 'done') return first;
     if (first.broken === undefined) return first;
     // A failed install was already started over by `refresh`, or was a timeout or a refused host
-    // that a repeat would only meet again: it is reported as it is. An install that exited zero gets
-    // the second pass, and `refresh` adds no retry to a start over it was asked for, so one gate
-    // runs an install twice at most.
-    if (first.final === true) return first;
+    // that a repeat would only meet again: it is reported as it is. So is an install whose own
+    // start over exited zero and left the copy broken (`installs` 2 and not `final`): the second
+    // pass would be that same install from nothing again. Only an install that exited zero without
+    // a start over of `refresh`'s own gets the second pass, and `refresh` adds no retry to a start
+    // over it was asked for, so one gate runs an install twice at most.
+    if (first.final === true || (first.installs ?? 0) >= 2) return first;
     // The first recovery is automatic: remove node_modules, install from nothing, and let the step
     // run if that resolves. Only a second broken install in a row is reported
     // (`decisions/2026-11-03-a-broken-install-repairs-itself-once.md`).
