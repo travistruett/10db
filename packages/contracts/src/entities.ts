@@ -792,6 +792,12 @@ export const LEFT_OUT_NOTICE_KEY = 'left-out';
  */
 export const REVERTED_NOTICE_KEY = 'reverted-work';
 
+/**
+ * The key of the batch notice that records 10db repaired a broken install by itself. It is history,
+ * not a wait: a task's drawer keeps showing it after its run fails or its batch ends.
+ */
+export const INSTALL_REPAIRED_NOTICE_KEY = 'install-repaired';
+
 export const InboxTarget = z.object({
   workstreamId: WorkstreamId,
   sessionId: SessionId.nullable(),

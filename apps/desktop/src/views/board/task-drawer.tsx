@@ -82,6 +82,7 @@ import {
   pullRequestClosed,
   shippedAnywayAndClosed,
   shippedAtLimitLine,
+  taskHistory,
   taskNotices,
 } from './task-state';
 
@@ -309,7 +310,9 @@ export function TaskDrawer({
           onClosed={onClose}
           {...(onCancelRun ? { onCancelRun } : {})}
         />
-        <TaskNotices notices={taskNotices(workstream, batch)} />
+        <TaskNotices
+          notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}
+        />
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}

@@ -328,6 +328,74 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       );
     });
 
+    it('runs a failing install twice at most in one gate: refresh already started over, so the gate does not again', async () => {
+      const { batch } = await pruned();
+      h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      // Call 1 was the cut's; refresh's own install and its start over are the only two after it.
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(update.kind).toBe('install_broken');
+    });
+
+    it('runs an install twice at most in one gate when the first exits zero and the start over fails', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation((input) => {
+        if (input.startOver === true) h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+        return refresh(input);
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      // Call 1 was the cut's; the install that exited zero and the start over are the two after it.
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/needs failed \(exit 1/);
+    });
+
+    it('says both installs ran when the gate’s start over is the one refused a host', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation((input) => {
+        if (input.startOver === true) h.pnpm.blockedFrom('registry.npmjs.org');
+        return refresh(input);
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/installed again/);
+    });
+
+    it('raises the card without starting over when the first install timed out', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      const spy = vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation(async (input) => {
+        await refresh(input);
+        return {
+          kind: 'failed',
+          exitCode: 124,
+          timedOut: true,
+          tail: 'timed out',
+          logPath: '/log',
+          blockedHosts: [],
+        };
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/timed out/);
+      expect(update.kind === 'install_broken' && update.note).not.toMatch(/installed again/);
+    });
+
+    it('raises the card without starting over when the first install was refused a host', async () => {
+      const { batch } = await pruned();
+      h.pnpm.blockedFrom('registry.npmjs.org');
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      // The cut's install, and the one before the gate: neither is repeated.
+      expect(h.pnpm.calls()).toHaveLength(2);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).not.toMatch(/installed again/);
+    });
+
     it('says the install is broken, with no notice, when the second pass throws before it installs', async () => {
       const { batch } = await pruned();
       const read = h.git.blobAt.bind(h.git);
@@ -348,16 +416,15 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind === 'install_broken' && update.note).toMatch(/git is gone/);
     });
 
-    it('lets the gate run with the failure in its note when the second install exits non-zero but every package resolves', async () => {
+    it('lets the gate run with the failure in its note when refresh’s own start over exits non-zero but every package resolves', async () => {
       const { batch } = await pruned();
       h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
-      // Calls 2 and 3 are the first install and refresh's own retry; call 4 is the start over.
-      h.pnpm.makesOnCall(4, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+      // Call 2 is the first install and call 3 refresh's own start over; the gate adds no fourth.
+      h.pnpm.makesOnCall(3, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
-      expect(h.pnpm.calls()).toHaveLength(4);
+      expect(h.pnpm.calls()).toHaveLength(3);
       expect(update.kind).toBe('up_to_date');
       expect(update.kind === 'up_to_date' && update.note).toMatch(/needs failed \(exit 1/);
-      expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe('install-repaired');
     });
 
     it('leaves a project whose gate never needed node_modules alone', async () => {

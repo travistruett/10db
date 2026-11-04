@@ -1,4 +1,9 @@
-import { LEFT_OUT_NOTICE_KEY, type BatchDto, type Notice } from '@10db/contracts';
+import {
+  INSTALL_REPAIRED_NOTICE_KEY,
+  LEFT_OUT_NOTICE_KEY,
+  type BatchDto,
+  type Notice,
+} from '@10db/contracts';
 import { worktreeMergeCommand, worktreeRestoreCommand } from '../git';
 import { revertCommitLine } from '../team';
 import { detailOf, inSteps, listPaths, RERAN, testLines } from './cards';
@@ -52,7 +57,7 @@ export const NOTICE_KEY = {
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
-  installRepaired: 'install-repaired',
+  installRepaired: INSTALL_REPAIRED_NOTICE_KEY,
 } as const;
 
 /** What a batch's tasks are told about an install 10db repaired by itself. */

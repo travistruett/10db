@@ -19,9 +19,21 @@
   answers `install_broken` exactly as before, so the runner's `install_broken` failure and card and the shipping
   gate's `BatchFailure.InstallBroken` card are unchanged. Its note now says that two installs did not bring the
   packages back.
+- **A failed install is not started over again by the gate.** `refresh` already starts over once when its install
+  fails and leaves the copy broken, and deliberately does not after a timeout (it would only wait again) or a
+  refused host (the same refusal would come back). `installOnce` marks a failed install `final`, and `install`
+  reports it as it is: a timeout or a refused host raises the `install_broken` card without a second install, and
+  any other failure runs at most two installs in one gate (`refresh`'s own pair), not four. The second pass
+  applies only to an install that exited zero and left the copy broken. `refresh` adds no retry of its own to a
+  start over it was asked for, since that install already is the start over from nothing, so that path runs two
+  installs as well. The card's note says only that the install did not bring the packages back when no start
+  over happened.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. The next
-  repair replaces it with its own time. The time is the delivery context's clock.
+  repair replaces it with its own time. The time is the delivery context's clock. The notice is history, not a
+  wait: the desktop's `taskHistory` (`task-state.ts`) keeps listing it in the drawer after the run failed or
+  the batch closed, was abandoned or had its pull request merged, when `taskNotices` drops the batch's notices.
+  The card's state line does not show it then.
 
 ## Why
 

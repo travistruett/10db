@@ -1,4 +1,5 @@
 import {
+  INSTALL_REPAIRED_NOTICE_KEY,
   mintId,
   RiskTag,
   type BatchDto,
@@ -739,6 +740,43 @@ describe('TaskDrawer', () => {
       const d = await dialog();
       expect(within(d).getByText('Conflicts with main: README.md')).toBeTruthy();
       expect(within(d).getByText(/Resolve it on GitHub\./)).toBeTruthy();
+    });
+
+    describe('an install that was repaired', () => {
+      const repaired = {
+        key: INSTALL_REPAIRED_NOTICE_KEY,
+        tone: 'info' as const,
+        line: 'The install in this copy was repaired at 2026-11-03 10:00 UTC',
+        body: 'The first install left it broken, so it started over.',
+      };
+
+      it('still shows, with the time, on a failed run', async () => {
+        serve();
+        const batch = batchDto({ state: 'OPEN', notices: [repaired] });
+        open({ workstream: workstreamDto({ state: 'FAILED', batchId: batch.id }), batch });
+        const d = await dialog();
+        expect(within(d).getByText(repaired.line)).toBeTruthy();
+      });
+
+      it('still shows on finished work in a closed batch, without what the batch stood in', async () => {
+        serve();
+        const batch = batchDto({
+          state: 'CLOSED',
+          notices: [
+            {
+              key: 'base-conflict',
+              tone: 'warning',
+              line: 'Conflicts with main: README.md',
+              body: 'main on origin changed these files:\n- README.md',
+            },
+            repaired,
+          ],
+        });
+        open({ workstream: workstreamDto({ state: 'DONE', batchId: batch.id }), batch });
+        const d = await dialog();
+        expect(within(d).getByText(repaired.line)).toBeTruthy();
+        expect(within(d).queryByText('Conflicts with main: README.md')).toBeNull();
+      });
     });
 
     it('shows no notice for a task with none', async () => {
