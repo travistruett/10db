@@ -316,22 +316,6 @@ export const ProvenanceDto = z.object({
 });
 export type ProvenanceDto = z.infer<typeof ProvenanceDto>;
 
-const Flag = z
-  .enum(['0', '1'])
-  .default('0')
-  .transform((v) => v === '1');
-
-/** The list routes' query string. `history` also returns superseded, retired, withdrawn and proposed records. */
-export const KnowledgeQuery = z.object({
-  projectId: ProjectId,
-  scope: z.enum(KnowledgeScope).optional(),
-  area: AreaName.optional(),
-  kind: z.enum(PrincipleKind).optional(),
-  q: z.string().trim().max(200).optional(),
-  history: Flag,
-});
-export type KnowledgeQuery = z.output<typeof KnowledgeQuery>;
-
 export const ProposalQuery = z.object({
   projectId: ProjectId,
   status: z.enum(ProposalStatus).default(ProposalStatus.Pending),
