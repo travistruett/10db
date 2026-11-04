@@ -14,9 +14,17 @@ test("a page Vite serves carries the window's img-src and stops an image from el
   const response = await page.goto('/');
   expect(response?.headers()['content-security-policy']).toBe("img-src 'self' data:");
 
+  // The violation events stay on the page, in `window.cspBlocked`, and the test waits for them below.
+  // Each load goes to its own origin, not just its own path: WebKit may reduce a cross-origin blocked
+  // URI to its origin, and the origins tell the loads apart either way. Both hosts reach the daemon's
+  // port, not the page's, so both are another origin than the page's `localhost`.
+  const imageOrigin = daemonUrl;
+  const styleOrigin = `http://localhost:${new URL(daemonUrl).port}`;
+
   const outcome = await page.evaluate(
-    async ({ elsewhere, data }) => {
+    async ({ image: imageSrc, style: styleSrc, data }) => {
       const blocked: string[] = [];
+      (window as unknown as { cspBlocked: string[] }).cspBlocked = blocked;
       document.addEventListener('securitypolicyviolation', (event) => {
         blocked.push(`${event.violatedDirective} ${event.blockedURI}`);
       });
@@ -33,22 +41,39 @@ test("a page Vite serves carries the window's img-src and stops an image from el
         });
       // A stylesheet url() is an image load too.
       const style = document.createElement('style');
-      style.textContent = `body { background-image: url(${elsewhere}?css); }`;
+      style.textContent = `body { background-image: url(${styleSrc}); }`;
       document.head.append(style);
       document.body.getBoundingClientRect();
       const fromData = await load(data);
-      const fromElsewhere = await load(`${elsewhere}?image`);
-      // The violation events are queued; let them run.
-      await new Promise((resolve) => setTimeout(resolve, 250));
-      return { fromData, fromElsewhere, blocked };
+      const fromElsewhere = await load(imageSrc);
+      return { fromData, fromElsewhere };
     },
     // Another origin than the page's: the daemon, which the page may fetch but not draw.
-    { elsewhere: `${daemonUrl}/health`, data: DATA_IMAGE },
+    {
+      image: `${imageOrigin}/health/image`,
+      style: `${styleOrigin}/health/style`,
+      data: DATA_IMAGE,
+    },
   );
 
   expect(outcome.fromData).toBe(true);
   expect(outcome.fromElsewhere).toBe(false);
-  expect(
-    outcome.blocked.filter((entry) => entry.startsWith('img-src')).length,
-  ).toBeGreaterThanOrEqual(2);
+
+  // The violation events are queued after the loads settle: wait for them by condition.
+  const isBlocked = (origin: string): Promise<boolean> =>
+    page.evaluate(
+      (prefix) =>
+        (window as unknown as { cspBlocked: string[] }).cspBlocked.some((entry) =>
+          entry.startsWith(prefix),
+        ),
+      `img-src ${origin}`,
+    );
+  await expect
+    .poll(() => isBlocked(imageOrigin), { message: 'the new Image() load is reported blocked' })
+    .toBe(true);
+  await expect
+    .poll(() => isBlocked(styleOrigin), {
+      message: 'the stylesheet url() load is reported blocked',
+    })
+    .toBe(true);
 });
