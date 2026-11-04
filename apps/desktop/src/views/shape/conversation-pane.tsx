@@ -193,6 +193,11 @@ export function ConversationPane({
         )}
       </Group>
       <Transcript messages={view?.messages ?? []} why={why} />
+      {view?.turn.waitingForUpdate === true ? (
+        <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
+          Waiting for an update to install. Your message will run after it.
+        </Text>
+      ) : null}
       <Composer
         firstRun={!heardBuilder}
         answering={answering}

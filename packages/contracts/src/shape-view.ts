@@ -124,6 +124,11 @@ export const ShapeTurnDto = z.object({
   proposing: z.boolean(),
   /** A rehearsal turn is queued or running (§7): the Convert modal says "Rehearsing n tasks…". */
   rehearsing: z.boolean(),
+  /**
+   * The next turn is held back by a waiting update's drain: nothing of it has started, and it runs
+   * once the update has installed or the drain ended. `running` is false and `queued` counts it.
+   */
+  waitingForUpdate: z.boolean(),
 });
 export type ShapeTurnDto = z.infer<typeof ShapeTurnDto>;
 

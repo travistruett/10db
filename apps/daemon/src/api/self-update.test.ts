@@ -56,7 +56,7 @@ describe('the self-update setting', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
+    midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
     blocker: null,
   };
   const services: SelfUpdateServices = {

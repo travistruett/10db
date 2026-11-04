@@ -210,10 +210,11 @@ const PR_NOT_FOUND = /could not resolve to a (pullrequest|repository)\b/i;
 const SIGNED_OUT = /gh auth login|not logged in/i;
 /**
  * gh's words when it never reached GitHub: its own line for a DNS failure, or the network error Go
- * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out).
+ * gave it (`dial tcp ...: i/o timeout`, `connection refused`, a TLS handshake that timed out, a
+ * certificate a proxy or captive portal swapped in, a connection cut off with `EOF`).
  */
 const UNREACHABLE =
-  /error connecting to|check your internet connection|dial (tcp|udp)|i\/o timeout|connection (refused|reset)|network is unreachable|no route to host|no such host|tls handshake timeout|client\.timeout exceeded/i;
+  /error connecting to|check your internet connection|dial (tcp|udp)|i\/o timeout|connection (refused|reset)|network is unreachable|no route to host|no such host|tls handshake timeout|client\.timeout exceeded|tls: failed to verify certificate|x509:|\bEOF\s*$/i;
 const MAX_OUTPUT = 4 * 1024 * 1024;
 /** Prompts are off whatever the environment says: nobody can answer one. */
 const NO_PROMPTS = {

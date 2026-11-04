@@ -18,7 +18,9 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  countBatchesInFlight,
   countWaitingOnCard,
+  isLaneWaitingOnCard,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -459,11 +461,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWait: () => {
       scheduler?.requestTick();
     },
-    // During the drain a holder that runs nothing (queued, or parked before its next session or gate)
-    // frees no claim until the update installs. A wait on it would keep its session running, and the
-    // update waits for that session to end, so the wait is refused and the session ends by itself.
+    // During the drain a holder that runs nothing (queued, parked before its next session or gate, or
+    // waiting on a card with a live session) frees no claim until the update installs. A wait on it
+    // would keep its session running, and the update waits for that session to end, so the wait is
+    // refused and the session ends by itself.
     parked: (id) =>
-      updateDrain.draining && runner !== null && (!runner.isRunning(id) || runner.isParked(id)),
+      updateDrain.draining &&
+      runner !== null &&
+      (!runner.isRunning(id) || runner.isParked(id) || isLaneWaitingOnCard(state.db, id)),
   });
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -1121,10 +1126,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // the quit tells the builder it went unanswered); one running finishes. A lane waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
   // its session and recovery parks it on its card again, so it must not hold the install, and every
   // lane behind it, for as long as the builder leaves the card.
-  // `shapes` names the conversations among `working`, so a drain only they hold can say so.
+  // `shapes`, `batches` and `jobs` are the kinds of work among `working` that are no lane or gate, so
+  // a drain only they hold can say where to look instead of naming a running step the Board lacks.
   const midSessionWaits = (): {
     working: number;
     waitingOnCard: number;
+    batches: number;
+    jobs: number;
     shapes: { id: ShapeId; title: string }[];
   } => {
     const waitingOnCard = countWaitingOnCard(state.db);
@@ -1134,7 +1142,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         updateDrain.parked() -
         installHold.parked(),
     );
-    return { working, waitingOnCard, shapes: shape.runningTurns() };
+    return {
+      working,
+      waitingOnCard,
+      batches: countBatchesInFlight(state.db),
+      jobs: deliveryJobs.pending(),
+      shapes: shape.runningTurns(),
+    };
   };
   const midSessionCount = (): number => {
     const { working, waitingOnCard } = midSessionWaits();

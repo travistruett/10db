@@ -25,7 +25,7 @@ function noteFor(status: SelfUpdateStatusDto): Note | null {
   if (status.draining && status.drainingSince !== null)
     return {
       label: 'Update draining the factory',
-      text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: running steps finish, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
+      text: `Lanes are paused since ${absoluteTime(status.drainingSince)} for an update to ${build}: what is running finishes, then 10db installs and restarts, and lanes resume. ${waitsFor}`,
       color: 'var(--mantine-color-yellow-6)',
     };
   if (status.waitingSince !== null)

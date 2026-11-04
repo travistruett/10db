@@ -456,6 +456,33 @@ describe('tick', () => {
     expect(new Set(reasons).size).toBe(3);
   });
 
+  it('points at the repository only for an error that fits it, and always reads as a sentence', async () => {
+    const reasons: string[] = [];
+    for (const message of [
+      'gh api failed (exit 1): gh: API rate limit exceeded (HTTP 403)',
+      'gh api failed (exit 1): gh: secondary rate limit (HTTP 403)',
+      'gh api failed (exit 1): gh: Bad Gateway (HTTP 502)',
+      'gh api failed (exit 1): gh: Not Found (HTTP 404)',
+      'gh api failed (exit 1): ',
+    ]) {
+      world.head = new GhError(GhFailure.Failed, message);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      reasons.push(update.status().problem?.message ?? '');
+    }
+    for (const reason of reasons.slice(0, 3)) {
+      expect(reason).not.toMatch(/repository|account/i);
+      expect(reason).toMatch(/tries again/);
+    }
+    expect(reasons[0]).toMatch(/rate limit/i);
+    expect(reasons[2]).toMatch(/HTTP 502/);
+    expect(reasons[3]).toMatch(/repository/);
+    for (const reason of reasons) {
+      expect(reason).not.toMatch(/:\s*\.|:\s*$/);
+    }
+    expect(reasons[4]).toMatch(/exit 1\)/);
+  });
+
   it('names the error GitHub answered when the comparison is what failed, and when gh is not installed or times out', async () => {
     world.ahead = new GhError(GhFailure.Failed, 'gh api failed (exit 1): HTTP 403 rate limit');
     const update = make();
@@ -624,6 +651,20 @@ describe('a drain that only shaping conversations hold', () => {
     clock.advance(SHAPE_HOLD_ALERT_MS);
     await update.tick();
     expect(shapeCards()[0]?.body).toMatch(/“Denser board”.*“Login flow”/);
+  });
+
+  it('names only the conversations still holding it once one of them ends', async () => {
+    const login = { id: mintId('Shape'), title: 'Login flow' };
+    const update = await drainingForShapes(DENSER, login);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    world.busy = 1;
+    world.shapes = [login];
+    await update.tick();
+    const open = shapeCards().filter((item) => item.state === InboxState.Open);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.body).toContain('“Login flow”');
+    expect(open[0]?.body).not.toContain('“Denser board”');
   });
 
   it('raises none while a lane or gate also holds the drain', async () => {
@@ -1173,6 +1214,55 @@ describe('a waiting update drains the factory', () => {
         commit: NEWER,
       });
     });
+
+    it.each(['download', 'verify-checksum', 'stage'])(
+      'does not install the older build when the build for the same head fails again at %s after retry()',
+      async (step) => {
+        const update = await stagedThenNewerHeadFailsAt('download');
+        world.busy = 0;
+        expect(await update.tick()).toBe('failed');
+        update.retry();
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('failed');
+        expect(world.calls).not.toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe('e'.repeat(40));
+        expect(cards()).toHaveLength(1);
+        expect(update.status().notInstalling).toBe('failed');
+        expect(await update.tick()).toBe('failed-before');
+        expect(world.calls).not.toContain('apply');
+      },
+    );
+
+    /** The newer build failed and the builder retried, so only the mark says it failed. */
+    async function retriedAfterNewerHeadFailed() {
+      const update = await stagedThenNewerHeadFailsAt('download');
+      world.busy = 0;
+      expect(await update.tick()).toBe('failed');
+      update.retry();
+      expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      return update;
+    }
+
+    it('does not install the older build when GitHub goes away after retry()', async () => {
+      const update = await retriedAfterNewerHeadFailed();
+      world.head = new Error('offline');
+      expect(await update.tick()).toBe('unreachable');
+      expect(world.calls).not.toContain('apply');
+      expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+    });
+
+    it.each(['find-commit', 'find-build'])(
+      'does not install the older build when the look fails at %s after retry(), and records nothing',
+      async (step) => {
+        const update = await retriedAfterNewerHeadFailed();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
+        expect(world.calls).not.toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+      },
+    );
 
     it('does not fall back on the older build when GitHub goes away after a newer one failed', async () => {
       // The head moved first, so the staged build was found for an earlier head than the failure.
@@ -1985,10 +2075,64 @@ describe('why an available update is not installing', () => {
     const tick = update.tick();
     await settled();
     expect(update.status().availableCommit).toBe(NEWER);
-    expect(update.status().notInstalling).toBeNull();
+    // Nothing of the old head's, but not idle-waiting either: its build is being fetched.
+    expect(update.status().notInstalling).toBe('fetching');
     finishStage({ ok: true, current: true, commit: RUNNING });
     expect(await tick).toBe('no-newer-build');
     expect(update.status().notInstalling).toBe('unbuilt');
+  });
+
+  describe('while the first build of a head is fetched or waited for', () => {
+    let finishStage: (result: StageResult) => void = () => undefined;
+    beforeEach(() => {
+      world.stage = () =>
+        new Promise((resolve) => {
+          finishStage = resolve;
+        });
+    });
+
+    it('says it is fetching, with nothing staged and nothing waiting', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().waitingSince).toBeNull();
+      expect(update.status().notInstalling).toBe('fetching');
+      finishStage(STAGED_OK);
+      expect(await tick).toBe('applying');
+      expect(update.status().notInstalling).toBeNull();
+    });
+
+    it('says it again for a stage that fails, not that it waits', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      expect(update.status().notInstalling).toBe('fetching');
+      finishStage({ ok: false, step: 'download', message: 'reset' });
+      expect(await tick).toBe('failed');
+      expect(update.status().notInstalling).toBe('failed');
+    });
+
+    it('says it no more once the build is staged and waits for an idle moment', async () => {
+      world.busy = 1;
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      finishStage(STAGED_OK);
+      expect(await tick).toBe('busy');
+      expect(update.status().waitingSince).not.toBeNull();
+      expect(update.status().notInstalling).toBeNull();
+    });
+
+    it('says nothing of it when the switch is off', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      world.enabled = false;
+      expect(update.status().notInstalling).toBeNull();
+      finishStage(STAGED_OK);
+      await tick;
+    });
   });
 
   it('keeps the head’s reason through a stage for the same head', async () => {

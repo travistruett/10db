@@ -130,10 +130,12 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
-  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard }`, what the update waits for now
-  (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which hold it only
-  until the drain begins). Both notes say it: "waiting for N running steps", "Lanes waiting on a card (K) do not
-  hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
+  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard, batches, jobs, shapes }`, what the update
+  waits for now (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which
+  hold it only until the drain begins). `batches`, `jobs` and `shapes` are the kinds of `working` that are no lane
+  or gate, so the notes name each by what it is and call only the rest "running steps", since the Board shows only
+  those. Both notes say it: "waiting for 1 running step, 1 batch being cut or shipped and 1 delivery job", "Lanes
+  waiting on a card (K) do not hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.
@@ -146,6 +148,9 @@ factory (`self-update/drain.ts`) until the app has installed:
   that rolled-back one is `unbuilt`, because it installs by itself when its own build finishes. A check that could
   not ask GitHub learned nothing, so the reason stays; a different head, or the switch turned off and on, clears it
   at once rather than when the next check ends. An install that fails while the daemon runs counts with no check.
+  `fetching` is the one reason taken from a check under way rather than a finished one: while a head with nothing
+  staged has its build fetched, or waited for while GitHub still builds it (many minutes), nothing waits for an idle
+  moment yet. It shows only when no other reason holds and ends when the build is staged or the check ends.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
@@ -210,12 +215,23 @@ nor is any step of the re-stage while main's head is unchanged since the build w
 above). Any later step (`wait-for-build`,
 `download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
-confirmed. It stays staged, so when main moves the next stage passes `--have`: it fetches only if a newer build is
-still the newest. The builder's retry is the switch, and turning it off forgets the staged build (the folder is
-removed), so off and then on starts the next stage with nothing to keep and passes no `--have`: the newer build is
-fetched as wanted, and the older one is downloaded again only if it turns out to be the newest. Only a head move
-keeps the staged build with `--have`. It does not retry every minute, because a checksum mismatch
-would then download the same DMG each minute and hold the drain for ever.
+confirmed. It stays staged, marked as one whose newer build failed to fetch, so when main moves the next stage
+passes `--have`: it fetches only if a newer build is still the newest. The builder asks to try again with the
+switch, which `PUT /settings/self-update` takes as a retry on every touch, and what happens to the staged build
+depends on how:
+
+- Turning the switch off and on forgets the staged build (the folder is removed), so the next stage has nothing to
+  keep and passes no `--have`: the newer build is fetched as wanted, and the older one is downloaded again only if
+  it turns out to be the newest.
+- Saving the switch on while it is already on clears `self_update.failed_commit` and keeps the staged build, so the
+  next stage for the same head passes `--have` again. If that fetch fails too, at any later step, it is a failure
+  again, with its card and `self_update.failed_commit`. A failed look after the retry records nothing and raises no
+  card. Either way the older build still does not install, not even once nothing is mid-session and not with GitHub
+  away: the mark that the newer build failed outlives the retry. Any stage that answers ends it, whatever it
+  answers, and so does one that loses the folder, or the switch going off.
+
+A head move also keeps the staged build with `--have`. None of this retries every minute, because a checksum
+mismatch would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its
 first check and installs the build the builder just rolled back from. `rollback-app.sh` reads the commit from the

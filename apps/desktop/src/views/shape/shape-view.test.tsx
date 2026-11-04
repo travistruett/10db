@@ -73,7 +73,7 @@ const open = (view: ShapeViewDto): ReturnType<typeof renderApp> =>
 const runningView = (queued = 0): ShapeViewDto =>
   proposed([], {
     round: 0,
-    turn: { running: true, queued, proposing: false, rehearsing: false },
+    turn: { running: true, queued, proposing: false, rehearsing: false, waitingForUpdate: false },
   });
 
 const refusal = (): Response =>
@@ -321,7 +321,13 @@ describe('Shape: the conversation', () => {
   it('shows Propose as pending while a Propose turn is queued or running', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: true, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: true,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     serve(...conversations(view));
     open(view);
@@ -334,7 +340,13 @@ describe('Shape: the conversation', () => {
   it('shows Stop while a turn runs and stops it on Esc', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     const stops: string[] = [];
     serve(
@@ -411,7 +423,13 @@ describe('Shape: the conversation', () => {
   it('puts the daemon’s words in the red alert above the input when Stop is refused', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     serve(
       ...conversations(view),
@@ -428,7 +446,13 @@ describe('Shape: the conversation', () => {
   it('removes a refused Stop from the alert once the turn it targeted has ended', async () => {
     const running = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     const ended = { ...running, turn: { ...running.turn, running: false } };
     let current = running;
@@ -458,7 +482,13 @@ describe('Shape: the conversation', () => {
   it('keeps a refused Stop in the alert while its turn is still running', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     serve(
       ...conversations(view),
@@ -552,7 +582,13 @@ describe('Shape: the conversation', () => {
   it('still shows a Stop refused after a send succeeded while it was in flight', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     let refuse: () => void = () => undefined;
     const held = new Promise<void>((resolve) => {
@@ -587,7 +623,13 @@ describe('Shape: the conversation', () => {
   it('removes a refused Stop from the alert once a later send succeeds', async () => {
     const view = proposed([], {
       round: 0,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     serve(
       ...conversations(view),
@@ -654,6 +696,37 @@ describe('Shape: the conversation', () => {
     await act(() => queryClient.invalidateQueries({ queryKey: ['shapes'] }));
     await waitFor(() => {
       expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
+    });
+  });
+
+  it('says a turn held by an update will run after it, until the drain ends or the turn starts', async () => {
+    const parked: ShapeViewDto = proposed([], {
+      round: 0,
+      turn: {
+        running: false,
+        queued: 1,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: true,
+      },
+    });
+    let current = parked;
+    serve(
+      http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([parked.shape])),
+      http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(current)),
+    );
+    const { queryClient } = open(parked);
+    const conversation = await screen.findByRole('region', { name: 'Conversation' });
+    const line = /waiting for an update to install.*will run after it/i;
+    expect(await within(conversation).findByText(line)).toBeTruthy();
+    // The drain ends and the turn starts: the line goes.
+    current = {
+      ...parked,
+      turn: { ...parked.turn, running: true, queued: 0, waitingForUpdate: false },
+    };
+    await act(() => queryClient.invalidateQueries({ queryKey: ['shapes'] }));
+    await waitFor(() => {
+      expect(within(conversation).queryByText(line)).toBeNull();
     });
   });
 
@@ -1286,7 +1359,13 @@ describe('Shape: Convert', () => {
     const view = convertible();
     const running = {
       ...view,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     };
     serve(...conversations(running));
     open(running);

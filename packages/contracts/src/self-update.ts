@@ -33,9 +33,11 @@ export type SelfUpdateBlockerDto = z.infer<typeof SelfUpdateBlockerDto>;
 /**
  * Why an available update does not wait for an idle moment: `failed` (its update failed and is not
  * tried again until main moves on or the builder touches the switch), `rolled-back` (the builder
- * rolled back from it), `unbuilt` (it has no finished build newer than the running one yet).
+ * rolled back from it), `unbuilt` (it has no finished build newer than the running one yet),
+ * `fetching` (nothing is staged yet: its build is being fetched, or waited for while GitHub builds
+ * it, which can take many minutes).
  */
-export const SelfUpdateNotInstalling = z.enum(['failed', 'rolled-back', 'unbuilt']);
+export const SelfUpdateNotInstalling = z.enum(['failed', 'rolled-back', 'unbuilt', 'fetching']);
 export type SelfUpdateNotInstalling = z.infer<typeof SelfUpdateNotInstalling>;
 
 /**
@@ -54,8 +56,8 @@ export const SelfUpdateStatusDto = z.object({
   availableCommit: CommitSha.nullable(),
   /**
    * Why `availableCommit` is not going to install: null while it waits, drains or installs, and with
-   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt` the daemon
-   * remembers it, and drains the moment a build is staged.
+   * none available. Install Now does nothing for `failed` or `rolled-back`; for `unbuilt` and
+   * `fetching` the daemon remembers it, and drains the moment a build is staged.
    */
   notInstalling: SelfUpdateNotInstalling.nullable(),
   /** Minutes a staged build waits for an idle moment before the factory drains for it. */
@@ -75,12 +77,16 @@ export const SelfUpdateStatusDto = z.object({
    * and shaping turns. `waitingOnCard` is lanes parked on an unanswered permission or ask card with
    * a session still live: they hold the update only until the drain begins, because a restart ends
    * the session and recovery parks the lane on its card again, to resume with the answer.
-   * `shapes` names the shaping conversations whose turn is under way and counted in `working`: a
-   * builder with no lane running can then tell a conversation is what the update waits for.
+   * `batches` and `jobs` are the batches being cut or shipped and the delivery jobs (a queued ship,
+   * checkout return or cleanup) counted in `working`, and `shapes` names the shaping conversations
+   * whose turn is under way and counted there too: what remains of `working` is the lanes and gates
+   * on the Board. A builder can then be told where to look for what the update waits for.
    */
   midSession: z.object({
     working: z.number().int().min(0),
     waitingOnCard: z.number().int().min(0),
+    batches: z.number().int().min(0),
+    jobs: z.number().int().min(0),
     shapes: z.array(z.object({ id: ShapeId, title: z.string() })),
   }),
   /**
