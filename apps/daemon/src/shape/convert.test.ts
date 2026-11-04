@@ -9,6 +9,8 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  cancelTask,
+  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getPrinciple,
@@ -857,6 +859,53 @@ describe('additions, changes and removals', () => {
     expect(out.ok ? [] : out.errors).toEqual([
       expect.stringMatching(/Question 1, about: seats was removed/),
     ]);
+  });
+
+  describe('a task the single-task Remove action cancelled', () => {
+    /** A converted task cancelled and detached as the daemon's removeTask does, with no remove_task proposal. */
+    const removedByAction = () => {
+      const m = c.say();
+      propose({ looseTasks: [loose(m, 'seats')] });
+      converted('seats');
+      const task = taskTitled('Task seats');
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+        detachShapeQuestionsOfTask(ctx, task.id);
+      });
+      return task;
+    };
+
+    it('refuses to propose a question about it, saying it was removed', () => {
+      removedByAction();
+      const m2 = c.say('Who pays for it?');
+      const out = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ questions: [whoPays(m2, 'seats')] })),
+      );
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/Question 1, about: seats was removed/),
+      ]);
+    });
+
+    it('refuses Convert of a question pending about it, and stores nothing against the cancelled task', () => {
+      const m = c.say();
+      propose({ looseTasks: [loose(m, 'seats')] });
+      converted('seats');
+      const task = taskTitled('Task seats');
+      const m2 = c.say('Who pays?');
+      propose({ questions: [whoPays(m2, 'seats')] });
+      write((ctx) => {
+        editProposal(ctx, rowOf('who-pays').id, { text: 'Who pays now?' });
+      });
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+        detachShapeQuestionsOfTask(ctx, task.id);
+      });
+      const out = convert('who-pays');
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/who-pays is about seats, which was removed/),
+      ]);
+      expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+    });
   });
 
   const whoPays = (m: string, about: string) => ({

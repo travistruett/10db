@@ -68,12 +68,14 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       .map((m) => m.id),
   );
   const proposals = listShapeProposals(db, shapeId);
-  // A converted removal cancels its task and leaves the link, so the key stays in `convertedTasks`.
-  const removedIds = new Set<TaskId>(
-    proposals
+  // A removal, from a converted proposal or the task's own Remove action, cancels its task and leaves
+  // the link, so the key stays in `convertedTasks`. The task's status covers both doors.
+  const removedIds = new Set<TaskId>([
+    ...proposals
       .filter((r) => r.kind === 'remove_task' && r.state === ShapeProposalState.Accepted)
       .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
-  );
+    ...[...convertedTasks.values()].filter((id) => getTask(db, id).status === TaskStatus.Cancelled),
+  ]);
   const removedTasks = new Set(removedKeys(convertedTasks, removedIds));
   const pinned = proposals.filter(
     (r) => r.state === ShapeProposalState.Pending && r.pinned.length > 0,
