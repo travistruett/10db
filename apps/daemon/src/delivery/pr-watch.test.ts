@@ -1909,6 +1909,60 @@ describe('a required check GitHub cancelled', () => {
     expect(rerunNoticeOf(id)?.line).toContain('lint');
   });
 
+  it('after a restart between an accepted and a refused run, never says 10db ran the refused check while it stays cancelled', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    await w.stop();
+
+    // After the restart GitHub still refuses run 88, and both checks stay cancelled for 10 minutes.
+    const second = watcher();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    second.start();
+    await second.idle();
+    for (let i = 0; i < GRACE_ROUNDS + 2; i++) {
+      h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+      await round(second);
+      const notice = noticeOf(id);
+      // A notice may name desktop (10db ran it) but never lint, which 10db did not run.
+      if (notice !== undefined) expect(notice.line).not.toContain('lint');
+    }
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('after a restart between an accepted and a refused run, runs the refused one once and then names both when they stay cancelled', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    await w.stop();
+
+    const second = watcher();
+    second.start();
+    await second.idle();
+    for (let i = 0; i < GRACE_ROUNDS + 3; i++) await round(second);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(noticeOf(id)?.line).toContain('cancelled again');
+    expect(noticeOf(id)?.line).toContain('desktop');
+    expect(noticeOf(id)?.line).toContain('lint');
+  });
+
   it('does not run the first run again when the daemon stops between two reruns', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, {
