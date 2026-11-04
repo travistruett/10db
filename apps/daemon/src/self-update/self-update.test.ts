@@ -289,6 +289,35 @@ describe('tick', () => {
     });
   });
 
+  it('installs a newer finished build, not the staged older one, when the head’s build finishes while lanes are busy', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    // The head's own build is still running, so the stage found only NEW.
+    world.stage = () => Promise.resolve(STAGED_OK);
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    // Main's head did not move, but its build finished while the lanes ran.
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(world.calls.filter((call) => call === 'stage')).toHaveLength(2);
+    expect(world.calls.filter((call) => call === 'apply')).toHaveLength(1);
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEWER,
+    });
+  });
+
+  it('stages again only when no task is mid-session, so busy lanes cost no download', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    expect(await update.tick()).toBe('busy');
+    expect(world.calls).toEqual(['stage']);
+  });
+
   it('installs nothing when the newest finished build is the one that runs, however often it looks', async () => {
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
     const update = make();

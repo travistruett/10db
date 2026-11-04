@@ -375,7 +375,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.RolledBack;
     }
 
-    if (staged?.head !== head) {
+    // A staged build that is not the head's own was the newest finished one when it was fetched,
+    // and the head's build may have finished since. Once nothing is mid-session it is about to
+    // install, so the newest finished build is fetched again first: never an older one than main's
+    // newest, and one quit instead of two. While work runs, the wait costs no download.
+    const olderThanHead = staged !== null && staged.commit !== head;
+    if (staged?.head !== head || (olderThanHead && deps.midSession() === 0)) {
       staged = null;
       // The build the builder rolled back from is not fetched again, so a check while main's head
       // is still building costs a look at GitHub, not a download.
