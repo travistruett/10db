@@ -65,8 +65,11 @@ export function failureReasons(log: string): Map<string, string> {
   lines.forEach((line, at) => {
     const [test] = failingTests(line);
     if (!test || reasons.has(failureKey(test))) return;
-    const reason = lines.slice(at + 1).find((next) => next.trim() !== '');
-    if (reason === undefined || /^\s*FAIL\s/.test(reason)) return;
+    // Tests with the same error print their FAIL lines one after another, above the one error.
+    const reason = lines
+      .slice(at + 1)
+      .find((next) => next.trim() !== '' && !/^\s*FAIL\s/.test(next));
+    if (reason === undefined) return;
     reasons.set(failureKey(test), reason.trim().slice(0, REASON_MAX));
   });
   return reasons;

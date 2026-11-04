@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { TaskStatus } from '@10db/contracts';
 import { createTestStore, listTasks, setTaskStatus } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { seedWorkstream, tempDir } from '../../test/fixtures';
+import { failedRepoCheck, seedWorkstream, tempDir } from '../../test/fixtures';
 import type { GateResult } from '../verify';
 import { fileFlakyTests, flakeNote, flakyTitle, rerunFlaky, type FlakyTest } from './flaky-tests';
 
@@ -80,6 +80,49 @@ describe('rerunFlaky', () => {
           failure: 'AssertionError: expected 3 to be 4',
           timedOut: false,
         },
+      ],
+    });
+  });
+
+  it.each([
+    ['make check-changed', []],
+    ['make precheck', ['--precheck']],
+  ])("reads what the repository's own %s really leaves", async (_name, flags) => {
+    // The output runs past what 10db keeps of it, so the end of it must name the step by itself.
+    const log = `${'noise line\n'.repeat(1000)}${TIMEOUT_LOG}`;
+    const { checkout, exitCode, tail } = failedRepoCheck(log, flags);
+    expect(exitCode).not.toBe(0);
+    const commands: string[] = [];
+    const outcome = await rerunFlaky({
+      checkout,
+      output: tail,
+      run: (command) => {
+        commands.push(command);
+        return Promise.resolve(result(0));
+      },
+    });
+    expect(commands).toEqual(['pnpm exec vitest run src/a.test.ts src/b.test.ts']);
+    expect(outcome.kind).toBe('flaky');
+  });
+
+  it('names a whole group of tests that share one error, each with that error', async () => {
+    const { checkout, tail } = checkoutWith({
+      test: [
+        ' FAIL  daemon  src/a.test.ts > each > a',
+        ' FAIL  daemon  src/a.test.ts > each > b',
+        'Error: Test timed out in 30000ms.',
+      ].join('\n'),
+    });
+    const outcome = await rerunFlaky({
+      checkout,
+      output: tail,
+      run: () => Promise.resolve(result(0)),
+    });
+    expect(outcome).toMatchObject({
+      kind: 'flaky',
+      tests: [
+        { name: 'each > a', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
+        { name: 'each > b', failure: 'Error: Test timed out in 30000ms.', timedOut: true },
       ],
     });
   });

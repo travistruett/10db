@@ -1,5 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -106,6 +114,7 @@ import {
   waitFor,
 } from '../../test/fixtures';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { failedRepoCheck } from '../../test/fixtures';
 import { captureLogs } from '../../test/log-capture';
 
 let engine: TestEngine;
@@ -569,7 +578,6 @@ describe('runner', () => {
   });
 
   describe('a check that fails only in tests', () => {
-    const failedTail = 'FAILED test: pnpm test (log .gate/test.log)';
     const testLog = [
       ' FAIL  daemon  src/a.test.ts > suite > slow one',
       'Error: Test timed out in 30000ms.',
@@ -584,8 +592,12 @@ describe('runner', () => {
       blockedHosts: [],
     });
 
-    /** An engine whose check fails on its first run with a timed out test and answers the rerun as `rerunExit` says. */
-    async function flakyEngine(rerunExit: number): Promise<{ commands: string[] }> {
+    /**
+     * An engine whose check fails with what the repository's real check leaves when its tests print
+     * `log`, and whose rerun answers as `rerunExit` says.
+     */
+    async function flakyEngine(rerunExit: number, log = testLog): Promise<{ commands: string[] }> {
+      const check = failedRepoCheck(log);
       const commands: string[] = [];
       engine = await createTestEngine(
         { Alpha: [[turn]], Beta: [[turn]] },
@@ -595,16 +607,32 @@ describe('runner', () => {
             run: (request: GateRequest) => {
               commands.push(request.command);
               if (request.command === 'make check-changed')
-                return Promise.resolve(gateResult(2, failedTail));
+                return Promise.resolve(gateResult(check.exitCode, check.tail));
               return Promise.resolve(gateResult(rerunExit, rerunExit === 0 ? 'ok' : 'still red'));
             },
           },
         },
       );
-      mkdirSync(join(engine.repoPath, '.gate'), { recursive: true });
-      writeFileSync(join(engine.repoPath, '.gate', 'test.log'), testLog);
+      cpSync(join(check.checkout, '.gate'), join(engine.repoPath, '.gate'), { recursive: true });
       return { commands };
     }
+
+    it('names every test on the evidence when the flakes run past what a gate summary keeps', async () => {
+      const names = Array.from({ length: 8 }, (_, n) => `src/f${String(n)}.test.ts > long case`);
+      await flakyEngine(
+        0,
+        names
+          .flatMap((name) => [` FAIL  daemon  ${name}`, `AssertionError: ${'x'.repeat(280)}`])
+          .join('\n'),
+      );
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(ws(workstream.id)).toMatchObject({ state: 'DONE', attempt: 0 });
+      const [record] = listEvidence(engine.store.db, workstream.id);
+      for (const name of names) expect(record?.summary).toContain(name);
+    });
 
     it('goes on when the failing test files pass on one rerun: no fix session, no attempt used, the flake on the evidence, one Icebox task', async () => {
       const { commands } = await flakyEngine(0);

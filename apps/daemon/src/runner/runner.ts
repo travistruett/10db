@@ -2487,17 +2487,18 @@ export function createRunner(opts: RunnerOptions): Runner {
       cancelNow(id, ctl.fence);
       return;
     }
-    // The step's record names each test that failed once and passed on rerun.
-    const notes = [
+    const output = gateSummary(
       before.update === null ? null : gateNote(before.update),
-      flaky.length > 0 ? flakeNote(flaky) : null,
-    ].filter((n): n is string => n !== null);
+      result.tail,
+    );
     const evidence = {
       workstreamId: id,
       kind: 'gate' as const,
       command: gateCommand,
       exitCode: result.exitCode,
-      summary: gateSummary(notes.length > 0 ? notes.join('\n\n') : null, result.tail),
+      // The step's record names every test that failed once and passed on rerun, so the note on them
+      // stays outside what a gate summary caps.
+      summary: flaky.length > 0 ? `${flakeNote(flaky)}\n\n${output}` : output,
       logPath: result.logPath,
       commitShas,
     };
