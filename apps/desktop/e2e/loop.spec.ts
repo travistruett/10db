@@ -10,7 +10,7 @@ const Changes = z.object({ commits: z.array(z.string()) });
 const TASK = 'Write the greeting';
 const OTHER = 'Tidy the readme';
 const QUESTION = 'Which greeting?';
-const VIEWS = ['Board', 'Factory', 'Inbox', 'Settings'] as const;
+const VIEWS = ['Board', 'Factory', 'Inbox', 'Knowledge', 'Settings'] as const;
 
 /** The Board has no page heading, so its link in the sidebar marks it as the open view. */
 async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
@@ -27,6 +27,8 @@ async function expectView(page: Page, view: (typeof VIEWS)[number]): Promise<voi
     return;
   }
   await expect(page.getByRole('heading', { name: view, level: 2 })).toBeVisible();
+  // Axe must not scan a list that is still loading.
+  if (view === 'Knowledge') await expect(page.getByLabel(/^Loading /)).toHaveCount(0);
 }
 
 async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
@@ -58,6 +60,7 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
     },
   });
   expect(created.ok()).toBe(true);
+  const projectId = z.object({ id: z.string() }).parse(await created.json()).id;
   await page.goto('/board');
 
   // A new project starts with an Icebox column for parked work. While it is empty it is folded to a rail.
@@ -169,6 +172,31 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expect(page.getByText(/^Goals are outcomes 10db pursues/)).toBeVisible();
   await expect(page.getByRole('button', { name: /^Not in a goal/ })).toHaveCount(0);
   await expectAccessible(page, 'factory, no goals, dark');
+
+  // Knowledge: a decision written through the API (as Claude Code would) appears in the open view
+  // without a reload, with where it came from.
+  await open(page, 'Knowledge');
+  await page.getByRole('tab', { name: 'Decisions' }).click();
+  const written = await request.post(`${daemonUrl}/projects/${projectId}/decisions`, {
+    headers: { Authorization: `Bearer ${E2E_TOKEN}` },
+    data: {
+      question: 'Which greeting file?',
+      choice: 'hello.txt',
+      rationale: 'The gate looks for it.',
+      source: { via: 'claude_code', quote: 'keep it hello.txt' },
+    },
+  });
+  expect(written.ok()).toBe(true);
+  const decisions = page.getByRole('table', { name: 'Decisions' });
+  await expect(decisions.getByText('hello.txt')).toBeVisible();
+  await expectAccessible(page, 'knowledge, decisions, dark');
+  await decisions.getByRole('button', { name: /^Where .* came from$/ }).click();
+  const provenance = page.getByRole('dialog', { name: 'Where it came from' });
+  await expect(provenance.getByText('Claude Code')).toBeVisible();
+  await expect(provenance.getByText('keep it hello.txt')).toBeVisible();
+  await expectAccessible(page, 'knowledge, provenance, dark');
+  await page.keyboard.press('Escape');
+  await expect(provenance).toBeHidden();
 
   // The MCP commit really landed: the finished run's changes hold the one commit it made.
   const auth = { Authorization: `Bearer ${E2E_TOKEN}` };

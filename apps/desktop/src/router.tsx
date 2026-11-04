@@ -12,6 +12,7 @@ import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
+import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { ShapeView } from './views/shape/shape-view';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
@@ -28,6 +29,14 @@ function InboxPage() {
   return (
     <ViewBoundary name="Inbox">
       <InboxView />
+    </ViewBoundary>
+  );
+}
+
+function KnowledgePage() {
+  return (
+    <ViewBoundary name="Knowledge">
+      <KnowledgeView />
     </ViewBoundary>
   );
 }
@@ -108,6 +117,11 @@ const inboxRoute = createRoute({
   path: '/inbox',
   component: InboxPage,
 });
+const knowledgeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/knowledge',
+  component: KnowledgePage,
+});
 const boardRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/board',
@@ -159,6 +173,7 @@ const routeTree = rootRoute.addChildren([
   newShapeRoute,
   shapeRoute,
   inboxRoute,
+  knowledgeRoute,
   tasksRoute,
   settingsIndexRoute,
   settingsRoute,

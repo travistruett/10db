@@ -1,5 +1,6 @@
 import { AppShell, Badge, Divider, Group, NavLink, VisuallyHidden } from '@mantine/core';
 import {
+  IconBulb,
   IconBuildingFactory2,
   IconInbox,
   IconLayoutKanban,
@@ -28,6 +29,7 @@ const NAV = [
   { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
   { to: '/shape', label: 'Plan', icon: IconRoute },
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
+  { to: '/knowledge', label: 'Knowledge', icon: IconBulb },
   { to: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;
 
