@@ -830,7 +830,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     let tags: readonly string[];
     try {
       const added = await addedTags(ctx.git, path, `${merged.head}^1`, merged.from, dropped);
-      tags = await absentFrom(ctx.git, path, 'HEAD', added);
+      tags = await absentFrom(ctx.git, path, 'HEAD', added, merged.from);
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations not read');
       tags = dropped.filter((f) => f.endsWith('.sql')).map((f) => basename(f, '.sql'));
@@ -843,7 +843,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       ...earlier,
       ...lost
         .filter((tag) => !earlier.some((m) => m.tag === tag))
-        .map((tag): UncarriedMigration => ({ tag, at })),
+        .map((tag): UncarriedMigration => ({ tag, at, base: merged.from })),
     ]);
     if (!forPullRequest)
       tell(batch, () => {
@@ -864,19 +864,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const path = batch.worktreePath;
     if (notice === undefined || path === null) return answer;
     const held = uncarriedIn(notice);
-    let absent: readonly string[];
+    const left: UncarriedMigration[] = [];
     try {
-      absent = await absentFrom(
-        ctx.git,
-        path,
-        'HEAD',
-        held.map((m) => m.tag),
-      );
+      for (const m of held)
+        if ((await absentFrom(ctx.git, path, 'HEAD', [m.tag], m.base)).length > 0) left.push(m);
     } catch (error) {
       ctx.logger.warn({ batchId: batch.id, err: why(error) }, 'lost migrations not read');
-      absent = held.map((m) => m.tag);
+      left.splice(0, left.length, ...held);
     }
-    const left = held.filter((m) => absent.includes(m.tag));
     if (left.length === 0) {
       tell(batch, () => {
         hideNotices(ctx.state, batch.id, [NOTICE_KEY.migrationsUncarried]);

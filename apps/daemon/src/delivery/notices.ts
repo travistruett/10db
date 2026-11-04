@@ -71,8 +71,16 @@ export const NOTICE_KEY = {
 const RenumberedMigration = z.object({ from: z.string().min(1), to: z.string().min(1) });
 export type RenumberedMigration = z.infer<typeof RenumberedMigration>;
 
-/** A migration of the batch's that a merge lost: its tag, and the commit whose tree still has its file. */
-const UncarriedMigration = z.object({ tag: z.string().min(1), at: z.string().min(1) });
+/**
+ * A migration of the batch's that a merge lost: its tag, the commit whose tree still has its file,
+ * and the base that merge took, whose migrations of that name aren't this one. A notice an older
+ * daemon wrote has no `base`.
+ */
+const UncarriedMigration = z.object({
+  tag: z.string().min(1),
+  at: z.string().min(1),
+  base: z.string().min(1).optional(),
+});
 export type UncarriedMigration = z.infer<typeof UncarriedMigration>;
 
 /** What `notice` keeps, read as `schema`; none when it is absent or unreadable. */

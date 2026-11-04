@@ -379,27 +379,38 @@ describe('carrying a branch with several generated migrations over, each as its 
 
   describe('a migration regenerated under the same name', () => {
     const TAG = "  tag: text('tag'),";
-    const first: Step = { name: 'owner', schema: schemaFile({ columns: [NOTE, OWNER] }) };
-    const again: Step = {
-      name: 'owner',
-      schema: schemaFile({ columns: [NOTE, TAG] }),
-      redo: true,
+    const ADD_OWNER = 'ALTER TABLE `sessions` ADD `owner` text;';
+    const ADD_NOTE = 'ALTER TABLE `sessions` ADD `note` text;';
+    const ADD_TAG = 'ALTER TABLE `sessions` ADD `tag` text;';
+    const ADD_SHAPE = 'ALTER TABLE `sessions` ADD `shape_id` text;';
+    const addedOwner: Step = { name: 'owner', schema: schemaFile({ columns: [OWNER] }) };
+    // Only a migration with a generated one after it is made from its own step: the last is made
+    // from the schema file as merged. So here the regenerated one is never the last.
+    const steps: readonly Step[] = [
+      addedOwner,
+      { name: 'owner', schema: schemaFile({ columns: [TAG] }), redo: true },
+      { name: 'note', schema: schemaFile({ columns: [TAG, NOTE] }) },
+    ];
+    const addedNoteAfter: Step = {
+      name: 'note',
+      schema: schemaFile({ columns: [OWNER, NOTE] }),
     };
+    const baseOwner: Step = { name: 'owner', schema: schemaFile({ columns: [SHAPE] }) };
 
     it('is stepped from the schema of its last regeneration, not its first', async () => {
-      const batch = await bothSidesAdded([addNote, first, again], addLogs);
+      const batch = await bothSidesAdded(steps, addLogs);
 
       expect((await update(batch)).kind).toBe('merged');
 
       expect(h.cards()).toEqual([]);
-      expect(journalOf(batch)).toEqual(['0000_init', '0001_logs', '0002_note', '0003_owner']);
-      expect(sqlOf(batch, '0002_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
-      expect(sqlOf(batch, '0003_owner')).toBe('ALTER TABLE `sessions` ADD `tag` text;');
+      expect(journalOf(batch)).toEqual(['0000_init', '0001_logs', '0002_owner', '0003_note']);
+      expect(sqlOf(batch, '0002_owner')).toBe(ADD_TAG);
+      expect(sqlOf(batch, '0003_note')).toBe(ADD_NOTE);
       expect(statusOf(pathOf(batch))).toBe('');
     });
 
     it('is still skipped as a Regenerate commit by the second catch-up', async () => {
-      const batch = await bothSidesAdded([addNote, first, again], addLogs);
+      const batch = await bothSidesAdded(steps, addLogs);
       await update(batch);
       mainAdds({ name: 'shape', schema: schemaFile({ columns: [SHAPE], after: [LOGS] }) });
 
@@ -410,28 +421,104 @@ describe('carrying a branch with several generated migrations over, each as its 
         '0000_init',
         '0001_logs',
         '0002_shape',
-        '0003_note',
-        '0004_owner',
+        '0003_owner',
+        '0004_note',
       ]);
-      expect(sqlOf(batch, '0003_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
-      expect(sqlOf(batch, '0004_owner')).toBe('ALTER TABLE `sessions` ADD `tag` text;');
+      expect(sqlOf(batch, '0003_owner')).toBe(ADD_TAG);
+      expect(sqlOf(batch, '0004_note')).toBe(ADD_NOTE);
       expect(statusOf(pathOf(batch))).toBe('');
     });
 
-    it("is not taken for the branch's when the base once had a migration of that name", async () => {
-      const batch = await bothSidesAdded([addNote, first], {
-        name: 'owner',
-        schema: schemaFile({ columns: [SHAPE] }),
+    it("is not taken for the base's migration of that name under another number", async () => {
+      const batch = await bothSidesAdded([addedOwner, addedNoteAfter], {
+        name: 'x',
+        schema: schemaFile({ top: [TAG] }),
       });
+      mainAdds({ name: 'owner', schema: schemaFile({ top: [TAG], columns: [SHAPE] }) });
 
       expect((await update(batch)).kind).toBe('merged');
 
       expect(h.cards()).toEqual([]);
-      expect(journalOf(batch)).toEqual(['0000_init', '0001_owner', '0002_note', '0003_owner']);
-      expect(sqlOf(batch, '0001_owner')).toBe('ALTER TABLE `sessions` ADD `shape_id` text;');
-      expect(sqlOf(batch, '0002_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
-      expect(sqlOf(batch, '0003_owner')).toBe('ALTER TABLE `sessions` ADD `owner` text;');
+      expect(journalOf(batch)).toEqual([
+        '0000_init',
+        '0001_x',
+        '0002_owner',
+        '0003_owner',
+        '0004_note',
+      ]);
+      expect(sqlOf(batch, '0002_owner')).toBe(ADD_SHAPE);
+      expect(sqlOf(batch, '0003_owner')).toBe(ADD_OWNER);
+      expect(sqlOf(batch, '0004_note')).toBe(ADD_NOTE);
       expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it("is re-created when the base's has its very tag and it is the batch's last", async () => {
+      const batch = await bothSidesAdded([addNote, addOwner], {
+        name: 'x',
+        schema: schemaFile({ top: [TAG] }),
+      });
+      mainAdds({ name: 'owner', schema: schemaFile({ top: [TAG], columns: [SHAPE] }) });
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual([
+        '0000_init',
+        '0001_x',
+        '0002_owner',
+        '0003_note',
+        '0004_owner',
+      ]);
+      expect(sqlOf(batch, '0002_owner')).toBe(ADD_SHAPE);
+      expect(sqlOf(batch, '0003_note')).toBe(ADD_NOTE);
+      expect(sqlOf(batch, '0004_owner')).toBe(ADD_OWNER);
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it("is re-created when the base's has its very tag and another comes after it", async () => {
+      const batch = await bothSidesAdded([addedOwner, addedNoteAfter], baseOwner);
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual(['0000_init', '0001_owner', '0002_owner', '0003_note']);
+      expect(sqlOf(batch, '0001_owner')).toBe(ADD_SHAPE);
+      expect(sqlOf(batch, '0002_owner')).toBe(ADD_OWNER);
+      expect(sqlOf(batch, '0003_note')).toBe(ADD_NOTE);
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it('stays the base’s when both sides made the same migration under the same tag', async () => {
+      const batch = await bothSidesAdded([addedOwner, addedNoteAfter], addedOwner);
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual(['0000_init', '0001_owner', '0002_note']);
+      expect(sqlOf(batch, '0001_owner')).toBe(ADD_OWNER);
+      expect(sqlOf(batch, '0002_note')).toBe(ADD_NOTE);
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it("stays stopped after a carry that failed until the batch's own is back, beside the base's", async () => {
+      const batch = await bothSidesAdded([addedOwner], baseOwner);
+
+      expect((await update(batch, 'owner')).kind).toBe('uncarried');
+      // The journal holds the name, but only as the base's.
+      expect((await update(batch)).kind).toBe('uncarried');
+
+      drizzleGenerate(join(pathOf(batch), PACKAGE), 'owner', false);
+      await commitOnBatch(
+        batch,
+        new Map(
+          [JOURNAL, `${DB}/0002_owner.sql`, `${DB}/meta/0002_snapshot.json`].map((path) => [
+            path,
+            readFileSync(join(pathOf(batch), path), 'utf8'),
+          ]),
+        ),
+      );
+
+      expect((await update(batch)).kind).toBe('up_to_date');
     });
   });
 
