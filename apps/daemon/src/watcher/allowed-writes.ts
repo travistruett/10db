@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, lstatSync, realpathSync, statSync } from 'node:fs';
+import { type BigIntStats, constants, lstatSync, realpathSync, statSync } from 'node:fs';
 import { open, type FileHandle } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import {
@@ -167,42 +167,76 @@ function deletionStamp(root: string, path: string): string | null {
  * that is missing, or not a directory, is not a link: the open then fails as before.
  */
 function throughSymlink(root: string, path: string): boolean {
+  return lookAtAncestors(root, path) === 'link';
+}
+
+/**
+ * One look at every directory between `root` (excluded, see `throughSymlink`) and `path`: 'link' when one is
+ * a symlink, otherwise a string naming each one's device, inode and change time to the nanosecond (empty
+ * when there is none), or null when one is missing or can't be looked at. The change time moves when the
+ * directory is renamed, recreated, or has an entry added or removed, and no process can set it back, so two
+ * equal strings mean the same directories were in place the whole time between the two looks.
+ */
+function lookAtAncestors(root: string, path: string): string | null {
   const rel = relative(root, path);
-  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return false;
+  if (rel === '' || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return '';
   const parts = rel.split(sep).slice(0, -1);
   let dir = root;
+  const seen: string[] = [];
   for (const part of parts) {
     dir = resolve(dir, part);
     try {
-      if (lstatSync(dir).isSymbolicLink()) return true;
+      const at = lstatSync(dir, { bigint: true });
+      if (at.isSymbolicLink()) return 'link';
+      seen.push(`${String(at.dev)}.${String(at.ino)}.${String(at.ctimeNs)}`);
     } catch {
-      return false;
+      return null;
     }
   }
-  return false;
+  return seen.join(':');
 }
 
 /**
  * Whether `path` still leads to the file an open descriptor (`fd`, its `fstat`) is on, checked after the open
  * and the read. `throughSymlink` runs before the open, and the open runs on the thread pool, so a lane that
  * flips a directory above the file between a real directory and a link can have the open follow the link.
- * Looking at the ancestors again and comparing the descriptor's device and inode with an `lstat` of the path
- * closes that window: a descriptor that was reached through a link is on another inode than the path now
- * names, and a link still in place is seen. 'link': a directory above the file is a link. 'moved': the path
- * is gone or names another file (a rename over it is a real write, so the read is tried again).
+ * A look at the ancestors and an `lstat` of the path are separate steps, and a lane flipping a directory
+ * faster than they run (by rename, which keeps the inode) can show a real directory to each look while the
+ * open and the `lstat` both went through the link. So the ancestors are looked at before the open
+ * (`before`, with the device, inode and change time of each), after the read, and once more after the `lstat`
+ * of the path, and the answer is 'yes' only when no look saw a link and every look saw the same. A directory
+ * that was swapped, renamed away and back, or recreated at any moment in between has another change time
+ * however the flips are timed. 'link': a directory above the file is a link. 'moved': the path is gone or
+ * names another file (a rename over it is a real write, so the read is tried again), or a directory above it
+ * changed.
+ *
+ * The cost: adding or removing an entry in a directory above the file, such as a neighbouring file, also moves
+ * its change time, so a neighbour written during the read makes this read 'moved'. `stampOrReason` reads again
+ * (STAMP_ATTEMPTS times, each with fresh looks), so a one-off neighbouring write costs a second read and only
+ * a directory written to throughout every attempt ends as 'changing'. A directory directly under `root` is
+ * checked like any other; the files directly in `root` have no ancestor and are not affected. The change
+ * time of a renamed or swapped directory moving on APFS, RENAME_SWAP included, is something to confirm there;
+ * the tests here run the rename sequences on the filesystem they run on.
  */
 function descriptorIsAtPath(
   root: string,
   path: string,
   fd: { dev: bigint; ino: bigint },
+  before: string | null,
 ): 'yes' | 'link' | 'moved' {
-  if (throughSymlink(root, path)) return 'link';
+  const afterRead = lookAtAncestors(root, path);
+  if (afterRead === 'link') return 'link';
+  let at: BigIntStats;
   try {
-    const at = lstatSync(path, { bigint: true });
-    return at.isFile() && at.dev === fd.dev && at.ino === fd.ino ? 'yes' : 'moved';
+    at = lstatSync(path, { bigint: true });
   } catch {
     return 'moved';
   }
+  const last = lookAtAncestors(root, path);
+  if (last === 'link') return 'link';
+  if (before === null || afterRead === null || last === null) return 'moved';
+  if (before !== afterRead || before !== last) return 'moved';
+  return at.isFile() && at.dev === fd.dev && at.ino === fd.ino ? 'yes' : 'moved';
 }
 
 /** How many times a file that changes while it is read is read again before it counts as unstampable. */
@@ -223,7 +257,8 @@ export const STAMP_BUDGET_MS = 30_000;
  * One read of a regular file through a single descriptor: the file type and the metadata before and after
  * come from that descriptor (`fstat`), never from path lookups that another process could answer differently.
  * A link in a directory above the file is refused by `stampOrReason` (`throughSymlink`) before this opens it,
- * and a swap in the window between that check and the open is caught after the read (`descriptorIsAtPath`).
+ * and a swap in the window between that check and the open is caught after the read (`descriptorIsAtPath`),
+ * which compares the ancestors as they were just before the open with how they are after the read.
  * The open is non-blocking, so a FIFO can't block the daemon on the open, and it doesn't follow a link at the
  * path (O_NOFOLLOW), so a symlink, to a file, a FIFO or nothing, fails with ELOOP: not a file. The read is
  * asynchronous, a chunk at a time, so the event loop turns between chunks, and it stops at the size the first
@@ -237,6 +272,9 @@ async function readStamp(
   path: string,
   deadline: number,
 ): Promise<{ stamp: string } | { skip: 'not-a-file' | 'changing' | 'too-large' }> {
+  // The ancestors as they are before the open: `descriptorIsAtPath` refuses the read if any changed since.
+  const ancestors = lookAtAncestors(root, path);
+  if (ancestors === 'link') return { skip: 'not-a-file' };
   let handle: FileHandle;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
@@ -263,7 +301,7 @@ async function readStamp(
     const after = await handle.stat({ bigint: true });
     if (after.mtimeNs !== before.mtimeNs || after.size !== before.size) return { skip: 'changing' };
     // The path must still lead to this descriptor, through no link: see `descriptorIsAtPath`.
-    const at = descriptorIsAtPath(root, path, after);
+    const at = descriptorIsAtPath(root, path, after, ancestors);
     if (at !== 'yes') return { skip: at === 'link' ? 'not-a-file' : 'changing' };
     return { stamp: `${String(before.mtimeNs)}:${String(before.size)}:${hash.digest('hex')}` };
   } finally {

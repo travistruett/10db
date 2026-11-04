@@ -5,8 +5,10 @@ import type * as fsPromises from 'node:fs/promises';
 import {
   appendFileSync,
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   symlinkSync,
   truncateSync,
@@ -18,7 +20,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // The real filesystem, except that a test can make the file opened from `moving.path` look rewritten between
 // the stat before a read and the stat after it: the real 'changing' result, with no second read to fall back
-// on. `moving.watched` counts the path lookups (stat, lstat) made of one path, which must be none.
+// on. `moving.watched` counts the path lookups (stat, lstat) made of one path: the test expects one, the
+// `lstat` after the read that compares the path's inode with the descriptor's.
 const moving = vi.hoisted(() => ({
   path: null as string | null,
   watched: null as string | null,
@@ -34,11 +37,14 @@ const swapped = vi.hoisted(() => ({
   opens: 0,
 }));
 // A test can also run code at `race.path` just before and just after its open, the window in which a lane
-// swaps a directory above the file between a real directory and a link.
+// swaps a directory above the file between a real directory and a link, and just before and after the `lstat`
+// of that path that follows the read.
 const race = vi.hoisted(() => ({
   path: null as string | null,
   beforeOpen: null as (() => void) | null,
   afterOpen: null as (() => void) | null,
+  beforePathLstat: null as (() => void) | null,
+  afterPathLstat: null as (() => void) | null,
 }));
 vi.mock('node:fs', async (importOriginal) => {
   const real = await importOriginal<typeof fs>();
@@ -50,7 +56,10 @@ vi.mock('node:fs', async (importOriginal) => {
     }) as typeof fs.statSync,
     lstatSync: ((path: fs.PathLike, options: fs.StatOptions) => {
       if (path === moving.watched) moving.pathStats++;
-      return real.lstatSync(path, options);
+      if (path === race.path) race.beforePathLstat?.();
+      const result = real.lstatSync(path, options);
+      if (path === race.path) race.afterPathLstat?.();
+      return result;
     }) as typeof fs.lstatSync,
   };
 });
@@ -119,6 +128,8 @@ describe('stampOrReason', () => {
     race.path = null;
     race.beforeOpen = null;
     race.afterOpen = null;
+    race.beforePathLstat = null;
+    race.afterPathLstat = null;
   });
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
@@ -405,6 +416,68 @@ describe('stampOrReason', () => {
     it('gives no stamp when a copy of the file is put back after the open', async () => {
       race.afterOpen = () => {
         putDir('secret through the link');
+      };
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+  });
+
+  // A lane that swaps `sub` by rename keeps the same directory inode, so looking at the ancestors once before
+  // and once after the read can be answered 'real directory' both times, and the `lstat` of the path can land
+  // between two flips and reach the file through the link. The ancestors are looked at before the open and
+  // again after the path's `lstat`, and any change to one (inode, or change time, which no rename can set
+  // back) refuses the read.
+  describe('a directory flipped by rename around the check after the read', () => {
+    beforeEach(() => {
+      mkdirSync(join(root, 'real'));
+      writeFileSync(join(root, 'real/file.txt'), 'secret through the link');
+      mkdirSync(join(root, 'sub'));
+      writeFileSync(join(root, 'sub/file.txt'), 'inside the checkout');
+      race.path = join(root, 'sub/file.txt');
+    });
+
+    const isLink = (): boolean => lstatSync(join(root, 'sub')).isSymbolicLink();
+    function toLink(): void {
+      if (isLink()) return;
+      renameSync(join(root, 'sub'), join(root, 'sub.orig'));
+      symlinkSync(join(root, 'real'), join(root, 'sub'));
+    }
+    function toDir(): void {
+      if (!isLink()) return;
+      rmSync(join(root, 'sub'));
+      renameSync(join(root, 'sub.orig'), join(root, 'sub'));
+    }
+
+    it('gives no stamp when the directory is a link again at the lstat of the path', async () => {
+      race.beforeOpen = toLink;
+      race.afterOpen = toDir;
+      // The ancestors look real after the read; the link comes back just before the path's lstat.
+      race.beforePathLstat = toLink;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'not-a-file' });
+    });
+
+    it('gives no stamp when the directory is put back again after the lstat of the path', async () => {
+      race.beforeOpen = toLink;
+      race.afterOpen = toDir;
+      race.beforePathLstat = toLink;
+      race.afterPathLstat = toDir;
+      expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
+    });
+
+    it('stamps the file when a neighbour was added once during the read, on the next read', async () => {
+      let added = false;
+      race.afterOpen = () => {
+        if (added) return;
+        added = true;
+        writeFileSync(join(root, 'sub/neighbour.txt'), 'x');
+      };
+      const result = await stampOrReason(root, 'sub/file.txt');
+      expect('stamp' in result).toBe(true);
+    });
+
+    it('gives no stamp while neighbours keep being added in every read: the accepted cost', async () => {
+      let n = 0;
+      race.afterOpen = () => {
+        writeFileSync(join(root, `sub/neighbour-${String(n++)}.txt`), 'x');
       };
       expect(await stampOrReason(root, 'sub/file.txt')).toEqual({ reason: 'changing' });
     });
