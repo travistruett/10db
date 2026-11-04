@@ -151,10 +151,27 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     ...draft.looseTasks.map((t) => t.key),
     ...draft.additions.map((t) => t.key),
   ]);
+  const goalKeys = new Set(draft.goals.map((g) => g.key));
+  const keptGoalTasks = new Set(
+    [...world.pinnedGoalTasks].flatMap(([goal, tasks]) => (goalKeys.has(goal) ? [] : tasks)),
+  );
+  // A removed task's key stays in `convertedTasks`, so only something live under the key answers it.
+  const removed = new Set([
+    ...world.removedTasks,
+    ...removedKeys(world.convertedTasks, new Set(draft.removals.map((r) => r.taskId))),
+  ]);
+  const heldLive = (key: string): boolean =>
+    taskKeys.has(key) || world.storedEfforts.has(key) || keptGoalTasks.has(key);
+  /** A key whose converted task a removal cancelled, and nothing live holds now. */
+  const cancelled = (key: string): boolean => removed.has(key) && !heldLive(key);
   const knownTask = (key: string): boolean => taskKeys.has(key) || world.convertedTasks.has(key);
   const dependency = (label: string, field: string, keys: readonly string[], own: string): void => {
     for (const key of keys) {
       if (key === own) errors.push(`${label}, ${field}: a task cannot depend on itself`);
+      else if (cancelled(key))
+        errors.push(
+          `${label}, ${field}: ${key} was removed, so nothing can depend on it; a task that waits on a removed task never starts`,
+        );
       else if (!knownTask(key)) errors.push(`${label}, ${field}: no proposal has the key ${key}`);
     }
   };
@@ -272,15 +289,6 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
   });
 
   // Questions: the goal or task one is about must be in this plan, converted, or kept by this round.
-  const goalKeys = new Set(draft.goals.map((g) => g.key));
-  const keptGoalTasks = new Set(
-    [...world.pinnedGoalTasks].flatMap(([goal, tasks]) => (goalKeys.has(goal) ? [] : tasks)),
-  );
-  // A removed task's key stays in `convertedTasks`, so only something live under the key answers it.
-  const removed = new Set([
-    ...world.removedTasks,
-    ...removedKeys(world.convertedTasks, new Set(draft.removals.map((r) => r.taskId))),
-  ]);
   draft.questions.forEach((q, i) => {
     if (q.about === undefined) return;
     if (
@@ -348,6 +356,10 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
     const label = `Landing ${String(i + 1)}, keys`;
     let first: { key: string; place: TaskPlace } | undefined;
     for (const key of landing.keys) {
+      if (cancelled(key)) {
+        errors.push(`${label}: ${key} was removed, so it cannot be in a landing`);
+        continue;
+      }
       if (!knownTask(key)) {
         errors.push(`${label}: no proposal has the key ${key}`);
         continue;
@@ -358,7 +370,8 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
       else landed.set(key, landing.key);
       // A task Convert made is judged by the place and landing it has; one still in the draft gets
       // the project's defaults when it is converted.
-      const convertedId = world.convertedTasks.get(key);
+      // A removed key something live holds again is that row, not the cancelled task.
+      const convertedId = removed.has(key) ? undefined : world.convertedTasks.get(key);
       const place = convertedId === undefined ? world.draftPlace : world.placeOf(convertedId);
       if (place === null) continue;
       if (place.landingGroup !== null) errors.push(`${label}: ${key} is already in a landing`);

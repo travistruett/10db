@@ -431,6 +431,68 @@ describe('a plan that breaks a rule', () => {
     ).toEqual([]);
   });
 
+  describe('a dependency or landing key naming a converted task a removal cancelled', () => {
+    const removedWorld = (over: Partial<PlanWorld> = {}): PlanWorld =>
+      world({ removedTasks: new Set(['earlier-task']), ...over });
+    const removals = [{ taskId: converted, why: 'Not needed', sourceMessageIds: [message] }];
+
+    it.each<[string, Record<string, unknown>, RegExp]>([
+      [
+        'a loose task depends on it',
+        { looseTasks: [loose('after', { dependsOn: ['earlier-task'] })] },
+        /Loose task 1, depends on: earlier-task was removed/,
+      ],
+      [
+        'a goal task depends on it outside its goal',
+        { goals: [goal('g', [task('g1', { dependsOnOutside: ['earlier-task'] })])] },
+        /Goal g, task 1, depends on outside: earlier-task was removed/,
+      ],
+      [
+        'a landing includes it',
+        {
+          landings: [{ key: 'l', title: 'L', keys: ['earlier-task'], sourceMessageIds: [message] }],
+        },
+        /Landing 1, keys: earlier-task was removed/,
+      ],
+    ])('refuses it when %s, saying it was removed', (_name, draft, expected) => {
+      expect(check(draft, removedWorld())).toEqual([expect.stringMatching(expected)]);
+    });
+
+    it('refuses it when the same draft removes the task', () => {
+      expect(
+        check({ looseTasks: [loose('after', { dependsOn: ['earlier-task'] })], removals }),
+      ).toEqual([expect.stringMatching(/Loose task 1, depends on: earlier-task was removed/)]);
+    });
+
+    it('accepts the key while the task is not removed', () => {
+      expect(check({ looseTasks: [loose('after', { dependsOn: ['earlier-task'] })] })).toEqual([]);
+    });
+
+    it.each<[string, Record<string, unknown>, Partial<PlanWorld>]>([
+      ['the draft proposes it again', { looseTasks: [loose('earlier-task')] }, {}],
+      ['a pinned row keeps it', {}, { storedEfforts: new Set(['earlier-task']) }],
+      [
+        'a pinned goal the draft leaves out keeps it',
+        {},
+        { pinnedGoalTasks: new Map([['g', ['earlier-task']]]) },
+      ],
+    ])('accepts it when %s', (_name, draft, over) => {
+      const looseOrNone = (draft['looseTasks'] ?? []) as Record<string, unknown>[];
+      expect(
+        check(
+          {
+            ...draft,
+            looseTasks: [...looseOrNone, loose('after', { dependsOn: ['earlier-task'] })],
+            landings: [
+              { key: 'l', title: 'L', keys: ['earlier-task'], sourceMessageIds: [message] },
+            ],
+          },
+          removedWorld(over),
+        ),
+      ).toEqual([]);
+    });
+  });
+
   it('accepts a question about a stored goal or task that is still live', () => {
     expect(
       check(
