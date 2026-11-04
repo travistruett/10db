@@ -133,6 +133,32 @@ describe('the cards of a batch that failed to ship', () => {
   });
 });
 
+describe('the card of a migration a merge of the base lost', () => {
+  it('asks for the migration again and offers Retry and Abandon', () => {
+    const { card, failure } = shipCards.migrationsLost(batch, { note: '0042_x is missing.' });
+
+    expect(failure).toBe('base_conflict');
+    expect(card.body).toContain('0042_x is missing.');
+    expect(card.body).toContain('Re-create the migration');
+    expect(card.body).toContain('Press Retry');
+    expect(card.detail).toEqual({ batchId: batch.id, actions: ['retry', 'abandon'] });
+  });
+
+  it('offers only Abandon when the list could not be read, since nothing else clears the notice', () => {
+    const { card, failure } = shipCards.migrationsLost(batch, {
+      note: 'The list could not be read.',
+      unreadable: true,
+    });
+
+    expect(failure).toBe('base_conflict');
+    expect(card.body).toContain('The list could not be read.');
+    expect(card.body).not.toContain('Re-create');
+    expect(card.body).not.toContain('Press Retry');
+    expect(card.body).toContain('Abandon');
+    expect(card.detail).toEqual({ batchId: batch.id, actions: ['abandon'] });
+  });
+});
+
 describe('the card of a push the remote declined by rule or hook', () => {
   const stderr =
     'remote: error: GH013: Repository rule violations found for refs/heads/10db/x.\n ! [remote rejected] 10db/x -> 10db/x (push declined due to repository rule violations)';
