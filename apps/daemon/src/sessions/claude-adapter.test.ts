@@ -74,6 +74,8 @@ interface Script {
    * abort alone (a model that never answers), or throw.
    */
   readonly then?: 'end' | 'hang' | 'stall' | { readonly throws: string };
+  /** Microtask turns the stream waits before `then`, so a settled accountInfo() can be seen first. */
+  readonly thenAfterTicks?: number;
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
@@ -166,6 +168,7 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
     });
     async function* stream(): AsyncGenerator<SDKMessage, void> {
       for (const message of script.messages) yield message;
+      for (let tick = 0; tick < (script.thenAfterTicks ?? 0); tick += 1) await Promise.resolve();
       const then = script.then ?? 'end';
       if (then === 'stall') {
         await aborted;
@@ -2140,6 +2143,49 @@ describe('createClaudeAdapter', () => {
         },
       ]);
     });
+
+    it.each([
+      { kind: 'claude_subscription', identity: 'builder@example.com', ticks: 0 },
+      { kind: 'claude_subscription', identity: 'builder@example.com', ticks: 12 },
+      { kind: 'anthropic_api_key', identity: null, ticks: 0 },
+      { kind: 'anthropic_api_key', identity: null, ticks: 12 },
+    ] as const)(
+      'ends sandbox_refused after one start when the settings error comes as accountInfo() rejects ($kind, stream $ticks ticks late)',
+      async ({ kind, identity, ticks }) => {
+        // The SDK errors the stream and rejects accountInfo() about the same tick, in either order: the
+        // account step must not decide first, or a sandbox that cannot start is started again.
+        const rejected = Promise.reject(new Error('control channel closed'));
+        rejected.catch(() => undefined);
+        const clock = new ManualClock();
+        const { adapter, record } = adapterFor(
+          {
+            messages: [],
+            then: { throws: 'Error processing settings: ENOTDIR\n    at load (cli.js:1:1)' },
+            thenAfterTicks: ticks,
+            account: rejected as Promise<AccountInfo>,
+          },
+          1_000,
+          clock,
+        );
+        const done = collect(
+          adapter.start(
+            spec({
+              sandbox: laneSandbox,
+              account: { accountId: mintId('Account'), label: 'Claude plan', kind, identity },
+            }),
+          ).events,
+        );
+        const events = await done;
+        expect(events).toEqual([
+          {
+            type: 'ended',
+            reason: 'sandbox_refused',
+            message: 'The lane sandbox could not start: Error processing settings: ENOTDIR',
+          },
+        ]);
+        expect(record.queries).toBe(1);
+      },
+    );
 
     it('ends an unsandboxed session that fails the same way with an error', async () => {
       const { adapter } = adapterFor({

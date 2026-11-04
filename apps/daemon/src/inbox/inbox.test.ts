@@ -2434,6 +2434,34 @@ describe('permission broker in a sandboxed lane', () => {
     expect(openCards()).toEqual([]);
   });
 
+  it("reads the Command Line Tools SDK's headers and man pages with no card, and cards other /Library paths", async () => {
+    const ws = seedWorkstream(base);
+    const decide = sandboxed(ws);
+    const sdk = '/Library/Developer/CommandLineTools/SDKs/MacOSX26.2.sdk';
+    for (const [tool, input] of [
+      ['Read', { file_path: `${sdk}/usr/include/sys/attr.h` }],
+      ['Grep', { pattern: 'attrlist', path: `${sdk}/usr/include/sys/attr.h` }],
+      ['Grep', { pattern: 'attrlist', path: `${sdk}/usr/share/man/man2/setattrlist.2` }],
+    ] as const) {
+      expect(await decide(request(tool, input)), `${tool} ${JSON.stringify(input)}`).toEqual({
+        behavior: 'allow',
+      });
+    }
+    expect(openCards()).toEqual([]);
+    // Anything else under /Library, and any write to the SDK, still waits on a person.
+    for (const [tool, input] of [
+      ['Read', { file_path: '/Library/Preferences/com.apple.loginwindow.plist' }],
+      ['Edit', { file_path: `${sdk}/usr/include/sys/attr.h` }],
+    ] as const) {
+      void decide(request(tool, input)).catch(() => undefined);
+      await settle();
+      const card = onlyOpenCard();
+      expect(card.kind, tool).toBe('permission');
+      inbox.answer(card.id, { choice: 'deny' });
+      await settle();
+    }
+  });
+
   it('still cards a read under the home directory outside the copy, and a write to the manual pages', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);
