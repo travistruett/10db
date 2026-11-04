@@ -10,7 +10,6 @@ import {
   ProjectLanding,
   type ProjectDto,
   type ProjectPatch,
-  WorkspaceMode,
   WorkstreamState,
   type SystemCheckDto,
   type TaskLanding,
@@ -405,12 +404,12 @@ export function createServices(deps: {
               });
         // A join still pending has not written yet, so the move would collide with it.
         // The same holds for any move the rule makes: a task the builder placed never moves, and one with
-        // no reason moves only to a copy.
+        // no reason moves only when the rule matched.
         if (
           proposed !== undefined &&
           proposed.workspaceMode !== task.workspaceMode &&
           task.placementReason !== BUILDER_CHOSE_PLACEMENT &&
-          (task.placementReason !== null || proposed.workspaceMode === WorkspaceMode.Worktree)
+          (task.placementReason !== null || proposed.reason !== null)
         )
           deps.starter.refuseIfJoining(id);
         return patchTask(ctx, id, patch, proposed);
