@@ -22,6 +22,13 @@ export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
       `Goal ${goal.title} is ${goal.state}, not a draft; only a draft goal is removed`,
     );
   const tasks = listGoalTasks(ctx.tx, goalId);
+  // Questions and links are released while the tasks are still open: cancelling a task detaches the
+  // questions stored under it, which would hide them from this lookup. A refusal below rolls it back.
+  releaseShapeLinksOfGoal(
+    ctx,
+    goalId,
+    tasks.map((t) => t.id),
+  );
   // Tasks that nothing else in the goal waits on go first, so none is refused for its dependents.
   let remaining = tasks.filter((t) => t.status !== TaskStatus.Cancelled);
   while (remaining.length > 0) {
@@ -33,11 +40,6 @@ export function removeDraftGoal(ctx: WriteContext, goalId: GoalId): void {
     for (const task of leaves) cancelNeverStartedTask(ctx, task.id);
     remaining = open.filter((t) => !leaves.includes(t));
   }
-  releaseShapeLinksOfGoal(
-    ctx,
-    goalId,
-    tasks.map((t) => t.id),
-  );
   ctx.tx.update(schema.tasks).set({ goalId: null }).where(eq(schema.tasks.goalId, goalId)).run();
   ctx.tx.delete(schema.goalCriteria).where(eq(schema.goalCriteria.goalId, goalId)).run();
   ctx.tx.delete(schema.goalViews).where(eq(schema.goalViews.goalId, goalId)).run();

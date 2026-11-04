@@ -44,6 +44,7 @@ import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
+import { detachShapeQuestionsOfTask } from './shape-state';
 import type { DbReader, WriteContext } from './store';
 import { transitionWorkstream } from './workstreams';
 
@@ -895,13 +896,17 @@ function refuseWhileOpenDependents(
     );
 }
 
-/** The soft remove both routes end in: status cancelled, parked column cleared, one event. */
+/**
+ * The soft remove every route to Cancelled ends in: status cancelled, parked column cleared, the
+ * questions stored under the task detached, one event.
+ */
 function retireTask(ctx: WriteContext, id: TaskId): TaskDto {
   ctx.tx
     .update(schema.tasks)
     .set({ status: TaskStatus.Cancelled, boardColumnId: null, updatedAt: ctx.now })
     .where(eq(schema.tasks.id, id))
     .run();
+  detachShapeQuestionsOfTask(ctx, id);
   ctx.emit({
     type: EventType.TaskChanged,
     entityType: 'task',
