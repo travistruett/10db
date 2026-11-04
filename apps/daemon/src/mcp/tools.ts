@@ -720,16 +720,34 @@ export function createToolHandlers(
           // carries that list forward, and the list is what bounds the step: complete_step may file at
           // most MAX_FOLLOW_UPS in all, however many times it is called or by which session.
           const kept = filedFollowUpLines(step.result?.summary ?? '');
-          if (kept.length + input.followUps.length > MAX_FOLLOW_UPS)
+          // An earlier session that used this opId has already filed its follow-ups. This call is a
+          // retry or a rerun of it, so a follow-up with the title of one of those is that one: it is
+          // named again but not filed twice. Each earlier follow-up matches at most one input.
+          const alreadyFiled = earlier
+            ? McpToolOutputs.complete_step.parse(earlier.result).followUps
+            : [];
+          const unmatched = [...alreadyFiled];
+          const toFile = input.followUps.filter((followUp) => {
+            const at = unmatched.findIndex((f) => f.title === followUp.title);
+            if (at === -1) return true;
+            unmatched.splice(at, 1);
+            return false;
+          });
+          if (kept.length + toFile.length > MAX_FOLLOW_UPS)
             throw new InvalidError(
               `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks through complete_step and this step's result already lists ${String(kept.length)}. Send at most ${String(Math.max(0, MAX_FOLLOW_UPS - kept.length))} followUps, and put the rest in your notes.`,
             );
-          const filed = input.followUps.map((followUp) => {
+          const newlyFiled = toFile.map((followUp) => {
             const task = insertFollowUpTask(ctx, row.taskId, followUp);
             return { taskId: task.id, title: task.title };
           });
-          // The builder finds the follow-ups from the step's result, so they are written into it.
-          const listed = [...kept, ...filed.map((f) => `- ${f.taskId} ${f.title}`)];
+          const filed = [...alreadyFiled, ...newlyFiled];
+          // The builder finds the follow-ups from the step's result, so they are written into it. The
+          // earlier session's are added if the step's result no longer lists them.
+          const listed = [
+            ...kept,
+            ...filed.map((f) => `- ${f.taskId} ${f.title}`).filter((line) => !kept.includes(line)),
+          ];
           const summary =
             listed.length === 0
               ? input.summary
@@ -751,7 +769,7 @@ export function createToolHandlers(
               stepIndex: row.stepIndex,
               role: step.role,
               verdict,
-              followUps: filed.map((f) => f.taskId),
+              followUps: newlyFiled.map((f) => f.taskId),
             },
           });
           const reply = { instruction: 'Recorded. End your turn now.', followUps: filed };

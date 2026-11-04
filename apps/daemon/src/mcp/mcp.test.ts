@@ -2553,19 +2553,58 @@ describe('complete_step', () => {
           expect(summary).toContain(`${task.id} ${task.title}`);
       });
 
-      it('counts what an earlier session of the step filed when a rerun reuses its opId', async () => {
+      it('counts what an earlier session of the step filed against the cap', async () => {
         const s = await onStep('review');
-        const args = {
+        await s.call('complete_step', {
           opId: 'op-step-multi-g',
           summary: 'First notes.',
           verdict: 'approve',
           followUps: more(0, MAX_FOLLOW_UPS),
-        };
-        await s.call('complete_step', args);
+        });
         const rerun = await connectSession(s.workstream.id);
-        const again = await rerun.call('complete_step', args);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-h',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(100, 1),
+        });
         expect(again.isError).toBe(true);
         expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+      });
+
+      it('files no follow-up the earlier session already filed when a rerun reuses its opId', async () => {
+        const s = await onStep('review');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'First notes.',
+          verdict: 'reject',
+          followUps,
+        });
+        const filedBefore = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        const rerun = await connectSession(s.workstream.id);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'Rerun notes.',
+          verdict: 'approve',
+          followUps: [...followUps, ...more(0, 1)],
+        });
+        expect(again.isError).toBe(false);
+        // The verdict is the new one, and only the one follow-up the first call did not file is new.
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('approve');
+        expect(result?.summary.startsWith('Rerun notes.')).toBe(true);
+        const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        expect(filed).toHaveLength(followUps.length + 1);
+        expect(filed.slice(0, followUps.length)).toEqual(filedBefore);
+        // The result and the reply name each follow-up once.
+        for (const task of filed)
+          expect(result?.summary.split(`${task.id} ${task.title}`)).toHaveLength(2);
+        expect(again.json).toMatchObject({
+          followUps: filed.map((t) => ({ taskId: t.id, title: t.title })),
+        });
+        expect(first.json).toMatchObject({
+          followUps: filedBefore.map((t) => ({ taskId: t.id, title: t.title })),
+        });
       });
     });
 
