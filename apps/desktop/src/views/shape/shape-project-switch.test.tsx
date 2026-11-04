@@ -79,6 +79,39 @@ describe('Shape: switching project', () => {
     });
   });
 
+  it('stays on another project’s conversation opened at load, when the conversation answers before /projects', async () => {
+    const betaShape = shapeDto({ projectId: beta.id, state: 'proposed', round: 1 });
+    const view = shapeViewDto({
+      shape: betaShape,
+      messages: [shapeMessageDto(betaShape.id)],
+    });
+    let release: () => void = () => undefined;
+    const projectsArrive = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    window.localStorage.setItem('tendb.project', JSON.stringify(alpha.id));
+    server.use(
+      http.get(daemonUrl('/projects'), async () => {
+        await projectsArrive;
+        return HttpResponse.json([alpha, beta]);
+      }),
+      http.get(daemonUrl('/projects/:projectId/shapes'), ({ params }) =>
+        HttpResponse.json(params['projectId'] === beta.id ? [betaShape] : []),
+      ),
+      http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(view)),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', () => undefined),
+    );
+    const { router } = renderApp(`/shape/${betaShape.id}`);
+    // The conversation is in before the project list is.
+    await screen.findByRole('textbox', { name: 'Message' });
+
+    release();
+    await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(router.state.location.pathname).toBe(`/shape/${betaShape.id}`);
+  });
+
   it('never posts a send in the new project to the conversation a failed send made in the old one', async () => {
     const alphaShape = shapeDto({ projectId: alpha.id, state: 'listening', round: 0 });
     const betaShape = shapeDto({ projectId: beta.id, state: 'listening', round: 0 });
