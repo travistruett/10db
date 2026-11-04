@@ -54,6 +54,7 @@ import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
 import {
   commitCoveredByRevert,
+  commitGotThroughGate,
   commitResolvedMarkers,
   lastRevertNoteAt,
   revertCommitOf,
@@ -219,7 +220,7 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * batch's branch. A run left out holds a revert on its notice. A run retried before holds it in the
  * note its session was given, and is told again unless it has committed since: a commit after the
  * revert brings work back, and 10db never undoes a revert. A commit that resolved conflict markers of
- * a base merge brings none back, as the pull request reads it too, and neither does a result that
+ * a base merge, or one made fixing a failed gate, brings none back, as the pull request reads them too, and neither does a result that
  * made no new commit and handed the session a commit the revert covers (a reused opId). `kept` is a revert Ship without it
  * left on the branch without writing the run's notice (its write failed, and the batch's left-out
  * card holds it). It covers this run, and it is told of that one unless it is the revert the run was
@@ -244,6 +245,7 @@ function revertStillOn(
       if (
         McpToolOutputs.commit.safeParse(result).success &&
         !commitResolvedMarkers(result) &&
+        !commitGotThroughGate(result) &&
         !commitCoveredByRevert(result)
       )
         return null;

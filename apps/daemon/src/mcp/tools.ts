@@ -71,7 +71,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { commitResultAsStored, revertOfRun } from '../team';
+import { commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -650,10 +650,17 @@ export function createToolHandlers(
       // but brings none of a reverted task's work back. The session's answer is unchanged.
       // It also says when the tool made no new commit and handed the session one the run's revert
       // covers (an opId reused from the reverted commits): that brought no work back either.
-      const told = result.alreadyCommitted
-        ? revertOfRun({ notice: row.notice, evidence: listEvidence(db, workstreamId) })
-        : null;
-      const stored = await commitResultAsStored(deps.git, checkout, result, told?.revert ?? null);
+      // And when the session was fixing a failed gate, read from the run's record so a question, a usage
+      // limit or a handoff does not lose it: the commit adapts or repairs, and brings no work back.
+      const evidence = listEvidence(db, workstreamId);
+      const told = result.alreadyCommitted ? revertOfRun({ notice: row.notice, evidence }) : null;
+      const stored = await commitResultAsStored(
+        deps.git,
+        checkout,
+        result,
+        told?.revert ?? null,
+        fixingFailedGate(evidence),
+      );
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,

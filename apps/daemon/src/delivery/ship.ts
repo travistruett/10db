@@ -60,7 +60,12 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { commitResolvedMarkers, insertPlannedWorkstream, revertOfRun } from '../team';
+import {
+  commitGotThroughGate,
+  commitResolvedMarkers,
+  insertPlannedWorkstream,
+  revertOfRun,
+} from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -1354,7 +1359,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
 
   /**
    * Every commit `runs` made through the commit tool, in the order recorded. With `redoing`, the ones
-   * that resolved conflict markers of a base merge are left out.
+   * that resolved conflict markers of a base merge, or were made fixing a failed gate, are left out.
    */
   function commitsMadeBy(
     runs: readonly WorkstreamDto[],
@@ -1363,7 +1368,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const made: string[] = [];
     for (const run of runs)
       for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
-        if (options.redoing === true && commitResolvedMarkers(result)) continue;
+        if (
+          options.redoing === true &&
+          (commitResolvedMarkers(result) || commitGotThroughGate(result))
+        )
+          continue;
         const parsed = McpToolOutputs.commit.safeParse(result);
         if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
       }
@@ -1378,7 +1387,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * (`insertJoinedWorkstream`). Only a run that was told counts: the shipping gate sends a merge run to
    * a task that finished, and its commit resolves the base's conflicts without bringing any of the work
    * back. The same goes for a told run's own commit that resolved conflict markers of its gate's base
-   * merge: the commit tool records those, and they do not count.
+   * merge, or that was made fixing a failed gate: the commit tool records those, and they do not count.
    */
   async function revertedAway(
     batchId: BatchId,

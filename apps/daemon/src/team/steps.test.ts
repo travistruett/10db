@@ -474,6 +474,25 @@ describe('retryWorkstream', () => {
       expect(retried.notice?.key).toBe('reverted-work');
     });
 
+    it('tells a run again whose only commit since was made fixing a failed gate', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      state.write((ctx) => {
+        insertToolOp(ctx, {
+          workstreamId: ws.id,
+          sessionId: mintId('Session'),
+          opId: 'op-gate-fix',
+          tool: 'commit',
+          result: { sha: 'd'.repeat(40), alreadyCommitted: false, throughGate: true },
+        });
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, ws.id, { to, fence: null });
+      });
+      const retried = retryWorkstream(state, ws.id);
+      expect(builderNotes(ws.id)).toHaveLength(2);
+      expect(retried.notice?.key).toBe('reverted-work');
+    });
+
     it('does not tell a run again that was handed a commit already on the branch the revert does not cover', () => {
       const ws = failedAt(0, leftOut(REVERT));
       retryWorkstream(state, ws.id);

@@ -11,8 +11,10 @@ export {
 } from './steps';
 export {
   commitCoveredByRevert,
+  commitGotThroughGate,
   commitResolvedMarkers,
   commitResultAsStored,
+  fixingFailedGate,
   revertCommitLine,
   revertOfRun,
 } from './reverted-work';

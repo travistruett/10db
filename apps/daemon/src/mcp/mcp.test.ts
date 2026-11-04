@@ -58,7 +58,12 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { commitCoveredByRevert, commitResolvedMarkers, revertCommitLine } from '../team';
+import {
+  commitCoveredByRevert,
+  commitGotThroughGate,
+  commitResolvedMarkers,
+  revertCommitLine,
+} from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -1015,6 +1020,85 @@ describe('MCP tools', () => {
       writeRepoFile('src/api/b.ts', 'export {}\n');
       await s.call('commit', { opId: 'op-new-01', paths: ['src/api/b.ts'], message: 'Add b' });
       expect(covered(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made while the run is fixing a failed gate', () => {
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number | null,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode: exitCode ?? 0,
+                summary: 'The gate failed',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const throughGate = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitGotThroughGate);
+    const commitWork = async (s: Awaited<ReturnType<typeof seedSession>>, opId: string) => {
+      writeRepoFile('src/api/b.ts', `export const op = '${opId}';\n`);
+      await s.call('commit', { opId, paths: ['src/api/b.ts'], message: 'Work' });
+    };
+
+    it('is recorded when the latest gate run failed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      await commitWork(s, 'op-gate-fix-1');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is recorded after a session the builder answered continues the fix', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+        });
+      });
+      await commitWork(s, 'op-gate-fix-2');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is not recorded when no gate has run', async () => {
+      const s = await seedSession();
+      await commitWork(s, 'op-no-gate');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the latest gate run passed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'gate', 0);
+      await commitWork(s, 'op-gate-passed');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the builder’s note came after the failed gate run', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'builder', null);
+      await commitWork(s, 'op-note-after');
+      expect(throughGate(s)).toEqual([false]);
     });
   });
 

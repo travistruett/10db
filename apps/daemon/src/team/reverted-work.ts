@@ -28,6 +28,14 @@ const REVERT_LINE = REVERT_COMMIT_LINE;
 const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 
 /**
+ * The key a commit tool op's stored result carries when the run's latest gate run had failed and its
+ * session was fixing that failure (`fixingFailedGate`): a told run's gate runs on the merged branch,
+ * so the commit adapts the work to the base or repairs it, and brings none of a reverted task's work
+ * back. A commit made before the gate failed is the work, and it carries no key.
+ */
+const THROUGH_GATE_KEY = 'throughGate';
+
+/**
  * The key a commit tool op's stored result carries when it made no new commit (the opId was already on
  * the branch) and the sha is one the run's revert covers: the session was handed a commit the revert
  * undid, so no work came back. A retry reads it, and it needs no git to do so.
@@ -35,22 +43,41 @@ const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 const COVERED_BY_REVERT_KEY = 'coveredByRevert';
 
 /**
- * A commit tool op's result as it is stored, marked when the commit resolved conflict markers, and
- * when it made no new commit and `revert` (the one the run was told of; null when none) covers its sha.
+ * Whether a session making a commit is fixing a failed gate: of the run's gate and builder evidence the
+ * latest is a gate run that failed. This is the record `outstandingFixEvidence` reads (runner), so it
+ * holds after a question, a usage limit or a handoff replaced the next action. A Retry's note comes
+ * after the failure, so a session told to redo the work is not fixing one.
+ */
+export function fixingFailedGate(
+  evidence: readonly { readonly kind: string; readonly exitCode: number | null }[],
+): boolean {
+  const latest = evidence.filter((e) => e.kind === 'gate' || e.kind === 'builder').at(-1);
+  return latest?.kind === 'gate' && latest.exitCode !== 0;
+}
+
+/**
+ * A commit tool op's result as it is stored, marked when the commit resolved conflict markers, when
+ * the session making it was fixing a failed gate (`throughGate`), and when it made no new commit and
+ * `revert` (the one the run was told of; null when none) covers its sha.
  */
 export async function commitResultAsStored<T extends { readonly sha: string }>(
   git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween' | 'hasCommit' | 'isAncestor'>,
   repo: string,
   result: T & { readonly alreadyCommitted?: boolean },
   revert: string | null = null,
+  throughGate = false,
 ): Promise<
-  T & { readonly [RESOLVED_MARKERS_KEY]?: true; readonly [COVERED_BY_REVERT_KEY]?: true }
+  T & {
+    readonly [RESOLVED_MARKERS_KEY]?: true;
+    readonly [THROUGH_GATE_KEY]?: true;
+    readonly [COVERED_BY_REVERT_KEY]?: true;
+  }
 > {
   const parent = `${result.sha}^`;
   const changed = await git.filesChangedBetween(repo, parent, result.sha);
   const marked = await git.conflictMarkers(repo, changed, parent);
-  const resolved =
-    marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true as const } : result;
+  const gated = throughGate ? { ...result, [THROUGH_GATE_KEY]: true as const } : result;
+  const resolved = marked.length > 0 ? { ...gated, [RESOLVED_MARKERS_KEY]: true as const } : gated;
   // A named revert no longer on the branch covers nothing, as `revertedAway` reads it.
   const covered =
     result.alreadyCommitted === true &&
@@ -63,6 +90,11 @@ export async function commitResultAsStored<T extends { readonly sha: string }>(
 /** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
 export function commitResolvedMarkers(result: unknown): boolean {
   return storedMark(result, RESOLVED_MARKERS_KEY);
+}
+
+/** Whether a stored commit result was made fixing a failed gate (`commitResultAsStored`). */
+export function commitGotThroughGate(result: unknown): boolean {
+  return storedMark(result, THROUGH_GATE_KEY);
 }
 
 /** Whether a stored commit result made no new commit, and its sha is one the run's revert covers. */
