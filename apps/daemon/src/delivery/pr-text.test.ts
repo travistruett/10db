@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { prBody, prTitle, titlePrefix } from './index';
+import { prBody, prSubject, prTitle, titlePrefix } from './index';
 import { parsePrScopes, scopeOf } from './pr-scopes';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -92,6 +92,41 @@ describe("this repository's scope list", () => {
     expect(title).toBe(expected);
     const lint = commitlint(title);
     expect(lint.status, lint.output).toBe(0);
+  });
+});
+
+describe('prSubject', () => {
+  const task = (title: string, state: 'DONE' | 'FAILED', leftOut = false) => ({
+    title,
+    state,
+    leftOut,
+  });
+
+  it('is the batch title when no task named after it was left out', () => {
+    expect(prSubject('Greetings', [task('Alpha', 'FAILED', true), task('Beta', 'DONE')])).toBe(
+      'Greetings',
+    );
+    expect(prSubject('Alpha', [task('Alpha', 'FAILED'), task('Beta', 'DONE')])).toBe('Alpha');
+  });
+
+  it('is the first finished task still in when the batch is named after one left out', () => {
+    expect(
+      prSubject(' alpha. ', [
+        task('Alpha', 'FAILED', true),
+        task('Beta', 'FAILED'),
+        task('Gamma', 'DONE'),
+      ]),
+    ).toBe('Gamma');
+  });
+
+  it('is the first task still in when none finished', () => {
+    expect(prSubject('Alpha', [task('Alpha', 'FAILED', true), task('Beta', 'FAILED')])).toBe(
+      'Beta',
+    );
+  });
+
+  it('is the batch title when every task was left out', () => {
+    expect(prSubject('Alpha', [task('Alpha', 'FAILED', true)])).toBe('Alpha');
   });
 });
 

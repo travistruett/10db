@@ -786,6 +786,13 @@ export const PARKED_NOTICE_KEY = 'parked-answer';
 export const LEFT_OUT_NOTICE_KEY = 'left-out';
 
 /**
+ * The key of the notice a retried run keeps while its commits stay reverted on the batch's branch
+ * (Retry after Ship without it). The pull request lists the run's task as done only when it
+ * committed again after the revert.
+ */
+export const REVERTED_NOTICE_KEY = 'reverted-work';
+
+/**
  * The key of the batch notice that records 10db repaired a broken install by itself. It is history,
  * not a wait: a task's drawer keeps showing it after its run fails or its batch ends.
  */
