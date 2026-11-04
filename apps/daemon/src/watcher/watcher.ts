@@ -491,30 +491,36 @@ export function createWatcher(deps: {
         ({ rel, a }) =>
           rel === path && !a.standing && a.useKey !== null && !usedCards.has(a.useKey),
       );
-    // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
-    // is read; any other write is carded as it is. The reads run together, each within its time budget, so
-    // a batch waits for its slowest file and no longer than that; the decisions below then run without
-    // awaiting, one path after the other, against the cards and lanes as they are after the reads.
-    const reads = new Map(
-      await Promise.all(
-        paths
-          .filter(
-            (p) =>
-              !standing.some(({ rel }) => rel === p) &&
-              (keysOf(p).length > 0 || unusedCardsOf(p).length > 0),
-          )
-          .map(async (p) => [p, await stampOrReason(root, p)] as const),
-      ),
-    );
     // A card withdrawn or a rule removed during a read allows nothing now, and a lane whose run ended
-    // meanwhile has no card to use up or write to excuse. Called after every await, so no decision below
-    // uses a list made before one.
+    // meanwhile has no card to use up or write to excuse. Called after every round of reads, so no
+    // decision below uses a list made before one.
     const relist = (): void => {
       forgetEndedLanes();
       const active = new Set(listWorkstreams(db, { states: ACTIVE_STATES }).map((ws) => ws.id));
       ({ cards, standing } = allowancesOf(lanes.filter((l) => active.has(l))));
     };
-    relist();
+    // Reading a file to stamp it costs its whole content, so only a path a card or an excused write names
+    // is read; any other write is carded as it is. The reads of a round run together, each within its time
+    // budget, so a round waits for its slowest file and no longer than that. A card answered during the
+    // first round names a path it did not read, so those paths are read together in a second round after
+    // the relist. There are at most two rounds, so allowedWrites waits at most two budgets (STAMP_BUDGET_MS
+    // each); a path whose card is answered only during the second round is not read and fails closed (it is
+    // carded and the card stays unused). The decisions below then run with no await between them, against
+    // the cards and lanes as they are after the last round.
+    const reads = new Map<string, Awaited<ReturnType<typeof stampOrReason>>>();
+    const needsRead = (p: string): boolean =>
+      !reads.has(p) &&
+      !standing.some(({ rel }) => rel === p) &&
+      (keysOf(p).length > 0 || unusedCardsOf(p).length > 0);
+    const readRound = async (): Promise<void> => {
+      const round = await Promise.all(
+        paths.filter(needsRead).map(async (p) => [p, await stampOrReason(root, p)] as const),
+      );
+      for (const [p, read] of round) reads.set(p, read);
+      relist();
+    };
+    await readRound();
+    if (paths.some(needsRead)) await readRound();
     for (const path of paths) {
       if (standing.some(({ rel }) => rel === path)) {
         allowed.add(path);
@@ -523,17 +529,8 @@ export function createWatcher(deps: {
       // The decision is made against the excused writes and cards as they are now, not as they were before
       // the reads: another checkout's batch may have used a card or excused a write meanwhile.
       if (keysOf(path).length === 0 && unusedCardsOf(path).length === 0) continue;
-      let read = reads.get(path);
-      if (read === undefined) {
-        // A card for this path was answered during the batch reads, so it is read here. The read is an
-        // await: what the lanes, cards and rules allow is listed again after it, and the path decided anew.
-        read = await stampOrReason(root, path);
-        relist();
-        if (standing.some(({ rel }) => rel === path)) {
-          allowed.add(path);
-          continue;
-        }
-      }
+      // A path with no read gained its card during the second round: it fails closed, as an unreadable file.
+      const read = reads.get(path) ?? { reason: 'unreadable' as const };
       const keys = keysOf(path);
       const unusedCards = unusedCardsOf(path);
       if (keys.length === 0 && unusedCards.length === 0) continue;
