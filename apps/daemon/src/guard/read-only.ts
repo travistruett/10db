@@ -61,9 +61,10 @@ const WRITING_OPTIONS: Readonly<Record<string, readonly string[]>> = {
 /**
  * Why a read-only git call is refused because it writes a file or runs a program, or null when it
  * does neither. `--output` and `git grep -O` are gitVerdict's to judge (it knows `-O` only means a
- * pager for grep, so `git log -SOption` passes), and its message says how to rephrase. `--ext-diff`
- * and `--textconv` are checked here; `--text` is a different option (treat as text) and passes,
- * while any other abbreviation of `--textconv` is refused.
+ * pager for grep, so `git log -SOption` passes). Only the `-O` message says how to rephrase; the
+ * `--output` message says only what the option does. `--ext-diff` and `--textconv` are checked
+ * here and their messages likewise say only what the option does; `--text` is a different option
+ * (treat as text) and passes, while any other abbreviation of `--textconv` is refused.
  */
 function gitRunsOrWritesReason(args: readonly string[]): string | null {
   const verdict = gitVerdict(['git', ...args]);
@@ -136,8 +137,8 @@ function readOnlyJudgement(
 
 /**
  * Why a read-only step may not run this command, or null when every segment only reads. A read-only
- * git call refused for an option says which option and how to rephrase; any other refusal is the
- * generic one.
+ * git call refused for an option says which option and what it does (`git grep -O` also says how to
+ * rephrase; `--output`, `--ext-diff` and `--textconv` do not); any other refusal is the generic one.
  */
 export function readOnlyShellRefusal(command: string): string | null {
   const judgement = readOnlyJudgement(command, READ_COMMANDS, false);
