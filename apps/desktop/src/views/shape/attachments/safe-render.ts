@@ -25,13 +25,13 @@ export function mockupDocument(html: string): string {
 const refuse = (): Promise<never> =>
   Promise.reject(new Error('A chart loads nothing: its data is inline in data.values'));
 
-/** Vega's loader, with every way to load something refused. */
-export const refusingLoader: Loader = {
+/** Vega's loader, with every way to load something refused. Frozen: nothing can rewrite it. */
+export const refusingLoader: Loader = Object.freeze({
   load: refuse,
   sanitize: refuse,
   http: refuse,
   file: refuse,
-};
+});
 
 /** An SVG string as an image source. */
 export function svgDataUrl(svg: string): string {
@@ -51,13 +51,19 @@ export async function chartSvg(spec: Readonly<Record<string, unknown>>): Promise
   if (refusal !== null) throw new Error(refusal);
   // Vega-Embed writes into the spec it is given; it gets a copy, so the view's spec stays as checked.
   const copy = structuredClone(spec) as unknown as TopLevelSpec;
+  // Vega-Embed merges usermeta.embedOptions over ours (loader, defaultStyle, patch, config, ast...), and
+  // ChartSpec lets usermeta through. Nothing in a chart's own JSON may change how it is drawn.
+  Reflect.deleteProperty(copy, 'usermeta');
   const result = await embed(document.createElement('div'), copy, {
     mode: 'vega-lite',
     renderer: 'none',
     actions: false,
     tooltip: false,
     hover: false,
-    loader: refusingLoader,
+    // No <style> in the app document's head (a detached element falls back to it).
+    defaultStyle: false,
+    // This draw's own loader, frozen: vega-embed can't write into one a later chart will use.
+    loader: Object.freeze({ ...refusingLoader }),
     ast: true,
     expr: expressionInterpreter,
   });

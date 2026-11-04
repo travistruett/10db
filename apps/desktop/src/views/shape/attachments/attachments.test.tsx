@@ -1,7 +1,7 @@
 import { MantineProvider } from '@mantine/core';
 import { render, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import type { ReactElement } from 'react';
+import type { ComponentProps, ReactElement } from 'react';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { server } from '../../../test/daemon';
 import { theme } from '../../../theme';
@@ -126,6 +126,150 @@ describe('a chart', () => {
       /loads nothing/,
     );
     await expect(refusingLoader.file('/etc/passwd')).rejects.toThrow(/loads nothing/);
+  });
+});
+
+// vega-embed reads usermeta.embedOptions out of the spec and merges it over the caller's options
+// (deep-merging into the caller's loader object). ChartSpec lets usermeta through, so a chart's own
+// JSON must not be able to change how it is drawn.
+describe('a chart whose usermeta.embedOptions tries to change how it is drawn', () => {
+  const chart = (
+    embedOptions: Record<string, unknown>,
+  ): ComponentProps<typeof AttachmentView>['attachment'] =>
+    ({
+      kind: 'chart',
+      spec: {
+        mark: 'bar',
+        usermeta: { embedOptions },
+        data: { values: [{ a: 'x', b: 1 }] },
+        encoding: {
+          x: { field: 'a', type: 'nominal' },
+          y: { field: 'b', type: 'quantitative' },
+        },
+      },
+    }) as never;
+
+  const styleElements = (): HTMLStyleElement[] =>
+    Array.from(document.querySelectorAll('style')).filter(
+      (el) =>
+        el.id === 'vega-embed-style' ||
+        el.textContent.includes('display:none') ||
+        el.textContent.includes('vega-embed'),
+    );
+
+  beforeEach(() => {
+    document.getElementById('vega-embed-style')?.remove();
+  });
+
+  it('cannot replace the loader: a loader option leaves the refusing loader refusing', async () => {
+    renderWithDaemon(
+      <AttachmentView
+        attachment={chart({
+          loader: { load: 1, http: 1, baseURL: 'http://127.0.0.1:4999/' },
+        })}
+        title="Loader"
+      />,
+    );
+    await screen.findByRole('img', { name: 'Chart: Loader' });
+    expect(typeof refusingLoader.load).toBe('function');
+    await expect(refusingLoader.load('http://127.0.0.1:4999/x.json')).rejects.toThrow(
+      /loads nothing/,
+    );
+    await expect(refusingLoader.http('http://127.0.0.1:4999/x.json', {})).rejects.toThrow(
+      /loads nothing/,
+    );
+    expect(Object.keys(refusingLoader).sort()).toEqual(['file', 'http', 'load', 'sanitize']);
+    expect(reached).toEqual([]);
+  });
+
+  it('cannot change the loader for a later chart', async () => {
+    const { unmount } = render(
+      <MantineProvider theme={theme} defaultColorScheme="dark">
+        <AttachmentView
+          attachment={chart({ loader: { load: 1, baseURL: 'http://127.0.0.1:4999/' } })}
+          title="First"
+        />
+      </MantineProvider>,
+    );
+    await screen.findByRole('img', { name: 'Chart: First' });
+    unmount();
+    // A later chart whose data a patch points at a URL must still hit a refusing loader.
+    renderWithDaemon(
+      <AttachmentView
+        attachment={{
+          kind: 'chart',
+          spec: {
+            mark: 'bar',
+            data: { values: [{ a: 'x', b: 1 }] },
+            encoding: {
+              x: { field: 'a', type: 'nominal' },
+              y: { field: 'b', type: 'quantitative' },
+            },
+          },
+        }}
+        title="Second"
+      />,
+    );
+    await screen.findByRole('img', { name: 'Chart: Second' });
+    expect(Object.isFrozen(refusingLoader)).toBe(true);
+    expect(typeof refusingLoader.load).toBe('function');
+    expect(reached).toEqual([]);
+  });
+
+  it('adds no style element to the document, whatever defaultStyle says', async () => {
+    renderWithDaemon(
+      <AttachmentView
+        attachment={chart({ defaultStyle: 'body { display:none }' })}
+        title="Style"
+      />,
+    );
+    await screen.findByRole('img', { name: 'Chart: Style' });
+    expect(styleElements()).toEqual([]);
+    expect(document.getElementById('vega-embed-style')).toBeNull();
+  });
+
+  it('adds no style element for a chart that says nothing either', async () => {
+    renderWithDaemon(<AttachmentView attachment={chart({})} title="Plain" />);
+    await screen.findByRole('img', { name: 'Chart: Plain' });
+    expect(document.getElementById('vega-embed-style')).toBeNull();
+  });
+
+  it('is drawn without a patch that adds a data URL, and reaches no URL', async () => {
+    renderWithDaemon(
+      <AttachmentView
+        attachment={chart({
+          // No `url` key in the JSON, so ChartSpec doesn't see it; the patch swaps inline data for one.
+          patch: [
+            { op: 'remove', path: '/data/0/values' },
+            { op: 'add', path: '/data/0/url', value: 'http://127.0.0.1:4999/projects' },
+          ],
+        })}
+        title="Patch"
+      />,
+    );
+    const img = await screen.findByRole('img', { name: 'Chart: Patch' });
+    const svg = decode(img.getAttribute('src') ?? '');
+    expect(svg).toContain('<svg');
+    // Vega logs a refused load and draws on, with no data: the bar is there only if the patch wasn't applied.
+    expect(svg).toMatch(/class="mark-rect role-mark marks"[^>]*><path/);
+    expect(reached).toEqual([]);
+  });
+
+  it('is drawn without a config loaded from a URL, and reaches no URL', async () => {
+    renderWithDaemon(
+      <AttachmentView
+        attachment={chart({ config: 'http://127.0.0.1:4999/config.json' })}
+        title="Config"
+      />,
+    );
+    await screen.findByRole('img', { name: 'Chart: Config' });
+    expect(reached).toEqual([]);
+  });
+
+  it('is drawn without ast: false, which would compile expressions to code', async () => {
+    renderWithDaemon(<AttachmentView attachment={chart({ ast: false })} title="Ast" />);
+    await screen.findByRole('img', { name: 'Chart: Ast' });
+    expect(reached).toEqual([]);
   });
 });
 
