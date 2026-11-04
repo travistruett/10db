@@ -1312,6 +1312,19 @@ describe('a waiting update drains the factory', () => {
       },
     );
 
+    it.each(['find-commit', 'find-build'])(
+      'does not say the held-back build waits for an idle moment when the look fails at %s after retry()',
+      async (step) => {
+        const update = await retriedAfterNewerHeadFailed();
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        const status = update.status();
+        expect(status.availableCommit).toBe('e'.repeat(40));
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).toBe('unreachable');
+      },
+    );
+
     it('does not fall back on the older build when GitHub goes away after a newer one failed', async () => {
       // The head moved first, so the staged build was found for an earlier head than the failure.
       world.busy = 1;
