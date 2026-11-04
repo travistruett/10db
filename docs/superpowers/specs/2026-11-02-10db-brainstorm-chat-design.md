@@ -310,16 +310,36 @@ images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent 
 and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the
 pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose size can't be read (cut short, or not what
 its name says) goes as a path too, since it would be sent blind. The conversation total is one budget for every
-picture a resumed request resends that the daemon sends itself: it counts each image already told that fits both
-per-image caps (2 MiB and 2000 px, by the same check that decides what goes inline), an upper bound on what went
-inline, and each screen kept (§5.5), and `see_screen` refuses a picture that would pass it. An image sent as a
-path for its bytes or pixels counts for nothing, so Retina screenshots leave room for twelve screens. A
-conversation that sent such a block before the 2000 px cap is undercounted by that block, which is accepted:
-past 2000 px blocks were rare, and the 6 MB left over covers a few. Twelve screens at their 1.5 MB most fit
-inside the total, so it only limits them beside dropped images. A session started fresh (from a digest) resends
-no earlier block, so its first message starts at zero; later turns count the whole conversation again, which is
-the same upper bound. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and this
-budget doesn't count, so nothing here promises it fits in the 6 MB left over.
+picture a resumed request resends that the daemon sends itself: it counts each dropped image a turn of the live
+session sent as a block (`shape_files.inline_sent`, written as the turn is sent) and each screen that session
+took (§5.5), and `see_screen` refuses a picture that would pass it. An image sent as a path, for its bytes or pixels or because
+the message or the total was full, counts for nothing, so Retina screenshots leave room for twelve screens. A
+conversation that existed before the column was added keeps the old count (every told image within both
+per-image caps), an upper bound. Twelve screens at their 1.5 MB most fit inside the total, so it only limits
+them beside dropped images. A session started fresh (from a digest) resends no earlier block, so it clears the
+mark on every file of the conversation: its first message and every later turn of that session count only the
+images that session sent. Screens count the same way: only those whose transcript row follows the latest digest,
+so the picture is not charged where it is not carried, and `see_screen` is not refused on a screen the digest
+told Claude to take again.
+A picture Claude pulls in with `Read` is a tool result the daemon never sees, and a resumed session resends it too,
+so it has a budget of its own in the session's PreToolUse hook (`shape/read-budget.ts`), sized to the 6.8 MB the
+18 MiB leaves. The hook charges each of the session's own Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp`
+file (a dropped image or one in the checkout) the file's size, at most 1 MiB, since Claude Code resizes what it
+reads; a file that isn't there is charged nothing. A Read that would take the live session's total past 3 MiB
+(4 MiB as base64, which leaves about 2.6 MB of the 32 MB for the conversation's text) is refused with a reason
+that says to work from the pictures already read or ask for a smaller one. Each counted Read is a dimmed
+`Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
+it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
+session as text. A Read of a PDF is not counted (a separate task).
+**Not measured:** the 1 MiB is an allowance, not a measurement, and it ships that way with the orchestrator's
+acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-7131-b2f7-0a24df988ba6), since a lane
+can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
+small one and a 4000 px one with a real session, finds the three pictures Claude Code kept in the session's transcript
+and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
+So the 3 MiB total is a promise only if a Read returns at most 1 MiB: at 2 MiB each, the three Reads it allows carry
+8 MB as base64 against the 6.8 MB left, and a request can pass 32 MB. The test also leaves one question open. It reads a
+fresh session's stored transcript, which gives an upper bound but doesn't show whether Claude Code drops an old tool
+result's picture when it resends. The budget assumes it doesn't, which is the safe side.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 

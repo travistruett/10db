@@ -28,6 +28,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
   const query = useShapeView(shapeId);
   const view = query.data;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const toggle = useRef<HTMLButtonElement | null>(null);
   const [jump, setJump] = useState<{ section: SectionKey; nonce: number } | null>(null);
   const [why, setWhy] = useState<TranscriptProps['why']>(null);
   const error = query.isError ? query.error.message : null;
@@ -69,9 +70,17 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
     };
   }, [highlighted]);
 
+  // The drawer's controls are about to unmount, so focus goes to the button that opens it. That
+  // button sits in the drawer layout's bar only: beside the chat there is none, and focus stays.
+  const closeDrawer = (): void => {
+    setDrawerOpen(false);
+    setJump(null);
+    toggle.current?.focus();
+  };
+
   return (
     <>
-      <SplitPane drawerOpen={drawerOpen}>
+      <SplitPane drawerOpen={drawerOpen} onClose={closeDrawer}>
         {(layout) => ({
           chat: (
             <ConversationPane
@@ -98,8 +107,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
               }}
               onWhy={(row) => {
                 // A drawer would cover the messages it points at.
-                setDrawerOpen(false);
-                setJump(null);
+                closeDrawer();
                 setWhy((previous) => ({
                   ids: row.sourceMessageIds,
                   nonce: (previous?.nonce ?? 0) + 1,
@@ -118,6 +126,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
                 }}
               />
               <Button
+                ref={toggle}
                 variant="default"
                 size="xs"
                 aria-expanded={drawerOpen}

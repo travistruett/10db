@@ -1,7 +1,13 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { isShapeImage, shapeFileKind, type ShapeId } from '@10db/contracts';
-import { listShapeFiles } from '@10db/db';
+import {
+  isShapeImage,
+  ScreenMessageBody,
+  shapeFileKind,
+  ShapeMessageKind,
+  type ShapeId,
+} from '@10db/contracts';
+import { listShapeFiles, listShapeMessages } from '@10db/db';
 import type { StateStore } from '../events';
 import { readImageSize } from './image-check';
 
@@ -25,7 +31,8 @@ const INLINE_IMAGE_MAX_SIDE = 2000;
  * The most image bytes a whole conversation carries, dropped images and screens together. Base64 grows
  * them by 4/3: 18 MiB raw is 24 MiB (about 25 MB) on the wire, which leaves the API's 32 MB request limit
  * about 6 MB. Twelve screens at their 1.5 MB most fit inside it. A picture Claude pulls in with `Read` is a
- * tool result this budget can't see, so the 6 MB is not a promise that such pictures fit.
+ * tool result this budget can't see; the Shape hook counts those against 3 MiB of their own
+ * (`shape/read-budget.ts`).
  */
 export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
 
@@ -34,14 +41,40 @@ export const isImageName = (name: string): boolean => {
   return kind !== null && isShapeImage(kind);
 };
 
-const keptScreenBytes = (dir: string): number => {
+/** What a Screen message's body says, or null for a body that isn't one. */
+export function parseScreenBody(body: string): ScreenMessageBody | null {
   try {
-    return readdirSync(dir).reduce((sum, name) => sum + statSync(join(dir, name)).size, 0);
+    const parsed = ScreenMessageBody.safeParse(JSON.parse(body));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+const keptScreenBytes = (path: string): number => {
+  try {
+    return statSync(path).size;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
     throw error;
   }
 };
+
+/**
+ * The bytes of the screens the live session took. A session started from a digest carries no earlier
+ * picture (§5.5), and the digest's own row marks where it began, so a restart loses nothing.
+ */
+function liveScreenBytes(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
+  const messages = listShapeMessages(state.db, shapeId);
+  const start = messages.findLastIndex((m) => m.kind === ShapeMessageKind.Digest) + 1;
+  return messages.slice(start).reduce((sum, message) => {
+    if (message.kind !== ShapeMessageKind.Screen) return sum;
+    const name = parseScreenBody(message.body)?.name;
+    return name === undefined
+      ? sum
+      : sum + keptScreenBytes(join(filesRoot, shapeId, 'screens', name));
+  }, 0);
+}
 
 /**
  * Whether the stored image is within the side cap. One whose size can't be read (cut short, or not
@@ -66,16 +99,16 @@ export const tooBigAlone = (file: {
 }): boolean => file.size > INLINE_IMAGE_MAX_BYTES || !withinSideCap(file.storedPath);
 
 /**
- * The image bytes a conversation has already spent: every screen it keeps and every image Claude was told
- * of that could have gone as a block. Which of those did depends on how they were batched into turns, and
- * a fresh session drops what came before it, so this is an upper bound on what the daemon sent under
- * today's caps. `filesRoot` is the data directory's `shapes` folder.
+ * The image bytes the live session already carries: every screen it took and every dropped image one of
+ * its turns sent as a block (`shape_files.inline_sent`, which a fresh session clears). Images that went
+ * as paths, and pictures of an earlier session, are not charged. `filesRoot` is the data directory's
+ * `shapes` folder.
  */
 export function inlineBytesSpent(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
-  const told = listShapeFiles(state.db, shapeId).reduce(
+  const sent = listShapeFiles(state.db, shapeId).reduce(
     (sum, file) =>
-      file.toldAt !== null && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
+      file.inlineSent && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
     0,
   );
-  return told + keptScreenBytes(join(filesRoot, shapeId, 'screens'));
+  return sent + liveScreenBytes(state, filesRoot, shapeId);
 }

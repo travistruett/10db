@@ -1191,6 +1191,12 @@ export const shapeFiles = sqliteTable(
     storedPath: text('stored_path').notNull(),
     /** When a turn first carried it to Claude; null until then, so a restart still tells it. */
     toldAt: text('told_at'),
+    /**
+     * Whether the live session's history holds this file as an image block. Set when a turn sends it
+     * inline, cleared for the whole conversation when a fresh session starts, so the image budget
+     * counts what a resumed session resends and nothing else.
+     */
+    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
     createdAt: createdAt(),
   },
   (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],

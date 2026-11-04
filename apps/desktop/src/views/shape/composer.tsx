@@ -2,6 +2,7 @@ import { ActionIcon, Alert, Box, Button, Group, Stack, Text, Textarea } from '@m
 import { IconPaperclip } from '@tabler/icons-react';
 import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
 import { FILE_PICKER_ACCEPT } from './dropped-files';
+import type { LateOutcome } from './late-outcome';
 import { isSendKey } from './use-shape-keys';
 
 export interface ComposerProps {
@@ -22,6 +23,10 @@ export interface ComposerProps {
   readonly files: readonly string[];
   /** Adds dropped, pasted or picked files; answers a reason for each one it refused. */
   readonly onFiles: (files: File[]) => Promise<string[]>;
+  /** A send or drop from the screen this one replaced, finished late: its reasons and the failed text. */
+  readonly late: LateOutcome | null;
+  /** This input has taken `late`. */
+  readonly onLateTaken: () => void;
 }
 
 const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
@@ -40,6 +45,22 @@ export function Composer(props: ComposerProps) {
   useEffect(() => {
     if (firstRun) input.current?.focus();
   }, [firstRun]);
+
+  const { late, onLateTaken } = props;
+  // Taken while rendering, so the first paint already has it; the store is told after.
+  const [takenLate, setTakenLate] = useState<LateOutcome | null>(null);
+  if (late !== null && late !== takenLate) {
+    setTakenLate(late);
+    setRefused((held) => [...held, ...late.refused.filter((reason) => !held.includes(reason))]);
+    if (late.failure !== null) setFailure(late.failure);
+    const text = late.draft;
+    // Whatever was typed since stays, with the text that failed ahead of it.
+    if (text !== null)
+      setDraft((typed) => (typed.includes(text) ? typed : `${text}\n\n${typed}`.trim()));
+  }
+  useEffect(() => {
+    if (late !== null) onLateTaken();
+  }, [late, onLateTaken]);
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return;

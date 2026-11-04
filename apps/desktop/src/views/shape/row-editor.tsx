@@ -2,6 +2,7 @@ import type { ShapeProposalDto } from '@10db/contracts';
 import { Button, Group, NativeSelect, Stack, Text, Textarea, TextInput } from '@mantine/core';
 import { useState, type KeyboardEvent } from 'react';
 import { changedFields, editableFields, filledValues } from './row-editing';
+import { OWNS_ESCAPE_ATTRIBUTE } from './use-shape-keys';
 
 export interface RowEditorProps {
   readonly row: ShapeProposalDto;
@@ -37,6 +38,7 @@ export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
   return (
     <form
       aria-label="Edit row"
+      {...{ [OWNS_ESCAPE_ATTRIBUTE]: '' }}
       onSubmit={(event) => {
         event.preventDefault();
         if (dirty) onSave(changed);
@@ -92,10 +94,10 @@ export function RowEditor({ row, onSave, onCancel }: RowEditorProps) {
             An edited field is pinned: Claude’s next round leaves it as you set it.
           </Text>
           <Group gap="xs" wrap="nowrap">
-            <Button variant="default" size="xs" onClick={onCancel}>
+            <Button variant="default" size="xs" onClick={onCancel} onKeyDown={onKeyDown}>
               Cancel
             </Button>
-            <Button size="xs" type="submit" disabled={!dirty}>
+            <Button size="xs" type="submit" disabled={!dirty} onKeyDown={onKeyDown}>
               Save
             </Button>
           </Group>
