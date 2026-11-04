@@ -7,6 +7,7 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
+  areasForProposal,
   getProject,
   getProposal,
   insertTaskFromProposal,
@@ -37,6 +38,7 @@ export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId):
   const proposal = getProposal(ctx.tx, proposalId);
   const lane = proposalSourceTask(ctx.tx, proposalId);
   const fields = taskFieldsFromProposal(proposal);
+  const project = getProject(ctx.tx, proposal.projectId);
   const origin = lane
     ? `proposed by the lane working on the task "${lane.title}" (${lane.id})`
     : 'proposed by a lane';
@@ -49,7 +51,11 @@ export function fileProposalByItself(ctx: WriteContext, proposalId: ProposalId):
       description: `Filed by 10db without an Inbox card, ${origin}. It is small and carries no risk tag.\n\n${fields.description}`,
       parkInIcebox: true,
     },
-    proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags: [] }),
+    // The task is stored with the areas of the lane that raised it, so the rule sees those.
+    proposePlacement(project, {
+      areas: areasForProposal(ctx.tx, proposalId, project),
+      riskTags: [],
+    }),
   );
   resolveProposal(ctx, proposalId, {
     status: 'accepted',

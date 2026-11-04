@@ -67,6 +67,7 @@ import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../san
 import {
   createInboxService,
   createPermissionBroker,
+  fileProposalByItself,
   ParkedError,
   type InboxService,
   type WaitObserver,
@@ -377,6 +378,7 @@ describe('proposal verdicts', () => {
     title: string,
     body: string,
     detail: Record<string, unknown> = {},
+    sourceRef: Record<string, string> = {},
   ): { proposalId: ProposalId; card: InboxItemDto } {
     const proposalId = state.write((ctx) =>
       insertProposal(ctx, {
@@ -384,7 +386,7 @@ describe('proposal verdicts', () => {
         kind,
         title,
         body,
-        sourceId: insertSource(ctx, 'agent', {}),
+        sourceId: insertSource(ctx, 'agent', sourceRef),
       }),
     );
     const card = state.write((ctx) =>
@@ -476,6 +478,77 @@ describe('proposal verdicts', () => {
       });
     },
   );
+
+  describe('a proposal raised from a lane whose task has an isolate area', () => {
+    const prProject = () =>
+      seedProject(base, {
+        delivery: 'pull_request',
+        workspaceMode: 'shared',
+        prTitlePrefix: 'feat(app)',
+      });
+
+    it('stores an accepted task, which inherits the area, as a separate copy with a reason', () => {
+      const project = prProject();
+      const ws = seedWorkstream(base, { project, areas: ['migrations'] });
+      const { card } = proposalCard(
+        ws,
+        'new_task',
+        'Add caching',
+        'Cache the query.',
+        {},
+        {
+          workstreamId: ws.workstream.id,
+        },
+      );
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        areas: ['migrations'],
+        workspaceMode: 'worktree',
+        placementReason: 'touches migrations',
+      });
+    });
+
+    it('stores a task 10db files by itself, which inherits the area, as a separate copy with a reason', () => {
+      const project = prProject();
+      const ws = seedWorkstream(base, { project, areas: ['deps'] });
+      const { proposalId } = proposalCard(
+        ws,
+        'new_task',
+        'Add caching',
+        'Cache the query.',
+        {},
+        {
+          workstreamId: ws.workstream.id,
+        },
+      );
+      state.write((ctx) => fileProposalByItself(ctx, proposalId));
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        areas: ['deps'],
+        workspaceMode: 'worktree',
+        placementReason: 'touches deps',
+      });
+    });
+
+    it('keeps an inherited area that is not isolated in the project default', () => {
+      const project = prProject();
+      const ws = seedWorkstream(base, { project, areas: ['api'] });
+      const { card } = proposalCard(
+        ws,
+        'new_task',
+        'Add caching',
+        'Cache the query.',
+        {},
+        {
+          workstreamId: ws.workstream.id,
+        },
+      );
+      inbox.answer(card.id, { choice: 'accept' });
+      expect(listTasks(state.db, project.id).find((t) => t.title === 'Add caching')).toMatchObject({
+        workspaceMode: 'shared',
+        placementReason: null,
+      });
+    });
+  });
 
   it('keeps an accepted task declaring migration in Your folder when the project has local delivery', () => {
     const project = seedProject(base, { delivery: 'local', workspaceMode: 'shared' });
