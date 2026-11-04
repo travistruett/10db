@@ -1,11 +1,11 @@
-import { mintId, PARK_TASK_OPTION, type InboxItemDto } from '@10db/contracts';
+import { mintId, PARK_TASK_OPTION, type InboxItemDto, type ProvenanceDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
 import { batchDto, inboxItemDto, projectViewDto } from '../../test/fixtures';
-import { proposalDto } from '../../test/knowledge-fixtures';
+import { knowledgeList, proposalDto, provenanceDto } from '../../test/knowledge-fixtures';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
   server.use(
@@ -948,6 +948,62 @@ describe('the resolved view', () => {
     expect(screen.queryByRole('button', { name: 'Send Answer' })).toBeNull();
   });
 
+  it('says an answer in the words the card offered it', async () => {
+    const closedProposal = (choice: string): InboxItemDto =>
+      inboxItemDto({
+        kind: 'proposal',
+        state: 'RESOLVED',
+        title: 'Tests never sleep',
+        options: [
+          { label: 'accept_project', description: 'Confirm it for this project' },
+          { label: 'accept_you', description: 'Confirm it for you, in every project' },
+          { label: 'accept_area', description: 'Confirm it for the api area of this project' },
+          { label: 'reject', description: 'Reject it; it stays on record as withdrawn' },
+        ],
+        detail: { proposalId: mintId('Proposal'), principleId: mintId('Principle') },
+        answer: { choice },
+      });
+    const permission = inboxItemDto({
+      kind: 'permission',
+      state: 'RESOLVED',
+      title: 'Run a command?',
+      options: [{ label: 'allow_once', description: 'This time' }],
+      answer: { choice: 'allow_once' },
+    });
+    const gone = inboxItemDto({
+      kind: 'question',
+      state: 'RESOLVED',
+      title: 'An option no longer listed',
+      options: [{ label: 'Teal', description: 'A green-blue' }],
+      answer: { choice: 'Violet' },
+    });
+    serveBoth(
+      [],
+      [
+        closedProposal('accept_project'),
+        closedProposal('accept_you'),
+        closedProposal('accept_area'),
+        closedProposal('reject'),
+        permission,
+        gone,
+      ],
+    );
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
+    await screen.findAllByTestId('resolved-card');
+    for (const words of [
+      'Answered: This project',
+      'Answered: All my projects',
+      'Answered: This area',
+      'Answered: Reject',
+      'Answered: Allow once',
+      'Answered: Violet',
+    ]) {
+      expect(screen.getByText(words)).toBeTruthy();
+    }
+    expect(screen.queryByText(/accept_|allow_once/)).toBeNull();
+  });
+
   it('says so when nothing has been resolved', async () => {
     serveBoth([color], []);
     renderApp('/inbox');
@@ -1197,7 +1253,8 @@ describe('knowledge on cards', () => {
 });
 
 describe('a resolved answer that proposed a principle', () => {
-  const proposed = [{ proposalId: mintId('Proposal'), principleId: mintId('Principle') }];
+  const principleId = mintId('Principle');
+  const proposed = [{ proposalId: mintId('Proposal'), principleId }];
   const answered = inboxItemDto({
     kind: 'question',
     state: 'RESOLVED',
@@ -1224,40 +1281,146 @@ describe('a resolved answer that proposed a principle', () => {
     );
   }
 
-  it('says a principle was proposed and opens it in the Knowledge view', async () => {
+  /** The principle as the daemon reports it, whatever became of its proposal. */
+  function serveProvenance(...records: ProvenanceDto[]): void {
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/knowledge'), () =>
+        HttpResponse.json(knowledgeList()),
+      ),
+      http.get(daemonUrl('/principles/:id/provenance'), ({ params }) => {
+        const record = records.find((r) => r.id === params['id']);
+        return record
+          ? HttpResponse.json(record)
+          : HttpResponse.json({ error: 'not_found' }, { status: 404 });
+      }),
+    );
+  }
+
+  const openDrawer = async (): Promise<HTMLElement> =>
+    screen.findByRole('dialog', { name: 'Where it came from' });
+
+  const selectedTab = (): string | null => screen.getByRole('tab', { selected: true }).textContent;
+
+  async function clickOpenInKnowledge(): Promise<void> {
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    await screen.findAllByTestId('resolved-card');
+    fireEvent.click(screen.getByRole('link', { name: 'Open in Knowledge' }));
+  }
+
+  it('says a principle was proposed, on the card that proposed it only', async () => {
     serveResolved([answered, plain]);
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
     const rows = await screen.findAllByTestId('resolved-card');
     expect(rows[0]?.textContent).toContain('A principle was proposed');
     expect(rows[1]?.textContent).not.toContain('principle');
-    const link = within(
-      rows.find((r) => r.textContent.includes('proposed')) ?? document.body,
-    ).getByRole('link', { name: 'Open in Knowledge' });
-    expect(link.getAttribute('href')).toContain('/knowledge');
-    fireEvent.click(link);
-    expect(await screen.findByRole('heading', { name: 'Knowledge', level: 2 })).toBeTruthy();
-    // The proposal waits in the Proposals tab.
-    expect(screen.getByRole('tab', { name: /Proposals/ }).getAttribute('aria-selected')).toBe(
-      'true',
-    );
   });
 
-  it('counts the principles when an answer proposed several', async () => {
+  it('opens a principle still waiting for a verdict, over the Proposals tab', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({ id: principleId, state: 'proposed', text: 'Never add Redis for queues.' }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    await waitFor(() => {
+      expect(selectedTab()).toContain('Proposals');
+    });
+  });
+
+  it('opens a principle accepted since the answer, over the Principles tab', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({ id: principleId, state: 'current', text: 'Never add Redis for queues.' }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    expect(selectedTab()).toContain('Principles');
+  });
+
+  it('opens a principle rejected since the answer, saying it was withdrawn', async () => {
+    serveResolved([answered]);
+    serveProvenance(
+      provenanceDto({
+        id: principleId,
+        state: 'withdrawn',
+        text: 'Never add Redis for queues.',
+        withdrawn: {
+          at: '2026-10-30T12:00:00.000Z',
+          by: 'me',
+          reason: 'Rejected in the inbox',
+          source: null,
+        },
+      }),
+    );
+    await clickOpenInKnowledge();
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
+    expect(within(drawer).getByText('Rejected in the inbox')).toBeTruthy();
+  });
+
+  it('lands on the project of the card, not the selected one', async () => {
+    const selected = projectViewDto({ name: 'Selected' });
+    const other = projectViewDto({ name: 'Other' });
+    const asked: string[] = [];
+    serveResolved([inboxItemDto({ ...answered, projectId: other.id })]);
+    serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([selected, other])),
+      http.get(daemonUrl('/projects/:projectId/proposals'), ({ params }) => {
+        asked.push(String(params['projectId']));
+        return HttpResponse.json([]);
+      }),
+    );
+    await clickOpenInKnowledge();
+    await openDrawer();
+    await waitFor(() => {
+      expect(asked).toContain(other.id);
+    });
+    expect(asked).not.toContain(selected.id);
+  });
+
+  it('forgets the link once the drawer closes, and keeps the tab it opened on', async () => {
+    serveResolved([answered]);
+    serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
+    const { router } = renderApp('/inbox');
+    fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
+    const drawer = await openDrawer();
+    await waitFor(() => {
+      expect(selectedTab()).toContain('Proposals');
+    });
+    fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({});
+    });
+    expect(selectedTab()).toContain('Proposals');
+  });
+
+  it('gives each principle its own link when an answer proposed several', async () => {
+    const second = mintId('Principle');
     const two = inboxItemDto({
       ...answered,
       detail: {
-        proposedPrinciples: [
-          ...proposed,
-          { proposalId: mintId('Proposal'), principleId: mintId('Principle') },
-        ],
+        proposedPrinciples: [...proposed, { proposalId: mintId('Proposal'), principleId: second }],
       },
     });
     serveResolved([two]);
+    serveProvenance(
+      provenanceDto({ id: principleId, text: 'Never add Redis for queues.' }),
+      provenanceDto({ id: second, text: 'Always keep queues in Postgres.' }),
+    );
     renderApp('/inbox');
     fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
     const [row] = await screen.findAllByTestId('resolved-card');
     expect(row?.textContent).toContain('2 principles were proposed');
+    expect(screen.getByRole('link', { name: 'Open principle 1' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('link', { name: 'Open principle 2' }));
+    const drawer = await openDrawer();
+    expect(await within(drawer).findByText('Always keep queues in Postgres.')).toBeTruthy();
   });
 
   it('ignores a detail that is not a list of proposals', async () => {

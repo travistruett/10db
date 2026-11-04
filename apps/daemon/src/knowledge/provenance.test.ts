@@ -87,6 +87,16 @@ describe('provenance', () => {
     });
   });
 
+  it('names the record in its own words, whatever its state', () => {
+    expect(decisionProvenance(store.db, decide().id).text).toBe('Which queue library? → BullMQ');
+    const withdrawn = rule();
+    store.write((ctx) => withdrawPrinciple(ctx, withdrawn.id, 'me', 'wrong'));
+    expect(principleProvenance(store.db, withdrawn.id)).toMatchObject({
+      state: 'withdrawn',
+      text: 'Never sleep in tests',
+    });
+  });
+
   it('links a decision to the one it replaced and the one that replaced it', () => {
     const a = decide();
     const b = store.write((ctx) => supersedeDecisionRecord(ctx, a.id, { choice: 'pg-boss' })).value;

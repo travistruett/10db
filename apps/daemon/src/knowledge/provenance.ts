@@ -141,6 +141,7 @@ export function decisionProvenance(db: DbReader, id: DecisionId): ProvenanceDto 
   return {
     id,
     kind: 'decision',
+    text: `${d.question} → ${d.choice}`,
     state: d.state,
     ...describeSource(db, {
       sourceId: d.sourceId,
@@ -174,6 +175,7 @@ export function principleProvenance(db: DbReader, id: PrincipleId): ProvenanceDt
   return {
     id,
     kind: 'principle',
+    text: p.statement,
     state: p.state,
     ...describeSource(db, {
       sourceId: p.sourceId,

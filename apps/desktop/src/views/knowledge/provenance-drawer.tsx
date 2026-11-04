@@ -1,6 +1,6 @@
 import type { ProvenanceDto } from '@10db/contracts';
 import { Alert, Anchor, Blockquote, Drawer, Loader, Stack, Text } from '@mantine/core';
-import { useProvenance, type TracedRecord } from '../../daemon/knowledge-queries';
+import { useProvenance, type RecordRef, type TracedRecord } from '../../daemon/knowledge-queries';
 import { STATE_LABELS } from './knowledge-labels';
 import { dateTimeText, sourceLabel, whoText } from './knowledge-labels';
 
@@ -54,7 +54,8 @@ export function ProvenanceDrawer({
   onTrace,
   onClose,
 }: {
-  readonly record: TracedRecord | null;
+  /** Without a label (a link from outside the view), the provenance names the record once it loads. */
+  readonly record: TracedRecord | RecordRef | null;
   /** Follows a replaced or replacing record. */
   readonly onTrace: (record: TracedRecord) => void;
   readonly onClose: () => void;
@@ -68,9 +69,12 @@ export function ProvenanceDrawer({
       position="right"
       title="Where it came from"
       size="min(480px, 50vw)"
+      closeButtonProps={{ 'aria-label': 'Close' }}
     >
       <Stack gap="sm">
-        {record ? <Text fw={600}>{record.label}</Text> : null}
+        {record ? (
+          <Text fw={600}>{'label' in record ? record.label : (p?.text ?? null)}</Text>
+        ) : null}
         {provenance.isPending && record ? <Loader size="sm" aria-label="Loading" /> : null}
         {provenance.isError ? (
           <Alert color="red" title="Couldn't load where it came from">

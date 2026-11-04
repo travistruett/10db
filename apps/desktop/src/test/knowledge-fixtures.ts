@@ -106,6 +106,7 @@ export function provenanceDto(overrides: Partial<ProvenanceDto> = {}): Provenanc
   return ProvenanceDto.parse({
     id: mintId('Principle'),
     kind: 'principle',
+    text: 'Never sleep in tests',
     state: 'current',
     sourceKind: 'builder',
     sourceRef: {},

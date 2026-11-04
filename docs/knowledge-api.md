@@ -366,6 +366,7 @@ happened to it:
 {
   "id": "pri_…",
   "kind": "principle",
+  "text": "Tests never sleep.",
   "state": "superseded",
   "sourceKind": "builder",
   "sourceRef": {
@@ -406,6 +407,7 @@ happened to it:
 
 | Field                                | Meaning                                                                                                                                     |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `text`                               | The record in words: a principle's statement, or a decision's `question → choice`.                                                          |
 | `sourceKind`, `sourceRef`            | The `sources` row as stored. Kinds include `builder` (this API, and the builder's own screens), and others for answered cards and sessions. |
 | `origin`                             | For a builder source with a `via`: the tool, its `sessionId` and `cwd` (null when absent). Null for every other source.                     |
 | `recordedAt`, `by`                   | When the source was written, and who made the record (`me` for the builder, or `agent:<session>`).                                          |

@@ -21,6 +21,9 @@
         "principle"
       ]
     },
+    "text": {
+      "type": "string"
+    },
     "state": {
       "type": "string",
       "enum": [
@@ -446,6 +449,7 @@
   "required": [
     "id",
     "kind",
+    "text",
     "state",
     "sourceKind",
     "sourceRef",

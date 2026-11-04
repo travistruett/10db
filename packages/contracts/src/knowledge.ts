@@ -244,6 +244,8 @@ export const ProvenanceDto = z.object({
   /** The record this answers for. */
   id: z.union([DecisionId, PrincipleId]),
   kind: z.enum(['decision', 'principle']),
+  /** The record in words: a principle's statement, or a decision's question and choice. */
+  text: z.string(),
   state: z.enum(KnowledgeState),
   sourceKind: z.enum(SourceKind),
   /** The `sources` row's own JSON, as stored. */

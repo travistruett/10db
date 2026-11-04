@@ -1,4 +1,4 @@
-import { GoalId, ShapeId, TaskId } from '@10db/contracts';
+import { GoalId, PrincipleId, ShapeId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -12,7 +12,7 @@ import { ViewBoundary } from './shell/view-boundary';
 import { BoardView } from './views/board/board-view';
 import { FactoryView } from './views/factory/factory-view';
 import { InboxView } from './views/inbox/inbox-view';
-import { isKnowledgeTab, KnowledgeView, type KnowledgeTab } from './views/knowledge/knowledge-view';
+import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { ShapeView } from './views/shape/shape-view';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
@@ -120,10 +120,11 @@ const inboxRoute = createRoute({
 const knowledgeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/knowledge',
-  // `tab` opens that tab, so a link from elsewhere (a resolved Inbox card) lands on the proposals it made.
-  validateSearch: (search: Record<string, unknown>): { tab?: KnowledgeTab } => {
-    const tab = search['tab'];
-    return typeof tab === 'string' && isKnowledgeTab(tab) ? { tab } : {};
+  // `principle` opens that principle, whatever its state, so a link from elsewhere (a resolved Inbox card)
+  // lands on the record and not on a list it may have left.
+  validateSearch: (search: Record<string, unknown>): { principle?: PrincipleId } => {
+    const principle = PrincipleId.safeParse(search['principle']);
+    return principle.success ? { principle: principle.data } : {};
   },
   component: KnowledgePage,
 });

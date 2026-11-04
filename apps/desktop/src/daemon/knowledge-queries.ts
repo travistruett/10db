@@ -91,10 +91,14 @@ export function useProposals(projectId: ProjectId, enabled = true) {
   });
 }
 
-/** The record whose provenance is open. `label` names it for the drawer. */
-export interface TracedRecord {
+/** A record by its id, as a link knows it before anything has loaded. */
+export interface RecordRef {
   readonly kind: KnowledgeItemKind;
   readonly id: DecisionId | PrincipleId;
+}
+
+/** The record whose provenance is open. `label` names it for the drawer. */
+export interface TracedRecord extends RecordRef {
   readonly label: string;
 }
 
@@ -102,7 +106,7 @@ export interface TracedRecord {
  * Where a record came from and what has happened to it. A retire, a withdrawal or a replacement changes
  * it, so the record's events refetch it.
  */
-export function useProvenance(record: TracedRecord | null) {
+export function useProvenance(record: RecordRef | null) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: record ? knowledgeKeys.provenance(record.id) : ['provenance', 'none'],
