@@ -291,6 +291,8 @@ describe('a shipped pull request that conflicts with its base', () => {
         ['no check is set', null],
         ['a gate is set', 'true'],
       ] as const;
+      /** The card is raised before the rewind, which may leave the merge where it is. */
+      const SAYS_PUT_BACK = /put (its|the) merge back|merge (was|is) put back/;
 
       it.each(
         PROBLEMS.flatMap(([problem, why, setUp, kept]) =>
@@ -314,12 +316,82 @@ describe('a shipped pull request that conflicts with its base', () => {
           expect(card.title).toContain("conflicts with main and 10db couldn't update it");
           expect(card.body).toContain(why);
           expect(card.body).toContain(`${GENERATED}/`);
+          expect(card.body).not.toContain('regenerated from its sources');
+          expect(card.body).not.toMatch(SAYS_PUT_BACK);
           // The worktree the catch-up made is gone, and no card tells the builder to regenerate in it.
           if (!kept) expect(now.worktreePath).toBeNull();
           expect(card.body).not.toContain('Regenerate them in the worktree');
           expect(now.notices.map((n) => n.key)).not.toContain('pull-request-update');
         },
       );
+
+      /** The builder commits while the install reads the merged lockfile at HEAD, before the generators. */
+      const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
+        const read = h.git.blobAt.bind(h.git);
+        let committed = false;
+        vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
+          if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
+            committed = true;
+            await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+          }
+          return read(repo, rev, file);
+        });
+        return () => committed;
+      };
+
+      /** The builder commits while the generators run. */
+      const commitsDuringGenerators = (batch: BatchDto): (() => boolean) => {
+        let committed = false;
+        vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(async ({ path }) => {
+          committed = true;
+          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+          return { kind: 'done', logPath: join(path, 'generate.log') };
+        });
+        return () => committed;
+      };
+
+      it.each([
+        ['the install', commitsDuringInstall, true, null],
+        ['the install', commitsDuringInstall, false, 'true'],
+        ['the generators', commitsDuringGenerators, true, 'true'],
+        ['the generators', commitsDuringGenerators, false, null],
+      ])(
+        "keeps a builder's commit made during %s and does not say the merge went back",
+        async (_when, commits, keepWorktree, gateCommand) => {
+          const batch = await generatedConflict(gateCommand, keepWorktree);
+          const branch = batch.branch ?? '';
+          const before = onOrigin(branch);
+          const committed = commits(batch);
+
+          await catchUp(batch);
+
+          expect(committed()).toBe(true);
+          const tip = h.git$('rev-parse', `refs/heads/${branch}`);
+          expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
+          expect(onOrigin(branch)).toBe(before);
+          // (A kept worktree has its own card, from the ship.)
+          const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
+          expect(card.body).toContain('the branch moved to');
+          expect(card.body).toContain('nothing was pushed');
+          expect(card.body).not.toMatch(SAYS_PUT_BACK);
+        },
+      );
+
+      it("does not say the merge went back when it can't be", async () => {
+        const batch = await generatedConflict(null, false);
+        const branch = batch.branch ?? '';
+        const before = onOrigin(branch);
+        failing();
+        vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
+
+        await catchUp(batch);
+
+        expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
+        expect(onOrigin(branch)).toBe(before);
+        const card = h.only(h.cards());
+        expect(card.body).toContain('nothing was pushed');
+        expect(card.body).not.toMatch(SAYS_PUT_BACK);
+      });
     });
 
     it('raises the card naming the conflict when the base could not be merged at all', async () => {

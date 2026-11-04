@@ -1832,10 +1832,11 @@ export function createShipper(deps: ShipperDeps): Shipper {
       }
       if (brought.kind === 'unregenerated') {
         // The merge has the base's generated directories, without the batch's changes in them: with
-        // or without a check, it is not pushed, and goes back with the others.
+        // or without a check, it is not pushed, and goes back with the others. The card says nothing
+        // of that: it is raised before the rewind, which leaves a merge under a builder's commit.
         stop({
           kind: 'other',
-          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed; 10db put its merge back.`,
+          why: `${brought.note}\n\nNo ${check === null ? 'check' : check.kind === 'precheck' ? 'pre-check' : 'gate'} ran and nothing was pushed.`,
         });
         return;
       }

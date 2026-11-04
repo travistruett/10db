@@ -1556,8 +1556,13 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         const note = joined(merged.note, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
           return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
+        // Not the merge's own note: it says these directories were regenerated from their sources.
         if (regenerated.unregenerated === true)
-          return { kind: 'unregenerated', head: regenerated.head, note: note ?? '' };
+          return {
+            kind: 'unregenerated',
+            head: regenerated.head,
+            note: joined(regenerated.note, installed.note) ?? '',
+          };
         return {
           ...merged,
           head: regenerated.head,
