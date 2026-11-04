@@ -582,6 +582,42 @@ describe('retiring and withdrawing', () => {
       ]);
     });
   });
+
+  it('says nothing is left to withdraw when the newest version is retired', async () => {
+    const older = decisionItem({ state: 'superseded', question: 'Which queue?', choice: 'BullMQ' });
+    const newest = mintId('Decision');
+    const { posted } = serve({ decisions: [older] });
+    server.use(
+      http.get(daemonUrl(`/decisions/${older.id}/provenance`), () =>
+        HttpResponse.json(
+          provenanceDto({
+            id: older.id,
+            kind: 'decision',
+            state: 'superseded',
+            supersededBy: newest,
+            supersededByText: 'Which queue? → Graphile',
+          }),
+        ),
+      ),
+      http.get(daemonUrl(`/decisions/${newest}/provenance`), () =>
+        HttpResponse.json(provenanceDto({ id: newest, kind: 'decision', state: 'retired' })),
+      ),
+    );
+    await openDecisions();
+    fireEvent.click(await screen.findByRole('switch', { name: 'History' }));
+    await openRowMenu('Actions for "Which queue?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    expect(await within(dialog).findByText(/has a newer version/)).toBeTruthy();
+    expect(
+      await within(dialog).findByText(
+        /The newest version is retired, so there is nothing left to withdraw/,
+      ),
+    ).toBeTruthy();
+    expect(within(dialog).getByText('Which queue? → Graphile')).toBeTruthy();
+    expect(within(dialog).queryByRole('button', { name: 'Withdraw Newest Version' })).toBeNull();
+    expect(within(dialog).queryByLabelText('Reason')).toBeNull();
+    expect(posted).toEqual([]);
+  });
 });
 
 describe('proposals', () => {
