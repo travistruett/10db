@@ -2621,6 +2621,47 @@ describe('permission broker in a sandboxed lane', () => {
         expect(warnings[0]?.fields).toMatchObject({ cardId: betaCard.id });
       });
 
+      it("still returns the builder's answered card when listing the covered cards fails, leaving them open and logging it", async () => {
+        const warnings: { fields: unknown; message: unknown }[] = [];
+        const logger = {
+          ...silentLogger,
+          warn: (fields: unknown, message?: unknown) => warnings.push({ fields, message }),
+        };
+        const failing: { afterId?: string; reading: boolean } = { reading: false };
+        inbox = createInboxService({
+          state: {
+            // The listing is the first read after the builder's answer is stored.
+            get db() {
+              if (failing.reading) throw new Error('database is locked');
+              return state.db;
+            },
+            now: () => state.now(),
+            write: (fn) =>
+              state.write((ctx) => {
+                const result = fn(ctx);
+                if ((result as { id?: string } | null)?.id === failing.afterId) {
+                  failing.reading = true;
+                }
+                return result;
+              }),
+          },
+          onParkedAnswer: () => undefined,
+          log: logger,
+        });
+        const { a, b, first, cardOf } = twoLanes();
+        const alphaCard = cardOf(a);
+        const betaCard = cardOf(b);
+        failing.afterId = alphaCard.id;
+        const answered = inbox.answer(alphaCard.id, { choice: 'allow_project' });
+        failing.reading = false;
+        expect(answered).toMatchObject({ id: alphaCard.id, state: 'RESOLVED' });
+        expect(await first).toEqual({ behavior: 'allow' });
+        expect(getInboxItem(state.db, betaCard.id)).toMatchObject({ state: 'OPEN' });
+        expect(openCards().map((c) => c.id)).toEqual([betaCard.id]);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]?.fields).toMatchObject({ cardId: alphaCard.id });
+      });
+
       it('leaves another lane’s card for a different file open', () => {
         const a = seedWorkstream(base);
         const b = seedWorkstream(base, { project: a.project, title: 'Beta' });

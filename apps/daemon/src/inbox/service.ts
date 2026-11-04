@@ -394,17 +394,25 @@ export function createInboxService(deps: {
     };
     const rule = ruleOf(answered);
     if (rule === undefined) return;
-    const covered = listInbox(deps.state.db, {
-      states: [InboxState.Open],
-      projectId: answered.projectId,
-    }).filter((card) => {
-      if (card.id === answered.id || card.kind !== InboxKind.Permission) return false;
-      if (card.detail?.[EXACT_WRITE_KEY] !== true) return false;
-      // The classifier handed that call to a person; the stored rule would not have answered it either.
-      if (card.detail[ESCALATED_KEY] === true) return false;
-      const theirs = ruleOf(card);
-      return theirs?.toolName === rule.toolName && theirs.pattern === rule.pattern;
-    });
+    let covered: InboxItemDto[];
+    try {
+      covered = listInbox(deps.state.db, {
+        states: [InboxState.Open],
+        projectId: answered.projectId,
+      }).filter((card) => {
+        if (card.id === answered.id || card.kind !== InboxKind.Permission) return false;
+        if (card.detail?.[EXACT_WRITE_KEY] !== true) return false;
+        // The classifier handed that call to a person; the stored rule would not have answered it either.
+        if (card.detail[ESCALATED_KEY] === true) return false;
+        const theirs = ruleOf(card);
+        return theirs?.toolName === rule.toolName && theirs.pattern === rule.pattern;
+      });
+    } catch (error) {
+      // Same as a failed release below: the builder's answer is stored and delivered, so it stands. The
+      // other lanes' cards stay open for the builder.
+      deps.log?.warn({ err: error, cardId: answered.id }, 'could not list the covered edit cards');
+      return;
+    }
     for (const card of covered) {
       try {
         service.answer(card.id, {
