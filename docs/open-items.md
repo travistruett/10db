@@ -23,6 +23,9 @@
 - [ ] Knowledge: the override review. Spec §9 asks for a "review this principle?" card after two recent signed overrides of a principle. Deferred: `report_deviation` takes no principle key and nothing counts deviations against a principle. Open: the threshold (two within 30 days was the plan's default), how a deviation names a principle (a topic key resolved like the pack resolves it), and the card's keep and retire options.
 - [ ] Facts: the table, the builder's writes, a Knowledge tab and the pack's facts shelf (spec §1.4 fast-follow, §9 "from the next slice"). The schema is not in the database yet.
 - [ ] M3: the legacy harness import, with bulk confirm in the Knowledge view and the uncommitted pilot acceptance script (its own plan; spec §4, §10, §12).
+- [ ] Knowledge: PDF intake as proposals with page references, reusing sources and proposals (spec §1, §12 fast-follow). Nothing reads a PDF yet.
+- [ ] Knowledge: embeddings. The pack and `find_knowledge` use FTS5 keyword search only (spec decision 10 chose no embeddings); revisit only if keyword recall proves too weak.
+- [ ] Knowledge: the `SessionStart` hook that injects the context pack into a terminal session (spec §9). Managed sessions get the pack in the bootstrap prompt; a terminal session gets none.
 - [ ] Knowledge: the PM agent proposes principles through `propose`, replacing the always/never word detector.
 - [ ] Knowledge: a `find_knowledge` result can't yet say which records are in the pack already; agents may re-read them.
 - [x] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
