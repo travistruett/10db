@@ -822,11 +822,6 @@ export const shipCards = {
     },
   }),
   /**
-   * The copy's packages still did not resolve what its lockfile names after 10db installed again
-   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
-   * failure would have said nothing of the batch's code. Retry installs again before the gate.
-   */
-  /**
    * `note` names the migrations a merge of the base lost and says how to re-create them. An
    * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again until
    * the builder clears the notice after checking the journal (`LostChoice.Clear`); Abandon also ends it.
@@ -849,6 +844,11 @@ export const shipCards = {
       ...(unreadable === true ? { options: lostMigrationsOffer(batch).options } : {}),
     },
   }),
+  /**
+   * The copy's packages still did not resolve what its lockfile names after 10db installed again
+   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
+   * failure would have said nothing of the batch's code. Retry installs again before the gate.
+   */
   installBroken: (batch: BatchDto, note: string, noPnpm = false): ShipFailure => ({
     failure: BatchFailure.InstallBroken,
     card: {

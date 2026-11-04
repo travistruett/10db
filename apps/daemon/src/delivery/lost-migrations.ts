@@ -21,8 +21,8 @@ const Offer = z.object({ batchId: BatchId });
  * it is only ever asked of the builder; no gate reads an unreadable list as all carried.
  *
  * A notice that reads is refused (the card is stale: the journal clears it at the next gate, and an
- * answer must not drop a list that still stands guard), and so is a batch with no notice left to
- * clear, which keeps the card open and tells the builder why. Any other answer changes nothing.
+ * answer must not drop a list that still stands guard). A batch with no notice left (it was cleared
+ * from the other card) just lets the card close with its answer. Any other answer changes nothing.
  */
 export function createLostMigrationsAnswers(
   ctx: DeliveryContext,

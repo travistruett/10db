@@ -96,7 +96,8 @@ export type BaseUpdate =
    * a check could see, and every later gate answers this until the journal at HEAD holds it. A caller
    * asked for a pull request puts the merge at `head` back instead
    * (`decisions/2026-11-04-a-base-merge-carries-a-batchs-migrations-over.md`). `unreadable` says the
-   * batch's notice has no list to read, so no journal clears it and only abandoning the batch ends it.
+   * batch's notice has no list to read, so no journal clears it: the builder's Clear the notice answer
+   * (`LostChoice.Clear`, after checking the journal) does, and abandoning the batch also ends it.
    */
   | {
       readonly kind: 'uncarried';

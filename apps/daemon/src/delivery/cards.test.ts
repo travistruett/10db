@@ -4,6 +4,8 @@ import { batchCardFields } from './batch-card';
 import { GhError } from '../github';
 import {
   checkoutCards,
+  LOST_MIGRATIONS_DETAIL,
+  LostChoice,
   prCards,
   shipCards,
   worktreeCards,
@@ -144,7 +146,7 @@ describe('the card of a migration a merge of the base lost', () => {
     expect(card.detail).toEqual({ batchId: batch.id, actions: ['retry', 'abandon'] });
   });
 
-  it('offers only Abandon when the list could not be read, since nothing else clears the notice', () => {
+  it('offers Clear the notice, then Retry, when the list could not be read, and Abandon besides', () => {
     const { card, failure } = shipCards.migrationsLost(batch, {
       note: 'The list could not be read.',
       unreadable: true,
@@ -152,10 +154,17 @@ describe('the card of a migration a merge of the base lost', () => {
 
     expect(failure).toBe('base_conflict');
     expect(card.body).toContain('The list could not be read.');
-    expect(card.body).not.toContain('Re-create');
+    expect(card.body).not.toContain('Re-create the migration on');
     expect(card.body).not.toContain('Press Retry');
+    expect(card.body).toContain('journal');
+    expect(card.body).toContain(LostChoice.Clear);
     expect(card.body).toContain('Abandon');
-    expect(card.detail).toEqual({ batchId: batch.id, actions: ['abandon'] });
+    expect(card.options?.map((o) => o.label)).toEqual([LostChoice.Clear]);
+    expect(card.detail).toEqual({
+      batchId: batch.id,
+      [LOST_MIGRATIONS_DETAIL]: { batchId: batch.id },
+      actions: ['retry', 'abandon'],
+    });
   });
 });
 
