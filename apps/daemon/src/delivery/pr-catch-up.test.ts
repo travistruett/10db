@@ -801,7 +801,8 @@ describe('a catch-up while a waiting update drains the factory', () => {
     [
       'the base into a pull request whose checks never started',
       (batch: BatchDto) => {
-        h.shipper.restartCi(batch.id);
+        // Held: it says so, and the watch keeps the ask unasked.
+        expect(h.shipper.restartCi(batch.id)).toBe(false);
       },
     ],
   ])('starts no gate to bring %s', async (_name, ask) => {

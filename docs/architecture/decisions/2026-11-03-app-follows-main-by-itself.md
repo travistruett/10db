@@ -75,7 +75,9 @@ factory (`self-update/drain.ts`) until the app has installed:
   (`ShipperDeps.holdShips`; a batch whose work is done stays OPEN and is shipped by `checkOpenBatches` when the drain
   ends or after the relaunch), a ship the builder asks for (Ship anyway, Retry, a failed task's card) is refused with
   a `ConflictError` that says why, and no catch-up begins, since it runs the shipping gate (the pull request watch
-  asks again on a later round). The runner's hold is the load guard _and_ the drain (`holdBoth`): work starts only
+  asks again on a later round: `catchUp` every round, and `restartCi`, asked once per head, returns false when held,
+  so the watch keeps it unasked, starts no count and raises no notice, and asks it on the first round after the
+  drain). The runner's hold is the load guard _and_ the drain (`holdBoth`): work starts only
   when neither holds.
 - **Why a held gate keeps neither its batch's turn nor a slot:** a sibling's gate, a running session's
   `install_dependencies` and its migrations claim all queue behind the turn without being parked at the drain, so a

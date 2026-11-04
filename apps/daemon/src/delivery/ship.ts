@@ -210,7 +210,7 @@ export interface Shipper {
    * job runs, when the branch already holds the base, or when the merge or its check fails; none of
    * those raises a card, since the watch's notice says the checks never started.
    */
-  restartCi(batchId: BatchId): void;
+  restartCi(batchId: BatchId): boolean;
   /**
    * The open pull request merges cleanly: merges it again, or turns auto-merge on again, when GitHub
    * refused that earlier, 10db just pushed to it, or the watch just withdrew the card of a catch-up
@@ -1779,11 +1779,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
     );
   }
 
-  function queueCatchUp(batchId: BatchId, cause: CatchUpCause): void {
-    // A catch-up runs the shipping gate, so none begins during a drain; the watch asks again.
-    if (deps.holdShips?.()) return;
+  /** Returns false when a drain holds it and nothing was queued; the watch must ask again. */
+  function queueCatchUp(batchId: BatchId, cause: CatchUpCause): boolean {
+    // A catch-up runs the shipping gate, so none begins during a drain.
+    if (deps.holdShips?.()) return false;
     const batch = getBatch(db, batchId);
-    if (!landsItself(batch) || catchingUp.has(batchId)) return;
+    if (!landsItself(batch) || catchingUp.has(batchId)) return true;
     catchingUp.add(batchId);
     deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
       try {
@@ -1792,14 +1793,13 @@ export function createShipper(deps: ShipperDeps): Shipper {
         catchingUp.delete(batchId);
       }
     });
+    return true;
   }
 
   const catchUp = (batchId: BatchId): void => {
     queueCatchUp(batchId, 'conflict');
   };
-  const restartCi = (batchId: BatchId): void => {
-    queueCatchUp(batchId, 'checks');
-  };
+  const restartCi = (batchId: BatchId): boolean => queueCatchUp(batchId, 'checks');
 
   function retryMerge(batchId: BatchId, opts: RetryMergeOptions = {}): void {
     const batch = getBatch(db, batchId);

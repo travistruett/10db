@@ -109,9 +109,10 @@ export interface PullRequestLanding {
   /**
    * The open pull request's head has had minutes to get its required checks and has none at all:
    * merges the base into the pull request and pushes it, so GitHub starts its workflows on a new head.
-   * Pushes nothing when checks have appeared since.
+   * Pushes nothing when checks have appeared since. Returns false when the shipper holds the ask (a
+   * drain for an update is on) and did nothing: the watch counts it as not asked and asks again.
    */
-  restartCi(batchId: BatchId): void;
+  restartCi(batchId: BatchId): boolean;
   /**
    * The open pull request is clean: a merge GitHub refused, or one 10db just pushed to, is asked again.
    * `catchUpCardWasOpen`: this round withdrew the card for a catch-up that stopped, so a merge is due.
@@ -551,9 +552,12 @@ export function createPrWatch(input: {
     awaitingRuns.set(root.id, waiting);
     if (at - waiting.since < CHECKS_START_MS) return;
     if (!waiting.asked && landing !== undefined && root.autoMerge) {
-      waiting.asked = true;
-      waiting.since = at;
-      landing.restartCi(root.id);
+      // A restart the shipper holds (a drain is on) stays unasked: no count, no notice, and the
+      // first round after the hold ends asks it.
+      if (landing.restartCi(root.id)) {
+        waiting.asked = true;
+        waiting.since = at;
+      }
       return;
     }
     ctx.state.write((write) => {

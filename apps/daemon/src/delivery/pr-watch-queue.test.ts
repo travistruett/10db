@@ -38,7 +38,10 @@ function watching(): { asked: string[]; w: PrWatch } {
     ciFix: { dataDir: h.dataDir },
     landing: {
       catchUp: (id) => asked.push(`catch-up ${id}`),
-      restartCi: (id) => asked.push(`restart-ci ${id}`),
+      restartCi: (id) => {
+        asked.push(`restart-ci ${id}`);
+        return true;
+      },
       retryMerge: (id) => asked.push(`retry ${id}`),
     },
   });
