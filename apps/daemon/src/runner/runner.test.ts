@@ -17,6 +17,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   mintId,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
+  MIGRATIONS_UNCARRIED_NOTICE_KEY,
   PARK_TASK_CHOICE,
   PARKED_NOTICE_KEY,
   REVERT_COMMIT_LINE,
@@ -5396,6 +5397,36 @@ describe('the base merge leaving conflict markers in a task that used its fix at
     await engine.runner.idle();
     expect(engine.adapter.prompts[0]?.prompt).not.toContain('0042_x');
     expect(engine.adapter.prompts[1]?.prompt).toContain(notice.body);
+  });
+
+  it("is not told to re-create migrations when the lost-migrations notice's list can't be read", async () => {
+    const notice = {
+      key: MIGRATIONS_UNCARRIED_NOTICE_KEY,
+      tone: 'warning',
+      line: '1 of this batch migrations was lost',
+      body: 'The lane re-creates each after the base',
+    } as const;
+    const baseUpdates: BaseUpdates = {
+      beforeGate: (batchId) => {
+        engine.state.write((c) => {
+          setBatchNotice(c, batchId, notice);
+        });
+        return Promise.resolve(conflicted);
+      },
+      gate: (_batchId, _signal, go) => go(),
+      atLaunch: () => Promise.resolve({ kind: 'up_to_date', note: null }),
+    };
+    engine = await createTestEngine({ Alpha: [[turn], [turn]] }, {}, { baseUpdates });
+    const batch = engine.state.write((ctx) =>
+      insertBatch(ctx, { projectId: engine.project.id, title: 'Greetings', baseBranch: 'main' }),
+    );
+    const { workstream } = engine.addTask('Alpha', ['api'], [], undefined, batch.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(engine.adapter.prompts[1]?.prompt).toContain("won't clear this notice");
+    expect(engine.adapter.prompts[1]?.prompt).not.toContain(notice.body);
   });
 
   it('still gets a session that resolves the markers, rather than failing before any merge session ran', async () => {

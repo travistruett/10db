@@ -37,6 +37,14 @@ migrations after the base's, in their journal order, instead of one plain run of
   later gate answers `up_to_date`; each gate reads the notice and answers `uncarried` until the journal holds them,
   then clears it and the card. Telling by name means a stub of the right name clears it, and that a batch which no
   longer wants the migration clears it with an empty custom migration of that name.
+- **A notice whose list can't be read:** the notice keeps the list in its `record`. A list too long for
+  `NOTICE_RECORD_MAX` is left out, and a malformed record reads as nothing, so the gate can't compare the journal
+  with anything. Nothing then counts as carried: every gate answers `uncarried`, marked `unreadable`, and never clears
+  the notice, because a journal can't satisfy a list that can't be read. A later merge that loses another migration
+  leaves the notice as it stands: rewriting it would list only the new loss and let the next gate clear the rest.
+  Abandoning the batch is the one thing that ends this, so the gate's note and the session's brief say that in place
+  of the notice's text, which may be cut short or miss a later loss and whose steps can't help. The shipping gate's
+  card offers Abandon alone, not Retry.
 - **Who does what with it:** a task's verify gate counts it as a failed gate, so a fix session re-creates the
   migration, told how by the note and the notice in its brief. The shipping gate fails the batch
   (`BatchFailure.BaseConflict`, whose flag card carries the detail, with no second regenerate card), and a Retry reads

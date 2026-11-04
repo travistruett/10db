@@ -41,6 +41,7 @@ import {
   NOTICE_KEY,
   renumberedLines,
   uncarriedIn,
+  uncarriedSaid,
   type RenumberedMigration,
   type UncarriedMigration,
 } from './notices';
@@ -86,9 +87,15 @@ export type BaseUpdate =
    * not make again: `note` names it. No gate runs, since a custom migration's loss changes no snapshot
    * a check could see, and every later gate answers this until the journal at HEAD holds it. A caller
    * asked for a pull request puts the merge at `head` back instead
-   * (`decisions/2026-11-04-a-base-merge-carries-a-batchs-migrations-over.md`).
+   * (`decisions/2026-11-04-a-base-merge-carries-a-batchs-migrations-over.md`). `unreadable` says the
+   * batch's notice has no list to read, so no journal clears it and only abandoning the batch ends it.
    */
-  | { readonly kind: 'uncarried'; readonly head: string; readonly note: string }
+  | {
+      readonly kind: 'uncarried';
+      readonly head: string;
+      readonly note: string;
+      readonly unreadable?: true;
+    }
   /**
    * Answered only for a pull request's catch-up: the merge took generated directories from the base
    * and the regeneration reported a problem (the install it needs failed, a generator failed, it
@@ -349,13 +356,9 @@ const STOPPED: Unregenerated = {
   restored: false,
 };
 
-/**
- * What a gate is told when the batch's lost-migrations notice is stored without a list it can read
- * (`fitNotice` leaves out a record that is too long): nothing can say which migrations are missing
- * from the journal, so none counts as carried.
- */
-const UNREADABLE_LOST =
-  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. Its text names them; check the journal at HEAD against it and re-create any that is missing, after the base's, under the same name. No gate passes while the notice stands.";
+/** Marks an `uncarried` answer given for `lost`, when that notice's list can't be read. */
+const unreadableMark = (lost: Notice): { readonly unreadable?: true } =>
+  uncarriedIn(lost) === null ? { unreadable: true } : {};
 
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
@@ -726,6 +729,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly head: string;
         readonly note: string | null;
         readonly uncarried?: true;
+        /** The batch's lost-migrations notice has no list to read. */
+        readonly unreadable?: true;
         /** A pull request's catch-up whose regeneration reported a problem that lost no migration. */
         readonly unregenerated?: true;
         /** The generators ran and reported no problem: the directories are regenerated. */
@@ -804,6 +809,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       kind: 'done',
       head,
       uncarried: true,
+      ...unreadableMark(lost),
       note: joined(
         // A merge that goes back moved nothing.
         forPullRequest ? null : renumberedNote(batch, renumbered, true),
@@ -811,7 +817,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           lost: true,
           card: !forPullRequest && options.raisesUncarried !== true,
         }),
-        lost.body,
+        uncarriedSaid(lost),
       ),
     };
   }
@@ -878,12 +884,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const held = uncarriedIn(notice);
     if (held === null) {
       // Which migrations were lost can't be told, so nothing can say they are carried: the notice and
-      // the regenerate card stay, and the gate stops.
+      // the regenerate card stay, and the gate stops, here and at every gate after.
       ctx.logger.warn({ batchId: batch.id }, 'lost migrations notice has no readable list');
+      const said = uncarriedSaid(notice);
       return {
         kind: 'uncarried',
         head: await ctx.git.head(path),
-        note: joined(gateNote(answer), UNREADABLE_LOST) ?? UNREADABLE_LOST,
+        note: joined(gateNote(answer), said) ?? said,
+        ...unreadableMark(notice),
       };
     }
     const left: UncarriedMigration[] = [];
@@ -1545,7 +1553,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           return {
             kind: 'uncarried',
             head: merged.kind === 'merged' ? merged.head : pending.head,
-            note: joined(note, lost.body) ?? lost.body,
+            note: joined(note, uncarriedSaid(lost)) ?? uncarriedSaid(lost),
+            ...unreadableMark(lost),
           };
       }
       return {
@@ -1593,7 +1602,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           regenerated.made === true ? (merging.regeneratedNote ?? merged.note) : merged.note;
         const note = joined(settled, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
-          return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
+          return {
+            kind: 'uncarried',
+            head: regenerated.head,
+            note: note ?? '',
+            ...(regenerated.unreadable === true ? { unreadable: true } : {}),
+          };
         // Not the merge's own note: it names the directories the merge took from the base, and
         // this card has its own words for what became of them.
         if (regenerated.unregenerated === true)

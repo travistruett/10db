@@ -9,6 +9,7 @@ import {
   rerunRecord,
   type RerunRuns,
   uncarriedIn,
+  uncarriedSaid,
 } from './notices';
 
 const HEAD = 'a'.repeat(40);
@@ -56,6 +57,17 @@ describe('reading the lost-migrations notice', () => {
     ).toBeNull();
     expect(uncarriedIn({ ...stored, record: 'not json' })).toBeNull();
     expect(uncarriedIn({ ...stored, record: '{"tag":"0001_x"}' })).toBeNull();
+  });
+
+  it("says the notice's own text while its list reads, and no steps that can't clear it otherwise", () => {
+    expect(uncarriedSaid(stored)).toBe(stored.body);
+
+    const said = uncarriedSaid({ ...stored, record: 'not json' });
+    expect(said).toContain('could not be read');
+    expect(said).toContain('cut short');
+    expect(said).toContain("won't clear this notice");
+    expect(said).toContain('abandoning the batch');
+    expect(said).not.toContain(stored.body);
   });
 });
 

@@ -248,6 +248,35 @@ describe('shipping', () => {
     expect(card.body).toContain('Retry');
   });
 
+  it('offers only Abandon when the list of lost migrations could not be read', async () => {
+    h = createDeliveryHarness(
+      { gateCommand: 'touch gate-ran' },
+      {
+        shipBaseUpdates: (real) => ({
+          ...real,
+          beforeGate: () =>
+            Promise.resolve({
+              kind: 'uncarried',
+              head: 'abc',
+              note: 'The list could not be read.',
+              unreadable: true,
+            }),
+        }),
+      },
+    );
+    const { batch } = await openBatch('Add greetings', 'Alpha');
+    h.commit('src/api/alpha.txt');
+
+    const failed = await finishAll(batch);
+
+    expect(existsSync(join(h.repo, 'gate-ran'))).toBe(false);
+    expect(failed).toMatchObject({ state: 'FAILED', failure: 'base_conflict' });
+    const card = h.only(h.cards());
+    expect(card.body).toContain('The list could not be read.');
+    expect(card.body).not.toContain('Re-create');
+    expect(card.detail).toMatchObject({ batchId: batch.id, actions: ['abandon'] });
+  });
+
   it('raises one card per host the sandbox blocked the shipping gate from, naming the command', async () => {
     // The sandbox's runner reports the hosts its proxy refused; this one reports them for any failure.
     h = createDeliveryHarness(

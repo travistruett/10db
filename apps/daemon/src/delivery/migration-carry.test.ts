@@ -337,6 +337,8 @@ describe('carrying a batch over when main and the batch both added migrations', 
 
       if (again.kind !== 'uncarried') throw new Error(`uncarried expected, got ${again.kind}`);
       expect(again.note).toContain('could not be read');
+      expect(again.note).toContain("won't clear this notice");
+      expect(again.unreadable).toBe(true);
       expect(again.head).toBe(headOf(pathOf(batch)));
       expect(h.cards()).toHaveLength(1);
       expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(
@@ -344,6 +346,66 @@ describe('carrying a batch over when main and the batch both added migrations', 
       );
     },
   );
+
+  it('still answers for an unreadable list when the migration is back in the journal', async () => {
+    const sql = 'update a;\n';
+    const batch = await bothSidesAdded([{ tag: '0001_mine_backfill', sql, custom: true }]);
+    const updates = createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    });
+    await updates.beforeGate(batch.id, signal);
+    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    h.state.write((w) => {
+      setBatchNotice(w, batch.id, { ...stored, record: 'not json' });
+    });
+
+    await commitOnBatch(batch, `${DB}/0002_mine_backfill.sql`, sql);
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_mine_backfill'));
+
+    expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
+      kind: 'uncarried',
+      unreadable: true,
+    });
+    expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(NOTICE_KEY.migrationsUncarried);
+  });
+
+  it('leaves an unreadable lost-migrations notice as it is when a later merge loses another', async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    }).beforeGate(batch.id, signal);
+    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
+    h.state.write((w) => {
+      setBatchNotice(w, batch.id, bare);
+    });
+    // The batch adds another migration, and the base takes that number too.
+    await commitOnBatch(batch, `${DB}/0002_more.sql`, 'update b;\n');
+    await commitOnBatch(batch, `${DB}/meta/0002_snapshot.json`, snapshot('more', 'a', 'c'));
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_more'));
+    h.teammatePush('main', `${DB}/0002_theirs_too.sql`, 'alter table a add d;\n');
+    h.teammatePush('main', `${DB}/meta/0002_snapshot.json`, snapshot('too', 'a', 'c', 'd'));
+    h.teammatePush('main', JOURNAL, journal('0000_init', '0001_theirs', '0002_theirs_too'));
+    const updates = createBaseUpdates({ ...h.ctx, generators: drizzle({ failAt: 'more' }) });
+
+    const merged = await updates.beforeGate(batch.id, signal);
+
+    // The merge is answered in the unreadable notice's words, not with text that names a stale list.
+    if (merged.kind !== 'uncarried') throw new Error(`uncarried expected, got ${merged.kind}`);
+    expect(merged.unreadable).toBe(true);
+    expect(merged.note).toContain('could not be read');
+    expect(merged.note).not.toContain(stored.body);
+    expect(existsSync(join(pathOf(batch), DB, '0002_more.sql'))).toBe(false);
+    expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual(bare);
+    expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
+      kind: 'uncarried',
+      unreadable: true,
+    });
+  });
 
   it('keeps refusing while one migration is back and another is not, and names only that one', async () => {
     const batch = await bothSidesAdded([

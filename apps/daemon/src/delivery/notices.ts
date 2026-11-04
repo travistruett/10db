@@ -106,6 +106,19 @@ function recordIn<T>(notice: Notice | undefined, schema: z.ZodType<T>): T[] | nu
 export const uncarriedIn = (notice: Notice | undefined): UncarriedMigration[] | null =>
   recordIn(notice, UncarriedMigration);
 
+/**
+ * What a gate, a session's brief and a card are told in place of the notice's text when its list
+ * can't be read. That text won't do: `fitNotice` cuts the body of a list long enough to lose its
+ * record, steps and all, and a later merge's losses never reach it (`keepLost`). Nothing but the list
+ * could clear the notice, so its steps wouldn't either.
+ */
+const UNREADABLE_LOST =
+  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. The notice's text may be cut short and may miss migrations lost since, so it is not the whole list. Re-creating migrations won't clear this notice, so don't: no gate passes and nothing ships while it stands, and the one thing that ends it is the builder abandoning the batch.";
+
+/** What the lost-migrations `notice` tells a lane or the builder: its text, while its list reads. */
+export const uncarriedSaid = (notice: Notice): string =>
+  uncarriedIn(notice) === null ? UNREADABLE_LOST : notice.body;
+
 /** One line per migration, saying where it went. */
 export const renumberedLines = (moved: readonly RenumberedMigration[]): string =>
   moved.map(({ from, to }) => `- ${from} → ${to}`).join('\n');

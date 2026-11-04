@@ -1078,7 +1078,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             if (before.update?.kind === 'install_broken' && !stopped())
               fail(batch, shipCards.installBroken(batch, before.update.note));
             if (before.update?.kind === 'uncarried' && !stopped())
-              fail(batch, shipCards.migrationsLost(batch, before.update.note));
+              fail(batch, shipCards.migrationsLost(batch, before.update));
             return null;
           }
           return {
@@ -1181,7 +1181,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         if (standing.kind === 'aborted') return;
         if (standing.kind === 'uncarried') {
-          fail(batch, shipCards.migrationsLost(batch, standing.note));
+          fail(batch, shipCards.migrationsLost(batch, standing));
           return;
         }
       }
