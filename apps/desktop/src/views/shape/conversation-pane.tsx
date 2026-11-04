@@ -160,6 +160,9 @@ export function ConversationPane({
         onSend={async (text) => {
           const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
+          // The daemon took the message, so an earlier refusal of Propose or Stop is out of date.
+          propose.reset();
+          stop.reset();
           if (shapeId === null) onOpened(id);
         }}
         onPropose={doPropose}
