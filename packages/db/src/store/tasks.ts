@@ -262,9 +262,10 @@ function placementFor(project: ProjectDto, named: WorkspaceMode | undefined): Wo
 /**
  * The areas a task filed from a proposal works in: those of the task whose session raised it, else
  * the project's only area. Empty when neither says (several areas and no raising task), and then the
- * task can't start until the builder names them.
+ * task can't start until the builder names them. `insertTaskFromProposal` stores these, so the daemon
+ * asks here for the areas its placement rule must see.
  */
-function areasForProposal(
+export function areasForProposal(
   tx: DbReader,
   proposalId: ProposalId,
   project: ProjectDto,

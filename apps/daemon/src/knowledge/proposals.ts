@@ -98,13 +98,14 @@ function placeWords(p: Pick<PrincipleDto, 'scope' | 'area'>): string {
 }
 
 // Agent text is data: the card shows it as plain text with where it came from (spec §7).
-function cardBody(p: PrincipleDto, body: string): string {
+function cardBody(p: PrincipleDto, body: string, note: string | null): string {
   return [
     p.statement,
     '',
     `Kind: ${p.kind}. Key: ${p.topicKey}. Proposed for ${placeWords(p)}.`,
     ...(p.sourceQuote === null ? [] : [`Quote: "${p.sourceQuote}"`]),
     ...(body === p.statement ? [] : ['', body]),
+    ...(note === null ? [] : ['', note]),
   ].join('\n');
 }
 
@@ -116,6 +117,8 @@ interface PrincipleProposal {
   readonly sourceId: SourceId;
   /** Who stated it: `me`, or `agent:<session>`. */
   readonly speaker: string;
+  /** A line closing the card, when the proposer has something the builder must see there. */
+  readonly cardNote?: string | null;
 }
 
 /** Stores a proposed principle, its pending proposal and the card that asks the builder (spec §9). */
@@ -147,7 +150,7 @@ export function proposePrinciple(
     projectId: input.projectId,
     kind: InboxKind.Proposal,
     title: input.title,
-    body: cardBody(principle, input.body),
+    body: cardBody(principle, input.body, input.cardNote ?? null),
     options: principleCardOptions(principle),
     recommendation: VERDICT_FOR_SCOPE[principle.scope],
     category: QuestionCategory.Product,
