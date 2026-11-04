@@ -111,6 +111,7 @@ import {
 } from './rounds';
 import type { ShapeJev } from './jev';
 import { inlineBytesSpent, type ScreenService } from '../screens';
+import type { Hold } from '../verify';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision, withdrawConvertedPrinciple } from './undo';
 import { convertedStateNote } from './converted-state';
@@ -151,6 +152,14 @@ export interface ShapeServiceDeps {
   readonly trackedFiles?: TrackedFiles;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered to a session without it. */
   readonly screens?: Pick<ScreenService, 'see'>;
+  /**
+   * Holds new turns back, as a waiting update's drain does: while it holds, a queued turn waits
+   * before it starts a session or sends to one. A turn already running finishes. A turn that waits
+   * has begun nothing, so the install need not wait for it: it waits in `untilClear`, which the
+   * drain counts as parked, and the mid-session count takes the parked ones off
+   * `turnsInProgress`, which still counts the conversation.
+   */
+  readonly hold?: Hold;
 }
 
 /** A file as the input hands it over: the name and type the browser reported, and its bytes. */
@@ -312,6 +321,8 @@ interface Runtime {
   waiting: ((end: TurnEnd) => void) | null;
   /** Set while Convert writes: no new turn starts. */
   held: boolean;
+  /** Set while the next turn waits for the hold (a drain) to clear: nothing of it has started. */
+  parked: boolean;
   pump: Promise<void> | null;
   idle: Timer | null;
   contextPct: number;
@@ -343,6 +354,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         live: null,
         waiting: null,
         held: false,
+        parked: false,
         pump: null,
         idle: null,
         contextPct: 0,
@@ -837,6 +849,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     run = (async () => {
       try {
         while (rt.queue.length > 0 && !rt.held) {
+          // A drain starts nothing new: wait, then look again, as the queue or Convert's hold may
+          // have changed meanwhile.
+          if (deps.hold?.holding() === true) {
+            rt.parked = true;
+            try {
+              await deps.hold.untilClear();
+            } finally {
+              rt.parked = false;
+            }
+            continue;
+          }
           const turn = rt.queue.shift();
           if (turn === undefined) break;
           rt.current = turn;
@@ -1167,7 +1190,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     turnsInProgress() {
       let count = 0;
       for (const rt of runtimes.values())
-        if (rt.current !== null || rt.queue.length > 0) count += 1;
+        if (rt.current !== null || rt.queue.length > 0 || rt.parked) count += 1;
       return count;
     },
 

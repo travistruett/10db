@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vit
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
+import { createDrain } from '../self-update';
 import {
   FakeAdapter,
   type FakeShapeBehaviour,
@@ -45,8 +46,10 @@ let adapter: FakeAdapter;
 let clock: ManualClock;
 let service: ShapeService;
 let shapeId: ShapeId;
+let drain: ReturnType<typeof createDrain>;
 beforeEach(() => {
   c = seedConversation();
+  drain = createDrain();
   state = createStateStore(c.store, createEventBus());
   adapter = new FakeAdapter({});
   clock = new ManualClock();
@@ -57,6 +60,7 @@ beforeEach(() => {
     clock,
     filesDir: '/files',
     log: silentLogger,
+    hold: drain,
     mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
     launch: () => ({
       cwd: '/repo',
@@ -79,6 +83,7 @@ beforeEach(() => {
   });
 });
 afterEach(async () => {
+  drain.stop();
   await service.close();
   c.close();
 });
@@ -162,6 +167,43 @@ describe('a message', () => {
     // One conversation, one turn running and one queued: the conversation is counted once.
     expect(service.turnsInProgress()).toBe(1);
     first.open();
+    await service.settled(shapeId);
+    expect(service.turnsInProgress()).toBe(0);
+  });
+
+  it('starts no session while a drain holds, parks the message so the install need not wait for it, and starts it once the drain ends', async () => {
+    drain.begin(new Date(0));
+    service.send(shapeId, 'During the drain.');
+    await tick();
+    // Nothing has started: no session to cut off. The conversation is counted and parked in the
+    // drain once each, which is what start.ts subtracts to a mid-session count of zero.
+    expect(adapter.shapeSessions).toHaveLength(0);
+    expect(service.turnsInProgress() - drain.parked()).toBe(0);
+    drain.end();
+    await service.settled(shapeId);
+    expect(adapter.shapeSessions).toHaveLength(1);
+    expect(service.turnsInProgress()).toBe(0);
+  });
+
+  it('lets a turn that is running finish when a drain begins, and holds the turn queued behind it', async () => {
+    const first = gate();
+    adapter.shapeBehaviour = async (turn: FakeShapeTurn) => {
+      if (turn.number === 1) await first.wait;
+      return { text: 'reply' };
+    };
+    service.send(shapeId, 'one');
+    await tick();
+    drain.begin(new Date(0));
+    service.send(shapeId, 'two');
+    await tick();
+    // The running turn is mid-session; the install waits for it.
+    expect(service.turnsInProgress() - drain.parked()).toBe(1);
+    first.open();
+    await tick();
+    // It finished; the queued turn is held, not started, so the install has nothing to wait for.
+    expect(adapter.shapeSessions[0]?.sent ?? []).toHaveLength(0);
+    expect(service.turnsInProgress() - drain.parked()).toBe(0);
+    drain.end();
     await service.settled(shapeId);
     expect(service.turnsInProgress()).toBe(0);
   });

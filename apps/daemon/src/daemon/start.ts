@@ -858,6 +858,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
     screens,
+    // A waiting update starts no new Shape turn: a conversation's session is no lane, and the
+    // install would cut off one that began during the drain.
+    hold: updateDrain,
     jev: createShapeJev({
       state,
       judge,
@@ -1108,7 +1111,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // before it is a row. A lane or gate parked by the drain has begun nothing: it is not cut off by
   // the quit (the stop leaves its saved action for recovery), and counting it would keep the drain
   // going for ever. A shaping conversation with a turn under way counts: it is no workstream, and
-  // the quit would cut off the answer in front of the builder. The drain does not park it. A lane
+  // the quit would cut off the answer in front of the builder. The drain parks a turn that has not
+  // started (it waits in the drain, so `parked()` takes it off the count); one running finishes. A lane
   // waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
   // its session and recovery parks it on its card again, so it must not hold the install, and every
   // lane behind it, for as long as the builder leaves the card.
