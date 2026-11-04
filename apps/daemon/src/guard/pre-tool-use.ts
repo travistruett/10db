@@ -202,7 +202,7 @@ function holdsEndlessFile(real: string): boolean {
 
 /**
  * A device that yields bytes forever, or a tree holding one: a foreground read spins until the Bash
- * timeout. The path is read from the command's working directory (the lane's copy) as the kernel
+ * timeout. The path is read from the command's working directory (the hook's `cwd`, which an earlier call's `cd` may have moved off the lane's copy) as the kernel
  * opens it, links followed, and with `..` collapsed as text first; either reading naming one counts,
  * and so does a path that has no single real path, so a spelling is never a way past it.
  */
@@ -221,7 +221,8 @@ function isEndlessFile(path: string, cwd: string): boolean {
 
 /**
  * Whether a sandboxed lane's Bash command is made only of read-only commands and names no path a
- * lane may never read. It has no `cd` (a relative path would then mean another directory) and
+ * lane may never read. It has no `cd` (a relative path would then mean another directory; one from
+ * an earlier call is already in the hook's `cwd`, which every relative word is judged from) and
  * every word is judged as a path the way the file tools' reads are, so a secret file, a protected
  * directory and a search over one stay with today's judgement. A path outside the paths a lane may
  * read without asking is not judged here: the sandbox's read policy confines Bash to the paths it
@@ -233,6 +234,11 @@ function onlyReads(input: GuardInput): boolean {
   if (command === null) return false;
   const segments = laneReadOnlyWords(command);
   if (segments === null) return false;
+  // Where the call really runs: an earlier call's `cd` carries into this one. A directory the hook
+  // did not give as an absolute path is one a relative word cannot be judged from.
+  const cwd = input.cwd ?? input.repoPath;
+  if (!isAbsolute(cwd)) return false;
+  const moved = resolve(cwd) !== resolve(input.repoPath);
   try {
     for (const [cmd = '', ...args] of segments) {
       if (cmd === 'cd') return false;
@@ -241,10 +247,11 @@ function onlyReads(input: GuardInput): boolean {
         const paths = pathsOf(word);
         if (paths === null) return false;
         for (const path of paths) {
-          if (path === '' || path.startsWith('~') || isEndlessFile(path, input.repoPath)) {
-            return false;
-          }
-          if (input.fileAccess.read('LS', { path }) !== 'ok') return false;
+          if (path === '' || path.startsWith('~') || isEndlessFile(path, cwd)) return false;
+          // The file-access judge reads a relative path from the copy's root, so away from it the
+          // word is joined to the directory first (not collapsed: `..` after a link means something).
+          const judged = moved && !isAbsolute(path) ? `${cwd}${sep}${path}` : path;
+          if (input.fileAccess.read('LS', { path: judged }) !== 'ok') return false;
         }
       }
     }

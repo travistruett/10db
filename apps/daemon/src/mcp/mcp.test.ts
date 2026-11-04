@@ -585,6 +585,38 @@ describe('MCP tools', () => {
       });
     });
 
+    it('states each risk once on the card of a tagged proposal when the limit is zero', async () => {
+      const s = await seedSession();
+      state.write((ctx) => {
+        setSmallProposalLimit(ctx, s.project.id, 0);
+      });
+      await s.call('propose', {
+        opId: 'op-prop-0007',
+        ...small,
+        title: 'Tighten the security and auth checks',
+        riskTags: ['security'],
+      });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]?.body).toMatch(
+        /\n\nRaised as a card because it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk\.$/,
+      );
+    });
+
+    it('states each risk once on the card of a tagged change_task proposal', async () => {
+      const s = await seedSession();
+      await s.call('propose', {
+        opId: 'op-prop-0008',
+        ...small,
+        kind: 'change_task',
+        title: 'Tighten the security and auth checks',
+        riskTags: ['security'],
+      });
+      expect(openCards()).toHaveLength(1);
+      expect(openCards()[0]?.body).toMatch(
+        /\n\nRaised as a card because it carries the security risk tag, and it is not a new task, and it names the auth risk\.$/,
+      );
+    });
+
     it('sends every proposal to the Inbox when the project’s limit is zero', async () => {
       const s = await seedSession();
       state.write((ctx) => {
@@ -2366,6 +2398,131 @@ describe('complete_step', () => {
       expect(result?.summary.startsWith('Fixed as asked.')).toBe(true);
       expect(result?.summary).toContain('Follow-up tasks filed:');
       for (const task of filed) expect(result?.summary).toContain(`${task.id} ${task.title}`);
+    });
+
+    it('files them even after the step has filed the shared cap', async () => {
+      const s = await onStep('review');
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1)
+        await s.call('file_follow_up', {
+          opId: `op-step-cap-${String(i).padStart(2, '0')}`,
+          title: `Left over ${String(i)}`,
+          description: 'Not done.',
+        });
+      const result = await s.call('complete_step', {
+        opId: 'op-step-0016',
+        summary: 'Fixed as asked.',
+        verdict: 'approve',
+        followUps,
+      });
+      expect(result.isError).toBe(false);
+      expect(result.json).toMatchObject({ followUps: [{}, {}] });
+      expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS + followUps.length);
+    });
+
+    it('does not use up the shared cap: the step can still file all of it afterwards', async () => {
+      const s = await onStep('review');
+      await s.call('complete_step', {
+        opId: 'op-step-0017',
+        summary: 'Fixed as asked.',
+        verdict: 'approve',
+        followUps,
+      });
+      for (let i = 0; i < MAX_FOLLOW_UPS; i += 1) {
+        const filed = await s.call('file_follow_up', {
+          opId: `op-step-after-${String(i).padStart(2, '0')}`,
+          title: `Left over ${String(i)}`,
+          description: 'Not done.',
+        });
+        expect(filed.isError).toBe(false);
+      }
+      expect(tasksOf(s.project.id)).toHaveLength(1 + followUps.length + MAX_FOLLOW_UPS);
+    });
+
+    describe('across several complete_step calls in one step', () => {
+      const more = (from: number, count: number) =>
+        Array.from({ length: count }, (_, i) => ({
+          title: `Later finding ${String(from + i)}`,
+          description: 'Found on a later call.',
+        }));
+      const resultOf = (s: { workstream: { id: WorkstreamId } }) =>
+        getWorkstream(base.db, s.workstream.id).steps[1]?.result;
+
+      it("keeps the earlier call's follow-ups named when a second call files more", async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
+          opId: 'op-step-multi-a',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps,
+        });
+        const second = await s.call('complete_step', {
+          opId: 'op-step-multi-b',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(0, 1),
+        });
+        expect(second.isError).toBe(false);
+        const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        expect(filed).toHaveLength(3);
+        const summary = resultOf(s)?.summary ?? '';
+        expect(summary.startsWith('Second notes.')).toBe(true);
+        expect(summary.match(/Follow-up tasks filed:/g)).toHaveLength(1);
+        for (const task of filed) expect(summary).toContain(`${task.id} ${task.title}`);
+      });
+
+      it('refuses a call that would take the step past MAX_FOLLOW_UPS, files nothing and keeps the result', async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
+          opId: 'op-step-multi-c',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps: more(0, MAX_FOLLOW_UPS - 1),
+        });
+        const before = resultOf(s);
+        const over = await s.call('complete_step', {
+          opId: 'op-step-multi-d',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(100, 2),
+        });
+        expect(over.isError).toBe(true);
+        expect(over.text).toContain(String(MAX_FOLLOW_UPS));
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS - 1);
+        expect(resultOf(s)).toEqual(before);
+        // One more fits exactly, and a call with no follow-ups is never refused.
+        const fits = await s.call('complete_step', {
+          opId: 'op-step-multi-e',
+          summary: 'Third notes.',
+          verdict: 'approve',
+          followUps: more(200, 1),
+        });
+        expect(fits.isError).toBe(false);
+        const none = await s.call('complete_step', {
+          opId: 'op-step-multi-f',
+          summary: 'Fourth notes.',
+          verdict: 'approve',
+        });
+        expect(none.isError).toBe(false);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+        const summary = resultOf(s)?.summary ?? '';
+        for (const task of tasksOf(s.project.id).filter((t) => t.id !== s.task.id))
+          expect(summary).toContain(`${task.id} ${task.title}`);
+      });
+
+      it('counts what an earlier session of the step filed when a rerun reuses its opId', async () => {
+        const s = await onStep('review');
+        const args = {
+          opId: 'op-step-multi-g',
+          summary: 'First notes.',
+          verdict: 'approve',
+          followUps: more(0, MAX_FOLLOW_UPS),
+        };
+        await s.call('complete_step', args);
+        const rerun = await connectSession(s.workstream.id);
+        const again = await rerun.call('complete_step', args);
+        expect(again.isError).toBe(true);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+      });
     });
 
     it('files them once on an opId replay', async () => {

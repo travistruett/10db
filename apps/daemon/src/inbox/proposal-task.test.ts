@@ -91,6 +91,82 @@ describe('proposalFiling', () => {
     });
   });
 
+  describe('a risk both declared and named in the text', () => {
+    it('states a declared risk once', () => {
+      expect(
+        proposalFiling({
+          ...small,
+          title: 'Tighten the security check',
+          riskTags: ['security'],
+          limit: 1200,
+        }),
+      ).toEqual({ file: false, reason: 'it carries the security risk tag' });
+    });
+
+    it('names a risk in the text that was not declared, and not the declared one', () => {
+      expect(
+        proposalFiling({
+          ...small,
+          title: 'Tighten the security and auth checks',
+          riskTags: ['security'],
+          limit: 1200,
+        }),
+      ).toEqual({
+        file: false,
+        reason: 'it carries the security risk tag, and it names the auth risk',
+      });
+    });
+
+    it('names every undeclared risk the text mentions', () => {
+      expect(
+        proposalFiling({
+          ...small,
+          title: 'Auth migration for the zod dependency',
+          limit: 1200,
+        }),
+      ).toEqual({ file: false, reason: 'it names the auth, migration and dependency risks' });
+      expect(
+        proposalFiling({
+          ...small,
+          title: 'Auth migration for the zod dependency',
+          riskTags: ['migration'],
+          limit: 1200,
+        }),
+      ).toEqual({
+        file: false,
+        reason: 'it carries the migration risk tag, and it names the auth and dependency risks',
+      });
+    });
+
+    it('names the text risks when the limit is zero or the kind is change_task', () => {
+      expect(
+        proposalFiling({
+          ...small,
+          title: 'Tighten the security and auth checks',
+          riskTags: ['security'],
+          limit: 0,
+        }),
+      ).toEqual({
+        file: false,
+        reason:
+          'it carries the security risk tag, and filing small proposals by itself is off for this project, and it names the auth risk',
+      });
+      expect(
+        proposalFiling({
+          ...small,
+          kind: 'change_task',
+          title: 'Tighten the security and auth checks',
+          riskTags: ['security'],
+          limit: 1200,
+        }),
+      ).toEqual({
+        file: false,
+        reason:
+          'it carries the security risk tag, and it is not a new task, and it names the auth risk',
+      });
+    });
+  });
+
   // A principle proposal takes its own path to the card: mcp.test.ts covers its tags.
   it.each(['change_task', 'note'] as const)(
     'names the declared risk tags of a %s proposal',

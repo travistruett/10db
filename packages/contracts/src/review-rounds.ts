@@ -59,6 +59,19 @@ export function findingNotes(summary: string): string {
 }
 
 /**
+ * The follow-up tasks 10db listed after a step's notes (one `- <taskId> <title>` line each), in the order
+ * they were filed. A step that completes again carries these forward, so none is lost from its result.
+ */
+export function filedFollowUpLines(summary: string): string[] {
+  const at = summary.indexOf(`\n${FOLLOW_UPS_HEADING}`);
+  if (at === -1) return [];
+  return summary
+    .slice(at + FOLLOW_UPS_HEADING.length + 1)
+    .split('\n')
+    .filter((line) => line.startsWith('- '));
+}
+
+/**
  * The findings in a review's notes. The reviewer persona writes each finding as a numbered note
  * (`1. BLOCKING path:line ...`); a finding's severity and location are what it wrote. Notes with no
  * numbering are one finding; text before the first number is not a finding.
