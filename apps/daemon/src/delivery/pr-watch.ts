@@ -45,6 +45,7 @@ import {
   NOTICE_KEY,
   rerunNoticeHead,
   rerunNotices,
+  rerunRecord,
   type CancelledWhy,
 } from './notices';
 
@@ -623,18 +624,22 @@ export function createPrWatch(input: {
     // The rerun is stored on the batch, so a daemon that restarted after it reads the head as asked.
     clearRerunNotices(root.id, read.headSha);
     let seen = cancelledRuns.get(root.id);
-    if (
-      seen === undefined &&
-      read.headSha !== null &&
-      storedNotices.some((n) => rerunNoticeHead(n.key) === read.headSha)
-    ) {
+    const storedRerun =
+      seen === undefined && read.headSha !== null
+        ? storedNotices.find((n) => rerunNoticeHead(n.key) === read.headSha)
+        : undefined;
+    if (storedRerun !== undefined && read.headSha !== null) {
+      const record = rerunRecord(storedRerun);
+      const partial = record !== null && !record.done;
       seen = {
         head: read.headSha,
-        streak: 0,
-        asked: true,
+        // A rerun that left a run to ask for already counted its reads: the next one asks again.
+        streak: partial ? 1 : 0,
+        asked: !partial,
         // The time of the rerun isn't stored: the minutes a run gets to start count from this read.
         askedAt: clock.now().getTime(),
-        rerun: new Map(),
+        // The runs GitHub took are never run again; a partial record leaves the rest to ask for.
+        rerun: record === null ? new Map<string, { name: string }[]>() : record.runs,
         active: false,
         notified: storedNotices.some((n) => n.key === NOTICE_KEY.checksCancelled),
       };
@@ -696,11 +701,11 @@ export function createPrWatch(input: {
     // Stored as soon as GitHub takes each run, before the next call: a daemon killed between two
     // reruns must not run this head a second time. It names only the checks GitHub took, over every
     // round, since a check it took stops being listed as cancelled once it runs.
-    const storeRerun = (): void => {
+    const storeRerun = (done: boolean): void => {
       if (read.headSha === null) return;
       const headSha = read.headSha;
       ctx.state.write((write) => {
-        setBatchNotice(write, root.id, rerunNotices.ran(headSha, [...track.rerun.values()].flat()));
+        setBatchNotice(write, root.id, rerunNotices.ran(headSha, track.rerun, done));
       });
     };
     // A run GitHub took earlier this head is never run again, whichever run it refused after it.
@@ -726,8 +731,10 @@ export function createPrWatch(input: {
         runId,
         cancelled.filter((job) => job.runId === runId),
       );
-      storeRerun();
+      storeRerun(false);
     }
+    // Every run is asked for: the record says so, so a restart does not ask again.
+    storeRerun(true);
     track.asked = true;
     track.askedAt = at;
     track.active = false;

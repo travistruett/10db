@@ -1848,6 +1848,67 @@ describe('a required check GitHub cancelled', () => {
     expect(rerunNoticeOf(id)?.line).toContain('lint');
   });
 
+  it('after a restart, runs the run GitHub refused once and not the run it took', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    await w.stop();
+
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    // Run 88 is run now; run 77 is never run a second time.
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(rerunNoticeOf(id)?.line).toContain('desktop');
+    expect(rerunNoticeOf(id)?.line).toContain('lint');
+    for (let i = 0; i < GRACE_ROUNDS + 2; i++) await round(second);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+  });
+
+  it('after a restart, says nothing ran for a check whose run 10db never ran', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    await w.stop();
+
+    // Run 88 is refused again: the record names only desktop, and no 'again' notice is shown.
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    const second = watcher();
+    second.start();
+    await second.idle();
+    for (let i = 0; i < 3; i++) {
+      if (i > 0) await round(second);
+      if (i === 0) {
+        expect(h.gh.reruns).toEqual(['77']);
+        expect(rerunNoticeOf(id)?.line).toContain('desktop');
+        expect(rerunNoticeOf(id)?.line).not.toContain('lint');
+      }
+      expect(noticeOf(id)).toBeUndefined();
+    }
+    // Run 88 was run in the end; only then is lint named, and no notice says it was cancelled again.
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(rerunNoticeOf(id)?.line).toContain('lint');
+  });
+
   it('does not run the first run again when the daemon stops between two reruns', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, {
@@ -1876,7 +1937,8 @@ describe('a required check GitHub cancelled', () => {
     await second.idle();
     await round(second);
     await round(second);
-    expect(h.gh.reruns).toEqual(['77']);
+    // The run GitHub refused is run now; the run it took is not run a second time.
+    expect(h.gh.reruns).toEqual(['77', '88']);
   });
 
   it('names only the check GitHub refused when it hard-refuses the second run', async () => {
