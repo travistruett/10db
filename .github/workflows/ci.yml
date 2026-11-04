@@ -9,7 +9,9 @@ on:
     branches: [main]
     # edited re-runs the checks when the title changes: squash merge makes the title the commit on
     # main, so policy must lint the current one. Every job runs on every event. A job skipped on
-    # edited would count as passing and replace an earlier red result for the same commit.
+    # edited would count as passing and replace an earlier red result for the same commit. The one
+    # job that can be skipped, desktop, is skipped by the pull request's files and never by the
+    # event, so an edited event decides as the last push did.
     types: [opened, synchronize, reopened, edited]
   # Inert while main has no merge queue (decisions/2026-11-02-main-has-no-merge-queue.md); kept for
   # when an organization move brings it back. A queue builds a gh-readonly-queue/main/... branch of
@@ -66,7 +68,36 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Decides whether desktop needs a macOS runner, from the pull request's files alone
+  # (scripts/desktop-scope.mjs; decisions/2026-11-04-desktop-runs-on-macos-only-when-its-files-change.md).
+  # It reads no event action, so an edited event decides as the last push did.
+  desktop-scope:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      desktop: ${{ steps.scope.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/desktop-scope.mjs
+
   desktop:
+    needs: desktop-scope
+    # The required check. Skipped when no file of the pull request can affect it, which GitHub counts
+    # as passing, and without taking a macOS runner. Runs when desktop-scope failed or was skipped
+    # (its output is then empty), so a broken decision never hides a build. !cancelled() lets it
+    # evaluate after a failed need, which a plain `if` would not.
+    if: ${{ !cancelled() && needs.desktop-scope.outputs.desktop != 'false' }}
     runs-on: macos-15
     # A cold Rust cache rebuilds the Tauri crate and its dependencies.
     timeout-minutes: 30
