@@ -1,6 +1,7 @@
 import { tmpdir } from 'node:os';
 import { relative } from 'node:path';
 import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
+import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngOfSize } from '../../test/png';
 import { INLINE_CONVERSATION_MAX_BYTES } from '../screens';
@@ -49,12 +50,18 @@ async function nextTurn(text = 'Here you go'): Promise<FakeShapeTurn> {
   return must(seen.turn, 'a turn');
 }
 
-const read = (path: string, n = 0, agentId?: string) =>
+const readInput = (input: Record<string, unknown>, n = 0, agentId?: string) =>
   must(f.adapter.shapeSessions[n], 'a session').spec.preToolUse({
     toolName: 'Read',
-    input: { file_path: path },
+    input,
     ...(agentId === undefined ? {} : { agentId, agentType: 'scope' }),
   });
+const read = (path: string, n = 0, agentId?: string) => readInput({ file_path: path }, n, agentId);
+const readPages = (path: string, pages: unknown, n = 0, agentId?: string) =>
+  readInput({ file_path: path, pages }, n, agentId);
+const reasonOf = (answer: ReturnType<typeof read>): string =>
+  answer.decision === 'deny' ? answer.reason : '';
+const spent = () => readPictureBytesSpent(listShapeMessages(f.c.store.db, shapeId()));
 
 describe('the pictures a Shape session pulls in with Read', () => {
   it('fits the request limit beside a full inline budget', () => {
@@ -120,61 +127,122 @@ describe('the pictures a Shape session pulls in with Read', () => {
     expect(read(big.storedPath)).toMatchObject({ decision: 'deny' });
   });
 
-  it('count a PDF by its whole size, since a document block carries the file, and refuse one past the total', async () => {
-    // A dropped PDF is up to 20 MB and 20 a conversation; Read returns the file (or its pages as pictures),
-    // and a resumed session resends it. The file's size bounds a document block, so it is charged uncapped.
-    const pdf = (bytes: number) => Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(bytes)]);
-    const files = [
-      drop('a.pdf', pdf(1 * MB)),
-      drop('b.pdf', pdf(1 * MB)),
-      drop('c.pdf', pdf(1 * MB)),
-      drop('d.pdf', pdf(20 * 1024)),
-      drop('huge.pdf', pdf(20 * MB - 9)),
-    ];
-    await nextTurn('Hello');
-    const [a, b, c, d, huge] = files.map((file) => file.storedPath);
-    // A 20 MB PDF alone is past the total: refused with a reason, however empty the conversation.
-    const alone = read(huge ?? '');
-    expect(alone).toMatchObject({ decision: 'deny' });
-    expect(alone.decision === 'deny' ? alone.reason : '').toMatch(/PDF.*32 MB/);
-    // 3 x ~1 MiB fits up to the total (each pdf is a little over 1 MiB, so the third is refused).
-    expect(read(a ?? '')).toEqual({ decision: 'allow' });
-    expect(read(b ?? '')).toEqual({ decision: 'allow' });
-    expect(read(c ?? '')).toMatchObject({ decision: 'deny' });
-    // A small one still fits in what is left.
-    expect(read(d ?? '')).toEqual({ decision: 'allow' });
-  });
+  describe('a PDF', () => {
+    // What Read returns for a PDF has no relation to its size: a small text PDF renders to pictures much
+    // larger than itself. So a Read is charged by the page, and one that names no pages can't be bounded.
+    const tinyPdf = () => Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(100_000)]);
+    const room = Math.floor(READ_PICTURES_MAX_BYTES / READ_PICTURE_CHARGE_MAX_BYTES);
 
-  it('share one total between PDFs and pictures, and leave a subagent’s PDF Read uncounted', async () => {
-    const pdf = Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(2 * MB - 9)]);
-    const doc = drop('two.pdf', pdf);
-    const big = drop('big.png', wholePng(5 * MB));
-    await nextTurn('Hello');
-    for (let i = 0; i < 5; i += 1)
-      expect(read(doc.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
-    expect(read(doc.storedPath)).toEqual({ decision: 'allow' });
-    // 2 MiB of PDF leaves 1 MiB: one picture fits, the next does not.
-    expect(read(big.storedPath)).toEqual({ decision: 'allow' });
-    expect(read(big.storedPath)).toMatchObject({ decision: 'deny' });
-  });
+    it.each([
+      ['no range', undefined],
+      ['an open range', '3-'],
+      ['a list of pages', '1,3'],
+      ['a backwards range', '4-2'],
+      ['page zero', '0'],
+      ['words', 'all'],
+      ['an empty value', ''],
+      ['a number, not a string', 2],
+      ['a range too long for one Read', '1-21'],
+      ['more pages than the total holds', '1-4'],
+    ])('is refused with the way to read it when the Read has %s', async (_name, pages) => {
+      const doc = drop('small.pdf', tinyPdf());
+      await nextTurn('Hello');
+      const answer = pages === undefined ? read(doc.storedPath) : readPages(doc.storedPath, pages);
+      expect(answer).toMatchObject({ decision: 'deny' });
+      expect(reasonOf(answer)).toMatch(/PDF.*pages.*32 MB/s);
+      expect(reasonOf(answer)).toContain(`up to ${String(room)} pages`);
+      expect(reasonOf(answer)).toMatch(/ask the builder for its text/);
+    });
 
-  it('keep a conversation that Reads every dropped PDF under the request limit', async () => {
-    // The 20 a conversation may hold: six at the 20 MB cap and fourteen of 500 kB.
-    const sized = (bytes: number) =>
-      Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(bytes)]);
-    const large = Array.from({ length: 6 }, (_, i) =>
-      drop(`p${String(i)}.pdf`, sized(20 * MB - 9)),
-    );
-    const small = Array.from({ length: 14 }, (_, i) => drop(`s${String(i)}.pdf`, sized(500_000)));
-    await nextTurn('Hello');
-    expect(large.map((file) => read(file.storedPath).decision)).toEqual(Array(6).fill('deny'));
-    const allowed = small.filter((file) => read(file.storedPath).decision === 'allow').length;
-    // 3 MiB holds six 500 kB PDFs; the rest are refused.
-    expect(allowed).toBe(Math.floor(READ_PICTURES_MAX_BYTES / 500_009));
-    expect(allowed).toBeLessThan(small.length);
-    expect(onTheWire(INLINE_CONVERSATION_MAX_BYTES) + onTheWire(allowed * 500_009)).toBeLessThan(
-      REQUEST_LIMIT,
-    );
+    it.each([
+      ['one page', '7', 1],
+      ['a spaced page', ' 7 ', 1],
+      ['a one-page range', '7-7', 1],
+      ['a range', '2-3', 2],
+      ['a spaced range', '1 - 3', 3],
+    ])('is charged 1 MiB a page for %s', async (_name, pages, count) => {
+      const doc = drop('small.pdf', tinyPdf());
+      await nextTurn('Hello');
+      expect(readPages(doc.storedPath, pages)).toEqual({ decision: 'allow' });
+      expect(spent()).toBe(count * READ_PICTURE_CHARGE_MAX_BYTES);
+    });
+
+    it('stays under the limit however small the PDF and however many ranges are asked for', async () => {
+      // A 100 kB, 400-page text PDF read 20 pages at a time would be 600 pictures.
+      const doc = drop('long.pdf', tinyPdf());
+      await nextTurn('Hello');
+      const ranges = Array.from({ length: 400 }, (_, i) => String(i + 1));
+      const answers = ranges.map((pages) => readPages(doc.storedPath, pages));
+      const allowed = answers.filter((a) => a.decision === 'allow').length;
+      expect(allowed).toBe(room);
+      expect(reasonOf(answers.at(-1) ?? { decision: 'allow' })).toMatch(
+        /no room|what is already read/i,
+      );
+      expect(onTheWire(INLINE_CONVERSATION_MAX_BYTES) + onTheWire(spent())).toBeLessThan(
+        REQUEST_LIMIT,
+      );
+    });
+
+    it('can be read by the page whatever the size of the file', async () => {
+      const doc = drop(
+        'huge.pdf',
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(20 * MB - 9)]),
+      );
+      await nextTurn('Hello');
+      expect(readPages(doc.storedPath, '1')).toEqual({ decision: 'allow' });
+    });
+
+    it('shares one total with pictures, and a subagent’s Read is left uncounted', async () => {
+      const doc = drop('two.pdf', tinyPdf());
+      const big = drop('big.png', wholePng(5 * MB));
+      await nextTurn('Hello');
+      for (let i = 0; i < 5; i += 1) {
+        expect(read(doc.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
+        expect(readPages(doc.storedPath, '1-20', 0, 'agent-1')).toEqual({ decision: 'allow' });
+      }
+      expect(readPages(doc.storedPath, '1-2')).toEqual({ decision: 'allow' });
+      // Two pages leave 1 MiB: one picture fits, the next does not.
+      expect(read(big.storedPath)).toEqual({ decision: 'allow' });
+      expect(read(big.storedPath)).toMatchObject({ decision: 'deny' });
+      expect(readPages(doc.storedPath, '3')).toMatchObject({ decision: 'deny' });
+    });
+
+    it('leaves a conversation that Reads every dropped PDF under the request limit', async () => {
+      // The 20 a conversation may hold: six at the 20 MB cap and fourteen small ones.
+      const sized = (bytes: number) =>
+        Buffer.concat([Buffer.from('%PDF-1.7\n'), Buffer.alloc(bytes)]);
+      const files = [
+        ...Array.from({ length: 6 }, (_, i) => drop(`p${String(i)}.pdf`, sized(20 * MB - 9))),
+        ...Array.from({ length: 14 }, (_, i) => drop(`s${String(i)}.pdf`, sized(100_000))),
+      ];
+      await nextTurn('Hello');
+      // Whole, then 20 pages at a time, then a page at a time.
+      for (const file of files) {
+        read(file.storedPath);
+        readPages(file.storedPath, '1-20');
+        readPages(file.storedPath, '1');
+      }
+      expect(spent()).toBeLessThanOrEqual(READ_PICTURES_MAX_BYTES);
+      expect(onTheWire(INLINE_CONVERSATION_MAX_BYTES) + onTheWire(spent())).toBeLessThan(
+        REQUEST_LIMIT,
+      );
+    });
+
+    it('is not told it has room when nothing is left', async () => {
+      const big = drop('big.png', wholePng(5 * MB));
+      const doc = drop('small.pdf', tinyPdf());
+      await nextTurn('Hello');
+      for (let i = 0; i < room; i += 1) read(big.storedPath);
+      const answer = read(doc.storedPath);
+      expect(reasonOf(answer)).not.toMatch(/up to \d+ pages/);
+      expect(reasonOf(answer)).toMatch(/ask the builder for its text/);
+    });
+
+    it('charges nothing for a PDF that is not there', async () => {
+      await nextTurn('Hello');
+      expect(read('/nowhere/gone.pdf').decision).not.toBe('ask');
+      expect(spent()).toBe(0);
+    });
   });
 
   it('count a path with a line break in it', () => {

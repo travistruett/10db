@@ -330,12 +330,24 @@ reads; a file that isn't there is charged nothing. A Read that would take the li
 that says to work from the pictures already read or ask for a smaller one. Each counted Read is a dimmed
 `Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
 it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
-session as text. A Read of a `.pdf` (a dropped one is up to 20 MB) is charged to the same total, but its whole file
-size with no 1 MiB cap, since a document block carries the file and what Read returns for pages is unmeasured; it
-is recorded as `Read · <path> · PDF · <n> bytes counted`. So a PDF over 3 MiB is always refused (with a reason that
-says to work from what is already read or ask for a smaller PDF or its text), and a conversation that Reads all 20
-dropped PDFs stays under the request limit. **Not measured:** a live session has not shown what Read returns for a
-PDF (document block or page pictures); the charge is an upper bound for a document block only.
+session as text.
+
+A Read of a `.pdf` (a dropped one is up to 20 MB, 20 a conversation) is charged to the same total, by the page and
+not by the file: Read returns either the whole file as a document block or pages rendered to pictures, the SDK's types
+show pictures can come back with no range too, and a small text PDF renders to pictures far larger than itself. So
+a Read that names its pages with `pages` (one number or one range) is charged 1 MiB a page, the allowance for one
+picture, whatever the file's size, and is recorded as `Read · <path> · PDF · <n> bytes counted`. A Read with no `pages`,
+or with a value that isn't one number or one range, can't be bounded, so it is charged the 20 pages a Read can
+return, which is past the total, and refused. The refusal says how many pages still fit and to name them, or that
+none do, and either way to ask the builder for the PDF's text. That makes at most 3 pages a conversation, fewer beside
+Read pictures, and a conversation that Reads all 20 dropped PDFs stays under the request limit if a page picture is
+at most 1 MiB. **Not measured:** a live session has not shown what Read returns for a PDF. This ships unmeasured with
+the builder's acceptance (inbox card inb_01a1a613-db5c-74d6-9bc8-f779db7f360d). The live run is follow-up task
+tsk_01a1a613-b481-766b-b60e-ec76fecb12ca, which runs beside the picture one below: two PDF cases in
+`test/shape-session.live.test.ts` print what a 3-page range of a 40-page text PDF and a whole 3-page PDF add to the
+session's transcript, and fail if a page passes the charge or a whole Read passes 1 MiB a page. Their result sets
+the charge, and says whether a Read with no pages could be charged instead of refused. They have not been run.
+
 **Not measured:** the 1 MiB is an allowance, not a measurement, and it ships that way with the orchestrator's
 acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-7131-b2f7-0a24df988ba6), since a lane
 can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a

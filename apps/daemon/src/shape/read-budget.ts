@@ -4,7 +4,7 @@ import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
 import { expandHome } from '../sandbox';
 import type { ShapeAccess } from './confinement';
 
-// Shape spec §5.4. A picture Claude pulls in with `Read` comes back as a tool result, and a resumed
+// Shape spec §5.4. A picture or PDF Claude pulls in with `Read` comes back as a tool result, and a resumed
 // session resends every earlier tool result with each request, beside the pictures the daemon sends
 // itself (`screens/inline-budget.ts`: 18 MiB, 24 MiB as base64, which leaves the API's 32 MB request
 // about 6.8 MB). The daemon never sees that result, so it counts the Read in the PreToolUse hook, before
@@ -32,18 +32,39 @@ export const READ_PICTURE_CHARGE_MAX_BYTES = 1 * MIB;
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
 /**
- * A PDF Claude Code's `Read` returns as a document block (the whole file, base64) or, for a page range, as
- * pages rendered to pictures. UNMEASURED like the picture allowance above (no live session has run), so a PDF
- * is charged its whole file size with no cap: a document block can't be larger than the file, and a smaller
- * charge for pages would be a guess. A PDF past the total is refused, so a big PDF can't be Read at all.
+ * The most pages one Read of a PDF returns (`pages`: "Maximum 20 pages per request"). What a Read of a PDF
+ * returns is either the whole file as a document block or its pages as pictures, and the SDK's types show
+ * pictures can come back with no range too, so its size is not the file's: a 100 kB text PDF renders to
+ * pictures far larger than itself. So a Read is charged by the page, each page at the per-picture allowance,
+ * and one whose pages aren't known is charged this most, which is past the total: refused, with the reason
+ * saying to name them. UNMEASURED like that allowance: it ships with the builder's acceptance (inbox card
+ * inb_01a1a613-db5c-74d6-9bc8-f779db7f360d), and follow-up task tsk_01a1a613-b481-766b-b60e-ec76fecb12ca runs
+ * the PDF cases of `test/shape-session.live.test.ts`.
  */
+const PDF_PAGES_MAX = 20;
+
 const PDF_NAME = /\.pdf$/i;
+
+const PAGE_RANGE = /^\s*(\d+)\s*(?:-\s*(\d+)\s*)?$/;
+
+/** How many pages a Read's `pages` names, up to the most: that most when it names none or can't be read. */
+function pagesCharged(pages: string | null): number {
+  const range = pages === null ? null : PAGE_RANGE.exec(pages);
+  if (range === null) return PDF_PAGES_MAX;
+  const first = Number(range[1]);
+  const count = Number(range[2] ?? range[1]) - first + 1;
+  return first >= 1 && count >= 1 ? Math.min(count, PDF_PAGES_MAX) : PDF_PAGES_MAX;
+}
 
 export type ReadKind = 'picture' | 'PDF';
 
-/** What a Read of this path is charged: null for anything but a picture or PDF that exists. */
+/**
+ * What a Read of this path is charged: null for anything but a picture or PDF that exists. `pages` is the
+ * Read's own `pages` value, which only a PDF uses.
+ */
 export function readCharge(
   path: string,
+  pages: string | null,
   access: Pick<ShapeAccess, 'checkout' | 'home'>,
 ): { kind: ReadKind; bytes: number } | null {
   const kind: ReadKind | null = PICTURE_NAME.test(path)
@@ -57,7 +78,10 @@ export function readCharge(
     if (!stat.isFile()) return null;
     return {
       kind,
-      bytes: kind === 'PDF' ? stat.size : Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES),
+      bytes:
+        kind === 'PDF'
+          ? pagesCharged(pages) * READ_PICTURE_CHARGE_MAX_BYTES
+          : Math.min(stat.size, READ_PICTURE_CHARGE_MAX_BYTES),
     };
   } catch {
     // Read of a path that isn't there fails, and a failed Read returns text.
@@ -93,12 +117,18 @@ export function readPictureRefusal(
   kind: ReadKind = 'picture',
 ): string | null {
   if (spent + charge <= READ_PICTURES_MAX_BYTES) return null;
-  if (kind === 'PDF')
+  if (kind === 'PDF') {
+    const room = Math.floor((READ_PICTURES_MAX_BYTES - spent) / READ_PICTURE_CHARGE_MAX_BYTES);
+    const next =
+      room > 0
+        ? `Read it again with \`pages\` naming one page or range, such as "1-${String(room)}": up to ${String(room)} pages fit`
+        : 'No room is left for more pages: work from what is already read';
     return (
-      `Too much read in this conversation: the PDF ${path} would pass the total of pictures and PDFs a ` +
-      `resumed session can carry under the API's 32 MB request limit. Work from what is already read, or ` +
-      `ask the builder for a smaller PDF or its text.`
+      `The PDF ${path} can only be read by the page here, with \`pages\`, and this Read's pages would pass ` +
+      `the total of pictures and PDF pages a resumed session can carry under the API's 32 MB request limit. ` +
+      `${next}, or ask the builder for its text.`
     );
+  }
   return (
     `Too many pictures read in this conversation: ${path} would pass the total a resumed session can carry ` +
     `under the API's 32 MB request limit. Work from the pictures already read, or ask the builder for a ` +
