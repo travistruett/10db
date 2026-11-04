@@ -358,6 +358,62 @@ describe('dropping files', () => {
     });
   });
 
+  it('puts a file dropped while the first send is still creating the conversation into that conversation', async () => {
+    const view = proposed([], {}, 0);
+    let created = 0;
+    let release: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const posted: string[] = [];
+    const uploaded: string[] = [];
+    serve(
+      ...conversation(view),
+      // Every create makes its own conversation, so a second create shows as a different id.
+      http.post(daemonUrl('/projects/:projectId/shapes'), async () => {
+        created += 1;
+        const made = created === 1 ? view.shape : shapeDto({ ...inProject, state: 'listening' });
+        await held;
+        return HttpResponse.json(made, { status: 201 });
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), ({ params }) => {
+        posted.push(String(params['shapeId']));
+        return HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 });
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/files'), ({ params, request }) => {
+        uploaded.push(String(params['shapeId']));
+        return HttpResponse.json(
+          {
+            id: mintId('ShapeFile'),
+            shapeId: view.shape.id,
+            name: new URL(request.url).searchParams.get('name'),
+            mediaType: 'text/markdown',
+            size: 4,
+            storedPath: '/data/shapes/x/files/brief.md',
+            createdAt: '2026-11-02T12:00:00.000Z',
+          },
+          { status: 201 },
+        );
+      }),
+    );
+    renderApp('/shape');
+    const input = await screen.findByRole('textbox', { name: 'Message' });
+    await screen.findByRole('list', { name: 'Recent conversations' });
+    fireEvent.change(input, { target: { value: 'Move density ahead of the scrollbars.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(created).toBe(1);
+    });
+    dropOn(input, [new File(['# Hi'], 'brief.md', { type: 'text/markdown' })]);
+    release();
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+      expect(uploaded).toHaveLength(1);
+    });
+    expect(uploaded).toEqual(posted);
+    expect(posted).toEqual([view.shape.id]);
+  });
+
   it('uploads a pasted screenshot under a name the daemon accepts', async () => {
     const view = proposed([], {}, 0);
     const up = upload();

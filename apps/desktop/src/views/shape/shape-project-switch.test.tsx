@@ -46,6 +46,89 @@ describe('Shape: switching project', () => {
     ).toBeTruthy();
   });
 
+  it('still leaves for /shape of the new project when the switch came before the conversation loaded', async () => {
+    const base = shapeDto({ projectId: alpha.id, state: 'proposed', round: 1 });
+    const view = shapeViewDto({ shape: base, messages: [shapeMessageDto(base.id)] });
+    let release: () => void = () => undefined;
+    const loaded = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/projects/:projectId/shapes'), ({ params }) =>
+        HttpResponse.json(params['projectId'] === alpha.id ? [base] : []),
+      ),
+      http.get(daemonUrl('/shapes/:shapeId'), async () => {
+        await loaded;
+        return HttpResponse.json(view);
+      }),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', () => undefined),
+    );
+    const { router } = renderApp(`/shape/${base.id}`);
+    const trigger = await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('option', { name: /beta/, ...HIDDEN }));
+    await screen.findByRole('button', { name: 'Project: beta. Switch project' });
+    // The conversation has not arrived, so nothing can be compared with the new project yet.
+    expect(router.state.location.pathname).toBe(`/shape/${base.id}`);
+
+    release();
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/shape');
+    });
+  });
+
+  it('stays on another project’s conversation opened at load, when the conversation answers before /projects', async () => {
+    const betaShape = shapeDto({
+      projectId: beta.id,
+      title: 'The beta conversation',
+      state: 'proposed',
+      round: 1,
+    });
+    const view = shapeViewDto({
+      shape: betaShape,
+      messages: [shapeMessageDto(betaShape.id)],
+    });
+    let release: () => void = () => undefined;
+    const projectsArrive = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const listedFor: string[] = [];
+    window.localStorage.setItem('tendb.project', JSON.stringify(alpha.id));
+    server.use(
+      http.get(daemonUrl('/projects'), async () => {
+        await projectsArrive;
+        return HttpResponse.json([alpha, beta]);
+      }),
+      http.get(daemonUrl('/projects/:projectId/shapes'), ({ params }) => {
+        listedFor.push(String(params['projectId']));
+        return HttpResponse.json(params['projectId'] === beta.id ? [betaShape] : []);
+      }),
+      http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(view)),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', () => undefined),
+    );
+    const { router } = renderApp(`/shape/${betaShape.id}`);
+    // Only the conversation's answer fills in its title; the input is there from the first render.
+    await screen.findByText('The beta conversation');
+    expect(listedFor).toEqual([]);
+
+    const navigations: string[] = [];
+    router.history.subscribe(({ location }) => {
+      navigations.push(location.pathname);
+    });
+    release();
+    await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    // History asks for the project's conversations in the same effects pass as Shape's check of the
+    // project, so once that request lands the check has run and any navigation it made is logged.
+    await waitFor(() => {
+      expect(listedFor).toContain(alpha.id);
+    });
+    expect(navigations).toEqual([]);
+    expect(router.state.location.pathname).toBe(`/shape/${betaShape.id}`);
+  });
+
   it('never posts a send in the new project to the conversation a failed send made in the old one', async () => {
     const alphaShape = shapeDto({ projectId: alpha.id, state: 'listening', round: 0 });
     const betaShape = shapeDto({ projectId: beta.id, state: 'listening', round: 0 });

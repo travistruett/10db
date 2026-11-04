@@ -34,14 +34,24 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
 
   // A conversation belongs to its project: when the selected project changes while another
   // project's conversation is open, leave it for the new project's /shape. A link that opens
-  // a conversation of an unselected project at load is not a change, so it stays.
+  // a conversation of an unselected project at load is not a change, so it stays. The change is
+  // remembered until the conversation has loaded, because only then is its project known.
   const projectId = project?.id ?? null;
   const seenProjectId = useRef(projectId);
+  const switched = useRef(false);
   const viewProjectId = view?.shape.projectId ?? null;
   useEffect(() => {
-    if (seenProjectId.current === projectId) return;
-    seenProjectId.current = projectId;
-    if (shapeId !== null && viewProjectId !== null && viewProjectId !== projectId) {
+    // The projects arriving (null to the first project) is the load, not a switch.
+    if (projectId !== null && seenProjectId.current !== projectId) {
+      if (seenProjectId.current !== null) switched.current = true;
+      seenProjectId.current = projectId;
+    }
+    if (
+      switched.current &&
+      shapeId !== null &&
+      viewProjectId !== null &&
+      viewProjectId !== projectId
+    ) {
       void navigate({ to: '/shape' });
     }
   }, [projectId, shapeId, viewProjectId, navigate]);
