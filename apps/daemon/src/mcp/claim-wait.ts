@@ -238,20 +238,21 @@ export class ClaimWaits {
 
   /**
    * The claims `holder` holds that a wait is waiting for, among the waits of `start` and of everything
-   * `start` waits on through other waiters: what `holder` gives up to unblock `start`.
+   * `start` waits on through other waiters: what `holder` gives up to unblock `start`. Each claim is
+   * listed once, however many of those waiters wait for it.
    */
   claimsAwaitedFrom(
     holder: WorkstreamId,
     start: WorkstreamId,
   ): { readonly kind: ClaimKind; readonly name: string }[] {
-    const out: { readonly kind: ClaimKind; readonly name: string }[] = [];
+    const out = new Map<string, { readonly kind: ClaimKind; readonly name: string }>();
     for (const { state } of this.#live.values())
       if (
         state.heldBy === holder &&
         (state.workstreamId === start || this.waitsOn(start, state.workstreamId))
       )
-        out.push({ kind: state.kind, name: state.name });
-    return out;
+        out.set(`${state.kind}:${state.name}`, { kind: state.kind, name: state.name });
+    return [...out.values()];
   }
 
   /**

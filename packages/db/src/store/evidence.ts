@@ -18,7 +18,7 @@ interface NewEvidenceBase {
   readonly commitShas: readonly string[];
 }
 
-/** A gate or agent check records its command and exit code; the builder's note has neither. */
+/** A gate or agent check records its command and exit code; a note or `no_revert` record has neither. */
 export type NewEvidence =
   | (NewEvidenceBase & {
       readonly kind: typeof EvidenceKind.Gate | typeof EvidenceKind.Agent;
@@ -26,7 +26,7 @@ export type NewEvidence =
       readonly exitCode: number;
     })
   | (NewEvidenceBase & {
-      readonly kind: typeof EvidenceKind.Builder;
+      readonly kind: typeof EvidenceKind.Builder | typeof EvidenceKind.NoRevert;
       readonly command: null;
       readonly exitCode: null;
     });

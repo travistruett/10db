@@ -1,7 +1,10 @@
 import {
+  EvidenceKind,
+  lastRevertTold,
   LEFT_OUT_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
+  revertCommitIn,
   ToolAccess,
   type Notice,
   type WorkstreamStep,
@@ -24,24 +27,137 @@ const REVERT_LINE = REVERT_COMMIT_LINE;
  */
 const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 
-/** A commit tool op's result as it is stored, marked when the commit resolved conflict markers. */
+/**
+ * The key a commit tool op's stored result carries when the run's latest gate run had failed and its
+ * session was fixing that failure (`fixingFailedGate`): a told run's gate runs on the merged branch,
+ * so the commit adapts the work to the base or repairs it, and brings none of a reverted task's work
+ * back. A commit made before the gate failed is the work, and it carries no key.
+ */
+const THROUGH_GATE_KEY = 'throughGate';
+
+/**
+ * The key a commit tool op's stored result carries when the run had committed a resolution of conflict
+ * markers and no gate run or builder note came after it (`afterMarkersResolved`): a told run that skipped
+ * the redo and hit markers at its gate is still in the merge work, which mergeSection tells it to finish
+ * by adapting the callers of what the merge changed. Such a commit brings no reverted work back either.
+ */
+const AFTER_RESOLUTION_KEY = 'afterResolution';
+
+/**
+ * The key a commit tool op's stored result carries when it made no new commit (the opId was already on
+ * the branch) and the sha is one the run's revert covers: the session was handed a commit the revert
+ * undid, so no work came back. A retry reads it, and it needs no git to do so.
+ */
+const COVERED_BY_REVERT_KEY = 'coveredByRevert';
+
+/**
+ * Whether a session making a commit is fixing a failed gate: of the run's gate and builder evidence the
+ * latest is a gate run that failed. This is the record `outstandingFixEvidence` reads (runner), so it
+ * holds after a question, a usage limit or a handoff replaced the next action. A Retry's note comes
+ * after the failure, so a session told to redo the work is not fixing one.
+ */
+export function fixingFailedGate(
+  evidence: readonly { readonly kind: string; readonly exitCode: number | null }[],
+): boolean {
+  const latest = evidence.filter((e) => e.kind === 'gate' || e.kind === 'builder').at(-1);
+  return latest?.kind === 'gate' && latest.exitCode !== 0;
+}
+
+/**
+ * Whether a session making a commit is still in the merge work: the run has a commit that resolved
+ * conflict markers (`resolvedMarkers`), and no gate run or builder note is newer than it. A gate run
+ * ends the merge work (a failed one starts a fix, which `fixingFailedGate` reads), and a Retry's or a
+ * reviewer's note asks for new work. `commits` and `evidence` are the run's records, oldest first;
+ * their ids are time-ordered and compare with each other.
+ */
+export function afterMarkersResolved(
+  commits: readonly { readonly id: string; readonly result: unknown }[],
+  evidence: readonly { readonly id: string; readonly kind: string }[],
+): boolean {
+  const resolution = commits.findLast((c) => commitResolvedMarkers(c.result));
+  if (resolution === undefined) return false;
+  const closing = evidence.findLast((e) => e.kind === 'gate' || e.kind === 'builder');
+  return closing === undefined || uuidOf(closing.id) < uuidOf(resolution.id);
+}
+
+/** An id without its kind prefix: the part that sorts by the time it was minted. */
+function uuidOf(id: string): string {
+  return id.slice(id.indexOf('_') + 1);
+}
+
+/**
+ * A commit tool op's result as it is stored, marked when the commit resolved conflict markers, when
+ * the session making it was fixing a failed gate or still in the merge work after a resolution
+ * (`marks`), and when it made no new commit and `revert` (the one the run was told of; null when none)
+ * covers its sha.
+ */
 export async function commitResultAsStored<T extends { readonly sha: string }>(
-  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween'>,
+  git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween' | 'hasCommit' | 'isAncestor'>,
   repo: string,
-  result: T,
-): Promise<T & { readonly [RESOLVED_MARKERS_KEY]?: true }> {
+  result: T & { readonly alreadyCommitted?: boolean },
+  revert: string | null = null,
+  marks: { readonly throughGate?: boolean; readonly afterResolution?: boolean } = {},
+): Promise<
+  T & {
+    readonly [RESOLVED_MARKERS_KEY]?: true;
+    readonly [THROUGH_GATE_KEY]?: true;
+    readonly [AFTER_RESOLUTION_KEY]?: true;
+    readonly [COVERED_BY_REVERT_KEY]?: true;
+  }
+> {
   const parent = `${result.sha}^`;
   const changed = await git.filesChangedBetween(repo, parent, result.sha);
   const marked = await git.conflictMarkers(repo, changed, parent);
-  return marked.length > 0 ? { ...result, [RESOLVED_MARKERS_KEY]: true } : result;
+  const gated = marks.throughGate ? { ...result, [THROUGH_GATE_KEY]: true as const } : result;
+  const merging = marks.afterResolution
+    ? { ...gated, [AFTER_RESOLUTION_KEY]: true as const }
+    : gated;
+  const resolved =
+    marked.length > 0 ? { ...merging, [RESOLVED_MARKERS_KEY]: true as const } : merging;
+  // A named revert no longer on the branch covers nothing, as `revertedAway` reads it.
+  const covered =
+    result.alreadyCommitted === true &&
+    revert !== null &&
+    (await git.hasCommit(repo, revert)) &&
+    (await git.isAncestor(repo, result.sha, revert));
+  return covered ? { ...resolved, [COVERED_BY_REVERT_KEY]: true } : resolved;
 }
 
 /** Whether a stored commit result resolved conflict markers (`commitResultAsStored`). */
 export function commitResolvedMarkers(result: unknown): boolean {
+  return storedMark(result, RESOLVED_MARKERS_KEY);
+}
+
+/** Whether a stored commit result was made fixing a failed gate (`commitResultAsStored`). */
+export function commitGotThroughGate(result: unknown): boolean {
+  return storedMark(result, THROUGH_GATE_KEY);
+}
+
+/** Whether a stored commit result was made after a resolution, before a gate run (`afterMarkersResolved`). */
+export function commitAfterResolution(result: unknown): boolean {
+  return storedMark(result, AFTER_RESOLUTION_KEY);
+}
+
+/**
+ * Whether a stored commit result brings no reverted work back: it resolved conflict markers, was made
+ * fixing a failed gate, or was made in the merge work after a resolution.
+ */
+export function commitAdaptsMerge(result: unknown): boolean {
+  return (
+    commitResolvedMarkers(result) || commitGotThroughGate(result) || commitAfterResolution(result)
+  );
+}
+
+/** Whether a stored commit result made no new commit, and its sha is one the run's revert covers. */
+export function commitCoveredByRevert(result: unknown): boolean {
+  return storedMark(result, COVERED_BY_REVERT_KEY);
+}
+
+function storedMark(result: unknown, key: string): boolean {
   return (
     typeof result === 'object' &&
     result !== null &&
-    (result as Record<string, unknown>)[RESOLVED_MARKERS_KEY] === true
+    (result as Record<string, unknown>)[key] === true
   );
 }
 
@@ -50,30 +166,9 @@ export function revertCommitLine(sha: string): string {
   return `${REVERT_LINE}${sha}`;
 }
 
-/** The full id of the revert commit a text names on its revert line; null when it names none. */
-function revertCommitIn(text: string): string | null {
-  const line = text.split('\n').find((l) => l.startsWith(REVERT_LINE));
-  const sha = line?.slice(REVERT_LINE.length).trim() ?? '';
-  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
-}
-
 /** The full id of the revert commit a notice names; null when it names none. */
 export function revertCommitOf(notice: Notice | null): string | null {
   return notice ? revertCommitIn(notice.body) : null;
-}
-
-/**
- * The revert commit the last retry of a run told its session about: the builder notes among the
- * run's evidence, oldest first. The notice shares one slot with the run's waits, so a wait for a claim
- * can replace it; the note is what the pull request relies on.
- */
-export function lastRevertTold(
-  evidence: readonly { readonly kind: string; readonly summary: string }[],
-): string | null {
-  let found: string | null = null;
-  for (const row of evidence)
-    if (row.kind === 'builder') found = revertCommitIn(row.summary) ?? found;
-  return found;
 }
 
 /** When the last retry of a run told its session of a revert; null when none did. */
@@ -99,16 +194,45 @@ export function lastRevertNoteAt(
  * `reverted-work` in the write that adds the note, so a run still holding it was left out after its last
  * note, and its commits made after that note are in this revert. The run still counts as told: a commit
  * it makes after this revert was made knowing the work had been undone before.
+ *
+ * A `left-out` notice that names no revert is newer than any note too: Ship without it wrote it after
+ * finding none of the run's reverts on the branch (`nothingToRevert`), so the run records none, whatever
+ * its notes say. The Retry that clears that notice leaves a `no_revert` record for the same answer.
  */
-export function revertOfRun(run: {
-  readonly notice: Notice | null;
-  readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
-}): { readonly revert: string; readonly told: boolean } | null {
+export function revertOfRun(run: RunRecord): {
+  readonly revert: string;
+  readonly told: boolean;
+} | null {
+  if (leftOutWithNoRevert(run.notice)) return null;
   const noted = lastRevertTold(run.evidence);
   const leftOut = run.notice?.key === LEFT_OUT_NOTICE_KEY ? revertCommitOf(run.notice) : null;
   const carried = run.notice?.key === REVERTED_NOTICE_KEY ? revertCommitOf(run.notice) : null;
   const revert = leftOut ?? noted ?? carried;
   return revert === null ? null : { revert, told: noted !== null };
+}
+
+/**
+ * The revert that stands for a task after these runs of it, oldest first: a later run started from the
+ * one before it, so the last run with a record names it. A later run that found none on the branch
+ * says the older revert has gone too, since Ship without it read every run's latest record.
+ */
+export function revertOfRuns(runs: readonly RunRecord[]): string | null {
+  let revert: string | null = null;
+  for (const run of runs) {
+    const gone =
+      leftOutWithNoRevert(run.notice) || run.evidence.some((e) => e.kind === EvidenceKind.NoRevert);
+    revert = revertOfRun(run)?.revert ?? (gone ? null : revert);
+  }
+  return revert;
+}
+
+interface RunRecord {
+  readonly notice: Notice | null;
+  readonly evidence: readonly { readonly kind: string; readonly summary: string }[];
+}
+
+function leftOutWithNoRevert(notice: Notice | null): boolean {
+  return notice?.key === LEFT_OUT_NOTICE_KEY && revertCommitOf(notice) === null;
 }
 
 /** The notice a retried run keeps while its commits stay reverted. */

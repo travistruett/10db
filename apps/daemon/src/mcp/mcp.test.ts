@@ -17,6 +17,7 @@ import {
   getWorkstream,
   insertBatch,
   insertDecision,
+  insertEvidence,
   insertPrinciple,
   insertSession,
   insertShape,
@@ -40,6 +41,7 @@ import {
 } from '@10db/db';
 import {
   EventType,
+  filedFollowUpLines,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   mintId,
@@ -57,7 +59,14 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { commitResolvedMarkers } from '../team';
+import {
+  advanceSteps,
+  commitCoveredByRevert,
+  commitAfterResolution,
+  commitGotThroughGate,
+  commitResolvedMarkers,
+  revertCommitLine,
+} from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -947,6 +956,250 @@ describe('MCP tools', () => {
     });
   });
 
+  describe('a commit result that made no new commit under a revert', () => {
+    const headOf = () =>
+      execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim();
+    /** Tells the run of a revert at `revert`, as a Retry or a joined start does. */
+    const toldOf = (s: Awaited<ReturnType<typeof seedSession>>, revert: string) =>
+      state.write((ctx) =>
+        insertEvidence(ctx, {
+          workstreamId: s.workstream.id,
+          kind: 'builder',
+          command: null,
+          exitCode: null,
+          summary: `Your commits were reverted.\n\n${revertCommitLine(revert)}`,
+          logPath: null,
+          commitShas: [],
+        }),
+      );
+    const covered = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitCoveredByRevert);
+
+    it('is recorded when the sha is in the revert the run was told of', async () => {
+      const s = await seedSession();
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      const direct = await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-reused-01',
+        branch: 'main',
+      });
+      toldOf(s, headOf());
+      const viaTool = await s.call('commit', {
+        opId: 'op-reused-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toEqual({ sha: direct.sha, alreadyCommitted: true });
+      expect(covered(s)).toEqual([true]);
+    });
+
+    it('is not recorded for a commit the revert does not cover', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-after-01',
+        branch: 'main',
+      });
+      const viaTool = await s.call('commit', {
+        opId: 'op-after-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toMatchObject({ alreadyCommitted: true });
+      expect(covered(s)).toEqual([false]);
+    });
+
+    it('is not recorded for a new commit', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await s.call('commit', { opId: 'op-new-01', paths: ['src/api/b.ts'], message: 'Add b' });
+      expect(covered(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made while the run is fixing a failed gate', () => {
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number | null,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode: exitCode ?? 0,
+                summary: 'The gate failed',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const throughGate = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitGotThroughGate);
+    const commitWork = async (s: Awaited<ReturnType<typeof seedSession>>, opId: string) => {
+      writeRepoFile('src/api/b.ts', `export const op = '${opId}';\n`);
+      await s.call('commit', { opId, paths: ['src/api/b.ts'], message: 'Work' });
+    };
+
+    it('is recorded when the latest gate run failed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      await commitWork(s, 'op-gate-fix-1');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is recorded after a session the builder answered continues the fix', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+        });
+      });
+      await commitWork(s, 'op-gate-fix-2');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is not recorded when no gate has run', async () => {
+      const s = await seedSession();
+      await commitWork(s, 'op-no-gate');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the latest gate run passed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'gate', 0);
+      await commitWork(s, 'op-gate-passed');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the builder’s note came after the failed gate run', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'builder', null);
+      await commitWork(s, 'op-note-after');
+      expect(throughGate(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made after a resolution of conflict markers, before the next gate run', () => {
+    const MARKED = '<<<<<<< HEAD\nours\n||||||| base\n=======\ntheirs\n>>>>>>> origin/main\n';
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode,
+                summary: 'The gate ran',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const afterResolution = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitAfterResolution);
+    const commitFile = async (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      opId: string,
+      path: string,
+      content: string,
+    ) => {
+      writeRepoFile(path, content);
+      await s.call('commit', { opId, paths: [path], message: opId });
+    };
+    /** The branch as the base merge leaves it, then the session's resolution of it. */
+    const resolved = async (s: Awaited<ReturnType<typeof seedSession>>) => {
+      await commitFile(s, 'op-marked', 'src/api/a.ts', MARKED);
+      await commitFile(s, 'op-resolve', 'src/api/a.ts', 'ours\ntheirs\n');
+    };
+
+    it('is recorded on a caller adapted after the resolution, and not on the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is recorded on every commit until a gate run', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller-1', 'src/api/c1.ts', 'export {}\n');
+      await commitFile(s, 'op-caller-2', 'src/api/c2.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true, true]);
+    });
+
+    it('is not recorded once a gate run came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'gate', 0);
+      await commitFile(s, 'op-later', 'src/api/later.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is not recorded once a builder note came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'builder', 0);
+      await commitFile(s, 'op-redo-01', 'src/api/redo.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is recorded when the gate and the note came before the resolution', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'builder', 0);
+      evidenceOf(s, 'gate', 1);
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is not recorded when no commit resolved markers', async () => {
+      const s = await seedSession();
+      await commitFile(s, 'op-work-01', 'src/api/work.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false]);
+    });
+  });
+
   it('recovers a commit made before a crash that never recorded its op', async () => {
     const s = await seedSession();
     writeRepoFile('src/api/b.ts', 'export {}\n');
@@ -1536,6 +1789,46 @@ describe('MCP tools', () => {
       expect(refreshed.detail?.['heldBy']).toBe(g.workstream.id);
       expect(refreshed.body).toContain('Task "Gamma" holds area api');
       expect(b.workstream.id).not.toBe(g.workstream.id);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta, gamma]);
+    });
+
+    it('lists each yielded claim once when a third task also waits for it', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      const g = await seedSession(['migrations'], undefined, {
+        project: a.project,
+        title: 'Gamma',
+      });
+      const gamma = g.call('request_claim', {
+        opId: 'op-deadlock-g',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(g)).not.toBeNull();
+      });
+      state.write((ctx) => {
+        releaseClaims(ctx, a.workstream.id);
+        acquireClaims(ctx, {
+          projectId: a.project.id,
+          workstreamId: g.workstream.id,
+          requests: [{ kind: 'area', name: 'api' }],
+          leaseExpiresAt: ctx.now,
+        });
+      });
+      const refreshed = await vi.waitFor(() => {
+        const found = getInboxItem(state.db, card.id);
+        if (!found.options.some((o) => o.label === 'Gamma yields area api'))
+          throw new Error('card not refreshed');
+        return found;
+      });
+      expect(refreshed.options.map((o) => o.label)).toEqual([
+        'Beta yields area ui',
+        'Gamma yields area api',
+        'Cancel Beta',
+        'Cancel Gamma',
+      ]);
       sessionAbort.abort();
       await Promise.all([alpha, beta, gamma]);
     });
@@ -2553,19 +2846,148 @@ describe('complete_step', () => {
           expect(summary).toContain(`${task.id} ${task.title}`);
       });
 
-      it('counts what an earlier session of the step filed when a rerun reuses its opId', async () => {
+      it('never refuses a call with no follow-ups for the bound, however many lines the result seems to list', async () => {
         const s = await onStep('review');
-        const args = {
+        const bullets = Array.from(
+          { length: MAX_FOLLOW_UPS + 5 },
+          (_, i) => `- pasted ${String(i)}`,
+        );
+        const notes = ['1. Fine.', '', 'Follow-up tasks filed:', ...bullets].join('\n');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-n',
+          summary: notes,
+          verdict: 'approve',
+        });
+        expect(first.isError).toBe(false);
+        const second = await s.call('complete_step', {
+          opId: 'op-step-multi-o',
+          summary: 'Replacement notes.',
+          verdict: 'reject',
+        });
+        expect(second.isError).toBe(false);
+        expect(resultOf(s)?.summary.startsWith('Replacement notes.')).toBe(true);
+        expect(resultOf(s)?.verdict).toBe('reject');
+        expect(tasksOf(s.project.id)).toHaveLength(1);
+        // A call that files something is still bounded by what the result seems to list.
+        const files = await s.call('complete_step', {
+          opId: 'op-step-multi-p',
+          summary: 'Third notes.',
+          verdict: 'approve',
+          followUps: more(0, 1),
+        });
+        expect(files.isError).toBe(true);
+      });
+
+      it('counts what an earlier session of the step filed against the cap', async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
           opId: 'op-step-multi-g',
           summary: 'First notes.',
           verdict: 'approve',
           followUps: more(0, MAX_FOLLOW_UPS),
-        };
-        await s.call('complete_step', args);
+        });
         const rerun = await connectSession(s.workstream.id);
-        const again = await rerun.call('complete_step', args);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-h',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(100, 1),
+        });
         expect(again.isError).toBe(true);
         expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+      });
+
+      it('files no follow-up the earlier session already filed when a rerun reuses its opId', async () => {
+        const s = await onStep('review');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'First notes.',
+          verdict: 'reject',
+          followUps,
+        });
+        const filedBefore = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        const rerun = await connectSession(s.workstream.id);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'Rerun notes.',
+          verdict: 'approve',
+          followUps: [...followUps, ...more(0, 1)],
+        });
+        expect(again.isError).toBe(false);
+        // The verdict is the new one, and only the one follow-up the first call did not file is new.
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('approve');
+        expect(result?.summary.startsWith('Rerun notes.')).toBe(true);
+        const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        expect(filed).toHaveLength(followUps.length + 1);
+        expect(filed.slice(0, followUps.length)).toEqual(filedBefore);
+        // The result and the reply name each follow-up once.
+        for (const task of filed)
+          expect(result?.summary.split(`${task.id} ${task.title}`)).toHaveLength(2);
+        expect(again.json).toMatchObject({
+          followUps: filed.map((t) => ({ taskId: t.id, title: t.title })),
+        });
+        expect(first.json).toMatchObject({
+          followUps: filedBefore.map((t) => ({ taskId: t.id, title: t.title })),
+        });
+      });
+
+      it('files nothing twice and stays within the bound when the step runs again before its opId is reused', async () => {
+        const s = await onStep('review');
+        const opId = 'op-step-multi-j';
+        const firstRound = more(0, 3);
+        await s.call('complete_step', {
+          opId,
+          summary: 'First round.',
+          verdict: 'reject',
+          followUps: firstRound,
+        });
+        // The rework ran: the review is entered again, and its result moves to `earlier`.
+        state.write((ctx) => {
+          const { steps } = getWorkstream(ctx.tx, s.workstream.id);
+          patchWorkstream(ctx, s.workstream.id, null, {
+            steps: advanceSteps(steps, 0, 1, { now: ctx.now, sessions: 2 }),
+          });
+        });
+        expect(resultOf(s)).toBeNull();
+
+        const secondRound = await connectSession(s.workstream.id);
+        const filedNew = await secondRound.call('complete_step', {
+          opId,
+          summary: 'Second round.',
+          verdict: 'reject',
+          followUps: more(100, MAX_FOLLOW_UPS),
+        });
+        expect(filedNew.isError).toBe(false);
+        // The list is this attempt's, so it holds a full allowance and no more. The first round's stay
+        // named in the result it moved to `earlier`.
+        expect(filedFollowUpLines(resultOf(s)?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        const step = getWorkstream(base.db, s.workstream.id).steps[1];
+        expect(filedFollowUpLines(step?.earlier[0]?.summary ?? '')).toHaveLength(firstRound.length);
+
+        // The same opId again, resending the first round's: nothing is filed, on a full list.
+        const thirdSession = await connectSession(s.workstream.id);
+        const resent = await thirdSession.call('complete_step', {
+          opId,
+          summary: 'Resent notes.',
+          verdict: 'approve',
+          followUps: firstRound,
+        });
+        expect(resent.isError).toBe(false);
+        expect(resultOf(s)?.verdict).toBe('approve');
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
+
+        // A later call that files nothing is not refused.
+        const none = await thirdSession.call('complete_step', {
+          opId: 'op-step-multi-k',
+          summary: 'Final notes.',
+          verdict: 'reject',
+        });
+        expect(none.isError).toBe(false);
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('reject');
+        expect(filedFollowUpLines(result?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
       });
     });
 

@@ -167,7 +167,13 @@ export const SourceKind = {
 } as const;
 export type SourceKind = ValueOf<typeof SourceKind>;
 
-export const EvidenceKind = { Gate: 'gate', Agent: 'agent', Builder: 'builder' } as const;
+export const EvidenceKind = {
+  Gate: 'gate',
+  Agent: 'agent',
+  Builder: 'builder',
+  /** Retry's record that no revert of the run stands: earlier notes naming one no longer hold. */
+  NoRevert: 'no_revert',
+} as const;
 export type EvidenceKind = ValueOf<typeof EvidenceKind>;
 
 export const SessionMode = { Managed: 'managed', Terminal: 'terminal' } as const;

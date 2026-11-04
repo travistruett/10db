@@ -22,6 +22,11 @@ export interface ToolRequest {
    */
   readonly escalated: boolean;
   readonly signal: AbortSignal;
+  /**
+   * The hook's `cwd` for this same call, where a relative path is read from. An earlier Bash call's
+   * `cd` moves it off the lane's copy. Absent where no hook ran for the call.
+   */
+  readonly cwd?: string;
 }
 
 export type ToolDecision =
