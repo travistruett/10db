@@ -1963,6 +1963,238 @@ describe('a required check GitHub cancelled', () => {
     expect(h.gh.reruns).toEqual(['77']);
   });
 
+  describe('a check cancelled after a rerun that did not include its run', () => {
+    const desktopCancelledLintRunning = {
+      state: 'cancelled' as const,
+      failing: [],
+      pending: [job('lint', '88')],
+      cancelled: [job('desktop', '77')],
+    };
+    const lintCancelled = {
+      state: 'cancelled' as const,
+      failing: [],
+      pending: [],
+      cancelled: [job('lint', '88')],
+    };
+    const desktopAndLintCancelled = {
+      ...lintCancelled,
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    };
+
+    /** Runs run 77 only, while run 88 is a different run still going. */
+    async function rerunOfDesktopOnly(w: PrWatch, prUrl: string): Promise<void> {
+      h.gh.setRequiredChecks(prUrl, desktopCancelledLintRunning);
+      w.start();
+      await w.idle();
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77']);
+    }
+
+    it.each([
+      ['the same daemon', false],
+      ['a daemon that restarted', true],
+    ])('runs it once on %s, with no notice that 10db ran it', async (_, restart) => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      let current = w;
+      if (restart) {
+        await w.stop();
+        current = watcher();
+      }
+      h.gh.setRequiredChecks(prUrl, lintCancelled);
+      if (restart) {
+        current.start();
+        await current.idle();
+      } else await round(current);
+      for (let i = 0; i < GRACE_ROUNDS + 1; i++) {
+        expect(noticeOf(id)).toBeUndefined();
+        await round(current);
+        if (i === 0) expect(h.gh.reruns).toEqual(['77', '88']);
+      }
+      expect(h.gh.reruns).toEqual(['77', '88']);
+      // Only now that 10db ran it does a notice say so.
+      expect(noticeOf(id)?.line).toContain('lint');
+      expect(rerunNoticeOf(id)?.line).toContain('lint');
+    });
+
+    it('waits for the second read in a row, as for any cancelled check', async () => {
+      const { prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      h.gh.setRequiredChecks(prUrl, running('desktop'));
+      await round(w);
+      h.gh.setRequiredChecks(prUrl, lintCancelled);
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77']);
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77', '88']);
+    });
+
+    it('runs it when the partial record was closed by a read that listed only the taken run', async () => {
+      const { id, prUrl, w } = watching();
+      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+      w.start();
+      await w.idle();
+      h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77']);
+
+      h.gh.setRequiredChecks(prUrl, desktopCancelledLintRunning);
+      await round(w);
+      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+      await round(w);
+      h.gh.setRequiredChecks(prUrl, passing);
+      await round(w);
+      h.gh.setRequiredChecks(prUrl, lintCancelled);
+      await round(w);
+      expect(noticeOf(id)).toBeUndefined();
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77', '88']);
+      expect(noticeOf(id)).toBeUndefined();
+    });
+
+    it('names only the checks 10db ran when one is cancelled again and another is not run yet', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      for (let i = 0; i < GRACE_ROUNDS; i++) await round(w);
+      expect(noticeOf(id)?.line).toContain('desktop');
+
+      // The notice about desktop does not stop lint, which 10db has not run, from running.
+      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+      await round(w);
+      expect(noticeOf(id)?.line).not.toContain('lint');
+      await round(w);
+      expect(h.gh.reruns).toEqual(['77', '88']);
+      for (let i = 0; i < GRACE_ROUNDS; i++) await round(w);
+      expect(h.gh.reruns).toEqual(['77', '88']);
+      expect(noticeOf(id)?.line).toContain('desktop');
+      expect(noticeOf(id)?.line).toContain('lint');
+    });
+
+    it('says GitHub refused, and asks once, when GitHub hard-refuses it', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      h.gh.setRequiredChecks(prUrl, desktopAndLintCancelled);
+      await round(w);
+      h.gh.failRerunOf.set('88', new GhError('failed', 'HTTP 403: Resource not accessible'));
+      await round(w);
+      expect(h.gh.failRerunOf.has('88')).toBe(false);
+      const notice = noticeOf(id);
+      expect(notice?.line).toContain('could not run');
+      expect(notice?.line).toContain('lint');
+      expect(notice?.line).not.toContain('desktop');
+      expect(notice?.body).not.toContain('10db ran');
+      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(w);
+      expect(h.gh.reruns).toEqual(['77']);
+      expect(noticeOf(id)?.line).toContain('could not run');
+    });
+
+    it('says it has no run when the check is a commit status', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      const status = { ...job('ci/other', null), jobId: null };
+      h.gh.setRequiredChecks(prUrl, { ...lintCancelled, cancelled: [status] });
+      await round(w);
+      await round(w);
+      expect(noticeOf(id)?.line).toContain("can't be run again");
+      expect(noticeOf(id)?.body).not.toContain('10db ran');
+      expect(h.gh.reruns).toEqual(['77']);
+    });
+  });
+
+  it('does not run an old head again when its stored rerun notice carries no record', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+    w.start();
+    await w.idle();
+    await round(w);
+    await w.stop();
+    const notice = rerunNoticeOf(id);
+    expect(notice).toBeDefined();
+    // As an older daemon stored it: the head was asked, and which runs is not known.
+    h.state.write((write) => {
+      setBatchNotice(write, id, {
+        tone: 'info',
+        key: `checks-rerun:${HEAD_A}`,
+        line: notice?.line ?? '',
+        body: 'GitHub cancelled a check, so 10db ran it again once for this head.',
+      });
+    });
+
+    const second = watcher();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('lint', '88')],
+    });
+    second.start();
+    await second.idle();
+    for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(noticeOf(id)?.line).toContain('lint');
+  });
+
+  describe('a check 10db could not run, then a restart', () => {
+    /** The check is cancelled, 10db stops with `line`, the daemon restarts and the check clears. */
+    async function clearedAfterRestart(
+      id: BatchId,
+      prUrl: string,
+      w: PrWatch,
+      line: string,
+    ): Promise<PrWatch> {
+      w.start();
+      await w.idle();
+      await round(w);
+      expect(noticeOf(id)?.line).toContain(line);
+      await w.stop();
+
+      const second = watcher();
+      second.start();
+      await second.idle();
+      expect(noticeOf(id)?.line).toContain(line);
+      h.gh.setRequiredChecks(prUrl, running('desktop'));
+      await round(second);
+      expect(noticeOf(id)).toBeUndefined();
+      return second;
+    }
+
+    it('never says 10db ran a check GitHub refused', async () => {
+      const { id, prUrl, w } = watching();
+      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+      h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+      const second = await clearedAfterRestart(id, prUrl, w, 'could not run');
+
+      h.gh.failRerunOf.set('77', new GhError('failed', 'HTTP 403: Resource not accessible'));
+      h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
+      await round(second);
+      await round(second);
+      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
+      expect(h.gh.reruns).toEqual([]);
+      expect(noticeOf(id)?.line).toContain('could not run');
+      expect(noticeOf(id)?.body).not.toContain('10db ran');
+    });
+
+    it('never says 10db ran a check with no Actions run', async () => {
+      const { id, prUrl, w } = watching();
+      const status = { ...job('ci/other', null), jobId: null };
+      const statusCancelled = {
+        state: 'cancelled' as const,
+        failing: [],
+        pending: [],
+        cancelled: [status],
+      };
+      h.gh.setRequiredChecks(prUrl, statusCancelled);
+      const second = await clearedAfterRestart(id, prUrl, w, "can't be run again");
+
+      h.gh.setRequiredChecks(prUrl, statusCancelled);
+      await round(second);
+      await round(second);
+      for (let i = 0; i < GRACE_ROUNDS + 1; i++) await round(second);
+      expect(noticeOf(id)?.line).toContain("can't be run again");
+      expect(noticeOf(id)?.body).not.toContain('10db ran');
+    });
+  });
+
   it('gives a new head its own rerun', async () => {
     const { id, prUrl, w } = watching();
     h.gh.setRequiredChecks(prUrl, cancelled('desktop'));
