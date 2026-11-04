@@ -9,7 +9,12 @@ export {
   retryWorkstream,
   startTaskWithPlan,
 } from './steps';
-export { revertCommitLine, revertOfRun } from './reverted-work';
+export {
+  commitResultUnderMerge,
+  commitUnderMerge,
+  revertCommitLine,
+  revertOfRun,
+} from './reverted-work';
 export {
   advanceSteps,
   countSendBack,

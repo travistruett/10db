@@ -60,7 +60,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import { insertPlannedWorkstream, revertOfRun } from '../team';
+import { commitUnderMerge, insertPlannedWorkstream, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -1334,11 +1334,18 @@ export function createShipper(deps: ShipperDeps): Shipper {
     return listWorkstreams(db, { batchId }).filter((run) => run.taskId === member.taskId);
   }
 
-  /** Every commit `runs` made through the commit tool, in the order recorded. */
-  function commitsMadeBy(runs: readonly WorkstreamDto[]): string[] {
+  /**
+   * Every commit `runs` made through the commit tool, in the order recorded. With `redoing`, the ones
+   * made while a run resolved conflict markers of its own gate's base merge are left out.
+   */
+  function commitsMadeBy(
+    runs: readonly WorkstreamDto[],
+    options: { readonly redoing?: boolean } = {},
+  ): string[] {
     const made: string[] = [];
     for (const run of runs)
       for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
+        if (options.redoing === true && commitUnderMerge(result)) continue;
         const parsed = McpToolOutputs.commit.safeParse(result);
         if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
       }
@@ -1352,7 +1359,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * is taken to be on the branch. A retry tells its session, and so does a start that joins the batch
    * (`insertJoinedWorkstream`). Only a run that was told counts: the shipping gate sends a merge run to
    * a task that finished, and its commit resolves the base's conflicts without bringing any of the work
-   * back.
+   * back. The same goes for a told run's own commit made under a `merge` next action, when its gate's
+   * base merge left conflict markers: the commit tool records those, and they do not count.
    */
   async function revertedAway(
     batchId: BatchId,
@@ -1370,7 +1378,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const revert = records.at(-1)?.revert;
     if (revert === undefined) return false;
     const told = records.filter((r) => r.told);
-    for (const sha of commitsMadeBy(told.map((t) => t.run)))
+    for (const sha of commitsMadeBy(
+      told.map((t) => t.run),
+      { redoing: true },
+    ))
       if (
         (await deps.git.hasCommit(target.checkout, sha)) &&
         (await deps.git.isAncestor(target.checkout, sha, `refs/heads/${target.branch}`)) &&

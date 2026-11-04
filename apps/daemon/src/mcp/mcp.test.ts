@@ -26,6 +26,7 @@ import {
   listBoardColumns,
   listInbox,
   listTasks,
+  listToolOpResults,
   patchWorkstream,
   releaseClaims,
   schema,
@@ -54,6 +55,7 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
+import { commitUnderMerge } from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -806,6 +808,34 @@ describe('MCP tools', () => {
     expect(first.json).toMatchObject({ alreadyCommitted: false });
     expect(retry.json).toEqual(first.json);
     expect(commitCount()).toBe(2);
+  });
+
+  it('records that a commit was made while the run resolves conflict markers of a base merge', async () => {
+    const s = await seedSession();
+    writeRepoFile('src/api/a.ts', 'export {}\n');
+    const plain = await s.call('commit', {
+      opId: 'op-commit-plain',
+      paths: ['src/api/a.ts'],
+      message: 'Add a',
+    });
+    state.write((ctx) => {
+      patchWorkstream(ctx, s.workstream.id, null, {
+        nextAction: { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
+      });
+    });
+    writeRepoFile('src/api/b.ts', 'export {}\n');
+    const merged = await s.call('commit', {
+      opId: 'op-commit-merge',
+      paths: ['src/api/b.ts'],
+      message: 'Resolve',
+    });
+
+    // The session sees the same answer either way; only the record tells them apart.
+    expect(Object.keys(merged.json as object).sort()).toEqual(
+      Object.keys(plain.json as object).sort(),
+    );
+    const recorded = listToolOpResults(state.db, s.workstream.id, 'commit').map(commitUnderMerge);
+    expect(recorded).toEqual([false, true]);
   });
 
   it('recovers a commit made before a crash that never recorded its op', async () => {

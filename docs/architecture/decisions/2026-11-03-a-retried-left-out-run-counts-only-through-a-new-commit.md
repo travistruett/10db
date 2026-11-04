@@ -34,6 +34,14 @@ unless an implement step has started since the last note.
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
 
+A told run's own commit does not count either when it was made under a `merge` next action. The runner queues the
+same run that way when the base merge at its gate leaves conflict markers (`sendToMerge`), so a retried run can
+skip the redo and commit only the resolution. The commit tool reads the run's next action as it commits and stores
+`underMerge: true` in that commit's tool-op result (the session's answer is unchanged); the pull request leaves
+those commits out when it asks whether a told run committed again. A run that redoes the work in the same session
+still counts through its other commits. A session that is asked a question during the merge (`ask_human`) resumes
+under an `answer` action, so a resolution committed after the answer is not marked and counts.
+
 ## Why
 
 The retried step may commit nothing: a retry can re-run a review or QA step, and the run then reaches `DONE`
@@ -52,7 +60,7 @@ redoes the work: that run was told, so its commit counts.
 The note is the record rather than the notice, because a run's notice shares one slot with its waits, so a wait
 for a claim can replace it.
 
-The check does not read what a commit changed. A run that was told and whose only later commit resolves conflict
-markers counts as having committed again, and a run that never heard of the revert stays under Not done even if
-it did the work again. The first would need a comparison of the reverted changes with the branch, and the second
-errs towards saying less was shipped, not more.
+The check does not read what a commit changed. A run that never heard of the revert stays under Not done even if
+it did the work again; that errs towards saying less was shipped, not more. A resolution commit is told apart by
+the next action it was made under, which is recorded when it is made, not by comparing the reverted changes with
+the branch.

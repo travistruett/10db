@@ -49,8 +49,17 @@ afterEach(() => {
   h.close();
 });
 
-/** Records `path` as a commit `workstreamId` made through the commit tool. */
-function commitAs(workstreamId: WorkstreamId, path: string, content: string): string {
+/**
+ * Records `path` as a commit `workstreamId` made through the commit tool; `underMerge` is a commit
+ * made while the run resolved conflict markers of its own gate's base merge (its `merge` next action),
+ * which the tool records as it does in the real session.
+ */
+function commitAs(
+  workstreamId: WorkstreamId,
+  path: string,
+  content: string,
+  options: { readonly underMerge?: boolean } = {},
+): string {
   const sha = h.commit(path, content);
   h.state.write((w) => {
     insertToolOp(w, {
@@ -58,7 +67,11 @@ function commitAs(workstreamId: WorkstreamId, path: string, content: string): st
       sessionId: mintId('Session'),
       opId: `op-${path}-${sha}`,
       tool: 'commit',
-      result: { sha, alreadyCommitted: false },
+      result: {
+        sha,
+        alreadyCommitted: false,
+        ...(options.underMerge === true ? { underMerge: true } : {}),
+      },
     });
   });
   return sha;
@@ -1387,6 +1400,42 @@ describe('the failed workstream card', () => {
         expect(body).not.toContain('### Alpha');
         expect(body).toMatch(/Alpha \(done, .*reverted/);
         expect(body).toContain('### Beta');
+      });
+
+      it('does not list the task as finished when its only new commit resolves conflict markers of its own gate’s base merge', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+
+        // The same run, not a new one, is queued to merge when its gate's base merge leaves markers.
+        commitAs(failed, 'README.md', '# ours and theirs\n', { underMerge: true });
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('README.md');
+        expect(branchFiles(batchId)).not.toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).not.toContain('### Alpha');
+        expect(body).toMatch(/Alpha \(done, .*reverted/);
+        expect(body).toContain('### Beta');
+      });
+
+      it('lists the task as finished when it redoes the work after resolving conflict markers', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+        commitAs(failed, 'README.md', '# ours and theirs\n', { underMerge: true });
+        commitAs(failed, 'src/api/alpha.txt', 'alpha again\n');
+
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).toContain('### Alpha');
+        expect(body).not.toMatch(/reverted/);
       });
 
       it('still lists the task as finished when it committed again before it was sent to merge', async () => {

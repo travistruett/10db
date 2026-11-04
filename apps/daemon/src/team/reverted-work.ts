@@ -15,6 +15,31 @@ import {
  */
 const REVERT_LINE = REVERT_COMMIT_LINE;
 
+/**
+ * The key a commit tool op's stored result carries when the commit was made while the run resolved
+ * conflict markers its own gate's base merge left (its `merge` next action). The session's answer does
+ * not carry it. The pull request reads it: such a commit resolves the base's conflicts and brings none
+ * of a reverted task's work back.
+ */
+const UNDER_MERGE_KEY = 'underMerge';
+
+/** A commit tool op's result as it is stored, marked when the commit was made under a `merge` action. */
+export function commitResultUnderMerge<T extends object>(
+  result: T,
+  underMerge: boolean,
+): T & { readonly [UNDER_MERGE_KEY]?: true } {
+  return underMerge ? { ...result, [UNDER_MERGE_KEY]: true } : result;
+}
+
+/** Whether a stored commit result was recorded under a `merge` next action. */
+export function commitUnderMerge(result: unknown): boolean {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    (result as Record<string, unknown>)[UNDER_MERGE_KEY] === true
+  );
+}
+
 /** The line a notice's body carries to name the revert commit. */
 export function revertCommitLine(sha: string): string {
   return `${REVERT_LINE}${sha}`;
