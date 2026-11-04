@@ -1624,8 +1624,8 @@ describe('after make rollback-app', () => {
     // The newest finished build of main is still the one rolled back from: nothing was fetched.
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
+    expect(await update.tick()).toBe('no-newer-build');
     expect(world.stagedSkipping).toEqual([NEW, NEW]);
     expect(world.calls).not.toContain('apply');
   });
@@ -1635,7 +1635,7 @@ describe('after make rollback-app', () => {
     // A stage that fetched the rolled-back build anyway is dropped, so the next check looks again.
     world.stage = () => Promise.resolve(STAGED_OK);
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
     expect(world.calls).not.toContain('apply');
     world.stage = () =>
       Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
@@ -1646,7 +1646,7 @@ describe('after make rollback-app', () => {
     world.head = NEWER;
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: NEW });
     const update = rolledBack();
-    expect(await update.tick()).toBe('rolled-back');
+    expect(await update.tick()).toBe('no-newer-build');
     world.stage = () =>
       Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
     expect(await update.tick()).toBe('applying');
@@ -1741,12 +1741,181 @@ describe('why an available update is not installing', () => {
     expect(update.status().notInstalling).toBeNull();
   });
 
-  it('forgets it once the builder asks again or main is the running commit', async () => {
+  it('forgets it once main is the running commit', async () => {
     world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
     const update = make();
     await update.tick();
+    expect(update.status().notInstalling).toBe('unbuilt');
     world.head = RUNNING;
     expect(await update.tick()).toBe('current');
     expect(update.status().notInstalling).toBeNull();
+  });
+
+  it.each<[string, () => void, string]>([
+    [
+      'a failed head',
+      () => {
+        world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+      },
+      'failed',
+    ],
+    [
+      'a head rolled back from',
+      () => {
+        world.rolledBackFrom = NEW;
+      },
+      'rolled-back',
+    ],
+  ])('forgets %s at once when the builder asks again', async (_name, arrange, reason) => {
+    arrange();
+    const update = make();
+    update.settle();
+    await update.tick();
+    expect(update.status().notInstalling).toBe(reason);
+    update.retry();
+    // No check has ended yet: the switch is the builder's answer to the line, so the line goes now.
+    expect(update.status().notInstalling).toBeNull();
+  });
+
+  it.each<[string, () => void]>([
+    [
+      'skipped',
+      () => {
+        world.stage = () => Promise.resolve({ ok: true, current: true, commit: OLD_BUILD });
+      },
+    ],
+    [
+      'fetched',
+      () => {
+        world.stage = () => Promise.resolve({ ...STAGED_OK, commit: OLD_BUILD });
+      },
+    ],
+  ])(
+    'says a head has no build, not that it was rolled back from, when only the rolled-back build exists and the stage %s it',
+    async (_name, arrange) => {
+      world.rolledBackFrom = OLD_BUILD;
+      arrange();
+      const update = make();
+      update.settle();
+      expect(await update.tick()).toBe('no-newer-build');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe('unbuilt');
+    },
+  );
+
+  describe('when GitHub cannot be reached', () => {
+    const offline = new Error('gh is signed out');
+
+    it.each<[string, () => void, string]>([
+      [
+        'rolled-back',
+        () => {
+          world.rolledBackFrom = NEW;
+        },
+        'rolled-back',
+      ],
+      [
+        'unbuilt',
+        () => {
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+        },
+        'unbuilt',
+      ],
+    ])('keeps saying %s when the head cannot be read', async (_name, arrange, reason) => {
+      arrange();
+      const update = make();
+      update.settle();
+      await update.tick();
+      world.head = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe(reason);
+    });
+
+    it('keeps the reason when main cannot be compared with the running build', async () => {
+      world.rolledBackFrom = NEW;
+      const update = make();
+      update.settle();
+      await update.tick();
+      world.ahead = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().notInstalling).toBe('rolled-back');
+    });
+
+    it('says failed for an install that ended while the daemon ran, then GitHub went', async () => {
+      const update = make();
+      expect(await update.tick()).toBe('applying');
+      world.head = offline;
+      world.endScript();
+      await settled();
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().notInstalling).toBe('failed');
+    });
+  });
+
+  it('says failed as soon as an install ends while the daemon runs, before the next check', async () => {
+    const update = make();
+    expect(await update.tick()).toBe('applying');
+    expect(update.status().notInstalling).toBeNull();
+    world.endScript();
+    await settled();
+    expect(update.status().notInstalling).toBe('failed');
+  });
+
+  it.each<[string, () => void]>([
+    [
+      'failed',
+      () => {
+        world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+      },
+    ],
+    [
+      'was rolled back from',
+      () => {
+        world.rolledBackFrom = NEW;
+      },
+    ],
+    [
+      'had no build',
+      () => {
+        world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+      },
+    ],
+  ])('says nothing of the old head while a new one stages after it %s', async (_name, arrange) => {
+    arrange();
+    const update = make();
+    update.settle();
+    await update.tick();
+    expect(update.status().notInstalling).not.toBeNull();
+    world.head = NEWER;
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().availableCommit).toBe(NEWER);
+    expect(update.status().notInstalling).toBeNull();
+    finishStage({ ok: true, current: true, commit: RUNNING });
+    expect(await tick).toBe('no-newer-build');
+    expect(update.status().notInstalling).toBe('unbuilt');
+  });
+
+  it('keeps the head’s reason through a stage for the same head', async () => {
+    world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+    const update = make();
+    await update.tick();
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().notInstalling).toBe('unbuilt');
+    finishStage({ ok: true, current: true, commit: RUNNING });
+    await tick;
   });
 });

@@ -443,7 +443,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
   let failure: { readonly head: string; readonly message: string } | null = null;
   /** The last check could not ask GitHub. */
   let unreachable = false;
-  /** Why the last check found nothing to install for the available head, when it did. */
+  /**
+   * Why the last check that could ask found nothing to install for the available head, when it did.
+   * Gone once the head changes or the builder asks again, which no check has to end for.
+   */
   let notInstalling: SelfUpdateNotInstalling | null = null;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
@@ -510,6 +513,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       }
       return TickResult.NotAhead;
     }
+    // Why an update is not installing is about one head of main, and a stage can take minutes.
+    if (available !== head) notInstalling = null;
     available = head;
     // A failure is about one head of main: a newer head is a fresh start.
     if (failure !== null && failure.head !== head) failure = null;
@@ -571,12 +576,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       staged = null;
       // The newest finished build is not the head's when the head's is still building. It is the
       // build the app runs until a newer one finishes, and then there is nothing to install. Nor
-      // when it is the build the builder rolled back from; the next check looks again.
+      // when it is the build the builder rolled back from: this head was not rolled back from, it
+      // has no build yet, and the next check looks again.
       if (result.current) {
         noBuildYet();
-        return skip !== null && result.commit === skip
-          ? TickResult.RolledBack
-          : TickResult.NoNewerBuild;
+        return TickResult.NoNewerBuild;
       }
       // Never an older build: the one that was fetched must be ahead of the running commit too. The
       // staged one was checked when it was fetched, and the running commit has not changed.
@@ -631,7 +635,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     if (build.commit === rolledBackFrom()) {
       staged = null;
       noBuildYet();
-      return TickResult.RolledBack;
+      return TickResult.NoNewerBuild;
     }
     if (!deps.enabled()) {
       clearWaiting();
@@ -782,7 +786,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // Working means the check ended early because the daemon is stopping: it learned nothing.
       if (result !== TickResult.Working) {
         unreachable = result === TickResult.Unreachable;
-        notInstalling = NOT_INSTALLING[result] ?? null;
+        // Neither did a check that could not ask GitHub, so the last reason still holds.
+        if (!unreachable) notInstalling = NOT_INSTALLING[result] ?? null;
       }
       return result;
     } finally {
@@ -860,6 +865,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     },
     retry() {
       failure = null;
+      notInstalling = null;
       state.write((ctx) => {
         deleteAppSetting(ctx, SELF_UPDATE_FAILED_KEY);
         deleteAppSetting(ctx, SELF_UPDATE_ROLLED_BACK_KEY);

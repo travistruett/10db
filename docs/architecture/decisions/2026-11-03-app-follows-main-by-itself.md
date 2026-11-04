@@ -124,6 +124,10 @@ factory (`self-update/drain.ts`) until the app has installed:
   back from it, or it has no finished build newer than the running one. `notInstalling` (`failed`, `rolled-back`,
   `unbuilt`, else null) says which, taken from the last check's result. Settings then says why instead of
   "waiting for a moment when nothing is mid-session" and offers no Install Now, which would do nothing.
+  `rolled-back` is only ever the head the builder rolled back from: a newer head whose newest finished build is
+  that rolled-back one is `unbuilt`, because it installs by itself when its own build finishes. A check that could
+  not ask GitHub learned nothing, so the reason stays; a different head, or the switch turned off and on, clears it
+  at once rather than when the next check ends. An install that fails while the daemon runs counts with no check.
 
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
