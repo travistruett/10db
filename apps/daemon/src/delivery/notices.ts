@@ -409,9 +409,27 @@ export const cancelledNotices = {
       tone: 'warning',
       line,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that ${batch.baseBranch} requires, so ${named}${prUrl === null ? '' : ` (${prUrl})`} cannot merge.\n\n${list}\n\n${tail} Run ${one ? 'it' : 'them'} again from the link${one ? '' : 's'} above (Re-run jobs), or push a commit to the branch. This notice goes once the check runs again or passes.`,
+      // Read back after a restart, so 10db knows which kind of notice this was.
+      record: JSON.stringify({ kind: why.kind === 'again' ? 'again' : 'stopped' }),
     };
   },
 };
+
+/**
+ * Which kind of cancelled-check notice is stored: 'again' (10db ran the checks it names, and still
+ * runs one it has not run) or 'stopped' (10db could not run a check, so it asks nothing more). Null
+ * when the notice is an older one with no record of its kind.
+ */
+export function cancelledNoticeKind(notice: Notice): 'again' | 'stopped' | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    const kind = (parsed as { kind?: unknown } | null)?.kind;
+    return kind === 'again' || kind === 'stopped' ? kind : null;
+  } catch {
+    return null;
+  }
+}
 
 /** The key of the rerun notice for one pull request head. */
 export const rerunNoticeKey = (head: string): string => `${NOTICE_KEY.checksRerun}:${head}`;

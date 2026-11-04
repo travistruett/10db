@@ -40,6 +40,7 @@ import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-sto
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import {
   baseNotices,
+  cancelledNoticeKind,
   cancelledNotices,
   ciNotices,
   NOTICE_KEY,
@@ -642,9 +643,10 @@ export function createPrWatch(input: {
     if (storedRerun !== undefined && read.headSha !== null) {
       const record = rerunRecord(storedRerun);
       const partial = record !== null && !record.done;
-      const shown = storedNotices.some((n) => n.key === NOTICE_KEY.checksCancelled);
-      // A partial rerun that shows a notice stopped at a run GitHub refused outright.
-      const shownKind = partial ? 'stopped' : 'again';
+      const shown = storedNotices.find((n) => n.key === NOTICE_KEY.checksCancelled);
+      // The kind is stored with the notice. One stored by an older daemon has none: a partial
+      // rerun that shows a notice then stopped at a run GitHub refused outright.
+      const shownKind = (shown && cancelledNoticeKind(shown)) ?? (partial ? 'stopped' : 'again');
       seen = {
         head: read.headSha,
         // A rerun that left a run to ask for already counted its reads: the next one asks again.
@@ -656,7 +658,7 @@ export function createPrWatch(input: {
         rerun: record === null ? new Map<string, { name: string }[]>() : record.runs,
         everyRunAsked: record === null,
         active: false,
-        notice: shown ? shownKind : null,
+        notice: shown === undefined ? null : shownKind,
       };
       cancelledRuns.set(root.id, seen);
     }

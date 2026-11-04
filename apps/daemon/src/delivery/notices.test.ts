@@ -1,6 +1,12 @@
 import { fitNotice, NOTICE_BODY_MAX } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { rerunNotices, rerunRecord, type RerunRuns } from './notices';
+import {
+  cancelledNoticeKind,
+  cancelledNotices,
+  rerunNotices,
+  rerunRecord,
+  type RerunRuns,
+} from './notices';
 
 const HEAD = 'a'.repeat(40);
 
@@ -67,5 +73,27 @@ describe('the rerun notice', () => {
     expect(
       rerunRecord({ key: `checks-rerun:${HEAD}`, tone: 'info', line: 'x', body: 'Only prose.' }),
     ).toBeNull();
+  });
+});
+
+describe('the cancelled-check notice kind', () => {
+  const batch = { baseBranch: 'main', prUrl: null } as unknown as Parameters<
+    typeof cancelledNotices.stuck
+  >[0];
+  const checks = [{ name: 'desktop', link: null }];
+
+  it.each([
+    [{ kind: 'again' }, 'again'],
+    [{ kind: 'no_run' }, 'stopped'],
+    [{ kind: 'refused', detail: 'HTTP 403' }, 'stopped'],
+  ] as const)('stores %j as %s, and reads it back without showing it', (why, kind) => {
+    const notice = cancelledNotices.stuck(batch, checks, why);
+    expect(cancelledNoticeKind(notice)).toBe(kind);
+    expect(notice.body).not.toContain('{"kind"');
+  });
+
+  it('reads no kind from an older notice with no record', () => {
+    const notice = cancelledNotices.stuck(batch, checks, { kind: 'again' });
+    expect(cancelledNoticeKind({ ...notice, record: undefined })).toBeNull();
   });
 });
