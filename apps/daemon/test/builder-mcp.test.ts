@@ -946,6 +946,7 @@ describe('the builder MCP endpoint', () => {
         queued: 0,
         proposing: false,
         rehearsing: false,
+        waitingForUpdate: false,
       });
     });
 
