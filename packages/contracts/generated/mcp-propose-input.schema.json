@@ -24,20 +24,60 @@
       "type": "string",
       "minLength": 1
     },
-    "riskTags": {
-      "type": "array",
-      "items": {
-        "type": "string",
-        "enum": [
-          "security",
-          "auth",
-          "migration",
-          "dependency"
-        ]
-      }
-    },
-    "joinsRunningBatch": {
-      "type": "boolean"
+    "principle": {
+      "description": "For kind \"principle\": the rule itself. Without it, the body is used as the statement.",
+      "type": "object",
+      "properties": {
+        "statement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "One rule, phrased as an instruction."
+        },
+        "kind": {
+          "default": "heuristic",
+          "description": "policy = must, heuristic = prefer, belief = context.",
+          "type": "string",
+          "enum": [
+            "policy",
+            "heuristic",
+            "belief"
+          ]
+        },
+        "topicKey": {
+          "description": "A short stable key such as testing.no-sleeps; a later principle with the same key and scope replaces this one.",
+          "type": "string",
+          "maxLength": 80,
+          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+        },
+        "scope": {
+          "default": "project",
+          "type": "string",
+          "enum": [
+            "you",
+            "project",
+            "area"
+          ]
+        },
+        "area": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$"
+        },
+        "quote": {
+          "description": "The words this principle comes from, quoted exactly.",
+          "type": "string",
+          "maxLength": 2000
+        },
+        "rationale": {
+          "description": "Why the rule holds, in a sentence.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        }
+      },
+      "required": [
+        "statement"
+      ]
     }
   },
   "required": [

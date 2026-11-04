@@ -246,6 +246,48 @@
       "when": 1793682001175,
       "tag": "0034_blue_blindfold",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1793741935737,
+      "tag": "0035_strong_klaw",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1793741948077,
+      "tag": "0036_principles_fts",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1793742377547,
+      "tag": "0037_gifted_skin",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1793748906698,
+      "tag": "0038_green_sauron",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1793755629592,
+      "tag": "0039_shape_questions",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1793755640994,
+      "tag": "0040_shape_links_targets",
+      "breakpoints": true
     }
   ]
 }

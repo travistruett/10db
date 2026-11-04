@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "projectId": {
+      "type": "string",
+      "pattern": "^prj_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "q": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "decision",
+        "principle",
+        "policy",
+        "heuristic",
+        "belief"
+      ]
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "you",
+        "project",
+        "area"
+      ]
+    },
+    "area": {
+      "type": "string"
+    },
+    "history": {
+      "type": "boolean"
+    },
+    "limit": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "projectId"
+  ],
+  "additionalProperties": false
+}

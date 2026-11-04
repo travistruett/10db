@@ -133,6 +133,25 @@ export function decisionProposal(
   });
 }
 
+export function principleProposal(
+  key: string,
+  overrides: ProposalOverrides & { readonly statement?: string } = {},
+): ShapeProposalDto {
+  return ShapeProposalDto.parse({
+    ...proposalBase(overrides),
+    key,
+    kind: 'principle',
+    body: {
+      key,
+      kind: 'principle',
+      scope: 'project',
+      statement: overrides.statement ?? 'Never mock the database',
+      rationale: 'Mocks hid a broken migration once.',
+      sourceMessageIds: [SOURCE],
+    },
+  });
+}
+
 export function questionProposal(key: string, text = 'When should this ship?'): ShapeProposalDto {
   return ShapeProposalDto.parse({
     ...proposalBase({}),

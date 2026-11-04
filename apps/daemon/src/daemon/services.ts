@@ -100,6 +100,7 @@ import {
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
+import type { KnowledgeApiServices } from './knowledge-services';
 import type { ShapeApiServices } from './shape-services';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
@@ -117,6 +118,7 @@ export function createServices(deps: {
   readonly benchmarks: BenchmarkSync;
   readonly judge: JudgeApiServices;
   readonly shape: ShapeApiServices;
+  readonly knowledge: KnowledgeApiServices;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
@@ -359,6 +361,7 @@ export function createServices(deps: {
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
     ...deps.shape,
+    ...deps.knowledge,
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),

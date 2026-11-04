@@ -1,4 +1,9 @@
-import { InboxKind, type InboxItemDto } from '@10db/contracts';
+import {
+  InboxKind,
+  isParkChoice,
+  type DecisionRecording,
+  type InboxItemDto,
+} from '@10db/contracts';
 import {
   Alert,
   Badge,
@@ -22,6 +27,9 @@ import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
+import { usePrincipleOf } from './principle-card';
+import { RecordDecision } from './record-decision';
+import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
 
 export interface InboxCardProps {
   readonly item: InboxItemDto;
@@ -30,12 +38,15 @@ export interface InboxCardProps {
   readonly selected: boolean;
   readonly choice: string | null;
   readonly note: string;
+  /** How a question's answer is recorded as a decision; null records nothing. Used on the open card only. */
+  readonly recording: DecisionRecording | null;
   readonly error: string | null;
   readonly pending: boolean;
   readonly noteRef: RefObject<HTMLTextAreaElement | null>;
   readonly onSelect: () => void;
   readonly onChoose: (choice: string) => void;
   readonly onNote: (note: string) => void;
+  readonly onRecord: (recording: DecisionRecording | null) => void;
   /** What the builder typed for sending a check card back; kept while another card is open. */
   readonly sendBackNote: string;
   readonly onSendBackNote: (note: string) => void;
@@ -83,12 +94,14 @@ export function InboxCard({
   selected,
   choice,
   note,
+  recording,
   error,
   pending,
   noteRef,
   onSelect,
   onChoose,
   onNote,
+  onRecord,
   sendBackNote,
   onSendBackNote,
   onNoteFocus,
@@ -97,6 +110,7 @@ export function InboxCard({
 }: InboxCardProps) {
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
+  const principle = usePrincipleOf(item, selected);
   const dismissable = isDismissable(item);
   // Every card waits on the builder, a flag included: yellow, never the red of a failure.
   const kind = (
@@ -186,12 +200,20 @@ export function InboxCard({
   };
   const hasOptions = item.options.length > 0;
   const link = cardLink(item);
+  // Parking the task stops the run and records nothing, so the control goes while that is chosen.
+  const recordable =
+    item.kind === InboxKind.Question && hasOptions && !(choice !== null && isParkChoice(choice));
 
   return (
     <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
+          {principle ? (
+            <Badge size="sm" variant="outline" style={{ flexShrink: 0 }}>
+              {PRINCIPLE_KIND_LABELS[principle.kind]}
+            </Badge>
+          ) : null}
           {times}
           <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
             {item.title}
@@ -221,7 +243,7 @@ export function InboxCard({
                     <div>
                       <Group gap="xs">
                         <Text size="sm" fw={500}>
-                          {optionLabel(item, option)}
+                          {optionLabel(item, option, principle?.area ?? null)}
                         </Text>
                         {item.recommendation === option.label ? (
                           <Badge size="xs" variant="outline">
@@ -241,6 +263,7 @@ export function InboxCard({
             </Stack>
           </Radio.Group>
         ) : null}
+        {recordable ? <RecordDecision item={item} value={recording} onChange={onRecord} /> : null}
         {hasOptions ? (
           <Textarea
             ref={noteRef}

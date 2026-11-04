@@ -9,6 +9,7 @@ import {
   ShapeRehearseResult,
   ShapeViewDto,
   type DecisionId,
+  type PrincipleId,
   type GoalId,
   type ProjectId,
   type ShapeFindingId,
@@ -326,6 +327,24 @@ export function useUploadShapeFile() {
           },
         ),
         ShapeFileDto,
+      );
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
+/** Withdraw Principle…: a tombstone with the builder's reason; the principle leaves searches and context. */
+export function useWithdrawPrinciple(shapeId: ShapeId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly principleId: PrincipleId; readonly reason: string }) => {
+      await readJson(
+        await client.shapes[':shapeId'].principles[':principleId'].withdraw.$post({
+          param: { shapeId, principleId: input.principleId },
+          json: { reason: input.reason },
+        }),
+        z.null(),
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),

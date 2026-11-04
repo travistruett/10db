@@ -27,6 +27,7 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/flows' },
   { route: '/workstreams' },
   { route: '/inbox' },
+  { route: '/projects/:projectId/proposals' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
@@ -67,6 +68,9 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/settings/keep-awake': 'No screen draws a setting.',
   '/settings/lane-permissions': 'No screen draws a setting.',
   '/settings/self-update': 'No screen draws a setting.',
+  '/projects/:projectId/knowledge': 'Only the Knowledge view draws it, and it is not a screen.',
+  '/decisions/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
+  '/principles/:id/provenance': 'Only the Knowledge view draws it, and it is not a screen.',
 };
 
 const PARAM = '[A-Za-z0-9_-]+';

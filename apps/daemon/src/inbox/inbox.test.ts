@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CARD_PROPOSED_PRINCIPLES,
   ConflictError,
   DEFAULT_HAZARDS,
   EventType,
@@ -10,6 +11,8 @@ import {
   type HazardDef,
   InvalidError,
   mintId,
+  PARK_TASK_CHOICE,
+  ProposedPrinciples,
   STOCK_HAZARD_REVISIONS,
   type InboxItemDto,
   type InboxTarget,
@@ -20,12 +23,15 @@ import {
   addStockHazardCommands,
   createTestStore,
   getInboxItem,
+  getPrinciple,
   getProject,
   getProposal,
+  getProposalDto,
   insertInboxItem,
   insertPermissionRule,
   insertProposal,
   insertSource,
+  listDecisions,
   listEventsAfter,
   listInbox,
   listPermissionRules,
@@ -33,6 +39,8 @@ import {
   patchProject,
   schema,
   searchDecisions,
+  searchPrincipleIds,
+  searchPrinciples,
   seedProject,
   updateInboxItem,
 } from '@10db/db';
@@ -41,6 +49,7 @@ import { execFileSync } from 'node:child_process';
 import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, type Git } from '../git';
+import { acceptProposal, proposePrinciple } from '../knowledge';
 import { silentLogger } from '../log';
 import {
   allowFoundHosts,
@@ -391,6 +400,300 @@ describe('proposal verdicts', () => {
     expect(getProposal(state.db, proposalId).status).toBe('pending');
     expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
     expect(taskCount(ws)).toBe(before);
+  });
+});
+
+describe('knowledge capture', () => {
+  function askIn(ws: ReturnType<typeof seedWorkstream>, category: 'design' | 'other') {
+    return inbox.ask({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      sessionId: mintId('Session'),
+      kind: 'question',
+      title: 'Which queue library?',
+      body: '',
+      options: [
+        { label: 'BullMQ', description: '' },
+        { label: 'pg-boss', description: '' },
+      ],
+      recommendation: null,
+      category,
+      urgency: 'normal',
+      detail: null,
+      signal: new AbortController().signal,
+    }).item;
+  }
+
+  it.each([
+    {
+      name: 'a design answer, by default',
+      category: 'design',
+      record: undefined,
+      scope: 'project',
+      fromOther: false,
+    },
+    {
+      name: 'an other answer, by default',
+      category: 'other',
+      record: undefined,
+      scope: null,
+      fromOther: false,
+    },
+    {
+      name: 'a design answer told not to record',
+      category: 'design',
+      record: null,
+      scope: null,
+      fromOther: false,
+    },
+    {
+      name: 'an other answer recorded for you',
+      category: 'other',
+      record: { scope: 'you', area: null },
+      scope: 'you',
+      fromOther: true,
+    },
+    {
+      name: 'a design answer recorded for an area',
+      category: 'design',
+      record: { scope: 'area', area: 'api' },
+      scope: 'area',
+      fromOther: false,
+    },
+  ] as const)(
+    'records $name, and reads it back through search',
+    ({ category, record, scope, fromOther }) => {
+      const ws = seedWorkstream(base);
+      const other = seedWorkstream(base, { title: 'Elsewhere' }).project;
+      const item = askIn(ws, category);
+      inbox.answer(item.id, {
+        choice: 'pg-boss',
+        note: 'one database',
+        ...(record === undefined ? {} : { record }),
+      });
+      const found = searchDecisions(state.db, ws.project.id, 'queue', 5);
+      expect(found.map((d) => d.scope)).toEqual(scope === null ? [] : [scope]);
+      expect(searchDecisions(state.db, other.id, 'queue', 5).length > 0).toBe(fromOther);
+    },
+  );
+
+  it('labels a decision recorded for an area with that area', () => {
+    const ws = seedWorkstream(base);
+    inbox.answer(askIn(ws, 'design').id, {
+      choice: 'pg-boss',
+      record: { scope: 'area', area: 'api' },
+    });
+    expect(searchDecisions(state.db, ws.project.id, 'queue', 5)).toMatchObject([
+      { scope: 'area', area: 'api', choice: 'pg-boss' },
+    ]);
+  });
+
+  it('refuses an area the project lacks and leaves the card open', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'design');
+    expect(() =>
+      inbox.answer(item.id, { choice: 'pg-boss', record: { scope: 'area', area: 'billing' } }),
+    ).toThrow(InvalidError);
+    expect(getInboxItem(state.db, item.id).state).toBe('OPEN');
+    expect(listDecisions(state.db, { projectId: ws.project.id })).toEqual([]);
+  });
+
+  it('turns always and never sentences in a note into principle proposals, none of them current', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'other');
+    inbox.answer(item.id, {
+      choice: 'pg-boss',
+      note: 'Use pg-boss. Never add Redis for queues. Always keep jobs idempotent.',
+    });
+    const cards = listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.kind === 'proposal');
+    expect(cards.map((c) => c.title)).toEqual([
+      'Make this a principle? Never add Redis for queues.',
+      'Make this a principle? Always keep jobs idempotent.',
+    ]);
+    expect(cards[0]?.options.map((o) => o.label)).toEqual([
+      'accept_project',
+      'accept_you',
+      'reject',
+    ]);
+    expect(searchPrinciples(state.db, ws.project.id, 'redis', 5)).toEqual([]);
+    const [id] = searchPrincipleIds(state.db, {
+      projectId: ws.project.id,
+      query: 'redis',
+      limit: 5,
+      history: true,
+    });
+    expect(id && getPrinciple(state.db, id)).toMatchObject({
+      state: 'proposed',
+      kind: 'policy',
+      scope: 'project',
+      speaker: 'me',
+      sourceQuote: 'Never add Redis for queues.',
+    });
+  });
+
+  it('keeps which principles an answer proposed on the answered card', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'other');
+    inbox.answer(item.id, {
+      choice: 'pg-boss',
+      note: 'Use pg-boss. Never add Redis for queues. Always keep jobs idempotent.',
+    });
+    const proposed = listInbox(state.db, { states: ['OPEN'] })
+      .filter((c) => c.kind === 'proposal')
+      .map((c) => c.detail);
+    const kept = ProposedPrinciples.parse(
+      getInboxItem(state.db, item.id).detail?.[CARD_PROPOSED_PRINCIPLES],
+    );
+    expect(kept).toHaveLength(2);
+    expect(kept).toEqual(proposed);
+  });
+
+  it('keeps nothing on a card whose answer proposed no principle', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'other');
+    inbox.answer(item.id, { choice: 'pg-boss', note: 'Sounds good.' });
+    expect(getInboxItem(state.db, item.id).detail?.[CARD_PROPOSED_PRINCIPLES]).toBeUndefined();
+  });
+
+  it('proposes the formatter sentence from an answer, quoting it', () => {
+    const ws = seedWorkstream(base);
+    inbox.answer(askIn(ws, 'design').id, {
+      choice: 'pg-boss',
+      note: 'Fine with me, and always run the formatter before committing.',
+    });
+    const [id] = searchPrincipleIds(state.db, {
+      projectId: ws.project.id,
+      query: 'formatter',
+      limit: 5,
+      history: true,
+    });
+    expect(id && getPrinciple(state.db, id)).toMatchObject({
+      state: 'proposed',
+      sourceQuote: 'Fine with me, and always run the formatter before committing.',
+    });
+  });
+
+  it('proposes at most three principles from one answer', () => {
+    const ws = seedWorkstream(base);
+    inbox.answer(askIn(ws, 'other').id, {
+      choice: 'pg-boss',
+      note: 'Always do A now. Always do B now. Always do C now. Always do D now.',
+    });
+    expect(
+      listInbox(state.db, { states: ['OPEN'] }).filter((c) => c.kind === 'proposal'),
+    ).toHaveLength(3);
+  });
+
+  it('proposes nothing from a note without always or never', () => {
+    const ws = seedWorkstream(base);
+    inbox.answer(askIn(ws, 'other').id, { choice: 'pg-boss', note: 'Sounds good.' });
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+  });
+
+  it('records no decision and proposes no principle when the answer parks the task', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'design');
+    inbox.answer(item.id, {
+      choice: PARK_TASK_CHOICE,
+      note: 'Never mind this one, always ask me later.',
+      record: { scope: 'project', area: null },
+    });
+    expect(searchDecisions(state.db, ws.project.id, 'queue', 5)).toEqual([]);
+    expect(listDecisions(state.db, { projectId: ws.project.id, history: true })).toEqual([]);
+    expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    expect(
+      searchPrincipleIds(state.db, {
+        projectId: ws.project.id,
+        query: 'ask',
+        limit: 5,
+        history: true,
+      }),
+    ).toEqual([]);
+  });
+
+  function proposal(
+    ws: ReturnType<typeof seedWorkstream>,
+    draft: Partial<Parameters<typeof proposePrinciple>[1]['draft']> = {},
+  ) {
+    return state.write((ctx) =>
+      proposePrinciple(ctx, {
+        projectId: ws.project.id,
+        title: 'No sleeps',
+        body: 'b',
+        draft: { statement: 'Never sleep in tests', kind: 'policy', scope: 'project', ...draft },
+        sourceId: insertSource(ctx, 'agent', {}),
+        speaker: 'agent:x',
+      }),
+    );
+  }
+
+  it.each([
+    { verdict: 'accept_project', state: 'current', scope: 'project', fromOther: false },
+    { verdict: 'accept_you', state: 'current', scope: 'you', fromOther: true },
+    { verdict: 'accept_area', state: 'current', scope: 'area', fromOther: false },
+    { verdict: 'reject', state: 'withdrawn', scope: 'area', fromOther: false },
+  ] as const)(
+    'applies the card verdict $verdict and reads the result back through search',
+    ({ verdict, state: expected, scope, fromOther }) => {
+      const ws = seedWorkstream(base);
+      const other = seedWorkstream(base, { title: 'Elsewhere' }).project;
+      const { principle, proposalId, card } = proposal(ws, { scope: 'area', area: 'api' });
+      inbox.answer(card.id, { choice: verdict, note: 'checked' });
+      expect(getPrinciple(state.db, principle.id)).toMatchObject({ state: expected, scope });
+      expect(getProposalDto(state.db, proposalId).status).toBe(
+        verdict === 'reject' ? 'rejected' : 'accepted',
+      );
+      expect(searchPrinciples(state.db, ws.project.id, 'sleep', 5).length).toBe(
+        expected === 'current' ? 1 : 0,
+      );
+      expect(searchPrinciples(state.db, other.id, 'sleep', 5).length > 0).toBe(fromOther);
+    },
+  );
+
+  it.each([
+    { name: 'the answer note', note: 'we use fake timers', reason: 'we use fake timers' },
+    { name: 'a default when there is no note', note: undefined, reason: 'Rejected in the Inbox' },
+    { name: 'a default when the note is blank', note: '  ', reason: 'Rejected in the Inbox' },
+  ])('withdraws a rejected principle with $name as the reason', ({ note, reason }) => {
+    const ws = seedWorkstream(base);
+    const { principle, card } = proposal(ws);
+    inbox.answer(card.id, { choice: 'reject', ...(note === undefined ? {} : { note }) });
+    expect(getPrinciple(state.db, principle.id)).toMatchObject({
+      state: 'withdrawn',
+      withdrawnReason: reason,
+    });
+  });
+
+  it('refuses a second verdict on a decided proposal and changes nothing', () => {
+    const ws = seedWorkstream(base);
+    const { principle, proposalId, card } = proposal(ws);
+    inbox.answer(card.id, { choice: 'accept_project' });
+    expect(() => state.write((ctx) => acceptProposal(ctx, proposalId, {}, 'me'))).toThrow(
+      ConflictError,
+    );
+    expect(() => inbox.answer(card.id, { choice: 'reject' })).toThrow(ConflictError);
+    expect(getPrinciple(state.db, principle.id).state).toBe('current');
+    expect(getProposalDto(state.db, proposalId).status).toBe('accepted');
+    expect(searchPrinciples(state.db, ws.project.id, 'sleep', 5)).toHaveLength(1);
+  });
+
+  it('keeps a card open and its principle proposed when the accepted target is refused', () => {
+    const ws = seedWorkstream(base);
+    const { principle, proposalId, card } = proposal(ws);
+    expect(() =>
+      state.write((ctx) =>
+        acceptProposal(
+          ctx,
+          proposalId,
+          { target: { scope: 'area', projectId: ws.project.id, area: 'billing' } },
+          'me',
+        ),
+      ),
+    ).toThrow(InvalidError);
+    expect(getProposalDto(state.db, proposalId).status).toBe('pending');
+    expect(getPrinciple(state.db, principle.id).state).toBe('proposed');
+    expect(getInboxItem(state.db, card.id).state).toBe('OPEN');
+    expect(searchPrinciples(state.db, ws.project.id, 'sleep', 5)).toEqual([]);
   });
 });
 
