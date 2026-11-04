@@ -218,6 +218,18 @@ describe('the failed workstream card', () => {
     expect(describe('Ship without it')).toMatch(/every other task that failed .* is left out too/i);
   });
 
+  it('says beside Retry what happens once the task is set to work somewhere else', async () => {
+    // The card is written when the run fails and a placement change doesn't touch it, so it says this
+    // up front: the daemon refuses that Retry.
+    const { card } = await failedInBatch('DONE');
+    const retry = card.options.find((o) => o.label === 'Retry')?.description;
+    expect(retry).toMatch(/run this workstream again in its batch/i);
+    expect(retry).toMatch(/set to work somewhere else/i);
+    expect(retry).toMatch(/refused/i);
+    expect(retry).toMatch(/set it back/i);
+    expect(retry).toMatch(/start it over/i);
+  });
+
   it('retries the workstream, reopening a failed batch', async () => {
     const { card, batchId, failed } = await failedInBatch('DONE');
     h.state.write((c) =>

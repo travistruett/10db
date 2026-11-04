@@ -28,7 +28,13 @@ const BatchCardDetail = z.object({
 });
 
 const OPTIONS: readonly InboxOption[] = [
-  { label: BatchCardChoice.Retry, description: 'Run this workstream again in its batch' },
+  {
+    label: BatchCardChoice.Retry,
+    // The card is not rewritten when the task's placement changes, and `BatchStarter.retry` refuses
+    // a task that moved, so the offer says so itself.
+    description:
+      "Run this workstream again in its batch. Refused if the task has since been set to work somewhere else: set it back, or start it over from the task's drawer",
+  },
   {
     label: BatchCardChoice.ShipAnyway,
     description:
