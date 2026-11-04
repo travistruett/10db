@@ -44,6 +44,8 @@ let head: string;
 let ahead: boolean;
 /** How many times main's head was asked: a check ran for each. */
 let heads: number;
+/** While true, asking GitHub for main's head fails, as it does offline or signed out. */
+let failHead: boolean;
 let installer: ScriptInstaller;
 /** What the install script left behind, as the next daemon finds it. */
 let status: ScriptStatus | null;
@@ -113,6 +115,8 @@ async function start(
   options: {
     updatable?: boolean;
     repository?: string | null;
+    /** GitHub can't be reached, until the test sets `failHead` false. */
+    failHead?: boolean;
     intervalMs?: number;
     adapter?: FakeAdapter;
     caps?: { global: number };
@@ -120,6 +124,7 @@ async function start(
     delivery?: { gh: FakeGh; networkEnv: () => Readonly<Record<string, string>> };
   } = {},
 ): Promise<ReturnType<typeof apiClient>> {
+  failHead = options.failHead ?? false;
   daemon = await startDaemon({
     sandbox: null,
     dataDir: dir.path,
@@ -138,7 +143,7 @@ async function start(
       intervalMs: options.intervalMs ?? 20,
       headOf: () => {
         heads += 1;
-        return Promise.resolve(head);
+        return failHead ? Promise.reject(new Error('gh: offline')) : Promise.resolve(head);
       },
       isAhead: () => Promise.resolve(ahead),
       installer,
@@ -244,6 +249,45 @@ describe('self-update in the daemon', () => {
     expect(await selfUpdate(api)).toMatchObject({ runningCommit: RUNNING });
     expect(heads).toBe(0);
     expect(applied).toEqual([]);
+  });
+
+  describe('says in Settings why the app cannot update itself', () => {
+    it('has no reason while it can', async () => {
+      const api = await start();
+      await waitFor(() => applied.length > 0 && applied);
+      expect((await selfUpdate(api)).blocker).toBeNull();
+    });
+
+    it('names a copy outside Applications', async () => {
+      const api = await start({ updatable: false });
+      expect((await selfUpdate(api)).blocker).toMatchObject({ kind: 'not-in-applications' });
+    });
+
+    it('names a build with no repository', async () => {
+      const api = await start({ repository: null, updatable: false });
+      expect((await selfUpdate(api)).blocker).toMatchObject({ kind: 'no-repository' });
+    });
+
+    it('names a GitHub that cannot be reached, and stops once it can', async () => {
+      const api = await start({ failHead: true });
+      await waitForAsync(async () => (await selfUpdate(api)).blocker?.kind === 'unreachable');
+      head = RUNNING;
+      failHead = false;
+      await waitForAsync(async () => (await selfUpdate(api)).blocker === null);
+    });
+
+    it('names a failed update when no project is registered to carry its card', async () => {
+      installer.stage = () =>
+        Promise.resolve({ ok: false, step: 'download', message: 'connection reset' });
+      const api = await start();
+      const found = await waitForAsync(async () => {
+        const { blocker } = await selfUpdate(api);
+        return blocker?.kind === 'failed' && blocker;
+      });
+      expect(found.message).toContain('connection reset');
+      // The builder turning the switch off and on is what tries again.
+      expect(found.message).toContain('Update 10db by itself');
+    });
   });
 
   it('leaves a build from another branch alone: main is not ahead of it', async () => {

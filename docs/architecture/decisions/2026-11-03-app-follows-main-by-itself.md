@@ -24,20 +24,32 @@ says `ahead`). A head that is the running commit, or a running commit main is no
 branch, or one nobody pushed), is not an update, so a branch build is never replaced by an older main.
 
 **What it installs: the install path of today, not another.** The daemon stages with
-`install-app.sh --stage <data dir>/self-update/stage --running <running commit> [--skip <rolled-back commit>] main`: the same choice as
+`install-app.sh --stage <data dir>/self-update/stage --running <running commit> [--skip <rolled-back commit>] [--have <staged commit>] main`: the same choice as
 `make install-app` (decisions/2026-11-02-install-takes-the-newest-finished-build.md). It takes the newest of
 main's last 100 commits that has a finished successful `release-dry-run` build with a live artifact, **not
 necessarily the head**, and never an older one: it waits for or starts the head's build only when none of the 100
 has one, and with `--running` a newest finished build that is the running commit is not fetched at all (status
-step `current`, so a build still under way for the head costs one cheap lookup a minute, not a download). The
+step `current`, so a build still under way for the head costs one cheap lookup a minute, not a download). With
+`--have`, a newest finished build that is the one already staged is not fetched either (status step `have`), and
+the folder stays as it is, so a head that moves while lanes are busy costs a lookup, not a DMG. The
 fetched build must also be ahead of the running commit (the same comparison), else nothing is installed. The DMG
 is checked against `SHA256SUMS`, and the stage folder keeps the DMG, the checksum, the commit and a copy of the
-two install scripts, because the install replaces the app that holds them.
+two install scripts, because the install replaces the app that holds them. A newer build replaces the staged one
+only once it is checked, and the commit file is removed first and written last, so a folder that names a commit
+holds all of that build.
+
+**What is staged is the newest finished build, not the head.** The daemon stages again, passing `--have`, when main's
+head moves, and, for a staged build that is not the head's own, once nothing is mid-session: it is about to install,
+and a newer build may have finished since. So an older build never installs while a newer one exists, and there is
+one quit instead of two. While lanes are busy and the head has not moved, it does not look.
 
 **When it installs.** Only when nothing is mid-session: no lane holding a session (`countLanes`'s states, and a
 `WAITING_HUMAN` workstream with a live session), no workstream with a gate process, no batch `CUTTING` or
 `SHIPPING` (`countMidSession`, `packages/db`), and no delivery job queued or running (`DeliveryJobs.pending()`: a
-ship, checkout return or cleanup is a job before it is a row). Queued, held, paused and waiting work does not
+ship, checkout return or cleanup is a job before it is a row), and no shaping conversation with a turn running or
+queued (`ShapeService.turnsInProgress()`, counted once per conversation). A shape session is no workstream, and a
+quit mid-turn would cut off the answer the builder is waiting on; the drain does not park it, so it ends with the
+turn. An idle shaping session with no turn does not count. Queued, held, paused and waiting work does not
 count, because startup recovery keeps its place across a restart. The daemon checks, holds the scheduler back
 (`scheduler.stop()`) and waits for the tick it was in to finish (`scheduler.idle()`), checks again, and starts the
 staged `install-app.sh --apply <stage> --quit-first --relaunch` detached. `Scheduler.stop()` also makes a tick that
@@ -77,9 +89,12 @@ factory (`self-update/drain.ts`) until the app has installed:
   its script ends with the daemon still running, main is back at the running commit, or the staged build is dropped.
   Install Now is remembered while no build is staged yet, and drains the moment one is.
 - **Without GitHub:** a check that can't reach it goes on from the staged build, which was checked when it was
-  fetched and installs with no network, so the drain still installs or waits for the running steps. With no build
-  staged (a stage replaces the one before it) the drain has nothing to install and ends, and the update's wait goes
-  on from where it was.
+  fetched and installs with no network, so the drain still installs or waits for the running steps. A stage that
+  fails while it looks for a newer build (`find-commit`, `find-build`) is the same outage: the staged build stays
+  and goes on, with no card, no `self_update.failed_commit` and the drain as it was. With no build staged (a newer
+  fetched build replaced it and could not be compared) the drain has nothing to install and ends, and the update's
+  wait goes on from where it was. The one exception: a staged build whose head has failed (see Failure) does not
+  install this way either.
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
@@ -91,9 +106,29 @@ factory (`self-update/drain.ts`) until the app has installed:
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
 
-**What the script does.** `--apply` takes the install lock, sends the window SIGTERM (the supervisor stops the
-daemon cleanly), waits until no process that holds the database is left (the builder's MCP bridge,
-`builder-mcp.mjs`, holds none and is neither waited for nor signalled), then does what an install does: back up
+**What the script does.** `--apply` takes the install lock and asks the running app to quit the way ⌘Q does: an
+Apple event to the window's bundle id (`app.10db.desktop`), which runs the shell's exit path so the supervisor
+stops the daemon cleanly, and needs no process listing to find it. When the Apple event is refused (no Automation
+permission for a script started by the daemon, or no GUI session) it falls back to a SIGTERM to the window alone;
+the daemon then stops on seeing its stdin close. A signal to the daemon would not do: it exits 0, the supervisor
+stops, and the window stays. It then waits, within `TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds
+the database is left (the builder's MCP bridge, `builder-mcp.mjs`, holds none and is neither waited for nor
+signalled) **and** every `--quit-pid` is gone. The daemon passes its own pid, and its parent's when the window
+started it (`TENDB_PARENT_STDIN`), as a second check beside the listing. If any is still there at the bound the
+quit step fails ("10db could not be quit") and nothing in Applications is touched.
+
+**Why the quit once did nothing.** On 2026-11-04 the update installed over a 10db that went on running. The script
+then quit by `pkill -TERM -f` and watched with `pgrep -lf`, and macOS's pkill and pgrep leave out their caller and
+all its ancestors unless given `-a`. The script is the daemon's child and the window's grandchild, and starting it
+detached gives it a new session, not a new parent. So pkill matched nothing, pgrep listed no app, and the wait
+returned at once. SIGTERM was not unreliable and pgrep did not miss at random: the same request from the builder's
+shell, which descends from nothing in the app, works, and so did the osascript quit that finished the job by hand.
+`pgrep -alf` and `pkill -TERM -a -f` now see the app whoever runs them. The signal stays first: `pkill -a -TERM` is
+a usage error, which the fallback's `|| true` would hide. This was read from the man page and the process tree and
+is checked with the real tools by `tests/repo/src/self-update-real-processes.test.ts`, which runs in CI's macOS job
+because a lane's sandbox cannot list processes.
+
+Then it does what an install does: back up
 the database with `sqlite3 .backup`, zip the previous app to `10db-previous/`, copy the new one in, clear its
 quarantine, register it, and with `--relaunch` open it. `make rollback-app` finds that zip and that backup as it
 does after a manual install. `--status-file` makes either half write `{ok, mode, step, message, commit}`.
@@ -114,8 +149,23 @@ hears the detached script exit, reads the status file, starts the scheduler agai
 the card. An apply failure after the quit is reported once by the next daemon, from the status file and the
 `self_update.applying` marker, at startup. The head of main whose update failed is kept
 (`self_update.failed_commit`); it is not tried again until main has a newer head or the builder touches the
-switch, so one failure is one card. Cards sit under the first project; with none registered the failure is only
-logged.
+switch, so one failure is one card. Cards sit under the first project; with none registered no card is raised and
+the failure is logged and shown in Settings > Updates.
+
+**Why it will not update.** `GET /settings/self-update` carries `blocker`: a `kind` and a `message`, or null, and
+Settings > Updates shows the message under the switch. Four kinds are facts about the install, known at start, and
+show even with the switch off: `source`, `no-repository`, `not-in-applications` and `gh-missing`. Two come from
+checks and show only with it on: `unreachable` (the last finished check could not reach GitHub) and `failed` (an
+update failed). The reason text of a failure is held in memory, not stored: after a restart the check that finds
+`self_update.failed_commit` still at main's head reduces it to a generic line that names the commit.
+
+A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
+killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above). Any later step
+(`wait-for-build`, `download`, `verify-checksum`, `stage`) is a failure as above, with its card and
+`self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
+confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
+it fetches only if a newer build is still the newest. It does not retry every minute, because a checksum mismatch
+would then download the same DMG each minute and hold the drain for ever.
 
 **After `make rollback-app`.** Rolling back must stick: otherwise the restored app finds main ahead of it at its
 first check and installs the build the builder just rolled back from. `rollback-app.sh` reads the commit from the

@@ -7,6 +7,29 @@ export const CommitSha = z
 export type CommitSha = z.infer<typeof CommitSha>;
 
 /**
+ * Why an app that is switched on will not update itself: what the builder can read under the switch.
+ * `source`, `no-repository`, `not-in-applications` and `gh-missing` last until the app is replaced
+ * or gh is installed; `unreachable` lasts while GitHub can't be asked; `failed` until the builder
+ * touches the switch or main moves on.
+ */
+export const SelfUpdateBlockerKind = z.enum([
+  'source',
+  'no-repository',
+  'not-in-applications',
+  'gh-missing',
+  'unreachable',
+  'failed',
+]);
+export type SelfUpdateBlockerKind = z.infer<typeof SelfUpdateBlockerKind>;
+
+export const SelfUpdateBlockerDto = z.object({
+  kind: SelfUpdateBlockerKind,
+  /** A sentence or two for the builder, naming what to do about it. */
+  message: z.string().min(1),
+});
+export type SelfUpdateBlockerDto = z.infer<typeof SelfUpdateBlockerDto>;
+
+/**
  * `GET /settings/self-update`: whether 10db installs main's build by itself, and which commits are
  * involved. One setting for the whole app, on until the builder turns it off. What it follows is
  * not a setting: it is the repository the app was built for.
@@ -31,6 +54,12 @@ export const SelfUpdateStatusDto = z.object({
   draining: z.boolean(),
   /** When new work stopped starting; null while it is not held. */
   drainingSince: z.iso.datetime().nullable(),
+  /**
+   * Why this app will not update itself, whatever the switch says; null when nothing stops it. The
+   * ones that last (a source run, a copy outside Applications, no repository, no gh) show even with
+   * the switch off; a GitHub that can't be reached and a failed update show only while it is on.
+   */
+  blocker: SelfUpdateBlockerDto.nullable(),
 });
 export type SelfUpdateStatusDto = z.infer<typeof SelfUpdateStatusDto>;
 

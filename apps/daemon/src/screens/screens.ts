@@ -18,6 +18,7 @@ import type { StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker } from './broker';
 import { readImageHeader } from './image-check';
+import { INLINE_CONVERSATION_MAX_BYTES, inlineBytesSpent } from './inline-budget';
 
 // Shape spec §5.5: see_screen. Asks the app's window for a picture of one of its screens, checks the
 // picture, keeps it with the conversation (a file, and a transcript row that names it) and answers the
@@ -133,6 +134,15 @@ export function createScreens(deps: ScreenDeps): ScreenService {
       if (!outcome.ok) return refuse(shapeId, outcome.reason);
       const result = checked(outcome.image, input);
       if ('problem' in result) return refuse(shapeId, result.problem);
+      // Read after the await, with nothing awaited before the file is kept, so two calls can't both pass.
+      if (
+        inlineBytesSpent(deps.state, deps.filesDir, shapeId) + result.bytes.length >
+        INLINE_CONVERSATION_MAX_BYTES
+      )
+        return refuse(
+          shapeId,
+          'This conversation has no room for another picture: every picture stays in your context, and one request to Claude can only carry so many. Work from the ones you have, or ask the builder to start a new conversation.',
+        );
 
       const dir = screensDir(shapeId);
       mkdirSync(dir, { recursive: true });
