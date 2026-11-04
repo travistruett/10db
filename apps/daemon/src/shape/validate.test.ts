@@ -432,6 +432,39 @@ describe('a plan that breaks a rule', () => {
     ).toEqual([]);
   });
 
+  describe('a task key that names a converted task', () => {
+    it.each<[string, Record<string, unknown>, RegExp]>([
+      [
+        'a goal task takes it',
+        { goals: [goal('h', [task('earlier-task')])] },
+        /Goal h, task 1, key: earlier-task is a task this conversation already converted/,
+      ],
+      [
+        'an addition takes it',
+        {
+          additions: [{ ...loose('earlier-task'), goalId: convertedGoal }],
+        },
+        /Addition 1, key: earlier-task is a task this conversation already converted/,
+      ],
+    ])('refuses it by name while the task is live, when %s', (_name, draft, expected) => {
+      expect(check(draft)).toEqual([expect.stringMatching(expected)]);
+    });
+
+    it('accepts a goal task taking it once the task was removed', () => {
+      expect(
+        check(
+          { goals: [goal('h', [task('earlier-task')])] },
+          world({ removedTasks: new Set(['earlier-task']) }),
+        ),
+      ).toEqual([]);
+    });
+
+    it('accepts a goal task taking it when the same draft removes the task', () => {
+      const removals = [{ taskId: converted, why: 'Not needed', sourceMessageIds: [message] }];
+      expect(check({ goals: [goal('h', [task('earlier-task')])], removals })).toEqual([]);
+    });
+  });
+
   describe('a dependency or landing key naming a converted task a removal cancelled', () => {
     const removedWorld = (over: Partial<PlanWorld> = {}): PlanWorld =>
       world({ removedTasks: new Set(['earlier-task']), ...over });

@@ -1165,6 +1165,54 @@ describe('additions, changes and removals', () => {
     expect(getTask(c.store.db, removed.id).status).toBe(TaskStatus.Cancelled);
   });
 
+  describe('a goal whose task takes the key of a converted task that is still live', () => {
+    it('is refused by name at propose when a converted loose task holds the key', () => {
+      const m = c.say('A task.');
+      propose({ looseTasks: [loose(m, 'a')] });
+      converted('a');
+      const m2 = c.say('A goal that reuses a.');
+      expect(() => {
+        propose({ goals: [goalOf(m2, 'h', ['a'])] });
+      }).toThrow(/Goal h, task 1, key: a is a task this conversation already converted/);
+      expect(tasks().filter((t) => t.title === 'Task a')).toHaveLength(1);
+    });
+
+    it('is refused by name at propose when a converted goal’s task holds the key', () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const m2 = c.say('Another goal that reuses g1.');
+      expect(() => {
+        propose({ goals: [goalOf(m2, 'h', ['g1'])] });
+      }).toThrow(/Goal h, task 1, key: g1 is a task this conversation already converted/);
+    });
+
+    it('is refused by name at Convert, not thrown, while the removal that frees the key is not selected', () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const old = taskTitled('Task g1');
+      const m2 = c.say('Drop g1, and a goal that reuses it.');
+      propose({
+        goals: [goalOf(m2, 'h', ['g1'])],
+        removals: [{ taskId: old.id, why: 'Not needed', sourceMessageIds: [m2] }],
+      });
+
+      const out = convert('h');
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/h: its task g1 takes the key of a task this conversation converted/),
+      ]);
+      expect(tasks().filter((t) => t.title === 'Task g1')).toEqual([
+        expect.objectContaining({ id: old.id }),
+      ]);
+
+      converted('h', `remove:${old.id}`);
+      const made = tasks().filter((t) => t.title === 'Task g1' && t.id !== old.id);
+      expect(made).toHaveLength(1);
+      expect(getTask(c.store.db, old.id).status).toBe(TaskStatus.Cancelled);
+    });
+  });
+
   it('resolves a task that waits on a removed key a goal took again to the goal’s new task', () => {
     const removed = removedGoalTask();
     const m = c.say('A goal that reuses g1, and a task after it.');
