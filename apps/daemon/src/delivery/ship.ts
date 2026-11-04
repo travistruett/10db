@@ -72,6 +72,7 @@ import {
   autoMergeRefusedKey,
   detailOf,
   leftOutCards,
+  type LeftOutAttempt,
   nothingToWaitFor,
   preCheckOnlyKey,
   prCardKey,
@@ -192,8 +193,10 @@ export interface Shipper {
    * and when no task finished. The revert runs in the ship queue: one that conflicts, would bring
    * conflict markers back, or meets uncommitted changes, ships nothing, leaves the branch and the
    * batch as they were, and raises a card naming the files that can answer Ship without it again.
+   * `revert` is the revert commit an earlier answer left on the branch, read from the card: the commits
+   * it covers are not reverted again, and the notices name it.
    */
-  shipWithout(batchId: BatchId, workstreamId: WorkstreamId): BatchDto;
+  shipWithout(batchId: BatchId, workstreamId: WorkstreamId, revert?: string): BatchDto;
   abandon(batchId: BatchId): BatchDto;
   /**
    * The open pull request of a shipped batch that merges by itself conflicts with its base: merges the
@@ -1390,10 +1393,17 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * moves to shipping in one write, which also closes the other runs' failed cards, and the ship then
    * runs as any other. Nothing moves until the revert has worked; a revert that cannot is a card and
    * the batch stays as it was.
+   *
+   * `earlier` is the revert an answer before this one left on the branch without getting as far as
+   * the notices. Its commits are not asked of git again: undoing commits that built on each other
+   * once more conflicts with the tip that no longer has them. They count as this answer's, under that
+   * revert. A commit it does not cover is reverted as usual. A revert no longer on the branch covers
+   * nothing, so the commits are reverted as if it had never been made.
    */
   async function leaveOut(
     batchId: BatchId,
     workstreamId: WorkstreamId,
+    earlier: string | null,
     signal: AbortSignal,
   ): Promise<void> {
     const batch = getBatch(db, batchId);
@@ -1406,7 +1416,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     // An earlier Ship without it may have left the answered run out already; its gate failed since.
     const titles = failed.length > 0 ? failed.map((m) => m.taskTitle) : [member.taskTitle];
     const named = titles.map((t) => `"${t}"`).join(', ');
-    const attempt = { workstreamId, titles };
+    let attempt: LeftOutAttempt = { workstreamId, titles, revert: earlier };
     const stopWith = (card: Card): void => {
       deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
       try {
@@ -1452,8 +1462,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
       notStarted(refusal.why, refusal.answerable);
       return;
     }
-    // The revert commit, once there is one: from then on a stop must not leave the branch unexplained.
+    // The revert commit this answer made, once there is one.
     let revert: string | null = null;
+    // Any revert on the branch: from then on a stop must not leave the branch unexplained.
+    const kept = (): string | null => revert ?? attempt.revert ?? null;
     try {
       const { branch } = batch;
       const checkout = batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
@@ -1481,9 +1493,29 @@ export function createShipper(deps: ShipperDeps): Shipper {
         );
         return;
       }
-      const commits: { readonly run: WorkstreamDto; readonly shas: readonly string[] }[] = [];
-      for (const run of failed)
-        commits.push({ run, shas: await commitsOf(batchId, run, checkout, branch) });
+      const standing =
+        earlier !== null &&
+        (await deps.git.hasCommit(checkout, earlier)) &&
+        (await deps.git.isAncestor(checkout, earlier, `refs/heads/${branch}`))
+          ? earlier
+          : null;
+      attempt = { ...attempt, revert: standing };
+      const commits: {
+        readonly run: WorkstreamDto;
+        /** Its commits this answer reverts. */
+        readonly shas: readonly string[];
+        /** How many of its commits the earlier revert covers. */
+        readonly covered: number;
+      }[] = [];
+      for (const run of failed) {
+        const left: string[] = [];
+        let covered = 0;
+        for (const sha of await commitsOf(batchId, run, checkout, branch))
+          if (standing !== null && (await deps.git.isAncestor(checkout, sha, standing)))
+            covered += 1;
+          else left.push(sha);
+        commits.push({ run, shas: left, covered });
+      }
       const shas = commits.flatMap((c) => c.shas);
       if (shas.length > 0) {
         const reverted = await deps.git.revertCommits({
@@ -1521,13 +1553,15 @@ export function createShipper(deps: ShipperDeps): Shipper {
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
-        for (const { run, shas: own } of commits)
+        for (const { run, shas: own, covered } of commits)
           setWorkstreamNotice(
             w,
             run.id,
             revert !== null && own.length > 0
               ? leftOutNotices.reverted(own.length, revert)
-              : leftOutNotices.nothingToRevert(),
+              : standing !== null && covered > 0
+                ? leftOutNotices.reverted(covered, standing)
+                : leftOutNotices.nothingToRevert(),
           );
         // Every failed member's commits are gone now, so no attempt's are left for its notice to warn of.
         clearBatchNotice(w, batchId, NOTICE_KEY.supersededAttempt);
@@ -1546,21 +1580,24 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return;
       }
       const { state } = getBatch(db, batchId);
-      if (revert !== null) {
+      const reverted = kept();
+      if (revert === null && carriedOut(state)) return;
+      if (reverted !== null) {
         stopWith(
           leftOutCards.revertKept(
             batch,
             attempt,
-            revert,
-            `The batch became ${state.toLowerCase()} while the revert ran, so its notices were not written.`,
+            reverted,
+            `The batch became ${state.toLowerCase()} while the answer ran, so its notices were not written.`,
             state,
           ),
         );
-      } else if (!carriedOut(state)) {
+      } else {
         notStarted(`the batch is ${state.toLowerCase()}`, false);
       }
     } catch (error) {
-      if (revert !== null) {
+      const reverted = kept();
+      if (reverted !== null) {
         // The write that threw held the withdrawal of the other failed tasks' cards. With the batch
         // still answerable they are withdrawn on their own; the answered run's card is the one this
         // card folds into, and the card offers the same answer.
@@ -1580,7 +1617,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
             'ship without a run could not withdraw the other failed cards',
           );
         }
-        stopWith(leftOutCards.revertKept(batch, attempt, revert, detailOf(error), state));
+        stopWith(leftOutCards.revertKept(batch, attempt, reverted, detailOf(error), state));
         return;
       }
       if (stopped()) notStarted('10db was stopping');
@@ -2016,7 +2053,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
       if (unfinished) throw unfinished;
       return ship(batchId);
     },
-    shipWithout(batchId, workstreamId) {
+    shipWithout(batchId, workstreamId, revert) {
       const batch = getBatch(db, batchId);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
@@ -2034,7 +2071,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
         );
       refuseWhileHeld(batch);
       deps.jobs.run(jobKey(batch, JobQueue.Ship), (signal) =>
-        deps.git.operation(() => leaveOut(batchId, workstreamId, signal)),
+        deps.git.operation(() => leaveOut(batchId, workstreamId, revert ?? null, signal)),
       );
       return batch;
     },

@@ -104,6 +104,17 @@ describe('revertCommits', () => {
     expect(rawGit('rev-parse', 'HEAD')).toBe(before);
   });
 
+  it('conflicts on a second revert of two commits on one file, so its caller must not ask twice', async () => {
+    const add = commitFiles({ 'src/alpha.txt': 'one\n' }, 'alpha adds it');
+    const edit = commitFiles({ 'src/alpha.txt': 'two\n' }, 'alpha edits it');
+    expect((await revert([add, edit])).kind).toBe('reverted');
+    const before = rawGit('rev-parse', 'HEAD');
+
+    // Undoing the edit merges the older commit's file with a tip that no longer has it.
+    expect(await revert([add, edit])).toEqual({ kind: 'conflict', paths: ['src/alpha.txt'] });
+    expect(rawGit('rev-parse', 'HEAD')).toBe(before);
+  });
+
   it('writes nothing and names the files when undoing a commit would bring conflict markers back', async () => {
     const marked = '<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n';
     commitFiles({ 'src/merged.txt': marked }, 'the base merge left markers');

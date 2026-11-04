@@ -1237,16 +1237,21 @@ export const branchCards = {
   }),
 };
 
-/** The tasks a stopped Ship without it meant to leave out, and the failed run it was answered on. */
+/**
+ * The tasks a stopped Ship without it meant to leave out, the failed run it was answered on, and the
+ * revert commit an earlier answer left on the branch, if one did.
+ */
 export interface LeftOutAttempt {
   readonly workstreamId: WorkstreamId;
   readonly titles: readonly string[];
+  readonly revert?: string | null;
 }
 
 /**
  * What every card of a stopped revert shares: it folds per batch, goes when the batch ships, and
  * offers the failed task's own choices, so Ship without it can be answered again here. The first
- * answer closed the failed card, and Ship anyway from the drawer reverts nothing.
+ * answer closed the failed card, and Ship anyway from the drawer reverts nothing. A revert already on
+ * the branch stays in the card's detail, because each stopped answer folds over the card before it.
  */
 function leftOutCard(
   batch: BatchDto,
@@ -1258,7 +1263,7 @@ function leftOutCard(
     foldKey: `left-out:${batch.id}`,
     refresh: true,
     resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
-    ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }),
+    ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }, attempt.revert),
   };
 }
 
@@ -1268,9 +1273,19 @@ const leftOutSubject = (attempt: LeftOutAttempt): string =>
 const leftOutNames = (attempt: LeftOutAttempt): string =>
   attempt.titles.map((t) => `"${t}"`).join(', ');
 
+/** What a stopped answer left on the branch: nothing new, and any revert an earlier answer made. */
+const leftOutBranch = ({ revert }: LeftOutAttempt): string =>
+  revert
+    ? `Nothing was shipped, and this answer changed nothing on the branch: the revert commit ${revert.slice(0, 9)} an earlier answer made stays on it.`
+    : 'Nothing was shipped and the branch is unchanged.';
+
 /** What the cards say last: how to go on, and what the other answer would do. */
 const leftOutAgain = (attempt: LeftOutAttempt): string =>
-  `answer Ship without it on this card. Ship anyway would put the commits of ${leftOutNames(attempt)} in the pull request.`;
+  `answer Ship without it on this card. ${
+    attempt.revert
+      ? 'Ship anyway would ship the branch as it stands, and leave the revert unexplained in the drawer and the pull request.'
+      : `Ship anyway would put the commits of ${leftOutNames(attempt)} in the pull request.`
+  }`;
 
 /** What Ship without it tells the builder when it could not revert a failed task's commits. */
 export const leftOutCards = {
@@ -1287,7 +1302,7 @@ export const leftOutCards = {
   ): Card => {
     const text = {
       title: `${leftOutSubject(attempt)}: ${why}`,
-      body: `Ship without it did not begin on ${leftOutNames(attempt)}: ${why}.\n\n${answerable ? `Nothing was shipped and the branch is unchanged. When that is settled, ${leftOutAgain(attempt)}` : 'Ship without it changed nothing, and no longer applies to this batch.'}`,
+      body: `Ship without it did not begin on ${leftOutNames(attempt)}: ${why}.\n\n${answerable ? `${leftOutBranch(attempt)} When that is settled, ${leftOutAgain(attempt)}` : attempt.revert ? `This answer changed nothing, and Ship without it no longer applies to this batch. The revert commit ${attempt.revert.slice(0, 9)} an earlier answer made stays on the branch.` : 'Ship without it changed nothing, and no longer applies to this batch.'}`,
     };
     return answerable
       ? leftOutCard(batch, attempt, text)
@@ -1297,10 +1312,11 @@ export const leftOutCards = {
    * The revert commit `revert` is on the batch's branch, but the notices and the move to shipping
    * were not written. `state` is the batch's state now (null when it could not be read), and the
    * next step follows it:
-   * - open or failed (or unknown): Ship without it is offered again. It finds the revert on the
-   *   tip, so `revertCommits` changes nothing, and it writes the notices and moves the batch. That
-   *   beats Ship anyway, which leaves the revert unexplained in the drawer and the pull request.
-   *   The card goes when the batch ships;
+   * - open or failed (or unknown): Ship without it is offered again, with `revert` in the card's
+   *   detail. The answer leaves the commits that revert covers out of `revertCommits`, which would
+   *   conflict on commits that built on each other, writes the notices naming `revert` and moves the
+   *   batch. That beats Ship anyway, which leaves the revert unexplained in the drawer and the pull
+   *   request. The card goes when the batch ships;
    * - shipping or later: the ship goes on with the revert in the branch, so there is nothing to do;
    *   the card goes when the batch ships;
    * - abandoned: nothing ships, and no step is offered.
@@ -1320,10 +1336,14 @@ export const leftOutCards = {
     const lead = `Ship without it reverted the commits of ${names} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\n`;
     const fold = { foldKey: `left-out:${batch.id}`, refresh: true } as const;
     if (answerable)
-      return leftOutCard(batch, attempt, {
-        title: `${names}: the revert is on the branch, but the batch did not move`,
-        body: `${lead}The revert stays on ${branch}, and nothing was shipped. ${names} ${one ? 'is' : 'are'} still failed here, and ${its} drawer does not yet say the work was left out. When that is settled, answer Ship without it again on this card: the revert is on the branch already, so it reverts nothing more, writes the notices and moves the batch on to ship. Ship anyway also ships the branch without ${its} changes, but leaves the revert unexplained in the drawer and the pull request.`,
-      });
+      return leftOutCard(
+        batch,
+        { ...attempt, revert },
+        {
+          title: `${names}: the revert is on the branch, but the batch did not move`,
+          body: `${lead}The revert stays on ${branch}, and nothing was shipped. ${names} ${one ? 'is' : 'are'} still failed here, and ${its} drawer does not yet say the work was left out. When that is settled, answer Ship without it again on this card: 10db leaves out the commits this revert covers, so it reverts nothing more of them, writes the notices and moves the batch on to ship. Ship anyway also ships the branch without ${its} changes, but leaves the revert unexplained in the drawer and the pull request.`,
+        },
+      );
     const title = `${names}: the revert is on the branch`;
     if (state === BatchState.Abandoned)
       return {
@@ -1341,24 +1361,24 @@ export const leftOutCards = {
   conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
     leftOutCard(batch, attempt, {
       title: `${leftOutSubject(attempt)}: reverting ${attempt.titles.length === 1 ? 'its' : 'their'} commits conflicts`,
-      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and later commits changed these files in ways that conflict with that:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Resolve it on the branch (revert the commits by hand, or start a fix task in the batch), then ${leftOutAgain(attempt)}`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and later commits changed these files in ways that conflict with that:\n${listPaths(paths)}\n\n${leftOutBranch(attempt)} Resolve it on the branch (revert the commits by hand, or start a fix task in the batch), then ${leftOutAgain(attempt)}`,
     }),
   /** A commit being undone resolved the conflict markers of a merge of the base, now in `paths`. */
   markers: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
     leftOutCard(batch, attempt, {
       title: `${leftOutSubject(attempt)}: ${attempt.titles.length === 1 ? 'its' : 'their'} commits resolved conflict markers`,
-      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and one of them resolved the conflict markers a merge of ${batch.baseBranch} left in these files, so undoing it would put the markers back:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Retry the task, or resolve the conflict on the branch without its commits (start a fix task in the batch), then ${leftOutAgain(attempt)}`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch before shipping, and one of them resolved the conflict markers a merge of ${batch.baseBranch} left in these files, so undoing it would put the markers back:\n${listPaths(paths)}\n\n${leftOutBranch(attempt)} ${attempt.revert ? 'Resolve' : 'Retry the task, or resolve'} the conflict on the branch without its commits (start a fix task in the batch), then ${leftOutAgain(attempt)}`,
     }),
   /** Something else stopped the revert: `why` is git's or 10db's own words. */
   failed: (batch: BatchDto, attempt: LeftOutAttempt, why: string): Card =>
     leftOutCard(batch, attempt, {
       title: `${leftOutSubject(attempt)}: ${why.split('\n')[0]?.slice(0, 200) ?? why}`,
-      body: `Ship without it could not revert the commits of ${leftOutNames(attempt)} on the batch's branch:\n\n${why.slice(0, 1500)}\n\nNothing was shipped and the branch is unchanged. Fix what it names, then ${leftOutAgain(attempt)}`,
+      body: `Ship without it could not ${attempt.revert ? 'finish leaving out' : 'revert the commits of'} ${leftOutNames(attempt)} on the batch's branch:\n\n${why.slice(0, 1500)}\n\n${leftOutBranch(attempt)} Fix what it names, then ${leftOutAgain(attempt)}`,
     }),
   /** Uncommitted changes are in `paths`, which the revert writes. */
   blocked: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>
     leftOutCard(batch, attempt, {
       title: `${leftOutSubject(attempt)}: uncommitted changes are in the way`,
-      body: `Ship without it reverts a failed task's commits on the batch's branch, which writes these files, and they have uncommitted changes:\n${listPaths(paths)}\n\nNothing was shipped and the branch is unchanged. Commit or discard the changes, then ${leftOutAgain(attempt)}`,
+      body: `Ship without it reverts a failed task's commits on the batch's branch, which writes these files, and they have uncommitted changes:\n${listPaths(paths)}\n\n${leftOutBranch(attempt)} Commit or discard the changes, then ${leftOutAgain(attempt)}`,
     }),
 };

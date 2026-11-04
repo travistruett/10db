@@ -705,10 +705,217 @@ describe('the failed workstream card', () => {
         expect(inbox.answer(stopped.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
         await h.jobs.idle();
 
-        expect(reverts).toEqual(['reverted', 'nothing']);
+        // The second answer leaves the reverted commits out of its work, so git is not asked again.
+        expect(reverts).toEqual(['reverted']);
         expect(getWorkstream(h.store.db, failed).notice?.key).toBe('left-out');
         expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
         expect(getInboxItem(h.store.db, stopped.id).state).not.toBe('OPEN');
+      });
+
+      const failNextWrite = (message: string): void => {
+        vi.spyOn(h.state, 'write').mockImplementationOnce(() => {
+          throw new Error(message);
+        });
+      };
+
+      /**
+       * A harness that records each revert asked of git, and whose first revert's state write throws.
+       * `failJobWrite` makes the next job's state write throw, whether or not it reverts anything.
+       */
+      function revertsWithFailedWrite(ship: Parameters<typeof createDeliveryHarness>[1] = {}) {
+        const asked: (readonly string[])[] = [];
+        const armed = { job: false };
+        h.close();
+        h = createDeliveryHarness(
+          {},
+          {
+            ...ship,
+            wrapGit: (git) => ({
+              ...git,
+              currentBranch: async (repo) => {
+                if (armed.job) failNextWrite('database is still locked');
+                armed.job = false;
+                return git.currentBranch(repo);
+              },
+              revertCommits: async (request) => {
+                asked.push(request.shas);
+                const reverted = await git.revertCommits(request);
+                if (asked.length === 1) failNextWrite('database is locked');
+                return reverted;
+              },
+            }),
+          },
+        );
+        inbox = answering();
+        return {
+          asked,
+          failJobWrite: () => {
+            armed.job = true;
+          },
+        };
+      }
+
+      it('moves a run with two commits on one file past the second answer', async () => {
+        revertsWithFailedWrite();
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'one\n',
+        });
+        commitAs(failed, 'src/api/alpha.txt', 'two\n');
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const revert = h.git$('rev-parse', 'HEAD');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+        inbox.answer(stopped.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(h.cards().filter((c) => c.title.includes('conflict'))).toEqual([]);
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        const notice = getWorkstream(h.store.db, failed).notice;
+        expect(notice?.key).toBe('left-out');
+        expect(notice?.line).toMatch(/its 2 commits were reverted/);
+        expect(notice?.body).toContain(`Revert commit: ${revert}`);
+        expect(notice?.body).not.toMatch(/no commits|reverted nothing/);
+      });
+
+      it('tells a run retried after the second answer that its commits are reverted', async () => {
+        const { asked } = revertsWithFailedWrite({
+          shipGate: (gate) => ({
+            run: async (request) => ({ ...(await gate.run(request)), exitCode: 1 }),
+          }),
+        });
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'alpha\n',
+        });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const revert = h.git$('rev-parse', 'HEAD');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        inbox.answer(stopped.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        expect(getBatch(h.store.db, batchId).state).toBe('FAILED');
+
+        retryWorkstream(h.state, failed);
+
+        const notice = getWorkstream(h.store.db, failed).notice;
+        expect(notice?.key).toBe('reverted-work');
+        expect(notice?.body).toContain(`Revert commit: ${revert}`);
+        expect(asked).toHaveLength(1);
+      });
+
+      it('reverts only the commits the first revert does not cover', async () => {
+        const { asked } = revertsWithFailedWrite();
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'one\n',
+        });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        const later = commitAs(failed, 'src/api/later.txt', 'later\n');
+
+        inbox.answer(stopped.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(asked).toHaveLength(2);
+        expect(asked[1]).toEqual([later]);
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        // Newest first, on the batch's branch: the ship may have left the checkout on another.
+        const reverts = h.git$('log', '--all', '--grep=leave out', '--format=%H').split('\n');
+        expect(reverts).toHaveLength(2);
+        expect(getWorkstream(h.store.db, failed).notice?.body).toContain(
+          `Revert commit: ${reverts[0] ?? ''}`,
+        );
+      });
+
+      it('keeps the revert on the card when the second answer stops as well', async () => {
+        const { failJobWrite } = revertsWithFailedWrite();
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'one\n',
+        });
+        commitAs(failed, 'src/api/alpha.txt', 'two\n');
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const revert = h.git$('rev-parse', 'HEAD');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+        failJobWrite();
+        inbox.answer(stopped.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        const again = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(again.body).toContain(revert.slice(0, 9));
+        expect(again.body).toContain('database is still locked');
+        expect(again.body).not.toMatch(/branch is unchanged/);
+
+        inbox.answer(again.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        expect(getWorkstream(h.store.db, failed).notice?.body).toContain(
+          `Revert commit: ${revert}`,
+        );
+      });
+
+      it('reverts as usual when the revert the card names is no longer on the branch', async () => {
+        const { batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'alpha\n',
+        });
+        raise(
+          inbox,
+          h.project.id,
+          leftOutCards.revertKept(
+            getBatch(h.store.db, batchId),
+            { workstreamId: failed, titles: ['Alpha'] },
+            'a'.repeat(40),
+            'a test',
+            'OPEN',
+          ),
+        );
+        const stale = h.only(h.cards().filter((c) => c.title.includes('revert')));
+
+        inbox.answer(stale.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        const notice = getWorkstream(h.store.db, failed).notice;
+        expect(notice?.body).not.toContain('a'.repeat(40));
+        expect(notice?.line).toMatch(/its commit was reverted/);
+      });
+
+      it('says what a stopped second answer left, on a card that keeps the revert', async () => {
+        const { batchId, failed } = await failedInBatch('DONE');
+        const stopped = leftOutCards.conflict(
+          getBatch(h.store.db, batchId),
+          { workstreamId: failed, titles: ['Alpha'], revert: 'b'.repeat(40) },
+          ['src/api/beta.txt'],
+        );
+
+        expect(stopped.body).not.toMatch(/branch is unchanged/);
+        expect(stopped.body).toContain('b'.repeat(9));
+        expect(stopped.body).not.toMatch(/put the commits of/);
+        expect(stopped.options?.map((o) => o.label)).toEqual([
+          'Ship anyway',
+          'Ship without it',
+          'Later',
+        ]);
+        expect(stopped.detail).toMatchObject({ batchCard: { revert: 'b'.repeat(40) } });
+      });
+
+      it('words its answers for a branch that already holds the revert', async () => {
+        revertsWithFailedWrite();
+        const { card } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        const said = new Map(stopped.options.map((o) => [o.label, o.description]));
+        // Retry is not offered: no left-out notice exists yet to tell its session of the revert.
+        expect([...said.keys()]).toEqual(['Ship anyway', 'Ship without it', 'Later']);
+        expect(said.get('Ship anyway')).toMatch(/revert/i);
+        expect(said.get('Ship anyway')).not.toMatch(/commits will be in the pull request/);
+        expect(said.get('Ship without it')).not.toMatch(/^Reverts its commits/);
       });
 
       it('withdraws the other failed tasks’ cards when the write threw', async () => {
