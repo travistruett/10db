@@ -43,6 +43,9 @@ const MAX_HEARD_CHARS = 80;
 /** What the project's areas are, when a draft names one it hasn't got: "(it has src, ui)". */
 const AREAS_OF_THE_PROJECT = /\(it has ([^)]+)\)/;
 
+/** "see the board", "see the task tsk_…", each with an optional "at 900": a look at one of the app's screens. */
+const SEE_SCREEN = /\bsee the (factory|board|inbox|plan|task (\S+))(?: at (\d+))?/i;
+
 /** What the scripted draft proposes, citing the builder's messages; every task is in `area`. */
 function scriptedDraft(area: string, sources: readonly string[]): Record<string, unknown> {
   const task = (key: string, title: string) => ({
@@ -104,16 +107,21 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
     const call = async (
       tool: string,
       args: Record<string, unknown>,
-    ): Promise<{ isError: boolean; text: string }> => {
+    ): Promise<{ isError: boolean; text: string; images: number }> => {
       const result = await client.callTool({ name: tool, arguments: args }, undefined, {
         timeout: turn.spec.mcp.toolTimeoutMs,
         signal: turn.signal,
       });
-      const content = Array.isArray(result.content) ? result.content : [];
-      const text = content
-        .map((c: { type?: string; text?: string }) => (c.type === 'text' ? (c.text ?? '') : ''))
-        .join('');
-      return { isError: result.isError === true, text };
+      const content = (Array.isArray(result.content) ? result.content : []) as {
+        type?: string;
+        text?: string;
+      }[];
+      const text = content.map((c) => (c.type === 'text' ? (c.text ?? '') : '')).join('');
+      return {
+        isError: result.isError === true,
+        text,
+        images: content.filter((c) => c.type === 'image').length,
+      };
     };
     try {
       await client.connect(
@@ -138,6 +146,22 @@ export function scriptedShapeBehaviour(): FakeShapeBehaviour {
       const id = BUILDER_MESSAGE_ID.exec(turn.message)?.[1];
       if (id !== undefined) ids.push(id);
       const text = turn.message.replace(BUILDER_MESSAGE_ID, '');
+      // "See the board at 900" asks for a screen, as a session planning UI work would.
+      const look = SEE_SCREEN.exec(text);
+      if (look !== null) {
+        const screen = (look[1] ?? '').toLowerCase();
+        const taskId = look[2];
+        const answer = await call('see_screen', {
+          screen: taskId === undefined ? screen : 'task',
+          ...(taskId === undefined ? {} : { taskId }),
+          ...(look[3] === undefined ? {} : { width: Number(look[3]) }),
+        });
+        return {
+          text: answer.isError
+            ? `I could not see it: ${answer.text}`
+            : `I saw the ${screen}: ${String(answer.images)} picture.`,
+        };
+      }
       const items = text
         .split(/[\n.]+/)
         .map((s) => s.trim())

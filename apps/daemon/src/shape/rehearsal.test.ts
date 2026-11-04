@@ -130,7 +130,12 @@ describe('Rehearse', () => {
     for (const key of ['cards', 'bars', 'abandon'])
       expect(session.prompt).toContain(`taskKey ${key} · taskHash ${hashOf(key)}`);
     expect(session.prompt).toContain('Title: Cards');
-    expect(Object.keys(session.agents).sort()).toEqual(['engineering', 'rehearsal', 'scope']);
+    expect(Object.keys(session.agents).sort()).toEqual([
+      'engineering',
+      'rehearsal',
+      'researcher',
+      'scope',
+    ]);
     expect(session.agents).toEqual(SHAPE_AGENTS);
     expect(session.agents['rehearsal']?.tools).toEqual([
       'Read',

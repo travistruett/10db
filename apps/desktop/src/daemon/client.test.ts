@@ -84,3 +84,31 @@ describe('the daemon client', () => {
     await expect(readJson(await client.projects.$get(), z.array(ProjectDto))).rejects.toThrow();
   });
 });
+
+describe('a read-only daemon client (a screen being drawn, Shape spec §5.5)', () => {
+  const readOnly = createDaemonClient({ ...TEST_CONNECTION, readOnly: true });
+
+  it('reads as any client does', async () => {
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([])));
+    expect(await readJson(await readOnly.projects.$get(), z.array(ProjectDto))).toEqual([]);
+  });
+
+  it('refuses every write before a request leaves the window', async () => {
+    let reached = 0;
+    server.use(
+      http.post(daemonUrl('/projects'), () => {
+        reached += 1;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+      http.put(daemonUrl('/settings/lane-permissions'), () => {
+        reached += 1;
+        return HttpResponse.json({}, { status: 500 });
+      }),
+    );
+    await expect(readOnly.projects.$post({ json: projectInput })).rejects.toThrow(/read-only/);
+    await expect(
+      readOnly.settings['lane-permissions'].$put({ json: { autoMode: false } }),
+    ).rejects.toThrow(/read-only/);
+    expect(reached).toBe(0);
+  });
+});

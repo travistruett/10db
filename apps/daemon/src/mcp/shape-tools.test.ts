@@ -20,8 +20,10 @@ import { createGit } from '../git';
 import { protectedPaths } from '../guard';
 import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
-import { createMcpHandler, mintSessionToken } from './index';
+import { createMcpHandler, mintSessionToken, ToolImages } from './index';
 import type { ShapeToolsFor } from './shape-tools';
+
+const PICTURE = { mediaType: 'image/png', data: 'iVBORw0KGgo=' } as const;
 
 // Shape spec §5.5: the endpoint builds a session's tool set from its row.
 
@@ -150,6 +152,43 @@ describe('a Shape session’s tool set', () => {
     expect(calls).toEqual([]);
   });
 
+  it('answers a tool whose result is pictures with an image block the session receives, beside its text', async () => {
+    shapeTools = () => ({
+      see_screen: () => Promise.resolve(new ToolImages('The Board at 1200×900.', [PICTURE])),
+    });
+    const client = await connect(shapeToken().token);
+    const result = await client.callTool({
+      name: 'see_screen',
+      arguments: { screen: 'board' },
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.content).toEqual([
+      { type: 'text', text: 'The Board at 1200×900.' },
+      { type: 'image', data: PICTURE.data, mimeType: 'image/png' },
+    ]);
+  });
+
+  it('parses see_screen’s input with its defaults, and refuses a click, a key or a url in it', async () => {
+    const seen: unknown[] = [];
+    shapeTools = () => ({
+      see_screen: (input) => {
+        seen.push(input);
+        return Promise.resolve(new ToolImages('ok', []));
+      },
+    });
+    const client = await connect(shapeToken().token);
+    await client.callTool({ name: 'see_screen', arguments: { screen: 'factory' } });
+    expect(seen).toEqual([{ screen: 'factory', width: 1200, height: 900 }]);
+    const { tools } = await client.listTools();
+    const schema = tools.find((t) => t.name === 'see_screen')?.inputSchema;
+    expect(Object.keys(schema?.properties ?? {}).sort()).toEqual([
+      'height',
+      'screen',
+      'taskId',
+      'width',
+    ]);
+  });
+
   it('gives a lane session the lane tools, never the Shape tools', async () => {
     const client = await connect(laneToken());
     const { tools } = await client.listTools();
@@ -157,6 +196,7 @@ describe('a Shape session’s tool set', () => {
     expect(names).toContain('commit');
     expect(names).not.toContain('propose_plan');
     expect(names).not.toContain('note_heard');
+    expect(names).not.toContain('see_screen');
   });
 });
 

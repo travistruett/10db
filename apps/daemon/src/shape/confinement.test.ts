@@ -2,7 +2,14 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { judgeShapeCall, type ShapeAccess, type ShapeCall } from './confinement';
+import {
+  judgeShapeCall,
+  RESEARCH_QUERY_LIMIT,
+  RESEARCH_QUESTION_LIMIT,
+  RESEARCH_URL_LIMIT,
+  type ShapeAccess,
+  type ShapeCall,
+} from './confinement';
 
 // Shape spec §5.2: read-only comes from the tool lists and the hook. Every row here is a call a
 // Shape session (or one of its reviewers) must not make.
@@ -142,6 +149,140 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     () =>
       call('Read', { file_path: path('outside/notes.txt') }, { agentId: 'a', agentType: 'scope' }),
   ],
+  // Research (§5.2): only the researcher touches the network, and it reads nothing.
+  ...(['scope', 'engineering', 'rehearsal', 'general-purpose'] as const).flatMap((agentType) => [
+    [
+      `a WebSearch from the ${agentType} agent`,
+      () => call('WebSearch', { query: 'x' }, { agentId: 'a', agentType }),
+    ] as const,
+    [
+      `a WebFetch from the ${agentType} agent`,
+      () => call('WebFetch', { url: 'https://example.com/' }, { agentId: 'a', agentType }),
+    ] as const,
+  ]),
+  [
+    'a WebSearch from a subagent of no type',
+    () => call('WebSearch', { query: 'x' }, { agentId: 'a' }),
+  ],
+  ...(
+    [
+      ['a Read of a checkout file', 'Read', () => ({ file_path: path('checkout/src/a.ts') })],
+      ['a Read of a dropped file', 'Read', () => ({ file_path: path('files/brief.md') })],
+      [
+        'a Grep of a checkout directory',
+        'Grep',
+        () => ({ pattern: 'a', path: path('checkout/src') }),
+      ],
+      ['a Grep of the files directory', 'Grep', () => ({ pattern: 'a', path: path('files') })],
+      [
+        'a Glob of a checkout directory',
+        'Glob',
+        () => ({ pattern: '**/*.ts', path: path('checkout/src') }),
+      ],
+      ['a Glob of the files directory', 'Glob', () => ({ pattern: '*', path: path('files') })],
+    ] as const
+  ).map(
+    ([name, tool, input]) =>
+      [
+        `${name} from the researcher`,
+        () => call(tool, input(), { agentId: 'a', agentType: 'researcher' }),
+      ] as const,
+  ),
+  [
+    'a Bash call from the researcher',
+    () => call('Bash', { command: 'curl x' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'an Agent launched by the researcher',
+    () =>
+      call(
+        'Agent',
+        { subagent_type: 'researcher', prompt: 'x' },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
+  ],
+  [
+    'report_finding from the researcher',
+    () => call('mcp__10db__report_finding', {}, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'propose_plan from the researcher',
+    () => call('mcp__10db__propose_plan', {}, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'see_screen from the researcher',
+    () =>
+      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'see_screen from a reviewer',
+    () =>
+      call('mcp__10db__see_screen', { screen: 'board' }, { agentId: 'a', agentType: 'rehearsal' }),
+  ],
+  [
+    'a browser tool of any kind',
+    () => call('mcp__playwright__browser_navigate', { url: 'http://127.0.0.1:1420' }),
+  ],
+  ['a click or a key into a screen', () => call('mcp__10db__click', { selector: 'button' })],
+  [
+    'find_records from the researcher',
+    () =>
+      call('mcp__10db__find_records', { query: 'x' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'an Agent for the researcher with a question over the limit',
+    () =>
+      call('Agent', {
+        subagent_type: 'researcher',
+        prompt: 'x'.repeat(RESEARCH_QUESTION_LIMIT + 1),
+      }),
+  ],
+  [
+    'an Agent for the researcher with no question',
+    () => call('Agent', { subagent_type: 'researcher' }),
+  ],
+  ...(
+    [
+      ['a page over http', 'http://example.com/'],
+      ['a file URL', 'file:///etc/passwd'],
+      ['a URL with a login', 'https://user:pw@example.com/'],
+      ['a URL that is not one', 'not a url'],
+      ['localhost', 'https://localhost/'],
+      ['a name under localhost', 'https://app.localhost/'],
+      ['a loopback address', 'https://127.0.0.1/'],
+      ['a loopback address in decimal', 'https://2130706433/'],
+      ['a private address', 'https://192.168.1.1/'],
+      ['an IPv6 address', 'https://[::1]/'],
+      ['a name with one label', 'https://intranet/'],
+      ['a .local host', 'https://printer.local/'],
+      ['a .internal host', 'https://metadata.google.internal/'],
+      ['a port other than 443', 'https://example.com:8443/'],
+      ['a URL over the limit', `https://example.com/${'a'.repeat(RESEARCH_URL_LIMIT)}`],
+    ] as const
+  ).map(
+    ([name, url]) =>
+      [
+        `the researcher’s WebFetch of ${name}`,
+        () => call('WebFetch', { url }, { agentId: 'a', agentType: 'researcher' }),
+      ] as const,
+  ),
+  [
+    'the researcher’s WebFetch with no url',
+    () => call('WebFetch', {}, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'the researcher’s WebSearch with no query',
+    () => call('WebSearch', { query: '  ' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'the researcher’s WebSearch of a query over the limit',
+    () =>
+      call(
+        'WebSearch',
+        { query: 'x'.repeat(RESEARCH_QUERY_LIMIT + 1) },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
+  ],
 ];
 
 const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
@@ -164,10 +305,42 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
   ['propose_plan', () => call('mcp__10db__propose_plan', {})],
   ['similar_tasks', () => call('mcp__10db__similar_tasks', { query: 'x' })],
   ['find_records', () => call('mcp__10db__find_records', { query: 'x' })],
+  ['see_screen', () => call('mcp__10db__see_screen', { screen: 'board' })],
   [
     'a reviewer’s Read inside the checkout',
     () =>
       call('Read', { file_path: path('checkout/src/a.ts') }, { agentId: 'a', agentType: 'scope' }),
+  ],
+  [
+    'an Agent for the researcher',
+    () => call('Agent', { subagent_type: 'researcher', prompt: 'How does Vega-Lite handle ties?' }),
+  ],
+  [
+    'the researcher’s WebSearch',
+    () =>
+      call(
+        'WebSearch',
+        { query: 'vega-lite stack ties', allowed_domains: ['vega.github.io'] },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
+  ],
+  [
+    'the researcher’s WebFetch of a public page',
+    () =>
+      call(
+        'WebFetch',
+        { url: 'https://vega.github.io/vega-lite/docs/stack.html', prompt: 'ties' },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
+  ],
+  [
+    'the researcher’s WebFetch with the port 443 named',
+    () =>
+      call(
+        'WebFetch',
+        { url: 'https://example.com:443/a?b=c#d' },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
   ],
 ];
 
@@ -202,6 +375,25 @@ describe('judgeShapeCall', () => {
   it('never answers ask, so nothing reaches the broker or raises a card', () => {
     for (const [, make] of [...REFUSED, ...ALLOWED])
       expect(judgeShapeCall(make(), access).decision).not.toBe('ask');
+  });
+
+  it('says why the main session may not search or fetch, in words the conversation can show', () => {
+    const verdict = judgeShapeCall(call('WebSearch', { query: 'x' }), access);
+    expect(verdict).toMatchObject({ decision: 'deny' });
+    expect('reason' in verdict && verdict.reason).toMatch(/researcher/i);
+  });
+
+  it('says why the researcher may not read, naming that it holds no project files', () => {
+    const verdict = judgeShapeCall(
+      call(
+        'Read',
+        { file_path: path('checkout/src/a.ts') },
+        { agentId: 'a', agentType: 'researcher' },
+      ),
+      access,
+    );
+    expect(verdict).toMatchObject({ decision: 'deny' });
+    expect('reason' in verdict && verdict.reason).toMatch(/researcher/i);
   });
 
   it('says why in words the conversation can show', () => {

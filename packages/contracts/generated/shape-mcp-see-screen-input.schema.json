@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "screen": {
+      "type": "string",
+      "enum": [
+        "factory",
+        "board",
+        "inbox",
+        "task",
+        "plan"
+      ]
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "width": {
+      "default": 1200,
+      "type": "integer",
+      "minimum": 480,
+      "maximum": 1600
+    },
+    "height": {
+      "default": 900,
+      "type": "integer",
+      "minimum": 400,
+      "maximum": 2000
+    }
+  },
+  "required": [
+    "screen"
+  ]
+}
