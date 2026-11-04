@@ -279,6 +279,20 @@ describe('a lane Bash call made only of read-only commands', () => {
     });
   });
 
+  it('is not settled for a single-dash word over 256 characters, which is not split into paths', () => {
+    // Short path parts and a last part that is a name, so no tail of the word fails on its own: a part
+    // over 255 characters has no real path, and a tail of just `/` holds /dev.
+    const word = (length: number): string => `-${'a/'.repeat(127)}${'a'.repeat(length - 255)}`;
+    expect(word(256)).toHaveLength(256);
+    expect('settled' in pre(`grep ${word(256)} x a`)).toBe(true);
+    expect('settled' in pre(`grep ${word(257)} x a`)).toBe(false);
+  });
+
+  it('is not settled for ps with a value holding an e, as `-o pid,etime` does', () => {
+    expect(laneReadOnlyWords('ps -o pid,etime')).toBeNull();
+    expect('settled' in pre('ps -o pid,etime')).toBe(false);
+  });
+
   it('is not settled after a cd, which moves what a relative path means', () => {
     expect('settled' in pre('cd secrets && cat .env')).toBe(false);
   });
