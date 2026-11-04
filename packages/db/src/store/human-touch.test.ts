@@ -10,7 +10,7 @@ import {
   type ProjectId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { insertBatch, transitionBatch } from './batches';
 import { humanTouchDays } from './human-touch';
 import { insertInboxItem, updateInboxItem } from './inbox';
@@ -296,5 +296,41 @@ describe('humanTouchDays', () => {
     store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Failed }));
 
     expect(failedMinutesAtNoon(project.id)).toBe(660);
+  });
+
+  it('reads the event log through an index, never a full scan', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: B.Open }));
+    failAtOne(project.id, batch.id);
+    at('2026-11-03T12:00:00.000Z');
+
+    const client = store.db.$client;
+    const prepare = client.prepare.bind(client);
+    const eventQueries: string[] = [];
+    const spy = vi.spyOn(client, 'prepare').mockImplementation((sql: string) => {
+      if (/from "events"/i.test(sql)) eventQueries.push(sql);
+      return prepare(sql);
+    });
+    humanTouchDays(store.db, project.id, new Date(nowMs));
+    spy.mockRestore();
+
+    // Card close, workstream state and task/batch end, the first two once for waiting and once for failed.
+    expect(eventQueries.length).toBeGreaterThanOrEqual(5);
+    for (const sql of eventQueries) {
+      const placeholders = Array.from({ length: sql.split('?').length - 1 }, () => 'x');
+      const plan = client
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...placeholders)
+        .map((row) => (row as { detail: string }).detail);
+      const events = plan.filter((detail) => /\bevents\b/.test(detail));
+      expect(events.length).toBeGreaterThan(0);
+      for (const detail of events) {
+        expect(detail).toContain('USING INDEX events_entity_idx');
+        expect(detail).not.toMatch(/^SCAN/);
+      }
+    }
   });
 });

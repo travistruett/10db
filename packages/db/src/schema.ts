@@ -829,14 +829,19 @@ export const deviations = sqliteTable('deviations', {
   updatedAt: updatedAt(),
 });
 
-export const events = sqliteTable('events', {
-  seq: integer('seq').primaryKey({ autoIncrement: true }),
-  type: text('type').$type<EventType>().notNull(),
-  entityType: text('entity_type').notNull(),
-  entityId: text('entity_id').notNull(),
-  data: text('data', { mode: 'json' }).$type<Record<string, Json>>().notNull(),
-  at: text('at').notNull(),
-});
+export const events = sqliteTable(
+  'events',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    type: text('type').$type<EventType>().notNull(),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    data: text('data', { mode: 'json' }).$type<Record<string, Json>>().notNull(),
+    at: text('at').notNull(),
+  },
+  // Per-entity lookups of the log (human touch, lane times) filter on all three, in this order.
+  (t) => [index('events_entity_idx').on(t.entityType, t.entityId, t.type)],
+);
 
 /** The builder's verdict on one repo MCP server config, per project. A changed config has a new hash and no verdict. */
 export const mcpServerApprovals = sqliteTable(

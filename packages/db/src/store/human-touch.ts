@@ -181,20 +181,38 @@ function retryEnds(db: DbReader, ids: readonly WorkstreamId[]): Map<string, numb
     .from(schema.workstreams)
     .where(inArray(schema.workstreams.id, [...ids]))
     .all();
-  const events = db
-    .select({ entityId: schema.events.entityId, data: schema.events.data, at: schema.events.at })
-    .from(schema.events)
-    .where(
-      and(
-        inArray(schema.events.type, [EventType.TaskChanged, EventType.BatchUpdated]),
-        inArray(
-          schema.events.entityId,
-          rows.flatMap((r) => (r.batchId === null ? [r.taskId] : [r.taskId, r.batchId])),
-        ),
-      ),
-    )
-    .orderBy(asc(schema.events.seq))
-    .all();
+  // One lookup per entity type, so each is served by the (entity_type, entity_id, type) index.
+  const eventsOf = (entityType: string, type: EventType, entityIds: readonly string[]) =>
+    entityIds.length === 0
+      ? []
+      : db
+          .select({
+            entityId: schema.events.entityId,
+            data: schema.events.data,
+            at: schema.events.at,
+          })
+          .from(schema.events)
+          .where(
+            and(
+              eq(schema.events.entityType, entityType),
+              eq(schema.events.type, type),
+              inArray(schema.events.entityId, [...entityIds]),
+            ),
+          )
+          .orderBy(asc(schema.events.seq))
+          .all();
+  const events = [
+    ...eventsOf(
+      'task',
+      EventType.TaskChanged,
+      rows.map((r) => r.taskId),
+    ),
+    ...eventsOf(
+      'batch',
+      EventType.BatchUpdated,
+      rows.flatMap((r) => (r.batchId === null ? [] : [r.batchId])),
+    ),
+  ];
   const endedAt = new Map<string, number>();
   for (const event of events) {
     const ended =

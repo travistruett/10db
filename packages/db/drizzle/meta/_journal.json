@@ -295,6 +295,13 @@
       "when": 1793762809702,
       "tag": "0041_redundant_lorna_dane",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1793771302938,
+      "tag": "0042_solid_sasquatch",
+      "breakpoints": true
     }
   ]
 }

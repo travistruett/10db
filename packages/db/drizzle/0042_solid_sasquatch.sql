@@ -1,0 +1,1 @@
+CREATE INDEX `events_entity_idx` ON `events` (`entity_type`,`entity_id`,`type`);
