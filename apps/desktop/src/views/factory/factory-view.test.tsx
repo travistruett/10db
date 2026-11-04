@@ -1282,7 +1282,7 @@ function selfUpdateStatus(over: Partial<SelfUpdateStatusDto>): SelfUpdateStatusD
     waitingSince: '2026-11-03T12:00:00.000Z',
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0 },
+    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
     blocker: null,
     ...over,
   });
@@ -1326,7 +1326,7 @@ describe('FactoryView waiting update', () => {
       selfUpdate({
         draining: true,
         drainingSince: '2026-11-03T12:15:00.000Z',
-        midSession: { working: 2, waitingOnCard: 1 },
+        midSession: { working: 2, waitingOnCard: 1, shapes: [] },
       }),
     );
     renderApp('/factory');
@@ -1334,6 +1334,26 @@ describe('FactoryView waiting update', () => {
     const note = await screen.findByRole('status', { name: 'Update draining the factory' });
     expect(note.textContent).toMatch(/waiting for 2 running steps to finish/);
     expect(note.textContent).toMatch(/Lanes waiting on a card \(1\) do not hold it/);
+  });
+
+  it('names the shaping conversation that alone keeps lanes paused', async () => {
+    serve(
+      selfUpdate({
+        draining: true,
+        drainingSince: '2026-11-03T12:15:00.000Z',
+        midSession: {
+          working: 1,
+          waitingOnCard: 0,
+          shapes: [{ id: mintId('Shape'), title: 'Denser board' }],
+        },
+      }),
+    );
+    renderApp('/factory');
+
+    const note = await screen.findByRole('status', { name: 'Update draining the factory' });
+    expect(note.textContent).toMatch(/lanes are paused/i);
+    expect(note.textContent).toMatch(/shaping conversation “Denser board”/);
+    expect(note.textContent).toMatch(/No lane is running/);
   });
 
   it('says nothing is left running when a drain waits for nothing', async () => {
@@ -1345,7 +1365,7 @@ describe('FactoryView waiting update', () => {
   });
 
   it('names what holds an update that waits, a lane waiting on a card included', async () => {
-    serve(selfUpdate({ midSession: { working: 1, waitingOnCard: 2 } }));
+    serve(selfUpdate({ midSession: { working: 1, waitingOnCard: 2, shapes: [] } }));
     renderApp('/factory');
 
     const note = await screen.findByRole('status', { name: 'Update waiting' });

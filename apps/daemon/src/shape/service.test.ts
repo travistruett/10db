@@ -171,6 +171,29 @@ describe('a message', () => {
     expect(service.turnsInProgress()).toBe(0);
   });
 
+  it('names the conversations whose turn is running, and not one that waits for a drain', async () => {
+    const first = gate();
+    adapter.shapeBehaviour = async () => {
+      await first.wait;
+      return { text: 'reply' };
+    };
+    expect(service.runningTurns()).toEqual([]);
+    service.send(shapeId, 'Make the board denser.');
+    await tick();
+    expect(service.runningTurns()).toEqual([{ id: shapeId, title: 'Board polish' }]);
+    first.open();
+    await service.settled(shapeId);
+    expect(service.runningTurns()).toEqual([]);
+    // A turn held by a drain has begun nothing: the update need not wait for it.
+    drain.begin(new Date(0));
+    service.send(shapeId, 'During the drain.');
+    await tick();
+    expect(service.turnsInProgress()).toBe(1);
+    expect(service.runningTurns()).toEqual([]);
+    drain.end();
+    await service.settled(shapeId);
+  });
+
   it('starts no session while a drain holds, parks the message so the install need not wait for it, and starts it once the drain ends', async () => {
     drain.begin(new Date(0));
     service.send(shapeId, 'During the drain.');

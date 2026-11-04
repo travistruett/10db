@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ShapeId } from './ids';
 
 /** A full git commit SHA, as GitHub and `git rev-parse` print it. */
 export const CommitSha = z
@@ -60,10 +61,13 @@ export const SelfUpdateStatusDto = z.object({
    * and shaping turns. `waitingOnCard` is lanes parked on an unanswered permission or ask card with
    * a session still live: they hold the update only until the drain begins, because a restart ends
    * the session and recovery parks the lane on its card again, to resume with the answer.
+   * `shapes` names the shaping conversations whose turn is under way and counted in `working`: a
+   * builder with no lane running can then tell a conversation is what the update waits for.
    */
   midSession: z.object({
     working: z.number().int().min(0),
     waitingOnCard: z.number().int().min(0),
+    shapes: z.array(z.object({ id: ShapeId, title: z.string() })),
   }),
   /**
    * Why this app will not update itself, whatever the switch says; null when nothing stops it. The

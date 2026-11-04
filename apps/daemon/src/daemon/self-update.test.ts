@@ -437,7 +437,11 @@ describe('self-update in the daemon', () => {
 
       it('says it holds the update, as a lane waiting on a card and not as work running', async () => {
         const { api } = await waitingOnCard();
-        expect((await selfUpdate(api)).midSession).toEqual({ working: 0, waitingOnCard: 1 });
+        expect((await selfUpdate(api)).midSession).toEqual({
+          working: 0,
+          waitingOnCard: 1,
+          shapes: [],
+        });
       });
 
       it('does not hold the install once the factory drains: the card stays open for the answer', async () => {
@@ -749,6 +753,34 @@ describe('self-update in the daemon', () => {
       expect(after.messages.at(-1)?.body).toContain('One more thing.');
       expect(adapter.shapeSessions).toHaveLength(0);
     });
+  });
+
+  it('names the conversation whose turn is all a drain waits for, with no lane running', async () => {
+    head = RUNNING;
+    const adapter = new FakeAdapter({});
+    let release: () => void = () => undefined;
+    adapter.shapeBehaviour = async () => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return { text: 'Done.' };
+    };
+    const api = await start({ adapter });
+    await api.put('/settings/self-update/wait', SelfUpdateStatusDto, { minutes: 0 });
+    const project = await addProject(api);
+    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Denser board.' });
+    await waitFor(() => adapter.shapeSessions.length === 1);
+    head = NEW;
+    await waitForAsync(async () => (await selfUpdate(api)).draining);
+    const { midSession } = await selfUpdate(api);
+    expect(midSession).toEqual({
+      working: 1,
+      waitingOnCard: 0,
+      shapes: [{ id: shape.id, title: 'Denser board.' }],
+    });
+    release();
+    await waitFor(() => applied.length > 0 && applied);
   });
 
   it('lets work go on and raises one card when starting the install throws', async () => {

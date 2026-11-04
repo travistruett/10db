@@ -12,6 +12,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
+  type ShapeId,
   type SystemCheckDto,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -1119,7 +1120,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // the quit tells the builder it went unanswered); one running finishes. A lane waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
   // its session and recovery parks it on its card again, so it must not hold the install, and every
   // lane behind it, for as long as the builder leaves the card.
-  const midSessionWaits = (): { working: number; waitingOnCard: number } => {
+  // `shapes` names the conversations among `working`, so a drain only they hold can say so.
+  const midSessionWaits = (): {
+    working: number;
+    waitingOnCard: number;
+    shapes: { id: ShapeId; title: string }[];
+  } => {
     const waitingOnCard = countWaitingOnCard(state.db);
     const working = Math.max(
       0,
@@ -1127,7 +1133,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         updateDrain.parked() -
         installHold.parked(),
     );
-    return { working, waitingOnCard };
+    return { working, waitingOnCard, shapes: shape.runningTurns() };
   };
   const midSessionCount = (): number => {
     const { working, waitingOnCard } = midSessionWaits();
@@ -1178,6 +1184,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         outcome: installer.outcome,
         rollback: installer.rollback,
         midSession: midSessionCount,
+        shapeTurns: () => shape.runningTurns(),
         waitLimitMs: () => selfUpdateWaitMinutes(state.db) * 60_000,
         drain: {
           begin: (since) => {

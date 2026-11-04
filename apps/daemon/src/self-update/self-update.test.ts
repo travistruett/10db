@@ -1,4 +1,4 @@
-import type { ProjectId } from '@10db/contracts';
+import { InboxState, mintId, type ProjectId, type ShapeId } from '@10db/contracts';
 import { createTestStore, getAppSetting, listInbox, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
@@ -10,6 +10,7 @@ import {
   createSelfUpdate,
   SELF_UPDATE_APPLYING_KEY,
   SELF_UPDATE_FAILED_KEY,
+  SHAPE_HOLD_ALERT_MS,
   type ApplyResult,
   type ScriptStatus,
   type SelfUpdate,
@@ -58,6 +59,8 @@ interface World {
   /** Settles when apply answers: until then the install is starting. */
   applyAnswers: Promise<void>;
   busy: number;
+  /** The shaping conversations whose turn runs: part of `busy`, named. */
+  shapes: { id: ShapeId; title: string }[];
   /** How long a staged build waits for an idle moment before the factory drains for it. */
   waitLimitMs: number;
   /** When the drain began, as the update told the factory; null while it does not drain. */
@@ -139,6 +142,7 @@ function make(
       return world.applyAnswers.then(() => ({ ...result, ended }));
     },
     midSession: () => world.busy,
+    shapeTurns: () => world.shapes,
     waitLimitMs: () => world.waitLimitMs,
     drain: {
       begin: (since) => {
@@ -194,6 +198,7 @@ beforeEach(() => {
     apply: () => ({ ok: true }),
     applyAnswers: Promise.resolve(),
     busy: 0,
+    shapes: [],
     waitLimitMs: WAIT_LIMIT_MS,
     drainedSince: null,
     busyAfterPause: null,
@@ -521,6 +526,104 @@ describe('tick', () => {
     expect(cards()).toEqual([]);
     world.head = NEW;
     expect(await update.tick()).toBe('applying');
+  });
+});
+
+describe('a drain that only shaping conversations hold', () => {
+  const DENSER = { id: mintId('Shape'), title: 'Denser board' };
+  const shapeCards = () =>
+    listInbox(state.db, {}).filter((item) => item.title.startsWith('A shaping conversation'));
+
+  /** Drains for `busy` turns of conversations, with no lane or gate running. */
+  async function drainingForShapes(...shapes: { id: ShapeId; title: string }[]) {
+    world.busy = shapes.length;
+    world.shapes = shapes;
+    world.waitLimitMs = 0;
+    const update = make();
+    expect(await update.tick()).toBe('draining');
+    return update;
+  }
+
+  it('raises no card at first: a turn is expected to end on its own', async () => {
+    await (await drainingForShapes(DENSER)).tick();
+    expect(shapeCards()).toEqual([]);
+  });
+
+  it('tells the builder, once, which conversation keeps lanes paused past the limit', async () => {
+    const update = await drainingForShapes(DENSER);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    const [card, ...rest] = shapeCards();
+    expect(rest).toEqual([]);
+    expect(card?.title).toBe('A shaping conversation is holding the update, and lanes are paused');
+    expect(card?.body).toContain('“Denser board”');
+    expect(card?.body).toContain('Stop');
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards()).toHaveLength(1);
+  });
+
+  it('names every conversation that holds it', async () => {
+    const update = await drainingForShapes(DENSER, { id: mintId('Shape'), title: 'Login flow' });
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards()[0]?.body).toMatch(/“Denser board”.*“Login flow”/);
+  });
+
+  it('raises none while a lane or gate also holds the drain', async () => {
+    const update = await drainingForShapes(DENSER);
+    world.busy = 2;
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards()).toEqual([]);
+  });
+
+  it('does not count the time a lane held it before the conversation was the only holder', async () => {
+    world.busy = 2;
+    world.shapes = [DENSER];
+    world.waitLimitMs = 0;
+    const update = make();
+    await update.tick();
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards()).toEqual([]);
+    world.busy = 1;
+    await update.tick();
+    expect(shapeCards()).toEqual([]);
+  });
+
+  it('closes the card once the turn ends and the install can go on', async () => {
+    const update = await drainingForShapes(DENSER);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards()).toHaveLength(1);
+    world.busy = 0;
+    world.shapes = [];
+    expect(await update.tick()).toBe('applying');
+    expect(shapeCards()[0]?.state).toBe(InboxState.Resolved);
+  });
+
+  it('closes the card when the drain ends for another reason', async () => {
+    const update = await drainingForShapes(DENSER);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    await update.turnOff();
+    expect(shapeCards()[0]?.state).toBe(InboxState.Resolved);
+  });
+
+  it('raises a card again for a later hold', async () => {
+    const update = await drainingForShapes(DENSER);
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    world.enabled = false;
+    await update.tick();
+    world.enabled = true;
+    await update.tick();
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    clock.advance(SHAPE_HOLD_ALERT_MS);
+    await update.tick();
+    expect(shapeCards().filter((item) => item.state === InboxState.Open)).toHaveLength(1);
   });
 });
 

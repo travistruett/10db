@@ -680,6 +680,7 @@ describe('pull-request delivery', () => {
         },
         // The daemon's own wiring: the real count of lanes, and the real scheduler.
         midSession: () => countMidSession(store.db),
+        shapeTurns: () => [],
         waitLimitMs: () => 15 * 60_000,
         drain: { begin: () => undefined, end: () => undefined },
         pause: async () => {

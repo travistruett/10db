@@ -258,6 +258,12 @@ export interface ShapeService {
    * quit now would cut the answer off. A conversation counts once, however many turns it has queued.
    */
   turnsInProgress(): number;
+  /**
+   * The conversations whose turn has begun, by name: those `turnsInProgress` counts minus the ones
+   * a drain or the install holds back before they started anything. An update waits for exactly
+   * these, so it can say which conversation keeps it waiting.
+   */
+  runningTurns(): { id: ShapeId; title: string }[];
   /** Stops every session, and tells each conversation which queued turns will not run. */
   close(): Promise<void>;
 }
@@ -1198,6 +1204,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       for (const rt of runtimes.values())
         if (rt.current !== null || rt.queue.length > 0 || rt.parked) count += 1;
       return count;
+    },
+
+    runningTurns() {
+      const running: { id: ShapeId; title: string }[] = [];
+      for (const [shapeId, rt] of runtimes)
+        if ((rt.current !== null || rt.queue.length > 0) && !rt.parked)
+          running.push({ id: shapeId, title: getShape(state.db, shapeId).title });
+      return running;
     },
 
     async close() {

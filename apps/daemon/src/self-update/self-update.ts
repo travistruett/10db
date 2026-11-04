@@ -1,10 +1,17 @@
-import type { ProjectId, SelfUpdateBlockerDto } from '@10db/contracts';
+import type { InboxItemId, ProjectId, SelfUpdateBlockerDto, ShapeId } from '@10db/contracts';
 import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { SELF_UPDATE_SWITCH } from './blocker';
+
+/**
+ * How long a drain may be held by shaping conversations alone before the builder is told. A turn
+ * is Claude answering, which takes minutes at most; one that goes on past this is hung, or a run of
+ * turns that keeps the update waiting while every lane is paused.
+ */
+export const SHAPE_HOLD_ALERT_MS = 5 * 60_000;
 
 /** The commit an install that is under way was fetched for, and the head of main it was chosen for. */
 export const SELF_UPDATE_APPLYING_KEY = 'self_update.applying';
@@ -125,6 +132,11 @@ export interface SelfUpdateDeps {
    * Work that only waits is not counted.
    */
   midSession(): number;
+  /**
+   * The shaping conversations whose turn is under way, by name: the part of `midSession` that is no
+   * lane, gate or job. A drain that only these hold has no lane to blame, so the builder is told.
+   */
+  shapeTurns(): readonly { readonly id: ShapeId; readonly title: string }[];
   /** How long a staged build waits for an idle moment before the factory drains for it. */
   waitLimitMs(): number;
   /**
@@ -301,7 +313,57 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     deps.drain.begin(drainingSince);
   }
 
+  /**
+   * Since when only shaping conversations have held the drain, and the card that told the builder
+   * once they had for too long. Null while a lane, a gate or a job holds it too, or nothing does.
+   */
+  let shapeHold: { readonly since: Date; cardId: InboxItemId | null } | null = null;
+
+  function releaseShapeHold(reason: string): void {
+    if (shapeHold?.cardId) inbox.resolve(shapeHold.cardId, reason);
+    shapeHold = null;
+  }
+
+  /**
+   * A drain pauses every lane, so when the only thing it waits for is a shaping conversation's turn,
+   * Settings and the factory note name it, and past `SHAPE_HOLD_ALERT_MS` one card does too: the
+   * conversation is no lane, so nothing else would say why lanes are paused.
+   */
+  function watchShapeHold(): void {
+    const turns = deps.shapeTurns();
+    if (drainingSince === null || turns.length === 0 || turns.length < deps.midSession()) {
+      releaseShapeHold('A lane, a gate or a job holds the update now, or nothing does.');
+      return;
+    }
+    const now = deps.clock.now();
+    shapeHold ??= { since: now, cardId: null };
+    if (
+      shapeHold.cardId !== null ||
+      now.getTime() - shapeHold.since.getTime() < SHAPE_HOLD_ALERT_MS
+    )
+      return;
+    const names = turns.map((turn) => `“${turn.title}”`).join(', ');
+    logger.warn(
+      { shapes: turns.map((turn) => turn.id), since: shapeHold.since.toISOString() },
+      'only shaping conversations keep the update waiting, and lanes stay paused',
+    );
+    const projectId = deps.cardProject();
+    // A card needs a project to sit under; Settings and the factory note still name the conversation.
+    if (projectId === null) return;
+    shapeHold.cardId = inbox.flag({
+      projectId,
+      workstreamId: null,
+      title: 'A shaping conversation is holding the update, and lanes are paused',
+      body: [
+        `An update to ${short(available ?? '')} is installed once nothing is mid-session, and 10db has started no lane since ${drainingSince.toISOString()} so that it can. No lane, gate or job is running: the only thing it waits for is a turn in ${names}.`,
+        'Claude may still be answering, or the session may be hung. Open the conversation and press Stop to end the turn. Lanes start again once it ends and the app has installed and restarted.',
+      ].join('\n\n'),
+      foldKey: 'self-update-shape-turn',
+    }).id;
+  }
+
   function endDrain(): void {
+    releaseShapeHold('The update no longer waits, so lanes start again.');
     if (drainingSince === null) return;
     drainingSince = null;
     logger.info({}, 'the update no longer waits: lanes start again');
@@ -529,6 +591,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return TickResult.Off;
     }
     if (deps.midSession() > 0) return waitOrDrain();
+    releaseShapeHold('Nothing is mid-session now, so the update installs.');
     return install(runningCommit, { head: build.head, commit: build.commit }, build);
   }
 
@@ -540,6 +603,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
     const waited = waitingSince === null ? 0 : deps.clock.now().getTime() - waitingSince.getTime();
     if (drainingSince === null && !forced && waited < deps.waitLimitMs()) return TickResult.Busy;
     startDrain();
+    watchShapeHold();
     return TickResult.Draining;
   }
 
