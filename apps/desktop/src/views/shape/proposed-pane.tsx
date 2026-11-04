@@ -90,19 +90,36 @@ export function ProposedPane({
       : undefined;
   const unread = view?.rehearsals.some((r) => !r.rehearsed) ?? false;
 
-  const jump = (section: SectionKey): void => {
+  const focusSection = (section: SectionKey): boolean => {
     const target = listRef.current?.querySelector<HTMLElement>(`[data-section="${section}"]`);
     target?.focus();
     target?.scrollIntoView({ block: 'nearest' });
+    return target != null;
   };
+  // The filter can hide what a count points at (it always hides converted rows): the jump lifts
+  // it, and lands once the full list has rendered. A section the filter shows leaves it on.
+  const jumpAfterFilter = useRef<SectionKey | null>(null);
+  const jump = (section: SectionKey): void => {
+    if (focusSection(section) || !filtering) return;
+    jumpAfterFilter.current = section;
+    setChangesOnly(false);
+  };
+  useEffect(() => {
+    if (filtering || jumpAfterFilter.current === null) return;
+    focusSection(jumpAfterFilter.current);
+    jumpAfterFilter.current = null;
+  }, [filtering]);
 
   // The rows exist once the view has loaded; until then the request waits.
   const ready = view !== undefined && !loading && error === null;
   useEffect(() => {
     if (jumpRequest === null || !ready) return;
+    // Only the rendered list can say whether the filter hides the section, so a request that it
+    // does lifts the filter from here: one extra render, once per request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     jump(jumpRequest.section);
     onJumped?.();
-    // `jump` reads only the list ref; a request is handled once, by its nonce.
+    // A request is handled once, by its nonce.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jumpRequest?.nonce, ready]);
 

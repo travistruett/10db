@@ -444,6 +444,60 @@ describe('Shape: the Proposed sidebar', () => {
     );
   });
 
+  describe('with the round filter on', () => {
+    const done = {
+      state: 'accepted' as const,
+      converted: { goalId: null, taskIds: [mintId('Task')], decisionId: null },
+    };
+    const view = proposed(
+      [
+        looseTaskProposal('scrollbars', { title: 'Thin board scrollbars', ...done }),
+        looseTaskProposal('tabs', { title: 'Calmer tabs', ...done }),
+        looseTaskProposal('older', { title: 'Older loose task' }),
+        goalProposal('brainstorm', ['one'], { title: 'Brainstorm chat', round: 2, mark: 'new' }),
+      ],
+      { round: 2 },
+    );
+
+    /** Opens the view and presses the filter, so only the goal is listed. */
+    async function filtered() {
+      serve(...conversations(view));
+      open(view);
+      const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+      const summary = await within(sidebar).findByRole('group', { name: 'Summary' });
+      const filter = within(sidebar).getByRole('button', { name: '1 change in round 2' });
+      fireEvent.click(filter);
+      expect(filter.getAttribute('aria-pressed')).toBe('true');
+      expect(within(sidebar).queryByRole('button', { name: /^Calmer tabs/ })).toBeNull();
+      return { sidebar, summary, filter };
+    }
+
+    it('lifts the filter to focus a converted row, which the filter always hides', async () => {
+      const { sidebar, summary, filter } = await filtered();
+      fireEvent.click(within(summary).getByRole('button', { name: '2 converted' }));
+      expect(filter.getAttribute('aria-pressed')).toBe('false');
+      expect(focused(within(sidebar).getByRole('button', { name: /^Thin board scrollbars/ }))).toBe(
+        true,
+      );
+    });
+
+    it('lifts the filter to focus a pending row it hides', async () => {
+      const { sidebar, summary, filter } = await filtered();
+      fireEvent.click(within(summary).getByRole('button', { name: '1 loose' }));
+      expect(filter.getAttribute('aria-pressed')).toBe('false');
+      expect(focused(within(sidebar).getByRole('button', { name: /^Older loose task/ }))).toBe(
+        true,
+      );
+    });
+
+    it('keeps the filter on when the count lands on a row it shows', async () => {
+      const { sidebar, summary, filter } = await filtered();
+      fireEvent.click(within(summary).getByRole('button', { name: '1 goal' }));
+      expect(filter.getAttribute('aria-pressed')).toBe('true');
+      expect(focused(within(sidebar).getByRole('button', { name: /^Brainstorm chat/ }))).toBe(true);
+    });
+  });
+
   it('shows Superseded rows under a collapsed Earlier', async () => {
     const view = proposed([
       looseTaskProposal('old', { title: 'Old idea', state: 'superseded' }),

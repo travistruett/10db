@@ -128,6 +128,33 @@ describe('Shape: the drawer layout', () => {
     expect(document.activeElement).toBe(first);
   });
 
+  it('lifts the round filter in an open drawer to focus a converted row', async () => {
+    const done = {
+      state: 'accepted' as const,
+      converted: { goalId: null, taskIds: [mintId('Task')], decisionId: null },
+    };
+    openNarrow(
+      shapeViewDto({
+        shape: { ...base, round: 2 },
+        messages: [shapeMessageDto(base.id)],
+        proposals: [
+          looseTaskProposal('density', { title: 'Compact card density', ...done }),
+          goalProposal('brainstorm', ['one'], { round: 2, mark: 'new' }),
+        ],
+      }),
+    );
+    const bar = await screen.findByRole('group', { name: 'Summary' });
+    fireEvent.click(within(bar).getByRole('button', { name: '1 goal' }));
+    const sidebar = await screen.findByRole('region', { name: 'Proposed' });
+    const filter = within(sidebar).getByRole('button', { name: '1 change in round 2' });
+    fireEvent.click(filter);
+    expect(filter.getAttribute('aria-pressed')).toBe('true');
+    fireEvent.click(within(bar).getByRole('button', { name: '1 converted' }));
+    expect(filter.getAttribute('aria-pressed')).toBe('false');
+    const row = within(sidebar).getByRole('button', { name: /^Compact card density/ });
+    expect(document.activeElement).toBe(row);
+  });
+
   it('opens at the top, with no jump left over, from the Proposed button', async () => {
     openNarrow(view);
     const bar = await screen.findByRole('group', { name: 'Summary' });
