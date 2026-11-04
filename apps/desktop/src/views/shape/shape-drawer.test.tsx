@@ -167,4 +167,37 @@ describe('Shape: the drawer layout', () => {
     const sidebar = await screen.findByRole('region', { name: 'Proposed' });
     expect(sidebar.contains(document.activeElement)).toBe(false);
   });
+
+  // The drawer is laid over the bar's right end, where the Proposed button is, so a mouse user
+  // needs a close control inside it.
+  it('closes from a Close button in the drawer and leaves focus on the Proposed button', async () => {
+    openNarrow(view);
+    const bar = await screen.findByRole('group', { name: 'Summary' });
+    fireEvent.click(within(bar).getByRole('button', { name: '2 loose' }));
+    await screen.findByRole('region', { name: 'Proposed' });
+    fireEvent.click(screen.getByRole('button', { name: 'Close Proposed' }));
+    expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
+  });
+
+  it('closes on Esc, wherever focus is, and leaves focus on the Proposed button', async () => {
+    openNarrow(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+    await screen.findByRole('region', { name: 'Proposed' });
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(screen.queryByRole('region', { name: 'Proposed' })).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Proposed' }));
+  });
+
+  it('leaves Esc to an open menu in the drawer', async () => {
+    openNarrow(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Proposed' }));
+    await screen.findByRole('region', { name: 'Proposed' });
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.append(menu);
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    menu.remove();
+    expect(screen.getByRole('region', { name: 'Proposed' })).toBeTruthy();
+  });
 });

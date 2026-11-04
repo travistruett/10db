@@ -1,6 +1,14 @@
-import { Box } from '@mantine/core';
+import { Box, CloseButton, Group } from '@mantine/core';
 import { useElementSize, useLocalStorage, useMergedRef } from '@mantine/hooks';
-import { useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent,
+  type ReactNode,
+} from 'react';
+import { escapeIsTaken } from './use-shape-keys';
 import {
   CHAT_MIN,
   DEFAULT_CHAT_SHARE,
@@ -29,13 +37,15 @@ export interface SplitPaneProps {
     readonly bar: ReactNode;
   };
   readonly drawerOpen: boolean;
+  /** Closes the drawer (its Close button, Esc); the owner puts focus back on its toggle. */
+  readonly onClose: () => void;
 }
 
 /**
  * The conversation beside the sidebar, split by a draggable divider that remembers its place. Under
  * 1100 px the sidebar is a drawer laid over the chat while `drawerOpen`.
  */
-export function SplitPane({ children, drawerOpen }: SplitPaneProps) {
+export function SplitPane({ children, drawerOpen, onClose }: SplitPaneProps) {
   const { ref: sizeRef, width } = useElementSize();
   const container = useRef<HTMLDivElement | null>(null);
   const ref = useMergedRef(sizeRef, container);
@@ -49,6 +59,26 @@ export function SplitPane({ children, drawerOpen }: SplitPaneProps) {
   const { chat, sidebar, bar } = children(layout);
   const dragging = useRef(false);
   const [chatPx, setChatPx] = useState<number | null>(null);
+
+  // Esc closes the open drawer from anywhere on the screen, ahead of "Esc stops the turn" (capture
+  // phase, default prevented), but leaves it to a modal, menu or open select.
+  const closing = layout.mode === 'drawer' && drawerOpen;
+  const latestClose = useRef(onClose);
+  useEffect(() => {
+    latestClose.current = onClose;
+  });
+  useEffect(() => {
+    if (!closing) return;
+    const onKeyDown = (event: globalThis.KeyboardEvent): void => {
+      if (event.key !== 'Escape' || escapeIsTaken(event)) return;
+      event.preventDefault();
+      latestClose.current();
+    };
+    document.addEventListener('keydown', onKeyDown, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+  }, [closing]);
 
   if (layout.mode === 'drawer') {
     return (
@@ -71,9 +101,15 @@ export function SplitPane({ children, drawerOpen }: SplitPaneProps) {
               background: 'var(--mantine-color-body)',
               borderLeft: '1px solid var(--mantine-color-default-border)',
               zIndex: 5,
+              display: 'flex',
+              flexDirection: 'column',
             }}
           >
-            {sidebar}
+            {/* The drawer covers the bar's Proposed button, so it carries its own close. */}
+            <Group justify="flex-end" px="xs" pt={6} style={{ flex: 'none' }}>
+              <CloseButton aria-label="Close Proposed" size="sm" onClick={onClose} />
+            </Group>
+            <Box style={{ flex: 1, minHeight: 0 }}>{sidebar}</Box>
           </Box>
         ) : null}
       </Box>

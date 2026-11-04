@@ -28,6 +28,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
   const query = useShapeView(shapeId);
   const view = query.data;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const toggle = useRef<HTMLButtonElement | null>(null);
   const [jump, setJump] = useState<{ section: SectionKey; nonce: number } | null>(null);
   const [why, setWhy] = useState<TranscriptProps['why']>(null);
   const error = query.isError ? query.error.message : null;
@@ -71,7 +72,15 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
 
   return (
     <>
-      <SplitPane drawerOpen={drawerOpen}>
+      <SplitPane
+        drawerOpen={drawerOpen}
+        onClose={() => {
+          // The drawer's own controls are about to unmount: focus goes to the button that opens it.
+          setDrawerOpen(false);
+          setJump(null);
+          toggle.current?.focus();
+        }}
+      >
         {(layout) => ({
           chat: (
             <ConversationPane
@@ -118,6 +127,7 @@ function Shape({ shapeId }: { readonly shapeId: ShapeId | null }) {
                 }}
               />
               <Button
+                ref={toggle}
                 variant="default"
                 size="xs"
                 aria-expanded={drawerOpen}

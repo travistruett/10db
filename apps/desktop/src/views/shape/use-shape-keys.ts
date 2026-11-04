@@ -12,7 +12,7 @@ export interface ShapeKeys {
  * True when Esc belongs to something open on top of the screen: a modal, a menu, or a select whose
  * list is showing. Closed ones are not in the page (or, for a select, not `aria-expanded`).
  */
-function escapeIsTaken(event: KeyboardEvent): boolean {
+export function escapeIsTaken(event: KeyboardEvent): boolean {
   return (
     event.defaultPrevented ||
     document.querySelector(
