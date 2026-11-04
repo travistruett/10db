@@ -253,17 +253,19 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           packageInstall: true,
         });
         // Appended once the run has ended, so what the log opened with is not lost to the stream.
-        if (reasons.length > 0) {
-          const note = reasons.map(
-            (reason) => `Started over: node_modules was removed first because ${reason}.`,
-          );
-          if (attempt > 1) note.push(`The first attempt's output: ${logPath}`);
+        // Every attempt after the first names the first one's log, whether or not a node_modules
+        // was there to remove: the first log holds the real cause.
+        const note = reasons.map(
+          (reason) => `Started over: node_modules was removed first because ${reason}.`,
+        );
+        reasons = [];
+        if (attempt > 1) note.push(`The first attempt's output: ${logPath}`);
+        if (note.length > 0) {
           try {
             appendFileSync(attemptLog, `\n${note.join('\n')}\n`);
           } catch {
             // The daemon log still has the reason.
           }
-          reasons = [];
         }
         if (result.aborted) return { kind: 'aborted' };
         if (result.exitCode !== 0 || result.timedOut)

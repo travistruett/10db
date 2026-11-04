@@ -354,6 +354,36 @@ describe('refreshing a worktree’s dependencies', () => {
       );
     });
 
+    it('points a failed retry’s log at the first attempt’s log when there was no node_modules to remove', async () => {
+      // A lockfile that names a dependency, so a copy with no node_modules is broken.
+      writeFileSync(
+        join(worktree, 'pnpm-lock.yaml'),
+        "lockfileVersion: '9.0'\nimporters:\n  .:\n    dependencies:\n      left-pad:\n        specifier: 1.0.0\n        version: 1.0.0\n",
+      );
+      // Fails every time and makes no node_modules, so the retry has no reason to give.
+      writeFileSync(
+        join(bin, 'pnpm'),
+        `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\necho "attempt $$"\necho ERR_PNPM_NO_MATCHING_VERSION\nexit 1\n`,
+      );
+      chmodSync(join(bin, 'pnpm'), 0o755);
+      const result = await dependencies().refresh({
+        batch,
+        project,
+        path: worktree,
+        signal,
+        seeded: false,
+      });
+      if (result.kind !== 'failed') throw new Error('not failed');
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
+      expect(existsSync(join(worktree, 'node_modules'))).toBe(false);
+      const text = readFileSync(result.logPath, 'utf8');
+      expect(text).not.toContain('Started over');
+      const named = /first attempt's output: (\S+)/.exec(text)?.[1];
+      expect(named).toBeDefined();
+      expect(named).not.toBe(result.logPath);
+      expect(readFileSync(named ?? '', 'utf8')).toContain('ERR_PNPM_NO_MATCHING_VERSION');
+    });
+
     it('reports the second failure when the fresh install fails too', async () => {
       fakePnpm();
       installedCopy('packageManager: pnpm@12.9.1\n');
