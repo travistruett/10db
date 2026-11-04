@@ -235,6 +235,14 @@ describe('a large dropped image', () => {
       { name: 'a tall JPEG', file: 'long.jpg', bytes: jpeg(1200, 12_000) },
       { name: 'a wide lossy WebP', file: 'wide.webp', bytes: webpLossy(9000, 600) },
       { name: 'an extended WebP', file: 'long.webp', bytes: webpExtended(800, 16_000) },
+      { name: 'a tall lossless WebP', file: 'long.webp', bytes: webpImage('lossless', 1200, 8001) },
+      { name: 'a wide lossless WebP', file: 'wide.webp', bytes: webpImage('lossless', 8001, 1200) },
+      // Both 14-bit fields at their largest: a mask or shift off by one would read these wrong.
+      {
+        name: 'a lossless WebP at 16384 px',
+        file: 'max.webp',
+        bytes: webpImage('lossless', 16_384, 16_384),
+      },
     ])('goes as a path to Read, not an image block: $name', async ({ file, bytes }) => {
       const stored = drop(file, bytes);
       const turn = await nextTurn('The whole page');
@@ -613,6 +621,20 @@ describe('a dropped image over 2000 px a side', () => {
       { mediaType: 'image/png', data: pngOfSize(2000, 2000).toString('base64') },
     ]);
     expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+  });
+
+  // A lossless WebP keeps both sizes, less one, in 14 bits each of one word: the likely form of a screenshot.
+  it('goes as a block at exactly 2000 px, and as a path at 2001, for a lossless WebP too', async () => {
+    drop('edge.webp', webpImage('lossless', 2000, 2000));
+    drop('wide.webp', webpImage('lossless', 2001, 100));
+    drop('tall.webp', webpImage('lossless', 100, 2001));
+    const turn = await nextTurn('Edges');
+    expect(turn.images).toEqual([
+      { mediaType: 'image/webp', data: webpImage('lossless', 2000, 2000).toString('base64') },
+    ]);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+    expect(turn.message).toMatch(/wide\.webp\) — too large to show/);
+    expect(turn.message).toMatch(/tall\.webp\) — too large to show/);
   });
 
   it('goes as a path when its size cannot be read, since a model would be sent it blind', async () => {
