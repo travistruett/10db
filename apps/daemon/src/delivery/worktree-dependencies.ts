@@ -12,7 +12,7 @@ import {
   checkInstall,
   describeBroken,
   madeByAnotherPnpm,
-  madeFromAnotherStore,
+  storeRecordProblem,
   PNPM_LOCKFILE,
   removeBrokenInstall,
 } from './install-health';
@@ -73,16 +73,26 @@ export type DependencyRefresh =
       readonly durationMs: number;
       /** The copy's `node_modules` was removed first, so whatever install scripts had built went with it. */
       readonly startedOver: boolean;
+      /** How many installs this call ran: 2 when a first one failed and left the copy broken. */
+      readonly installs: number;
+      /** Set by the retry after a failed install left the copy broken: what that install left unresolved. */
+      readonly leftBroken?: string;
     }
   | {
       readonly kind: 'failed';
       readonly exitCode: number;
       readonly timedOut: boolean;
+      /** How many installs this call ran: 0 when it found no trustworthy pnpm, 2 after a retry. */
+      readonly installs: number;
+      /** The copy's `node_modules` was removed, so the failed install started from nothing. */
+      readonly startedOver: boolean;
       /** The end of the install's output. */
       readonly tail: string;
       readonly logPath: string;
       /** The hosts the sandbox refused the install, lower case, each once: each gets a card. */
       readonly blockedHosts: readonly string[];
+      /** Set by the retry after a failed install left the copy broken: what that install left unresolved. */
+      readonly leftBroken?: string;
     }
   /** Shutdown stopped the install. */
   | { readonly kind: 'aborted' };
@@ -199,7 +209,16 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           "No trustworthy pnpm was found on the login shell's PATH: it must be a program outside the project's checkouts, not a script and not a version manager's shim.";
         mkdirSync(dirname(logPath), { recursive: true });
         writeFileSync(logPath, `${tail}\n`);
-        return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
+        return {
+          kind: 'failed',
+          exitCode: 127,
+          timedOut: false,
+          installs: 0,
+          startedOver: false,
+          tail,
+          logPath,
+          blockedHosts: [],
+        };
       }
       let startedOver = false;
       // Why node_modules was removed, written to the log of the install that follows (the daemon's
@@ -228,7 +247,10 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         if (asked === true) return 'the install before this one left the copy broken';
         if (madeByAnotherPnpm(path, version))
           return `its node_modules/.modules.yaml names ${recordedPnpm(path)}, not the daemon's pnpm@${version ?? '?'}`;
-        if (madeFromAnotherStore(path, store))
+        const storeProblem = storeRecordProblem(path, store);
+        if (storeProblem === 'unreadable')
+          return 'its node_modules/.modules.yaml could not be read (it is not valid pnpm state)';
+        if (storeProblem === 'other_store')
           return `its node_modules/.modules.yaml names a pnpm store other than ${store ?? "the daemon's"}`;
         if (health.kind === 'broken') return describeBroken(health);
         return null;
@@ -253,17 +275,19 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           packageInstall: true,
         });
         // Appended once the run has ended, so what the log opened with is not lost to the stream.
-        if (reasons.length > 0) {
-          const note = reasons.map(
-            (reason) => `Started over: node_modules was removed first because ${reason}.`,
-          );
-          if (attempt > 1) note.push(`The first attempt's output: ${logPath}`);
+        // Every attempt after the first names the first one's log, whether or not a node_modules
+        // was there to remove: the first log holds the real cause.
+        const note = reasons.map(
+          (reason) => `Started over: node_modules was removed first because ${reason}.`,
+        );
+        reasons = [];
+        if (attempt > 1) note.push(`The first attempt's output: ${logPath}`);
+        if (note.length > 0) {
           try {
             appendFileSync(attemptLog, `\n${note.join('\n')}\n`);
           } catch {
             // The daemon log still has the reason.
           }
-          reasons = [];
         }
         if (result.aborted) return { kind: 'aborted' };
         if (result.exitCode !== 0 || result.timedOut)
@@ -271,6 +295,8 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
             kind: 'failed',
             exitCode: result.exitCode,
             timedOut: result.timedOut,
+            installs: attempt,
+            startedOver,
             tail: result.tail,
             logPath: result.logPath,
             blockedHosts: result.blockedHosts,
@@ -280,6 +306,7 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           logPath: result.logPath,
           durationMs: result.durationMs,
           startedOver,
+          installs: attempt,
         };
       };
       const first = await install();
@@ -298,7 +325,12 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           startOver(
             `the install exited ${String(first.exitCode)} and left the copy broken (${describeBroken(left)})`,
           );
-          return install();
+          // What the failed install left unresolved, so a caller that finds the copy whole after
+          // this retry can say what was repaired.
+          const retried = await install();
+          return retried.kind === 'installed' || retried.kind === 'failed'
+            ? { ...retried, leftBroken: describeBroken(left) }
+            : retried;
         }
       }
       return first;

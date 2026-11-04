@@ -125,6 +125,28 @@ describe('installing a lane’s dependency change in its copy', () => {
     expect(result.kind === 'failed' && result.summary).toContain('do not resolve');
   });
 
+  it('leaves the install-repaired notice when refresh’s own start over brings a failed install back', async () => {
+    const { batch, changes } = await lane({ 'left-pad': '1.3.0' });
+    const first = h.pnpm.calls().length + 1;
+    h.pnpm.makes({ 'pnpm-lock.yaml': LOCKFILE });
+    h.pnpm.failsOnCall(first, 'ERR_PNPM_FETCH_403');
+    h.pnpm.makesOnCall(first + 1, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+    expect(await changes.install(batch.id, signal)).toMatchObject({ kind: 'installed' });
+    const notice = h.only(getBatch(h.store.db, batch.id).notices);
+    expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
+    expect(notice.body).toContain('left-pad');
+  });
+
+  it('leaves no notice when the start over exits non-zero: the lane is told the install failed', async () => {
+    const { batch, changes } = await lane({ 'left-pad': '1.3.0' });
+    const first = h.pnpm.calls().length + 1;
+    h.pnpm.makes({ 'pnpm-lock.yaml': LOCKFILE });
+    h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+    h.pnpm.makesOnCall(first + 1, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
+    expect(await changes.install(batch.id, signal)).toMatchObject({ kind: 'failed' });
+    expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+  });
+
   it('refuses a task working in the builder’s own checkout', async () => {
     h = createDeliveryHarness({ workspaceMode: 'shared' }, { trigger: false });
     const started = h.starter.startTask(h.addTask('Alpha').id);
