@@ -101,6 +101,7 @@ describe('scripts/check-changed.mjs', () => {
     ['the e2e config', 'apps/desktop/e2e/playwright.config.ts', 'apps/desktop'],
     ['a package script', 'apps/daemon/scripts/live-acceptance.ts', 'apps/daemon'],
     ['a vitest config', 'packages/db/vitest.config.ts', 'packages/db'],
+    ['a named vitest config', 'apps/daemon/vitest.delivery.config.ts', 'apps/daemon'],
     ['the daemon env example', 'apps/daemon/.env.example', 'apps/daemon'],
     ['a daemon git test', 'apps/daemon/src/git/git.ts', 'apps/daemon'],
     ['the daemon test fixtures', 'apps/daemon/test/fixtures.ts', 'apps/daemon'],
