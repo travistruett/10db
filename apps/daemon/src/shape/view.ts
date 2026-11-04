@@ -17,6 +17,7 @@ import {
   type ShapeViewDto,
 } from '@10db/contracts';
 import {
+  decisionSuccessor,
   getDecision,
   getPrinciple,
   getShape,
@@ -89,7 +90,13 @@ function convertedOf(
     decisionId,
     ...(principleId === null ? {} : { principleId }),
     ...(questionId === null ? {} : { questionId }),
-    ...(decisionId === null ? {} : { withdrawn: getDecision(db, decisionId).withdrawnAt !== null }),
+    ...(decisionId === null
+      ? {}
+      : {
+          withdrawn: getDecision(db, decisionId).withdrawnAt !== null,
+          // What Withdraw refuses on, so withdrawing the successor gives this row its Withdraw back.
+          superseded: decisionSuccessor(db, decisionId) !== null,
+        }),
     ...(principle === null
       ? {}
       : {

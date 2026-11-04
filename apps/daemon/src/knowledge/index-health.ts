@@ -1,5 +1,6 @@
 import {
   checkKnowledgeIndex,
+  composeKnowledgeText,
   KnowledgeIndex,
   rebuildKnowledgeIndex,
   type TendbDatabase,
@@ -20,6 +21,14 @@ export interface KnowledgeIndexRepair {
  * (`decisions/2026-10-31-notices-not-cards.md`), so the list route says search is unavailable instead.
  */
 export function repairKnowledgeIndex(db: TendbDatabase, log: Logger): KnowledgeIndexRepair {
+  // Text stored before writes composed it (NFC) is composed now, through the FTS triggers, so a
+  // composed search finds it. A failure leaves it stored as it was and never stops the daemon.
+  try {
+    const composed = composeKnowledgeText(db);
+    if (composed > 0) log.info({ rows: composed }, 'composed decomposed knowledge text');
+  } catch (error) {
+    log.error({ err: error }, 'composing the stored knowledge text failed; search may miss it');
+  }
   let broken: readonly KnowledgeIndex[];
   try {
     broken = checkKnowledgeIndex(db);

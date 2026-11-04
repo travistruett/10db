@@ -80,7 +80,9 @@ export function convertedLine(row: ShapeProposalDto): string | null {
         ? 'Converted · replaced by a later principle'
         : 'Converted · in Knowledge';
     case 'decision':
-      return 'Converted · in Knowledge';
+      return row.converted?.superseded === true
+        ? 'Converted · replaced by a later decision'
+        : 'Converted · in Knowledge';
     case 'question':
       return 'Converted · stored, sent when people arrive';
     case 'goal':

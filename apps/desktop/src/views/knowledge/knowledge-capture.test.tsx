@@ -190,6 +190,17 @@ async function openDecisions() {
   fireEvent.click(await screen.findByRole('tab', { name: 'Decisions' }));
 }
 
+/** What the Withdraw dialog says when the dry run failed for a reason other than a refusal. */
+const COULD_NOT_CHECK = /Couldn’t check whether an older version would become current again/;
+
+/** Waits until the dry run has been answered (or has failed): only then can Withdraw be sent. */
+async function dryRunAnswered(dialog: HTMLElement) {
+  await waitFor(() => {
+    const button = within(dialog).getByRole('button', { name: 'Withdraw' });
+    expect((button as HTMLButtonElement).disabled).toBe(false);
+  });
+}
+
 async function openRowMenu(name: string, item: string) {
   fireEvent.click(await screen.findByRole('button', { name }));
   fireEvent.click(await screen.findByRole('menuitem', { name: item }));
@@ -394,6 +405,7 @@ describe('retiring and withdrawing', () => {
         /leaves briefings and search\. It stays under History with your reason\./,
       ),
     ).toBeTruthy();
+    await dryRunAnswered(dialog);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
     expect(await within(dialog).findByText('Say why.')).toBeTruthy();
     expect(posted).toEqual([]);
@@ -451,11 +463,43 @@ describe('retiring and withdrawing', () => {
     await openDecisions();
     await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
-    await waitFor(() => {
-      expect(dryRuns).toHaveLength(1);
-    });
+    await dryRunAnswered(dialog);
+    expect(dryRuns).toHaveLength(1);
     expect(within(dialog).getByText(/leaves briefings and search\./)).toBeTruthy();
     expect(within(dialog).queryByText(/current again/)).toBeNull();
+    expect(within(dialog).queryByText(/older version/)).toBeNull();
+  });
+
+  it('cannot send a withdrawal while the dry run is outstanding', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    const { posted } = serve({ decisions: [decision] });
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(daemonUrl('/decisions/:id/withdraw'), async ({ request }) => {
+        const body: unknown = await request.clone().json();
+        if (!DryRunBody.safeParse(body).success) return undefined;
+        await gate;
+        return HttpResponse.json(noRestore);
+      }),
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
+    const button = within(dialog).getByRole('button', { name: 'Withdraw' });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    fireEvent.submit(within(dialog).getByLabelText('Reason').closest('form') ?? dialog);
+    expect(posted).toEqual([]);
+    release();
+    await dryRunAnswered(dialog);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
   });
 
   it('still lets the builder withdraw when the preview is refused', async () => {
@@ -468,11 +512,74 @@ describe('retiring and withdrawing', () => {
     await openDecisions();
     await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    await dryRunAnswered(dialog);
+    // The real withdrawal meets the same check, so a refusal is not reported as a failed check.
+    expect(within(dialog).queryByText(COULD_NOT_CHECK)).toBeNull();
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
     await waitFor(() => {
       expect(posted).toHaveLength(1);
     });
+  });
+
+  it('treats a 400 refusal of the preview the same way', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    serve({ decisions: [decision] }, { 'decision-withdraw-dry-run': refusal(400, 'Say why.') });
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    await dryRunAnswered(dialog);
+    expect(within(dialog).queryByText(COULD_NOT_CHECK)).toBeNull();
+  });
+
+  it('says it could not check for an older version when the preview fails, and still lets the builder withdraw', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    const { posted } = serve(
+      { decisions: [decision] },
+      {
+        'decision-withdraw-dry-run': () => ({ status: 500, json: { error: 'internal' } }),
+      },
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await dryRunAnswered(dialog);
+    fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
+    await waitFor(() => {
+      expect(posted).toHaveLength(1);
+    });
+  });
+
+  it('says it could not check when the preview’s answer does not parse', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    serve(
+      { decisions: [decision] },
+      { 'decision-withdraw-dry-run': () => ({ status: 200, json: { nonsense: true } }) },
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await dryRunAnswered(dialog);
+  });
+
+  it('says it could not check when the connection drops during the preview', async () => {
+    const decision = decisionItem({ projectId: project.id });
+    serve({ decisions: [decision] });
+    server.use(
+      http.post(daemonUrl('/decisions/:id/withdraw'), async ({ request }) => {
+        const body: unknown = await request.clone().json();
+        if (!DryRunBody.safeParse(body).success) return undefined;
+        return HttpResponse.error();
+      }),
+    );
+    await openDecisions();
+    await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
+    const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
+    await dryRunAnswered(dialog);
   });
 
   it('retires a principle with a reason', async () => {
@@ -500,6 +607,7 @@ describe('retiring and withdrawing', () => {
     renderApp('/knowledge');
     await openRowMenu('Actions for testing.no-sleeps', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Principle' });
+    await dryRunAnswered(dialog);
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Wrong repo' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
     await waitFor(() => {
@@ -518,6 +626,7 @@ describe('retiring and withdrawing', () => {
     await openDecisions();
     await openRowMenu('Actions for "Which queue library?"', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
+    await dryRunAnswered(dialog);
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Withdraw' }));
     expect(await within(dialog).findByText(message)).toBeTruthy();
@@ -572,6 +681,7 @@ describe('retiring and withdrawing', () => {
         /“Which queue\? → pg-boss” leaves briefings and search/,
       ),
     ).toBeTruthy();
+    await dryRunAnswered(reasonDialog);
     fireEvent.change(within(reasonDialog).getByLabelText('Reason'), {
       target: { value: 'Rolled back' },
     });
