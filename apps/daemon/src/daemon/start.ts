@@ -1103,7 +1103,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         cardProject: () => listProjects(state.db)[0]?.id ?? null,
         headOf: opts.selfUpdate?.headOf ?? githubHeadOfMain(ghExec, ghCall),
         isAhead: opts.selfUpdate?.isAhead ?? githubMainIsAhead(ghExec, ghCall),
-        stage: (target, running, skip) => installer.stage(target, running, skip),
+        stage: (target, running, skip, keep) => installer.stage(target, running, skip, keep),
         stopStage: () => installer.stop(),
         cancelStage: () => installer.cancel(),
         apply: (staged) => installer.apply(staged),

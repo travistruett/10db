@@ -42,6 +42,8 @@ interface World {
   stagedFor: string[];
   /** The commit each stage was told not to fetch: the one the builder rolled back from. */
   stagedSkipping: (string | null)[];
+  /** The commit already staged that each stage was told to keep when it is still the newest. */
+  stagedKeeping: (string | null)[];
   stage: () => Promise<StageResult>;
   /** Stops a stage under way, as the installer kills the script's process group. */
   stopStage: () => Promise<void>;
@@ -104,11 +106,12 @@ function make(
         ? Promise.reject(world.stagedAhead)
         : Promise.resolve(world.stagedAhead);
     },
-    stage: (target, running, skip) => {
+    stage: (target, running, skip, keep) => {
       world.calls.push('stage');
       world.stagedFrom.push(target.repo);
       world.stagedFor.push(running);
       world.stagedSkipping.push(skip);
+      world.stagedKeeping.push(keep);
       return world.stage();
     },
     stopStage: () => {
@@ -181,6 +184,7 @@ beforeEach(() => {
     stagedFrom: [],
     stagedFor: [],
     stagedSkipping: [],
+    stagedKeeping: [],
     pause: () => Promise.resolve(),
     stage: () => Promise.resolve(STAGED_OK),
     stopStage: () => Promise.resolve(),
@@ -303,6 +307,39 @@ describe('tick', () => {
     expect(await update.tick()).toBe('applying');
     expect(world.calls.filter((call) => call === 'stage')).toHaveLength(2);
     expect(world.calls.filter((call) => call === 'apply')).toHaveLength(1);
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEWER,
+    });
+  });
+
+  it('tells each stage which build is already staged, so a stage that finds the same one fetches nothing', async () => {
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    // Main moves, but its newest finished build is still the staged NEW: the stage keeps it.
+    world.head = NEWER;
+    expect(await update.tick()).toBe('busy');
+    expect(world.stagedKeeping).toEqual([null, NEW]);
+    // The kept build is the one that installs once the lanes are done.
+    world.busy = 0;
+    expect(await update.tick()).toBe('applying');
+    expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+      head: NEWER,
+      commit: NEW,
+    });
+  });
+
+  it('asks again for a newer finished build, keeping the staged one, before it installs', async () => {
+    world.head = NEWER;
+    world.busy = 1;
+    const update = make();
+    expect(await update.tick()).toBe('busy');
+    world.busy = 0;
+    world.stage = () =>
+      Promise.resolve({ ok: true, current: false, dir: STAGED.dir, commit: NEWER });
+    expect(await update.tick()).toBe('applying');
+    expect(world.stagedKeeping).toEqual([null, NEW]);
     expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
       head: NEWER,
       commit: NEWER,
@@ -726,6 +763,9 @@ describe('a waiting update drains the factory', () => {
       clock.advance(WAIT_LIMIT_MS);
       await update.tick();
       world.head = NEWER;
+      // A build newer than the staged one finished: it is fetched and compared (the head itself is
+      // compared by another answer).
+      world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
       world.stagedAhead = new Error('offline');
       return update;
     }

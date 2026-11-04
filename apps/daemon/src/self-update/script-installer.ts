@@ -64,8 +64,17 @@ export interface ScriptInstallerOptions {
 }
 
 export interface ScriptInstaller {
-  /** Stages main's newest finished build unless it is the build of `running`, or of `skip` when given. */
-  stage(target: UpdateTarget, running: string, skip?: string | null): Promise<StageResult>;
+  /**
+   * Stages main's newest finished build unless it is the build of `running`, or of `skip` when given.
+   * When it is the build already staged (`keep`), nothing is fetched, the folder stays, and the
+   * result names it.
+   */
+  stage(
+    target: UpdateTarget,
+    running: string,
+    skip?: string | null,
+    keep?: string | null,
+  ): Promise<StageResult>;
   apply(staged: StagedBuild): Promise<ApplyResult>;
   /**
    * For shutdown: kills a stage under way, with the gh it started, removes its folders, and starts no
@@ -151,7 +160,12 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
     }
   };
 
-  function runStage(target: UpdateTarget, running: string, skip: string | null): StageRun {
+  function runStage(
+    target: UpdateTarget,
+    running: string,
+    skip: string | null,
+    keep: string | null,
+  ): StageRun {
     const timeout = options.stageTimeoutMs ?? DEFAULT_STAGE_TIMEOUT_MS;
     let killGroup = (): void => undefined;
     /** Set when the stage is killed on purpose, by `stop` or `cancel`, not by its deadline. */
@@ -170,6 +184,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
             '--running',
             running,
             ...(skip === null ? [] : ['--skip', skip]),
+            ...(keep === null ? [] : ['--have', keep]),
             BRANCH,
           ],
           {
@@ -209,7 +224,8 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
       const finish = (result: StageResult): void => {
         deadline.cancel();
         killGroup();
-        // Only a staged build keeps its folder; "current" and "skipped" fetched nothing.
+        // Only a staged build keeps its folder; "current" and "skipped" fetched nothing, and a stage
+        // that did not end well leaves no build, the kept one included.
         tidy(result.ok && !result.current);
         resolve(result);
       };
@@ -283,8 +299,18 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
 
   const rollbackMarker = join(options.workDir, ROLLBACK_MARKER);
 
+  /** The commit the stage folder holds a build of, as the staging script wrote it; null with none. */
+  const stagedCommit = (): string | null => {
+    try {
+      const parsed = CommitSha.safeParse(readFileSync(join(stageDir, 'commit'), 'utf8').trim());
+      return parsed.success ? parsed.data : null;
+    } catch {
+      return null;
+    }
+  };
+
   return {
-    stage(target, running, skip = null) {
+    stage(target, running, skip = null, keep = null) {
       if (stopped) {
         return Promise.resolve({
           ok: false,
@@ -292,9 +318,11 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           message: '10db is quitting, so the build was not fetched.',
         });
       }
+      // The staged folder is only kept when it holds the very build it is said to.
+      const kept = keep !== null && stagedCommit() === keep ? keep : null;
       try {
         rmSync(stageStatus, { force: true });
-        removeStageFiles(false);
+        removeStageFiles(kept !== null);
         mkdirSync(scratchDir, { recursive: true });
       } catch (error) {
         return Promise.resolve({
@@ -303,7 +331,7 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
           message: `Could not make a place for the build in ${options.workDir}: ${messageOf(error)}`,
         });
       }
-      const run = runStage(target, running, skip);
+      const run = runStage(target, running, skip, kept);
       current = run;
       void run.ended.then(() => {
         if (current === run) current = null;

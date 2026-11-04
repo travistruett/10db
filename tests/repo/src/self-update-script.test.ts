@@ -103,6 +103,28 @@ describe('install-app.sh --stage', () => {
     expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
   });
 
+  it('fetches nothing, and leaves the folder as it is, when the newest finished build is already staged', () => {
+    expect(stage().status).toBe(0);
+    const before = gh().filter((call) => call.startsWith('gh run download')).length;
+    const result = stage({}, ['--running', OLDER, '--have', HEAD_SHA]);
+    expect(result.status).toBe(0);
+    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'have', commit: HEAD_SHA });
+    expect(gh().filter((call) => call.startsWith('gh run download'))).toHaveLength(before);
+    expect(readFileSync(join(stageDir, DMG_NAME), 'utf8')).toBe('disk image bytes');
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
+  });
+
+  it('replaces the staged build with a newer one, leaving one DMG', () => {
+    mkdirSync(stageDir, { recursive: true });
+    writeFileSync(join(stageDir, 'commit'), `${OLDER}\n`);
+    writeFileSync(join(stageDir, 'older.dmg'), 'older');
+    const result = stage({}, ['--running', OLDER, '--have', OLDER]);
+    expect(result.status).toBe(0);
+    expect(status()).toMatchObject({ ok: true, mode: 'stage', step: 'done', commit: HEAD_SHA });
+    expect(existsSync(join(stageDir, 'older.dmg'))).toBe(false);
+    expect(readFileSync(join(stageDir, 'commit'), 'utf8').trim()).toBe(HEAD_SHA);
+  });
+
   it('stages a build that is not the running one', () => {
     const result = stage({}, ['--running', OLDER]);
     expect(result.status).toBe(0);
@@ -146,6 +168,8 @@ describe('install-app.sh --stage', () => {
     { name: '--running without a stage', args: ['--apply', '/x', '--running', HEAD_SHA] },
     { name: 'a commit to skip that is no SHA', args: ['--stage', '/x', '--skip', 'main'] },
     { name: '--skip without a stage', args: ['--apply', '/x', '--skip', HEAD_SHA] },
+    { name: 'a staged commit that is no SHA', args: ['--stage', '/x', '--have', 'main'] },
+    { name: '--have without a stage', args: ['--apply', '/x', '--have', HEAD_SHA] },
     { name: '--quit-first on a stage', args: ['--stage', '/x', '--quit-first'] },
     { name: 'a relative stage folder', args: ['--stage', 'staged'] },
   ])('refuses $name', ({ args }) => {

@@ -127,6 +127,47 @@ describe('stage', () => {
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
   });
 
+  it('keeps the staged build, and fetches nothing, when it is still the newest finished one', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${COMMIT}\n`);
+    writeFileSync(join(workDir, 'stage', 'build.dmg'), 'kept');
+    fakeScript(
+      `echo '{"ok":true,"mode":"stage","step":"have","message":"","commit":"${COMMIT}"}' > "$status"`,
+    );
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+      ok: true,
+      current: false,
+      dir: join(workDir, 'stage'),
+      commit: COMMIT,
+    });
+    expect(invocations()[0]).toContain(` --running ${RUNNING} --have ${COMMIT} main`);
+    expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+  });
+
+  it('does not keep a stage folder that is not the build it was told to keep', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${RUNNING}\n`);
+    writeFileSync(join(workDir, 'stage', 'old.dmg'), 'old');
+    fakeScript(stagedOk());
+    await installer.stage(TARGET, RUNNING, null, COMMIT);
+    expect(invocations()[0]).not.toContain('--have');
+    expect(existsSync(join(workDir, 'stage', 'old.dmg'))).toBe(false);
+  });
+
+  it('removes the kept build when the stage ends in a failure or finds the running build', async () => {
+    mkdirSync(join(workDir, 'stage'), { recursive: true });
+    writeFileSync(join(workDir, 'stage', 'commit'), `${COMMIT}\n`);
+    fakeScript(
+      `echo '{"ok":true,"mode":"stage","step":"current","message":"","commit":"${RUNNING}"}' > "$status"`,
+    );
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+      ok: true,
+      current: true,
+      commit: RUNNING,
+    });
+    expect(existsSync(join(workDir, 'stage'))).toBe(false);
+  });
+
   it('hands the data directory to the script, so it backs up the daemon’s own database', async () => {
     fakeScript(stagedOk());
     await installer.stage(TARGET, RUNNING);
