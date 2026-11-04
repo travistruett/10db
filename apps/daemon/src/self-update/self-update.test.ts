@@ -435,6 +435,21 @@ describe('tick', () => {
     expect(update.status().problem).toBeNull();
   });
 
+  it('does not call the machine offline for a certificate failure, and quotes gh', async () => {
+    for (const text of [
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r": tls: failed to verify certificate: x509: certificate signed by unknown authority',
+      'gh api failed (exit 1): Get "https://api.github.com/repos/o/r": x509: certificate has expired or is not yet valid',
+    ]) {
+      world.head = new GhError(GhFailure.Unreachable, text);
+      const update = make();
+      expect(await update.tick()).toBe('unreachable');
+      const message = update.status().problem?.message ?? '';
+      expect(message).toMatch(/could not reach GitHub securely/i);
+      expect(message).toContain(text);
+      expect(message).not.toMatch(/offline/i);
+    }
+  });
+
   it('gives a signed-out gh, an offline machine and an error GitHub answered each their own reason', async () => {
     const reasons: string[] = [];
     for (const error of [
@@ -606,6 +621,28 @@ describe('tick', () => {
     expect(cards()).toEqual([]);
     world.head = NEW;
     expect(await update.tick()).toBe('applying');
+  });
+
+  it('does not say the update waits for an idle moment when a stage left nothing staged and GitHub cannot compare it', async () => {
+    world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
+    world.stagedAhead = new Error('offline');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    const status = update.status();
+    expect(status.availableCommit).toBe(NEW);
+    expect(status.problem?.kind).toBe('unreachable');
+    expect(status.waitingSince).toBeNull();
+    expect(status.notInstalling).not.toBeNull();
+  });
+
+  it('says the same when GitHub then stops answering for the head too', async () => {
+    world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
+    world.stagedAhead = new Error('offline');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    world.head = new Error('offline');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().notInstalling).not.toBeNull();
   });
 });
 
@@ -2030,6 +2067,80 @@ describe('why an available update is not installing', () => {
       expect(update.status().availableCommit).toBe(NEW);
       expect(update.status().notInstalling).toBe('failed');
     });
+
+    it.each<[string, () => void, string]>([
+      [
+        'a staged build waiting',
+        () => {
+          world.busy = 1;
+        },
+        'busy',
+      ],
+      [
+        'a failed update',
+        () => {
+          world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'reset' });
+        },
+        'failed',
+      ],
+      [
+        'a head rolled back from',
+        () => {
+          world.rolledBackFrom = NEW;
+        },
+        'rolled-back',
+      ],
+      [
+        'a head with no build',
+        () => {
+          world.stage = () => Promise.resolve({ ok: true, current: true, commit: RUNNING });
+        },
+        'no-newer-build',
+      ],
+    ])(
+      'does not say the update waits for an idle moment once the switch dropped %s',
+      async (_name, arrange, first) => {
+        arrange();
+        const update = make();
+        update.settle();
+        expect(await update.tick()).toBe(first);
+        world.head = offline;
+        update.retry();
+        await update.turnOff();
+        expect(await update.tick()).toBe('unreachable');
+        const status = update.status();
+        expect(status.availableCommit).toBe(NEW);
+        expect(status.waitingSince).toBeNull();
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).not.toBeNull();
+      },
+    );
+
+    it('does not say so once a stage the switch cancelled dropped the waiting build', async () => {
+      world.busy = 1;
+      const update = make();
+      expect(await update.tick()).toBe('busy');
+      world.head = NEWER;
+      world.stage = () => {
+        world.enabled = false;
+        return Promise.resolve({ ok: false, step: 'download', message: 'killed' });
+      };
+      expect(await update.tick()).toBe('off');
+      world.enabled = true;
+      world.head = offline;
+      expect(await update.tick()).toBe('unreachable');
+      expect(update.status().availableCommit).toBe(NEWER);
+      expect(update.status().notInstalling).not.toBeNull();
+    });
+
+    it('still says the update waits while a staged build goes on waiting', async () => {
+      world.busy = 1;
+      const update = make();
+      expect(await update.tick()).toBe('busy');
+      world.head = offline;
+      expect(await update.tick()).toBe('busy');
+      expect(update.status().notInstalling).toBeNull();
+    });
   });
 
   it('says failed as soon as an install ends while the daemon runs, before the next check', async () => {
@@ -2133,6 +2244,32 @@ describe('why an available update is not installing', () => {
       finishStage(STAGED_OK);
       await tick;
     });
+  });
+
+  it('keeps waiting, not fetching, while a newer head restages with a build already staged', async () => {
+    world.busy = 1;
+    const update = make();
+    const stagedAt = clock.now();
+    expect(await update.tick()).toBe('busy');
+    expect(update.status().waitingSince).toEqual(stagedAt);
+    expect(update.status().notInstalling).toBeNull();
+    clock.advance(60_000);
+    world.head = NEWER;
+    let finishStage: (result: StageResult) => void = () => undefined;
+    world.stage = () =>
+      new Promise((resolve) => {
+        finishStage = resolve;
+      });
+    const tick = update.tick();
+    await settled();
+    expect(update.status().availableCommit).toBe(NEWER);
+    // The old build is still staged and the update still waits for an idle moment.
+    expect(update.status().notInstalling).toBeNull();
+    expect(update.status().waitingSince).toEqual(stagedAt);
+    finishStage(STAGED_OK);
+    expect(await tick).toBe('busy');
+    expect(update.status().notInstalling).toBeNull();
+    expect(update.status().waitingSince).toEqual(stagedAt);
   });
 
   it('keeps the head’s reason through a stage for the same head', async () => {
