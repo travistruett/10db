@@ -54,8 +54,7 @@ import type { StateStore } from '../events';
 import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
 import {
   commitCoveredByRevert,
-  commitGotThroughGate,
-  commitResolvedMarkers,
+  commitAdaptsMerge,
   lastRevertNoteAt,
   revertCommitOf,
   revertOfRun,
@@ -244,8 +243,7 @@ function revertStillOn(
     for (const result of listToolOpResults(db, row.id, McpToolName.Commit, since))
       if (
         McpToolOutputs.commit.safeParse(result).success &&
-        !commitResolvedMarkers(result) &&
-        !commitGotThroughGate(result) &&
+        !commitAdaptsMerge(result) &&
         !commitCoveredByRevert(result)
       )
         return null;

@@ -6,8 +6,10 @@ import {
   getEvidence,
   getInboxItem,
   getWorkstream,
+  insertEvidence,
   insertToolOp,
   listEvidence,
+  listToolOps,
   listWorkstreams,
   setTaskStatus,
   setWorkstreamNotice,
@@ -17,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
 import {
+  afterMarkersResolved,
   commitResultAsStored,
   insertPlannedWorkstream,
   planForStart,
@@ -73,6 +76,8 @@ function commitAs(workstreamId: WorkstreamId, path: string, content: string): st
 /**
  * Commits `path` for `workstreamId` and stores the result as the commit tool does, from the branch.
  * `gettingThroughGate` is what the tool read from the run's record: a failed gate run was outstanding.
+ * The tool also reads whether a resolution of markers came before with no gate run or note after it, and
+ * so does this, from the run's tool ops and evidence.
  */
 async function commitAsTheToolRecords(
   workstreamId: WorkstreamId,
@@ -81,13 +86,13 @@ async function commitAsTheToolRecords(
   gettingThroughGate = false,
 ): Promise<string> {
   const sha = h.commit(path, content);
-  const result = await commitResultAsStored(
-    h.git,
-    h.repo,
-    { sha, alreadyCommitted: false },
-    null,
-    gettingThroughGate,
-  );
+  const result = await commitResultAsStored(h.git, h.repo, { sha, alreadyCommitted: false }, null, {
+    throughGate: gettingThroughGate,
+    afterResolution: afterMarkersResolved(
+      listToolOps(h.store.db, workstreamId, 'commit'),
+      listEvidence(h.store.db, workstreamId),
+    ),
+  });
   h.state.write((w) => {
     insertToolOp(w, {
       workstreamId,
@@ -2141,11 +2146,94 @@ describe('the failed workstream card', () => {
         expect(body).toContain('### Beta');
       });
 
-      it('lists the task as finished when it redoes the work after resolving conflict markers', async () => {
+      it('does not list the task as finished when it adapts a caller after resolving conflict markers of its own gate’s base merge', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+
+        // The merge session resolves the markers, then commits the caller it adapted in a commit of its own.
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/caller.txt', 'adapted\n');
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('README.md');
+        expect(branchFiles(batchId)).toContain('src/api/caller.txt');
+        expect(branchFiles(batchId)).not.toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).not.toContain('### Alpha');
+        expect(body).toMatch(/Alpha \(done, .*reverted/);
+        expect(body).toContain('### Beta');
+      });
+
+      it('does not list the task as finished when it adapts a caller and then fixes the merged branch’s gate', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/caller.txt', 'adapted\n');
+        h.state.write((w) =>
+          insertEvidence(w, {
+            workstreamId: failed,
+            kind: 'gate',
+            command: 'make gate',
+            exitCode: 1,
+            summary: 'The gate failed on the merged branch',
+            logPath: null,
+            commitShas: [],
+          }),
+        );
+        await commitAsTheToolRecords(failed, 'src/api/fix.txt', 'fixed\n', true);
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('src/api/caller.txt');
+        expect(branchFiles(batchId)).toContain('src/api/fix.txt');
+        expect(branchFiles(batchId)).not.toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).not.toContain('### Alpha');
+        expect(body).toMatch(/Alpha \(done, .*reverted/);
+      });
+
+      it('lists the task as finished when it redoes the work after a gate run that came after the resolution', async () => {
         const { batchId, failed } = await leftOutThenRetried();
         h.commit('README.md', MARKED_README);
         await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        h.state.write((w) =>
+          insertEvidence(w, {
+            workstreamId: failed,
+            kind: 'gate',
+            command: 'make gate',
+            exitCode: 0,
+            summary: 'The gate passed',
+            logPath: null,
+            commitShas: [],
+          }),
+        );
         await commitAsTheToolRecords(failed, 'src/api/alpha.txt', 'alpha again\n');
+        h.settle(failed, 'DONE');
+        h.shipper.checkBatch(batchId);
+        await h.jobs.idle();
+
+        const shipped = getBatch(h.store.db, batchId);
+        expect(shipped.state).toBe('SHIPPED');
+        expect(branchFiles(batchId)).toContain('src/api/alpha.txt');
+        const body = h.gh.body(shipped.prUrl ?? '');
+        expect(body).toContain('### Alpha');
+        expect(body).not.toMatch(/reverted/);
+      });
+
+      it('lists the task as finished when it redoes the work before resolving conflict markers', async () => {
+        const { batchId, failed } = await leftOutThenRetried();
+        await commitAsTheToolRecords(failed, 'src/api/alpha.txt', 'alpha again\n');
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/caller.txt', 'adapted\n');
 
         h.settle(failed, 'DONE');
         h.shipper.checkBatch(batchId);
@@ -2231,11 +2319,26 @@ describe('the failed workstream card', () => {
         expect(retried.notice?.key).toBe('reverted-work');
       });
 
-      it('does not tell a run again on Retry when it committed work besides the resolution', async () => {
+      it('tells a run again on Retry when its commits since the note are a resolution and an adapted caller', async () => {
         const { failed } = await leftOutThenRetried();
         h.commit('README.md', MARKED_README);
         await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
+        await commitAsTheToolRecords(failed, 'src/api/caller.txt', 'adapted\n');
+        h.settle(failed, 'FAILED');
+
+        const retried = retryWorkstream(h.state, failed);
+
+        const notes = listEvidence(h.store.db, failed).filter((e) => e.kind === 'builder');
+        expect(notes).toHaveLength(2);
+        expect(notes[1]?.summary).toContain('Redo the work');
+        expect(retried.notice?.key).toBe('reverted-work');
+      });
+
+      it('does not tell a run again on Retry when it committed work besides the resolution', async () => {
+        const { failed } = await leftOutThenRetried();
         await commitAsTheToolRecords(failed, 'src/api/alpha.txt', 'alpha again\n');
+        h.commit('README.md', MARKED_README);
+        await commitAsTheToolRecords(failed, 'README.md', '# ours and theirs\n');
         h.settle(failed, 'FAILED');
 
         retryWorkstream(h.state, failed);

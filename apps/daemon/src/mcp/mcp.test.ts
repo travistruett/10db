@@ -60,6 +60,7 @@ import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import {
   commitCoveredByRevert,
+  commitAfterResolution,
   commitGotThroughGate,
   commitResolvedMarkers,
   revertCommitLine,
@@ -1099,6 +1100,101 @@ describe('MCP tools', () => {
       evidenceOf(s, 'builder', null);
       await commitWork(s, 'op-note-after');
       expect(throughGate(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made after a resolution of conflict markers, before the next gate run', () => {
+    const MARKED = '<<<<<<< HEAD\nours\n||||||| base\n=======\ntheirs\n>>>>>>> origin/main\n';
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode,
+                summary: 'The gate ran',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const afterResolution = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitAfterResolution);
+    const commitFile = async (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      opId: string,
+      path: string,
+      content: string,
+    ) => {
+      writeRepoFile(path, content);
+      await s.call('commit', { opId, paths: [path], message: opId });
+    };
+    /** The branch as the base merge leaves it, then the session's resolution of it. */
+    const resolved = async (s: Awaited<ReturnType<typeof seedSession>>) => {
+      await commitFile(s, 'op-marked', 'src/api/a.ts', MARKED);
+      await commitFile(s, 'op-resolve', 'src/api/a.ts', 'ours\ntheirs\n');
+    };
+
+    it('is recorded on a caller adapted after the resolution, and not on the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is recorded on every commit until a gate run', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller-1', 'src/api/c1.ts', 'export {}\n');
+      await commitFile(s, 'op-caller-2', 'src/api/c2.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true, true]);
+    });
+
+    it('is not recorded once a gate run came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'gate', 0);
+      await commitFile(s, 'op-later', 'src/api/later.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is not recorded once a builder note came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'builder', 0);
+      await commitFile(s, 'op-redo-01', 'src/api/redo.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is recorded when the gate and the note came before the resolution', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'builder', 0);
+      evidenceOf(s, 'gate', 1);
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is not recorded when no commit resolved markers', async () => {
+      const s = await seedSession();
+      await commitFile(s, 'op-work-01', 'src/api/work.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false]);
     });
   });
 

@@ -50,7 +50,7 @@ session.
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
 
-A told run's own commit does not count either when it resolved conflict markers. The runner queues the same run
+A told run's own commit does not count either when it resolved conflict markers (or, below, adapts to the merge). The runner queues the same run
 again when the base merge at its gate leaves markers (`sendToMerge`), so a retried run can skip the redo and commit
 only the resolution. 10db commits that merge with the markers in it, so the branch itself says which commits resolve
 them: the commit tool compares each commit with its parent, and stores `resolvedMarkers: true` in the commit's
@@ -60,11 +60,20 @@ asks whether to tell the session again, so one commit is judged one way. It hold
 commit: one that asked the builder a question, was paused by the usage limit, handed off, or left the resolution
 uncommitted for the next session.
 
-A run that resolves the markers and redoes the work in another commit counts through that commit. One commit that
-does both does not count, and the task is under Not done with its work on the branch, because the record cannot
-separate the two; that errs towards saying less was shipped. So does a redo that edits a file with marker lines in
-it. A commit by a told run that is neither work nor a resolution still counts: a caller adapted to the base in a
-commit of its own, once the markers are gone.
+A run that redoes the work in a commit of its own before it resolves the markers counts through that commit. One
+commit that does both does not count, and the task is under Not done with its work on the branch, because the record
+cannot separate the two; that errs towards saying less was shipped. So does a redo that edits a file with marker
+lines in it.
+
+A told run's commit made after such a resolution does not count either, until a gate run or a builder note comes
+after the resolution. The merge session is told to adapt the callers of what the merge changed and to commit each
+file it changed (`mergeSection`), so a caller adapted in a commit of its own is the merge work. The commit tool
+stores `afterResolution: true` when the run has a commit marked `resolvedMarkers` and no gate or builder evidence
+row is newer than it (`afterMarkersResolved`; ids are time-ordered, so a commit and an evidence row compare by id).
+That holds whichever session makes the commit, so a question, a usage limit or a handoff does not lose it. The pull
+request and Retry read it with the other two marks (`commitAdaptsMerge`). A gate run ends the window: a failed one
+starts a fix, which `throughGate` reads, and a passed one means a later commit is new work. A Retry's or a
+reviewer's note asks for new work and ends it too.
 
 A told run's commit made while its session was fixing a failed gate does not count either. The commit tool stores
 `throughGate: true` in the tool-op result when the latest of the run's gate and builder evidence is a gate run that
@@ -72,9 +81,10 @@ failed (`fixingFailedGate`, the record the runner's `outstandingFixEvidence` rea
 question, a usage limit or a handoff replaced the next action. A told run's gate runs on the merged branch, so such
 a commit repairs or adapts the work to the base. The pull request and Retry read it with the markers mark. A Retry's
 note comes after the failure, so a session told to redo the work is not marked, and a redo made before the gate failed
-counts. A redo made only in a session fixing a failed gate errs to Not done, as one commit doing both does. The
-caller commit above is not covered: it is made in the merge session before any gate runs again, and a redo committed
-in that session after the resolution counts by the rule above, so no record separates the two.
+counts. A redo made only in a session fixing a failed gate errs to Not done, as one commit doing both does. So
+does a redo committed in the merge session after the resolution, before a gate run: no record separates it from
+an adapted caller, and the merge session is not asked to redo the work. A redo before the resolution, or after a
+gate run, counts.
 
 ## Why
 

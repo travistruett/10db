@@ -64,6 +64,24 @@ export function listToolOpResults(
 }
 
 /**
+ * Every recorded call of the tool by any session of the workstream with its id, oldest first. The id
+ * sorts against other records' ids (they are time-ordered), so a call can be placed among the
+ * workstream's evidence without comparing timestamps that two writes in a millisecond share.
+ */
+export function listToolOps(
+  db: DbReader,
+  workstreamId: WorkstreamId,
+  tool: string,
+): { id: string; result: Json }[] {
+  return db
+    .select({ id: schema.toolOps.id, result: schema.toolOps.result })
+    .from(schema.toolOps)
+    .where(and(eq(schema.toolOps.workstreamId, workstreamId), eq(schema.toolOps.tool, tool)))
+    .orderBy(asc(schema.toolOps.id))
+    .all();
+}
+
+/**
  * How many calls of a tool the workstream's current step has recorded, across every session
  * of the step (a handoff, re-launch or recovery starts a new session in the same step): the
  * sessions after the step's `sessionFloor`, as the runner counts them. A replayed opId is one

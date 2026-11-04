@@ -60,12 +60,7 @@ import {
   type PullRequestStatus,
   type RequiredChecks,
 } from '../github';
-import {
-  commitGotThroughGate,
-  commitResolvedMarkers,
-  insertPlannedWorkstream,
-  revertOfRun,
-} from '../team';
+import { commitAdaptsMerge, insertPlannedWorkstream, revertOfRun } from '../team';
 import { raiseGateHostCards, withdrawCard } from '../inbox';
 import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateResult, type GateRunner } from '../verify';
@@ -1368,11 +1363,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const made: string[] = [];
     for (const run of runs)
       for (const result of listToolOpResults(db, run.id, McpToolName.Commit)) {
-        if (
-          options.redoing === true &&
-          (commitResolvedMarkers(result) || commitGotThroughGate(result))
-        )
-          continue;
+        if (options.redoing === true && commitAdaptsMerge(result)) continue;
         const parsed = McpToolOutputs.commit.safeParse(result);
         if (parsed.success && !made.includes(parsed.data.sha)) made.push(parsed.data.sha);
       }

@@ -41,6 +41,7 @@ import {
   insertSource,
   insertToolOp,
   listEvidence,
+  listToolOps,
   listStepToolOpResults,
   replaceToolOp,
   patchWorkstream,
@@ -71,7 +72,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
+import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -654,13 +655,13 @@ export function createToolHandlers(
       // limit or a handoff does not lose it: the commit adapts or repairs, and brings no work back.
       const evidence = listEvidence(db, workstreamId);
       const told = result.alreadyCommitted ? revertOfRun({ notice: row.notice, evidence }) : null;
-      const stored = await commitResultAsStored(
-        deps.git,
-        checkout,
-        result,
-        told?.revert ?? null,
-        fixingFailedGate(evidence),
-      );
+      const stored = await commitResultAsStored(deps.git, checkout, result, told?.revert ?? null, {
+        throughGate: fixingFailedGate(evidence),
+        afterResolution: afterMarkersResolved(
+          listToolOps(db, workstreamId, McpToolName.Commit),
+          evidence,
+        ),
+      });
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,

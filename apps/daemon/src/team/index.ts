@@ -10,6 +10,9 @@ export {
   startTaskWithPlan,
 } from './steps';
 export {
+  afterMarkersResolved,
+  commitAdaptsMerge,
+  commitAfterResolution,
   commitCoveredByRevert,
   commitGotThroughGate,
   commitResolvedMarkers,

@@ -36,6 +36,14 @@ const RESOLVED_MARKERS_KEY = 'resolvedMarkers';
 const THROUGH_GATE_KEY = 'throughGate';
 
 /**
+ * The key a commit tool op's stored result carries when the run had committed a resolution of conflict
+ * markers and no gate run or builder note came after it (`afterMarkersResolved`): a told run that skipped
+ * the redo and hit markers at its gate is still in the merge work, which mergeSection tells it to finish
+ * by adapting the callers of what the merge changed. Such a commit brings no reverted work back either.
+ */
+const AFTER_RESOLUTION_KEY = 'afterResolution';
+
+/**
  * The key a commit tool op's stored result carries when it made no new commit (the opId was already on
  * the branch) and the sha is one the run's revert covers: the session was handed a commit the revert
  * undid, so no work came back. A retry reads it, and it needs no git to do so.
@@ -56,28 +64,56 @@ export function fixingFailedGate(
 }
 
 /**
+ * Whether a session making a commit is still in the merge work: the run has a commit that resolved
+ * conflict markers (`resolvedMarkers`), and no gate run or builder note is newer than it. A gate run
+ * ends the merge work (a failed one starts a fix, which `fixingFailedGate` reads), and a Retry's or a
+ * reviewer's note asks for new work. `commits` and `evidence` are the run's records, oldest first;
+ * their ids are time-ordered and compare with each other.
+ */
+export function afterMarkersResolved(
+  commits: readonly { readonly id: string; readonly result: unknown }[],
+  evidence: readonly { readonly id: string; readonly kind: string }[],
+): boolean {
+  const resolution = commits.findLast((c) => commitResolvedMarkers(c.result));
+  if (resolution === undefined) return false;
+  const closing = evidence.findLast((e) => e.kind === 'gate' || e.kind === 'builder');
+  return closing === undefined || uuidOf(closing.id) < uuidOf(resolution.id);
+}
+
+/** An id without its kind prefix: the part that sorts by the time it was minted. */
+function uuidOf(id: string): string {
+  return id.slice(id.indexOf('_') + 1);
+}
+
+/**
  * A commit tool op's result as it is stored, marked when the commit resolved conflict markers, when
- * the session making it was fixing a failed gate (`throughGate`), and when it made no new commit and
- * `revert` (the one the run was told of; null when none) covers its sha.
+ * the session making it was fixing a failed gate or still in the merge work after a resolution
+ * (`marks`), and when it made no new commit and `revert` (the one the run was told of; null when none)
+ * covers its sha.
  */
 export async function commitResultAsStored<T extends { readonly sha: string }>(
   git: Pick<Git, 'conflictMarkers' | 'filesChangedBetween' | 'hasCommit' | 'isAncestor'>,
   repo: string,
   result: T & { readonly alreadyCommitted?: boolean },
   revert: string | null = null,
-  throughGate = false,
+  marks: { readonly throughGate?: boolean; readonly afterResolution?: boolean } = {},
 ): Promise<
   T & {
     readonly [RESOLVED_MARKERS_KEY]?: true;
     readonly [THROUGH_GATE_KEY]?: true;
+    readonly [AFTER_RESOLUTION_KEY]?: true;
     readonly [COVERED_BY_REVERT_KEY]?: true;
   }
 > {
   const parent = `${result.sha}^`;
   const changed = await git.filesChangedBetween(repo, parent, result.sha);
   const marked = await git.conflictMarkers(repo, changed, parent);
-  const gated = throughGate ? { ...result, [THROUGH_GATE_KEY]: true as const } : result;
-  const resolved = marked.length > 0 ? { ...gated, [RESOLVED_MARKERS_KEY]: true as const } : gated;
+  const gated = marks.throughGate ? { ...result, [THROUGH_GATE_KEY]: true as const } : result;
+  const merging = marks.afterResolution
+    ? { ...gated, [AFTER_RESOLUTION_KEY]: true as const }
+    : gated;
+  const resolved =
+    marked.length > 0 ? { ...merging, [RESOLVED_MARKERS_KEY]: true as const } : merging;
   // A named revert no longer on the branch covers nothing, as `revertedAway` reads it.
   const covered =
     result.alreadyCommitted === true &&
@@ -95,6 +131,21 @@ export function commitResolvedMarkers(result: unknown): boolean {
 /** Whether a stored commit result was made fixing a failed gate (`commitResultAsStored`). */
 export function commitGotThroughGate(result: unknown): boolean {
   return storedMark(result, THROUGH_GATE_KEY);
+}
+
+/** Whether a stored commit result was made after a resolution, before a gate run (`afterMarkersResolved`). */
+export function commitAfterResolution(result: unknown): boolean {
+  return storedMark(result, AFTER_RESOLUTION_KEY);
+}
+
+/**
+ * Whether a stored commit result brings no reverted work back: it resolved conflict markers, was made
+ * fixing a failed gate, or was made in the merge work after a resolution.
+ */
+export function commitAdaptsMerge(result: unknown): boolean {
+  return (
+    commitResolvedMarkers(result) || commitGotThroughGate(result) || commitAfterResolution(result)
+  );
 }
 
 /** Whether a stored commit result made no new commit, and its sha is one the run's revert covers. */
