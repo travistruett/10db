@@ -1,7 +1,13 @@
-import { LEFT_OUT_NOTICE_KEY, mintId, PARKED_NOTICE_KEY, type BatchDto } from '@10db/contracts';
+import {
+  INSTALL_REPAIRED_NOTICE_KEY,
+  LEFT_OUT_NOTICE_KEY,
+  mintId,
+  PARKED_NOTICE_KEY,
+  type BatchDto,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { batchDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
-import { canRetryRun, failureLine, taskNotices, taskState } from './task-state';
+import { canRetryRun, failureLine, taskHistory, taskNotices, taskState } from './task-state';
 
 const AT = '2026-11-02T10:00:00.000Z';
 const SESSION = mintId('Session');
@@ -513,6 +519,64 @@ describe('taskState', () => {
         leftOut,
       ]);
       expect(taskNotices(workstreamDto({ state: 'FAILED', notice: waiting }), batch)).toEqual([]);
+    });
+
+    describe('history', () => {
+      const repaired = {
+        key: INSTALL_REPAIRED_NOTICE_KEY,
+        tone: 'info' as const,
+        line: 'The install in this copy was repaired at 2026-11-03 10:00 UTC',
+        body: 'x',
+      };
+
+      it('keeps the install repair on a failed run and on finished work in a closed batch', () => {
+        expect(
+          taskHistory(
+            workstreamDto({ state: 'FAILED' }),
+            batchDto({ state: 'OPEN', notices: [conflict, repaired] }),
+          ),
+        ).toEqual([repaired]);
+        for (const state of ['CLOSED', 'ABANDONED'] as const)
+          expect(
+            taskHistory(
+              workstreamDto({ state: 'DONE' }),
+              batchDto({ state, notices: [conflict, repaired] }),
+            ),
+          ).toEqual([repaired]);
+        expect(
+          taskHistory(workstreamDto({ state: 'DONE' }), {
+            ...shipped({ state: 'merged' }),
+            notices: [repaired],
+          }),
+        ).toEqual([repaired]);
+      });
+
+      it('lists it once: not again where the live notices already show it', () => {
+        expect(
+          taskHistory(
+            workstreamDto({ state: 'RUNNING' }),
+            batchDto({ state: 'OPEN', notices: [repaired] }),
+          ),
+        ).toEqual([]);
+      });
+
+      it('has nothing without a repair or a batch', () => {
+        expect(
+          taskHistory(workstreamDto({ state: 'FAILED' }), batchDto({ notices: [conflict] })),
+        ).toEqual([]);
+        expect(taskHistory(workstreamDto({ state: 'FAILED' }), undefined)).toEqual([]);
+        expect(taskHistory(undefined, batchDto({ notices: [repaired] }))).toEqual([]);
+      });
+
+      it('leaves the card’s state line as it is', () => {
+        expect(
+          taskState(
+            workstreamDto({ state: 'DONE' }),
+            batchDto({ state: 'CLOSED', notices: [repaired] }),
+            null,
+          ),
+        ).toBeNull();
+      });
     });
 
     it('keeps the question and answer of a run the builder parked, though it was cancelled', () => {

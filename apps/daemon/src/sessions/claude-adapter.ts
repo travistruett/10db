@@ -390,6 +390,13 @@ function startSession(
   const preflightOk = new Promise<boolean>((resolve) => {
     resolvePreflight = resolve;
   });
+  // Settles once the preflight knows whether claude reported an account and, if it did not, has retried or
+  // refused the start. A claude that exits before reporting one ends the event stream while the sign-in
+  // check runs; the pump waits here so that exit is a start with no account, not a finished session.
+  let settleAccountStep: () => void = () => undefined;
+  const accountStep = new Promise<void>((resolve) => {
+    settleAccountStep = resolve;
+  });
   let resolveVerified: (ok: boolean) => void = () => undefined;
   const billingVerified = new Promise<boolean>((resolve) => {
     resolveVerified = resolve;
@@ -520,8 +527,10 @@ function startSession(
    * Before the prompt: the account Claude Code loaded must match the project's billing mode. A named
    * function, not an IIFE: TypeScript reads an IIFE as running inline, and would narrow `ended` to false.
    */
-  const preflight = async (): Promise<void> => {
+  const preflightSteps = async (): Promise<void> => {
     account = await settleWithin(clock, q.accountInfo(), attempt.waitMs);
+    // An account is what the event pump waits for; a start with none is decided below, after the sign-in check.
+    if (account) settleAccountStep();
     if (ended || failure) return;
     if (!account) {
       // Silence is not a sign-out: a start under load can take minutes. Only `claude auth status`, asked
@@ -603,6 +612,13 @@ function startSession(
     );
     promptSent = true;
     resolvePreflight(true);
+  };
+  const preflight = async (): Promise<void> => {
+    try {
+      await preflightSteps();
+    } finally {
+      settleAccountStep();
+    }
   };
   void preflight();
 
@@ -741,18 +757,29 @@ function startSession(
         }
         if (msg.type === 'assistant') readContext();
       }
+      if (!started) await accountStep;
       end(endReason(), failure);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (failure) end(failureReason, failure);
-      else if (stopRequested) end('stopped', null);
-      else if (sandboxed && !started && message.includes(SANDBOX_SETTINGS_ERROR)) {
+      if (
+        sandboxed &&
+        !started &&
+        !failure &&
+        !stopRequested &&
+        message.includes(SANDBOX_SETTINGS_ERROR)
+      ) {
+        // Final, whatever the account says: a start again would meet the same sandbox.
         log.error({ reason: message }, 'claude session sandbox refused');
         end(
           SessionEndReason.SandboxRefused,
           `The lane sandbox could not start: ${message.split('\n')[0] ?? message}`,
         );
-      } else end('error', message);
+        return;
+      }
+      if (!started) await accountStep;
+      if (failure) end(failureReason, failure);
+      else if (stopRequested) end('stopped', null);
+      else end('error', message);
     }
   };
   void pump();
@@ -774,6 +801,8 @@ function startSession(
     async stop() {
       if (ended) return;
       stopRequested = true;
+      // A stop wants no retry or refusal: release the event pump if it waits for the account check.
+      settleAccountStep();
       input.end();
       await settleWithin(clock, q.interrupt(), graceMs);
       const abortTimer = clock.setTimeout(() => {
