@@ -722,11 +722,11 @@ export function createPrWatch(input: {
     // Stored as soon as GitHub takes each run, before the next call: a daemon killed between two
     // reruns must not run this head a second time. It names only the checks GitHub took, over every
     // round, since a check it took stops being listed as cancelled once it runs.
-    const storeRerun = (done: boolean): void => {
+    const storeRerun = (state: 'asking' | 'refused' | 'done'): void => {
       if (read.headSha === null) return;
       const headSha = read.headSha;
       ctx.state.write((write) => {
-        setBatchNotice(write, root.id, rerunNotices.ran(headSha, track.rerun, done));
+        setBatchNotice(write, root.id, rerunNotices.ran(headSha, track.rerun, state));
       });
     };
     // A run GitHub took earlier this head is never in `runs`, whichever run it refused after it.
@@ -742,6 +742,9 @@ export function createPrWatch(input: {
           'could not run a cancelled check again',
         );
         track.notice = 'stopped';
+        // The runs GitHub took stay on record as not done, so a restart does not read the head as
+        // fully asked, but the notice stops saying 10db will ask for the refused one.
+        if (track.rerun.size > 0) storeRerun('refused');
         const notTaken = notRun.filter((job) => job.runId === null || !track.rerun.has(job.runId));
         noticeCancelled(root, notTaken, { kind: 'refused', detail: detailOf(error) });
         return;
@@ -750,10 +753,10 @@ export function createPrWatch(input: {
         runId,
         cancelled.filter((job) => job.runId === runId),
       );
-      storeRerun(false);
+      storeRerun('asking');
     }
     // Every run is asked for: the record says so, so a restart does not ask again.
-    storeRerun(true);
+    storeRerun('done');
     track.asked = true;
     track.askedAt = at;
     track.active = false;

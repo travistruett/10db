@@ -2013,8 +2013,41 @@ describe('a required check GitHub cancelled', () => {
     expect(noticeOf(id)?.body).toContain('Resource not accessible');
     expect(rerunNoticeOf(id)?.line).toContain('desktop');
     expect(rerunNoticeOf(id)?.line).not.toContain('lint');
+    // The refused check is not one 10db will run, and the builder sees no record.
+    expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
+    expect(rerunNoticeOf(id)?.body).not.toContain('{');
     await round(w);
     expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('shows no record in a rerun notice, and a restart still reads it', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, {
+      state: 'cancelled',
+      failing: [],
+      pending: [],
+      cancelled: [job('desktop', '77'), job('lint', '88')],
+    });
+    w.start();
+    await w.idle();
+    h.gh.failRerunOf.set('88', new GhError('failed', 'run 88 cannot be rerun; already running'));
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    const body = rerunNoticeOf(id)?.body ?? '';
+    expect(body).toContain('as soon as GitHub allows');
+    expect(body).not.toContain('{');
+    expect(body).not.toContain('Runs 10db started');
+    await w.stop();
+
+    // A daemon that restarts reads the stored runs: 77 is not run again, 88 is asked for.
+    h.gh.failRerunOf.delete('88');
+    const second = watcher();
+    second.start();
+    await second.idle();
+    await round(second);
+    await round(second);
+    expect(h.gh.reruns).toEqual(['77', '88']);
+    expect(rerunNoticeOf(id)?.body).not.toContain('as soon as GitHub allows');
   });
 
   describe('a check cancelled after a rerun that did not include its run', () => {
