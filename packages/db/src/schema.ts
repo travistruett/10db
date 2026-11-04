@@ -1197,6 +1197,11 @@ export const shapeFiles = sqliteTable(
      * counts what a resumed session resends and nothing else.
      */
     inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * When a notice first told the builder Claude can't or couldn't Read this image; null until then.
+     * A file has its own mark because a name can repeat in a conversation, and can hold any punctuation.
+     */
+    unreadableToldAt: text('unreadable_told_at'),
     createdAt: createdAt(),
   },
   (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
