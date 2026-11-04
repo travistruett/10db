@@ -2,6 +2,7 @@ import {
   LEFT_OUT_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
+  revertCommitIn,
   ToolAccess,
   type Notice,
   type WorkstreamStep,
@@ -78,13 +79,6 @@ function storedMark(result: unknown, key: string): boolean {
 /** The line a notice's body carries to name the revert commit. */
 export function revertCommitLine(sha: string): string {
   return `${REVERT_LINE}${sha}`;
-}
-
-/** The full id of the revert commit a text names on its revert line; null when it names none. */
-function revertCommitIn(text: string): string | null {
-  const line = text.split('\n').find((l) => l.startsWith(REVERT_LINE));
-  const sha = line?.slice(REVERT_LINE.length).trim() ?? '';
-  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
 }
 
 /** The full id of the revert commit a notice names; null when it names none. */

@@ -4,12 +4,15 @@ import {
   canTransition,
   ConflictError,
   EventType,
+  EvidenceKind,
   LANE_STATES,
   mintId,
   NotFoundError,
   LEFT_OUT_NOTICE_KEY,
   PARKED_NOTICE_KEY,
+  REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
+  revertCommitIn,
   TaskStatus,
   WorkstreamState,
   type AccountId,
@@ -26,7 +29,7 @@ import {
   Effort,
   type WorkstreamStep,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, inArray, isNotNull, or, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, like, or, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
@@ -108,9 +111,26 @@ function toDto(db: DbReader, row: WorkstreamRow): WorkstreamDto {
     lastActivityAt: row.lastActivityAt,
     runNextAt: row.runNextAt,
     notice: row.notice,
+    revertTold: revertTold(db, row.id),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/** Whether a builder note among the run's evidence names a revert commit (a retry or a joined start wrote it). */
+function revertTold(db: DbReader, id: WorkstreamId): boolean {
+  return db
+    .select({ summary: schema.evidence.summary })
+    .from(schema.evidence)
+    .where(
+      and(
+        eq(schema.evidence.workstreamId, id),
+        eq(schema.evidence.kind, EvidenceKind.Builder),
+        like(schema.evidence.summary, `%${REVERT_COMMIT_LINE}%`),
+      ),
+    )
+    .all()
+    .some((row) => revertCommitIn(row.summary) !== null);
 }
 
 export function getWorkstream(db: DbReader, id: WorkstreamId): WorkstreamDto {

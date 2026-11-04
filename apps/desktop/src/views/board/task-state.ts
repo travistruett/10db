@@ -90,6 +90,7 @@ function whatRetryDoes(
   stepIndex: number,
   step: string | null,
   notice: Notice | null,
+  revertTold: boolean,
 ): string {
   const target = retryTargetAfterRejection(steps, stepIndex);
   const rework = target === null ? undefined : steps[target];
@@ -98,8 +99,12 @@ function whatRetryDoes(
   if (!step) return 'Retry runs it again.';
   // A run whose commits were reverted is told so at the step that can commit, so Retry goes there
   // before a read-only step (`retryWorkstream`). A retried run is told again only if it has not
-  // committed since, which the notice does not say.
+  // committed since, which the notice does not say. A run whose notice is not the `left-out` one is
+  // told by the note its session was given, which the run records (`revertTold`): a joined run holds
+  // no notice at all. A `left-out` notice that names no revert says none is on the branch, whatever
+  // an older note says.
   const revertNamed = notice?.body.includes(REVERT_COMMIT_LINE) ?? false;
+  const retold = notice?.key !== LEFT_OUT_NOTICE_KEY && (revertNamed || revertTold);
   const failed = steps[stepIndex];
   const canRedo =
     failed !== undefined &&
@@ -108,7 +113,7 @@ function whatRetryDoes(
     steps.slice(0, stepIndex).some((s) => s.role === StepRole.Implement);
   if (canRedo && revertNamed && notice?.key === LEFT_OUT_NOTICE_KEY)
     return `Retry sends the work back to the build step and tells it its commits were reverted, and the ${step} runs after it.`;
-  if (canRedo && revertNamed && notice?.key === REVERTED_NOTICE_KEY)
+  if (canRedo && retold)
     return `Retry sends the work back to the build step and tells it its commits were reverted, unless the run has committed since: then it runs the ${step} step again.`;
   switch (kind) {
     case WorkstreamFailure.GateFailed:
@@ -134,6 +139,7 @@ export function failureLine(
   workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & {
     readonly failureKind: string | null;
     readonly notice?: Notice | null;
+    readonly revertTold?: boolean;
   },
   retryable: boolean,
 ): string {
@@ -141,7 +147,7 @@ export function failureLine(
   const step = failed ? STEP_NAME[failed.role] : null;
   const happened = whatHappened(workstream.failureKind, step);
   if (!retryable) return happened;
-  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null)}`;
+  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null, workstream.revertTold ?? false)}`;
 }
 
 function building(workstream: WorkstreamDto): string {

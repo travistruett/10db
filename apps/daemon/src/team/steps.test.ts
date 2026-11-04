@@ -506,6 +506,80 @@ describe('retryWorkstream', () => {
       expect(notes[1]?.summary).toContain(SECOND_REVERT);
     });
 
+    /** What Ship without it writes for a run with no commit left on the branch: it names no revert. */
+    const nothingToRevert: Notice = {
+      key: 'left-out',
+      tone: 'info',
+      line: 'Left out of the pull request: it had no commits to revert',
+      body: "This run failed, and you chose Ship without it. It had no commits on the batch's branch that were still there, so 10db reverted nothing.",
+    };
+    const failAgain = (id: WorkstreamId, at: number) => {
+      state.write((ctx) => {
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, id, { to, fence: null });
+        const row = getWorkstreamRow(ctx.tx, id);
+        patchWorkstream(ctx, id, null, {
+          stepIndex: at,
+          steps: row.steps.map((s, i) => ({
+            ...s,
+            status: i < at ? 'done' : i === at ? 'failed' : 'pending',
+          })),
+        });
+      });
+    };
+
+    it('says on the run that its session was told of a revert, whatever its notice holds', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      expect(getWorkstream(state.db, ws.id).revertTold).toBe(false);
+      retryWorkstream(state, ws.id);
+      expect(getWorkstream(state.db, ws.id).revertTold).toBe(true);
+      state.write((ctx) => setWorkstreamNotice(ctx, ws.id, null));
+      expect(getWorkstream(state.db, ws.id).revertTold).toBe(true);
+    });
+
+    it('sends a joined run with no notice that committed nothing back to the implement step', () => {
+      const task = addTask();
+      const plan = resolveStepPlan(state.db, task.id);
+      const batch = state.write((ctx) => {
+        const row = insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' });
+        transitionBatch(ctx, row.id, { to: 'OPEN' });
+        const left = insertPlannedWorkstream(ctx, task.id, plan, row.id);
+        for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
+          transitionWorkstream(ctx, left.id, { to, fence: null });
+        setWorkstreamNotice(ctx, left.id, leftOut(REVERT));
+        return row;
+      });
+      const joined = state.write((ctx) => insertJoinedWorkstream(ctx, task.id, plan, batch.id));
+      failAgain(joined.id, 1);
+      const failed = getWorkstream(state.db, joined.id);
+      expect(failed.notice).toBeNull();
+      // The failure line reads this fact to say what the retry below does.
+      expect(failed.revertTold).toBe(true);
+      const retried = retryWorkstream(state, joined.id);
+      expect(retried.stepIndex).toBe(0);
+      expect(retried.notice?.key).toBe('reverted-work');
+    });
+
+    it('does not tell a run left out with nothing to revert of a revert no longer on the branch', () => {
+      const ws = failedAt(0, leftOut(REVERT));
+      retryWorkstream(state, ws.id);
+      failAgain(ws.id, 1);
+      // Ship without it again found the revert gone from the branch, so it wrote no revert line.
+      state.write((ctx) => setWorkstreamNotice(ctx, ws.id, nothingToRevert));
+      const notes = builderNotes(ws.id).length;
+      const retried = retryWorkstream(state, ws.id);
+      expect(retried.notice).toBeNull();
+      expect(retried.stepIndex).toBe(1);
+      expect(builderNotes(ws.id)).toHaveLength(notes);
+    });
+
+    it('still tells a run left out with nothing to revert of the revert a card holds', () => {
+      const ws = failedAt(1, nothingToRevert);
+      const retried = retryWorkstream(state, ws.id, undefined, REVERT);
+      expect(retried.stepIndex).toBe(0);
+      expect(builderNotes(ws.id).map((n) => n.summary.includes(REVERT))).toEqual([true]);
+    });
+
     const REDO = 'Redo the work and commit it with the commit tool';
     /** Four criteria keep the full flow's plan step, so the run starts on a read-only step. */
     const fullFlowPlan = (taskId: TaskId) => {

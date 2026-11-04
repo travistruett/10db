@@ -143,6 +143,28 @@ describe('failureLine', () => {
       );
     });
 
+    it('hedges for a run told of a revert that holds no notice, as a joined run does', () => {
+      const line = failureLine({ failureKind: 'no_result', ...flow, revertTold: true }, true);
+      expect(line).toContain('Retry sends the work back to the build step');
+      expect(line).toContain('unless the run has committed since');
+    });
+
+    it('does not promise the build step to a run told of a revert whose notice names none', () => {
+      expect(
+        failureLine(
+          {
+            failureKind: 'no_result',
+            ...flow,
+            revertTold: true,
+            notice: notice(LEFT_OUT_NOTICE_KEY, 'It had no commits.'),
+          },
+          true,
+        ),
+      ).toBe(
+        'The review session stopped without reporting a result. Retry runs the review step again.',
+      );
+    });
+
     it('hedges for a retried run, which is sent back only if it has not committed since', () => {
       const line = failureLine(
         {

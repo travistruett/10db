@@ -688,6 +688,12 @@ export const WorkstreamDto = z.object({
   runNextAt: Timestamp.nullable(),
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
+  /**
+   * Whether a note told this run's session that its commits were reverted by Ship without it (a Retry
+   * or a start that joined the batch wrote it). The notice slot can't say so: a joined run holds none,
+   * and a wait can replace one. The failure line reads it to say where Retry restarts the run.
+   */
+  revertTold: z.boolean().default(false),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -804,6 +810,13 @@ export const REVERTED_NOTICE_KEY = 'reverted-work';
 
 /** The start of the line on which these notices, and a retried run's note, name the revert commit. */
 export const REVERT_COMMIT_LINE = 'Revert commit: ';
+
+/** The full id of the revert commit a text names on its revert line; null when it names none. */
+export function revertCommitIn(text: string): string | null {
+  const line = text.split('\n').find((l) => l.startsWith(REVERT_COMMIT_LINE));
+  const sha = line?.slice(REVERT_COMMIT_LINE.length).trim() ?? '';
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}
 
 /**
  * The key of the batch notice that records 10db repaired a broken install by itself. It is history,

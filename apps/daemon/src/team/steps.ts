@@ -221,7 +221,8 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * left on the branch without writing the run's notice (its write failed, and the batch's left-out
  * card holds it). It covers this run, and it is told of that one unless it is the revert the run was
  * told of already: a different revert undid what the run had by then. The card is never older than
- * the run's record, because the answer that writes the notices closes it.
+ * the run's record, because the answer that writes the notices closes it. A run whose `left-out` notice
+ * names no revert has none on the branch, whatever its notes say, so only `kept` can apply to it.
  */
 function revertStillOn(
   db: DbReader,
@@ -231,6 +232,10 @@ function revertStillOn(
   if (row.notice?.key === LEFT_OUT_NOTICE_KEY) {
     const named = revertCommitOf(row.notice);
     if (named !== null) return named;
+    // Ship without it wrote this notice after reading the branch, and it names no revert: none of the
+    // run's is on the branch (`nothingToRevert`). A note from before it, which names a revert that has
+    // since left the branch, must not tell the session of one; only a card's revert can.
+    return kept;
   }
   const evidence = listEvidence(db, row.id);
   const record = revertOfRun({ notice: row.notice, evidence });
