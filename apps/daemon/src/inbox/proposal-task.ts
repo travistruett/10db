@@ -111,11 +111,20 @@ export function proposalFiling(proposal: {
 }): ProposalFiling {
   const other = firstReasonNotToFile(proposal);
   const carries = carriesRiskTags(proposal.riskTags);
-  if (carries === null) return other === null ? { file: true } : { file: false, reason: other };
+  // The step cap is the last rule: it only names a proposal that would otherwise have been filed, so
+  // a risk, a size or a batch request is never hidden behind it.
+  const capped = proposal.stepCapReached === true ? STEP_CAP_REASON : null;
+  if (carries === null) {
+    const reason = other ?? capped;
+    return reason === null ? { file: true } : { file: false, reason };
+  }
   // A declared tag is what the builder most needs to see, so the card names every one of them first,
   // whichever other rule also raised it.
   return { file: false, reason: other === null ? carries : `${carries}, and ${other}` };
 }
+
+const STEP_CAP_REASON =
+  'this step has already filed as many tasks as a step may, so a person decides';
 
 /** The clause naming every risk tag a proposal declared; null when it declared none. */
 export function carriesRiskTags(riskTags: readonly RiskTag[] | undefined): string | null {
@@ -131,11 +140,8 @@ function firstReasonNotToFile(proposal: {
   readonly body: string;
   readonly joinsRunningBatch?: boolean | undefined;
   readonly limit: number;
-  readonly stepCapReached?: boolean | undefined;
 }): string | null {
   if (proposal.kind !== ProposalKind.NewTask) return 'it is not a new task';
-  if (proposal.stepCapReached === true)
-    return 'this step has already filed as many tasks as a step may, so a person decides';
   if (proposal.limit <= 0) return 'filing small proposals by itself is off for this project';
   if (proposal.joinsRunningBatch === true) return 'it asks to join a running batch';
   const text = `${proposal.title}\n${proposal.body}`;
