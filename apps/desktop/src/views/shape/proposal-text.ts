@@ -75,6 +75,7 @@ export function convertedLine(row: ShapeProposalDto): string | null {
   if (row.converted?.withdrawn === true) return 'Withdrawn';
   switch (row.kind) {
     case 'principle':
+      if (row.converted?.retired === true) return 'Retired from Knowledge';
       return row.converted?.superseded === true
         ? 'Converted · replaced by a later principle'
         : 'Converted · in Knowledge';

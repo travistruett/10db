@@ -132,8 +132,10 @@ export function ProposedPane({
       ];
     }
     if (row.kind === 'principle' && row.converted?.principleId != null) {
-      // A withdrawn principle is gone, and a replaced one is not the head of its chain.
-      if (row.converted.withdrawn === true || row.converted.superseded === true) return [];
+      // A withdrawn or retired principle is gone, and a replaced one is not the head of its chain:
+      // only a current or proposed principle can be withdrawn.
+      const { withdrawn, superseded, retired } = row.converted;
+      if (withdrawn === true || superseded === true || retired === true) return [];
       const { principleId } = row.converted;
       return [
         {

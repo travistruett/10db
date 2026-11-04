@@ -3,6 +3,8 @@ import {
   landingTarget,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  ShapeProposalBody,
+  ShapeProposalState,
   taskLandingFor,
   TaskStatus,
   WorkspaceMode,
@@ -24,6 +26,7 @@ import {
   listShapeMessages,
   listShapeProposals,
   type DbReader,
+  type ShapeProposalRow,
 } from '@10db/db';
 import type { PlanWorld } from './validate';
 
@@ -32,6 +35,10 @@ const landsText = (target: LandingTarget): string =>
   target.autoMerge
     ? `merges into ${target.baseBranch} when checks pass`
     : `is held for your review (pull request against ${target.baseBranch})`;
+
+/** The keys of the tasks a goal row holds in its body; none for any other row. */
+export const tasksInside = (row: ShapeProposalRow): string[] =>
+  row.kind === 'goal' ? ShapeProposalBody.goal.parse(row.body).tasks.map((t) => t.key) : [];
 
 /**
  * What the rules about the conversation and the project read, as of now. Built inside the write
@@ -60,13 +67,27 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       )
       .map((m) => m.id),
   );
+  const proposals = listShapeProposals(db, shapeId);
+  const pinned = proposals.filter(
+    (r) => r.state === ShapeProposalState.Pending && r.pinned.length > 0,
+  );
   return {
     areaNames: [...project.areas.map((a) => a.name), ...project.hazards.map((h) => h.name)],
     people: listPeople(db),
     citable,
     convertedTasks,
     convertedGoals,
-    storedSources: new Set(listShapeProposals(db, shapeId).map((r) => r.key)),
+    storedSources: new Set(proposals.map((r) => r.key)),
+    storedKeys: new Set(proposals.flatMap((r) => [r.key, ...tasksInside(r)])),
+    storedEfforts: new Set([
+      // Decided from the links: an addition Remove Draft Goal took back stays Accepted, linkless.
+      ...links.filter((l) => l.goalId !== null).map((l) => l.key),
+      // A round supersedes every other pending row its draft leaves out.
+      ...pinned.filter((r) => r.kind === 'goal' || r.kind === 'task').map((r) => r.key),
+    ]),
+    pinnedGoalTasks: new Map(
+      pinned.filter((r) => r.kind === 'goal').map((r) => [r.key, tasksInside(r)]),
+    ),
     draftPlace: {
       // What `insertTask` gives a task with no placement named: the project's own.
       place:
