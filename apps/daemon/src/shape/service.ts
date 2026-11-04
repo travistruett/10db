@@ -608,26 +608,32 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
    * Tells the builder which images this turn points Claude at as a path that a Read would refuse, because the
    * pictures the session already carries leave no room in the pool (§5.4). `shown` are the files the message
    * names, `intake.files` the ones it sends, and a `fresh` session carries no earlier picture or Read.
+   * Returns the images that would be refused, read from the state before the turn is marked told; the turn
+   * says so through `warnUnreadable` once it has reached Claude, so a turn that fails leaves its retry to say it.
    */
-  const warnUnreadable = (
+  const unreadableOf = (
     shapeId: ShapeId,
     intake: Intake,
     shown: readonly ShapeFileRow[],
     sentInline: ReadonlySet<ShapeFileRow['id']>,
     fresh: boolean,
-  ): void => {
+  ): readonly ShapeFileRow[] => {
     const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
     const paths = shown.filter((file) => byPath.has(file.id));
-    if (paths.length === 0) return;
+    if (paths.length === 0) return [];
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
     const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
-    const unreadable = unreadableImages(
+    return unreadableImages(
       paths,
       readCeiling(inline) - readBytesSpent(messages),
       readPictureCap(messages),
     );
+  };
+
+  /** Writes the notice for the images `unreadableOf` found, if any. */
+  const warnUnreadable = (shapeId: ShapeId, unreadable: readonly ShapeFileRow[]): void => {
     if (unreadable.length > 0)
       noticeUnreadable(shapeId, unreadable, unreadableImagesNotice(unreadable.map(noticeName)));
   };
@@ -794,7 +800,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
     const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
-    warnUnreadable(shapeId, intake, files, new Set(inlineIds), resumeId === null);
+    // Worked out now, from the state before this turn is marked told, and said once the session has started.
+    const unreadable = unreadableOf(shapeId, intake, files, new Set(inlineIds), resumeId === null);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -952,6 +959,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     };
     rt.live = live;
     told(shapeId, files, intake.missized, inlineIds, resumeId === null);
+    warnUnreadable(shapeId, unreadable);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -1008,9 +1016,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       else {
         const lines = intakeText(intake);
         const { images, ids } = imagesOf(intake.files, intake.spent);
-        warnUnreadable(shapeId, intake, intake.files, new Set(ids), false);
+        const unreadable = unreadableOf(shapeId, intake, intake.files, new Set(ids), false);
         rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
         told(shapeId, intake.files, intake.missized, ids, false);
+        warnUnreadable(shapeId, unreadable);
       }
     } catch (error) {
       // The turn never reached Claude, so what was to go ahead of it waits for the next one; its

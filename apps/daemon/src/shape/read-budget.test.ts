@@ -573,6 +573,51 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(told[0]).not.toMatch(/shot0\.png/);
     });
 
+    describe('when the turn that names them never reaches Claude', () => {
+      const shots = () =>
+        Array.from({ length: 4 }, (_, i) => drop(`shot${String(i)}.png`, retina(MB + 200_000)));
+      const shotNotices = () => notices().filter((body) => /shot\d\.png/.test(body));
+
+      it('says nothing when the send fails, and says it on the retry', async () => {
+        await fillInline();
+        shots();
+        const live = must(f.adapter.shapeSessions[0], 'the live session').handle;
+        const send = live.send.bind(live);
+        let failures = 1;
+        (live as { send: typeof live.send }).send = (text, images) => {
+          if (failures-- > 0) throw new Error('the pipe is closed');
+          send(text, images);
+        };
+        f.service.send(shapeId(), 'Look at these');
+        await f.service.settled(shapeId());
+        expect(notices().filter((body) => body.includes('could not start'))).toHaveLength(1);
+        expect(shotNotices()).toEqual([]);
+        await nextTurn('Look again');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+      });
+
+      it('says nothing when the session fails to start, and says it on the retry', async () => {
+        await fillInline();
+        shots();
+        // Quitting ends the live session; the next turn resumes the conversation's session.
+        await f.restart();
+        const start = f.adapter.startShape.bind(f.adapter);
+        let failures = 1;
+        f.adapter.startShape = (spec) => {
+          if (failures-- > 0) throw new Error('Claude is not available');
+          return start(spec);
+        };
+        f.service.send(shapeId(), 'Look at these');
+        await f.service.settled(shapeId());
+        expect(notices().filter((body) => body.includes('could not start'))).toHaveLength(1);
+        expect(shotNotices()).toEqual([]);
+        await nextTurn('Look again');
+        expect(shotNotices()).toHaveLength(1);
+        expect(shotNotices()[0]).toMatch(/shot2\.png, shot3\.png/);
+      });
+    });
+
     describe('refused when the send-time notice could not predict it', () => {
       const shots = (n: number, from = 0) =>
         Array.from({ length: n }, (_, i) =>
