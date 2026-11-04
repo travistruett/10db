@@ -114,12 +114,14 @@ export const migrationNotices = {
   /**
    * `moved` joins what `earlier`, the batch's notice so far, already lists: a migration renumbered
    * again keeps its first tag, so the list runs from the names the batch's work knows to the names
-   * that hold now.
+   * that hold now. A migration renumbered again from a tag the list already starts at (a catch-up
+   * that began over from the same branch) replaces its line rather than adding one.
    */
   renumbered: (earlier: Notice | undefined, moved: readonly RenumberedMigration[]): Notice => {
     const all = recordIn(earlier, RenumberedMigration);
     for (const { from, to } of moved) {
-      const at = all.findIndex((m) => m.to === from);
+      const chained = all.findIndex((m) => m.to === from);
+      const at = chained >= 0 ? chained : all.findIndex((m) => m.from === from);
       const first = all[at];
       if (first === undefined) all.push({ from, to });
       else all[at] = { from: first.from, to };

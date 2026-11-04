@@ -74,6 +74,12 @@ export type BaseUpdate =
       readonly note: string | null;
       /** The conflicts the merge settled; only when asked for a pull request (`forPullRequest`). */
       readonly resolved?: readonly ResolvedConflict[];
+      /**
+       * The migrations the merge renumbered; only when asked for a pull request, whose catch-up may
+       * still be put back. The batch's notice is not written for it: the caller keeps it once the
+       * merge is pushed (`keepRenumbered`).
+       */
+      readonly renumbered?: readonly RenumberedMigration[];
     }
   /**
    * The branch lacks a migration of the batch's that a merge of the base lost, and that 10db could
@@ -688,6 +694,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly head: string;
         readonly note: string | null;
         readonly uncarried?: true;
+        /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
+        readonly renumbered?: readonly RenumberedMigration[];
       }
     | { readonly kind: 'aborted' }
   > {
@@ -732,14 +740,21 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       return outcome;
     }
     const { head, problem, renumbered } = outcome;
-    if (problem === null) return { kind: 'done', head, note: renumberedNote(batch, renumbered) };
+    if (problem === null)
+      return {
+        kind: 'done',
+        head,
+        // A catch-up's merge may still be put back: its caller keeps the notice once it is pushed.
+        note: renumberedNote(batch, renumbered, !forPullRequest),
+        ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
+      };
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
     if (lost === null)
       return {
         kind: 'done',
         head,
         note: joined(
-          renumberedNote(batch, renumbered),
+          renumberedNote(batch, renumbered, !forPullRequest),
           unregenerated(batch, path, merged, problem),
         ),
       };
@@ -749,7 +764,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       uncarried: true,
       note: joined(
         // A merge that goes back moved nothing.
-        forPullRequest ? null : renumberedNote(batch, renumbered),
+        forPullRequest ? null : renumberedNote(batch, renumbered, true),
         unregenerated(batch, path, merged, problem, {
           lost: true,
           card: !forPullRequest && options.raisesUncarried !== true,
@@ -847,22 +862,29 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
-  /**
-   * Keeps what `renumbered` moved on the batch, where every later step's brief reads it. Resolves with
-   * what the gate's note says of it; null when nothing moved.
-   */
-  function renumberedNote(
-    batch: BatchDto,
-    renumbered: readonly RenumberedMigration[],
-  ): string | null {
-    if (renumbered.length === 0) return null;
-    ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
+  /** Puts what `renumbered` moved on the batch's notice, with what it already lists. */
+  function keepRenumbered(batch: BatchDto, renumbered: readonly RenumberedMigration[]): void {
     tell(batch, () => {
       const earlier = getBatch(db, batch.id).notices.find(
         (n) => n.key === NOTICE_KEY.migrationsRenumbered,
       );
       showNotice(ctx.state, batch.id, migrationNotices.renumbered(earlier, renumbered));
     });
+  }
+
+  /**
+   * Keeps what `renumbered` moved on the batch (unless `keep` is false: a catch-up's caller keeps it
+   * itself once the merge is pushed), where every later step's brief reads it. Resolves
+   * with what the gate's note says of it; null when nothing moved.
+   */
+  function renumberedNote(
+    batch: BatchDto,
+    renumbered: readonly RenumberedMigration[],
+    keep: boolean,
+  ): string | null {
+    if (renumbered.length === 0) return null;
+    ctx.logger.info({ batchId: batch.id, renumbered }, 'migrations renumbered after the base');
+    if (keep) keepRenumbered(batch, renumbered);
     return `10db re-created this batch's migrations after origin/${batch.baseBranch}'s. These changed number:\n${renumberedLines(renumbered)}`;
   }
 
@@ -1515,7 +1537,12 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         const note = joined(merged.note, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
           return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
-        return { ...merged, head: regenerated.head, note };
+        return {
+          ...merged,
+          head: regenerated.head,
+          note,
+          ...(regenerated.renumbered === undefined ? {} : { renumbered: regenerated.renumbered }),
+        };
       }
     }
   }
