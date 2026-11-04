@@ -301,8 +301,11 @@ data directory and kept as long as the conversation. Images reach the session as
 files as a line naming the path, which the session reads with `Read`. **(spec's call: the limits)**
 
 The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
-image, so one oversize block would end every later turn. An image over 2 MiB, or past 6 MiB of images in one
-message, therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes itself.
+image, so one oversize block would end every later turn. An image over 2 MiB, past 6 MiB of images in one
+message, or past 18 MiB of images across the whole conversation (24 MiB as base64, leaving the 32 MB request
+about 6 MB for text), therefore goes as a path line marked "too large to show inline; Read it", which `Read`
+resizes itself. The conversation total counts every image already told that fits the 2 MiB cap, an upper bound
+on what went inline; a session started fresh (from a digest) resends no earlier block, so it starts at zero.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 

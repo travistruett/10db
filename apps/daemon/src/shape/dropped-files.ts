@@ -83,16 +83,46 @@ export const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
 export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
 
 /**
- * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
- * cap, and together within the per-message cap. Every other image goes as a path.
+ * The most image bytes a whole conversation carries as content blocks. A resumed session resends every
+ * earlier block with each request, and base64 grows them by 4/3: 18 MiB raw is 24 MiB (about 25 MB) on
+ * the wire, leaving the API's 32 MB request limit about 6 MB for the text, tool results and the reply.
  */
-export function inlineImageIds(files: readonly FileSize[]): Set<string> {
+export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
+
+const isImageName = (name: string): boolean => {
+  const kind = shapeFileKind(name);
+  return kind !== null && isShapeImage(kind);
+};
+
+/**
+ * The inline image bytes a conversation has already spent, from the files Claude was told of earlier.
+ * Which of them went as blocks depends on how they were batched into turns, so every told image within
+ * the per-image cap counts: an upper bound, never an undercount, so the resent request stays under the limit.
+ */
+export function inlineBytesSpent(told: readonly FileSize[]): number {
+  return told.reduce(
+    (sum, file) =>
+      isImageName(file.name) && file.size <= INLINE_IMAGE_MAX_BYTES ? sum + file.size : sum,
+    0,
+  );
+}
+
+/**
+ * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
+ * cap, together within the per-message cap, and within what is left of the conversation's cap after
+ * `spent` bytes sent earlier. Every other image goes as a path.
+ */
+export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<string> {
   const ids = new Set<string>();
   let total = 0;
   for (const file of files) {
-    const kind = shapeFileKind(file.name);
-    if (kind === null || !isShapeImage(kind)) continue;
-    if (file.size > INLINE_IMAGE_MAX_BYTES || total + file.size > INLINE_IMAGES_MAX_BYTES) continue;
+    if (!isImageName(file.name)) continue;
+    if (
+      file.size > INLINE_IMAGE_MAX_BYTES ||
+      total + file.size > INLINE_IMAGES_MAX_BYTES ||
+      spent + total + file.size > INLINE_CONVERSATION_MAX_BYTES
+    )
+      continue;
     total += file.size;
     ids.add(file.id);
   }
@@ -101,11 +131,16 @@ export function inlineImageIds(files: readonly FileSize[]): Set<string> {
 
 /**
  * The ids of the images among `shown` (the files a message names) that reach Claude as a path alone
- * when `sent` (the files whose images the message carries) go as `inlineImageIds` says: an image over the
- * per-image cap, or one of `sent` the total left out. A shown image outside `sent` was sent earlier.
+ * when `sent` (the files whose images the message carries) go as `inlineImageIds` says after `spent`
+ * bytes sent earlier: an image over the per-image cap, or one of `sent` the caps left out. A shown image
+ * outside `sent` was sent earlier.
  */
-export function pathImageIds(shown: readonly FileSize[], sent: readonly FileSize[]): Set<string> {
-  const inline = inlineImageIds(sent);
+export function pathImageIds(
+  shown: readonly FileSize[],
+  sent: readonly FileSize[],
+  spent = 0,
+): Set<string> {
+  const inline = inlineImageIds(sent, spent);
   const sentIds = new Set(sent.map((file) => file.id));
   return new Set(
     shown

@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
+import { INLINE_CONVERSATION_MAX_BYTES } from './dropped-files';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
 // Shape spec §5.4 Dropped files and §5.6 Starting from a terminal.
@@ -191,6 +192,39 @@ describe('a large dropped image', () => {
     expect(turn.images).toHaveLength(3);
     expect(turn.message.match(/too large to show/g)).toHaveLength(1);
     expect(turn.message).toMatch(/shot3\.png\) .*too large to show/);
+  });
+
+  it('keeps a whole conversation’s inline images under a total, the later ones going as paths', async () => {
+    // A resumed session resends every earlier image block, so the sum across turns is what the API sees.
+    const sent: number[] = [];
+    const marked: number[] = [];
+    for (let turnNo = 0; turnNo < 5; turnNo += 1) {
+      for (let i = 0; i < 3; i += 1)
+        drop(`t${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      const turn = await nextTurn(`Turn ${String(turnNo)}`);
+      sent.push(turn.images.length);
+      marked.push(turn.message.match(/too large to show/g)?.length ?? 0);
+    }
+    expect(sent.reduce((a, b) => a + b, 0) * 2 * MB).toBeLessThanOrEqual(
+      INLINE_CONVERSATION_MAX_BYTES,
+    );
+    // base64 grows 4/3: what a resumed request carries stays well under the API's 32 MB.
+    expect((INLINE_CONVERSATION_MAX_BYTES * 4) / 3).toBeLessThan(28_000_000);
+    expect(sent).toEqual([3, 3, 3, 0, 0]);
+    expect(marked).toEqual([0, 0, 0, 3, 3]);
+  });
+
+  it('spends what is left of the conversation total on a smaller image, then stops', async () => {
+    for (let turnNo = 0; turnNo < 3; turnNo += 1)
+      for (let i = 0; i < 3; i += 1) {
+        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+        if (i === 2) await nextTurn(`Turn ${String(turnNo)}`);
+      }
+    // 18 MiB spent: nothing more fits, not even a tiny image.
+    drop('tiny.png', PNG);
+    const turn = await nextTurn('One more');
+    expect(turn.images).toEqual([]);
+    expect(turn.message).toMatch(/tiny\.png\) — too large to show inline; Read it/);
   });
 
   it('is sent as a path to a session that has not started, and not as an image', async () => {
