@@ -2554,6 +2554,38 @@ describe('complete_step', () => {
           expect(summary).toContain(`${task.id} ${task.title}`);
       });
 
+      it('never refuses a call with no follow-ups for the bound, however many lines the result seems to list', async () => {
+        const s = await onStep('review');
+        const bullets = Array.from(
+          { length: MAX_FOLLOW_UPS + 5 },
+          (_, i) => `- pasted ${String(i)}`,
+        );
+        const notes = ['1. Fine.', '', 'Follow-up tasks filed:', ...bullets].join('\n');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-n',
+          summary: notes,
+          verdict: 'approve',
+        });
+        expect(first.isError).toBe(false);
+        const second = await s.call('complete_step', {
+          opId: 'op-step-multi-o',
+          summary: 'Replacement notes.',
+          verdict: 'reject',
+        });
+        expect(second.isError).toBe(false);
+        expect(resultOf(s)?.summary.startsWith('Replacement notes.')).toBe(true);
+        expect(resultOf(s)?.verdict).toBe('reject');
+        expect(tasksOf(s.project.id)).toHaveLength(1);
+        // A call that files something is still bounded by what the result seems to list.
+        const files = await s.call('complete_step', {
+          opId: 'op-step-multi-p',
+          summary: 'Third notes.',
+          verdict: 'approve',
+          followUps: more(0, 1),
+        });
+        expect(files.isError).toBe(true);
+      });
+
       it('counts what an earlier session of the step filed against the cap', async () => {
         const s = await onStep('review');
         await s.call('complete_step', {

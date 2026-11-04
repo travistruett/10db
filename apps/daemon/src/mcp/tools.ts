@@ -734,7 +734,10 @@ export function createToolHandlers(
             unmatched.splice(at, 1);
             return false;
           });
-          if (kept.length + toFile.length > MAX_FOLLOW_UPS)
+          // Only a call that files something is bounded. The list is read back from the notes, so notes that
+          // hold their own "Follow-up tasks filed:" lines can make it look longer than what was filed; a
+          // call that files nothing must still be able to replace such a result.
+          if (toFile.length > 0 && kept.length + toFile.length > MAX_FOLLOW_UPS)
             throw new InvalidError(
               `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks through complete_step and this step's result already lists ${String(kept.length)}. Send at most ${String(Math.max(0, MAX_FOLLOW_UPS - kept.length))} followUps, and put the rest in your notes.`,
             );
@@ -756,7 +759,7 @@ export function createToolHandlers(
           // Throwing here rolls back the tasks filed above.
           if (summary.length > MAX_STEP_SUMMARY)
             throw new InvalidError(
-              `Your notes and the list of follow-up tasks 10db adds are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
+              `Your notes and the list of follow-up tasks this step has filed, which 10db adds to them, are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
             );
           const result = { summary, verdict, sessionId, at: ctx.now };
           patchWorkstream(ctx, workstreamId, null, {
