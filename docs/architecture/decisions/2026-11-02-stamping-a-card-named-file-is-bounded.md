@@ -18,16 +18,27 @@
 - A checkout holds at most one batch waiting to start. `flush` queues a run for a checkout only when none is
   waiting there, and the run takes the checkout's pending changes when it starts, so events that arrive while
   a slow batch runs join the waiting one. Work in a checkout so waits for at most the batch running and the
-  one waiting, each within the budget, however often a lane touches a slow file. `flush` settles when every
-  queue has.
-- `allowedWrites` reads the stamps of a batch's card-named paths together, then decides path by path with no
-  await between the decisions, against the cards and excused writes as they are after the reads.
+  one waiting, each with its stamp reads within four budgets (120 s, below), however often a lane touches a
+  slow file. `flush` settles when every queue has.
+- `allowedWrites` reads the stamps of a batch's card-named paths together, in at most two rounds of reads.
+  The first round reads the paths a card or an excused write names when it starts. A card answered during
+  that round names a path it did not read, so the lists are made again and those paths are read together in a
+  second round. A card answered only during the second round gets no third round: its path is not read and
+  fails closed like an unreadable one (carded, the card left unused). Each round is within one budget, so
+  `allowedWrites` waits at most two budgets (60 s), however many paths gain cards. It then decides path by
+  path with no await between the decisions, against the cards and excused writes as they are after the
+  reads.
+- A batch calls `allowedWrites` at most twice: once for the paths it reports, then once for the files of all
+  its reported directories not yet allowed, together, however many directories there are. So its stamp reads
+  take at most four budgets (120 s), and it may first wait for the batch running ahead of it in its checkout,
+  which is bounded the same way. A file read in the first call is read again in the second.
 - A step end reads a file for another lane's excused stamp only when that lane has an excused write for the
-  path, and those reads run together. A step end does not wait on its checkout's queue: it makes two rounds
-  of reads one after the other, its own lane's (`allowedWrites`) and then the others' excused stamps, each
-  within one budget, so it waits at most two budgets (60 s). A read that runs out of time gives no stamp, so
-  the file is carded (fail closed). A test pins this: a step end settles while another lane's batch is still
-  held on a stamp read.
+  path, and those reads run together. A step end does not wait on its checkout's queue: it makes up to three
+  rounds of reads one after the other, its own lane's two (`allowedWrites`) and then the others' excused
+  stamps, each within one budget, so it waits at most three budgets (90 s). A read that runs out of time
+  gives no stamp, so the file is carded (fail closed). A test pins this: a step end settles while another
+  lane's batch is still held on a stamp read; another pins that paths whose cards are answered during the
+  reads are read together and get no third round; a third pins that two directories' files are read together.
 
 ## Why
 
