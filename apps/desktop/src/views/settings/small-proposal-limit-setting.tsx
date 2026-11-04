@@ -14,10 +14,12 @@ export const SMALL_PROPOSAL_LIMIT_LABEL = 'Size limit for small proposals';
 export function SmallProposalLimitSetting({ project }: { readonly project: ProjectDto }) {
   const setting = useSmallProposalLimit(project.id);
   const set = useSetSmallProposalLimit(project.id);
-  const [draft, setDraft] = useState<number | null>(null);
+  // null = untouched (show the saved limit); '' = the builder cleared the field, which stays empty
+  // until a number is typed, so retyping from scratch (backspace, then 0) works.
+  const [draft, setDraft] = useState<number | '' | null>(null);
   const saved = setting.data?.limit;
   const value = draft ?? saved;
-  const changed = draft !== null && draft !== saved;
+  const changed = typeof draft === 'number' && draft !== saved;
   return (
     <SettingsCard>
       <SettingRow
@@ -36,7 +38,7 @@ export function SmallProposalLimitSetting({ project }: { readonly project: Proje
             value={value ?? ''}
             disabled={setting.data === undefined}
             onChange={(next) => {
-              setDraft(typeof next === 'number' ? next : null);
+              setDraft(typeof next === 'number' ? next : '');
             }}
           />
           <Button
@@ -44,7 +46,7 @@ export function SmallProposalLimitSetting({ project }: { readonly project: Proje
             w="fit-content"
             disabled={!changed || set.isPending}
             onClick={() => {
-              if (draft === null) return;
+              if (typeof draft !== 'number') return;
               set.mutate(draft, {
                 onSuccess: () => {
                   setDraft(null);
