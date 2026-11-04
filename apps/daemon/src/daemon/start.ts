@@ -80,6 +80,7 @@ import {
   DEFAULT_DELIVERY_LIMITS,
   flagWorktreeMissing,
   flagWrongBranch,
+  moveRetiredLandings,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
@@ -119,6 +120,7 @@ import {
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { offeredProfiles, roleDefault } from '../routing';
+import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
@@ -652,6 +654,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     inbox,
     jobs: deliveryJobs,
     logger: logger.child({ component: 'delivery' }),
+    clock,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
       gateTimeoutMs: limits.gateTimeoutMs,
@@ -831,12 +834,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // Shape conversations (spec §5): a read-only session per conversation on the project's account and
   // the `plan` role's model. The MCP address is known once the server listens, so it is read lazily.
+  // `see_screen` (§5.5): the window draws a screen on the daemon's request, held to reads by a token
+  // that belongs to that one request.
+  const screenBroker = createScreenBroker();
+  const screens = createScreens({
+    state,
+    broker: screenBroker,
+    filesDir: join(opts.dataDir, 'shapes'),
+  });
   const shape = createShapeService({
     state,
     adapter,
     clock,
     log: logger.child({ component: 'shape' }),
     filesDir: join(opts.dataDir, 'shapes'),
+    screens,
     jev: createShapeJev({
       state,
       judge,
@@ -989,6 +1001,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
+  // Tasks made for a branch that is gone from origin land in their project's default now. It asks
+  // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
+  const retiredLandingsAbort = new AbortController();
+  const retiredLandings = moveRetiredLandings(delivery, retiredLandingsAbort.signal).catch(
+    (error: unknown) => {
+      logger.warn({ err: error }, 'tasks on retired landing branches not moved');
+    },
+  );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
@@ -1196,6 +1216,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     services,
     taskRemoval: services,
     builderMcp: createBuilderMcpHandler({ services, log: logger }),
+    screens: {
+      claim: (signal) => screenBroker.claim(signal),
+      deliver: (id, image) => screenBroker.deliver(id, image),
+      refuse: (id, reason) => screenBroker.refuse(id, reason),
+      tokenValid: (token) => screenBroker.tokenValid(token),
+      mayRead: renderMayRead,
+      image: (shapeId, name) => screens.image(shapeId, name),
+    },
     upgradeWebSocket,
     onUnexpectedError: (error) => {
       logger.error({ err: error }, 'unhandled API error');
@@ -1281,6 +1309,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeShip();
       unsubscribePrWatch();
       await prWatch.stop();
+      retiredLandingsAbort.abort();
+      await retiredLandings;
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

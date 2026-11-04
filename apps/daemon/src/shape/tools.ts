@@ -3,11 +3,13 @@ import {
   ShapeMessageAuthor,
   ShapeMessageKind,
   type PlanDraft,
+  type SeeScreenInput,
   type ShapeId,
 } from '@10db/contracts';
 import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
+import type { ScreenService } from '../screens';
 import { attach } from './attach';
 import { reconcileDraft } from './rounds';
 import { reportFinding, resolveFinding, writeSpec } from './review';
@@ -23,6 +25,8 @@ export interface ShapeToolDeps {
   onProposal?(shapeId: ShapeId, accepted: boolean): void;
   /** What the ceremony rule reads about the project: its one-way paths (§7). */
   world?(shapeId: ShapeId): ViewWorld;
+  /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered without it. */
+  readonly screens?: Pick<ScreenService, 'see'>;
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}`;
@@ -55,6 +59,7 @@ const BEFORE_PROPOSE =
   'propose_plan is refused until the builder presses Propose. Keep listening: answer from the code, ask questions, and echo what you have heard with note_heard.';
 
 export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): ShapeToolHandlers {
+  const { screens } = deps;
   const line = (body: string): void => {
     deps.state.write((ctx) => {
       insertShapeMessage(ctx, shapeId, {
@@ -101,6 +106,9 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
       );
       return Promise.resolve({ records });
     },
+    ...(screens === undefined
+      ? {}
+      : { see_screen: (input: SeeScreenInput) => screens.see(shapeId, input) }),
     attach: (input) =>
       Promise.resolve().then(() => deps.state.write((ctx) => attach(ctx, shapeId, input))),
     write_spec: (input) =>

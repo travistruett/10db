@@ -5,6 +5,17 @@ const REDIRECTS = ['2>&1', '>/dev/null', '2>/dev/null'];
 /** zsh `=cmd` expansion: a word's start, or after `=` or `:` under MAGIC_EQUAL_SUBST. */
 export const EQUALS_EXPANSION = /(^|[=:])=/;
 
+/**
+ * With `optionGlobs`, `*`, `?` and `[`/`]` are plain in an option's value (`--include=*.ts`): after
+ * the `=` of a word that starts with `-`. The shell tries the word as a file name pattern, but a
+ * match must begin with the literal text before the glob (`--include=`), so it can only be a file
+ * named that way, never another option such as `-delete`. In any other word the shell would fill in
+ * file names the guard cannot see, so those stay refused.
+ */
+function isOptionGlob(wordSoFar: string, c: string): boolean {
+  return wordSoFar.startsWith('-') && wordSoFar.includes('=') && '*?[]'.includes(c);
+}
+
 /** Every control character but tab: newlines and `\r` end or reshape a command. */
 function hasControl(text: string): boolean {
   for (let i = 0; i < text.length; i += 1) {
@@ -24,7 +35,10 @@ function hasControl(text: string): boolean {
  * does the same after an option's `=` and after a `:` in an assignment-like word. Because nothing outside this grammar is accepted, the words cannot
  * differ from what runs.
  */
-export function plainCommandWords(command: string): string[][] | null {
+export function plainCommandWords(
+  command: string,
+  options: { readonly optionGlobs?: boolean } = {},
+): string[][] | null {
   if (hasControl(command)) return null;
   const segments: string[][] = [];
   let words: string[] = [];
@@ -78,7 +92,7 @@ export function plainCommandWords(command: string): string[][] | null {
         if (c === '"' && DOUBLE_QUOTED_FORBIDDEN.test(body)) return null;
         word += body;
         i = end + 1;
-      } else if (UNQUOTED.test(c)) {
+      } else if (UNQUOTED.test(c) || (options.optionGlobs === true && isOptionGlob(word, c))) {
         word += c;
         i += 1;
       } else if (c === '|' || c === '&' || c === ';') {

@@ -17,6 +17,7 @@ import { ParkedError } from '../inbox';
 import { hashToken } from './tokens';
 import { ClaimWaits } from './claim-wait';
 import { SHAPE_TOOL_DESCRIPTIONS } from './shape-tools';
+import { ToolImages } from './tool-images';
 import { createToolHandlers, TOOL_DESCRIPTIONS, type McpDeps } from './tools';
 
 function errorText(error: unknown, deps: McpDeps, tool: string, args: unknown): string {
@@ -111,6 +112,18 @@ export function createMcpHandler(deps: McpDeps): (req: Request) => Promise<Respo
         async (args: unknown) => {
           try {
             const output = await tool.run(tool.schema.parse(args));
+            // A tool whose result is pictures answers image blocks, which the session sees as its result.
+            if (output instanceof ToolImages)
+              return {
+                content: [
+                  { type: 'text' as const, text: output.text },
+                  ...output.images.map((image) => ({
+                    type: 'image' as const,
+                    data: image.data,
+                    mimeType: image.mediaType,
+                  })),
+                ],
+              };
             return { content: [{ type: 'text' as const, text: JSON.stringify(output) }] };
           } catch (error) {
             return {

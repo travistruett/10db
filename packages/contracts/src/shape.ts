@@ -12,6 +12,7 @@ import {
 } from './ids';
 import { TopicKey } from './knowledge';
 import { KnowledgeScope, PrincipleKind } from './states';
+import { SeeScreenInput } from './shape-screens';
 
 // Shape spec: docs/superpowers/specs/2026-11-02-10db-brainstorm-chat-design.md (§5.3, §5.5, §6, §13).
 // Contracts only; the daemon module that runs a conversation comes in later tasks.
@@ -50,6 +51,8 @@ export const ShapeMessageKind = {
   Digest: 'digest',
   Event: 'event',
   Notice: 'notice',
+  /** A screenshot the session took with `see_screen` (§5.5); its body is a ScreenMessageBody. */
+  Screen: 'screen',
 } as const;
 export type ShapeMessageKind = ValueOf<typeof ShapeMessageKind>;
 
@@ -315,6 +318,7 @@ export const ShapeToolName = {
   ReportFinding: 'report_finding',
   ResolveFinding: 'resolve_finding',
   FindRecords: 'find_records',
+  SeeScreen: 'see_screen',
 } as const;
 export type ShapeToolName = ValueOf<typeof ShapeToolName>;
 
@@ -421,4 +425,5 @@ export const ShapeToolInputs = {
   }),
   resolve_finding: z.object({ findingId: ShapeFindingId, how: HowResolved }),
   find_records: z.object({ query: z.string().min(1) }),
+  see_screen: SeeScreenInput,
 } as const satisfies Record<ShapeToolName, z.ZodType>;

@@ -37,6 +37,7 @@ import {
   toolUseBlock,
 } from './claude-test-support';
 import { AccountProbeError } from './index';
+import type { SignInCheck, SignInState } from './sign-in-check';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { CompletionError, type SessionEvent, type SessionSpec } from './types';
 
@@ -218,6 +219,8 @@ function adapterFor(
   script: Script | readonly Script[],
   stopGraceMs = 1_000,
   clock: Clock = systemClock,
+  // Never the real `claude auth status`: a test that needs the sign-in check answers it.
+  signInCheck: SignInCheck = () => Promise.resolve('signed_in'),
 ) {
   const fake = fakeQuery(script);
   const adapter = createClaudeAdapter({
@@ -228,6 +231,7 @@ function adapterFor(
     allowUnsandboxed: true,
     stopGraceMs,
     clock,
+    signInCheck,
   });
   return { adapter, record: fake.record };
 }
@@ -272,8 +276,11 @@ async function callHook(record: Record_, toolName: string) {
   );
 }
 
-/** The adapter's wait for accountInfo() before it gives up. */
+/** The adapter's wait for accountInfo() on its first start, which grows on each start after it. */
 const BILLING_PREFLIGHT_MS = 30_000;
+const START_WAITS_MS = [30_000, 60_000, 120_000];
+/** The pause before the second and the third start. */
+const START_BACKOFF_MS = [10_000, 30_000];
 
 const deps = {
   claudePath: '/usr/local/bin/claude',
@@ -1002,79 +1009,223 @@ describe('createClaudeAdapter', () => {
         clearInterval(ticker);
       }
     }
-    /** Advances the clock one wait at a time, once claude has been started for each. */
+    /** Lets the clock run to the next start through its pause, a second at a time, never past the start. */
+    async function pastBackoff(clock: ManualClock, record: Record_, next: number): Promise<void> {
+      for (let tick = 0; tick < 100 && record.queries < next; tick += 1) {
+        clock.advance(1_000);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      expect(record.queries).toBe(next);
+    }
+    /**
+     * Advances the clock through each start's wait (they grow) and the pause before the next start,
+     * once claude has been started for each.
+     */
     async function pastWaits(clock: ManualClock, record: Record_, starts: number): Promise<void> {
       for (let start = 1; start <= starts; start += 1) {
         await vi.waitFor(() => {
           expect(record.queries).toBe(start);
           expect(record.printed).toBe(record.spawned);
         });
-        clock.advance(BILLING_PREFLIGHT_MS);
+        clock.advance(START_WAITS_MS[start - 1] ?? 0);
+        if (start < starts) await pastBackoff(clock, record, start + 1);
       }
     }
+    const signInCheckOf = (state: SignInState) => vi.fn<SignInCheck>(() => Promise.resolve(state));
+    const account = (kind: 'claude_subscription' | 'anthropic_api_key') => ({
+      accountId: mintId('Account'),
+      label: 'Claude plan',
+      kind,
+      identity: kind === 'claude_subscription' ? 'builder@example.com' : null,
+    });
+
     it.each<{
       how: keyof typeof noAnswer;
-      kind: 'claude_subscription' | 'anthropic_api_key';
-      reason: string;
+      state: SignInState;
+      starts: number;
+      problem: string;
       message: RegExp;
     }>([
       {
         how: 'never answers',
-        kind: 'claude_subscription',
-        reason: 'account_refused',
+        state: 'signed_out',
+        starts: 1,
+        problem: 'signed_out',
         message:
-          /^Claude Code reported no account within 30 s on each of 2 starts for account "Claude plan", which looks signed out\. Claude Code printed nothing\. No prompt was sent/,
+          /^Claude Code reported no account within 30 s for account "Claude plan", and claude auth status says it is not signed in, so it looks signed out\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
-        kind: 'claude_subscription',
-        reason: 'account_refused',
-        message: /^Claude Code reported no account.*on each of 2 starts.*No prompt was sent/,
+        state: 'signed_out',
+        starts: 1,
+        problem: 'signed_out',
+        message: /^Claude Code reported no account.*claude auth status says it is not signed in/,
       },
       {
         how: 'never answers',
-        kind: 'anthropic_api_key',
-        reason: 'billing_refused',
+        state: 'signed_in',
+        starts: 3,
+        problem: 'start_timeout',
         message:
-          /^Account check failed: Claude Code reported no account within 30 s on each of 2 starts\. Claude Code printed nothing\. No prompt was sent/,
+          /^Claude Code reported no account on each of 3 starts \(waiting 30 s, 60 s and 120 s\) for account "Claude plan", but claude auth status says it is signed in, so its starts kept timing out\. Claude Code printed nothing\. No prompt was sent/,
       },
       {
         how: 'rejects',
-        kind: 'anthropic_api_key',
-        reason: 'billing_refused',
-        message: /^Account check failed: Claude Code reported no account.*on each of 2 starts/,
+        state: 'signed_in',
+        starts: 3,
+        problem: 'start_timeout',
+        message: /^Claude Code reported no account on each of 3 starts.*kept timing out/,
+      },
+      {
+        how: 'never answers',
+        state: 'unknown',
+        starts: 3,
+        problem: 'start_timeout',
+        message: /but claude auth status gave no answer, so its starts kept timing out/,
       },
     ])(
-      '$kind: accountInfo() $how on both starts, so no prompt is sent',
-      async ({ how, kind, reason, message }) => {
+      'a subscription whose accountInfo() $how and claude auth status says $state: $starts start(s), then $problem',
+      async ({ how, state, starts, problem, message }) => {
         const clock = new ManualClock();
+        const check = signInCheckOf(state);
         const { adapter, record } = adapterFor(
           { messages: [initMessage()], then: 'hang', account: noAnswer[how]() },
           1_000,
           clock,
+          check,
         );
-        const account = {
-          accountId: mintId('Account'),
-          label: 'Claude plan',
-          kind,
-          identity: kind === 'claude_subscription' ? 'builder@example.com' : null,
-        };
-        const done = collect(adapter.start(spec({ account })).events);
-        await pastWaits(clock, record, 2);
+        const done = collect(
+          adapter.start(spec({ account: account('claude_subscription') })).events,
+        );
+        await pastWaits(clock, record, starts);
         const events = await done;
         expect(events.map((e) => e.type)).toEqual(['ended']);
-        expect(events[0]).toMatchObject({ type: 'ended', reason });
-        if (reason === 'account_refused')
-          expect(events[0]).toMatchObject({
-            refusal: { problem: 'signed_out', seenIdentity: null },
-          });
+        expect(events[0]).toMatchObject({
+          type: 'ended',
+          reason: 'account_refused',
+          refusal: { problem, seenIdentity: null },
+        });
         expect(endMessage(events[0])).toMatch(message);
-        expect(record.queries).toBe(2);
+        expect(record.queries).toBe(starts);
         expect(record.inputs).toEqual([]);
+        // The check is asked about the account's own env, once for each start that got no account.
+        expect(check).toHaveBeenCalledTimes(starts);
+        expect(check).toHaveBeenCalledWith(spec().env);
       },
     );
 
-    it('waits 30 s for each start: a slow lane at background priority is not a signed-out account', async () => {
+    it.each(['never answers', 'rejects'] as const)(
+      'a keyed account whose accountInfo() %s fails its step after the same bounded starts, without asking claude auth status',
+      async (how) => {
+        const clock = new ManualClock();
+        const check = signInCheckOf('signed_out');
+        const { adapter, record } = adapterFor(
+          { messages: [initMessage()], then: 'hang', account: noAnswer[how]() },
+          1_000,
+          clock,
+          check,
+        );
+        const done = collect(adapter.start(spec({ account: account('anthropic_api_key') })).events);
+        await pastWaits(clock, record, 3);
+        const events = await done;
+        expect(events[0]).toMatchObject({ type: 'ended', reason: 'billing_refused' });
+        expect(endMessage(events[0])).toMatch(
+          /^Account check failed: Claude Code reported no account on each of 3 starts \(waiting 30 s, 60 s and 120 s\)\./,
+        );
+        expect(record.queries).toBe(3);
+        expect(check).not.toHaveBeenCalled();
+      },
+    );
+
+    it('retries a slow start of a signed-in account with a longer wait and does not refuse it', async () => {
+      const clock = new ManualClock();
+      const check = signInCheckOf('signed_in');
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+          { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+        ],
+        1_000,
+        clock,
+        check,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastWaits(clock, record, 2);
+      await pastBackoff(clock, record, 3);
+      const events = await done;
+      expect(record.queries).toBe(3);
+      expect(events.map((e) => e.type)).toEqual(['started', 'turn_complete', 'ended']);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+      expect(events.some((e) => e.type === 'ended' && e.refusal !== undefined)).toBe(false);
+      expect(record.inputs).toHaveLength(1);
+    });
+
+    it('waits 60 s on the second start, after a pause, and 120 s on the third', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      clock.advance(START_WAITS_MS[0] ?? 0);
+      await vi.waitFor(() => {
+        expect(record.signals[0]?.aborted).toBe(true);
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      // Backs off before the second start.
+      clock.advance((START_BACKOFF_MS[0] ?? 0) - 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(record.queries).toBe(1);
+      clock.advance(1);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(2);
+      });
+      clock.advance((START_WAITS_MS[1] ?? 0) - 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(record.signals[1]?.aborted).toBe(false);
+      clock.advance(1);
+      await vi.waitFor(() => {
+        expect(record.signals[1]?.aborted).toBe(true);
+      });
+      await pastBackoff(clock, record, 3);
+      clock.advance((START_WAITS_MS[2] ?? 0) - 1);
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(record.signals[2]?.aborted).toBe(false);
+      await stopOn(clock, handle);
+      await done;
+    });
+
+    it('stops during the pause between starts without starting again', async () => {
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
+        1_000,
+        clock,
+      );
+      const handle = adapter.start(spec());
+      const done = collect(handle.events);
+      await vi.waitFor(() => {
+        expect(record.queries).toBe(1);
+      });
+      clock.advance(START_WAITS_MS[0] ?? 0);
+      await vi.waitFor(() => {
+        expect(record.signals[0]?.aborted).toBe(true);
+      });
+      await new Promise((resolve) => setImmediate(resolve));
+      await handle.stop();
+      const events = await done;
+      expect(record.queries).toBe(1);
+      expect(events.map((e) => e.type)).toEqual(['ended']);
+      expect(events[0]).toMatchObject({ reason: 'stopped' });
+    });
+
+    it('waits 30 s for the first start: a slow lane at background priority is not a signed-out account', async () => {
       const clock = new ManualClock();
       const { adapter, record } = adapterFor(
         { messages: [initMessage()], then: 'hang', account: noAnswer['never answers']() },
@@ -1106,6 +1257,7 @@ describe('createClaudeAdapter', () => {
       );
       const done = collect(adapter.start(spec()).events);
       await pastWaits(clock, record, 1);
+      await pastBackoff(clock, record, 2);
       const events = await done;
       expect(record.queries).toBe(2);
       // The slow first start is closed, not left running beside the second.
@@ -1117,11 +1269,18 @@ describe('createClaudeAdapter', () => {
     });
 
     it('retries when accountInfo() rejects at once, and asks a signed-in account only once', async () => {
-      const { adapter, record } = adapterFor([
-        { messages: [], then: 'hang', account: noAnswer.rejects() },
-        { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
-      ]);
-      const events = await collect(adapter.start(spec()).events);
+      const clock = new ManualClock();
+      const { adapter, record } = adapterFor(
+        [
+          { messages: [], then: 'hang', account: noAnswer.rejects() },
+          { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+        ],
+        1_000,
+        clock,
+      );
+      const done = collect(adapter.start(spec()).events);
+      await pastBackoff(clock, record, 2);
+      const events = await done;
       expect(record.queries).toBe(2);
       expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
       const signedIn = adapterFor({
@@ -1152,10 +1311,10 @@ describe('createClaudeAdapter', () => {
         clock,
       );
       const done = collect(adapter.start(spec()).events);
-      await pastWaits(clock, record, 2);
+      await pastWaits(clock, record, 3);
       const [ended] = await done;
       const message = endMessage(ended);
-      expect(message).toContain('on each of 2 starts');
+      expect(message).toContain('on each of 3 starts');
       expect(message).toContain('"warming up plugin cache locked"');
       expect(message).toContain('"Error: not logged in"');
       expect(ended).toMatchObject({
@@ -1177,10 +1336,17 @@ describe('createClaudeAdapter', () => {
       const done = collect(handle.events);
       handle.send('also: mind the lint');
       await pastWaits(clock, record, 1);
+      // A message sent while the next start is being waited for goes to that start too.
       await vi.waitFor(() => {
-        expect(record.inputs).toHaveLength(2);
+        expect(record.signals[0]?.aborted).toBe(true);
+      });
+      handle.send('and: keep the diff small');
+      await pastBackoff(clock, record, 2);
+      await vi.waitFor(() => {
+        expect(record.inputs).toHaveLength(3);
       });
       expect(JSON.stringify(record.inputs[1])).toContain('also: mind the lint');
+      expect(JSON.stringify(record.inputs[2])).toContain('and: keep the diff small');
       await stopOn(clock, handle);
       await done;
     });
@@ -1720,7 +1886,7 @@ describe('createClaudeAdapter', () => {
       1_000,
       clock,
     );
-    const events = await collect(
+    const done = collect(
       adapter.start(
         spec({
           sandbox: laneSandbox,
@@ -1733,6 +1899,13 @@ describe('createClaudeAdapter', () => {
         }),
       ).events,
     );
+    // Each start that gets no account is followed by a pause before the next one.
+    const ticker = setInterval(() => {
+      clock.advance(10_000);
+    }, 5);
+    const events = await done.finally(() => {
+      clearInterval(ticker);
+    });
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'billing_refused' });
     expect(endMessage(events.at(-1))).toContain("Check the project's account.");
     expect(endMessage(events.at(-1))).not.toContain('settings.json');

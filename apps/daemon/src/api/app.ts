@@ -57,6 +57,8 @@ import {
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
+  ScreenImageInput,
+  ScreenRefusalInput,
   ShapeConvertInput,
   ShapeDismissInput,
   ShapeEditInput,
@@ -80,6 +82,7 @@ import {
   WorkstreamId,
   type AccountConfig,
   type GoalAdoptError,
+  type ScreenRenderRequest,
   type ShapeConvertError,
 } from '@10db/contracts';
 import { Hono, type MiddlewareHandler } from 'hono';
@@ -92,6 +95,20 @@ import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
 import { streamEvents } from './stream';
+
+/** What the screen routes need from the screens module: the broker's window side and the kept pictures. */
+export interface ScreenRoutes {
+  claim(signal: AbortSignal): Promise<ScreenRenderRequest | null>;
+  deliver(id: string, image: ScreenImageInput): boolean;
+  refuse(id: string, reason: string): boolean;
+  tokenValid(token: string): boolean;
+  /** Whether a render token may make this request: a GET of a route a screen shows, nothing else. */
+  mayRead(method: string, path: string): boolean;
+  image(
+    shapeId: ShapeId,
+    name: string,
+  ): { readonly bytes: Uint8Array; readonly mediaType: string } | null;
+}
 
 export interface ApiDeps {
   readonly startedAt: Date;
@@ -111,6 +128,8 @@ export interface ApiDeps {
   mcp(req: Request): Promise<Response>;
   /** The builder's MCP endpoint, for the builder's own clients; the UI token guards it. */
   builderMcp?(req: Request): Promise<Response>;
+  /** Draws Shape's `see_screen` pictures in the window (§5.5); the routes answer 501 without it. */
+  readonly screens?: ScreenRoutes;
   /** Called with every error the API answers as a 500, so the daemon can log it. */
   onUnexpectedError(error: unknown): void;
 }
@@ -186,8 +205,14 @@ export function createApp(deps: ApiDeps) {
         c.req.path === STREAM_PATH
           ? (c.req.query('token') ?? '')
           : (/^Bearer (.+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? '');
-      if (!sameToken(presented, deps.token)) return c.json({ error: 'unauthorized' }, 401);
-      return next();
+      if (sameToken(presented, deps.token)) return next();
+      // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
+      // shows and nothing else, so no write, no digest and no command can be reached with it.
+      if (presented !== '' && deps.screens?.tokenValid(presented) === true)
+        return deps.screens.mayRead(c.req.method, c.req.path)
+          ? next()
+          : c.json({ error: 'forbidden', message: 'A screen is drawn read-only' }, 403);
+      return c.json({ error: 'unauthorized' }, 401);
     })
     // After the token check, before any route reads the body. A declared length over the limit is
     // refused unread; a body with none is read only up to the limit.
@@ -564,6 +589,43 @@ export function createApp(deps: ApiDeps) {
         );
       },
     )
+    // Screens (§5.5): the window asks for a screen to draw, and answers with the picture or a reason.
+    // They are the UI token's alone; a render token reaches none of them.
+    .post('/screens/claim', async (c) => {
+      if (!deps.screens) return c.json({ error: 'not_implemented' }, 501);
+      const request = await deps.screens.claim(c.req.raw.signal);
+      return request === null ? c.body(null, 204) : c.json(request);
+    })
+    .post(
+      '/screens/:requestId/image',
+      validator('json', (value): ScreenImageInput => ScreenImageInput.parse(value)),
+      (c) => {
+        if (!deps.screens) return c.json({ error: 'not_implemented' }, 501);
+        return deps.screens.deliver(c.req.param('requestId'), c.req.valid('json'))
+          ? c.body(null, 204)
+          : c.json({ error: 'not_found', message: 'No screen is waiting for that picture' }, 404);
+      },
+    )
+    .post(
+      '/screens/:requestId/refuse',
+      validator('json', (value): ScreenRefusalInput => ScreenRefusalInput.parse(value)),
+      (c) => {
+        if (!deps.screens) return c.json({ error: 'not_implemented' }, 501);
+        return deps.screens.refuse(c.req.param('requestId'), c.req.valid('json').reason)
+          ? c.body(null, 204)
+          : c.json({ error: 'not_found', message: 'No screen is waiting for that answer' }, 404);
+      },
+    )
+    // A kept screenshot, for the transcript row that names it.
+    .get('/shapes/:shapeId/screens/:name', (c) => {
+      const image = deps.screens?.image(ShapeId.parse(c.req.param('shapeId')), c.req.param('name'));
+      if (!image) return c.json({ error: 'not_found', message: 'No such screenshot' }, 404);
+      return c.body(image.bytes as Uint8Array<ArrayBuffer>, 200, {
+        'content-type': image.mediaType,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      });
+    })
     .post('/projects/:projectId/mcp-servers/review', (c) =>
       c.json(deps.services.reviewProjectMcp(ProjectId.parse(c.req.param('projectId')))),
     )

@@ -34,4 +34,6 @@ export const SHAPE_TOOL_DESCRIPTIONS: Record<ShapeToolName, string> = {
     'Mark a finding resolved once a propose_plan call has answered it, with a one-line how. The builder dismisses the ones you leave.',
   find_records:
     'Search the decisions and principles that apply to this project, and its earlier conversations. Each hit carries its date and, for a principle, its kind, topic key and scope. Cite what you find, with its date.',
+  see_screen:
+    "Look at one of 10db's own screens: factory, board, inbox, plan (this conversation), or task with a taskId (that task's drawer), at a window width of 480 to 1600 px (default 1200) and height of 400 to 2000 (default 900). Answers a picture of the screen with this project's real data as it is now. It is only a picture: you cannot click, type or scroll, and taking it changes nothing. A screen that can't be drawn is refused with the reason. Each picture stays in your context and a conversation holds 12, so ask for the one screen and size you need.",
 };

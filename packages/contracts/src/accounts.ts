@@ -45,6 +45,8 @@ export const AccountProblem = {
   /** The login Keychain timed out, was locked or denied 10db's read: the secret may well be there. */
   KeychainUnavailable: 'keychain_unavailable',
   CannotBill: 'cannot_bill',
+  /** Claude Code reported no account on every bounded start, and `claude auth status` did not say signed out. */
+  StartTimeout: 'start_timeout',
 } as const;
 export type AccountProblem = ValueOf<typeof AccountProblem>;
 

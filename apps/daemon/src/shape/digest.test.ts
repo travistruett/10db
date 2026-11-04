@@ -38,6 +38,28 @@ describe('buildDigest', () => {
     expect(digest.match(/\[m:/g)).toHaveLength(DIGEST_MESSAGES - 1);
   });
 
+  it('says a screenshot was taken, and where, without its row’s JSON: the picture is not carried over', () => {
+    c.say('How does the board look?');
+    c.store.write((ctx) =>
+      insertShapeMessage(ctx, c.shape.id, {
+        author: ShapeMessageAuthor.Claude,
+        kind: ShapeMessageKind.Screen,
+        body: JSON.stringify({
+          screen: 'board',
+          width: 1200,
+          height: 900,
+          name: '0001.png',
+          mediaType: 'image/png',
+        }),
+      }),
+    );
+    const digest = buildDigest(c.store.db, c.shape.id);
+    expect(digest).toContain('(claude) [A screenshot of the board at 1200×900 was taken here');
+    expect(digest).toContain('see_screen');
+    expect(digest).not.toContain('0001.png');
+    expect(digest).not.toContain('mediaType');
+  });
+
   it('lists each proposal with its state and sources, and what Convert made', () => {
     const m = c.say('Do the thing.');
     c.store.write((ctx) =>
