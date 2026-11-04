@@ -563,8 +563,19 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
             );
             return withoutGitHub(runningCommit);
           }
-          // A newer build exists and did not arrive. The staged one stays for the next try, as the
-          // failed head's: it does not install, not even with GitHub away.
+          // Main's head is the one this build was staged for: the stage only ran again because
+          // nothing is mid-session, to see whether a newer build had finished. The staged build was
+          // checked when it was fetched and installs with no network, as with GitHub away, so a
+          // failed second look is no failed update: nothing is recorded, and it installs.
+          if (staged.head === head) {
+            logger.warn(
+              { step: result.step, message: result.message, staged: staged.commit },
+              'could not fetch a newer build than the staged one again: installing the staged one',
+            );
+            return installWhenIdle(runningCommit, staged);
+          }
+          // Main moved on and its build did not arrive. The staged one stays for the next try, as
+          // the failed head's: it does not install, not even with GitHub away.
           staged = { ...staged, head };
         } else {
           staged = null;

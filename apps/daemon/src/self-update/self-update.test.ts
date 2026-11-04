@@ -1047,32 +1047,58 @@ describe('a waiting update drains the factory', () => {
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
     });
 
-    it.each(['download', 'verify-checksum'])(
-      'does not install the older build when the newer one failed at %s, and raises one card',
+    it.each(['download', 'verify-checksum', 'stage'])(
+      'installs the staged build when fetching it again fails at %s with main unchanged, and records no failure',
       async (step) => {
+        // NEW is staged for NEWER while lanes run; nothing is mid-session when the re-stage fails.
         const update = await stagedThenFailsAt(step);
+        world.busy = 0;
+        expect(await update.tick()).toBe('applying');
+        expect(world.stagedKeeping).toEqual([null, NEW]);
+        expect(world.calls).toContain('apply');
+        expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
+          head: NEWER,
+          commit: NEW,
+        });
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBeUndefined();
+        expect(cards()).toEqual([]);
+        expect(update.status().problem).toBeNull();
+      },
+    );
+
+    /** NEW is staged for NEWER, then main moves on to a head whose newer build fails at `step`. */
+    async function stagedThenNewerHeadFailsAt(step: string) {
+      const update = await stagedThenFailsAt(step);
+      world.head = 'e'.repeat(40);
+      return update;
+    }
+
+    it.each(['download', 'verify-checksum'])(
+      'does not install the older build when the build for a newer head failed at %s, and raises one card',
+      async (step) => {
+        const update = await stagedThenNewerHeadFailsAt(step);
         world.busy = 0;
         expect(await update.tick()).toBe('failed');
         expect(await update.tick()).toBe('failed-before');
         expect(world.calls).not.toContain('apply');
         expect(cards()).toHaveLength(1);
-        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe(NEWER);
+        expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe('e'.repeat(40));
       },
     );
 
     it('keeps the staged build for the next look once a newer one failed to fetch', async () => {
-      const update = await stagedThenFailsAt('download');
+      const update = await stagedThenNewerHeadFailsAt('download');
       world.busy = 0;
       await update.tick();
       // Main moves on and the newest finished build turns out to be the staged one after all.
-      world.head = 'e'.repeat(40);
+      world.head = 'f'.repeat(40);
       world.stage = () => Promise.resolve(STAGED_OK);
       expect(await update.tick()).toBe('applying');
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
     });
 
     it('tries the build that failed to fetch again once the builder asks', async () => {
-      const update = await stagedThenFailsAt('download');
+      const update = await stagedThenNewerHeadFailsAt('download');
       world.busy = 0;
       await update.tick();
       update.retry();
@@ -1081,7 +1107,7 @@ describe('a waiting update drains the factory', () => {
       expect(await update.tick()).toBe('applying');
       expect(world.stagedKeeping).toEqual([null, NEW, NEW]);
       expect(getAppSetting(state.db, SELF_UPDATE_APPLYING_KEY)).toEqual({
-        head: NEWER,
+        head: 'e'.repeat(40),
         commit: NEWER,
       });
     });

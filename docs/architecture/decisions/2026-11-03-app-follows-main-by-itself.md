@@ -43,6 +43,15 @@ head moves, and, for a staged build that is not the head's own, once nothing is 
 and a newer build may have finished since. So an older build never installs while a newer one exists, and there is
 one quit instead of two. While lanes are busy and the head has not moved, it does not look.
 
+**The re-stage of a staged build older than the head.** When the staged build's commit is not the head's (the head's
+own build was still running when it was staged) and nothing is mid-session, the check stages once more before it
+installs, with `--have` naming the staged commit: it fetches only if a newer finished build exists, and otherwise
+the staged folder stays and installs. That second look is an optimisation (a newer build, one quit), not the update
+itself, so when it fails with the head unchanged since the build was staged (`download`, `verify-checksum`, `stage`,
+and the looking steps) and the staged folder is still whole (`kept`), the check installs the staged build as it
+would with GitHub away: no card, no `self_update.failed_commit`. It is a failure only when main's head has moved on
+since the build was staged, because then the newer build is the update that did not arrive (see Failure).
+
 **When it installs.** Only when nothing is mid-session: no lane holding a session (`countLanes`'s states, and a
 `WAITING_HUMAN` workstream with a live session), no workstream with a gate process, no batch `CUTTING` or
 `SHIPPING` (`countMidSession`, `packages/db`), and no delivery job queued or running (`DeliveryJobs.pending()`: a
@@ -108,8 +117,9 @@ factory (`self-update/drain.ts`) until the app has installed:
   fails while it looks for a newer build (`find-commit`, `find-build`) is the same outage: the staged build stays
   and goes on, with no card, no `self_update.failed_commit` and the drain as it was. With no build staged (a newer
   fetched build replaced it and could not be compared) the drain has nothing to install and ends, and the update's
-  wait goes on from where it was. The one exception: a staged build whose head has failed (see Failure) does not
-  install this way either.
+  wait goes on from where it was. The same holds for the re-stage of a staged build older than the head, once nothing
+  is mid-session, when it fails with the head unchanged at any step: the staged build installs (see "When it
+  installs"). The one exception: a staged build whose head has failed (see Failure) does not install this way either.
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
@@ -186,8 +196,9 @@ update failed). The reason text of a failure is held in memory, not stored: afte
 `self_update.failed_commit` still at main's head reduces it to a generic line that names the commit.
 
 A stage that fails with a build already staged leaves that folder in place, unless it had begun replacing it or was
-killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above). Any later step
-(`wait-for-build`, `download`, `verify-checksum`, `stage`) is a failure as above, with its card and
+killed on purpose (the switch, a quit). A failed look is no failure at all ("Without GitHub" above), nor is any
+step of the re-stage while main's head is unchanged since the build was staged. Any later step (`wait-for-build`,
+`download`, `verify-checksum`, `stage`) for a head that has moved on is a failure as above, with its card and
 `self_update.failed_commit`, and the older build does not install, since a newer one exists or none could be
 confirmed. It stays staged, so when main moves or the builder asks to try again the next stage passes `--have`:
 it fetches only if a newer build is still the newest. It does not retry every minute, because a checksum mismatch
