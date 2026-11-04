@@ -80,19 +80,13 @@ import {
   type TrackedFiles,
 } from './ceremony';
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
-<<<<<<< 772bd631075ba5c5994e95f461ac7c41a536313c
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
-||||||| 4075881
-import { convertProposals, type ConvertOutcome } from './convert';
-=======
-import { convertProposals, type ConvertOutcome } from './convert';
 import {
   readPictureBytesSpent,
   readPictureCharge,
   readPictureLine,
   readPictureRefusal,
 } from './read-budget';
->>>>>>> 84d0b7e62e3320ff58249693cdf894a50a7d5196
 import { buildDigest } from './digest';
 import {
   asImage,
