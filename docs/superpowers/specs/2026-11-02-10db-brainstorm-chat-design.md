@@ -331,8 +331,9 @@ that says to work from the pictures already read or ask for a smaller one. Each 
 `Read · <path> · picture · <n> bytes counted` transcript line, and the total is the lines after the latest digest, so
 it survives a restart and a fresh session starts at zero. A subagent's Read is not counted: its result reaches the
 session as text. A Read of a PDF is not counted (a separate task).
-**Not measured:** the 1 MiB is an allowance, not a measurement, and the builder chose to ship it that way with a
-follow-up task, since a lane can't run a live session. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
+**Not measured:** the 1 MiB is an allowance, not a measurement, and it ships that way with the orchestrator's
+acceptance for the builder (inbox card inb_01a1a575, decision dec_01a1a578-922e-7131-b2f7-0a24df988ba6), since a lane
+can't run a live session. The live run is follow-up task tsk_01a1a578-91d9-7591-beb2-36336144c589. `test/shape-session.live.test.ts` reads a 6 MB noise picture, a
 small one and a 4000 px one with a real session, finds the three pictures Claude Code kept in the session's transcript
 and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
 So the 3 MiB total is a promise only if a Read returns at most 1 MiB: at 2 MiB each, the three Reads it allows carry
