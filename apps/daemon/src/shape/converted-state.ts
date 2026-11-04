@@ -6,7 +6,7 @@ import { getGoal, getTask, latestWorkstreamOf, listShapeLinks, type DbReader } f
 // removals for a task marked "not started".
 
 /** The line that introduces the converted-state lines in a note. */
-export const CONVERTED_HEADING =
+const CONVERTED_HEADING =
   'Converted so far, read-only (propose a change or removal only for a task marked "not started"):';
 
 /** The converted-state lines under their heading, or null when nothing was converted. */

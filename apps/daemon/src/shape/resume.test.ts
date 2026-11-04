@@ -330,11 +330,86 @@ describe('telling a reopened conversation what Convert made', () => {
     expect(must(prompts()[0], 'prompt')).not.toContain(HEADING);
   });
 
-  it('says it once when a resume event reopens the conversation too', async () => {
+  it('gives the converted rows of a partial Convert, with proposals still pending', async () => {
+    const m = f.c.say();
+    propose({ looseTasks: [loose(m, 'a'), loose(m, 'b')] });
+    const out = write((ctx) =>
+      convertProposals(
+        ctx,
+        shapeId(),
+        listShapeProposals(ctx.tx, shapeId())
+          .filter((r) => r.key === 'a')
+          .map((r) => r.id),
+      ),
+    );
+    if (!out.ok) throw new Error(out.errors.join('; '));
+    const converted = must(out.results.flatMap((r) => r.taskIds)[0], 'task');
+    write((ctx) => {
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    expect(getShape(f.c.store.db, shapeId()).state).toBe(ShapeState.Proposed);
+
+    await send('What should change?');
+    expect(must(prompts()[0], 'prompt')).toContain(`task ${converted} "Task a" — not started`);
+  });
+
+  it('keeps telling a conversation a re-plan round moved back to Proposed', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    propose({ looseTasks: [loose(f.c.say(), 'b')] });
+    write((ctx) => {
+      insertWorkstream(ctx, must(first, 'task'));
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    expect(getShape(f.c.store.db, shapeId()).state).toBe(ShapeState.Proposed);
+
+    await send('What should change?');
+    expect(must(prompts()[0], 'prompt')).toMatch(
+      new RegExp(`task ${first ?? ''} "Task a" — started`),
+    );
+  });
+
+  it('says it once, as it stands at the turn, when a resume event came first', async () => {
     const [first] = convertTasks('a').map((id) => must(id, 'task'));
     write((ctx) => {
       patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
     });
+    f.service.resume(shapeId(), 'Task a is done.');
+    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    await send('What should change?');
+    const prompt = must(prompts()[0], 'prompt');
+    expect(times(prompt, `task ${first ?? ''} "Task a"`)).toBe(1);
+    expect(prompt).toMatch(new RegExp(`task ${first ?? ''} "Task a" — started`));
+  });
+
+  it('sends the lines as they stand after a failed start, not as they stood at it', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    write((ctx) => {
+      patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
+    });
+    f.service.resume(shapeId(), 'Task a is done.');
+    const startShape = f.adapter.startShape.bind(f.adapter);
+    f.adapter.startShape = (): never => {
+      throw new Error('Claude is not available');
+    };
+    await send('First.');
+    f.adapter.startShape = startShape;
+
+    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    await send('Second.');
+    const prompt = must(prompts()[0], 'prompt');
+    expect(times(prompt, `task ${first ?? ''} "Task a"`)).toBe(1);
+    expect(prompt).toMatch(new RegExp(`task ${first ?? ''} "Task a" — started`));
+  });
+
+  it('puts the lines in a digested start once, after a resume event too', async () => {
+    const [first] = convertTasks('a').map((id) => must(id, 'task'));
+    write((ctx) =>
+      insertShapeMessage(ctx, shapeId(), {
+        author: ShapeMessageAuthor.Claude,
+        kind: ShapeMessageKind.Text,
+        body: 'Converted.',
+      }),
+    );
     f.service.resume(shapeId(), 'Task a is done.');
     await send('What should change?');
     expect(times(must(prompts()[0], 'prompt'), `task ${first ?? ''} "Task a"`)).toBe(1);

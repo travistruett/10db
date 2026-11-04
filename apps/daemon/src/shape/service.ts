@@ -9,7 +9,6 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
-  ShapeState,
   shapeFileKind,
   SessionMode,
   type DecisionId,
@@ -111,7 +110,7 @@ import {
 import type { ShapeJev } from './jev';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
-import { CONVERTED_HEADING, convertedStateNote } from './converted-state';
+import { convertedStateNote } from './converted-state';
 import { untoldMissized, type UntoldMissized } from './sizing';
 import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 
@@ -269,7 +268,7 @@ interface Intake {
   readonly files: readonly ShapeFileRow[];
   /** Finished tasks outside their size that Claude has not heard about. */
   readonly missized: UntoldMissized;
-  /** A converted conversation: what Convert made as it stands now, null when nothing needs saying. */
+  /** What Convert made as it stands now, null when nothing was converted. */
   readonly converted: string | null;
 }
 
@@ -546,22 +545,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
    * and which mis-sized tasks is read from the database, so what waited through a restart still
    * reaches it.
    */
-  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => {
-    const notes = rt.notes.splice(0);
-    // A converted conversation tells its turn what Convert made, as it stands as the turn starts.
-    // A resume note already carries the same lines.
-    const converted =
-      getShape(state.db, shapeId).state === ShapeState.Converted &&
-      !notes.some((note) => note.includes(CONVERTED_HEADING))
-        ? convertedStateNote(state.db, shapeId)
-        : null;
-    return {
-      notes,
-      files: listUntoldShapeFiles(state.db, shapeId),
-      missized: untoldMissized(state.db, shapeId),
-      converted,
-    };
-  };
+  const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
+    notes: rt.notes.splice(0),
+    files: listUntoldShapeFiles(state.db, shapeId),
+    missized: untoldMissized(state.db, shapeId),
+    // What Convert made, as it stands as the turn starts. Whatever state the conversation is in: a
+    // partial Convert or a re-plan round leaves it Proposed with converted rows.
+    converted: convertedStateNote(state.db, shapeId),
+  });
 
   /** Records that the turn just sent carried these files and these mis-sized tasks. */
   const told = (files: readonly ShapeFileRow[], missized: UntoldMissized): void => {
@@ -1013,12 +1004,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     resume(shapeId, event) {
       getShape(state.db, shapeId);
       const message = say(shapeId, ShapeMessageAuthor.Note, ShapeMessageKind.Event, event);
-      // The session sees what Convert made as it stands now, read-only, ahead of its next turn; a
-      // fresh session gets the same lines in its digest.
-      const converted = convertedStateNote(state.db, shapeId);
-      runtimeOf(shapeId).notes.push(
-        [`[m:${message.id}] ${event}`, ...(converted === null ? [] : [converted])].join('\n'),
-      );
+      // Only the event: every turn works out what Convert made as it starts, so a note queued here
+      // would go stale before it was sent.
+      runtimeOf(shapeId).notes.push(`[m:${message.id}] ${event}`);
       return message;
     },
 
