@@ -28,7 +28,7 @@ import {
   type DbReader,
   type ShapeProposalRow,
 } from '@10db/db';
-import type { PlanWorld } from './validate';
+import { removedKeys, type PlanWorld } from './validate';
 
 /** How a landing target reads in a refusal: "merges into main when checks pass". */
 const landsText = (target: LandingTarget): string =>
@@ -68,6 +68,13 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
       .map((m) => m.id),
   );
   const proposals = listShapeProposals(db, shapeId);
+  // A converted removal cancels its task and leaves the link, so the key stays in `convertedTasks`.
+  const removedIds = new Set<TaskId>(
+    proposals
+      .filter((r) => r.kind === 'remove_task' && r.state === ShapeProposalState.Accepted)
+      .map((r) => ShapeProposalBody.remove_task.parse(r.body).taskId),
+  );
+  const removedTasks = new Set(removedKeys(convertedTasks, removedIds));
   const pinned = proposals.filter(
     (r) => r.state === ShapeProposalState.Pending && r.pinned.length > 0,
   );
@@ -76,6 +83,7 @@ export function buildPlanWorld(db: DbReader, shapeId: ShapeId): PlanWorld {
     people: listPeople(db),
     citable,
     convertedTasks,
+    removedTasks,
     convertedGoals,
     storedSources: new Set(proposals.map((r) => r.key)),
     storedKeys: new Set(proposals.flatMap((r) => [r.key, ...tasksInside(r)])),

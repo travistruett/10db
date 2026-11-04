@@ -203,6 +203,9 @@ function withStoredSources(
     : body;
 }
 
+/** A kind as the builder reads it in a refusal: `a task`, `a change task`. */
+const withArticle = (kind: ShapeProposalKind): string => `a ${kind.replace('_', ' ')}`;
+
 /** Parses a body as its kind says, so what is stored always reads back. */
 function parsedBody(kind: ShapeProposalKind, body: unknown): Record<string, unknown> {
   return asRecord(ShapeProposalBody[kind].parse(body));
@@ -235,6 +238,13 @@ export function reconcileDraft(
 
   for (const unit of unitsOf(draft)) {
     const row = byKey.get(unit.key);
+    // A stored row keeps its kind: a body parsed as another kind would not read back from it.
+    if (row !== undefined && row.kind !== unit.kind) {
+      errors.push(
+        `${unit.key}: stored as ${withArticle(row.kind)}, so it cannot be stated as ${withArticle(unit.kind)}; use another key`,
+      );
+      continue;
+    }
     // An accepted task with no link is an addition Remove Draft Goal took back with its goal: its
     // task is cancelled, so the key is proposed afresh (against the goal's current id) rather than skipped.
     if (row?.state === ShapeProposalState.Accepted && !isTakenBack(row)) {
