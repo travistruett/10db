@@ -1153,6 +1153,34 @@ describe('additions, changes and removals', () => {
     });
   });
 
+  it('converts a goal whose task takes a removed task’s key, as a new task', () => {
+    const removed = removedGoalTask();
+    const m = c.say('A goal that reuses g1.');
+    propose({ goals: [goalOf(m, 'h', ['g1', 'g2'])] });
+
+    const out = converted('h');
+    const made = tasks().filter((t) => t.title === 'Task g1' && t.id !== removed.id);
+    expect(made).toHaveLength(1);
+    expect(out.results.find((r) => r.key === 'h')?.taskIds).toContain(made[0]?.id);
+    expect(getTask(c.store.db, removed.id).status).toBe(TaskStatus.Cancelled);
+  });
+
+  it('resolves a task that waits on a removed key a goal took again to the goal’s new task', () => {
+    const removed = removedGoalTask();
+    const m = c.say('A goal that reuses g1, and a task after it.');
+    propose({
+      goals: [goalOf(m, 'h', ['g1'])],
+      looseTasks: [loose(m, 'after', { dependsOn: ['g1'] })],
+    });
+
+    converted('h', 'after');
+    const g1 = must(
+      tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+      'the new task',
+    );
+    expect(taskTitled('Task after').dependsOn).toEqual([g1.id]);
+  });
+
   it('puts a question on a goal that took a removed task’s key, not on the cancelled task', () => {
     removedGoalTask();
     const m = c.say('A goal for it, and who pays?');

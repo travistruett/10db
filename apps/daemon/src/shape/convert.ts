@@ -359,10 +359,13 @@ export function convertProposals(
           .filter((t) => t.dependsOnOutside.length > 0)
           .map((t) => [t.key, t.dependsOnOutside]),
       );
+      // A goal task may take a removed task's key, which `taskIds` still maps to the cancelled task;
+      // that key is the brief's own, not an outside one.
+      const briefKeys = new Set(goal.tasks.map((t) => t.key));
       const written = insertGoal(ctx, project.id, {
         brief: goalBrief(goal),
         placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
-        outsideKeys: new Map(taskIds),
+        outsideKeys: new Map([...taskIds].filter(([key]) => !briefKeys.has(key))),
         dependsOnOutside: outside,
       });
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, goalId: written.goal.id });
