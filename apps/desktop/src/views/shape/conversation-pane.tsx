@@ -19,6 +19,7 @@ import { formatTokens } from '../factory/format-tokens';
 import { Composer } from './composer';
 import { addFiles } from './dropped-files';
 import { HistoryButton } from './history-button';
+import { leaveLate, takeLate, useLate } from './late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
@@ -46,6 +47,7 @@ export function ConversationPane({
   onOpened,
   why,
 }: ConversationPaneProps) {
+  const late = useLate(shapeId);
   const create = useCreateShape(projectId);
   const send = useSendShapeMessage();
   const propose = useProposeShape();
@@ -72,6 +74,31 @@ export function ConversationPane({
       if (created.current === entry) created.current = null;
     });
     return id;
+  };
+
+  // A send and a drop finish on their own, so the one that finishes second can find the screen
+  // already gone: opened by the first, or left by the builder. `opened` is the conversation the
+  // first one opened; only that one navigates, and only while the screen is still here, so a later
+  // finish cannot pull the builder back from where they went.
+  const here = useRef(true);
+  useEffect(() => {
+    here.current = true;
+    return () => {
+      here.current = false;
+    };
+  }, []);
+  const opened = useRef<ShapeId | null>(null);
+  // The last send on this screen that failed before anything opened the conversation, with its
+  // text: a drop that opens it afterwards replaces the input, and this is what it would lose.
+  const failedSend = useRef<{ readonly text: string; readonly message: string } | null>(null);
+  const open = (id: ShapeId): void => {
+    if (opened.current !== null || !here.current) return;
+    opened.current = id;
+    if (failedSend.current !== null) {
+      leaveLate(id, { failure: failedSend.current.message, draft: failedSend.current.text });
+      failedSend.current = null;
+    }
+    onOpened(id);
   };
 
   const answering = view?.turn.running ?? false;
@@ -174,6 +201,10 @@ export function ConversationPane({
         canPropose={canPropose}
         error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
+        late={late}
+        onLateTaken={() => {
+          if (shapeId !== null) takeLate(shapeId);
+        }}
         onFiles={async (dropped) => {
           // A drop into a conversation that doesn't exist yet starts it, as the first message does.
           const made: { id: ShapeId | null } = { id: shapeId };
@@ -186,13 +217,32 @@ export function ConversationPane({
               return upload.mutateAsync({ shapeId: made.id, file });
             },
           });
-          if (shapeId === null && made.id !== null) onOpened(made.id);
-          return problems;
+          if (shapeId !== null || made.id === null) return problems;
+          open(made.id);
+          // This input is leaving for the conversation, so the reasons go to the one that replaces it.
+          if (problems.length > 0) leaveLate(made.id, { refused: problems });
+          return [];
         }}
         onSend={async (text) => {
           const before = latest.current;
-          const id = await ensureId();
-          await send.mutateAsync({ shapeId: id, text });
+          failedSend.current = null;
+          let id: ShapeId;
+          try {
+            id = await ensureId();
+            await send.mutateAsync({ shapeId: id, text });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (shapeId !== null) throw error;
+            if (opened.current === null) {
+              // The drop may still open the conversation and take this input with it.
+              failedSend.current = { text, message };
+              throw error;
+            }
+            // The drop opened it while this was on its way: its input is gone, so the new one
+            // gets the reason and the text.
+            leaveLate(opened.current, { failure: message, draft: text });
+            return;
+          }
           // The daemon took the message, so a refusal of Propose or Stop from before the send is out
           // of date. Only that one is cleared: `mutateAsync` settles after the refetch, so a refusal
           // that arrived during the send is news, and a Propose or Stop still in flight keeps its
@@ -200,7 +250,7 @@ export function ConversationPane({
           const { propose: nowPropose, stop: nowStop } = latest.current;
           if (nowPropose.isError && nowPropose.error === before.propose.error) nowPropose.reset();
           if (nowStop.isError && nowStop.error === before.stop.error) nowStop.reset();
-          if (shapeId === null) onOpened(id);
+          if (shapeId === null) open(id);
         }}
         onPropose={doPropose}
         onStop={doStop}
