@@ -10,23 +10,29 @@ export const PNPM_LOCKFILE = 'pnpm-lock.yaml';
 const ModulesState = z.looseObject({ storeDir: z.string().optional() });
 
 /**
- * Whether the copy's `node_modules` was installed from a store other than `store`, as its
- * `.modules.yaml` records it. A `node_modules` with no record, or a record naming no store, is not
- * another store's; a record that can't be read counts as one, so the install starts over.
+ * What is wrong with the store a copy's `node_modules` records in its `.modules.yaml`, if anything:
+ * `other_store` when it names a store other than the one about to be used, `unreadable` when the
+ * record doesn't parse or fails its schema (so it names none). Either way the install starts over.
+ * A `node_modules` with no record, or a record naming no store, has no problem.
  */
-export function madeFromAnotherStore(path: string, store: string | undefined): boolean {
+export type StoreRecordProblem = 'other_store' | 'unreadable';
+
+export function storeRecordProblem(
+  path: string,
+  store: string | undefined,
+): StoreRecordProblem | null {
   const record = join(path, 'node_modules', '.modules.yaml');
-  if (!existsSync(record)) return false;
+  if (!existsSync(record)) return null;
   let parsed: unknown;
   try {
     parsed = parse(readFileSync(record, 'utf8'));
   } catch {
-    return true;
+    return 'unreadable';
   }
   const state = ModulesState.safeParse(parsed);
-  if (!state.success) return true;
+  if (!state.success) return 'unreadable';
   const recorded = state.data.storeDir;
-  return recorded !== undefined && recorded !== store;
+  return recorded !== undefined && recorded !== store ? 'other_store' : null;
 }
 
 /** What a copy's installed packages look like against its pnpm lockfile. */

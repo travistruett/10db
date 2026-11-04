@@ -90,6 +90,7 @@ function fakePnpm(root: string): FakePnpm {
       `if [ -d '${made}' ]; then cp -R '${made}/.' "$PWD"; fi`,
       `n=$(wc -l < '${log}' | tr -d ' ')`,
       `if [ -d '${made}.'"$n" ]; then cp -R '${made}.'"$n"'/.' "$PWD"; fi`,
+      `if [ -f '${verdict}.'"$n" ]; then cat '${verdict}.'"$n"; exit 1; fi`,
       `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
       '',
@@ -112,6 +113,9 @@ function fakePnpm(root: string): FakePnpm {
         : [],
     failWith(exitCode, output) {
       fail(exitCode, output, null);
+    },
+    failsOnCall(call, output) {
+      writeFileSync(`${verdict}.${String(call)}`, `${output}\n`);
     },
     blockedFrom(host) {
       fail(
@@ -187,6 +191,8 @@ export interface FakePnpm {
   calls(): string[];
   /** Makes every later call print `output` and exit with `exitCode`. */
   failWith(exitCode: number, output: string): void;
+  /** Makes only the `call`th call overall print `output` and exit 1. */
+  failsOnCall(call: number, output: string): void;
   /**
    * Makes every later call fail as pnpm does when the sandbox's proxy refuses `host`: srt's debug line
    * on stderr, pnpm's error, exit 1.
