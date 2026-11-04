@@ -91,14 +91,20 @@ export function ConversationPane({
   // The last send on this screen that failed before anything opened the conversation, with its
   // text: a drop that opens it afterwards replaces the input, and this is what it would lose.
   const failedSend = useRef<{ readonly text: string; readonly message: string } | null>(null);
+  // What the input holds now. The input unmounts when the conversation opens, so this is what its
+  // replacement is given, whatever the builder has typed, edited or cleared since a send failed.
+  const typed = useRef('');
   const open = (id: ShapeId): void => {
     if (opened.current !== null) return;
     // A send that failed first, with the screen still here, waits for a conversation to be left to.
     // Left too, it must still go: nothing else will, and opening the conversation later shows it.
-    if (failedSend.current !== null) {
-      leaveLate(id, { failure: failedSend.current.message, draft: failedSend.current.text });
-      failedSend.current = null;
-    }
+    // Its text is not put back, since the input may have been edited since; and a builder who
+    // cleared the input has dealt with the failure, so it stays behind with the text.
+    const hasText = typed.current.trim() !== '';
+    if (failedSend.current !== null && hasText)
+      leaveLate(id, { failure: failedSend.current.message });
+    failedSend.current = null;
+    if (hasText) leaveLate(id, { draft: typed.current });
     if (!here.current) return;
     opened.current = id;
     onOpened(id);
@@ -210,6 +216,9 @@ export function ConversationPane({
         error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         late={late}
+        onDraft={(text) => {
+          typed.current = text;
+        }}
         onLateTaken={() => {
           if (shapeId !== null) takeLate(shapeId);
         }}

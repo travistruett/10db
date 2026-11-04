@@ -27,6 +27,12 @@ export interface ComposerProps {
   readonly late: LateOutcome | null;
   /** This input has taken `late`. */
   readonly onLateTaken: () => void;
+  /**
+   * Told what the input holds each time it changes, so a screen that is about to replace this input
+   * can carry the text over. It is empty while a send of the text is in flight: that text is already
+   * on its way, and carrying it too would put it back after the send succeeds.
+   */
+  readonly onDraft: (text: string) => void;
 }
 
 const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list…';
@@ -61,6 +67,10 @@ export function Composer(props: ComposerProps) {
   useEffect(() => {
     if (late !== null) onLateTaken();
   }, [late, onLateTaken]);
+  const { onDraft } = props;
+  useEffect(() => {
+    onDraft(sending ? '' : draft);
+  }, [draft, sending, onDraft]);
 
   const addFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return;
