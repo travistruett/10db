@@ -252,7 +252,14 @@ function revertStillOn(
 
 /**
  * A failed workstream goes back to the queue; its current step restarts clean, from its own handoffs
- * only. A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
+ * only, except where a revert stands on the batch's branch (see `revertStillOn`). Then a read-only
+ * step with an implement step before it is not what restarts: the nearest implement step before it
+ * does, as after a reviewer's rejection, with the revert note as its fix, because only that step can
+ * commit the work again. The note is written again on every Retry until the run has committed since
+ * the revert (a second Retry of a run that committed nothing tells the session once more). A step
+ * before the first implement step (a plan or plan review) restarts as usual with a note that says
+ * only what happened, and the implement step gets the full note when the run enters it
+ * (`actionEntering`). A parked task, or a workstream a newer one replaced, is not retried. In a batch it may retry
  * only while the batch is OPEN or FAILED, and a FAILED batch reopens (batch delivery spec §4), except
  * a worktree batch: it stays FAILED until delivery has made its worktree whole and reopens it. A run
  * left out of the batch's pull request (Ship without it) stops being left out in the same write.

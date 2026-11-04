@@ -25,11 +25,23 @@ run is therefore one that was told. Runs started before this change have no note
 `left-out` notice behind it, the task is listed as not done unless a told run committed, which errs towards saying
 less was shipped.
 
-The step that can commit is the one asked to redo the work. A retry at a read-only step with an implement step
-before it restarts that implement step. A step that runs before the first implement step (a plan or plan review,
-on a retry or on a joined run's start) restarts as usual and gets a note that says only what happened, since it
-cannot commit. When the run then moves forward into its implement step, that step gets the full note as its fix,
-unless an implement step has started since the last note.
+The step that can commit is the one asked to redo the work. A retry at a read-only step (review or QA) with an
+implement step before it restarts that implement step, not the read-only step: the retry's target moves back to it,
+as a reviewer's rejection moves it, and the note is that step's fix. A step that runs before the first implement
+step (a plan or plan review, on a retry or on a joined run's start) restarts as usual and gets a note that says
+only what happened, since it cannot commit. When the run then moves forward into its implement step, that step gets
+the full note as its fix, unless an implement step has started since the last note.
+
+The note is repeated. Every Retry of a run whose revert still stands writes it again, so a second Retry of a run
+that committed nothing tells the new session once more. A commit made since the last note ends that: it brings work
+back, and 10db never undoes a revert, so the run is not told again. A commit that resolved conflict markers does
+not end it. A Retry that finds no revert standing writes a `no_revert` record and tells nothing
+(`decisions/2026-11-04-the-failure-line-reads-whether-a-run-was-told-of-a-revert-from-the-run.md`).
+
+A later Ship without it can find a run's revert still on the branch with no new commit, whether or not the run was
+ever retried. It reverts nothing more and gives the run the `left-out` notice `alreadyReverted`, which names the
+revert and does not say the run failed again or that a retry added none, since either may be untrue. That notice's
+revert line is what a Retry reads to tell the session.
 
 A run that was not told does not count. That covers a merge run the shipping gate sends to the task, whose commit
 resolves the base's conflicts and brings none of the work back.
@@ -52,9 +64,10 @@ commit of its own, once the markers are gone, or a fix for a merged branch's fai
 
 ## Why
 
-The retried step may commit nothing: a retry can re-run a review or QA step, and the run then reaches `DONE`
-with its work absent from the branch. The pull request body would call the task finished while the diff has
-none of it.
+The retried step may commit nothing: a retry that restarted a review or QA step would reach `DONE` with its work
+absent from the branch. The pull request body would call the task finished while the diff has none of it. So a
+run with a revert standing goes back to the implement step, which can commit, and is told again on each Retry
+until it has.
 
 Reverting the revert was turned down. The commits were left out because they passed no gate or review, so
 putting them back without a session would ship what the builder chose to keep out.

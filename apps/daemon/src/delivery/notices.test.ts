@@ -4,6 +4,7 @@ import {
   cancelledNoticeHead,
   cancelledNoticeKind,
   cancelledNotices,
+  leftOutNotices,
   migrationNotices,
   rerunNotices,
   rerunRecord,
@@ -13,6 +14,24 @@ import {
 } from './notices';
 
 const HEAD = 'a'.repeat(40);
+
+describe('the already-reverted left-out notice', () => {
+  // It is written for a run that was retried and failed again, and for one that never was: a later
+  // Ship without it finds the revert still on the branch either way.
+  const { body, line } = leftOutNotices.alreadyReverted('b'.repeat(40));
+
+  it('names the earlier revert and says nothing more was reverted', () => {
+    expect(body).toContain('bbbbbbbbb');
+    expect(body).toMatch(/reverted nothing more/);
+    expect(line).toMatch(/already reverted/);
+  });
+
+  it('does not claim the run failed again or was retried', () => {
+    expect(body).not.toMatch(/failed again/i);
+    expect(body).not.toMatch(/retry added none/i);
+    expect(body).not.toMatch(/the retry\b/i);
+  });
+});
 
 describe('the renumbered migrations notice', () => {
   const lines = (notice: { readonly record?: string | undefined }): unknown =>
