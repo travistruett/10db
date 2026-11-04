@@ -13,7 +13,7 @@ stored. For each day:
   `workstreamFailed`, every other flag as `flag`. `review` and `check` cards have their own columns, so `cards`
   is the day's row count.
 - **Cards per task** is `cards` over the tasks with a session running at some point of that day; null when none.
-- **Waiting minutes** are the time a card was open while a workstream it targets was in `WAITING_HUMAN`. A card
+- **Waiting minutes** are the time a card was open while a workstream it targets (or one cancelled off it, below) was in `WAITING_HUMAN`. A card
   is open from `created_at` to its first `inbox.changed` event whose state is not `OPEN` (now, while it is
   open); a workstream is blocked from a `workstream.changed` event into `WAITING_HUMAN` to the next change. The
   overlap is cut at UTC midnight and added to each day. Cards open together on one workstream count once. A card
@@ -30,8 +30,12 @@ stored. For each day:
   `waitingMinutes` stays `WAITING_HUMAN` time only, the panel shows the two as "Waited on an answer" and "Waited on a
   retry", and the two never overlap because a workstream is in one state at a time.
 - **A cancelled card keeps its target.** `cancelForWorkstream` leaves `targets` on a card it cancels outright, because
-  these figures attribute a card's time through them. A card with other targets still loses the cancelled one and
-  stays open.
+  these figures attribute a card's time through them. A card with other targets still loses the cancelled one from
+  `targets` and stays open, but the lane is not lost to the figures: `cancelForWorkstream` also records it in
+  `detail.releasedWorkstreams` (`CARD_RELEASED_WORKSTREAMS`), and `humanTouchDays` attributes the card's time to
+  the targets plus those released lanes (`cardWorkstreams`). A lane cancelled off such a card keeps the minutes it
+  waited on the card, as the waiting-minutes and failed-minutes bullets above describe them, while the card was open
+  and the lane was in `WAITING_HUMAN` (or `FAILED`).
 
 ## Why
 
