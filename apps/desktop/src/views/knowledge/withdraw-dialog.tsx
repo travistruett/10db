@@ -125,6 +125,21 @@ function WithdrawReason({
           {couldNotCheck
             ? ' Couldn’t check whether an older version would become current again. If there is one, withdrawing brings it back to briefings and search.'
             : null}
+          {preview.isPending ? (
+            <>
+              {' '}
+              <Loader
+                size="xs"
+                aria-hidden
+                display="inline-block"
+                style={{ verticalAlign: 'middle' }}
+              />
+              <span role="status">
+                {' '}
+                Checking whether an older version would become current again…
+              </span>
+            </>
+          ) : null}
         </>
       }
       submitLabel="Withdraw"

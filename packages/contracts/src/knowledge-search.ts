@@ -21,13 +21,14 @@ const DROPPED_MARKS =
 
 /**
  * What FTS5's unicode61 tokenizer makes of a word: lower-cased, with accents gone from Latin letters
- * only. Hangul, й and が keep their spelling, so no letter stays decomposed. Text is composed first,
- * so pasted decomposed text meets its stored spelling.
+ * only. Hangul, й and が keep their spelling, so no letter stays decomposed. The long s, plain or
+ * dotted, reads as s. Text is composed first, so pasted decomposed text meets its stored spelling.
  */
 function fold(text: string): string {
   return text
     .normalize('NFC')
     .toLowerCase()
+    .replace(/[\u{17f}\u{1e9b}]/gu, 's')
     .replace(/\p{Script=Latin}/gu, withoutAccent)
     .replace(DROPPED_MARKS, '');
 }
