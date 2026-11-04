@@ -47,7 +47,23 @@ export const NOTICE_KEY = {
   checksRerun: 'checks-rerun',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
+  /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
+  installRepaired: 'install-repaired',
 } as const;
+
+/** What a batch's tasks are told about an install 10db repaired by itself. */
+export const installNotices = {
+  /** The first install before a gate left the copy broken; a check after the second found it whole. */
+  repaired: (unresolved: string, at: Date): Notice => {
+    const when = `${at.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+    return {
+      key: NOTICE_KEY.installRepaired,
+      tone: 'info',
+      line: `The install in this copy was repaired at ${when}`,
+      body: `The install before the gate left this copy's packages broken (${unresolved}). At ${when} 10db removed node_modules and installed again from the lockfile. A check after that found every package resolved, so the step went on with no card and no attempt counted.`,
+    };
+  },
+};
 
 /**
  * What a batch's tasks are told when tasks in it failed, started over in a run of their own, and

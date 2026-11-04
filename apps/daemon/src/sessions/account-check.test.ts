@@ -257,6 +257,61 @@ describe('missingAccountRefusal with what Claude Code printed', () => {
   });
 });
 
+describe('missingAccountRefusal with what claude auth status said', () => {
+  const why = 'Claude Code reported no account within 30 s on each of 2 starts';
+  it('says the account looked signed out when claude auth status says it is', () => {
+    const refusal = missingAccountRefusal(
+      expect_('claude_subscription'),
+      why,
+      'Claude Code printed nothing',
+      'signed_out',
+    );
+    expect(refusal).toEqual({
+      problem: 'signed_out',
+      message: `${why} for account "Company A", and claude auth status says it is not signed in, so it looks signed out. Claude Code printed nothing`,
+      seenIdentity: null,
+    });
+  });
+
+  it.each([
+    ['signed_in', 'claude auth status says it is signed in'],
+    ['unknown', 'claude auth status gave no answer'],
+  ] as const)(
+    'says the starts kept timing out, not a sign-out, when the check says %s',
+    (state, said) => {
+      const refusal = missingAccountRefusal(
+        expect_('claude_subscription'),
+        why,
+        'Claude Code printed nothing',
+        state,
+      );
+      expect(refusal).toEqual({
+        problem: 'start_timeout',
+        message: `${why} for account "Company A", but ${said}, so its starts kept timing out. Claude Code printed nothing`,
+        seenIdentity: null,
+      });
+    },
+  );
+
+  it('leaves a keyed account to fail its workstream whatever the check says', () => {
+    expect(missingAccountRefusal(expect_('anthropic_api_key'), why, '', 'signed_out')).toBeNull();
+  });
+});
+
+describe('noAccountWhy with a wait that grows', () => {
+  it('names each start by its wait when the waits differ', () => {
+    expect(noAccountWhy([30_000, 60_000, 120_000], ['', '', '']).why).toBe(
+      'Claude Code reported no account on each of 3 starts (waiting 30 s, 60 s and 120 s)',
+    );
+  });
+
+  it('keeps the short wording when every start waited the same', () => {
+    expect(noAccountWhy([30_000, 30_000], ['', '']).why).toBe(
+      'Claude Code reported no account within 30 s on each of 2 starts',
+    );
+  });
+});
+
 describe('credentialProblem', () => {
   it.each<[string | undefined, AccountProblem | null]>([
     ['authentication_failed', 'signed_out'],

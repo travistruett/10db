@@ -88,6 +88,8 @@ function fakePnpm(root: string): FakePnpm {
       '#!/bin/sh',
       `printf '%s | %s\\n' "$PWD" "$*" >> '${log}'`,
       `if [ -d '${made}' ]; then cp -R '${made}/.' "$PWD"; fi`,
+      `n=$(wc -l < '${log}' | tr -d ' ')`,
+      `if [ -d '${made}.'"$n" ]; then cp -R '${made}.'"$n"'/.' "$PWD"; fi`,
       `if [ -f '${verdict}.stderr' ]; then cat '${verdict}.stderr' >&2; fi`,
       `if [ -f '${verdict}' ]; then cat '${verdict}'; read -r code < '${verdict}.code'; exit "$code"; fi`,
       '',
@@ -122,6 +124,12 @@ function fakePnpm(root: string): FakePnpm {
       for (const [relative, content] of Object.entries(files)) {
         mkdirSync(dirname(join(made, relative)), { recursive: true });
         writeFileSync(join(made, relative), content);
+      }
+    },
+    makesOnCall(call, files) {
+      for (const [relative, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(`${made}.${String(call)}`, relative)), { recursive: true });
+        writeFileSync(join(`${made}.${String(call)}`, relative), content);
       }
     },
     succeed() {
@@ -186,6 +194,8 @@ export interface FakePnpm {
   blockedFrom(host: string): void;
   /** Makes every later call write these files (path relative to its directory, content) first, as an install writes `node_modules`. */
   makes(files: Readonly<Record<string, string>>): void;
+  /** Makes only the `call`th call overall (1 is the first the harness ever saw) write these files, as `makes` does. */
+  makesOnCall(call: number, files: Readonly<Record<string, string>>): void;
   /** Makes every later call succeed again. */
   succeed(): void;
 }
@@ -310,9 +320,10 @@ export function createDeliveryHarness(
   const logs = captureLogs();
   const data = tempDir('delivery-data');
   const pnpm = fakePnpm(data.path);
+  const installClock = new ManualClock();
   const worktreeTools = {
     gate: createGateRunner({ sandbox: installSandbox, logger: silentLogger }),
-    clock: new ManualClock(),
+    clock: installClock,
     dataDir: data.path,
     sessionEnv: () => ({ PATH: `${pnpm.bin}:/usr/bin:/bin`, pnpm_config_store_dir: pnpm.bin }),
     resolvePnpm: () => Promise.resolve(join(pnpm.bin, 'pnpm')),
@@ -330,6 +341,7 @@ export function createDeliveryHarness(
     inbox,
     jobs,
     logger: logs.logger,
+    clock: installClock,
     limits: {
       ...DEFAULT_DELIVERY_LIMITS,
       networkTimeoutMs: opts.networkTimeoutMs ?? 10_000,
