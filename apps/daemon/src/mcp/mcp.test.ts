@@ -17,6 +17,7 @@ import {
   getWorkstream,
   insertBatch,
   insertDecision,
+  insertEvidence,
   insertPrinciple,
   insertSession,
   insertShape,
@@ -58,7 +59,14 @@ import { createTempRepo, isolatedGitEnv, seedWorkstream, tempDir } from '../../t
 import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../delivery';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
-import { advanceSteps, commitResolvedMarkers } from '../team';
+import {
+  advanceSteps,
+  commitCoveredByRevert,
+  commitAfterResolution,
+  commitGotThroughGate,
+  commitResolvedMarkers,
+  revertCommitLine,
+} from '../team';
 import { protectedPaths } from '../guard';
 import { createInboxService, type InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -945,6 +953,250 @@ describe('MCP tools', () => {
         message: 'R',
       });
       expect(replay.json).toEqual(viaTool.json);
+    });
+  });
+
+  describe('a commit result that made no new commit under a revert', () => {
+    const headOf = () =>
+      execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], { env: isolatedGitEnv() })
+        .toString()
+        .trim();
+    /** Tells the run of a revert at `revert`, as a Retry or a joined start does. */
+    const toldOf = (s: Awaited<ReturnType<typeof seedSession>>, revert: string) =>
+      state.write((ctx) =>
+        insertEvidence(ctx, {
+          workstreamId: s.workstream.id,
+          kind: 'builder',
+          command: null,
+          exitCode: null,
+          summary: `Your commits were reverted.\n\n${revertCommitLine(revert)}`,
+          logPath: null,
+          commitShas: [],
+        }),
+      );
+    const covered = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitCoveredByRevert);
+
+    it('is recorded when the sha is in the revert the run was told of', async () => {
+      const s = await seedSession();
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      const direct = await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-reused-01',
+        branch: 'main',
+      });
+      toldOf(s, headOf());
+      const viaTool = await s.call('commit', {
+        opId: 'op-reused-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toEqual({ sha: direct.sha, alreadyCommitted: true });
+      expect(covered(s)).toEqual([true]);
+    });
+
+    it('is not recorded for a commit the revert does not cover', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await git.commit({
+        repo: repo.path,
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+        opId: 'op-after-01',
+        branch: 'main',
+      });
+      const viaTool = await s.call('commit', {
+        opId: 'op-after-01',
+        paths: ['src/api/b.ts'],
+        message: 'Add b',
+      });
+      expect(viaTool.json).toMatchObject({ alreadyCommitted: true });
+      expect(covered(s)).toEqual([false]);
+    });
+
+    it('is not recorded for a new commit', async () => {
+      const s = await seedSession();
+      toldOf(s, headOf());
+      writeRepoFile('src/api/b.ts', 'export {}\n');
+      await s.call('commit', { opId: 'op-new-01', paths: ['src/api/b.ts'], message: 'Add b' });
+      expect(covered(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made while the run is fixing a failed gate', () => {
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number | null,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode: exitCode ?? 0,
+                summary: 'The gate failed',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const throughGate = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitGotThroughGate);
+    const commitWork = async (s: Awaited<ReturnType<typeof seedSession>>, opId: string) => {
+      writeRepoFile('src/api/b.ts', `export const op = '${opId}';\n`);
+      await s.call('commit', { opId, paths: ['src/api/b.ts'], message: 'Work' });
+    };
+
+    it('is recorded when the latest gate run failed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      await commitWork(s, 'op-gate-fix-1');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is recorded after a session the builder answered continues the fix', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      state.write((ctx) => {
+        patchWorkstream(ctx, s.workstream.id, null, {
+          nextAction: { kind: 'answer', inboxId: mintId('InboxItem'), providerSessionId: null },
+        });
+      });
+      await commitWork(s, 'op-gate-fix-2');
+      expect(throughGate(s)).toEqual([true]);
+    });
+
+    it('is not recorded when no gate has run', async () => {
+      const s = await seedSession();
+      await commitWork(s, 'op-no-gate');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the latest gate run passed', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'gate', 0);
+      await commitWork(s, 'op-gate-passed');
+      expect(throughGate(s)).toEqual([false]);
+    });
+
+    it('is not recorded when the builder’s note came after the failed gate run', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'gate', 1);
+      evidenceOf(s, 'builder', null);
+      await commitWork(s, 'op-note-after');
+      expect(throughGate(s)).toEqual([false]);
+    });
+  });
+
+  describe('a commit made after a resolution of conflict markers, before the next gate run', () => {
+    const MARKED = '<<<<<<< HEAD\nours\n||||||| base\n=======\ntheirs\n>>>>>>> origin/main\n';
+    const evidenceOf = (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      kind: 'gate' | 'builder',
+      exitCode: number,
+    ) =>
+      state.write((ctx) =>
+        insertEvidence(
+          ctx,
+          kind === 'gate'
+            ? {
+                workstreamId: s.workstream.id,
+                kind,
+                command: 'make gate',
+                exitCode,
+                summary: 'The gate ran',
+                logPath: null,
+                commitShas: [],
+              }
+            : {
+                workstreamId: s.workstream.id,
+                kind,
+                command: null,
+                exitCode: null,
+                summary: 'Redo the work',
+                logPath: null,
+                commitShas: [],
+              },
+        ),
+      );
+    const afterResolution = (s: Awaited<ReturnType<typeof seedSession>>) =>
+      listToolOpResults(state.db, s.workstream.id, 'commit').map(commitAfterResolution);
+    const commitFile = async (
+      s: Awaited<ReturnType<typeof seedSession>>,
+      opId: string,
+      path: string,
+      content: string,
+    ) => {
+      writeRepoFile(path, content);
+      await s.call('commit', { opId, paths: [path], message: opId });
+    };
+    /** The branch as the base merge leaves it, then the session's resolution of it. */
+    const resolved = async (s: Awaited<ReturnType<typeof seedSession>>) => {
+      await commitFile(s, 'op-marked', 'src/api/a.ts', MARKED);
+      await commitFile(s, 'op-resolve', 'src/api/a.ts', 'ours\ntheirs\n');
+    };
+
+    it('is recorded on a caller adapted after the resolution, and not on the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is recorded on every commit until a gate run', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      await commitFile(s, 'op-caller-1', 'src/api/c1.ts', 'export {}\n');
+      await commitFile(s, 'op-caller-2', 'src/api/c2.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true, true]);
+    });
+
+    it('is not recorded once a gate run came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'gate', 0);
+      await commitFile(s, 'op-later', 'src/api/later.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is not recorded once a builder note came after the resolution', async () => {
+      const s = await seedSession();
+      await resolved(s);
+      evidenceOf(s, 'builder', 0);
+      await commitFile(s, 'op-redo-01', 'src/api/redo.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, false]);
+    });
+
+    it('is recorded when the gate and the note came before the resolution', async () => {
+      const s = await seedSession();
+      evidenceOf(s, 'builder', 0);
+      evidenceOf(s, 'gate', 1);
+      await resolved(s);
+      await commitFile(s, 'op-caller', 'src/api/caller.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false, false, true]);
+    });
+
+    it('is not recorded when no commit resolved markers', async () => {
+      const s = await seedSession();
+      await commitFile(s, 'op-work-01', 'src/api/work.ts', 'export {}\n');
+      expect(afterResolution(s)).toEqual([false]);
     });
   });
 

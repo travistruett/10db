@@ -40,6 +40,8 @@ import {
   insertProposal,
   insertSource,
   insertToolOp,
+  listEvidence,
+  listToolOps,
   listStepToolOpResults,
   replaceToolOp,
   patchWorkstream,
@@ -70,7 +72,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { commitResultAsStored } from '../team';
+import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
   CLAIM_WAIT_SLICE_MS,
@@ -648,7 +650,19 @@ export function createToolHandlers(
       });
       // The record says when this commit resolved conflict markers of a base merge: it is on the branch
       // but brings none of a reverted task's work back. The session's answer is unchanged.
-      const stored = await commitResultAsStored(deps.git, checkout, result);
+      // It also says when the tool made no new commit and handed the session one the run's revert
+      // covers (an opId reused from the reverted commits): that brought no work back either.
+      // And when the session was fixing a failed gate, read from the run's record so a question, a usage
+      // limit or a handoff does not lose it: the commit adapts or repairs, and brings no work back.
+      const evidence = listEvidence(db, workstreamId);
+      const told = result.alreadyCommitted ? revertOfRun({ notice: row.notice, evidence }) : null;
+      const stored = await commitResultAsStored(deps.git, checkout, result, told?.revert ?? null, {
+        throughGate: fixingFailedGate(evidence),
+        afterResolution: afterMarkersResolved(
+          listToolOps(db, workstreamId, McpToolName.Commit),
+          evidence,
+        ),
+      });
       return deps.state.write((ctx) => {
         ctx.emit({
           type: EventType.CommitRecorded,

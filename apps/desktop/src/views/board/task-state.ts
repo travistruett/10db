@@ -12,6 +12,7 @@ import {
   REVERTED_NOTICE_KEY,
   StepRole,
   TaskStatus,
+  WorkspaceMode,
   WorkstreamFailure,
   WorkstreamState,
   type BatchDto,
@@ -95,6 +96,7 @@ function whatRetryDoes(
   stepIndex: number,
   step: string | null,
   notice: Notice | null,
+  revertTold: boolean,
 ): string {
   // The packages can't be installed until pnpm is fixed, whatever step the Retry would run.
   if (kind === WorkstreamFailure.NoPnpm) return FIX_PNPM_LINE;
@@ -105,8 +107,12 @@ function whatRetryDoes(
   if (!step) return 'Retry runs it again.';
   // A run whose commits were reverted is told so at the step that can commit, so Retry goes there
   // before a read-only step (`retryWorkstream`). A retried run is told again only if it has not
-  // committed since, which the notice does not say.
+  // committed since, which the notice does not say. A run whose notice is not the `left-out` one is
+  // told by the note its session was given, which the run records (`revertTold`): a joined run holds
+  // no notice at all. A `left-out` notice that names no revert says none is on the branch, whatever
+  // an older note says.
   const revertNamed = notice?.body.includes(REVERT_COMMIT_LINE) ?? false;
+  const retold = notice?.key !== LEFT_OUT_NOTICE_KEY && (revertNamed || revertTold);
   const failed = steps[stepIndex];
   const canRedo =
     failed !== undefined &&
@@ -115,7 +121,7 @@ function whatRetryDoes(
     steps.slice(0, stepIndex).some((s) => s.role === StepRole.Implement);
   if (canRedo && revertNamed && notice?.key === LEFT_OUT_NOTICE_KEY)
     return `Retry sends the work back to the build step and tells it its commits were reverted, and the ${step} runs after it.`;
-  if (canRedo && revertNamed && notice?.key === REVERTED_NOTICE_KEY)
+  if (canRedo && retold)
     return `Retry sends the work back to the build step and tells it its commits were reverted, unless the run has committed since: then it runs the ${step} step again.`;
   switch (kind) {
     case WorkstreamFailure.GateFailed:
@@ -141,6 +147,7 @@ export function failureLine(
   workstream: Pick<WorkstreamDto, 'steps' | 'stepIndex'> & {
     readonly failureKind: string | null;
     readonly notice?: Notice | null;
+    readonly revertTold?: boolean;
   },
   retryable: boolean,
 ): string {
@@ -148,7 +155,7 @@ export function failureLine(
   const step = failed ? STEP_NAME[failed.role] : null;
   const happened = whatHappened(workstream.failureKind, step);
   if (!retryable) return happened;
-  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null)}`;
+  return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null, workstream.revertTold ?? false)}`;
 }
 
 function building(workstream: WorkstreamDto): string {
@@ -212,21 +219,33 @@ export function pullRequestClosed(batch: BatchDto | undefined): boolean {
 }
 
 /** The task fields `retryWorkstream` reads before it accepts a retry. */
-export type RetryTask = Pick<TaskDto, 'status' | 'boardColumnId' | 'workstreamId'>;
+export type RetryTask = Pick<
+  TaskDto,
+  'status' | 'boardColumnId' | 'workstreamId' | 'workspaceMode'
+>;
 
 /**
  * Whether the batch lets a retry through: only an open or failed one reopens, and a run with no batch
  * has none to refuse. A run with a batch that is not loaded yet, or failed to, is not known to pass.
+ * A retry stays in its batch, so a task set to work somewhere else than its batch does is refused
+ * (`refuseMovedRetry`); it is started over instead. A batch works in a copy when it has a worktree.
  */
-function batchAllowsRetry(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+function batchAllowsRetry(
+  task: Pick<TaskDto, 'workspaceMode'> | undefined,
+  workstream: WorkstreamDto,
+  batch: BatchDto | undefined,
+): boolean {
   if (!batch) return workstream.batchId === null;
+  if (task && (batch.worktreePath !== null) !== (task.workspaceMode === WorkspaceMode.Worktree))
+    return false;
   return batch.state === BatchState.Open || batch.state === BatchState.Failed;
 }
 
 /**
  * Whether `retryWorkstream` would accept a retry of this run: it failed, its task was not closed or
  * parked and has no newer run, and its batch is still open or failed (retry reopens it; a batch shipped
- * anyway never reopens, so that run is run again with a fresh Start instead). Every line or button that
+ * anyway never reopens, so that run is run again with a fresh Start instead), and the task is set to
+ * work where the batch does (a moved task is started over, not retried). Every line or button that
  * offers Retry asks this, so none promises what the daemon refuses.
  */
 export function canRetryRun(
@@ -239,7 +258,7 @@ export function canRetryRun(
     task.status !== TaskStatus.Cancelled &&
     task.boardColumnId === null &&
     task.workstreamId === workstream.id &&
-    batchAllowsRetry(workstream, batch)
+    batchAllowsRetry(task, workstream, batch)
   );
 }
 
@@ -440,7 +459,9 @@ function stateOf(
       return {
         line: failureLine(
           workstream,
-          task ? canRetryRun(task, workstream, batch) : batchAllowsRetry(workstream, batch),
+          task
+            ? canRetryRun(task, workstream, batch)
+            : batchAllowsRetry(undefined, workstream, batch),
         ),
         color: 'red',
         detail: workstream.failureReason,

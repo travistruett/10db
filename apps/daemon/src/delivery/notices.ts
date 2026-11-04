@@ -225,14 +225,16 @@ export const leftOutNotices = {
     body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /**
-   * An earlier Ship without it reverted its commits in `revert`, a retry added none, and this answer
-   * had nothing left to revert. The revert line is what a Retry reads to tell the session again.
+   * The run's record names `revert`, which is still on the branch, but no revert on the branch lists
+   * a commit of the task and this answer reverted none of them. A run with a commit a revert lists
+   * gets `reverted` instead, naming that revert. Either kind of run may or may not have been retried,
+   * so the wording says nothing of a retry. The revert line is what a Retry reads to tell the session.
    */
   alreadyReverted: (revert: string): Notice => ({
     key: LEFT_OUT_NOTICE_KEY,
     tone: 'info',
     line: 'Left out of the pull request: its commits were already reverted',
-    body: `This run failed again, and you chose Ship without it. Its commits on the batch's branch were reverted by an earlier answer (${revert.slice(0, 9)}) and the retry added none, so 10db reverted nothing more, and the pull request has none of this task's changes.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
+    body: `This run failed, and you chose Ship without it. Its commits on the batch's branch were reverted by an earlier answer (${revert.slice(0, 9)}) and none has been added since, so 10db reverted nothing more, and the pull request has none of this task's changes.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /** It had no commit on the branch, so the pull request already lacked its work. */
   nothingToRevert: (): Notice => ({
