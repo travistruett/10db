@@ -215,11 +215,14 @@ function implementBefore(steps: readonly WorkstreamStep[], index: number): numbe
  * batch's branch. A run left out holds a revert on its notice. A run retried before holds it in the
  * note its session was given, and is told again unless it has committed since: a commit after the
  * revert brings work back, and 10db never undoes a revert. A commit that resolved conflict markers of
- * a base merge brings none back, as the pull request reads it too.
+ * a base merge brings none back, as the pull request reads it too. `kept` is a revert Ship without it
+ * left on the branch without writing the run's notice (its write failed, and the batch's left-out
+ * card holds it): a run with no record of its own is told of that one.
  */
 function revertStillOn(
   db: DbReader,
   row: { readonly id: WorkstreamId; readonly notice: Notice | null },
+  kept: string | null,
 ): string | null {
   if (row.notice?.key === LEFT_OUT_NOTICE_KEY) {
     const named = revertCommitOf(row.notice);
@@ -227,7 +230,7 @@ function revertStillOn(
   }
   const evidence = listEvidence(db, row.id);
   const record = revertOfRun({ notice: row.notice, evidence });
-  if (record === null) return null;
+  if (record === null) return kept;
   const since = lastRevertNoteAt(evidence);
   if (since !== null)
     for (const result of listToolOpResults(db, row.id, McpToolName.Commit, since))
@@ -245,9 +248,15 @@ function revertStillOn(
  * When a reviewer's rejection failed it, the retry runs the step the rejection goes back to instead,
  * with the review's notes. The builder's `note`, when they give one, reaches the step that runs next
  * whatever failed it, and the retry starts the send-back count over
- * (decisions/2026-10-29-review-findings-on-the-builders-screens.md).
+ * (decisions/2026-10-29-review-findings-on-the-builders-screens.md). `keptRevert` is the revert the
+ * batch's open left-out card holds when it covers this run (see `revertStillOn`); the caller reads it.
  */
-export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: string): WorkstreamDto {
+export function retryWorkstream(
+  state: StateStore,
+  id: WorkstreamId,
+  note?: string,
+  keptRevert: string | null = null,
+): WorkstreamDto {
   const row = getWorkstreamRow(state.db, id);
   if (row.state !== WorkstreamState.Failed)
     throw new ConflictError('Only a failed workstream can be retried');
@@ -277,7 +286,7 @@ export function retryWorkstream(state: StateStore, id: WorkstreamId, note?: stri
     // Its work may go in the pull request now, so "left out" is no longer true of this run. But the
     // revert commit is still on the branch: the run keeps a notice that says so (the pull request
     // lists its task as done only if the run commits again), and its session is told in the note below.
-    const revert = revertStillOn(ctx.tx, row);
+    const revert = revertStillOn(ctx.tx, row, keptRevert);
     if (revert) setWorkstreamNotice(ctx, id, revertedWorkNotice(revert));
     else if (row.notice?.key === LEFT_OUT_NOTICE_KEY) setWorkstreamNotice(ctx, id, null);
     // A revert note is for the step that can commit: a read-only step cannot redo the work, and its

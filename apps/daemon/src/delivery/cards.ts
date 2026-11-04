@@ -1294,7 +1294,11 @@ function leftOutCard(
     foldKey: leftOutFoldKey(batch.id),
     refresh: true,
     resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
-    ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }, attempt.revert),
+    ...batchCardFields(
+      { id: attempt.workstreamId, batchId: batch.id },
+      attempt.revert,
+      attempt.titles,
+    ),
   };
 }
 

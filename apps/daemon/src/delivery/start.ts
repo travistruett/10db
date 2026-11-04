@@ -29,6 +29,7 @@ import {
   getBoardColumn,
   getProject,
   getTask,
+  getWorkstream,
   getWorkstreamRow,
   insertBatch,
   listWorkstreams,
@@ -53,6 +54,7 @@ import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from '
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
+import { coversRun, keptRevertOf } from './left-out-settle';
 import { batchPlacement, placementWords, refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
 import { forgetStartSiblings, recordStartSiblings, startSiblings } from './start-siblings';
@@ -745,7 +747,16 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     retry(id, note) {
       refuseIfJoining(getWorkstreamRow(db, id).taskId);
       refuseMovedRetry(id);
-      const retried = retryWorkstream(ctx.state, id, note);
+      // A revert a stopped Ship without it left on the branch is known only to the batch's left-out
+      // card, so the run's session is told of it from there when the revert covers the run.
+      const run = getWorkstream(db, id);
+      const kept = run.batchId === null ? null : keptRevertOf(db, getBatch(db, run.batchId));
+      const retried = retryWorkstream(
+        ctx.state,
+        id,
+        note,
+        kept !== null && coversRun(kept, run) ? kept.revert : null,
+      );
       if (retried.batchId !== null) reopen(retried.batchId);
       return retried;
     },

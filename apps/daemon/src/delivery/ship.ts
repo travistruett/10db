@@ -86,7 +86,7 @@ import {
 } from './cards';
 import { allCheckouts, projectAtCheckout } from './checkout';
 import { returnCheckout } from './checkout-return';
-import { settleLeftOutCards } from './left-out-settle';
+import { keptRevertOf, settleLeftOutCards } from './left-out-settle';
 import { resolveShipCards } from './stale-cards';
 import {
   ghCall,
@@ -1433,19 +1433,23 @@ export function createShipper(deps: ShipperDeps): Shipper {
    * runs as any other. Nothing moves until the revert has worked; a revert that cannot is a card and
    * the batch stays as it was.
    *
-   * `earlier` is the revert an answer before this one left on the branch without getting as far as
-   * the notices. Its commits are not asked of git again: undoing commits that built on each other
-   * once more conflicts with the tip that no longer has them. They count as this answer's, under that
-   * revert. A commit it does not cover is reverted as usual. A revert no longer on the branch covers
-   * nothing, so the commits are reverted as if it had never been made.
+   * `given` is the revert the answered card names: one an answer before this left on the branch without
+   * getting as far as the notices. Another card of the batch may be the one answered (a task started
+   * into the batch later failed), and its detail names none, so the batch's open left-out card, which
+   * holds the revert, is read as well. The revert's commits are not asked of git again: undoing
+   * commits that built on each other once more conflicts with the tip that no longer has them. They
+   * count as this answer's, under that revert. A commit it does not cover is reverted as usual. A
+   * revert no longer on the branch covers nothing, so the commits are reverted as if it had never
+   * been made.
    */
   async function leaveOut(
     batchId: BatchId,
     workstreamId: WorkstreamId,
-    earlier: string | null,
+    given: string | null,
     signal: AbortSignal,
   ): Promise<void> {
     const batch = getBatch(db, batchId);
+    const earlier = given ?? keptRevertOf(db, batch)?.revert ?? null;
     const member = getWorkstream(db, workstreamId);
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;

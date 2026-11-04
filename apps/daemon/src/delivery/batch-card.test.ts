@@ -987,6 +987,92 @@ describe('the failed workstream card', () => {
         );
       });
 
+      describe('while the revert card is open', () => {
+        /** The first answer's revert is on the branch and its card is open; the notices were not written. */
+        async function openRevertCard() {
+          const { asked } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          h.only(h.cards().filter((c) => c.title.includes('revert')));
+          expect(getWorkstream(h.store.db, made.failed).notice).toBeNull();
+          return { ...made, revert, asked };
+        }
+
+        it('tells a run retried from the drawer that its commits were reverted', async () => {
+          const { failed, revert } = await openRevertCard();
+
+          const retried = h.starter.retry(failed);
+
+          expect(retried.notice?.key).toBe('reverted-work');
+          expect(retried.notice?.body).toContain(`Revert commit: ${revert}`);
+          const notes = listEvidence(h.store.db, failed).filter((e) => e.kind === 'builder');
+          expect(notes).toHaveLength(1);
+          expect(notes[0]?.summary).toContain(revert);
+          expect(notes[0]?.summary).toContain('Redo the work');
+        });
+
+        it('tells a run again when it failed again without committing after the note', async () => {
+          const { failed } = await openRevertCard();
+          h.starter.retry(failed);
+          h.settle(failed, 'FAILED');
+
+          h.starter.retry(failed);
+
+          // The note already told of the revert, and the run committed nothing after it: told again, once.
+          const notes = listEvidence(h.store.db, failed).filter((e) => e.kind === 'builder');
+          expect(notes).toHaveLength(2);
+        });
+
+        it('does not revert commits again when Ship without it is answered on another failed card', async () => {
+          const { asked, failed, batchId, revert } = await openRevertCard();
+          // The failed card of the same run as it stood before the revert: it names no revert.
+          const plain = batchCardFields({ id: failed, batchId });
+          if (!plain) throw new Error('a batch member gets card actions');
+          const other = inbox.flag({
+            projectId: h.project.id,
+            workstreamId: failed,
+            title: 'Workstream failed: Alpha again',
+            body: 'The gate failed 4 times',
+            ...plain,
+          });
+
+          inbox.answer(other.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          expect(asked).toHaveLength(1);
+          expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+          expect(getWorkstream(h.store.db, failed).notice?.body).toContain(
+            `Revert commit: ${revert}`,
+          );
+        });
+
+        it('keeps the revert on the card a stopped answer on another failed card raises', async () => {
+          const { failJobWrite } = revertsWithFailedWrite();
+          const made = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          inbox.answer(made.card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          const plain = batchCardFields({ id: made.failed, batchId: made.batchId });
+          if (!plain) throw new Error('a batch member gets card actions');
+          const other = inbox.flag({
+            projectId: h.project.id,
+            workstreamId: made.failed,
+            title: 'Workstream failed: Alpha again',
+            body: 'The gate failed 4 times',
+            ...plain,
+          });
+
+          failJobWrite();
+          inbox.answer(other.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          const folded = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          expect(folded.detail).toMatchObject({ batchCard: { revert } });
+        });
+      });
+
       it('reverts as usual when the revert the card names is no longer on the branch', async () => {
         const { batchId, failed } = await failedInBatch('DONE', {
           'src/api/alpha.txt': 'alpha\n',

@@ -20,11 +20,16 @@ export const BatchCardChoice = {
 } as const;
 export type BatchCardChoice = (typeof BatchCardChoice)[keyof typeof BatchCardChoice];
 
-/** `revert` is the revert commit an earlier Ship without it left on the branch, if it did. */
-const BatchCardDetail = z.object({
+/**
+ * `revert` is the revert commit an earlier Ship without it left on the branch, if it did, and `titles`
+ * the tasks whose commits it covers: the batch's other paths (Retry, a Ship without it answered on
+ * another card) read both from the batch's open left-out card (`keptRevertOf`).
+ */
+export const BatchCardDetail = z.object({
   batchId: BatchId,
   workstreamId: WorkstreamId,
   revert: z.string().optional(),
+  titles: z.array(z.string()).optional(),
 });
 
 const OPTIONS: readonly InboxOption[] = [
@@ -81,12 +86,17 @@ const REVERTED_OPTIONS: readonly InboxOption[] = [
 export function batchCardFields(
   row: { readonly id: WorkstreamId; readonly batchId: BatchId | null },
   revert?: string | null,
+  titles?: readonly string[],
 ): { options: InboxOption[]; detail: Record<string, Json> } | null {
   if (row.batchId === null) return null;
   const card = { batchId: row.batchId, workstreamId: row.id };
   return {
     options: [...(revert ? REVERTED_OPTIONS : OPTIONS)],
-    detail: { [BATCH_CARD_DETAIL]: revert ? { ...card, revert } : card },
+    detail: {
+      [BATCH_CARD_DETAIL]: revert
+        ? { ...card, revert, ...(titles ? { titles: [...titles] } : {}) }
+        : card,
+    },
   };
 }
 
