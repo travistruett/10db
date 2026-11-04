@@ -15,6 +15,14 @@ sets `FileAccessContext.systemDocRoots` and Shape's context leaves it unset. A S
 only its checkout and its conversation's files, and is denied these paths
 (`2026-11-02-shape-session-and-convert.md`).
 
+The same list holds the read-only SDK headers and man pages, where a `*` segment stands for exactly one
+path segment (an SDK's name): `/Library/Developer/CommandLineTools/SDKs/*/usr/include`, `.../usr/share/man`,
+and the same under the Xcode app's macOS SDKs
+(`/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/*/…`). Added after a lane
+raised two cards on 2026-11-04 for `sys/attr.h` and `man2/setattrlist.2` under `MacOSX26.2.sdk`. Nothing
+else under `/Library` (or the SDK, such as its frameworks) is covered: it still asks. A link such as
+`MacOSX.sdk` is judged by the SDK it names.
+
 The rule is about reads only. It adds nothing to `judgeWrite`, to the broker's Edit judgement or to the
 guard's refusal of a file-tool write outside the repository, so an Edit or Write of a path under
 `/usr/share/man` is still never allowed by this rule (the broker still cards it).

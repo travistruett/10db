@@ -212,12 +212,40 @@ function isOwnTaskOutput(realPath: string, ctx: FileAccessContext): boolean {
  * read-only and they hold no user data, so a lane reads them without a card. Only reads: nothing
  * here widens what a lane may write (a write is judged by `judgeWrite` and the guard). A lane opts
  * in through `FileAccessContext.systemDocRoots`; a Shape session does not, so it stays confined.
+ *
+ * A `*` segment stands for exactly one path segment (an SDK's name). The Command Line Tools' and the
+ * Xcode app's SDK headers and man pages are read-only system files like the rest.
  */
+const XCODE_MACOS_SDKS =
+  '/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs';
 export const SYSTEM_DOC_ROOTS: readonly string[] = [
   '/usr/share/man',
   '/usr/share/info',
   '/usr/share/doc',
+  '/Library/Developer/CommandLineTools/SDKs/*/usr/include',
+  '/Library/Developer/CommandLineTools/SDKs/*/usr/share/man',
+  `${XCODE_MACOS_SDKS}/*/usr/include`,
+  `${XCODE_MACOS_SDKS}/*/usr/share/man`,
 ];
+
+/** True when real path `real` is at or under `root`, whose `*` segments each match one path segment. */
+function isUnderDocRoot(real: string, root: string): boolean {
+  const star = root.indexOf('/*');
+  if (star === -1) return spellings(root).some((dir) => isEqualOrUnder(real, dir));
+  const pattern = root.slice(star + 1).split('/');
+  return spellings(root.slice(0, star)).some((fixed) => {
+    const base = foldPathCase(fixed);
+    const folded = foldPathCase(real);
+    if (!folded.startsWith(`${base}/`)) return false;
+    const parts = folded.slice(base.length + 1).split('/');
+    return (
+      parts.length >= pattern.length &&
+      pattern.every(
+        (want, i) => parts[i] !== '' && (want === '*' || parts[i] === foldPathCase(want)),
+      )
+    );
+  });
+}
 
 const READ_STRICTNESS: Record<ReadAccess, number> = {
   inside: 0,
@@ -241,9 +269,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (isOwnTaskOutput(real, ctx)) return 'allowed';
   if (isOutsideCopy(real, ctx)) return 'outside-copy';
   if (ctx.readList.flatMap(spellings).some((root) => isEqualOrUnder(real, root))) return 'allowed';
-  if ((ctx.systemDocRoots ?? []).flatMap(spellings).some((root) => isEqualOrUnder(real, root))) {
-    return 'allowed';
-  }
+  if ((ctx.systemDocRoots ?? []).some((root) => isUnderDocRoot(real, root))) return 'allowed';
   return 'ask';
 }
 

@@ -533,6 +533,13 @@ function startSession(
     if (account) settleAccountStep();
     if (ended || failure) return;
     if (!account) {
+      // The SDK errors the stream and rejects accountInfo() about the same tick, in either order. Let the pump
+      // see how the stream ended before this decides to start again: a sandbox that cannot start is final
+      // (the pump ends the session), and a keyed account has no await below to give the pump that turn.
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      if (over()) return;
       // Silence is not a sign-out: a start under load can take minutes. Only `claude auth status`, asked
       // of the account's own config directory, says the account is signed out. A keyed account has no
       // sign-in to check, and a stop in the meantime wants no answer.

@@ -591,6 +591,15 @@ describe('shell commands', () => {
     expect(verdict.decision === 'deny' && verdict.reason).toContain('-e O');
   });
 
+  it('tells a read-only step why a git option is refused', () => {
+    const readOnlyBash = (command: string) =>
+      judge('Bash', { command }, [{ kind: 'area', name: 'api' }], true);
+    const grep = readOnlyBash('git grep -eOption');
+    expect(grep.decision === 'deny' && grep.reason).toContain('-e O');
+    const extDiff = readOnlyBash('git diff --ext-diff');
+    expect(extDiff.decision === 'deny' && extDiff.reason).toContain('--ext-diff');
+  });
+
   it('allows when the Bash input has no command (the CLI rejects it anyway)', () => {
     expect(judge('Bash', {}).decision).toBe('allow');
   });
