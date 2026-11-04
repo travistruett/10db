@@ -15,6 +15,7 @@ import {
 import {
   getProject,
   getShape,
+  findShapeLinkOfTask,
   getTask,
   laneTimesOf,
   listFinishedLaneTimes,
@@ -22,7 +23,6 @@ import {
   listSessions,
   listShapeLinks,
   listShapeProposals,
-  listShapes,
   listWorkstreams,
   type DbReader,
 } from '@10db/db';
@@ -92,16 +92,26 @@ function existingItems(
   medianHours: number,
   now: Date,
 ): ScheduleItem[] {
-  const derived = new Map(
-    listShapes(db, projectId).flatMap((shape) =>
-      buildSizes(db, shape.id).flatMap((s) => (s.taskId === null ? [] : [[s.taskId, s.hours]])),
-    ),
-  );
   const items: ScheduleItem[] = [];
   const workstreams = listWorkstreams(db, { states: ACTIVE_STATES, projectId }).filter(
     (ws) => ws.state !== WorkstreamState.Held,
   );
   const active = new Set(workstreams.map((ws) => ws.taskId));
+  // Sizes are read only for the conversations that made a running or queued task (through
+  // shape_links), not for every conversation of the project.
+  const shapes = new Set(
+    [...active].flatMap((taskId) => {
+      const link = findShapeLinkOfTask(db, taskId);
+      return link === undefined ? [] : [link.shapeId];
+    }),
+  );
+  const derived = new Map(
+    [...shapes].flatMap((shapeId) =>
+      buildSizes(db, shapeId).flatMap((s) =>
+        s.taskId === null || !active.has(s.taskId) ? [] : [[s.taskId, s.hours]],
+      ),
+    ),
+  );
   for (const ws of workstreams) {
     const task = getTask(db, ws.taskId);
     // A finished or cancelled task whose last run was left behind holds no lane.
