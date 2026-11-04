@@ -2,6 +2,12 @@ const UNQUOTED = /[A-Za-z0-9_./:,@%+=-]/;
 const DOUBLE_QUOTED_FORBIDDEN = /[$`\\!"]/;
 const BLANK = new Set([' ', '\t']);
 const REDIRECTS = ['2>&1', '>/dev/null', '2>/dev/null'];
+/** The words, as source text and as the shell sees them, that group or negate a `find`'s tests. */
+const GROUPING: readonly { readonly text: string; readonly word: string }[] = [
+  { text: '\\(', word: '(' },
+  { text: '\\)', word: ')' },
+  { text: '!', word: '!' },
+];
 /** zsh `=cmd` expansion: a word's start, or after `=` or `:` under MAGIC_EQUAL_SUBST. */
 export const EQUALS_EXPANSION = /(^|[=:])=/;
 
@@ -30,7 +36,8 @@ function hasControl(text: string): boolean {
  * `||` and `;`, and returns each segment's words exactly as the shell sees them (quotes
  * removed). Returns null for anything else: expansions, globs, comments, redirections other
  * than `2>&1`, `>/dev/null` and `2>/dev/null`, backgrounding, escapes, control characters and
- * empty segments. A word whose decoded value, quoted or not, has `=` at its start or right after `=` or `:`
+ * empty segments. The one escape accepted is a whole word `\(` or `\)` (the words `(` and `)`),
+ * and a bare `!` after the command is the word `!`: `find`'s grouping and negation. A word whose decoded value, quoted or not, has `=` at its start or right after `=` or `:`
  * is refused too: zsh expands `=cmd` to a path after removing empty quotes, and MAGIC_EQUAL_SUBST
  * does the same after an option's `=` and after a `:` in an assignment-like word. Because nothing outside this grammar is accepted, the words cannot
  * differ from what runs.
@@ -80,6 +87,18 @@ export function plainCommandWords(
     if (redirect !== undefined) {
       if (!BLANK.has(command.charAt(i - 1)) || !endOfToken(i + redirect.length)) return null;
       i += redirect.length;
+      continue;
+    }
+    // A whole word that is `\(`, `\)` or `!` is the word `(`, `)` or `!`: find's grouping and
+    // negation operators, which only combine tests. A `\` before the paren is the one escape
+    // accepted, and only when it makes the whole word, so no other character is ever escaped.
+    // A bare `!` counts after the command only; as the command it negates the pipeline.
+    const group = GROUPING.find(
+      (g) => command.startsWith(g.text, i) && endOfToken(i + g.text.length),
+    );
+    if (group !== undefined && (group.text !== '!' || words.length > 0)) {
+      words.push(group.word);
+      i += group.text.length;
       continue;
     }
     let word = '';

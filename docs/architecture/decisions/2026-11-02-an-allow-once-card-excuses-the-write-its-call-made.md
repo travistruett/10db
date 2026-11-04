@@ -35,15 +35,16 @@ node_modules to read), with these results:
   to curly quotes in the file, and then the same curly style in `new_string` (double quotes were
   converted in the probe; an apostrophe in `new_string` stayed straight when `old_string` had no single
   quote). The broker finds no match, so `editResult` is undefined and the card records no hash.
-- **Not mirrored, fails closed: an empty `old_string` on a whitespace-only file.** Claude Code replaces the
-  file with `new_string` (stripped: `'  \n'` became `'x\n'` in the probe). The broker treats only an empty file
-  this way, so `editResult` is undefined and the card records no hash.
+- **Mirrored: an empty `old_string` on a whitespace-only file.** Claude Code replaces the file with
+  `new_string` (stripped: `'  \n'` became `'x\n'` in the probe); it refuses only when the trimmed file is
+  non-empty. `editResult` does the same for any file whose `trim()` is empty (`'\n'`, spaces, tabs, a CRLF
+  file of bare line breaks, which is written back in CRLF), and still returns undefined for a file with content.
 - **Not probed, fails closed if it differs: a carriage return in `new_string`.** The probe couldn't send one:
   an `old_string` written with a CR didn't match a file holding that CR, so the CR never reached the tool. The
   broker keeps the CR, so on a CRLF file `x\r\ny` hashes as `x\r\r\ny`. Whatever Claude Code writes that differs
   from that (folding `\r\n` to `\n` first would give `x\r\ny`) doesn't match the hash, and the write is carded.
 
-In each of the three "fails closed" cases the builder's allowed write is carded as a stray: noise, and never
+In each of the "fails closed" cases the builder's allowed write is carded as a stray: noise, and never
 an excuse for a write that wasn't approved. Mirroring desanitizing and quote style needs Claude Code's token
 table and its curly-quote placement rules, which can't be read from here and change with its version, so a
 wrong copy would be worse than carding. The carriage return stays unmirrored for the same reason: no probe

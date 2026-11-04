@@ -79,6 +79,37 @@ describe('plainCommandWords', () => {
     expect(plainCommandWords(command)).toEqual(expected);
   });
 
+  describe('grouping words', () => {
+    it.each<[string, string, string[][] | null]>([
+      [
+        'escaped parentheses are the words ( and )',
+        String.raw`find . \( -name a -o -name b \)`,
+        [['find', '.', '(', '-name', 'a', '-o', '-name', 'b', ')']],
+      ],
+      [
+        'quoted parentheses are the words ( and )',
+        `find . '(' -name a ")"`,
+        [['find', '.', '(', '-name', 'a', ')']],
+      ],
+      [
+        'a bare ! after the command is a word',
+        'find . ! -name a',
+        [['find', '.', '!', '-name', 'a']],
+      ],
+      ['an escaped paren glued to a word', String.raw`find . \(-name a`, null],
+      ['an escaped paren at the end of a word', String.raw`find . a\(`, null],
+      ['a bare paren', 'find . ( -name a )', null],
+      ['a bare ! as the command', '! ls', null],
+      ['a ! glued to a word', 'find . !a', null],
+      ['an escaped bang', String.raw`find . \!`, null],
+      ['an escaped paren with a space after the backslash', String.raw`find . \ (`, null],
+      ['a double backslash before a paren', String.raw`find . \\(`, null],
+    ])('%s', (_name, command, expected) => {
+      expect(plainCommandWords(command)).toEqual(expected);
+      expect(plainCommandWords(command, { optionGlobs: true })).toEqual(expected);
+    });
+  });
+
   describe('with optionGlobs', () => {
     it.each<[string, string, string[][] | null]>([
       [

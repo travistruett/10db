@@ -93,6 +93,18 @@ describe('rulesets', () => {
     }
   });
 
+  it('has no comment in tests/repo saying main merges through a merge queue today', () => {
+    const source = readRepoFile('tests/repo/src/ci.test.ts');
+    expect(source).not.toMatch(/main merges through a (GitHub )?merge queue/i);
+    const test = source.slice(source.indexOf("it('runs on merge queue entries"));
+    const comment = test.slice(0, test.indexOf('const parsed'));
+    expect(comment).toContain('decisions/2026-11-02-main-has-no-merge-queue.md');
+    expect(comment).toMatch(/inert (today|until)/);
+    expect(comment).toMatch(/until a queue returns/);
+    // The neighbouring queue comments describe a queue entry, not main's current merge path.
+    expect(source).not.toMatch(/which the queue counts as passing/);
+  });
+
   it('requires exactly the CI jobs that ci.yml defines', () => {
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
