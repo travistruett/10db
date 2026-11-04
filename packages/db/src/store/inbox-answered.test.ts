@@ -1,3 +1,4 @@
+import { PARK_TASK_CHOICE } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { answeredCardsForTask, insertInboxItem, updateInboxItem } from './inbox';
 import { insertTask } from './tasks';
@@ -91,6 +92,20 @@ describe('answeredCardsForTask', () => {
     answer(card(run, { kind: 'permission', title: 'Allow Bash?' }).id);
     answer(card(other, { title: 'Elsewhere?' }).id);
     expect(answeredCardsForTask(store.db, run.task.id)).toEqual([]);
+  });
+
+  it('leaves out a card the builder closed with Park the task, next to one they answered', () => {
+    const run = seedRun('Read picture');
+    const parked = card(run, { title: 'Parked?' });
+    const answered = card(run, { title: 'Answered?' });
+    store.write((ctx) =>
+      updateInboxItem(ctx, parked.id, {
+        state: 'RESOLVED',
+        answer: { choice: PARK_TASK_CHOICE, note: 'later' },
+      }),
+    );
+    answer(answered.id, 'RESOLVED');
+    expect(answeredCardsForTask(store.db, run.task.id).map((c) => c.id)).toEqual([answered.id]);
   });
 
   it('gives a card with no note a null note', () => {

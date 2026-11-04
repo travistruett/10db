@@ -116,7 +116,8 @@ export type ToolHandlers = { [K in McpToolName]: (input: In<K>) => Promise<Out<K
  * complete_step's followUps are deliberately not counted: they are a review's findings, its end
  * product, a separate allowance (decisions/2026-11-04-a-reviews-complete-step-follow-ups-are-outside-the-step-cap.md),
  * bounded at MAX_FOLLOW_UPS across all the step's complete_step calls by the list in its result
- * (decisions/2026-11-04-complete-step-follow-ups-are-bounded-per-step.md).
+ * (decisions/2026-11-04-complete-step-follow-ups-are-bounded-per-step.md), and filed once under a
+ * reused opId (decisions/2026-11-04-a-reused-complete-step-opid-files-no-follow-up-twice.md).
  */
 function stepFilings(
   db: Parameters<typeof countStepToolOps>[0],
@@ -734,16 +735,37 @@ export function createToolHandlers(
           // carries that list forward, and the list is what bounds the step: complete_step may file at
           // most MAX_FOLLOW_UPS in all, however many times it is called or by which session.
           const kept = filedFollowUpLines(step.result?.summary ?? '');
-          if (kept.length + input.followUps.length > MAX_FOLLOW_UPS)
+          // An earlier session that used this opId has already filed its follow-ups. This call is a
+          // retry or a rerun of it, so a follow-up with the title of one of those is that one: the reply
+          // names it again but it is not filed twice. Each earlier follow-up matches at most one input.
+          const alreadyFiled = earlier
+            ? McpToolOutputs.complete_step.parse(earlier.result).followUps
+            : [];
+          const unmatched = [...alreadyFiled];
+          const toFile = input.followUps.filter((followUp) => {
+            const at = unmatched.findIndex((f) => f.title === followUp.title);
+            if (at === -1) return true;
+            unmatched.splice(at, 1);
+            return false;
+          });
+          // Only a call that files something is bounded. The list is read back from the notes, so notes that
+          // hold their own "Follow-up tasks filed:" lines can make it look longer than what was filed; a
+          // call that files nothing must still be able to replace such a result.
+          if (toFile.length > 0 && kept.length + toFile.length > MAX_FOLLOW_UPS)
             throw new InvalidError(
               `A step can file at most ${String(MAX_FOLLOW_UPS)} follow-up tasks through complete_step and this step's result already lists ${String(kept.length)}. Send at most ${String(Math.max(0, MAX_FOLLOW_UPS - kept.length))} followUps, and put the rest in your notes.`,
             );
-          const filed = input.followUps.map((followUp) => {
+          const newlyFiled = toFile.map((followUp) => {
             const task = insertFollowUpTask(ctx, row.taskId, followUp);
             return { taskId: task.id, title: task.title };
           });
-          // The builder finds the follow-ups from the step's result, so they are written into it.
-          const listed = [...kept, ...filed.map((f) => `- ${f.taskId} ${f.title}`)];
+          // The stored reply keeps every filing under this opId, so a later reuse still matches them.
+          const filed = [...alreadyFiled, ...newlyFiled];
+          // The builder finds the follow-ups from the step's result, so they are written into it. Only
+          // this run's go in, which is what the check above bounds: a filing of a round before the step
+          // was entered again stays in the result that round left in `earlier`, and carrying it in
+          // could take the list past the bound and refuse a later call that files nothing.
+          const listed = [...kept, ...newlyFiled.map((f) => `- ${f.taskId} ${f.title}`)];
           const summary =
             listed.length === 0
               ? input.summary
@@ -751,7 +773,7 @@ export function createToolHandlers(
           // Throwing here rolls back the tasks filed above.
           if (summary.length > MAX_STEP_SUMMARY)
             throw new InvalidError(
-              `Your notes and the list of follow-up tasks 10db adds are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
+              `Your notes and the list of follow-up tasks this step has filed, which 10db adds to them, are over ${String(MAX_STEP_SUMMARY)} characters; send shorter notes.`,
             );
           const result = { summary, verdict, sessionId, at: ctx.now };
           patchWorkstream(ctx, workstreamId, null, {
@@ -765,7 +787,7 @@ export function createToolHandlers(
               stepIndex: row.stepIndex,
               role: step.role,
               verdict,
-              followUps: filed.map((f) => f.taskId),
+              followUps: newlyFiled.map((f) => f.taskId),
             },
           });
           const reply = { instruction: 'Recorded. End your turn now.', followUps: filed };

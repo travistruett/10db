@@ -124,7 +124,7 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
   }
   if (input.fileAccess !== undefined) {
     if (READ_FAMILY.has(input.toolName)) {
-      return input.fileAccess.readAsk(input.toolName, input.toolInput);
+      return input.fileAccess.readAsk(input.toolName, input.toolInput, input.cwd);
     }
     if (EDIT_FAMILY.has(input.toolName)) {
       const path =

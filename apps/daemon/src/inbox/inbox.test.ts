@@ -2636,6 +2636,44 @@ describe('permission broker in a sandboxed lane', () => {
     }
   });
 
+  describe('a relative path after an earlier Bash call changed directory', () => {
+    // The hook's `cwd` for the call, which the guard reads a relative path from too.
+    const from = (toolName: string, input: Record<string, unknown>, cwd: string) => ({
+      ...request(toolName, input),
+      cwd,
+    });
+
+    it.each<[string, Record<string, unknown>]>([
+      ['Grep', { pattern: 'x', path: '.claude.json' }],
+      ['LS', { path: '.claude.json' }],
+      ['Read', { file_path: '.claude.json' }],
+    ])('refuses %s of a protected path named from there', async (toolName, input) => {
+      const ws = seedWorkstream(base);
+      const decision = await sandboxed(ws)(from(toolName, input, fileAccess.home));
+      expect(decision).toEqual({
+        behavior: 'deny',
+        message: '.claude.json is a protected path; 10db never lets a lane read it.',
+      });
+    });
+
+    it('cards a relative path that lands outside the copy there, naming the real path', async () => {
+      const ws = seedWorkstream(base);
+      const other = join(root, 'work', 'other');
+      const decide = sandboxed(ws);
+      expect(await decide(request('Read', { file_path: 'notes.txt' }))).toEqual({
+        behavior: 'allow',
+      });
+      void decide(from('Read', { file_path: 'notes.txt' }, other)).catch(() => undefined);
+      await settle();
+      expect(onlyOpenCard().detail).toEqual({
+        toolName: 'Read',
+        summary: join(other, 'notes.txt'),
+      });
+      inbox.answer(onlyOpenCard().id, { choice: 'deny' });
+      await settle();
+    });
+  });
+
   it('cards a read outside the checkout, naming the real path, and stores the grant for every read tool', async () => {
     const ws = seedWorkstream(base);
     const decide = sandboxed(ws);

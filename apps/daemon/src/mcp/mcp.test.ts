@@ -41,6 +41,7 @@ import {
 } from '@10db/db';
 import {
   EventType,
+  filedFollowUpLines,
   MAX_FOLLOW_UPS,
   MAX_STEP_SUMMARY,
   mintId,
@@ -59,6 +60,7 @@ import type { DependencyChanges, MigrationsBase, MigrationsBaseTake } from '../d
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit } from '../git';
 import {
+  advanceSteps,
   commitCoveredByRevert,
   commitAfterResolution,
   commitGotThroughGate,
@@ -1791,6 +1793,46 @@ describe('MCP tools', () => {
       await Promise.all([alpha, beta, gamma]);
     });
 
+    it('lists each yielded claim once when a third task also waits for it', async () => {
+      const { a, alpha, beta, card } = await deadlocked();
+      const g = await seedSession(['migrations'], undefined, {
+        project: a.project,
+        title: 'Gamma',
+      });
+      const gamma = g.call('request_claim', {
+        opId: 'op-deadlock-g',
+        kind: 'area',
+        name: 'ui',
+        reason: 'x',
+      });
+      await vi.waitFor(() => {
+        expect(noticeOf(g)).not.toBeNull();
+      });
+      state.write((ctx) => {
+        releaseClaims(ctx, a.workstream.id);
+        acquireClaims(ctx, {
+          projectId: a.project.id,
+          workstreamId: g.workstream.id,
+          requests: [{ kind: 'area', name: 'api' }],
+          leaseExpiresAt: ctx.now,
+        });
+      });
+      const refreshed = await vi.waitFor(() => {
+        const found = getInboxItem(state.db, card.id);
+        if (!found.options.some((o) => o.label === 'Gamma yields area api'))
+          throw new Error('card not refreshed');
+        return found;
+      });
+      expect(refreshed.options.map((o) => o.label)).toEqual([
+        'Beta yields area ui',
+        'Gamma yields area api',
+        'Cancel Beta',
+        'Cancel Gamma',
+      ]);
+      sessionAbort.abort();
+      await Promise.all([alpha, beta, gamma]);
+    });
+
     it('keeps the refused call waiting on the card, and says so when a slice ends', async () => {
       claimWaitSliceMs = 50;
       const { a, alpha, beta, card } = await deadlocked();
@@ -2804,19 +2846,148 @@ describe('complete_step', () => {
           expect(summary).toContain(`${task.id} ${task.title}`);
       });
 
-      it('counts what an earlier session of the step filed when a rerun reuses its opId', async () => {
+      it('never refuses a call with no follow-ups for the bound, however many lines the result seems to list', async () => {
         const s = await onStep('review');
-        const args = {
+        const bullets = Array.from(
+          { length: MAX_FOLLOW_UPS + 5 },
+          (_, i) => `- pasted ${String(i)}`,
+        );
+        const notes = ['1. Fine.', '', 'Follow-up tasks filed:', ...bullets].join('\n');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-n',
+          summary: notes,
+          verdict: 'approve',
+        });
+        expect(first.isError).toBe(false);
+        const second = await s.call('complete_step', {
+          opId: 'op-step-multi-o',
+          summary: 'Replacement notes.',
+          verdict: 'reject',
+        });
+        expect(second.isError).toBe(false);
+        expect(resultOf(s)?.summary.startsWith('Replacement notes.')).toBe(true);
+        expect(resultOf(s)?.verdict).toBe('reject');
+        expect(tasksOf(s.project.id)).toHaveLength(1);
+        // A call that files something is still bounded by what the result seems to list.
+        const files = await s.call('complete_step', {
+          opId: 'op-step-multi-p',
+          summary: 'Third notes.',
+          verdict: 'approve',
+          followUps: more(0, 1),
+        });
+        expect(files.isError).toBe(true);
+      });
+
+      it('counts what an earlier session of the step filed against the cap', async () => {
+        const s = await onStep('review');
+        await s.call('complete_step', {
           opId: 'op-step-multi-g',
           summary: 'First notes.',
           verdict: 'approve',
           followUps: more(0, MAX_FOLLOW_UPS),
-        };
-        await s.call('complete_step', args);
+        });
         const rerun = await connectSession(s.workstream.id);
-        const again = await rerun.call('complete_step', args);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-h',
+          summary: 'Second notes.',
+          verdict: 'approve',
+          followUps: more(100, 1),
+        });
         expect(again.isError).toBe(true);
         expect(tasksOf(s.project.id)).toHaveLength(1 + MAX_FOLLOW_UPS);
+      });
+
+      it('files no follow-up the earlier session already filed when a rerun reuses its opId', async () => {
+        const s = await onStep('review');
+        const first = await s.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'First notes.',
+          verdict: 'reject',
+          followUps,
+        });
+        const filedBefore = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        const rerun = await connectSession(s.workstream.id);
+        const again = await rerun.call('complete_step', {
+          opId: 'op-step-multi-i',
+          summary: 'Rerun notes.',
+          verdict: 'approve',
+          followUps: [...followUps, ...more(0, 1)],
+        });
+        expect(again.isError).toBe(false);
+        // The verdict is the new one, and only the one follow-up the first call did not file is new.
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('approve');
+        expect(result?.summary.startsWith('Rerun notes.')).toBe(true);
+        const filed = tasksOf(s.project.id).filter((t) => t.id !== s.task.id);
+        expect(filed).toHaveLength(followUps.length + 1);
+        expect(filed.slice(0, followUps.length)).toEqual(filedBefore);
+        // The result and the reply name each follow-up once.
+        for (const task of filed)
+          expect(result?.summary.split(`${task.id} ${task.title}`)).toHaveLength(2);
+        expect(again.json).toMatchObject({
+          followUps: filed.map((t) => ({ taskId: t.id, title: t.title })),
+        });
+        expect(first.json).toMatchObject({
+          followUps: filedBefore.map((t) => ({ taskId: t.id, title: t.title })),
+        });
+      });
+
+      it('files nothing twice and stays within the bound when the step runs again before its opId is reused', async () => {
+        const s = await onStep('review');
+        const opId = 'op-step-multi-j';
+        const firstRound = more(0, 3);
+        await s.call('complete_step', {
+          opId,
+          summary: 'First round.',
+          verdict: 'reject',
+          followUps: firstRound,
+        });
+        // The rework ran: the review is entered again, and its result moves to `earlier`.
+        state.write((ctx) => {
+          const { steps } = getWorkstream(ctx.tx, s.workstream.id);
+          patchWorkstream(ctx, s.workstream.id, null, {
+            steps: advanceSteps(steps, 0, 1, { now: ctx.now, sessions: 2 }),
+          });
+        });
+        expect(resultOf(s)).toBeNull();
+
+        const secondRound = await connectSession(s.workstream.id);
+        const filedNew = await secondRound.call('complete_step', {
+          opId,
+          summary: 'Second round.',
+          verdict: 'reject',
+          followUps: more(100, MAX_FOLLOW_UPS),
+        });
+        expect(filedNew.isError).toBe(false);
+        // The list is this attempt's, so it holds a full allowance and no more. The first round's stay
+        // named in the result it moved to `earlier`.
+        expect(filedFollowUpLines(resultOf(s)?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        const step = getWorkstream(base.db, s.workstream.id).steps[1];
+        expect(filedFollowUpLines(step?.earlier[0]?.summary ?? '')).toHaveLength(firstRound.length);
+
+        // The same opId again, resending the first round's: nothing is filed, on a full list.
+        const thirdSession = await connectSession(s.workstream.id);
+        const resent = await thirdSession.call('complete_step', {
+          opId,
+          summary: 'Resent notes.',
+          verdict: 'approve',
+          followUps: firstRound,
+        });
+        expect(resent.isError).toBe(false);
+        expect(resultOf(s)?.verdict).toBe('approve');
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
+
+        // A later call that files nothing is not refused.
+        const none = await thirdSession.call('complete_step', {
+          opId: 'op-step-multi-k',
+          summary: 'Final notes.',
+          verdict: 'reject',
+        });
+        expect(none.isError).toBe(false);
+        const result = resultOf(s);
+        expect(result?.verdict).toBe('reject');
+        expect(filedFollowUpLines(result?.summary ?? '')).toHaveLength(MAX_FOLLOW_UPS);
+        expect(tasksOf(s.project.id)).toHaveLength(1 + firstRound.length + MAX_FOLLOW_UPS);
       });
     });
 

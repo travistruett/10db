@@ -63,10 +63,11 @@ export interface GuardInput {
  * the module that knows the sandbox's read policy.
  */
 export interface FileAccessJudge {
-  read(toolName: string, input: unknown): 'ok' | { refuse: string };
+  /** `cwd` is the directory a relative path is read from (the hook's); absent, the lane's copy. */
+  read(toolName: string, input: unknown, cwd?: string): 'ok' | { refuse: string };
   write(path: string): 'ok' | { refuse: string };
   /** Why a read of these paths needs a person (outside what lanes may read), or null. */
-  readAsk(toolName: string, input: unknown): string | null;
+  readAsk(toolName: string, input: unknown, cwd?: string): string | null;
   /** Why a write to this path needs a person (a Claude Code config path), or null. */
   writeAsk(path: string): string | null;
 }
@@ -635,7 +636,10 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
   const searches = input.toolName === 'Grep' || input.toolName === 'Glob';
   // The search path keeps its `..`, so a pattern under it is judged on each reading.
   const searchPath = stringField(input.toolInput, 'path') ?? '.';
-  const base = isAbsolute(searchPath) ? searchPath : `${input.repoPath}${sep}${searchPath}`;
+  // A relative path is read from where the call runs: an earlier Bash call's `cd` moved it off the
+  // copy's root, and the file tools follow it there.
+  const from = input.cwd !== undefined && isAbsolute(input.cwd) ? input.cwd : input.repoPath;
+  const base = isAbsolute(searchPath) ? searchPath : `${from}${sep}${searchPath}`;
   for (const field of ['file_path', 'notebook_path', 'path', 'pattern'] as const) {
     // Grep's pattern is a regular expression, not a path; Glob's is a path pattern under `path`.
     if (field === 'pattern' && input.toolName !== 'Glob') continue;
@@ -644,20 +648,15 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     const own =
       (input.toolName === 'Read' || input.toolName === 'Grep') &&
       input.ownSession !== undefined &&
-      isOwnToolResult(input.ownSession, value, input.repoPath);
+      isOwnToolResult(input.ownSession, value, from);
     if (own) continue;
-    const refusal = pathRefusal(
-      value,
-      field === 'pattern' ? base : input.repoPath,
-      input.protectedPaths,
-      {
-        contains: searches && (field === 'path' || field === 'pattern'),
-      },
-    );
+    const refusal = pathRefusal(value, field === 'pattern' ? base : from, input.protectedPaths, {
+      contains: searches && (field === 'path' || field === 'pattern'),
+    });
     if (refusal) return deny(refusal);
   }
   if (input.fileAccess && PATH_READ_TOOLS.has(input.toolName)) {
-    const verdict = input.fileAccess.read(input.toolName, input.toolInput);
+    const verdict = input.fileAccess.read(input.toolName, input.toolInput, from);
     if (verdict !== 'ok') return deny(verdict.refuse);
   }
   if (FILE_TOOLS.has(input.toolName)) {

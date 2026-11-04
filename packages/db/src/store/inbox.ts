@@ -3,6 +3,7 @@ import {
   InboxState,
   mintId,
   NotFoundError,
+  PARK_TASK_CHOICE,
   type InboxAnswer,
   type InboxItemDto,
   type InboxItemId,
@@ -261,8 +262,9 @@ export interface AnsweredCard {
 /**
  * The cards the builder answered on a task, oldest first: the question, the choice and the note. A
  * permission card is left out (its denials are told to a session on their own) and so is a proposal
- * (its answer files or drops a task, it decides nothing the task's work rests on). A card counts
- * whichever of the task's runs it targets.
+ * (its answer files or drops a task, it decides nothing the task's work rests on). A card the builder
+ * closed with Park the task is left out too: that is 10db's control over the run, not an answer to the
+ * question. A card counts whichever of the task's runs it targets.
  */
 export function answeredCardsForTask(db: DbReader, taskId: TaskId): AnsweredCard[] {
   return db
@@ -278,7 +280,7 @@ export function answeredCardsForTask(db: DbReader, taskId: TaskId): AnsweredCard
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
     .flatMap((row) =>
-      row.answer
+      row.answer && row.answer.choice !== PARK_TASK_CHOICE
         ? [
             {
               id: row.id,
