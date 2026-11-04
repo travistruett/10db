@@ -2279,6 +2279,29 @@ describe('a required check GitHub cancelled', () => {
       expect(h.gh.reruns).toEqual(['77']);
     });
 
+    it('after a restart, does not ask a run listed beside a stopped notice stored with a done record', async () => {
+      const { id, prUrl, w } = watching();
+      await rerunOfDesktopOnly(w, prUrl);
+      // Run 77 is rerun (a done record); then a check with no run is cancelled and 10db stops.
+      const status = { ...job('ci/other', null), jobId: null };
+      h.gh.setRequiredChecks(prUrl, { ...lintCancelled, cancelled: [status] });
+      await round(w);
+      await round(w);
+      expect(noticeOf(id)?.line).toContain("can't be run again");
+      await w.stop();
+
+      // After the restart that check drops out and run 88 is cancelled while the notice still stands.
+      // Only the stored 'stopped' kind keeps 10db from asking it: the record alone would say 'again'.
+      const second = watcher();
+      second.start();
+      await second.idle();
+      expect(noticeOf(id)?.line).toContain("can't be run again");
+      h.gh.setRequiredChecks(prUrl, lintCancelled);
+      for (let i = 0; i < GRACE_ROUNDS + 3; i++) await round(second);
+      expect(h.gh.reruns).toEqual(['77']);
+      expect(noticeOf(id)?.line).toContain("can't be run again");
+    });
+
     describe('the rerun notice beside a notice that 10db stopped', () => {
       const status = { ...job('ci/other', null), jobId: null };
       const statusCancelled = { ...lintCancelled, cancelled: [status] };
