@@ -25,6 +25,7 @@ import { cuttingTasks, forgetCuttingTasks } from './cutting-tasks';
 import { forgetStartSiblings } from './start-siblings';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
+import { settleLeftOutCards } from './left-out-settle';
 import type { Shipper } from './ship';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
@@ -197,13 +198,16 @@ export async function recoverBatches(deps: {
     }
     if (card !== null) {
       const reason = card.title;
-      deps.state.write((w) =>
-        transitionBatch(w, batch.id, {
-          to: BatchState.Failed,
-          patch: { failure: BatchFailure.WrongBranch },
-          reason,
-        }),
-      );
+      deps.state.write((w) => {
+        settleLeftOutCards(
+          w,
+          transitionBatch(w, batch.id, {
+            to: BatchState.Failed,
+            patch: { failure: BatchFailure.WrongBranch },
+            reason,
+          }),
+        );
+      });
       raise(deps.inbox, batch.projectId, card);
       report.failed.push(batch.id);
       continue;

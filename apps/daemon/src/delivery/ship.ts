@@ -1453,7 +1453,38 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const titles = failed.length > 0 ? failed.map((m) => m.taskTitle) : [member.taskTitle];
     const named = titles.map((t) => `"${t}"`).join(', ');
     let attempt: LeftOutAttempt = { workstreamId, titles, revert: earlier };
-    const stopWith = (card: Card): void => {
+    // The revert commit this answer made, once there is one.
+    let revert: string | null = null;
+    // Any revert on the branch: from then on a stop must not leave the branch unexplained.
+    const kept = (): string | null => revert ?? attempt.revert ?? null;
+    /** The card for a batch that moved on while the job ran, which offers nothing it would refuse. */
+    const overtaken = (state: BatchState): Card => {
+      const reverted = kept();
+      return reverted !== null
+        ? leftOutCards.revertKept(
+            batch,
+            attempt,
+            reverted,
+            `The batch became ${state.toLowerCase()} while the answer ran, so its notices were not written.`,
+            state,
+          )
+        : leftOutCards.notStarted(batch, attempt, `the batch is ${state.toLowerCase()}`, false);
+    };
+    /** Null when the state cannot be read: a stopping daemon may have closed the database. */
+    const stateNow = (): BatchState | null => {
+      try {
+        return getBatch(db, batchId).state;
+      } catch {
+        return null;
+      }
+    };
+    const stopWith = (stop: Card): void => {
+      // `abandon` does not wait for this job, and nothing closes a card raised after it: a card with
+      // answers is rewritten here, so it can't offer one the abandoned batch refuses.
+      const card =
+        (stop.options?.length ?? 0) > 0 && stateNow() === BatchState.Abandoned
+          ? overtaken(BatchState.Abandoned)
+          : stop;
       deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
       try {
         raise(deps.inbox, batch.projectId, card);
@@ -1498,10 +1529,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
       notStarted(refusal.why, refusal.answerable);
       return;
     }
-    // The revert commit this answer made, once there is one.
-    let revert: string | null = null;
-    // Any revert on the branch: from then on a stop must not leave the branch unexplained.
-    const kept = (): string | null => revert ?? attempt.revert ?? null;
     try {
       const { branch } = batch;
       const checkout = batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
@@ -1635,21 +1662,8 @@ export function createShipper(deps: ShipperDeps): Shipper {
         return;
       }
       const { state } = getBatch(db, batchId);
-      const reverted = kept();
       if (revert === null && carriedOut(state)) return;
-      if (reverted !== null) {
-        stopWith(
-          leftOutCards.revertKept(
-            batch,
-            attempt,
-            reverted,
-            `The batch became ${state.toLowerCase()} while the answer ran, so its notices were not written.`,
-            state,
-          ),
-        );
-      } else {
-        notStarted(`the batch is ${state.toLowerCase()}`, false);
-      }
+      stopWith(overtaken(state));
     } catch (error) {
       const reverted = kept();
       if (reverted !== null) {

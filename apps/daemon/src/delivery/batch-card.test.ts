@@ -1158,6 +1158,138 @@ describe('the failed workstream card', () => {
         expect(again.detail).toMatchObject({ resolvesWhen: { event: 'batch_shipped', batchId } });
       });
 
+      it('offers Ship without it again when the ship the card waited on reopens the batch for a merge', async () => {
+        let batch: string | null = null;
+        h.close();
+        h = createDeliveryHarness(
+          {},
+          {
+            shipBaseUpdates: (real) => ({
+              ...real,
+              beforeGate: () =>
+                Promise.resolve({
+                  kind: 'conflicted',
+                  base: 'origin/main',
+                  paths: ['README.md'],
+                  note: 'Conflict markers in README.md',
+                }),
+            }),
+            wrapGit: (git) => ({
+              ...git,
+              revertCommits: async (request) => {
+                const reverted = await git.revertCommits(request);
+                if (batch === null) throw new Error('batch unset');
+                h.state.write((w) =>
+                  transitionBatch(w, batch as BatchId, { to: 'SHIPPING', reason: 'a test' }),
+                );
+                return reverted;
+              },
+            }),
+          },
+        );
+        inbox = answering();
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        batch = batchId;
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+        const waiting = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(waiting.options).toEqual([]);
+
+        h.shipper.resume(batchId);
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        const again = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(again.id).toBe(waiting.id);
+        expect(again.body).not.toMatch(/nothing to answer/i);
+        expect(again.options.map((o) => o.label)).toContain('Ship without it');
+      });
+
+      describe('when the builder abandons the batch while the answer runs', () => {
+        /** A harness whose `revert`th revert abandons the batch and then answers `stop`. */
+        function abandonsDuringRevert(
+          stop: () => Awaited<ReturnType<DeliveryHarness['git']['revertCommits']>>,
+          revert = 1,
+        ) {
+          const on: { batchId: BatchId | null; reverts: number } = { batchId: null, reverts: 0 };
+          h.close();
+          h = createDeliveryHarness(
+            {},
+            {
+              wrapGit: (git) => ({
+                ...git,
+                revertCommits: async (request) => {
+                  on.reverts += 1;
+                  if (on.reverts !== revert) {
+                    const reverted = await git.revertCommits(request);
+                    failNextWrite('database is locked');
+                    return reverted;
+                  }
+                  if (on.batchId === null) throw new Error('batch unset');
+                  h.shipper.abandon(on.batchId);
+                  return stop();
+                },
+              }),
+            },
+          );
+          inbox = answering();
+          return on;
+        }
+
+        it.each([
+          ['conflict', () => ({ kind: 'conflict', paths: ['src/api/alpha.txt'] }) as const],
+          ['markers', () => ({ kind: 'markers', paths: ['src/api/alpha.txt'] }) as const],
+          ['blocked', () => ({ kind: 'blocked', changed: ['src/api/alpha.txt'] }) as const],
+          [
+            'a thrown error',
+            () => {
+              throw new Error('git broke');
+            },
+          ],
+        ])('raises no card offering an answer on a stop by %s', async (_, stop) => {
+          const on = abandonsDuringRevert(stop);
+          const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+          on.batchId = batchId;
+
+          inbox.answer(card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          expect(getBatch(h.store.db, batchId).state).toBe('ABANDONED');
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('not left out')));
+          expect(stopped.title).toMatch(/abandoned/);
+          expect(stopped.body).not.toMatch(/answer Ship without it|Ship anyway/);
+          expect(stopped.options).toEqual([]);
+          expect(stopped.detail).toBeNull();
+        });
+
+        it('says the revert an earlier answer left stays, on a card with no answer', async () => {
+          const on = abandonsDuringRevert(
+            () => ({ kind: 'conflict', paths: ['src/api/later.txt'] }),
+            2,
+          );
+          const { card, batchId, failed } = await failedInBatch('DONE', {
+            'src/api/alpha.txt': 'one\n',
+          });
+          on.batchId = batchId;
+          inbox.answer(card.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+          const revert = h.git$('rev-parse', 'HEAD');
+          const first = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          commitAs(failed, 'src/api/later.txt', 'later\n');
+
+          inbox.answer(first.id, { choice: 'Ship without it' });
+          await h.jobs.idle();
+
+          expect(getBatch(h.store.db, batchId).state).toBe('ABANDONED');
+          const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+          expect(stopped.title).toMatch(/revert is on the branch/i);
+          expect(stopped.body).toContain(revert.slice(0, 9));
+          expect(stopped.body).toMatch(/abandoned/);
+          expect(stopped.options).toEqual([]);
+          expect(stopped.detail).toBeNull();
+        });
+      });
+
       it('closes an answerable revert card when the batch is abandoned', async () => {
         revertsWithFailedWrite();
         const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
