@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto, PermissionRuleDto, ProjectDto, ProjectId } from '@10db/contracts';
 import type { Clock } from '../clock';
@@ -10,6 +10,7 @@ import { takeFoundHostsReading } from '../registries';
 import { BlockedRun, type GateRunner } from '../verify';
 import {
   checkInstall,
+  describeBroken,
   madeByAnotherPnpm,
   madeFromAnotherStore,
   PNPM_LOCKFILE,
@@ -29,6 +30,16 @@ export const INSTALL_SUMMARY = 'pnpm install --frozen-lockfile --ignore-scripts 
  * change (`install_dependencies`): pnpm resolves the manifests the lane edited and writes the lockfile.
  */
 export type InstallMode = 'frozen' | 'update';
+
+/** The pnpm the copy's `.modules.yaml` says made it, for a sentence. */
+function recordedPnpm(path: string): string {
+  try {
+    const text = readFileSync(join(path, 'node_modules', '.modules.yaml'), 'utf8');
+    return /^packageManager:\s*(\S+)/m.exec(text)?.[1] ?? 'another pnpm';
+  } catch {
+    return 'another pnpm';
+  }
+}
 
 const quoted = (text: string): string => `'${text.replaceAll("'", "'\\''")}'`;
 
@@ -134,6 +145,8 @@ export interface WorktreeDependenciesDeps {
   /** Every registered checkout and live worktree, which the install can't write. */
   checkouts(): readonly string[];
   readonly timeoutMs: number;
+  /** Where a removed `node_modules` and its reason are recorded, besides the install's own log. */
+  readonly logger?: Logger;
   /** The absolute path of a real pnpm program to run, found outside every checkout; null when none is trustworthy. */
   resolvePnpm(
     env: Readonly<Record<string, string>>,
@@ -188,8 +201,15 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
         return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath, blockedHosts: [] };
       }
       let startedOver = false;
-      const startOver = (): void => {
-        startedOver ||= existsSync(join(path, 'node_modules'));
+      // Why node_modules was removed, written to the log of the install that follows (the daemon's
+      // log too), so a builder who finds a copy installed from scratch can read the reason.
+      let reasons: string[] = [];
+      const startOver = (reason: string): void => {
+        if (existsSync(join(path, 'node_modules'))) {
+          startedOver = true;
+          reasons.push(reason);
+          deps.logger?.info({ path, reason }, 'removed node_modules: starting the install over');
+        }
         removeBrokenInstall(path);
       };
       // pnpm repairs an install that is out of date, but not one that is pruned or was made by another
@@ -201,18 +221,29 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // checkout the builder installed with their own pnpm), or from another store, starts over, as
       // the first install of a copy does, which works. Sources are not touched.
       const version = (await deps.pnpmVersion?.(pnpm, env)) ?? null;
-      if (
-        asked === true ||
-        madeByAnotherPnpm(path, version) ||
-        madeFromAnotherStore(path, env['pnpm_config_store_dir']) ||
-        checkInstall(path).kind === 'broken'
-      )
-        startOver();
+      const store = env['pnpm_config_store_dir'];
+      const health = checkInstall(path);
+      const why = ((): string | null => {
+        if (asked === true) return 'the install before this one left the copy broken';
+        if (madeByAnotherPnpm(path, version))
+          return `its node_modules/.modules.yaml names ${recordedPnpm(path)}, not the daemon's pnpm@${version ?? '?'}`;
+        if (madeFromAnotherStore(path, store))
+          return `its node_modules/.modules.yaml names a pnpm store other than ${store ?? "the daemon's"}`;
+        if (health.kind === 'broken') return describeBroken(health);
+        return null;
+      })();
+      if (why !== null) startOver(why);
+      let attempt = 0;
       const install = async (): Promise<DependencyRefresh> => {
+        attempt += 1;
+        // The gate truncates its log, so a second attempt gets a file of its own: the first one's
+        // output holds the real cause.
+        const attemptLog =
+          attempt === 1 ? logPath : logPath.replace(/\.log$/, `-retry${String(attempt - 1)}.log`);
         const result = await deps.gate.run({
           project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
           command: installCommand(pnpm, mode),
-          logPath,
+          logPath: attemptLog,
           timeoutMs: deps.timeoutMs,
           env,
           rules: deps.rules(project),
@@ -220,6 +251,19 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
           signal,
           packageInstall: true,
         });
+        // Appended once the run has ended, so what the log opened with is not lost to the stream.
+        if (reasons.length > 0) {
+          const note = reasons.map(
+            (reason) => `Started over: node_modules was removed first because ${reason}.`,
+          );
+          if (attempt > 1) note.push(`The first attempt's output: ${logPath}`);
+          try {
+            appendFileSync(attemptLog, `\n${note.join('\n')}\n`);
+          } catch {
+            // The daemon log still has the reason.
+          }
+          reasons = [];
+        }
         if (result.aborted) return { kind: 'aborted' };
         if (result.exitCode !== 0 || result.timedOut)
           return {
@@ -241,14 +285,14 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       // An install the sandbox stopped part way leaves packages missing. Once is enough to start
       // over: a copy with nothing in node_modules installs as a new one does. Not after a timeout
       // (it would only wait again) or a refused host (the same refusal would come back).
-      if (
-        first.kind === 'failed' &&
-        !first.timedOut &&
-        first.blockedHosts.length === 0 &&
-        checkInstall(path).kind === 'broken'
-      ) {
-        startOver();
-        return install();
+      if (first.kind === 'failed' && !first.timedOut && first.blockedHosts.length === 0) {
+        const left = checkInstall(path);
+        if (left.kind === 'broken') {
+          startOver(
+            `the install exited ${String(first.exitCode)} and left the copy broken (${describeBroken(left)})`,
+          );
+          return install();
+        }
       }
       return first;
     },
