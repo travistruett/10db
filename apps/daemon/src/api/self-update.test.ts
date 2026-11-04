@@ -55,6 +55,7 @@ describe('the self-update setting', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    blocker: null,
   };
   const services: SelfUpdateServices = {
     selfUpdateStatus: () => status,

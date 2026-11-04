@@ -241,6 +241,11 @@ export interface ShapeService {
   readonly toolsFor: ShapeToolsFor;
   /** Resolves when no turn is running or queued. */
   settled(shapeId: ShapeId): Promise<void>;
+  /**
+   * How many conversations have a turn running or queued: Claude is answering the builder, and a
+   * quit now would cut the answer off. A conversation counts once, however many turns it has queued.
+   */
+  turnsInProgress(): number;
   /** Stops every session. */
   close(): Promise<void>;
 }
@@ -1143,6 +1148,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     toolsFor,
     settled,
+
+    turnsInProgress() {
+      let count = 0;
+      for (const rt of runtimes.values())
+        if (rt.current !== null || rt.queue.length > 0) count += 1;
+      return count;
+    },
 
     async close() {
       for (const rt of runtimes.values()) {

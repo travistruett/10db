@@ -61,6 +61,37 @@
           "type": "null"
         }
       ]
+    },
+    "blocker": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "source",
+                "no-repository",
+                "not-in-applications",
+                "gh-missing",
+                "unreachable",
+                "failed"
+              ]
+            },
+            "message": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "message"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [
@@ -71,6 +102,7 @@
     "waitMinutes",
     "waitingSince",
     "draining",
-    "drainingSince"
+    "drainingSince",
+    "blocker"
   ]
 }

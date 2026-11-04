@@ -17,17 +17,25 @@
 # the last message says where it is. Exit 2: bad argument.
 #
 # 10db runs it in two halves to update itself (apps/daemon/src/self-update), each with absolute paths:
-#   install-app.sh --stage <dir> [--running <sha>] [--skip <sha>] [ref]
+#   install-app.sh --stage <dir> [--running <sha>] [--skip <sha>] [--have <sha>] [ref]
 #                                        choose, fetch and check the build exactly as above, leave it in
 #                                        <dir> with a copy of these scripts, and install nothing; 10db may
 #                                        be running. With --running, a build of that very commit is not
 #                                        fetched: the status says step "current". With --skip (the commit
 #                                        make rollback-app replaced), nor is a build of that one: the
-#                                        status says step "skipped".
-#   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first] [--relaunch]
+#                                        status says step "skipped". With --have (the commit already
+#                                        staged in <dir>), a build of that one is not fetched again
+#                                        and <dir> is left as it is: the status says step "have".
+#   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first [--quit-pid <pid>]...] [--relaunch]
 #                                        install that build. --quit-first asks the running 10db to
-#                                        quit instead of refusing; --relaunch opens the app again,
-#                                        the old one when the install failed.
+#                                        quit (as ⌘Q does, through its bundle id; a signal to the window
+#                                        only when that request is refused) instead of refusing, and
+#                                        installs nothing until every process of the app, and every
+#                                        --quit-pid (the pids the daemon knows are the running 10db),
+#                                        has exited, within TENDB_INSTALL_QUIT_SECONDS (90); if one has
+#                                        not, the quit step fails and /Applications is untouched.
+#                                        --relaunch opens the app again, the old one when the install
+#                                        failed.
 #   --status-file <file>                 either half writes {ok, mode, step, message, commit} there
 #                                        when it ends, so 10db can say which step failed.
 # 10db starts both halves with PATH=/usr/bin:/bin:/usr/sbin:/sbin and TENDB_INSTALL_GH set to the gh
@@ -51,7 +59,7 @@ gh() {
 usage() {
   echo "usage: install-app.sh [branch-or-tag] (default main)" >&2
   echo "  A name of 7 to 40 hex characters is taken for a commit SHA and refused: GitHub builds only a branch or tag." >&2
-  echo "  10db's own update: --stage <dir> [--running <sha>] [--skip <sha>] [ref], or --apply <dir> [--quit-first] [--relaunch]; --status-file <file>; absolute paths." >&2
+  echo "  10db's own update: --stage <dir> [--running <sha>] [--skip <sha>] [--have <sha>] [ref], or --apply <dir> [--quit-first [--quit-pid <pid>]...] [--relaunch]; --status-file <file>; absolute paths." >&2
   exit 2
 }
 
@@ -70,6 +78,7 @@ apply_dir=""
 status_file=""
 running_commit=""
 skip_commit=""
+have_commit=""
 quit_first=0
 relaunch=0
 while [ "$#" -gt 0 ]; do
@@ -79,8 +88,15 @@ while [ "$#" -gt 0 ]; do
     --status-file) [ "$#" -ge 2 ] || usage; status_file="$2"; shift 2 ;;
     --running) [ "$#" -ge 2 ] || usage; running_commit="$2"; shift 2 ;;
     --skip) [ "$#" -ge 2 ] || usage; skip_commit="$2"; shift 2 ;;
+    --have) [ "$#" -ge 2 ] || usage; have_commit="$2"; shift 2 ;;
     --quit-first) quit_first=1; shift ;;
     --relaunch) relaunch=1; shift ;;
+    --quit-pid)
+      [ "$#" -ge 2 ] || usage
+      # Not pid 1 or 0 (nothing to quit there, and kill -0 0 means this process group).
+      [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -gt 1 ] || usage
+      quit_pids="$quit_pids $2"
+      shift 2 ;;
     *) break ;;
   esac
 done
@@ -97,11 +113,15 @@ for path in "$stage_dir" "$apply_dir" "$status_file"; do
   case "$path" in "" | /*) ;; *) usage ;; esac
 done
 if [ "$mode" != apply ] && { [ "$quit_first" -eq 1 ] || [ "$relaunch" -eq 1 ]; }; then usage; fi
+if [ -n "$quit_pids" ] && { [ "$mode" != apply ] || [ "$quit_first" -eq 0 ]; }; then usage; fi
 if [ -n "$running_commit" ]; then
   [ "$mode" = stage ] && [[ "$running_commit" =~ ^[0-9a-f]{40}$ ]] || usage
 fi
 if [ -n "$skip_commit" ]; then
   [ "$mode" = stage ] && [[ "$skip_commit" =~ ^[0-9a-f]{40}$ ]] || usage
+fi
+if [ -n "$have_commit" ]; then
+  [ "$mode" = stage ] && [[ "$have_commit" =~ ^[0-9a-f]{40}$ ]] || usage
 fi
 
 workflow=release-dry-run.yml
@@ -373,6 +393,14 @@ if [ "$mode" != apply ]; then
     exit 0
   fi
 
+  if [ -n "$have_commit" ] && [ "$head" = "$have_commit" ] && [ -f "$stage_dir/commit" ] \
+    && [ "$(tr -d '[:space:]' < "$stage_dir/commit")" = "$have_commit" ]; then
+    # The newest finished build is the one already staged in <dir>: keep it as it is.
+    step=have
+    echo "The newest finished build of $ref, ${head:0:12}, is already staged in $stage_dir; nothing was fetched."
+    exit 0
+  fi
+
   step=download
   gh run download "$run_id" --name "$artifact" --dir "$work/artifact"
 
@@ -394,6 +422,12 @@ actual="$(shasum -a 256 "$dmg" | awk '{ print $1 }')"
 
 if [ "$mode" = stage ]; then
   step=stage
+  # A build kept from an earlier stage (--have) is replaced whole, so the folder never holds two DMGs.
+  # Its commit goes first, and the new one is written last: a folder that names a commit holds all of it.
+  if [ -n "$have_commit" ] && [ -f "$stage_dir/commit" ]; then
+    rm -f "$stage_dir/commit"
+    rm -rf "$stage_dir"
+  fi
   mkdir -p "$stage_dir/scripts/release" || fail "could not create $stage_dir"
   # The app that is installed may be replaced while --apply runs, so the apply half runs from here.
   cp scripts/release/install-app.sh scripts/release/installed-app.sh "$stage_dir/scripts/release/" \

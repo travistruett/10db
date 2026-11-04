@@ -149,6 +149,23 @@ describe('a message', () => {
     expect(getSession(c.store.db, session.spec.sessionId).inputTokens).toBeGreaterThan(0);
   });
 
+  it('counts as a turn in progress from the send until the reply lands, queued turns included', async () => {
+    const first = gate();
+    adapter.shapeBehaviour = async (turn: FakeShapeTurn) => {
+      if (turn.number === 1) await first.wait;
+      return { text: 'reply' };
+    };
+    expect(service.turnsInProgress()).toBe(0);
+    service.send(shapeId, 'one');
+    service.send(shapeId, 'two');
+    await tick();
+    // One conversation, one turn running and one queued: the conversation is counted once.
+    expect(service.turnsInProgress()).toBe(1);
+    first.open();
+    await service.settled(shapeId);
+    expect(service.turnsInProgress()).toBe(0);
+  });
+
   it('ends the session row, so its token no longer works, when the adapter fails to start', async () => {
     let spec: ShapeSessionSpec | null = null;
     adapter.startShape = (s: ShapeSessionSpec): never => {
