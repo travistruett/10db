@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BatchId, PrincipleId, ProposalId, TaskId } from './ids';
+import { BatchId, PrincipleId, ProposalId, TaskId, WorkstreamId } from './ids';
 
 /**
  * The `detail` key of a flag that reports a failed action. It says what makes the card stale, so 10db
@@ -16,6 +16,16 @@ export const CardResolvesWhen = z.discriminatedUnion('event', [
   z.object({ event: z.literal('checkout_trusted'), repo: z.string().startsWith('/') }),
 ]);
 export type CardResolvesWhen = z.infer<typeof CardResolvesWhen>;
+
+/**
+ * The `detail` key of a card that lost a lane's target when that lane was cancelled while other lanes
+ * stayed on it: the cancelled workstream ids. The Factory's figures still attribute the card's open
+ * time to those lanes, for the time they waited on it.
+ */
+export const CARD_RELEASED_WORKSTREAMS = 'releasedWorkstreams';
+
+export const ReleasedWorkstreams = z.array(WorkstreamId).min(1);
+export type ReleasedWorkstreams = z.infer<typeof ReleasedWorkstreams>;
 
 /** The `detail` key 10db writes on a card it closed because its cause was gone. */
 export const CARD_RESOLUTION = 'resolution';

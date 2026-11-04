@@ -1,5 +1,7 @@
 import {
   BatchState,
+  CARD_RELEASED_WORKSTREAMS,
+  ReleasedWorkstreams,
   EventType,
   HUMAN_TOUCH_DAYS,
   InboxKind,
@@ -67,8 +69,20 @@ function intersect(a: readonly Span[], b: readonly Span[]): Span[] {
 
 type CardRow = Pick<
   typeof schema.inboxItems.$inferSelect,
-  'id' | 'kind' | 'title' | 'state' | 'createdAt' | 'updatedAt' | 'targets'
+  'id' | 'kind' | 'title' | 'state' | 'createdAt' | 'updatedAt' | 'targets' | 'detail'
 >;
+
+/**
+ * The workstreams a card is attributed to: its targets, and the lanes cancelled off it while others
+ * stayed on it.
+ */
+function cardWorkstreams(card: CardRow): Set<WorkstreamId> {
+  const released = ReleasedWorkstreams.safeParse(card.detail?.[CARD_RELEASED_WORKSTREAMS]);
+  return new Set([
+    ...card.targets.map((t) => t.workstreamId),
+    ...(released.success ? released.data : []),
+  ]);
+}
 
 /** A flag raised for a failed workstream: the runner and recovery title it with the failure prefix. */
 function isFailureCard(card: CardRow): boolean {
@@ -213,11 +227,8 @@ function minutesInState(
   for (const card of cards) {
     const span = spans.get(card.id);
     if (!span) continue;
-    for (const target of card.targets)
-      byWorkstream.set(target.workstreamId, [
-        ...(byWorkstream.get(target.workstreamId) ?? []),
-        span,
-      ]);
+    for (const workstreamId of cardWorkstreams(card))
+      byWorkstream.set(workstreamId, [...(byWorkstream.get(workstreamId) ?? []), span]);
   }
   const blocked = stateSpans(db, [...byWorkstream.keys()], state, nowMs);
   const minutes = new Map<string, number>();

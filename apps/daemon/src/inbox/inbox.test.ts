@@ -318,6 +318,56 @@ describe('inbox questions', () => {
     expect(humanTouchDays(clocked.db, ws.project.id, new Date(now))[0]?.failedMinutes).toBe(420);
     expect(openItemsForWorkstream(clocked.db, ws.workstream.id)).toEqual([]);
   });
+
+  it('keeps the minutes a lane waited on a folded card after that lane is cancelled', () => {
+    let now = Date.parse('2026-11-03T00:30:00.000Z');
+    const test = createTestStore(() => new Date(now));
+    onTestFinished(test.close);
+    const clocked = createStateStore(test.store, createEventBus());
+    const service = createInboxService({ state: clocked, onParkedAnswer: () => undefined });
+    const a = seedWorkstream(test.store, { title: 'A' });
+    const b = seedWorkstream(test.store, { project: a.project, title: 'B' });
+    const move = (id: typeof a.workstream.id, to: WorkstreamState): void => {
+      clocked.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
+    };
+    for (const lane of [a, b]) {
+      move(lane.workstream.id, WorkstreamState.Starting);
+      move(lane.workstream.id, WorkstreamState.Running);
+    }
+
+    // Both lanes wait on one folded card from 01:00.
+    now = Date.parse('2026-11-03T01:00:00.000Z');
+    const askOn = (lane: typeof a) =>
+      service.ask({
+        projectId: lane.project.id,
+        workstreamId: lane.workstream.id,
+        sessionId: mintId('Session'),
+        kind: 'question',
+        title: 'Which color?',
+        body: 'For the badge',
+        options: [{ label: 'Teal', description: '' }],
+        recommendation: null,
+        category: 'design',
+        urgency: 'normal',
+        detail: null,
+        signal: new AbortController().signal,
+      });
+    const card = askOn(a).item;
+    expect(askOn(b).item.id).toBe(card.id);
+    move(a.workstream.id, WorkstreamState.WaitingHuman);
+    move(b.workstream.id, WorkstreamState.WaitingHuman);
+
+    // A is cancelled at 08:00, B is answered at 10:00.
+    now = Date.parse('2026-11-03T08:00:00.000Z');
+    service.cancelForWorkstream(a.workstream.id);
+    move(a.workstream.id, WorkstreamState.Cancelled);
+    now = Date.parse('2026-11-03T10:00:00.000Z');
+    service.answer(card.id, { choice: 'Teal' });
+    now = Date.parse('2026-11-03T12:00:00.000Z');
+
+    // A waited 7 hours and B 9: the card's change of targets takes nothing from A's 7.
+    expect(humanTouchDays(clocked.db, a.project.id, new Date(now))[0]?.waitingMinutes).toBe(960);
+  });
 });
 
 describe('proposal verdicts', () => {

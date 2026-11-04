@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import {
   CARD_PROPOSED_PRINCIPLES,
+  CARD_RELEASED_WORKSTREAMS,
   CARD_RESOLUTION,
+  ReleasedWorkstreams,
   CheckChoice,
   ConflictError,
   InboxAnswer,
@@ -552,6 +554,17 @@ export function createInboxService(deps: {
               ? { state: InboxState.Cancelled }
               : {
                   targets,
+                  // The lane leaves the card but keeps the minutes it waited on it.
+                  detail: {
+                    ...item.detail,
+                    [CARD_RELEASED_WORKSTREAMS]: [
+                      ...new Set([
+                        ...(ReleasedWorkstreams.safeParse(item.detail?.[CARD_RELEASED_WORKSTREAMS])
+                          .data ?? []),
+                        workstreamId,
+                      ]),
+                    ],
+                  },
                   ...(item.kind === InboxKind.Question
                     ? { options: optionsForTargets(ctx, item.options, targets) }
                     : {}),
