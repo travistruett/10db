@@ -306,6 +306,11 @@ type SettledMerge = Extract<BranchMerge, { readonly kind: 'merged' }>;
 interface Merging {
   readonly update: BaseUpdate;
   readonly regenerate: SettledMerge | null;
+  /**
+   * The merge's note once its generated directories are regenerated; null with none to regenerate.
+   * `update`'s note, until then, says only that they were taken from the base.
+   */
+  readonly regeneratedNote?: string | null;
 }
 
 /** What kept a merge's generated directories from being regenerated. */
@@ -458,21 +463,30 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     };
   }
 
-  /** What the gate's note says about the conflicts a merge settled; null when it settled none. */
-  function settledNote(batch: BatchDto, merged: SettledMerge): string | null {
+  /**
+   * What the gate's note says about the conflicts a merge settled; null when it settled none. A
+   * generated directory is only taken from the base when the merge is made, so it is said to be
+   * regenerated (`regenerated`) only once its regeneration has made it, and the merge that goes back
+   * is not said to be listed anywhere.
+   */
+  function settledNote(batch: BatchDto, merged: SettledMerge, regenerated: boolean): string | null {
     const resolved = merged.resolved ?? [];
     if (resolved.length === 0) return null;
-    ctx.logger.info(
-      { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
-      'base conflicts settled',
-    );
+    // Said once: a merge with directories to regenerate asks for both wordings.
+    if (regenerated)
+      ctx.logger.info(
+        { batchId: batch.id, base: merged.from, files: resolved.map((r) => r.path) },
+        'base conflicts settled',
+      );
+    const origin = `origin/${batch.baseBranch}`;
     const said = resolved
-      .map(
-        (r) =>
-          `${r.path} (${r.how === 'regenerated' ? 'regenerated from its sources' : "kept both sides' added lines"})`,
-      )
+      .map((r) => {
+        if (r.how !== 'regenerated') return `${r.path} (kept both sides' added lines)`;
+        return `${r.path} (${regenerated ? 'regenerated from its sources' : `taken from ${origin}, not regenerated`})`;
+      })
       .join(', ');
-    return `10db merged origin/${batch.baseBranch} into this branch and settled its conflicts with it: ${said}. The merge commit lists them.`;
+    const lead = `10db merged ${origin} into this branch and settled its conflicts with it: ${said}.`;
+    return regenerated ? `${lead} The merge commit lists them.` : lead;
   }
 
   /**
@@ -706,6 +720,8 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         readonly uncarried?: true;
         /** A pull request's catch-up whose regeneration reported a problem that lost no migration. */
         readonly unregenerated?: true;
+        /** The generators ran and reported no problem: the directories are regenerated. */
+        readonly made?: true;
         /** What moved, when the caller keeps the notice itself (`forPullRequest`). */
         readonly renumbered?: readonly RenumberedMigration[];
       }
@@ -761,7 +777,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
         note: joined(renumberedNote(batch, renumbered, !forPullRequest), other),
         ...(forPullRequest && renumbered.length > 0 ? { renumbered } : {}),
       }) as const;
-    if (problem === null) return stands(null);
+    if (problem === null) return { ...stands(null), made: true };
     const lost = await keepLost(batch, path, merged, forPullRequest, problem.uncarried);
     if (lost === null) {
       // The generated directories are the base's, without the batch's changes in them: a catch-up
@@ -1257,15 +1273,17 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       },
       'base merged into the batch branch',
     );
+    const waiting = (merged.regenerate ?? []).length > 0;
     return {
       update: {
         kind: 'merged',
         base: merged.from,
         head: merged.head,
-        note: joined(settledNote(batch, merged), unmoved),
+        note: joined(settledNote(batch, merged, !waiting), unmoved),
         ...(forPullRequest ? { resolved: merged.resolved ?? [] } : {}),
       },
-      regenerate: (merged.regenerate ?? []).length > 0 ? merged : null,
+      regenerate: waiting ? merged : null,
+      ...(waiting ? { regeneratedNote: joined(settledNote(batch, merged, true), unmoved) } : {}),
     };
   }
 
@@ -1553,10 +1571,14 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           signal,
         );
         if (regenerated.kind === 'aborted' || stopped()) return { kind: 'aborted' };
-        const note = joined(merged.note, regenerated.note, installed.note);
+        // The merge's note says its generated directories were regenerated only once they were.
+        const settled =
+          regenerated.made === true ? (merging.regeneratedNote ?? merged.note) : merged.note;
+        const note = joined(settled, regenerated.note, installed.note);
         if (regenerated.uncarried === true)
           return { kind: 'uncarried', head: regenerated.head, note: note ?? '' };
-        // Not the merge's own note: it says these directories were regenerated from their sources.
+        // Not the merge's own note: it names the directories the merge took from the base, and
+        // this card has its own words for what became of them.
         if (regenerated.unregenerated === true)
           return {
             kind: 'unregenerated',

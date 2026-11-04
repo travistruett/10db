@@ -223,6 +223,9 @@ describe('a shipped pull request that conflicts with its base', () => {
       expect(card.title).toContain("conflicts with main and 10db couldn't update it");
       expect(card.body).toContain('.: left-pad');
       expect(card.body).toContain(`${GENERATED}/ could not be regenerated`);
+      // The merge was put back and the directory was never regenerated, so the card says neither was done.
+      expect(card.body).not.toContain('regenerated from its sources');
+      expect(card.body).not.toContain('The merge commit lists them');
       expect(now.worktreePath).toBeNull();
       expect(
         h.logs
