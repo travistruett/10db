@@ -1727,6 +1727,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             toolName: req.toolName,
             toolInput: req.input,
             repoPath: checkout,
+            ...(req.cwd === undefined ? {} : { cwd: req.cwd }),
             areas: project.areas,
             hazards: project.hazards,
             claims: claims(),

@@ -321,7 +321,11 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
               try {
                 return toHookOutput(
-                  spec.preToolUse({ toolName: hookInput.tool_name, input: hookInput.tool_input }),
+                  spec.preToolUse({
+                    toolName: hookInput.tool_name,
+                    input: hookInput.tool_input,
+                    cwd: hookInput.cwd,
+                  }),
                 );
               } catch (error) {
                 // A guard that fails must never let the call run.

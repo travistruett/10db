@@ -59,9 +59,16 @@ directory. So does a path that names a device with no end (`/dev/zero`, `/dev/ur
 whichever command reads it and wherever it appears: a foreground read of one (`cat /dev/zero | wc -c`,
 `sort /dev/urandom`, `grep -r x /dev`) spins until the Bash timeout, and the endless-loop ask looks only at
 background calls. The comparison is on the path as the kernel opens it, not as it is spelled: each word is
-resolved from the lane's copy (the hook's `repoPath`, the command's working directory, which a settled line
-never changes because it has no `cd`), links followed, and with `..` collapsed as text first, and either reading
-counts. So `../../../../dev/zero`, `dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
+resolved from the command's working directory, links followed, and with `..` collapsed as text first, and either
+reading counts. That directory is the `cwd` of the PreToolUse hook's request, not the lane's copy: a settled line
+has no `cd` of its own, but Claude Code carries a `cd` from an earlier Bash call into the next, so after
+`cd apps` the line `cat zero-link` reads `apps/zero-link`. The adapter passes the hook's `cwd` to the guard
+(`GuardInput.cwd`), and the same directory is joined to a relative word before the file-access judge sees it
+(that judge reads a relative path from the copy's root). A hook `cwd` that is not an absolute path leaves the
+call unsettled; with no `cwd` at all (a test double, the fake adapter) the copy's root is used. The hook's `cwd`
+is the field `BaseHookInput.cwd` of the SDK's hook input. That Claude Code updates it after a `cd` in an earlier
+call is taken from its documented meaning (the session's current directory), not proven live; if it stayed the
+start directory, a `cd`-then-read pair would still be judged from the copy's root. So `../../../../dev/zero`, `dev/./zero`, a link in the copy that points at `/dev/zero` or at `/dev`, and
 a chain of links all stay unsettled. A word with no single real path (`..` past a missing part, a link loop, a
 part that cannot be examined) stays unsettled too. `ls /dev` and `ls /` are unsettled as a result: the guard
 knows no program's options, so it cannot tell a listing from a recursive read. A path merely outside the paths a
