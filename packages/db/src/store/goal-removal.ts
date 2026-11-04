@@ -8,9 +8,10 @@ import { cancelNeverStartedTask } from './tasks';
 
 /**
  * Removes a draft goal that nothing has started (Shape spec §11): its tasks are removed as any
- * unstarted task is, then its criteria and the goal itself. A run cancelled before any session, or
- * only held, is not a start, which is how the goal digest reads a goal as not started. A task that has started, or that a task
- * outside the goal waits on, refuses the whole removal; the caller's transaction leaves nothing behind.
+ * unstarted task is, then its criteria and the goal itself. What counts as started is `startedRun`
+ * over all a task's runs, which is how the goal digest reads a goal as not started. A task that has
+ * started, or that a task outside the goal waits on, refuses the whole removal; the caller's
+ * transaction leaves nothing behind.
  * The removed tasks keep their rows with status cancelled and no goal. A question converted under the
  * goal or one of its tasks goes back to its pending proposal.
  */
