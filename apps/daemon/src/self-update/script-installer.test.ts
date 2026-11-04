@@ -326,7 +326,20 @@ describe('apply', () => {
       return existsSync(path) && readFileSync(path, 'utf8').trim();
     });
     expect(args).toBe(
-      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --status-file ${join(workDir, 'status.json')}`,
+      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid ${String(process.pid)} --status-file ${join(workDir, 'status.json')}`,
+    );
+  });
+
+  it('names every process that must be gone before the install, so the script waits for those pids', async () => {
+    installer = installerWith({ quitPids: () => [4242, 4243] });
+    stagedScript(`echo "$*" > "${workDir}/applied"`);
+    expect(await installer.apply(staged())).toMatchObject({ ok: true });
+    const args = await waitFor(() => {
+      const path = join(workDir, 'applied');
+      return existsSync(path) && readFileSync(path, 'utf8').trim();
+    });
+    expect(args).toBe(
+      `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid 4242 --quit-pid 4243 --status-file ${join(workDir, 'status.json')}`,
     );
   });
 

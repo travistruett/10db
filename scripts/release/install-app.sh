@@ -26,10 +26,16 @@
 #                                        status says step "skipped". With --have (the commit already
 #                                        staged in <dir>), a build of that one is not fetched again
 #                                        and <dir> is left as it is: the status says step "have".
-#   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first] [--relaunch]
+#   <dir>/scripts/release/install-app.sh --apply <dir> [--quit-first [--quit-pid <pid>]...] [--relaunch]
 #                                        install that build. --quit-first asks the running 10db to
-#                                        quit instead of refusing; --relaunch opens the app again,
-#                                        the old one when the install failed.
+#                                        quit (as ⌘Q does, through its bundle id; a signal to the window
+#                                        only when that request is refused) instead of refusing, and
+#                                        installs nothing until every process of the app, and every
+#                                        --quit-pid (the pids the daemon knows are the running 10db),
+#                                        has exited, within TENDB_INSTALL_QUIT_SECONDS (90); if one has
+#                                        not, the quit step fails and /Applications is untouched.
+#                                        --relaunch opens the app again, the old one when the install
+#                                        failed.
 #   --status-file <file>                 either half writes {ok, mode, step, message, commit} there
 #                                        when it ends, so 10db can say which step failed.
 # 10db starts both halves with PATH=/usr/bin:/bin:/usr/sbin:/sbin and TENDB_INSTALL_GH set to the gh
@@ -53,7 +59,7 @@ gh() {
 usage() {
   echo "usage: install-app.sh [branch-or-tag] (default main)" >&2
   echo "  A name of 7 to 40 hex characters is taken for a commit SHA and refused: GitHub builds only a branch or tag." >&2
-  echo "  10db's own update: --stage <dir> [--running <sha>] [--skip <sha>] [--have <sha>] [ref], or --apply <dir> [--quit-first] [--relaunch]; --status-file <file>; absolute paths." >&2
+  echo "  10db's own update: --stage <dir> [--running <sha>] [--skip <sha>] [--have <sha>] [ref], or --apply <dir> [--quit-first [--quit-pid <pid>]...] [--relaunch]; --status-file <file>; absolute paths." >&2
   exit 2
 }
 
@@ -85,6 +91,12 @@ while [ "$#" -gt 0 ]; do
     --have) [ "$#" -ge 2 ] || usage; have_commit="$2"; shift 2 ;;
     --quit-first) quit_first=1; shift ;;
     --relaunch) relaunch=1; shift ;;
+    --quit-pid)
+      [ "$#" -ge 2 ] || usage
+      # Not pid 1 or 0 (nothing to quit there, and kill -0 0 means this process group).
+      [[ "$2" =~ ^[0-9]+$ ]] && [ "$2" -gt 1 ] || usage
+      quit_pids="$quit_pids $2"
+      shift 2 ;;
     *) break ;;
   esac
 done
@@ -101,6 +113,7 @@ for path in "$stage_dir" "$apply_dir" "$status_file"; do
   case "$path" in "" | /*) ;; *) usage ;; esac
 done
 if [ "$mode" != apply ] && { [ "$quit_first" -eq 1 ] || [ "$relaunch" -eq 1 ]; }; then usage; fi
+if [ -n "$quit_pids" ] && { [ "$mode" != apply ] || [ "$quit_first" -eq 0 ]; }; then usage; fi
 if [ -n "$running_commit" ]; then
   [ "$mode" = stage ] && [[ "$running_commit" =~ ^[0-9a-f]{40}$ ]] || usage
 fi

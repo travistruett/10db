@@ -62,6 +62,18 @@ export interface ScriptInstallerOptions {
   readonly logger: Logger;
   readonly clock?: Clock;
   readonly stageTimeoutMs?: number;
+  /**
+   * The processes that are the running 10db, which the install waits to see gone before it touches
+   * /Applications: this daemon, and the window that supervises it. Default: this process, and its
+   * parent when the shell holds its stdin (`TENDB_PARENT_STDIN`). Not found by name, so a pattern
+   * that misses the app cannot let the install go on over it.
+   */
+  readonly quitPids?: () => readonly number[];
+}
+
+/** The pids of this daemon and, when the app's window started it, of that window. */
+function ownQuitPids(): number[] {
+  return process.env['TENDB_PARENT_STDIN'] === '1' ? [process.pid, process.ppid] : [process.pid];
 }
 
 export interface ScriptInstaller {
@@ -410,6 +422,9 @@ export function createScriptInstaller(options: ScriptInstallerOptions): ScriptIn
               staged.dir,
               '--quit-first',
               '--relaunch',
+              ...(options.quitPids ?? ownQuitPids)()
+                .filter((pid) => Number.isInteger(pid) && pid > 1)
+                .flatMap((pid) => ['--quit-pid', String(pid)]),
               '--status-file',
               applyStatus,
             ],

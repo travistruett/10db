@@ -61,20 +61,31 @@ fi
 backup_file_for() { echo "$(dirname "$data_dir")/$(basename "$data_dir")-backup-$1/10db.sqlite"; }
 previous_zip_for() { echo "$previous_dir/10db-$1.zip"; }
 
+# Pids install-app.sh --apply --quit-first was told the running 10db is (--quit-pid, the daemon's
+# own and its shell's), space separated. They are waited for by pid, whatever pgrep's pattern sees.
+quit_pids=""
+
 # Prints the pids of the app's processes that hold the database (all of the app's but the bridge),
-# on one line; nothing when none runs. Returns pgrep's own status when it cannot look (2 or more).
+# and those of quit_pids that are still alive, on one line; nothing when none runs. Returns pgrep's
+# own status when it cannot look (2 or more).
 running_pids() {
-  local listing pids status=0
+  local listing pids="" status=0 pid alive=""
   listing="$(pgrep -lf "$app_process_pattern")" || status=$?
   case "$status" in
     0)
       # grep exits 1 when the bridge was the only match; that is not a failure.
       pids="$(grep -Ev -- "$bridge_process_pattern" <<< "$listing" | awk '{ print $1 }')" || true
-      echo $pids
       ;;
     1) ;;
     *) return "$status" ;;
   esac
+  # kill -0 sends nothing: it only says whether the pid is there (the app runs as this user).
+  for pid in $quit_pids; do
+    if kill -0 "$pid" 2> /dev/null; then
+      case " $pids " in *" $pid "*) ;; *) alive="$alive $pid" ;; esac
+    fi
+  done
+  echo $pids $alive
 }
 
 refuse_while_running() {
@@ -88,20 +99,37 @@ refuse_while_running() {
 desktop_process_pattern='/10db\.app(\.[^/]*)?/Contents/MacOS/tendb-desktop'
 quit_attempted=0
 
-# Asks the running 10db to quit, as ⌘Q would, and waits until no process of the app is left. Only
-# 10db's own update calls it (install-app.sh --quit-first), after it made sure nothing was mid-session;
-# it never kills the daemon itself.
+# The window's bundle identifier (apps/desktop/src-tauri/tauri.conf.json).
+desktop_bundle_id="app.10db.desktop"
+
+# Asks the running 10db to quit, as ⌘Q would, and waits until no process of the app is left and every
+# --quit-pid is gone. Only 10db's own update calls it (install-app.sh --quit-first), after it made sure
+# nothing was mid-session; it never kills the daemon itself.
+#
+# The request is the app's own quit (an Apple event, what `osascript -e 'quit app'` from a shell
+# sends), which runs the shell's exit path and stops the daemon cleanly. A SIGTERM to the window
+# is only the fallback for when that request is refused (Automation not allowed, no GUI session):
+# the window dies without running that path, and the daemon then stops only on seeing its stdin close.
+# Nothing is installed unless every one of those processes has exited within the bound.
 quit_app() {
   local limit="${TENDB_INSTALL_QUIT_SECONDS:-90}" waited=0 status=0 pids=""
   step=quit
   quit_attempted=1
-  pkill -TERM -f "$desktop_process_pattern" || true
+  pids="$(running_pids)" || fail "pgrep could not check whether 10db is running (exit $?)"
+  # An Apple event to an app that is not running may start it; nothing to quit then.
+  if [ -n "$pids" ]; then
+    if ! osascript -e "with timeout of 20 seconds" -e "tell application id \"$desktop_bundle_id\" to quit" \
+      -e "end timeout" > /dev/null; then
+      echo "$script_name: 10db did not take the quit request; signalling its window instead" >&2
+      pkill -TERM -f "$desktop_process_pattern" || true
+    fi
+  fi
   while :; do
     status=0
     pids="$(running_pids)" || status=$?
     [ "$status" -eq 0 ] || fail "pgrep could not check whether 10db has quit (exit $status)"
     [ -n "$pids" ] || return 0
-    [ "$waited" -lt "$limit" ] || fail "10db did not quit within $limit seconds"
+    [ "$waited" -lt "$limit" ] || fail "10db could not be quit: it did not quit within $limit seconds (still running: process $pids), so nothing was installed and the app in Applications is unchanged"
     waited=$((waited + 1))
     sleep "${TENDB_INSTALL_QUIT_POLL_SECONDS:-1}"
   done

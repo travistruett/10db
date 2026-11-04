@@ -106,9 +106,17 @@ factory (`self-update/drain.ts`) until the app has installed:
 The check runs every minute, so the install follows the end of the last running step by up to a minute: the app
 runs the new commit within the wait limit plus the time the running steps take plus that minute.
 
-**What the script does.** `--apply` takes the install lock, sends the window SIGTERM (the supervisor stops the
-daemon cleanly), waits until no process that holds the database is left (the builder's MCP bridge,
-`builder-mcp.mjs`, holds none and is neither waited for nor signalled), then does what an install does: back up
+**What the script does.** `--apply` takes the install lock and asks the running app to quit the way ⌘Q does: an
+Apple event to the window's bundle id (`app.10db.desktop`), which runs the shell's exit path so the supervisor
+stops the daemon cleanly. A SIGTERM to the window was the only request before; it kills the window without that
+path, leaving the daemon to notice its stdin closing, and is now only the fallback when the Apple event is refused
+(no Automation permission for a script started by the daemon, or no GUI session). It then waits, within
+`TENDB_INSTALL_QUIT_SECONDS` (90), until no process that holds the database is left (the builder's MCP bridge,
+`builder-mcp.mjs`, holds none and is neither waited for nor signalled) **and** every `--quit-pid` is gone. The daemon
+passes its own pid, and its parent's when the window started it (`TENDB_PARENT_STDIN`), because a process listing
+by name can miss the app (an incident installed over a 10db that was still running, because the wait found
+nothing and returned at once). If any is still there at the bound the quit step fails ("10db could not be quit")
+and nothing in Applications is touched. Then it does what an install does: back up
 the database with `sqlite3 .backup`, zip the previous app to `10db-previous/`, copy the new one in, clear its
 quarantine, register it, and with `--relaunch` open it. `make rollback-app` finds that zip and that backup as it
 does after a manual install. `--status-file` makes either half write `{ok, mode, step, message, commit}`.

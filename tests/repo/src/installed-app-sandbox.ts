@@ -150,8 +150,13 @@ const STUBS: Record<string, readonly string[]> = {
     'exec /bin/mv "$@"',
   ],
   xattr: ['exit 0'],
-  // Asks the running app to quit and starts it again; only their calls matter.
+  // Asks the running app to quit and starts it again; only their calls matter. A quit request through
+  // osascript (what ⌘Q does) can end the pids in STUB_QUIT_KILLS, as an app that quits would.
   pkill: ['exit 0'],
+  osascript: [
+    '[ -z "${STUB_OSASCRIPT_FAILS:-}" ] || { echo "execution error: Not authorized to send Apple events (-1743)" >&2; exit 1; }',
+    '[ -z "${STUB_QUIT_KILLS:-}" ] || kill $STUB_QUIT_KILLS',
+  ],
   open: ['[ -z "${STUB_OPEN_FAILS:-}" ] || exit 1'],
 };
 
