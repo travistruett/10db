@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import {
   InvalidError,
@@ -8,6 +8,7 @@ import {
   shapeFileRefusal,
   type ShapeId,
 } from '@10db/contracts';
+import { readImageSize } from '../screens';
 import type { ShapeImage } from '../sessions';
 
 // Shape spec §5.4. What a dropped file must be to reach the session, and where the daemon keeps it.
@@ -75,16 +76,41 @@ interface FileSize {
   readonly id: string;
   readonly name: string;
   readonly size: number;
+  readonly storedPath: string;
 }
 
 /** The largest image sent as a content block: 2 MiB is under 3 MB as base64. */
 export const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
 /** The most image bytes one message carries as content blocks. */
 export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
+/**
+ * The longest side of an image sent as a content block. The API takes at most 2000 px a side when a
+ * request holds more than 20 images, and a conversation's screens (12) and dropped images (20) can pass
+ * that together, so a request that failed on it would fail every later turn too. Claude Code is not
+ * known to shrink an image block, so a larger one goes as a path, which `Read` resizes.
+ */
+export const INLINE_IMAGE_MAX_SIDE = 2000;
+
+/**
+ * Whether the stored image is within the side cap. One whose size can't be read (cut short, or not
+ * what its name says) is not: it would be sent blind, and a model refusing it ends every turn.
+ */
+function withinSideCap(storedPath: string): boolean {
+  try {
+    const size = readImageSize(readFileSync(storedPath));
+    return size !== null && Math.max(size.width, size.height) <= INLINE_IMAGE_MAX_SIDE;
+  } catch {
+    return false;
+  }
+}
+
+/** An image too big, in bytes or in pixels, to be a content block on its own. */
+const tooBigAlone = (file: FileSize): boolean =>
+  file.size > INLINE_IMAGE_MAX_BYTES || !withinSideCap(file.storedPath);
 
 /**
  * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
- * cap, and together within the per-message cap. Every other image goes as a path.
+ * caps (bytes and pixels), and together within the per-message cap. Every other image goes as a path.
  */
 export function inlineImageIds(files: readonly FileSize[]): Set<string> {
   const ids = new Set<string>();
@@ -92,7 +118,7 @@ export function inlineImageIds(files: readonly FileSize[]): Set<string> {
   for (const file of files) {
     const kind = shapeFileKind(file.name);
     if (kind === null || !isShapeImage(kind)) continue;
-    if (file.size > INLINE_IMAGE_MAX_BYTES || total + file.size > INLINE_IMAGES_MAX_BYTES) continue;
+    if (tooBigAlone(file) || total + file.size > INLINE_IMAGES_MAX_BYTES) continue;
     total += file.size;
     ids.add(file.id);
   }
@@ -112,7 +138,7 @@ export function pathImageIds(shown: readonly FileSize[], sent: readonly FileSize
       .filter((file) => {
         const kind = shapeFileKind(file.name);
         if (kind === null || !isShapeImage(kind)) return false;
-        return file.size > INLINE_IMAGE_MAX_BYTES || (sentIds.has(file.id) && !inline.has(file.id));
+        return tooBigAlone(file) || (sentIds.has(file.id) && !inline.has(file.id));
       })
       .map((file) => file.id),
   );

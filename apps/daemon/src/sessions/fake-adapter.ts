@@ -210,9 +210,9 @@ export class FakeAdapter implements SessionAdapter {
         );
     const handle: ShapeSessionHandle = {
       events: inner.events,
-      send: (text) => {
+      send: (text, images) => {
         sent.push(text);
-        inner.send(text);
+        inner.send(text, images);
       },
       interrupt: () => inner.interrupt(),
       stop: async () => {

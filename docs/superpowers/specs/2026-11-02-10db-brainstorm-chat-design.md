@@ -303,8 +303,12 @@ files as a line naming the path, which the session reads with `Read`. **(spec's 
 The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
 image, so one oversize block would end every later turn. An image over 2 MiB, or past 6 MiB of images in one
 message, therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes itself.
-The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
-that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
+So does an image over 2000 px on either side, or one whose size the daemon can't read (a cut or mislabelled
+file): the API takes at most 2000 px a side once a request holds more than 20 images, and a conversation's
+screens (up to 12, §5.5) and dropped images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB
+sent as a block could fail that turn and every later one. The size is read from the file's own header (PNG, JPEG
+and WebP). The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks
+image blocks that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 
 ### 5.5 Shape MCP tools
 
