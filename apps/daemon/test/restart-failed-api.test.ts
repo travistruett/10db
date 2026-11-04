@@ -2,6 +2,7 @@ import {
   BatchDto,
   ProjectDto,
   TaskDto,
+  WorkspaceMode,
   WorkstreamDto,
   type InboxItemId,
   type ProjectId,
@@ -11,6 +12,7 @@ import {
 import {
   getInboxItem,
   insertBatch,
+  patchTask,
   transitionBatch,
   transitionWorkstream,
   insertWorkstream,
@@ -25,13 +27,16 @@ import { createTempRepo, tempDir, waitForAsync } from './fixtures';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
+let worktrees: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 beforeEach(async () => {
   data = tempDir('restart failed');
+  worktrees = tempDir('restart failed worktrees');
   repo = createTempRepo();
   daemon = await startDaemon({
     sandbox: null,
     dataDir: data.path,
+    worktreeRoot: worktrees.path,
     port: 0,
     adapter: new FakeAdapter({}),
     logLevel: 'warn',
@@ -46,6 +51,7 @@ afterEach(async () => {
   await daemon.scheduler.idle();
   await daemon.stop();
   repo.cleanup();
+  worktrees.cleanup();
   data.cleanup();
 });
 
@@ -125,6 +131,26 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     expect(fresh.id).not.toBe(batchId);
     const old = (await batchesOf(project.id)).find((b) => b.id === batchId);
     expect(old?.state).toBe('ABANDONED');
+    // The repo has no origin, so the new batch's cut is refused; wait for it before the daemon stops.
+    await waitForAsync(async () =>
+      (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,
+    );
+  });
+
+  it('starts over in a separate copy when the task was moved there, instead of rerunning in Your folder', async () => {
+    const { project, task, batchId, workstreamId } = await failedInOpenBatch();
+    daemon.state.write((ctx) => patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree }));
+
+    const res = await startTask(task.id, {});
+
+    expect(res.status).toBe(202);
+    const fresh = BatchDto.parse(res.body);
+    expect(fresh.id).not.toBe(batchId);
+    expect(fresh.worktreePath).not.toBeNull();
+    const old = (await batchesOf(project.id)).find((b) => b.id === batchId);
+    expect(old?.state).toBe('ABANDONED');
+    const runs = await api().get('/workstreams?active=false', z.array(WorkstreamDto));
+    expect(runs.find((w) => w.id === workstreamId)?.state).toBe('FAILED');
     // The repo has no origin, so the new batch's cut is refused; wait for it before the daemon stops.
     await waitForAsync(async () =>
       (await batchesOf(project.id)).every((b) => b.id !== fresh.id) ? true : undefined,

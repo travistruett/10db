@@ -220,6 +220,33 @@ describe('the failed card of a task that is started again', () => {
   });
 });
 
+describe('a task whose placement no longer matches the batch its failed run is in', () => {
+  it('is not moved while the task still has the placement its batch works in', async () => {
+    const { alpha } = await failedAlone();
+
+    expect(restarts.placementMoved(alpha.id)).toBe(false);
+    expect(restarts.continueRun(alpha.id)).not.toBeNull();
+  });
+
+  it('is moved once the task is set to a separate copy, and continuing declines', async () => {
+    const { alpha, batchId, ws } = await failedAlone();
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+
+    expect(restarts.placementMoved(alpha.id)).toBe(true);
+    // The retry would stay in the shared batch, in Your folder, whatever the badge says.
+    expect(restarts.continueRun(alpha.id)).toBeNull();
+    expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+  });
+
+  it('has nothing to move without a failed run', () => {
+    const alpha = h.addTask('Alpha');
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+
+    expect(restarts.placementMoved(alpha.id)).toBe(false);
+  });
+});
+
 describe('a task with no failed run in an open batch', () => {
   it('has nothing to continue or end', () => {
     const alpha = h.addTask('Alpha');

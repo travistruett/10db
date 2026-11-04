@@ -242,9 +242,11 @@ export function createServices(deps: {
         return { kind: 'workstream', workstream };
       }
       // A failed run in an open batch is run again in it, as the failure card's Retry does, unless
-      // the builder asked to start over: then the batch holding only that attempt ends first.
+      // the builder asked to start over: then the batch holding only that attempt ends first. The same
+      // when the task's placement moved since: a retry would stay in the batch, where the task no
+      // longer runs, so it starts over in its new placement.
       let left: BatchId | null = null;
-      if (input?.fresh) left = restarts.supersede(taskId);
+      if (input?.fresh || restarts.placementMoved(taskId)) left = restarts.supersede(taskId);
       else {
         const retried = restarts.continueRun(taskId);
         if (retried) {

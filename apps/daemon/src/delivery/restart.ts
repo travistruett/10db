@@ -1,5 +1,6 @@
 import {
   BatchState,
+  WorkspaceMode,
   WorkstreamState,
   type BatchDto,
   type BatchId,
@@ -18,6 +19,12 @@ export interface FailedRestarts {
    * does, so the commits its earlier attempt made stay. Null when the task has no such run.
    */
   continueRun(taskId: TaskId): WorkstreamDto | null;
+  /**
+   * Whether the task's failed run sits in a batch that works somewhere other than where the task
+   * now runs (Your folder or a separate copy). A retry would stay in that batch, so Start starts
+   * the task over instead (`supersede`, then a new run in its placement). False without such a run.
+   */
+  placementMoved(taskId: TaskId): boolean;
   /**
    * Before a task starts over from the base branch: abandons the batch that holds only the task's
    * failed attempt, so no open batch is left holding work nothing will finish. A batch that holds
@@ -48,10 +55,21 @@ export function createFailedRestarts(deps: {
     return { workstream, batch };
   }
 
+  /** Whether the task's placement is no longer the one the batch works in (a copy has a worktree path). */
+  function placementMovedFrom(taskId: TaskId, batch: BatchDto): boolean {
+    const inBatch = batch.worktreePath !== null ? WorkspaceMode.Worktree : WorkspaceMode.Shared;
+    return getTask(db, taskId).workspaceMode !== inBatch;
+  }
+
   return {
+    placementMoved(taskId) {
+      const failed = failedRun(taskId);
+      return failed !== null && placementMovedFrom(taskId, failed.batch);
+    },
     continueRun(taskId) {
       const failed = failedRun(taskId);
-      if (!failed) return null;
+      // A retry stays in its batch, so it can't run where the task now says it should.
+      if (!failed || placementMovedFrom(taskId, failed.batch)) return null;
       const retried = deps.starter.retry(failed.workstream.id);
       // The run is going again: the card that offered Retry for its failure has been answered.
       deps.inbox.cancelForWorkstream(failed.workstream.id);
