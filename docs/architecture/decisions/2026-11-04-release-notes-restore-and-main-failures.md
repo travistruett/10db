@@ -21,8 +21,8 @@ because editing an issue notifies nobody.
 - Only `success` and a failed conclusion decide. Any other conclusion gives way to the run before
   it, across the last 100 runs; a workflow with none of those is listed as having no finished run.
 - Pull request runs don't count, including those from a fork's `main`.
-- Only an issue authored by a bot is treated as the report: the repository is public, so anyone can
-  open an issue with that title, and adopting it would silence the report.
+- Only an issue by `app/github-actions` is treated as the report: the repository is public, so
+  anyone can open an issue with that title, and adopting it would silence the report.
 - A workflow with no run on main isn't watched. That is `release.yml`, which runs on tags: a person
   approves each release and sees its run.
 - A workflow that stops running keeps its last verdict, because the script reads only finished

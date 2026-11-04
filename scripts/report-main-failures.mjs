@@ -8,6 +8,7 @@
 import { spawnSync } from 'node:child_process';
 
 const ISSUE_TITLE = 'Workflows are failing on main';
+const REPORT_AUTHOR = 'app/github-actions';
 const PASSED = 'success';
 const FAILED = new Set(['failure', 'timed_out', 'startup_failure']);
 // Wide enough for main's cancelled CI runs: a run's conclusion decides only when it is one of the
@@ -71,9 +72,9 @@ const issues = JSON.parse(
   ]),
 );
 // Anyone can open an issue on a public repository, and one with this title must not silence the
-// report. Only an app installed here can author as a bot.
+// report, so only the workflow token's own issue counts.
 const issue = issues.find(
-  (candidate) => candidate.title === ISSUE_TITLE && candidate.author.is_bot,
+  (candidate) => candidate.title === ISSUE_TITLE && candidate.author.login === REPORT_AUTHOR,
 );
 
 if (failures.length === 0) {

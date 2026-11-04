@@ -53,13 +53,16 @@ interface OpenIssue {
   readonly number: number;
   readonly title: string;
   readonly body: string;
-  readonly isBot?: boolean;
+  readonly author?: string;
 }
 
 const openIssues = (...issues: readonly OpenIssue[]) => ({
   args: 'issue list',
   stdout: JSON.stringify(
-    issues.map(({ isBot, ...issue }) => ({ ...issue, author: { is_bot: isBot ?? true } })),
+    issues.map(({ author, ...issue }) => ({
+      ...issue,
+      author: { login: author ?? 'app/github-actions' },
+    })),
   ),
 });
 const changes: GhReply[] = [
@@ -192,12 +195,15 @@ describe('report-main-failures.mjs', () => {
     expect(close).toContain(`issue close 7 --repo ${repository}`);
   });
 
-  it("opens its own issue when someone else's has the same title, so nobody can silence it", () => {
-    const issues = openIssues({ number: 3, title, body: failingBody, isBot: false });
-    const [create, ...rest] = report([failing], issues);
-    expect(rest).toEqual([]);
-    expect(create).toContain('issue create');
-  });
+  it.each(['someone', 'app/renovate'])(
+    'opens its own issue when %s holds the same title, so nobody can silence it',
+    (author) => {
+      const issues = openIssues({ number: 3, title, body: failingBody, author });
+      const [create, ...rest] = report([failing], issues);
+      expect(rest).toEqual([]);
+      expect(create).toContain('issue create');
+    },
+  );
 
   it('leaves other issues alone', () => {
     const issues = openIssues({ number: 3, title: 'a bug', body: 'text' });
