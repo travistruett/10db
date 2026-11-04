@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   DecisionEdit,
   DecisionWrite,
+  KNOWLEDGE_SEARCH_MAX_LENGTH,
   KnowledgeListQuery,
   KnowledgeReason,
+  clampKnowledgeSearch,
   PrincipleEdit,
   PrincipleWrite,
   ProposalListQuery,
@@ -41,6 +43,36 @@ describe('the knowledge list query', () => {
     const r = KnowledgeListQuery.safeParse(input);
     expect(r.success).toBe(false);
     expect(paths(r)).toContain(path);
+  });
+
+  it('takes a search of exactly the shared limit and refuses one character more', () => {
+    const q = 'a'.repeat(KNOWLEDGE_SEARCH_MAX_LENGTH);
+    expect(KnowledgeListQuery.safeParse({ q }).success).toBe(true);
+    const r = KnowledgeListQuery.safeParse({ q: `${q}a` });
+    expect(r.success).toBe(false);
+    expect(paths(r)).toContain('q');
+  });
+});
+
+describe('clampKnowledgeSearch', () => {
+  it('leaves a search within the limit alone', () => {
+    expect(clampKnowledgeSearch('queue')).toBe('queue');
+  });
+
+  it('cuts plain text at the limit', () => {
+    const q = 'a'.repeat(KNOWLEDGE_SEARCH_MAX_LENGTH + 5);
+    expect(clampKnowledgeSearch(q)).toBe('a'.repeat(KNOWLEDGE_SEARCH_MAX_LENGTH));
+  });
+
+  it('counts UTF-16 code units like the route, so 200 emoji still parse', () => {
+    const clamped = clampKnowledgeSearch('😀'.repeat(200));
+    expect(clamped.length).toBeLessThanOrEqual(KNOWLEDGE_SEARCH_MAX_LENGTH);
+    expect(KnowledgeListQuery.safeParse({ q: clamped }).success).toBe(true);
+  });
+
+  it('never leaves half a surrogate pair at the cut', () => {
+    const clamped = clampKnowledgeSearch(`${'a'.repeat(KNOWLEDGE_SEARCH_MAX_LENGTH - 1)}😀`);
+    expect(clamped).toBe('a'.repeat(KNOWLEDGE_SEARCH_MAX_LENGTH - 1));
   });
 });
 

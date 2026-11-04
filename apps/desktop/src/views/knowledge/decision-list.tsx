@@ -1,4 +1,4 @@
-import { isSearch, KnowledgeItemKind, type DecisionItem } from '@10db/contracts';
+import { KnowledgeItemKind, type DecisionItem } from '@10db/contracts';
 import { Stack, Table, Text, VisuallyHidden } from '@mantine/core';
 import type { ReactNode } from 'react';
 import {
@@ -26,7 +26,6 @@ export function DecisionList({
     <ListStates
       query={decisions}
       what="decisions"
-      searching={isSearch(filter.q)}
       empty="No decisions yet. Answers in the Inbox and the choices agents make on their own are recorded here."
     >
       <Table aria-label="Decisions" verticalSpacing="xs">

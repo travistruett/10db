@@ -43,6 +43,19 @@ describe('repairKnowledgeIndex', () => {
     expect(errors).toEqual([]);
   });
 
+  it('composes text stored decomposed, so a composed search finds it', () => {
+    const project = seedProject(store);
+    const { id } = decide(project.id).value;
+    store.db.$client
+      .prepare('UPDATE decisions SET choice = ? WHERE id = ?')
+      .run('한글'.normalize('NFD'), id);
+    expect(searchDecisions(store.db, project.id, '한글', 5)).toEqual([]);
+    const { logger, errors } = recordingLogger();
+    expect(repairKnowledgeIndex(store.db, logger)).toEqual({ rebuilt: [], failed: [] });
+    expect(errors).toEqual([]);
+    expect(searchDecisions(store.db, project.id, '한글', 5).map((d) => d.id)).toEqual([id]);
+  });
+
   it('rebuilds an index out of step with its table, logs it, and search finds the record again', () => {
     const project = seedProject(store);
     store.db.$client.exec('DROP TRIGGER decisions_fts_insert');

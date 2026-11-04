@@ -137,7 +137,8 @@ export function ProposedPane({
       ];
     }
     if (row.kind === 'decision' && row.converted?.decisionId != null) {
-      if (row.converted.withdrawn === true) return [];
+      // A withdrawn decision is gone, and a replaced one is not the head of its chain.
+      if (row.converted.withdrawn === true || row.converted.superseded === true) return [];
       const { decisionId } = row.converted;
       return [
         {
