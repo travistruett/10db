@@ -33,6 +33,7 @@ import {
   insertLandingGroup,
   insertPrinciple,
   insertShapeLink,
+  detachShapeQuestionsOfTask,
   insertShapeQuestion,
   insertSource,
   insertTask,
@@ -46,7 +47,7 @@ import {
   type ShapeProposalRow,
   type WriteContext,
 } from '@10db/db';
-import { buildPlanWorld } from './world';
+import { buildPlanWorld, tasksInside } from './world';
 
 // Shape spec §11. Convert writes the selected proposals into goals, tasks, decisions, principles and
 // questions in the caller's transaction, so a refusal or a failure leaves nothing behind, and it
@@ -113,6 +114,21 @@ function goalBrief(goal: PlanGoal): GoalBrief {
       depends_on: t.depends_on,
     })),
   };
+}
+
+/** Why a stored row with this key cannot hold a question, as the end of a sentence. */
+function unfitForQuestion(row: ShapeProposalRow): string {
+  if (row.kind !== 'goal' && row.kind !== 'task')
+    return `is a ${row.kind.replaceAll('_', ' ')}, not a goal or task`;
+  const gone =
+    row.state === ShapeProposalState.Rejected
+      ? 'was dropped'
+      : row.state === ShapeProposalState.Superseded
+        ? 'was replaced by a later plan'
+        : row.state === ShapeProposalState.Accepted
+          ? 'was converted and then taken back (propose it again under the same key once its goal is converted)'
+          : `is ${row.state}`;
+  return `${gone}, so it cannot hold a question`;
 }
 
 /** Each effort in the order its dependencies need, or the keys of a cycle between efforts. */
@@ -248,9 +264,18 @@ export function convertProposals(
         (goal === undefined
           ? undefined
           : { title: ShapeProposalBody.goal.parse(goal.body).title, row: goal });
-      if (owner === undefined)
-        errors.push(`${row.key} is about ${about}, and no proposal has that key`);
-      else if (!selectedIds.has(owner.row.id))
+      if (owner === undefined) {
+        // A row may hold the key and still be unable to hold a question: say which way.
+        const held = rows.find((r) => r.key === about);
+        const goalOf = rows.find((r) => tasksInside(r).includes(about));
+        errors.push(
+          held !== undefined
+            ? `${row.key} is about ${about}, which ${unfitForQuestion(held)}`
+            : goalOf !== undefined
+              ? `${row.key} is about ${about}, whose goal ${goalOf.key} ${unfitForQuestion(goalOf)}`
+              : `${row.key} is about ${about}, and no proposal has that key`,
+        );
+      } else if (!selectedIds.has(owner.row.id))
         errors.push(`${row.key} is about ${owner.title}, which isn't selected`);
     } else if (row.kind === 'change_task' || row.kind === 'remove_task') {
       const body = ShapeProposalBody[row.kind].parse(row.body);
@@ -423,6 +448,8 @@ export function convertProposals(
   for (const row of pending.filter((r) => r.kind === 'remove_task')) {
     const removal: PlanRemoval = ShapeProposalBody.remove_task.parse(row.body);
     cancelTask(ctx, removal.taskId);
+    // A question stored under the task must not keep pointing at it once it is cancelled.
+    detachShapeQuestionsOfTask(ctx, removal.taskId);
     made.set(row.id, { taskIds: [removal.taskId] });
   }
 

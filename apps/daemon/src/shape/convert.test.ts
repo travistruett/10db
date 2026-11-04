@@ -28,6 +28,7 @@ import {
   searchPrinciples,
   insertDecision,
   insertSource,
+  patchShapeProposal,
   type WriteContext,
 } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -37,7 +38,7 @@ import { createKnowledgeServices } from '../daemon';
 import { createEventBus, createStateStore } from '../events';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
-import { dropProposal, reconcileDraft } from './rounds';
+import { dropProposal, editProposal, reconcileDraft, restoreProposal } from './rounds';
 
 // Shape spec §11: Convert is one transaction, refuses a partial selection by name, is idempotent,
 // and starts nothing.
@@ -533,6 +534,198 @@ describe('question records', () => {
     ]);
     expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
   });
+
+  // A stored proposal that is not a live goal or task cannot hold a question.
+  const askAbout = (m: string, about: string, draft: Record<string, unknown> = {}) =>
+    write((ctx) =>
+      reconcileDraft(
+        ctx,
+        c.shape.id,
+        PlanDraft.parse({ ...draft, questions: [questionOf(m, 'who-pays', { about })] }),
+      ),
+    );
+
+  it.each([
+    ['a decision', 'rule'],
+    ['a principle', 'habit'],
+    ['another question', 'first-q'],
+  ])('refuses to propose a question about %s', (_, about) => {
+    const m = c.say();
+    propose({
+      records: [decisionOf(m, 'rule'), principleOf(m, 'habit')],
+      questions: [questionOf(m, 'first-q')],
+    });
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+  });
+
+  it.each([
+    ['goal', 'g', (m: string) => ({ goals: [goalOf(m, 'g', ['g1'])] })],
+    ['task', 't', (m: string) => ({ looseTasks: [loose(m, 't')] })],
+  ])('refuses to propose a question about a dropped %s', (_, about, draftOf) => {
+    const m = c.say();
+    propose(draftOf(m));
+    write((ctx) => {
+      dropProposal(ctx, rowOf(about).id);
+    });
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+  });
+
+  it('refuses to propose a question about a task inside a dropped goal, naming what is wrong', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = askAbout(m, 'g1');
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
+  });
+
+  // A round replaces every unpinned pending row its draft leaves out, so those rows will be gone.
+  it.each([
+    ['goal', 'g', (m: string) => ({ goals: [goalOf(m, 'g', ['g1'])] })],
+    ['task', 't', (m: string) => ({ looseTasks: [loose(m, 't')] })],
+  ])('refuses to propose a question about a %s the draft leaves out', (_, about, draftOf) => {
+    const m = c.say();
+    propose(draftOf(m));
+    const out = askAbout(m, about);
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(new RegExp(`Question 1, about: ${about} is not a goal or task`)),
+    ]);
+    expect(rowOf(about).state).toBe(ShapeProposalState.Pending);
+  });
+
+  it.each([
+    ['a pinned goal', 'g', 'g'],
+    ['a task inside a pinned goal', 'g', 'g1'],
+    ['a pinned task', 't', 't'],
+  ])('takes a question about %s the draft leaves out', (_, pinned, about) => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])], looseTasks: [loose(m, 't')] });
+    write((ctx) => {
+      editProposal(ctx, rowOf(pinned).id, { title: 'Pinned title' });
+    });
+    expect(askAbout(m, about)).toMatchObject({ ok: true });
+    expect(rowOf(pinned).state).toBe(ShapeProposalState.Pending);
+    converted(pinned, 'who-pays');
+    expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['who-pays']);
+  });
+
+  // A restated goal keeps the draft's tasks, whatever is pinned on the goal itself.
+  it('refuses to propose a question about a task a pinned goal loses when restated', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1', 'g2'])] });
+    write((ctx) => {
+      editProposal(ctx, rowOf('g').id, { title: 'Pinned title' });
+    });
+    const out = askAbout(m, 'g1', { goals: [goalOf(m, 'g', ['g2'])] });
+    expect(out.ok ? [] : out.errors).toEqual([
+      expect.stringMatching(/Question 1, about: g1 is not a goal or task/),
+    ]);
+  });
+
+  it.each<[string, (ctx: WriteContext) => void]>([
+    [
+      'its own pin',
+      (ctx) => {
+        editProposal(ctx, rowOf('g').id, { 'tasks.g1.title': 'Pinned task' });
+      },
+    ],
+    [
+      'the pin on the whole goal',
+      (ctx) => {
+        restoreProposal(ctx, rowOf('g').id);
+      },
+    ],
+  ])('takes a question about a task a restated goal keeps by %s', (_, pin) => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1', 'g2'])] });
+    write(pin);
+    expect(askAbout(m, 'g1', { goals: [goalOf(m, 'g', ['g2'])] })).toMatchObject({ ok: true });
+    converted('g', 'who-pays');
+    expect(listShapeQuestions(c.store.db, c.shape.id).map((q) => q.key)).toEqual(['who-pays']);
+  });
+
+  it('takes a question about a goal or a task already converted', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    converted('g');
+    expect(askAbout(m, 'g')).toMatchObject({ ok: true });
+    expect(askAbout(m, 'g1')).toMatchObject({ ok: true });
+  });
+
+  it('says why Convert refuses a question about a task inside a goal that was dropped', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g1' })],
+    });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g1, whose goal g was dropped, so it cannot hold a question',
+    ]);
+  });
+
+  it('says why Convert refuses a question about a task inside a goal a later plan replaced', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g1' })],
+    });
+    // The pin keeps the question through the round that replaces its goal.
+    write((ctx) => {
+      editProposal(ctx, rowOf('who-pays').id, { text: 'Who pays now?' });
+    });
+    propose({ looseTasks: [loose(m, 'next')] });
+    expect(rowOf('g').state).toBe(ShapeProposalState.Superseded);
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g1, whose goal g was replaced by a later plan, so it cannot hold a question',
+    ]);
+  });
+
+  it('says why Convert refuses a question about a goal that was dropped', () => {
+    const m = c.say();
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      questions: [questionOf(m, 'who-pays', { about: 'g' })],
+    });
+    write((ctx) => {
+      dropProposal(ctx, rowOf('g').id);
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about g, which was dropped, so it cannot hold a question',
+    ]);
+  });
+
+  it('says why Convert refuses a question about a proposal that is not a goal or task', () => {
+    const m = c.say();
+    propose({
+      records: [decisionOf(m, 'rule')],
+      questions: [questionOf(m, 'who-pays')],
+    });
+    const question = rowOf('who-pays');
+    write((ctx) => {
+      patchShapeProposal(ctx, question.id, {
+        body: { ...(question.body as object), about: 'rule' },
+      });
+    });
+    const out = convert('who-pays');
+    expect(out.ok ? [] : out.errors).toEqual([
+      'who-pays is about rule, which is a decision, not a goal or task',
+    ]);
+  });
 });
 
 describe('additions, changes and removals', () => {
@@ -554,6 +747,35 @@ describe('additions, changes and removals', () => {
     expect(getTask(c.store.db, t1.id).title).toBe('Renamed');
     expect(getTask(c.store.db, t2.id).status).toBe(TaskStatus.Cancelled);
     expect(listGoalTasks(c.store.db, goalId).some((t) => t.title === 'Task g3')).toBe(true);
+  });
+
+  it('leaves no question attached to a task a removal cancels, and keeps it stored', () => {
+    const m = c.say();
+    propose({
+      looseTasks: [loose(m, 'seats')],
+      questions: [
+        {
+          key: 'who-pays',
+          text: 'Who pays for the extra seats?',
+          for: 'finance',
+          about: 'seats',
+          sourceMessageIds: [m],
+        },
+      ],
+    });
+    converted('seats', 'who-pays');
+    const task = taskTitled('Task seats');
+    expect(listShapeQuestions(c.store.db, c.shape.id)[0]?.taskId).toBe(task.id);
+
+    const m2 = c.say('Drop it.');
+    propose({ removals: [{ taskId: task.id, why: 'Not needed', sourceMessageIds: [m2] }] });
+    converted(`remove:${task.id}`);
+
+    expect(getTask(c.store.db, task.id).status).toBe(TaskStatus.Cancelled);
+    expect(listShapeQuestions(c.store.db, c.shape.id)).toMatchObject([
+      { key: 'who-pays', taskId: null, goalId: null },
+    ]);
+    expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
   });
 
   it('leaves nothing behind when a write fails part-way', () => {

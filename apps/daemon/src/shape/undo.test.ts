@@ -18,6 +18,7 @@ import {
   getPrinciple,
   getShape,
   insertWorkstream,
+  listShapeAttachments,
   listShapeLinks,
   listShapeProposals,
   listShapeQuestions,
@@ -124,6 +125,52 @@ describe('Remove Draft Goal', () => {
     );
   });
 
+  it('removes a goal that has an eval, and the eval follows the goal when converted anew', () => {
+    const m = c.say();
+    const draft = PlanDraft.parse({
+      goals: [
+        {
+          key: 'g',
+          title: 'Goal',
+          objective: 'Do it.',
+          ceremony: 'direct',
+          sourceMessageIds: [m],
+          eval: {
+            objective: 'Fewer clicks',
+            baseline: ['12 clicks today'],
+            models: ['claude-opus-5-5'],
+            constraints: ['No new dependencies'],
+          },
+          tasks: [{ key: 'g1', title: 'Only task', areas: ['api'], size: 'S' }],
+        },
+      ],
+    });
+    write((ctx) => reconcileDraft(ctx, c.shape.id, draft));
+    const ids = listShapeProposals(c.store.db, c.shape.id).map((r) => r.id);
+    const first = write((ctx) => convertProposals(ctx, c.shape.id, ids));
+    if (!first.ok) throw new Error(first.errors.join('; '));
+    const goalId = must(first.results.find((r) => r.key === 'g')?.goalId, 'the goal id');
+    expect(listShapeAttachments(c.store.db, c.shape.id).map((a) => a.goalId)).toEqual([goalId]);
+
+    write((ctx) => {
+      removeDraftGoalOf(ctx, c.shape.id, goalId);
+    });
+    expect(() => getGoal(c.store.db, goalId)).toThrow(NotFoundError);
+    // The eval stays with the conversation, attached to no goal.
+    const kept = listShapeAttachments(c.store.db, c.shape.id);
+    expect(kept.map((a) => [a.kind, a.goalId, a.taskId])).toEqual([['eval', null, null]]);
+
+    const pending = listShapeProposals(c.store.db, c.shape.id)
+      .filter((r) => r.state === ShapeProposalState.Pending)
+      .map((r) => r.id);
+    const second = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+    if (!second.ok) throw new Error(second.errors.join('; '));
+    const newGoalId = must(second.results.find((r) => r.key === 'g')?.goalId, 'the new goal id');
+    expect(newGoalId).not.toBe(goalId);
+    const again = listShapeAttachments(c.store.db, c.shape.id);
+    expect(again.map((a) => [a.kind, a.goalId])).toEqual([['eval', newGoalId]]);
+  });
+
   describe('with a question converted under it', () => {
     function convertedWithQuestion(about: string): GoalId {
       const m = c.say();
@@ -223,8 +270,101 @@ describe('Remove Draft Goal', () => {
       expect(row.state).toBe(ShapeProposalState.Pending);
       expect(write((ctx) => convertProposals(ctx, c.shape.id, [row.id]))).toEqual({
         ok: false,
-        errors: ['on-extra is about extra, and no proposal has that key'],
+        errors: [
+          'on-extra is about extra, which was converted and then taken back (propose it again under the same key once its goal is converted), so it cannot hold a question',
+        ],
       });
+
+      // Propose judges it the same way, a new question or the old one restated.
+      for (const key of ['late', 'on-extra']) {
+        const refused = write((ctx) =>
+          reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ questions: [{ ...question, key }] })),
+        );
+        expect(refused.ok ? [] : refused.errors).toEqual([
+          expect.stringMatching(/Question 1, about: extra is not a goal or task/),
+        ]);
+      }
+    });
+
+    it('lets a task added to the removed goal be proposed again under its key, and the question converts with it', () => {
+      const goalId = convertedWithQuestion('density');
+      const m = c.say();
+      const addition = (goal: GoalId) => ({
+        key: 'extra',
+        title: 'Extra',
+        criteria: ['It works'],
+        areas: ['api'],
+        size: 'S',
+        ceremony: 'direct',
+        sourceMessageIds: [m],
+        goalId: goal,
+      });
+      const question = {
+        key: 'on-extra',
+        text: 'Which extra?',
+        for: 'finance',
+        about: 'extra',
+        sourceMessageIds: [m],
+      };
+      const first = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          PlanDraft.parse({ additions: [addition(goalId)], questions: [question] }),
+        ),
+      );
+      if (!first.ok) throw new Error(first.errors.join('; '));
+      const selected = listShapeProposals(c.store.db, c.shape.id)
+        .filter((r) => r.state === ShapeProposalState.Pending)
+        .map((r) => r.id);
+      const converted = write((ctx) => convertProposals(ctx, c.shape.id, selected));
+      if (!converted.ok) throw new Error(converted.errors.join('; '));
+      write((ctx) => {
+        removeDraftGoalOf(ctx, c.shape.id, goalId);
+      });
+
+      // While the goal is not converted again, the session is told why the addition cannot be proposed.
+      const early = write((ctx) =>
+        reconcileDraft(ctx, c.shape.id, PlanDraft.parse({ additions: [addition(goalId)] })),
+      );
+      expect(early.ok ? [] : early.errors).toEqual([
+        expect.stringMatching(/is not a goal this conversation converted/),
+      ]);
+
+      const goalRow = must(
+        listShapeProposals(c.store.db, c.shape.id).find((r) => r.key === 'density'),
+        'the goal',
+      );
+      const again = write((ctx) => convertProposals(ctx, c.shape.id, [goalRow.id]));
+      if (!again.ok) throw new Error(again.errors.join('; '));
+      const newGoalId = must(again.results.find((r) => r.key === 'density')?.goalId, 'the goal');
+
+      const restated = write((ctx) =>
+        reconcileDraft(
+          ctx,
+          c.shape.id,
+          // A round supersedes the pending rows it leaves out, so the question is restated too.
+          PlanDraft.parse({ additions: [addition(newGoalId)], questions: [question] }),
+        ),
+      );
+      if (!restated.ok) throw new Error(restated.errors.join('; '));
+      const rows = listShapeProposals(c.store.db, c.shape.id);
+      const pending = rows.filter((r) => r.state === ShapeProposalState.Pending);
+      expect(pending.map((r) => r.key).sort()).toEqual(['extra', 'on-extra']);
+
+      const out = write((ctx) =>
+        convertProposals(
+          ctx,
+          c.shape.id,
+          pending.map((r) => r.id),
+        ),
+      );
+      expect(out).toMatchObject({ ok: true, createdNow: 2 });
+      const extra = listTasks(c.store.db, c.project.id).find((t) => t.title === 'Extra');
+      expect(extra?.goalId).toBe(newGoalId);
+      expect(
+        listShapeQuestions(c.store.db, c.shape.id).find((q) => q.key === 'on-extra'),
+      ).toMatchObject({ taskId: extra?.id });
     });
 
     it('leaves the question where it was when the removal is refused', () => {

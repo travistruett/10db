@@ -95,6 +95,7 @@ function convertedOf(
       : {
           withdrawn: principle.state === KnowledgeState.Withdrawn,
           superseded: principle.supersededById !== null,
+          retired: principle.state === KnowledgeState.Retired,
         }),
   };
 }

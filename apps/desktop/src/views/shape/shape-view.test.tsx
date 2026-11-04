@@ -846,7 +846,18 @@ describe('Shape: converted rows and their undo', () => {
     });
   });
 
-  it('offers no withdrawal for a principle already withdrawn or replaced', async () => {
+  // The menu opens a frame after the click, so wait for it; Why? is always in it. `hidden` because
+  // jsdom gives the target no size, so the popover then hides itself as detached (display: none)
+  // and a plain role query would find no item at all, whatever the menu holds.
+  const expectNoWithdrawalOffered = async (statement: string) => {
+    fireEvent.click(screen.getByRole('button', { name: `Actions for ${statement}` }));
+    const items = await screen.findAllByRole('menuitem', { hidden: true });
+    const labels = items.map((item) => item.textContent);
+    expect(labels).toContain('Why?');
+    expect(labels).not.toContain('Withdraw Principle…');
+  };
+
+  it('offers no withdrawal for a principle already withdrawn', async () => {
     const view = proposed([
       {
         ...principleProposal('gone', { state: 'accepted', statement: 'Never use tabs' }),
@@ -859,6 +870,15 @@ describe('Shape: converted rows and their undo', () => {
           superseded: false,
         },
       },
+    ]);
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText('Withdrawn')).toBeTruthy();
+    await expectNoWithdrawalOffered('Never use tabs');
+  });
+
+  it('offers no withdrawal for a principle already replaced', async () => {
+    const view = proposed([
       {
         ...principleProposal('old', { state: 'accepted', statement: 'Never use spaces' }),
         converted: {
@@ -873,13 +893,30 @@ describe('Shape: converted rows and their undo', () => {
     ]);
     serve(...conversations(view));
     open(view);
-    expect(await screen.findByText('Withdrawn')).toBeTruthy();
-    expect(screen.getByText('Converted · replaced by a later principle')).toBeTruthy();
-    for (const statement of ['Never use tabs', 'Never use spaces']) {
-      const actions = screen.queryByRole('button', { name: `Actions for ${statement}` });
-      if (actions !== null) fireEvent.click(actions);
-      expect(screen.queryByRole('menuitem', { name: 'Withdraw Principle…' })).toBeNull();
-    }
+    expect(await screen.findByText('Converted · replaced by a later principle')).toBeTruthy();
+    await expectNoWithdrawalOffered('Never use spaces');
+  });
+
+  it('says a converted principle was retired and offers no withdrawal for it', async () => {
+    const view = proposed([
+      {
+        ...principleProposal('ended', { state: 'accepted', statement: 'Never use semicolons' }),
+        converted: {
+          goalId: null,
+          taskIds: [],
+          decisionId: null,
+          principleId: mintId('Principle'),
+          withdrawn: false,
+          superseded: false,
+          retired: true,
+        },
+      },
+    ]);
+    serve(...conversations(view));
+    open(view);
+    expect(await screen.findByText('Retired from Knowledge')).toBeTruthy();
+    expect(screen.queryByText('Converted · in Knowledge')).toBeNull();
+    await expectNoWithdrawalOffered('Never use semicolons');
   });
 
   it('withdraws a decision only with a reason', async () => {
