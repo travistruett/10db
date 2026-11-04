@@ -3024,6 +3024,51 @@ describe('worktree checkouts', () => {
         expect(flags()).toEqual([]);
       });
 
+      it('reads the files of several directories together, so a batch waits no longer for more directories', async () => {
+        const OTHER = '.claude/hooks/new.sh';
+        const lane = running();
+        watcher.sync();
+        editCard(lane, FILE, 'allow_once');
+        editCard(lane, OTHER, 'allow_once');
+        const stamp = vi.mocked(stampOrReason);
+        stamp.mockClear();
+        const releases: ((r: { stamp: string }) => void)[] = [];
+        for (let i = 0; i < 2; i += 1) {
+          stamp.mockImplementationOnce(
+            () =>
+              new Promise((resolve) => {
+                releases.push(resolve);
+              }),
+          );
+        }
+        touch(FILE);
+        touch(OTHER);
+        emit('.codex/rules');
+        emit('.claude/hooks');
+        const flushing = watcher.flush();
+        // Both are read before either read finishes: one directory's slow file does not hold up the other's.
+        await vi.waitFor(() => {
+          expect(stamp).toHaveBeenCalledTimes(2);
+        });
+        releases[0]?.({ stamp: 'first-stamp' });
+        releases[1]?.({ stamp: 'second-stamp' });
+        await flushing;
+        expect(stamp).toHaveBeenCalledTimes(2);
+        expect(flags()).toEqual([]);
+      });
+
+      it('allows two reported directories, one inside the other, on one card for the file they share', async () => {
+        const NESTED = '.codex/rules/deep/new.rules';
+        const lane = running();
+        watcher.sync();
+        editCard(lane, NESTED, 'allow_once');
+        touch(NESTED);
+        emit('.codex/rules');
+        emit('.codex/rules/deep');
+        await watcher.flush();
+        expect(flags()).toEqual([]);
+      });
+
       it('still cards the directory that holds a file no card allowed', async () => {
         const lane = running();
         watcher.sync();

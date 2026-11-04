@@ -791,14 +791,22 @@ export function createWatcher(deps: {
     const outside = new Set([...strays, ...hidden]);
     // A write the builder allowed through its permission card needs no second card.
     const allowed = await allowedWrites(projectId, entry.root, [...outside], candidates);
-    // A directory the allowed write created holds only that write, so it is allowed with it.
-    for (const rel of outside) {
-      if (allowed.has(rel) || !isRealDirectory(join(entry.root, rel))) continue;
+    // A directory the allowed write created holds only that write, so it is allowed with it. The files of
+    // every such directory go through one allowedWrites call, so a batch makes at most two calls, whatever
+    // the number of directories, and waits at most four budgets (STAMP_BUDGET_MS each) for its reads.
+    const directories = [...outside].flatMap((rel) => {
+      if (allowed.has(rel) || !isRealDirectory(join(entry.root, rel))) return [];
       const files = filesUnder(entry.root, rel);
-      if (files === null || files.length === 0) continue;
-      const fileAllowed = await allowedWrites(projectId, entry.root, files, candidates);
+      return files === null || files.length === 0 ? [] : [{ rel, files }];
+    });
+    const fileAllowed = await allowedWrites(
+      projectId,
+      entry.root,
+      [...new Set(directories.flatMap(({ files }) => files))],
+      candidates,
+    );
+    for (const { rel, files } of directories)
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
-    }
     raise(
       project,
       site,
@@ -818,7 +826,8 @@ export function createWatcher(deps: {
    * Runs `work` after what is already queued for the checkout `root`. Each checkout has a queue of its own, so
    * a file that takes long to stamp holds up only the work behind it in its own checkout, never another
    * checkout's batches or another project's. With at most one batch waiting per checkout (see `flush`), work
-   * queued there waits for at most the batch running and the one waiting, each bounded by the stamp budget.
+   * queued there waits for at most the batch running and the one waiting, each with its stamp reads bounded
+   * by four budgets (`processBatch`).
    */
   function onRoot(root: string, work: () => Promise<void>): Promise<void> {
     const queued = (queues.get(root) ?? Promise.resolve()).then(work);
@@ -934,8 +943,9 @@ export function createWatcher(deps: {
       const allowed = await allowedWrites(ws.projectId, root, written, [workstreamId]);
       // Nor a file still showing the write another running lane's card excused: a stamp that matches means
       // nobody has written to it since, so it is that lane's write and not this lane's to answer for. Only a
-      // path another lane's excused write names is read (a huge file nobody excused costs nothing), and each
-      // read is within the stamp time budget, so this step end never waits on a file longer than that.
+      // path another lane's excused write names is read (a huge file nobody excused costs nothing). These
+      // reads run together as one round within the stamp time budget, after allowedWrites' two, so this step
+      // end makes at most three rounds and waits at most three budgets (90 s) for its reads.
       const others = listWorkstreams(db, { states: WATCHED_STATES, projectId: ws.projectId })
         .map((other) => other.id)
         .filter((id) => id !== workstreamId);
