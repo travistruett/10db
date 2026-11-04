@@ -1336,9 +1336,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     // A failed install was already started over by `refresh`, or was a timeout or a refused host
     // that a repeat would only meet again: it is reported as it is. So is an install whose own
     // start over exited zero and left the copy broken (`installs` 2 and not `final`): the second
-    // pass would be that same install from nothing again. Only an install that exited zero without
-    // a start over of `refresh`'s own gets the second pass, and `refresh` adds no retry to a start
-    // over it was asked for, so one gate runs an install twice at most.
+    // pass would be that same install from nothing again. Only `refresh`'s retry after a failed
+    // install (`installs` 2) rules out the second pass. A copy broken on arrival makes `refresh`
+    // remove node_modules before its first install (`startedOver`, `installs` 1): if that install
+    // exits zero and the copy is still broken, the second pass runs, and that is two installs.
+    // `refresh` adds no retry to a start over it was asked for, so one gate runs two installs at most.
     if (first.final === true || (first.installs ?? 0) >= 2) return first;
     // The first recovery is automatic: remove node_modules, install from nothing, and let the step
     // run if that resolves. Only a second broken install in a row is reported

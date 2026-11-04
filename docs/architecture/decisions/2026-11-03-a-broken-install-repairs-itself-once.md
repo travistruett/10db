@@ -10,7 +10,8 @@
   removes `node_modules` whatever its state), then checks again. If the packages now resolve, the step goes on: the
   gate starts, or the shipping gate runs, with no card and no attempt counted. The same code serves the task's
   gate and the shipping gate, since both call `beforeGate`.
-- **The check after the second pass reads the copy.** `install` calls `checkInstall` itself, whatever the second
+- **The check after the second pass reads the copy.** When `refresh`'s retry after a failed install already
+  was the second install, there is no second pass and the result is reported as it is. Otherwise `install` calls `checkInstall` itself, whatever the second
   pass answered: that pass can throw, or skip its own check when a failed first install took `node_modules` and the
   recorded lockfile with it. Only a whole copy goes on. A second install that exits non-zero with every link whole
   counts as repaired: the packages resolve, the gate runs with the failure in its note, and the next gate installs
@@ -33,9 +34,11 @@
   runs at most two installs in one gate (`refresh`'s own pair), not four. The same holds when `refresh`'s start
   over exits zero and the copy is still broken: that result is `installed` with two installs, not `final`, but
   the gate's second pass would be the same install from nothing a third time, so `install` reports it as it is
-  (no third install). The second pass applies only to an install that exited zero, with no start over of
-  `refresh`'s own, and left the copy broken. `refresh` adds no retry of its own to a start over it was asked
-  for, since that install already is the start over from nothing, so that path runs two installs as well.
+  (no third install). The one case that skips the second pass is `refresh`'s retry after a failed install
+  (two installs). A copy that is broken on arrival is different: `refresh` starts over before installing
+  (`node_modules` removed, one install), and if that install exits zero and the copy is still broken the gate's
+  second pass still runs, which is two installs. `refresh` adds no retry of its own to a start over it was asked
+  for, since that install already is the start over from nothing.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. Both repairs
   leave it: the gate's second pass, and `refresh`'s own start over after a failed install left the copy broken.
