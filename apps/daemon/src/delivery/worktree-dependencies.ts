@@ -117,6 +117,7 @@ export interface WorktreeDependencies {
     /**
      * Removes `node_modules` before installing whatever its state: the caller found the install
      * before this one left the copy broken (`decisions/2026-11-03-a-broken-install-repairs-itself-once.md`).
+     * This install is that start over, so a failure is reported as it is, with no retry of its own.
      */
     readonly startOver?: true;
   }): Promise<DependencyRefresh>;
@@ -240,8 +241,10 @@ export function createWorktreeDependencies(deps: WorktreeDependenciesDeps): Work
       const first = await install();
       // An install the sandbox stopped part way leaves packages missing. Once is enough to start
       // over: a copy with nothing in node_modules installs as a new one does. Not after a timeout
-      // (it would only wait again) or a refused host (the same refusal would come back).
+      // (it would only wait again) or a refused host (the same refusal would come back), and not
+      // when the caller asked to start over: this install already was that.
       if (
+        asked !== true &&
         first.kind === 'failed' &&
         !first.timedOut &&
         first.blockedHosts.length === 0 &&

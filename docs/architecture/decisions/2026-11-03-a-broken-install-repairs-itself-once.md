@@ -24,8 +24,10 @@
   refused host (the same refusal would come back). `installOnce` marks a failed install `final`, and `install`
   reports it as it is: a timeout or a refused host raises the `install_broken` card without a second install, and
   any other failure runs at most two installs in one gate (`refresh`'s own pair), not four. The second pass
-  applies only to an install that exited zero and left the copy broken. The card's note says only that the
-  install did not bring the packages back when no start over happened.
+  applies only to an install that exited zero and left the copy broken. `refresh` adds no retry of its own to a
+  start over it was asked for, since that install already is the start over from nothing, so that path runs two
+  installs as well. The card's note says only that the install did not bring the packages back when no start
+  over happened.
 - **History.** A repaired install leaves the batch notice `install-repaired` (`installNotices.repaired`): the drawer
   shows "The install in this copy was repaired at <UTC time>", and its body names what was unresolved. The next
   repair replaces it with its own time. The time is the delivery context's clock.

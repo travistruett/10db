@@ -216,7 +216,7 @@ type Installed =
        * wait again) or a refused host (the same refusal would come back).
        */
       readonly final?: true;
-      /** The install failed and `refresh` itself started over and installed again. */
+      /** The install failed after a start over, by `refresh` itself or the second pass. */
       readonly startedOver?: true;
     }
   | { readonly kind: 'aborted' };
@@ -922,8 +922,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const first = await installOnce(batch, project, path, signal, false);
     if (first.kind !== 'done' || first.broken === undefined) return first;
     // A failed install was already started over by `refresh`, or was a timeout or a refused host
-    // that a repeat would only meet again: it is reported as it is, so one gate runs an install
-    // twice at most.
+    // that a repeat would only meet again: it is reported as it is. An install that exited zero gets
+    // the second pass, and `refresh` adds no retry to a start over it was asked for, so one gate
+    // runs an install twice at most.
     if (first.final === true) return first;
     // The first recovery is automatic: remove node_modules, install from nothing, and let the step
     // run if that resolves. Only a second broken install in a row is reported
@@ -1018,9 +1019,9 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             ok: false,
             note: `The install this branch's lockfile needs failed (${how}; log: ${installed.logPath}), so its packages may not match it.${blocked}`,
             final: true as const,
-            ...(installed.timedOut || installed.blockedHosts.length > 0
-              ? {}
-              : { startedOver: true as const }),
+            ...(again || (!installed.timedOut && installed.blockedHosts.length === 0)
+              ? { startedOver: true as const }
+              : {}),
             ...(broken === undefined ? {} : { broken }),
           };
         }

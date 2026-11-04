@@ -314,6 +314,21 @@ describe('refreshing a worktree’s dependencies', () => {
       expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(2);
     });
 
+    it('does not start over again when the failed install was already the start over the caller asked for', async () => {
+      fakePnpm();
+      installedCopy('packageManager: pnpm@12.9.1\n');
+      writeFileSync(join(bin, 'pnpm'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${calls}'\nexit 1\n`);
+      const result = await dependencies().refresh({
+        batch,
+        project,
+        path: worktree,
+        signal,
+        startOver: true,
+      });
+      expect(result).toMatchObject({ kind: 'failed', exitCode: 1 });
+      expect(readFileSync(calls, 'utf8').trim().split('\n')).toHaveLength(1);
+    });
+
     it('does not start over when the failed install left every package in place', async () => {
       fakePnpm();
       installedCopy('packageManager: pnpm@12.9.1\n');

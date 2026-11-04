@@ -337,6 +337,34 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(update.kind).toBe('install_broken');
     });
 
+    it('runs an install twice at most in one gate when the first exits zero and the start over fails', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation((input) => {
+        if (input.startOver === true) h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
+        return refresh(input);
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      // Call 1 was the cut's; the install that exited zero and the start over are the two after it.
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/needs failed \(exit 1/);
+    });
+
+    it('says both installs ran when the gate’s start over is the one refused a host', async () => {
+      const { batch } = await pruned();
+      const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
+      vi.spyOn(h.ctx.dependencies, 'refresh').mockImplementation((input) => {
+        if (input.startOver === true) h.pnpm.blockedFrom('registry.npmjs.org');
+        return refresh(input);
+      });
+      const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+      expect(h.pnpm.calls()).toHaveLength(3);
+      expect(update.kind).toBe('install_broken');
+      expect(update.kind === 'install_broken' && update.note).toMatch(/installed again/);
+    });
+
     it('raises the card without starting over when the first install timed out', async () => {
       const { batch } = await pruned();
       const refresh = h.ctx.dependencies.refresh.bind(h.ctx.dependencies);
