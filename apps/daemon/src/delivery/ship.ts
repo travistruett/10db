@@ -1337,15 +1337,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const member = getWorkstream(db, workstreamId);
     // A function, so a check after an await is not narrowed away by the one before it.
     const stopped = (): boolean => signal.aborted;
-    // Whatever changed since the card was answered, the answer no longer fits: do nothing.
-    if (
-      stopped() ||
-      (batch.state !== BatchState.Open && batch.state !== BatchState.Failed) ||
-      member.state !== WorkstreamState.Failed ||
-      unfinishedWork(batch) !== null ||
-      deps.holdShips?.()
-    )
-      return;
     const failed = members(db, batchId).filter(
       (m) => m.state === WorkstreamState.Failed && !leftOut(m),
     );
@@ -1355,14 +1346,55 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const attempt = { workstreamId, titles };
     const stopWith = (card: Card): void => {
       deps.logger.warn({ batchId, workstreamId, title: card.title }, 'ship without a run stopped');
-      raise(deps.inbox, batch.projectId, card);
+      try {
+        raise(deps.inbox, batch.projectId, card);
+      } catch (error) {
+        // A daemon that is stopping may have closed the database: the log is all that is left.
+        deps.logger.error(
+          { batchId, workstreamId, err: detailOf(error) },
+          'ship without a run could not raise its card',
+        );
+      }
     };
+    // The failed card is resolved already, so a stop that leaves nothing would be a silent answer.
+    const notStarted = (why: string, answerable = true): void => {
+      stopWith(leftOutCards.notStarted(batch, attempt, why, answerable));
+    };
+    // Whatever changed since the card was answered, the answer no longer fits: nothing moves, and a card says why.
+    const unfinished = unfinishedWork(batch);
+    const refusal: { readonly why: string; readonly answerable: boolean } | null =
+      batch.state !== BatchState.Open && batch.state !== BatchState.Failed
+        ? { why: `the batch is ${batch.state.toLowerCase()}`, answerable: false }
+        : member.state !== WorkstreamState.Failed
+          ? {
+              why: `${member.taskTitle} is ${member.state.toLowerCase()}, not failed`,
+              answerable: false,
+            }
+          : stopped()
+            ? { why: '10db was stopping', answerable: true }
+            : unfinished
+              ? { why: unfinished.message, answerable: true }
+              : deps.holdShips?.()
+                ? {
+                    why: 'a waiting update has paused new ships until it installs',
+                    answerable: true,
+                  }
+                : null;
+    if (refusal) {
+      notStarted(refusal.why, refusal.answerable);
+      return;
+    }
+    // The revert commit, once there is one: from then on a stop must not leave the branch unexplained.
+    let revert: string | null = null;
     try {
       const { branch } = batch;
       const checkout = batch.worktreePath ?? getProject(db, batch.projectId).repoPath;
       if (batch.worktreePath !== null) {
         const whole = await ensureWorktreeWhole(deps, batch, signal);
-        if (stopped()) return;
+        if (stopped()) {
+          notStarted('10db was stopping');
+          return;
+        }
         if (whole === 'refused') {
           stopWith(
             leftOutCards.failed(batch, attempt, "the batch's worktree could not be made whole"),
@@ -1385,7 +1417,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
       for (const run of failed)
         commits.push({ run, shas: await commitsOf(batchId, run, checkout, branch) });
       const shas = commits.flatMap((c) => c.shas);
-      let revert: string | null = null;
       if (shas.length > 0) {
         const reverted = await deps.git.revertCommits({
           repo: checkout,
@@ -1397,7 +1428,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
             commits.flatMap((c) => c.shas.map((sha) => `- ${sha} (${c.run.taskTitle})`)).join('\n'),
           ].join('\n\n'),
         });
-        if (stopped()) return;
+        // Only a revert that committed must go on whatever the signal says; a stop leaves the rest unchanged.
+        if (reverted.kind === 'reverted') revert = reverted.head;
+        else if (stopped()) {
+          notStarted('10db was stopping');
+          return;
+        }
         if (reverted.kind === 'conflict') {
           stopWith(leftOutCards.conflict(batch, attempt, reverted.paths));
           return;
@@ -1410,8 +1446,10 @@ export function createShipper(deps: ShipperDeps): Shipper {
           stopWith(leftOutCards.blocked(batch, attempt, reverted.changed));
           return;
         }
-        if (reverted.kind === 'reverted') revert = reverted.head;
       }
+      // From here a stop of the daemon changes nothing: the revert commit is on the branch, so the
+      // notice and the move are written whatever the signal says. The ship itself is what a stopping
+      // daemon leaves queued, and a restart resumes a SHIPPING batch.
       const moved = deps.state.write((w) => {
         const now = getBatch(w.tx, batchId);
         if (now.state !== BatchState.Open && now.state !== BatchState.Failed) return false;
@@ -1435,10 +1473,26 @@ export function createShipper(deps: ShipperDeps): Shipper {
         });
         return true;
       });
-      if (moved) resume(batchId);
+      if (moved) {
+        if (!stopped()) resume(batchId);
+      } else if (revert !== null) {
+        const now = getBatch(db, batchId);
+        stopWith(
+          leftOutCards.revertKept(
+            batch,
+            attempt,
+            revert,
+            `The batch became ${now.state.toLowerCase()} while the revert ran, so its notices and its move to shipping were not written.`,
+          ),
+        );
+      }
     } catch (error) {
-      if (stopped()) return;
-      stopWith(leftOutCards.failed(batch, attempt, detailOf(error)));
+      if (revert !== null) {
+        stopWith(leftOutCards.revertKept(batch, attempt, revert, detailOf(error)));
+        return;
+      }
+      if (stopped()) notStarted('10db was stopping');
+      else stopWith(leftOutCards.failed(batch, attempt, detailOf(error)));
     }
   }
 

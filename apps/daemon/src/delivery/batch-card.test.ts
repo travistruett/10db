@@ -11,7 +11,7 @@ import {
   setWorkstreamNotice,
   transitionBatch,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { createInboxService, type InboxService } from '../inbox';
 import { insertPlannedWorkstream, planForStart, retryWorkstream } from '../team';
@@ -439,6 +439,135 @@ describe('the failed workstream card', () => {
       expect(stopped.title).toBe('Alpha was not left out: its commits resolved conflict markers');
       expect(stopped.body).toContain('- src/api/merged.txt');
       expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+    });
+
+    describe('when it stops between the answer and the job', () => {
+      it('raises a card saying a waiting update paused the ship, and offers the answer again', async () => {
+        let draining = false;
+        h.close();
+        h = createDeliveryHarness({}, { holdShips: () => draining });
+        inbox = answering();
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        const tip = h.git$('rev-parse', 'HEAD');
+
+        expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+        draining = true;
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        expect(h.git$('rev-parse', 'HEAD')).toBe(tip);
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        expect(stopped.title).toMatch(/waiting update/);
+        expect(stopped.body).toMatch(/Nothing was shipped and the branch is unchanged/);
+        expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+
+        draining = false;
+        expect(inbox.answer(stopped.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+        await h.jobs.idle();
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+      });
+
+      it('raises a card when the batch moved on, with no answer to give', async () => {
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        h.state.write((w) =>
+          transitionBatch(w, batchId, { to: 'ABANDONED', reason: 'abandoned by a test' }),
+        );
+        await h.jobs.idle();
+
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        expect(stopped.title).toMatch(/abandoned/);
+        expect(stopped.options).toEqual([]);
+      });
+
+      it('raises a card when the daemon was stopping before the job began', async () => {
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.stop();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        expect(stopped.title).toMatch(/stopping/);
+        expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
+      });
+    });
+
+    describe('once the revert commit is on the branch', () => {
+      /** A harness whose revert runs `after` once the real one has committed. */
+      function revertThen(after: () => void) {
+        h.close();
+        h = createDeliveryHarness(
+          {},
+          {
+            wrapGit: (git) => ({
+              ...git,
+              revertCommits: async (request) => {
+                const reverted = await git.revertCommits(request);
+                after();
+                return reverted;
+              },
+            }),
+          },
+        );
+        inbox = answering();
+      }
+
+      it('writes the notice and moves the batch when the daemon began stopping during the revert', async () => {
+        revertThen(() => {
+          void h.jobs.stop();
+        });
+        const { card, batchId, failed } = await failedInBatch('DONE', {
+          'src/api/alpha.txt': 'alpha\n',
+        });
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        // The revert is on the branch, so the batch moved and the drawer says why; the ship itself
+        // is what a restart resumes from SHIPPING.
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPING');
+        expect(getWorkstream(h.store.db, failed).notice?.key).toBe('left-out');
+      });
+
+      it('says the revert is on the branch when the state write throws', async () => {
+        const revertedAt: { sha: string } = { sha: 'unset' };
+        revertThen(() => {
+          revertedAt.sha = h.git$('rev-parse', 'HEAD');
+          vi.spyOn(h.state, 'write').mockImplementationOnce(() => {
+            throw new Error('database is locked');
+          });
+        });
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(stopped.title).toMatch(/revert is on the branch/i);
+        expect(stopped.body).toContain(revertedAt.sha.slice(0, 9));
+        expect(stopped.body).toContain('database is locked');
+        expect(stopped.body).not.toMatch(/branch is unchanged/);
+      });
+
+      it('says the revert is on the branch when the batch moved on before the write', async () => {
+        let batch: string | null = null;
+        revertThen(() => {
+          if (batch === null) throw new Error('batch unset');
+          h.state.write((w) =>
+            transitionBatch(w, batch as BatchId, { to: 'ABANDONED', reason: 'a test' }),
+          );
+        });
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        batch = batchId;
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('revert')));
+        expect(stopped.title).toMatch(/revert is on the branch/i);
+        expect(stopped.body).not.toMatch(/branch is unchanged/);
+      });
     });
 
     it('lets a batch reopened after a left-out run ship by itself once the rest is done', async () => {
