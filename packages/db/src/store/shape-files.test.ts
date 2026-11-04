@@ -10,6 +10,7 @@ import {
   listShapeFiles,
   listShapeProposals,
   listUntoldShapeFiles,
+  markShapeFilesInline,
   markShapeFilesTold,
   seedProject,
   type Store,
@@ -83,6 +84,29 @@ describe('shape files', () => {
       markShapeFilesTold(ctx, []);
     });
     expect(listUntoldShapeFiles(store.db, shapeId)).toHaveLength(1);
+  });
+
+  it('marks the files a turn sent inline, and a fresh session clears the others first', () => {
+    const a = store.write((ctx) => insertShapeFile(ctx, file('a.png'))).value;
+    const b = store.write((ctx) => insertShapeFile(ctx, file('b.png'))).value;
+    const inline = () => listShapeFiles(store.db, shapeId).map((f) => f.inlineSent);
+    expect(inline()).toEqual([false, false]);
+    store.write((ctx) => {
+      markShapeFilesInline(ctx, shapeId, [a.id], false);
+    });
+    expect(inline()).toEqual([true, false]);
+    store.write((ctx) => {
+      markShapeFilesInline(ctx, shapeId, [b.id], false);
+    });
+    expect(inline()).toEqual([true, true]);
+    store.write((ctx) => {
+      markShapeFilesInline(ctx, shapeId, [b.id], true);
+    });
+    expect(inline()).toEqual([false, true]);
+    store.write((ctx) => {
+      markShapeFilesInline(ctx, shapeId, [], true);
+    });
+    expect(inline()).toEqual([false, false]);
   });
 });
 

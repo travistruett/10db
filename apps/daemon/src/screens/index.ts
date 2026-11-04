@@ -7,6 +7,7 @@ export {
   INLINE_CONVERSATION_MAX_BYTES,
   inlineBytesSpent,
   isImageName,
+  parseScreenBody,
   tooBigAlone,
 } from './inline-budget';
 export { RENDER_READS, RENDER_REFUSED_READS, renderMayRead } from './render-access';

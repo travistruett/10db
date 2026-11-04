@@ -12,12 +12,25 @@ export interface ShapeKeys {
  * True when Esc belongs to something open on top of the screen: a modal, a menu, or a select whose
  * list is showing. Closed ones are not in the page (or, for a select, not `aria-expanded`).
  */
-function escapeIsTaken(event: KeyboardEvent): boolean {
+export function escapeIsTaken(event: KeyboardEvent): boolean {
   return (
     event.defaultPrevented ||
     document.querySelector(
       '[role="dialog"], [role="menu"], [aria-expanded="true"][aria-haspopup]',
     ) !== null
+  );
+}
+
+/** Marks a form that cancels on Esc itself, so a key pressed inside it is left to it. */
+export const OWNS_ESCAPE_ATTRIBUTE = 'data-owns-escape';
+
+/**
+ * True when the key landed inside a form that answers Esc itself. That form hears the key only on
+ * the way back up, after a capture listener, so the listener has to ask where the key landed.
+ */
+export function escapeHasOwner(event: KeyboardEvent): boolean {
+  return (
+    event.target instanceof Element && event.target.closest(`[${OWNS_ESCAPE_ATTRIBUTE}]`) !== null
   );
 }
 

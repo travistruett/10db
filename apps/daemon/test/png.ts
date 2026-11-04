@@ -31,6 +31,29 @@ export function pngOfSize(width: number, height: number, pad = 0): Buffer {
 }
 
 /**
+ * A real PNG any decoder opens that does not compress: every pixel is noise, so it weighs about
+ * `width * height * 3` bytes. For what a size-reducing tool does to a picture that is big in bytes.
+ */
+export function noisePng(width: number, height: number): Buffer {
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(width, 0);
+  header.writeUInt32BE(height, 4);
+  header.set([8, 2, 0, 0, 0], 8);
+  let state = 0x2545f491;
+  const rows = Buffer.alloc(height * (1 + width * 3));
+  for (let i = 0; i < rows.length; i += 1) {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
+    rows[i] = i % (1 + width * 3) === 0 ? 0 : state >>> 24;
+  }
+  return Buffer.concat([
+    SIGNATURE,
+    chunk('IHDR', header),
+    chunk('IDAT', deflateSync(rows, { level: 1 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+/**
  * A real PNG any decoder opens: the left half red, the right half blue. `pad` adds that many bytes of
  * ancillary text, for a picture too big to keep.
  */

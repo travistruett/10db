@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   realpathSync,
   rmSync,
@@ -30,6 +31,7 @@ import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { createMcpHandler, mintSessionToken, ToolImages } from '../src/mcp';
 import {
+  READ_PICTURE_CHARGE_MAX_BYTES,
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
@@ -39,7 +41,7 @@ import {
 } from '../src/shape';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
 import { createTempRepo } from './fixtures';
-import { pngImage } from './png';
+import { noisePng, pngImage } from './png';
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`
@@ -432,4 +434,143 @@ describe.skipIf(!live)('a Shape session, live', () => {
       rmSync(filesDir, { recursive: true, force: true });
     }
   }, 180_000);
+
+  // Shape spec §5.4: what a picture read with Read adds to a request the session resends. The hook charges
+  // a Read at most READ_PICTURE_CHARGE_MAX_BYTES (read-budget.ts); this reads the picture Claude Code put in
+  // the session's own transcript file, which is what it resends, and fails if it is larger. It prints the
+  // sizes it found so the allowance can be set from them.
+  it('returns a read picture within the size the hook charges for it', async () => {
+    const login = await captureLoginEnv({ inherited: process.env });
+    const claudePath = findClaude();
+    if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+    const repo = createTempRepo();
+    const checkout = realpathSync(repo.path);
+    const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
+    // A 6 MB picture that cannot be compressed, a small one, and a 4000 px wide one.
+    const big = join(filesDir, 'big.png');
+    const small = join(filesDir, 'small.png');
+    const wide = join(filesDir, 'wide.png');
+    writeFileSync(big, noisePng(1400, 1400));
+    writeFileSync(small, pngImage(600, 400));
+    writeFileSync(wide, noisePng(4000, 600));
+
+    const adapter = createClaudeAdapter({
+      claudePath,
+      pluginDir: HARNESS_PLUGIN_DIR,
+      logger: createLogger({ level: 'info', destination: { write: () => undefined } }),
+    });
+    const launcher = createLauncher({
+      base: login.vars,
+      clientApp: '10db/live-test',
+      keychain: systemKeychain,
+    });
+    const account: AccountRow = {
+      id: mintId('Account'),
+      kind: 'claude_subscription',
+      label: 'Claude plan',
+      payer: '',
+      expectedIdentity: null,
+      configDir: launcher.loginConfigDir(),
+      secretRef: null,
+      secretFingerprint: null,
+      settings: {},
+      laneCap: 4,
+      monthlyCapUsd: null,
+      archived: false,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+    const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
+    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const access = {
+      checkout,
+      home: homedir(),
+      protectedReads: [],
+      filesDir,
+      tempRoot: realpathSync(tmpdir()),
+    };
+
+    let providerSessionId = '';
+    const handle = adapter.startShape({
+      sessionId: mintId('Session'),
+      shapeId: mintId('Shape'),
+      cwd: checkout,
+      systemPrompt: SHAPE_SYSTEM_PROMPT,
+      prompt: `Use the Read tool on each of these in turn, then say "done": ${big}, ${small}, ${wide}`,
+      model: launch.model,
+      effort: 'low',
+      resumeProviderSessionId: null,
+      env: launch.env,
+      account: launch.expect,
+      tools: [...SHAPE_BUILT_IN_TOOLS],
+      allowedTools: SHAPE_ALLOWED_TOOLS,
+      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
+      agents: {},
+      mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+      preToolUse: (req) =>
+        judgeShapeCall(
+          {
+            toolName: req.toolName,
+            toolInput: req.input,
+            agentId: req.agentId,
+            agentType: req.agentType,
+          },
+          access,
+        ),
+    });
+    for await (const event of handle.events) {
+      if (event.type === 'started') providerSessionId = event.providerSessionId;
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+
+    try {
+      expect(providerSessionId).not.toBe('');
+      // Null is the ordinary case: Claude Code then keeps its config in ~/.claude.
+      const configDir = launcher.loginConfigDir() ?? join(homedir(), '.claude');
+      const transcript = findTranscript(configDir, providerSessionId);
+      const sizes = imageBlockBytes(readFileSync(transcript, 'utf8'));
+      console.log(
+        `Read pictures in the session's transcript, bytes before base64: ${JSON.stringify(sizes)}`,
+      );
+      // All three: the allowance is proven by the large pictures, not by the small one alone.
+      expect(sizes).toHaveLength(3);
+      for (const size of sizes) expect(size).toBeLessThanOrEqual(READ_PICTURE_CHARGE_MAX_BYTES);
+    } finally {
+      repo.cleanup();
+      rmSync(filesDir, { recursive: true, force: true });
+    }
+  }, 240_000);
 });
+
+/** The session's transcript file under Claude Code's config dir: `projects/<project>/<id>.jsonl`. */
+function findTranscript(configDir: string, providerSessionId: string): string {
+  const projects = join(configDir, 'projects');
+  for (const dir of readdirSync(projects)) {
+    const file = join(projects, dir, `${providerSessionId}.jsonl`);
+    if (existsSync(file)) return file;
+  }
+  throw new Error(`no transcript for session ${providerSessionId} under ${projects}`);
+}
+
+/** The decoded size of each image in a tool result in a transcript's lines. */
+function imageBlockBytes(jsonl: string): number[] {
+  const sizes: number[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(visit);
+    else if (typeof value === 'object' && value !== null) {
+      const block = value as { type?: unknown; source?: { data?: unknown } };
+      if (block.type === 'image' && typeof block.source?.data === 'string')
+        sizes.push(Buffer.from(block.source.data, 'base64').length);
+      else Object.values(value).forEach(visit);
+    }
+  };
+  for (const line of jsonl.split('\n')) {
+    if (line.trim() === '') continue;
+    const entry = JSON.parse(line) as { type?: unknown; message?: { content?: unknown } };
+    // Only a user entry's tool results: an image the user sent in a message is not a Read.
+    if (entry.type === 'user' && Array.isArray(entry.message?.content))
+      for (const part of entry.message.content as { type?: unknown; content?: unknown }[])
+        if (part.type === 'tool_result') visit(part.content);
+  }
+  return sizes;
+}
