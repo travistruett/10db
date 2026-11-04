@@ -36,6 +36,15 @@ describe('FormModal', () => {
     expect(alert.contains(save)).toBe(false);
   });
 
+  it('shows a long error in full, not clamped behind a hover', async () => {
+    const refusal =
+      'Principle pri_01a1a404-1ddd-7110-b7d9-74fbe475e9c2 already holds the key prs.small at that scope; supersede or retire it first';
+    renderModal({ error: refusal });
+    const text = await screen.findByText(refusal);
+    expect(text.closest('[data-line-clamp]')).toBeNull();
+    expect(text.hasAttribute('title')).toBe(false);
+  });
+
   it('has no error text when error is null', async () => {
     renderModal({ error: null });
     const alert = await screen.findByRole('alert');

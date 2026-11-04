@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { z } from 'zod';
 import { E2E_REPO, E2E_TOKEN } from './paths';
 import { daemonUrl } from './daemon-url';
@@ -36,6 +36,20 @@ async function open(page: Page, view: (typeof VIEWS)[number]): Promise<void> {
     .getByRole('link', { name: new RegExp(`^(Back to )?${view}( \\d+ open cards?)?$`) })
     .click();
   await expectView(page, view);
+}
+
+/**
+ * Visible with none of its text clipped; a line clamp leaves the rest in the DOM, out of sight.
+ * The pixel of slack allows for rounding, far less than a clipped line.
+ */
+async function expectFullyShown(text: Locator): Promise<void> {
+  await expect(text).toBeVisible();
+  const clipped = await text.evaluate(
+    (element) =>
+      element.scrollHeight > element.clientHeight + 1 ||
+      element.scrollWidth > element.clientWidth + 1,
+  );
+  expect(clipped).toBe(false);
 }
 
 test.describe.configure({ mode: 'serial' });
@@ -361,6 +375,27 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await expect(editPrinciple).toBeHidden();
   await expect(principles.getByText('Tests never sleep')).toBeVisible();
   await expect(principles.getByText('Never sleep in tests')).toBeHidden();
+
+  // A key another principle holds is refused, and a dialog's messages are readable without a hover.
+  await page.getByRole('button', { name: 'New Principle' }).click();
+  await newPrinciple.getByLabel('Statement').fill('Keep functions small');
+  await newPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expect(newPrinciple).toBeHidden();
+  await principles.getByRole('button', { name: 'Actions for keep-functions-small' }).click();
+  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  await editPrinciple.getByLabel('Topic key').fill('Not A Key');
+  await editPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expectFullyShown(editPrinciple.getByRole('alert').getByText(/testing\.no-sleeps\)\.$/));
+  await editPrinciple.getByLabel('Topic key').fill('never-sleep-in-tests');
+  await editPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expectFullyShown(
+    editPrinciple
+      .getByRole('alert')
+      .getByText(/already holds the key never-sleep-in-tests .* supersede or retire it first$/),
+  );
+  await editPrinciple.getByRole('button', { name: 'Cancel' }).click();
+  await expect(editPrinciple).toBeHidden();
+
   await page.getByRole('switch', { name: 'History' }).check();
   await expect(principles.getByText('Superseded')).toBeVisible();
   await expect(principles.getByText('Never sleep in tests')).toBeVisible();
