@@ -178,8 +178,9 @@ function throughSymlink(root: string, path: string): boolean {
  * equal strings mean none of those happened to these directories between the two looks. That was observed on
  * APFS (macOS, the data volume), including `renamex_np(RENAME_SWAP)` of a real directory with a symlink: each
  * swap moved the directory's change time, in both directions, and left its modification time alone. Other
- * filesystems were not checked; the daemon's checkouts are on APFS. A directory that can't be looked at
- * throws: two refused looks prove nothing about what was there, so they must not read as two equal looks.
+ * filesystems were not checked, and the daemon does not check which filesystem a checkout is on. A directory
+ * that can't be looked at throws: two refused looks prove nothing about what was there, so they must not read
+ * as two equal looks.
  */
 function lookAtAncestors(root: string, path: string): string | null {
   const rel = relative(root, path);
