@@ -1,5 +1,6 @@
+import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { relative } from 'node:path';
+import { join, relative } from 'node:path';
 import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
 import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -618,15 +619,91 @@ describe('the pictures a Shape session pulls in with Read', () => {
         expect(told[1]).not.toMatch(/shot[023]\.png/);
       });
 
-      it('says nothing for a refused picture that is not a dropped file, or a subagent’s Read', async () => {
+      it('tells apart two images with one name, naming each by the file it is kept in', async () => {
         await fillInline();
-        const files = shots(3);
-        await nextTurn('Look at these');
+        const [first, second] = shots(2);
+        await nextTurn('Two');
+        // Every pasted screenshot is called this, one to a turn, so no send-time notice sees them.
+        const pasted = [1, 2].map(() => drop('pasted-image.png', retina(MB + 200_000)));
+        await nextTurn('A paste');
+        expect(notices()).toEqual([]);
+        for (const file of [first, second]) read(must(file, 'a file').storedPath);
+        expect(read(must(pasted[0], 'a paste').storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toContain('Read pasted-image.png:');
+        // Another file, though it has the same name: the builder is told, and can tell which.
+        expect(read(must(pasted[1], 'a paste').storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(2);
+        expect(notices()[1]).toContain('Read pasted-image-2.png:');
+      });
+
+      it('still names a refused image when the send-time notice named another of its name', async () => {
+        await fillInline();
+        const pasted = [0, 1, 2, 3].map(() => drop('pasted-image.png', retina(MB + 200_000)));
+        await nextTurn('Pastes');
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toMatch(/Read pasted-image-3\.png, pasted-image-4\.png:/);
+        const order = [pasted[2], pasted[0], pasted[1]].map((file) =>
+          read(must(file, 'a paste').storedPath),
+        );
+        expect(order.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        expect(notices()).toHaveLength(2);
+        expect(notices()[1]).toContain('Read pasted-image-2.png:');
+      });
+
+      it('names an image with a comma in its name once, however many times it is refused', async () => {
+        await fillInline();
+        const first = shots(2);
+        await nextTurn('Two');
+        const comma = drop('Mockup, final.png', retina(MB + 200_000));
+        const plain = drop('final.png', retina(MB + 200_000));
+        await nextTurn('Mockups');
+        for (const file of first) read(file.storedPath);
         const before = notices().length;
-        const outside = read('/nowhere/else.png');
-        expect(outside.decision).toBe('deny');
-        for (const file of files) read(file.storedPath, 0, 'agent-1');
-        expect(notices()).toHaveLength(before);
+        for (let i = 0; i < 3; i += 1)
+          expect(read(comma.storedPath)).toMatchObject({ decision: 'deny' });
+        expect(notices()).toHaveLength(before + 1);
+        expect(notices().at(-1)).toContain('Read Mockup, final.png:');
+        // The other name is the end of that one, and is another file.
+        read(plain.storedPath);
+        expect(notices()).toHaveLength(before + 2);
+        expect(notices().at(-1)).toContain('Read final.png:');
+      });
+
+      it('does not repeat an image the send-time notice named, a comma in its name or not', async () => {
+        await fillInline();
+        const files = [...shots(2), drop('Mockup, final.png', retina(MB + 200_000))];
+        await nextTurn('Look at these');
+        expect(notices()).toHaveLength(1);
+        expect(notices()[0]).toContain('Mockup, final.png');
+        const answers = files.map((file) => read(file.storedPath));
+        expect(answers.map((a) => a.decision)).toEqual(['allow', 'allow', 'deny']);
+        expect(notices()).toHaveLength(1);
+      });
+
+      it('says nothing for a refused picture that is not a dropped file, or a subagent’s Read', async () => {
+        // A real checkout: a Read outside it is denied by confinement and never reaches the pool.
+        const checkout = realpathSync(mkdtempSync(join(tmpdir(), 'shape-checkout-')));
+        await f.close();
+        f = createServiceFixture({ checkout });
+        try {
+          await fillInline();
+          const files = shots(2);
+          await nextTurn('Look at these');
+          for (const file of files) read(file.storedPath);
+          const before = notices().length;
+          // The same name as a dropped file, so a match by name or by basename would notice it.
+          const inCheckout = join(checkout, 'shot0.png');
+          writeFileSync(inCheckout, retina(MB + 200_000));
+          const refused = read(inCheckout);
+          expect(refused).toMatchObject({ decision: 'deny' });
+          expect(reasonOf(refused)).toMatch(/Too many pictures read/);
+          const later = drop('later.png', retina(MB + 200_000));
+          expect(read(later.storedPath, 0, 'agent-1')).toEqual({ decision: 'allow' });
+          expect(notices()).toHaveLength(before);
+        } finally {
+          rmSync(checkout, { recursive: true, force: true });
+        }
       });
     });
 

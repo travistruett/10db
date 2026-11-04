@@ -1,5 +1,5 @@
 import { statSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, resolve } from 'node:path';
 import { expandHome } from '../sandbox';
 import {
   PICTURE_POOL_BYTES,
@@ -135,25 +135,32 @@ export function readCharge(
 }
 
 /**
- * The names of the images, among those that went to Claude as a path to Read, that a Read would be refused
- * for: each is charged as a Read charges it (its size, at most `pictureCap`) in order against `room`, the
- * bytes the live session's Reads have left (`readCeiling` less what they spent). An image that doesn't fit
- * is skipped, so a smaller one after it still counts as readable.
+ * The images, among those that went to Claude as a path to Read, that a Read would be refused for: each is
+ * charged as a Read charges it (its size, at most `pictureCap`) in order against `room`, the bytes the live
+ * session's Reads have left (`readCeiling` less what they spent). An image that doesn't fit is skipped, so a
+ * smaller one after it still counts as readable.
  */
-export function unreadableImages(
-  files: readonly { readonly name: string; readonly size: number }[],
+export function unreadableImages<F extends { readonly size: number }>(
+  files: readonly F[],
   room: number,
   pictureCap: number,
-): string[] {
+): F[] {
   let left = room;
-  const names: string[] = [];
-  for (const file of files) {
+  return files.filter((file) => {
     const charge = Math.min(file.size, pictureCap);
-    if (charge <= left) left -= charge;
-    else names.push(file.name);
-  }
-  return names;
+    if (charge > left) return true;
+    left -= charge;
+    return false;
+  });
 }
+
+/**
+ * What a notice calls a dropped image: the name it is kept under, unique in the conversation where the name it
+ * was dropped with is not (every pasted screenshot is `pasted-image.png`). Claude is told both, so the builder
+ * can use this one to say which picture matters most.
+ */
+export const noticeName = (file: { readonly storedPath: string }): string =>
+  basename(file.storedPath);
 
 /**
  * What the builder is told about images Claude was pointed at but a Read would refuse. It is an estimate, so
@@ -165,8 +172,6 @@ export const unreadableImagesNotice = (names: readonly string[]): string =>
   `Tell Claude which picture matters most so it Reads that one first, or send ` +
   `${names.length === 1 ? 'it' : 'them'} in a new conversation.`;
 
-const OUT_OF_ROOM = 'this conversation is out of room for pictures.';
-
 /**
  * What the builder is told when a Read of a dropped image was refused and no earlier notice named it: the
  * send-time notice is a prediction that misses images of earlier turns no Read had made room for, room taken
@@ -174,17 +179,8 @@ const OUT_OF_ROOM = 'this conversation is out of room for pictures.';
  * states what happened, so it does not say "probably".
  */
 export const refusedImageNotice = (name: string): string =>
-  `Claude couldn't Read ${name}: ${OUT_OF_ROOM} ` +
+  `Claude couldn't Read ${name}: this conversation is out of room for pictures. ` +
   `Tell Claude which picture matters most so it Reads that one first, or send it in a new conversation.`;
-
-/** The image names a notice from `unreadableImagesNotice` or `refusedImageNotice` names; none for any other. */
-export function namedUnreadable(body: string): string[] {
-  const named =
-    /^Claude (?:probably won't be able to|couldn't) Read (.+?): this conversation is out of room/.exec(
-      body,
-    );
-  return named?.[1] === undefined ? [] : named[1].split(', ');
-}
 
 /** The line that corrects a Read's counted charge to what its result measured. */
 export { readMeasuredLine };

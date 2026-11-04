@@ -1,0 +1,1 @@
+ALTER TABLE `shape_files` ADD `unreadable_told_at` text;

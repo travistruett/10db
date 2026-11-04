@@ -378,9 +378,12 @@ Read of the same file. (c) Order: it charges the images in message order, so whe
 refused image can be one the notice didn't name. For these the hook that refuses a Read of a picture under the
 conversation's files directory also tells the builder: `Claude couldn't Read <name>: this conversation is out of room
 for pictures` (the same advice as the send-time notice, stated as fact, not "probably"). It is sent once for an image:
-none if an earlier notice of either kind already names it. A refused Read of a PDF, of a file outside the conversation's
-files directory, or by a subagent gets no notice, only the dimmed `Read · refused` line. An image stays named for the
-whole conversation, so a later session that refuses it again does not repeat the notice.
+none if an earlier notice of either kind already named that file. Notices name a file by what it is kept as, and
+`shape_files.unreadable_told_at` marks each one they name, because a display name is not an identity: every pasted
+screenshot is `pasted-image.png`, kept as `pasted-image-2.png` and so on, and two of them get a notice each. Claude's
+`[file]` line gives both names, so the builder can use the one in the notice. A refused Read of a PDF, of a file outside
+the conversation's files directory, or by a subagent gets no notice, only the dimmed `Read · refused` line. An image
+stays named for the whole conversation, so a later session that refuses it again does not repeat the notice.
 
 A Read of a `.pdf` (a dropped one is up to 20 MB, 20 a conversation) is charged to the same total, by the page and
 not by the file: Read returns either the whole file as a document block or pages rendered to pictures, the SDK's types

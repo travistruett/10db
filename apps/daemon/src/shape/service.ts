@@ -49,6 +49,7 @@ import {
   markSessionStarted,
   markShapeFilesInline,
   markShapeFilesTold,
+  markShapeFilesUnreadableTold,
   markShapeLinksSizeTold,
   patchShape,
   setOneWayPaths as setOneWayPathsRow,
@@ -85,7 +86,7 @@ import { convertProposals, type ConvertOutcome, type JoiningProblem } from './co
 import {
   isFileUnchanged,
   measuredMediaBytes,
-  namedUnreadable,
+  noticeName,
   pagesCharged,
   readAllowance,
   readBytesSpent,
@@ -622,12 +623,32 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
     const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
-    const names = unreadableImages(
+    const unreadable = unreadableImages(
       paths,
       readCeiling(inline) - readBytesSpent(messages),
       readPictureCap(messages),
     );
-    if (names.length > 0) notice(shapeId, unreadableImagesNotice(names));
+    if (unreadable.length > 0)
+      noticeUnreadable(shapeId, unreadable, unreadableImagesNotice(unreadable.map(noticeName)));
+  };
+
+  /** Sends a notice that names these images, and marks each so a refused Read doesn't name it again. */
+  const noticeUnreadable = (
+    shapeId: ShapeId,
+    files: readonly ShapeFileRow[],
+    body: string,
+  ): void => {
+    state.write((ctx) => {
+      insertShapeMessage(ctx, shapeId, {
+        author: ShapeMessageAuthor.Note,
+        kind: ShapeMessageKind.Notice,
+        body,
+      });
+      markShapeFilesUnreadableTold(
+        ctx,
+        files.map((f) => f.id),
+      );
+    });
   };
 
   /**
@@ -639,17 +660,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     shapeId: ShapeId,
     readPath: string,
     access: Pick<ShapeAccess, 'checkout' | 'home'>,
-    messages: readonly ShapeMessageDto[],
   ): void => {
     const target = resolvePath(access.checkout, expandHome(readPath, access.home));
     const file = listShapeFiles(state.db, shapeId).find(
       (f) => resolvePath(f.storedPath) === target,
     );
-    if (file === undefined) return;
-    const named = messages
-      .filter((m) => m.kind === ShapeMessageKind.Notice)
-      .some((m) => namedUnreadable(m.body).includes(file.name));
-    if (!named) notice(shapeId, refusedImageNotice(file.name));
+    if (file?.unreadableToldAt === null)
+      noticeUnreadable(shapeId, [file], refusedImageNotice(noticeName(file)));
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
@@ -848,7 +865,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
           if (refusal !== null) {
             verdict = { decision: 'deny', reason: refusal };
-            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access, messages);
+            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access);
           } else
             say(
               shapeId,

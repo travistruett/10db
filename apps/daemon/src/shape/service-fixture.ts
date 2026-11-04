@@ -33,6 +33,7 @@ export function createServiceFixture(
     hold?: Hold;
     joiningProblem?: JoiningProblem;
     home?: string;
+    checkout?: string;
   } = {},
 ): ServiceFixture {
   const c = seedConversation();
@@ -66,7 +67,7 @@ export function createServiceFixture(
           identity: null,
         },
         access: {
-          checkout: '/repo',
+          checkout: opts.checkout ?? '/repo',
           home: opts.home ?? '/home',
           protectedReads: [],
           tempRoot: '/tmp/10db',
