@@ -83,19 +83,27 @@ const UncarriedMigration = z.object({
 });
 export type UncarriedMigration = z.infer<typeof UncarriedMigration>;
 
-/** What `notice` keeps, read as `schema`; none when it is absent or unreadable. */
-function recordIn<T>(notice: Notice | undefined, schema: z.ZodType<T>): T[] {
-  if (notice?.record === undefined) return [];
+/**
+ * What `notice` keeps, read as `schema`. Empty when there is no notice; null when there is one whose
+ * record is missing (`fitNotice` leaves out one that is too long) or unreadable, so a caller can tell
+ * "nothing listed" from "a list that could not be read".
+ */
+function recordIn<T>(notice: Notice | undefined, schema: z.ZodType<T>): T[] | null {
+  if (notice === undefined) return [];
+  if (notice.record === undefined) return null;
   try {
     const parsed = z.array(schema).safeParse(JSON.parse(notice.record));
-    return parsed.success ? parsed.data : [];
+    return parsed.success ? parsed.data : null;
   } catch {
-    return [];
+    return null;
   }
 }
 
-/** The migrations the batch's lost-migrations `notice` lists. */
-export const uncarriedIn = (notice: Notice | undefined): UncarriedMigration[] =>
+/**
+ * The migrations the batch's lost-migrations `notice` lists: none without a notice; null when the
+ * notice is there and its list can't be read, which must never count as "all carried".
+ */
+export const uncarriedIn = (notice: Notice | undefined): UncarriedMigration[] | null =>
   recordIn(notice, UncarriedMigration);
 
 /** One line per migration, saying where it went. */
@@ -126,7 +134,8 @@ export const migrationNotices = {
    * that began over from the same branch) replaces its line rather than adding one.
    */
   renumbered: (earlier: Notice | undefined, moved: readonly RenumberedMigration[]): Notice => {
-    const all = recordIn(earlier, RenumberedMigration);
+    // A list that can't be read starts over: the notice is only a courtesy, and blocks nothing.
+    const all = recordIn(earlier, RenumberedMigration) ?? [];
     for (const { from, to } of moved) {
       const chained = all.findIndex((m) => m.to === from);
       const at = chained >= 0 ? chained : all.findIndex((m) => m.from === from);

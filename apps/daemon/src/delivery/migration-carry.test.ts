@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { BatchDto } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchProject, patchWorkstream } from '@10db/db';
+import { getBatch, listWorkstreams, patchProject, patchWorkstream, setBatchNotice } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -310,6 +310,40 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(h.cards()).toEqual([]);
     expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
   });
+
+  it.each([
+    ['has no record', undefined],
+    ['has a record that is not JSON', 'not json'],
+    ['has a record that is not a list of migrations', '[{"nope":1}]'],
+  ])(
+    'does not clear a lost-migrations notice that %s, and says its list could not be read',
+    async (_what, record) => {
+      const batch = await bothSidesAdded([
+        { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+      ]);
+      const updates = createBaseUpdates({
+        ...h.ctx,
+        generators: drizzle({ failAt: 'mine_backfill' }),
+      });
+      await updates.beforeGate(batch.id, signal);
+      // As fitNotice leaves a notice whose record was too long, or a malformed record would.
+      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
+      h.state.write((w) => {
+        setBatchNotice(w, batch.id, record === undefined ? bare : { ...bare, record });
+      });
+
+      const again = await updates.beforeGate(batch.id, signal);
+
+      if (again.kind !== 'uncarried') throw new Error(`uncarried expected, got ${again.kind}`);
+      expect(again.note).toContain('could not be read');
+      expect(again.head).toBe(headOf(pathOf(batch)));
+      expect(h.cards()).toHaveLength(1);
+      expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(
+        NOTICE_KEY.migrationsUncarried,
+      );
+    },
+  );
 
   it('keeps refusing while one migration is back and another is not, and names only that one', async () => {
     const batch = await bothSidesAdded([

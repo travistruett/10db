@@ -349,6 +349,14 @@ const STOPPED: Unregenerated = {
   restored: false,
 };
 
+/**
+ * What a gate is told when the batch's lost-migrations notice is stored without a list it can read
+ * (`fitNotice` leaves out a record that is too long): nothing can say which migrations are missing
+ * from the journal, so none counts as carried.
+ */
+const UNREADABLE_LOST =
+  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. Its text names them; check the journal at HEAD against it and re-create any that is missing, after the base's, under the same name. No gate passes while the notice stands.";
+
 export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
   const db = ctx.state.db;
 
@@ -837,7 +845,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     }
     const lost = [...new Set(named === undefined ? tags : [...tags, named])].sort();
     if (lost.length === 0) return null;
-    const earlier = uncarriedIn(uncarriedNotice(batch));
+    const stored = uncarriedNotice(batch);
+    const earlier = uncarriedIn(stored);
+    // A notice whose list can't be read stays as it is, and keeps the gate stopped: rewriting it with
+    // only these migrations would forget the ones it lists, and the next gate would clear it.
+    if (earlier === null) return stored ?? null;
     const at = `${merged.head.slice(0, 12)}^1`;
     const notice = migrationNotices.uncarried([
       ...earlier,
@@ -864,6 +876,16 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const path = batch.worktreePath;
     if (notice === undefined || path === null) return answer;
     const held = uncarriedIn(notice);
+    if (held === null) {
+      // Which migrations were lost can't be told, so nothing can say they are carried: the notice and
+      // the regenerate card stay, and the gate stops.
+      ctx.logger.warn({ batchId: batch.id }, 'lost migrations notice has no readable list');
+      return {
+        kind: 'uncarried',
+        head: await ctx.git.head(path),
+        note: joined(gateNote(answer), UNREADABLE_LOST) ?? UNREADABLE_LOST,
+      };
+    }
     const left: UncarriedMigration[] = [];
     try {
       for (const m of held)
