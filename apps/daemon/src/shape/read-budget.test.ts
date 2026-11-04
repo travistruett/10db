@@ -549,6 +549,55 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(told[0]).not.toMatch(/smaller copy|too large/);
     });
 
+    it('are offered only a new conversation when no room is left for any of them', async () => {
+      await fillInline();
+      const big = dropBig();
+      await nextTurn('One to Read');
+      // Three Reads of 1 MiB take the 3 MiB the full inline budget leaves: room 0.
+      for (let i = 0; i < 3; i += 1) read(big.storedPath);
+      expect(notices()).toEqual([]);
+      const files = [4, 5].map((n) => drop(`shot${String(n)}.png`, retina(MB + 200_000)));
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/shot4\.png, shot5\.png/);
+      expect(told[0]).toMatch(/out of room for pictures/);
+      expect(told[0]).toMatch(/new conversation/);
+      // Reading one first would be refused, so it is not suggested.
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
+      expect(read(must(files[0], 'a dropped file').storedPath)).toMatchObject({ decision: 'deny' });
+      // Told already, so the refused Read adds no second notice.
+      expect(notices().filter((body) => /shot\d\.png/.test(body))).toHaveLength(1);
+    });
+
+    it('are offered only a new conversation when the room left is under what each is charged', async () => {
+      await fillInline();
+      const big = dropBig();
+      await nextTurn('One to Read');
+      // Two 1 MiB Reads leave 1 MiB, under the 1.2 MiB a dropped shot is charged.
+      for (let i = 0; i < 2; i += 1) read(big.storedPath);
+      for (const n of [4, 5]) drop(`shot${String(n)}.png`, retina(MB + 200_000));
+      await nextTurn('Look at these');
+      const told = notices().filter((body) => /shot\d\.png/.test(body));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/new conversation/);
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
+    });
+
+    it('say a refused Read only has a new conversation to offer', async () => {
+      await fillInline();
+      const first = [0, 1].map((n) => drop(`shot${String(n)}.png`, retina(MB + 200_000)));
+      await nextTurn('Two');
+      const [third] = [drop('shot2.png', retina(MB + 200_000))];
+      await nextTurn('One more');
+      for (const file of first) read(must(file, 'a file').storedPath);
+      expect(read(must(third, 'a file').storedPath)).toMatchObject({ decision: 'deny' });
+      const told = notices().filter((body) => body.includes('shot2.png'));
+      expect(told).toHaveLength(1);
+      expect(told[0]).toMatch(/new conversation/);
+      expect(told[0]).not.toMatch(/Reads that one first|which picture matters most/);
+    });
+
     it('can still have a named one Read, when Claude is told to take it first', async () => {
       await fillInline();
       const files = Array.from({ length: 4 }, (_, i) =>

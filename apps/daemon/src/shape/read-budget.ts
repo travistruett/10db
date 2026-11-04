@@ -155,6 +155,20 @@ export function unreadableImages<F extends { readonly size: number }>(
 }
 
 /**
+ * Whether Reading any one of these images first would be let in: each is charged as a Read charges it (its
+ * size, at most `pictureCap`) and `room` takes the largest of those alone. An image that doesn't fit even
+ * first can only go in a new conversation, so a notice that suggests Reading first must be true for all it
+ * names, since the builder picks which.
+ */
+export function eachFitsAlone(
+  files: readonly { readonly size: number }[],
+  room: number,
+  pictureCap: number,
+): boolean {
+  return files.every((file) => Math.min(file.size, pictureCap) <= room);
+}
+
+/**
  * What a notice calls a dropped image: the name it is kept under, unique in the conversation where the name it
  * was dropped with is not (every pasted screenshot is `pasted-image.png`). Claude is told both, so the builder
  * can use this one to say which picture matters most.
@@ -166,21 +180,27 @@ export const noticeName = (file: { readonly storedPath: string }): string =>
  * What the builder is told about images Claude was pointed at but a Read would refuse. It is an estimate, so
  * it says "probably": measured Reads can leave more room or less. The session is what ran out, not the image,
  * so a smaller copy is no remedy: it goes as a path too once the inline budget is full, and is refused.
+ * `readFirst` is whether the room left takes any one of the named images (`eachFitsAlone`): only then does
+ * Reading the one that matters most first help; otherwise a new conversation, which starts its own pool, is the
+ * only remedy offered.
  */
-export const unreadableImagesNotice = (names: readonly string[]): string =>
+export const unreadableImagesNotice = (names: readonly string[], readFirst: boolean): string =>
   `Claude probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures. ` +
-  `Tell Claude which picture matters most so it Reads that one first, or send ` +
-  `${names.length === 1 ? 'it' : 'them'} in a new conversation.`;
+  (readFirst
+    ? `Tell Claude which picture matters most so it Reads that one first, or send ` +
+      `${names.length === 1 ? 'it' : 'them'} in a new conversation.`
+    : `Send ${names.length === 1 ? 'it' : 'them'} in a new conversation.`);
 
 /**
  * What the builder is told when a Read of a dropped image was refused and no earlier notice named it: the
  * send-time notice is a prediction that misses images of earlier turns no Read had made room for, room taken
  * after it by `see_screen` or by other Reads, and Reads in an order it did not assume. Unlike that notice it
- * states what happened, so it does not say "probably".
+ * states what happened, so it does not say "probably". The room left was under this image's charge, so
+ * Reading it first is no remedy: only a new conversation is offered.
  */
 export const refusedImageNotice = (name: string): string =>
   `Claude couldn't Read ${name}: this conversation is out of room for pictures. ` +
-  `Tell Claude which picture matters most so it Reads that one first, or send it in a new conversation.`;
+  `Send it in a new conversation.`;
 
 /** The line that corrects a Read's counted charge to what its result measured. */
 export { readMeasuredLine };

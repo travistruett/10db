@@ -95,6 +95,7 @@ import {
   readCeiling,
   readCountedLine,
   readMeasuredLine,
+  eachFitsAlone,
   readRefusal,
   refusedImageNotice,
   unmeasuredRead,
@@ -339,6 +340,12 @@ interface Intake {
 }
 
 /** The image blocks a turn carries, and the files they came from. */
+/** The images a Read would refuse, and whether Reading any one of them first would be let in. */
+interface Unreadable {
+  readonly files: readonly ShapeFileRow[];
+  readonly readFirst: boolean;
+}
+
 interface SentImages {
   readonly images: ShapeImage[];
   readonly ids: ShapeFileRow['id'][];
@@ -617,25 +624,29 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     shown: readonly ShapeFileRow[],
     sentInline: ReadonlySet<ShapeFileRow['id']>,
     fresh: boolean,
-  ): readonly ShapeFileRow[] => {
+  ): Unreadable => {
     const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
     const paths = shown.filter((file) => byPath.has(file.id));
-    if (paths.length === 0) return [];
+    if (paths.length === 0) return { files: [], readFirst: false };
     const inline =
       (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
     const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
-    return unreadableImages(
-      paths,
-      readCeiling(inline) - readBytesSpent(messages),
-      readPictureCap(messages),
-    );
+    const room = readCeiling(inline) - readBytesSpent(messages);
+    const cap = readPictureCap(messages);
+    const files = unreadableImages(paths, room, cap);
+    // Reading one first only helps when the room left takes any one of them.
+    return { files, readFirst: eachFitsAlone(files, room, cap) };
   };
 
   /** Writes the notice for the images `unreadableOf` found, if any. */
-  const warnUnreadable = (shapeId: ShapeId, unreadable: readonly ShapeFileRow[]): void => {
-    if (unreadable.length > 0)
-      noticeUnreadable(shapeId, unreadable, unreadableImagesNotice(unreadable.map(noticeName)));
+  const warnUnreadable = (shapeId: ShapeId, unreadable: Unreadable): void => {
+    if (unreadable.files.length > 0)
+      noticeUnreadable(
+        shapeId,
+        unreadable.files,
+        unreadableImagesNotice(unreadable.files.map(noticeName), unreadable.readFirst),
+      );
   };
 
   /** Sends a notice that names these images, and marks each so a refused Read doesn't name it again. */

@@ -364,11 +364,16 @@ what a resized Retina picture weighs is unmeasured (follow-up tsk_01a1a578-91d9-
 
 Where a path image would be refused, the builder is told as the turn is sent, not when Claude's Read is refused: a
 notice (`Claude probably won't be able to Read <names>`) names the images that, charged in order against what the pool
-leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures, and to tell Claude
-which picture matters most so it Reads that one first, or to send them in a new conversation, which starts its own
-pool. A smaller copy is no remedy once the inline budget is full: it goes as a path too and is refused with no room
-left. The notice is an estimate, for the same reason as the counts: it charges an image as a Read would be at that
-moment, so a measurement can get an image the notice didn't name refused, and can leave room for one it did name.
+leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures, and which remedy
+works depends on the room left. When it takes every named image alone (each one's charge is at most the room, so
+whichever the builder picks, a Read of it first is let in), the notice says to tell Claude which picture matters most so
+it Reads that one first, or to send them in a new conversation, which starts its own pool. When the room is under the
+charge of any one named image, including no room at all (three Reads have taken the 3 MiB a full inline budget leaves),
+Reading one first would be refused too, so the notice offers only the new conversation. A smaller copy is not offered
+either way: it goes as a path too once the inline budget is full, and is refused unless the room still left takes its
+size, which the notice can't know. The notice is an estimate, for the same reason as the counts: it charges an image as
+a Read would be at that moment, so a measurement can get an image the notice didn't name refused, and can leave room
+for one it did name.
 
 **What the send-time notice can't predict.** It sees only this turn's images and the Reads already spent, so it misses
 three cases. (a) Path images of earlier turns that Claude has not Read yet hold no room: with the inline budget full,
@@ -377,7 +382,8 @@ a turn that drops 3 and a Read of none, then a turn that drops 1, send no notice
 Read of the same file. (c) Order: it charges the images in message order, so when Claude Reads in another order the
 refused image can be one the notice didn't name. For these the hook that refuses a Read of a picture under the
 conversation's files directory also tells the builder: `Claude couldn't Read <name>: this conversation is out of room
-for pictures` (the same advice as the send-time notice, stated as fact, not "probably"). It is sent once for an image:
+for pictures`, stated as fact, not "probably". The room left was under that image's charge, so it offers only a new
+conversation, not Reading it first. It is sent once for an image:
 none if an earlier notice of either kind already named that file. Notices name a file by what it is kept as, and
 `shape_files.unreadable_told_at` marks each one they name, because a display name is not an identity: every pasted
 screenshot is `pasted-image.png`, kept as `pasted-image-2.png` and so on, and two of them get a notice each. Claude's
