@@ -44,11 +44,16 @@ import {
   cancelledNoticeKind,
   cancelledNotices,
   ciNotices,
+  EMPTY_NO_RUNNER,
   NOTICE_KEY,
+  noRunnerNoticeHead,
+  noRunnerNotices,
+  noRunnerRecord,
   rerunNoticeHead,
   rerunNotices,
   rerunRecord,
   type CancelledWhy,
+  type NoRunnerRecord,
   type RerunRuns,
 } from './notices';
 
@@ -62,6 +67,12 @@ const PR_WATCH_INTERVAL_MS = 2 * 60_000;
 const CHECKS_START_MS = 10 * 60_000;
 /** GitHub's refusal of `gh run rerun` on a run still in progress ("This workflow is already running"). */
 const RUN_STILL_RUNNING = /already running/i;
+
+/**
+ * How many times 10db runs a job again that GitHub cancelled for want of a runner, for one head of a
+ * pull request. A shortage of macOS runners can last hours; past this the builder is told once.
+ */
+const MAX_RUNNER_RERUNS = 3;
 
 /** Longest reason kept on a batch: it is shown in the UI. */
 const MAX_REASON = 500;
@@ -268,6 +279,8 @@ export function createPrWatch(input: {
    * restart counts the minutes again.
    */
   const awaitingRuns = new Map<BatchId, { head: string | null; since: number; asked: boolean }>();
+  /** Whether GitHub cancelled each Actions job (by job id) for want of a runner: a job's record never changes. */
+  const noRunnerJobs = new Map<string, boolean>();
   /** Each open pull request with a cancelled required check, by its root batch. */
   const cancelledRuns = new Map<BatchId, CancelledRun>();
   /**
@@ -818,6 +831,164 @@ export function createPrWatch(input: {
     track.notice = null;
   }
 
+  /** Takes off the notices of runner-shortage reruns for any head but `keepHead`, and the card that went with them. */
+  function clearNoRunner(rootId: BatchId, keepHead: string | null): void {
+    const root = getBatch(ctx.state.db, rootId);
+    const stale = root.notices.filter((n) => {
+      const head = noRunnerNoticeHead(n.key);
+      return head !== null && head !== keepHead;
+    });
+    const carded = findOpenByFoldKey(ctx.state.db, root.projectId, prCardKey.noRunner(rootId));
+    if (stale.length === 0 && (keepHead !== null || carded === undefined)) return;
+    ctx.state.write((write) => {
+      for (const n of stale) clearBatchNotice(write, rootId, n.key);
+      if (stale.length > 0 || keepHead === null)
+        withdrawIn(write, root.projectId, [prCardKey.noRunner(rootId)]);
+    });
+  }
+
+  /** Whether GitHub cancelled the job for want of a runner. A job's record never changes, so it is read once. */
+  async function hadNoRunner(
+    repo: string,
+    jobId: string,
+    rootId: BatchId,
+    signal: AbortSignal,
+  ): Promise<boolean> {
+    const known = noRunnerJobs.get(jobId);
+    if (known !== undefined) return known;
+    try {
+      const answer = await ctx.gh.jobHadNoRunner({ repo, jobId }, ghCall(ctx, signal));
+      noRunnerJobs.set(jobId, answer);
+      return answer;
+    } catch (error) {
+      if (controller.signal.aborted || ghDown(error)) throw error;
+      // Not read, so the job is an ordinary cancelled check for now and is looked at again next round.
+      logger.warn(
+        { batchId: rootId, jobId, err: detailOf(error) },
+        'could not read a cancelled job',
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Runs again a required job GitHub cancelled because no hosted runner picked it up (the job has no
+   * runner, no steps and the annotation "not acquired by Runner of type hosted"): a shortage of
+   * runners, not a failure of the code, so no CI fix starts and no card is raised until the limit.
+   * Reruns it at once, up to `MAX_RUNNER_RERUNS` for one head of the pull request; the count is the
+   * stored notice's record, so a restart keeps it and a new head starts from zero. At the limit it
+   * raises one card naming the job and the attempts. A cancelled job that had a runner or ran a step,
+   * and a run a person cancelled, are no case of this and stay for `followCancelled`. Returns the
+   * required checks without the jobs it dealt with. Throws gh's failure only when gh itself is down.
+   */
+  async function followNoRunner(
+    root: BatchDto,
+    read: PullRequestStatus | null,
+    required: RequiredChecks | null,
+    queue: boolean | null,
+    signal: AbortSignal,
+  ): Promise<RequiredChecks | null> {
+    if (read === null) return required;
+    if (read.state !== PrState.Open || root.ciFixOf !== null) {
+      clearNoRunner(root.id, null);
+      return required;
+    }
+    if (required === null) return required;
+    const repo = root.repo;
+    const head = read.headSha;
+    if (
+      repo === null ||
+      head === null ||
+      queue !== false ||
+      required.cancelled.length === 0 ||
+      read.mergeBlocked === MergeBlocked.Conflicts ||
+      read.mergeable === PrMergeable.Conflicting ||
+      // A failing check starts a fix that pushes a new head: a cancelled job beside it is not the question.
+      required.state === 'failing'
+    ) {
+      if (head !== null) clearNoRunner(root.id, head);
+      return required;
+    }
+    clearNoRunner(root.id, head);
+    const stored = getBatch(ctx.state.db, root.id).notices.find(
+      (n) => noRunnerNoticeHead(n.key) === head,
+    );
+    const record = (stored && noRunnerRecord(stored)) ?? EMPTY_NO_RUNNER;
+    const shortage: RequiredChecks['cancelled'] = [];
+    const others: RequiredChecks['cancelled'] = [];
+    for (const job of required.cancelled) {
+      const isShortage =
+        job.jobId !== null &&
+        (record.jobs.includes(job.jobId) || (await hadNoRunner(repo, job.jobId, root.id, signal)));
+      (isShortage ? shortage : others).push(job);
+    }
+    if (shortage.length === 0) return required;
+    const rest: RequiredChecks = { ...required, cancelled: others };
+    const fresh = shortage.filter((job) => job.jobId !== null && !record.jobs.includes(job.jobId));
+    if (fresh.length === 0) return rest;
+    const names = [...new Set([...record.names, ...fresh.map((job) => job.name)])];
+    if (record.attempts >= MAX_RUNNER_RERUNS) {
+      if (record.carded) return rest;
+      const next: NoRunnerRecord = { ...record, names, carded: true };
+      ctx.state.write((write) => {
+        const now = getBatch(write.tx, root.id);
+        setBatchNotice(
+          write,
+          root.id,
+          noRunnerNotices.of(head, next, 'stopped', MAX_RUNNER_RERUNS),
+        );
+        raiseIn(write, root.projectId, prCards.noRunner(now, names, record.attempts));
+      });
+      return rest;
+    }
+    const runs = [...new Set(fresh.flatMap((job) => (job.runId === null ? [] : [job.runId])))];
+    // GitHub refuses to rerun a run another of whose jobs is still going: wait for it to finish.
+    if (required.pending.some((job) => job.runId !== null && runs.includes(job.runId))) return rest;
+    let done: NoRunnerRecord = record;
+    // Stored as soon as GitHub takes each run, before the next call, so a daemon killed between two
+    // reruns does not run this head's job a third time. All the runs of one round are one attempt.
+    const store = (state: 'ran' | 'refused', detail = ''): void => {
+      ctx.state.write((write) => {
+        setBatchNotice(
+          write,
+          root.id,
+          noRunnerNotices.of(head, done, state, MAX_RUNNER_RERUNS, detail),
+        );
+      });
+    };
+    for (const runId of runs) {
+      const ofRun = fresh.filter((job) => job.runId === runId);
+      try {
+        await ctx.gh.rerunFailed({ repo, runId }, ghCall(ctx, signal));
+      } catch (error) {
+        if (controller.signal.aborted || ghDown(error)) throw error;
+        // The run is still going (a job gh doesn't list as required, say): ask again next round.
+        if (RUN_STILL_RUNNING.test(detailOf(error))) return rest;
+        logger.warn(
+          { batchId: root.id, err: detailOf(error) },
+          'could not rerun a job with no runner',
+        );
+        // Counted and never asked for again: a refusal that repeated would otherwise ask every round.
+        done = {
+          ...done,
+          attempts: record.attempts + 1,
+          jobs: [...done.jobs, ...ofRun.flatMap((job) => (job.jobId === null ? [] : [job.jobId]))],
+          names,
+        };
+        store('refused', detailOf(error));
+        continue;
+      }
+      done = {
+        ...done,
+        attempts: record.attempts + 1,
+        jobs: [...done.jobs, ...ofRun.flatMap((job) => (job.jobId === null ? [] : [job.jobId]))],
+        names,
+      };
+      store('ran');
+    }
+    return rest;
+  }
+
   async function round(signal: AbortSignal): Promise<void> {
     await readAll(signal);
     // After the reads, so a merge or close this round recorded ends its fixes in the same round.
@@ -936,7 +1107,9 @@ export function createPrWatch(input: {
       }
       followMissingRuns(root, read, required, queue);
       try {
-        await followCancelled(root, read, required, queue, signal);
+        // A job GitHub cancelled for want of a runner is dealt with first, and the rest go on.
+        const rest = await followNoRunner(root, read, required, queue, signal);
+        await followCancelled(root, read, rest, queue, signal);
       } catch (error) {
         if (controller.signal.aborted) return;
         logger.warn(

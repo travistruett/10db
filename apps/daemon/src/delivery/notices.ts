@@ -57,6 +57,12 @@ export const NOTICE_KEY = {
    * restarted daemon reads that head as already asked and never runs it a second time.
    */
   checksRerun: 'checks-rerun',
+  /**
+   * GitHub cancelled a required job because no hosted runner picked it up, and 10db ran it again. The
+   * key ends in `:` and the head, and its record counts the reruns for that head, so a restart keeps
+   * the count and a new head starts from zero.
+   */
+  checksNoRunner: 'checks-no-runner',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
@@ -664,6 +670,83 @@ export const rerunNotices = {
       line: `${one ? `Required check ${names} was` : `Required checks ${names} were`} cancelled; 10db ran ${one ? 'it' : 'them'} again`,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. ${rest}This notice goes when the pull request merges, closes or gets a new commit.`,
       record,
+    };
+  },
+};
+
+/** The key of the runner-shortage notice for one pull request head. */
+export const noRunnerNoticeKey = (head: string): string => `${NOTICE_KEY.checksNoRunner}:${head}`;
+
+/** The head a stored notice key counts runner-shortage reruns for; null for any other key. */
+export function noRunnerNoticeHead(key: string): string | null {
+  const prefix = `${NOTICE_KEY.checksNoRunner}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+/** What 10db has done about cancelled-for-no-runner jobs on one pull request head. */
+export interface NoRunnerRecord {
+  /** Reruns made for the head: the count the limit is checked against. */
+  readonly attempts: number;
+  /** The cancelled Actions jobs (by job id) 10db has dealt with: GitHub lists one for a while after its rerun. */
+  readonly jobs: readonly string[];
+  /** The names of the checks that had no runner. */
+  readonly names: readonly string[];
+  /** The limit was reached and its one card is raised. */
+  readonly carded: boolean;
+}
+
+export const EMPTY_NO_RUNNER: NoRunnerRecord = { attempts: 0, jobs: [], names: [], carded: false };
+
+/** Reads a stored runner-shortage notice's record; null when it has none or cannot be read. */
+export function noRunnerRecord(notice: Notice): NoRunnerRecord | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { attempts, jobs, names, carded } = parsed as Record<string, unknown>;
+    const strings = (v: unknown): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string');
+    if (typeof attempts !== 'number' || !strings(jobs) || !strings(names)) return null;
+    return { attempts, jobs, names, carded: carded === true };
+  } catch {
+    return null;
+  }
+}
+
+/** What delivery shows on a shipped batch's tasks when GitHub cancelled a required job for want of a runner. */
+export const noRunnerNotices = {
+  /**
+   * `ran`: 10db ran the job(s) again, attempt `attempts` of `limit`. `refused`: GitHub would not run
+   * them again. `stopped`: the limit is reached and 10db raised its card. It is a runner shortage,
+   * not a test failure, whatever the state says.
+   */
+  of: (
+    head: string,
+    record: NoRunnerRecord,
+    state: 'ran' | 'refused' | 'stopped',
+    limit: number,
+    detail = '',
+  ): Notice => {
+    const names = record.names.map((n) => `"${n}"`).join(', ');
+    const one = record.names.length === 1;
+    const it = one ? 'it' : 'them';
+    const what = `Required ${one ? 'check' : 'checks'} ${names}`;
+    const tail = {
+      ran: `10db ran ${it} again (attempt ${String(record.attempts)} of ${String(limit)}).`,
+      refused: `10db could not run ${it} again: GitHub refused (${detail.slice(0, 300)}).`,
+      stopped: `10db ran ${it} again ${String(record.attempts)} times and stopped; a card says so.`,
+    }[state];
+    const line = {
+      ran: `${what} had no runner; 10db ran ${it} again (attempt ${String(record.attempts)} of ${String(limit)})`,
+      refused: `${what} had no runner and 10db could not run ${it} again`,
+      stopped: `${what} still had no runner after ${String(record.attempts)} reruns; 10db stopped`,
+    }[state];
+    return {
+      key: noRunnerNoticeKey(head),
+      tone: state === 'ran' ? 'info' : 'warning',
+      line,
+      body: `GitHub cancelled ${one ? 'a job' : 'jobs'} that the base branch requires because no hosted runner picked ${it} up: a runner shortage, not a test failure, and nothing in the code is wrong. ${tail} 10db reruns a job like this up to ${String(limit)} times for each head of the pull request. This notice goes when the pull request merges, closes or gets a new commit.`,
+      record: JSON.stringify(record),
     };
   },
 };

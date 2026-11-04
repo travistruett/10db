@@ -18,6 +18,8 @@ export type WorkflowStep = z.infer<typeof WorkflowStep>;
 
 const WorkflowJob = z.looseObject({
   if: z.string().optional(),
+  needs: z.union([z.string(), z.array(z.string())]).optional(),
+  outputs: z.record(z.string(), z.string()).optional(),
   'runs-on': z.string().optional(),
   'timeout-minutes': z.number().int().positive().optional(),
   container: z

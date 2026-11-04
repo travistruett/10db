@@ -105,14 +105,18 @@ describe('rulesets', () => {
     expect(source).not.toMatch(/which the queue counts as passing/);
   });
 
-  it('requires exactly the CI jobs that ci.yml defines', () => {
+  it('requires exactly the CI jobs that ci.yml defines, but desktop-scope, which only decides desktop', () => {
+    // desktop-scope is not required: the required desktop check is skipped, which counts as
+    // passing, when it says no macOS runner is needed, so the ruleset keeps its five names.
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as {
       context: string;
       integration_id?: number;
     }[];
-    expect(checks.map((c) => c.context)).toEqual(workflowJobNames('.github/workflows/ci.yml'));
+    expect(checks.map((c) => c.context)).toEqual(
+      workflowJobNames('.github/workflows/ci.yml').filter((name) => name !== 'desktop-scope'),
+    );
   });
 
   it('accepts each required check only from GitHub Actions, never a posted commit status', () => {

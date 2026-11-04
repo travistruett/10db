@@ -1044,6 +1044,8 @@ export const prCardKey = {
   ciStopped: (batchId: BatchId): string => `ci-stopped:${batchId}`,
   /** 10db could not bring the base into the conflicting pull request: the root batch's id. */
   catchUp: (batchId: BatchId): string => `pr-catch-up:${batchId}`,
+  /** A required job never got a runner, and 10db's reruns for the head ran out: the root batch's id. */
+  noRunner: (batchId: BatchId): string => `pr-no-runner:${batchId}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -1168,6 +1170,24 @@ export const prCards = {
           }
         : {}),
       detail: { ...prDetail(root, link), [CI_RERUN_DETAIL]: { batchId: root.id } },
+    };
+  },
+  /**
+   * GitHub keeps cancelling a required job because no hosted runner picks it up, and 10db's reruns for
+   * this head are used up. `names` are the jobs, `attempts` the reruns made. One card per head.
+   */
+  noRunner: (root: BatchDto, names: readonly string[], attempts: number): Card => {
+    const prUrl = root.prUrl ?? '(no pull request)';
+    const list = names.join(', ') || 'a required job';
+    return {
+      title: `${list} got no runner on GitHub after ${String(attempts)} reruns: ${root.title}`,
+      body: [
+        `Pull request: ${prUrl}`,
+        `GitHub cancelled the required job ${list} because no hosted runner picked it up (a runner shortage, such as capacity limits on macOS arm64 runners), not because a test failed. 10db has made ${String(attempts)} reruns for this commit and the job never got a runner, so it reruns no more. No CI fix session is started: there is nothing in the code to fix.`,
+        `Rerun the job from the pull request's checks page (Re-run jobs) once runners are free, or push a commit to ${root.branch ?? 'the branch'}, which gives 10db a fresh count. 10db withdraws this card when the pull request gets a new commit, merges or closes.`,
+      ].join('\n\n'),
+      foldKey: prCardKey.noRunner(root.id),
+      detail: prDetail(root, prUrl),
     };
   },
   /** GitHub refused the rerun the stop card's Retry asked for. */
