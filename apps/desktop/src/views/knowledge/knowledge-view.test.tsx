@@ -136,6 +136,51 @@ describe('KnowledgeView', () => {
     );
     renderApp('/knowledge');
     expect(await screen.findByText('Search is unavailable: x')).toBeTruthy();
+    expect(screen.queryByText(/match\./)).toBeNull();
+  });
+
+  it('says so with a search and does not read the empty answer as no match', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), ({ request }) => {
+        const searched = new URL(request.url).searchParams.has('q');
+        return HttpResponse.json(
+          knowledgeList(searched ? [] : [principleItem()], {
+            search: { available: false, message: 'Search is unavailable: x' },
+          }),
+        );
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    expect(await screen.findByText('Search is unavailable: x')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.queryByRole('table', { name: 'Principles' })).toBeNull();
+    });
+    expect(screen.queryByText('No principles match.')).toBeNull();
+  });
+
+  it('still lists the records without a search when search is unavailable', async () => {
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), () =>
+        HttpResponse.json(
+          knowledgeList([principleItem({ statement: 'Prefer small PRs' })], {
+            search: { available: false, message: 'Search is unavailable: x' },
+          }),
+        ),
+      ),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    expect(await screen.findByText('Prefer small PRs')).toBeTruthy();
+    expect(screen.getByText('Search is unavailable: x')).toBeTruthy();
   });
 
   it('filters by You, Project or one area, and shows history with each record’s state', async () => {
