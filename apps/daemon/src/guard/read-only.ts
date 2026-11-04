@@ -70,6 +70,18 @@ function usesOption(arg: string, option: string): boolean {
   return arg === option;
 }
 
+/**
+ * Whether `ps` may print the environment of the processes it lists: `-E` in a dash bundle, or the
+ * BSD form with no dash (`eww`, `Eww`, `aux e`), which ps takes as options. Any dashless word holding
+ * an `e` or `E` counts, even one that is an option's value (`-o pid,etime`): reading the grammar
+ * to tell them apart would be a guess, and the call then keeps today's judgement. Claude Code's own
+ * process runs outside the sandbox, so what the sandbox returns for another process's environment
+ * is not what the lane's Bash sees.
+ */
+function psShowsEnvironment(args: readonly string[]): boolean {
+  return args.some((a) => (a.startsWith('-') ? /^-[^-]*E/.test(a) : /[eE]/.test(a)));
+}
+
 const REFUSAL =
   'This step is read-only: the shell accepts only plain words, simple quoting and read-only commands (read-only git, cat, grep, ls, find and similar), with no redirection other than 2>&1, >/dev/null and 2>/dev/null. Describe the change in mcp__10db__complete_step.';
 
@@ -92,6 +104,7 @@ function readOnlySegments(
     } else if (!commands.has(cmd)) {
       return null;
     }
+    if (cmd === 'ps' && psShowsEnvironment(args)) return null;
     const writing = WRITING_OPTIONS[cmd] ?? [];
     if (args.some((a) => writing.some((o) => usesOption(a, o)))) return null;
   }

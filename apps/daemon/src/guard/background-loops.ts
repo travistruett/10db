@@ -134,7 +134,11 @@ const MAX_FOR_HEADER_TOKENS = 64;
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 const INTERPRETERS = new Set(['python', 'python3', 'node', 'perl', 'ruby', 'php', 'awk']);
-const ENDLESS_FILES = new Set(['/dev/zero', '/dev/urandom', '/dev/random']);
+export const ENDLESS_FILES: ReadonlySet<string> = new Set([
+  '/dev/zero',
+  '/dev/urandom',
+  '/dev/random',
+]);
 /** A loop that never ends, written in an interpreter's one-liner. Each repeat is bounded or literal-separated. */
 const INTERPRETER_LOOP =
   /\bwhile[ \t(]{1,8}(?:true|True|1)\b|\bfor[ \t]*\([ \t]*;[ \t]*;|\bloop[ \t]*\{|\b1 while 1\b|\bwhile[ \t]*:/;
