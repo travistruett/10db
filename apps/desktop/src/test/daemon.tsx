@@ -94,6 +94,7 @@ export function baseHandlers(
           waitingSince: null,
           draining: false,
           drainingSince: null,
+          blocker: null,
         }),
       ),
     ),

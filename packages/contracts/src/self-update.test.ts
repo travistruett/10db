@@ -40,6 +40,31 @@ describe('HealthResponse commit', () => {
   });
 });
 
+describe('SelfUpdateStatusDto blocker', () => {
+  const status = {
+    enabled: true,
+    isDefault: true,
+    runningCommit: SHA,
+    availableCommit: null,
+    waitMinutes: 15,
+    waitingSince: null,
+    draining: false,
+    drainingSince: null,
+  };
+
+  it('is null or a kind with a message', () => {
+    expect(SelfUpdateStatusDto.parse({ ...status, blocker: null }).blocker).toBeNull();
+    const blocker = { kind: 'gh-missing', message: 'gh is not installed.' };
+    expect(SelfUpdateStatusDto.parse({ ...status, blocker }).blocker).toEqual(blocker);
+  });
+
+  it('refuses a kind it does not know, and an answer with no blocker field', () => {
+    const unknown = { ...status, blocker: { kind: 'sad', message: 'x' } };
+    expect(SelfUpdateStatusDto.safeParse(unknown).success).toBe(false);
+    expect(SelfUpdateStatusDto.safeParse(status).success).toBe(false);
+  });
+});
+
 describe('SelfUpdateInput', () => {
   it.each([true, false, null])('takes %s', (enabled) => {
     expect(SelfUpdateInput.parse({ enabled })).toEqual({ enabled });
@@ -70,6 +95,7 @@ describe('SelfUpdateStatusDto', () => {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    blocker: null,
   };
 
   it('describes the switch, the commits and the wait', () => {

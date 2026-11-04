@@ -382,6 +382,54 @@ describe('tick', () => {
     expect(getAppSetting(state.db, SELF_UPDATE_FAILED_KEY)).toBe(NEW);
   });
 
+  it('keeps the failure for Settings when there is no project to carry a card', async () => {
+    world.stage = () =>
+      Promise.resolve({ ok: false, step: 'download', message: 'curl: connection reset' });
+    const update = make({ cardProject: null });
+    expect(update.status().problem).toBeNull();
+    await update.tick();
+    expect(update.status().problem).toMatchObject({ kind: 'failed' });
+    expect(update.status().problem?.message).toContain('downloading the build');
+    expect(update.status().problem?.message).toContain('curl: connection reset');
+    expect(update.status().problem?.message).toContain(NEW.slice(0, 12));
+    // Later checks skip the failed head, and Settings goes on saying why.
+    expect(await update.tick()).toBe('failed-before');
+    expect(update.status().problem).toMatchObject({ kind: 'failed' });
+  });
+
+  it('drops the failure when the builder asks again, and when main moves on', async () => {
+    world.stage = () => Promise.resolve({ ok: false, step: 'download', message: 'offline' });
+    const update = make({ cardProject: null });
+    await update.tick();
+    update.retry();
+    expect(update.status().problem).toBeNull();
+    await update.tick();
+    world.head = RUNNING;
+    await update.tick();
+    expect(update.status().problem).toBeNull();
+  });
+
+  it('says it could not reach GitHub while the check fails, and stops saying it once one succeeds', async () => {
+    const update = make();
+    expect(update.status().problem).toBeNull();
+    world.head = new Error('offline');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().problem?.kind).toBe('unreachable');
+    expect(update.status().problem?.message).toMatch(/signed out|offline/i);
+    world.head = RUNNING;
+    expect(await update.tick()).toBe('current');
+    expect(update.status().problem).toBeNull();
+  });
+
+  it('says nothing about GitHub while the switch is off', async () => {
+    world.head = new Error('offline');
+    const update = make();
+    await update.tick();
+    world.enabled = false;
+    await update.tick();
+    expect(update.status().problem).toBeNull();
+  });
+
   it('holds new work back before it looks again, and waits for the scheduler to settle', async () => {
     let settle: () => void = () => undefined;
     world.pause = () =>
@@ -1064,6 +1112,11 @@ describe('a build that fails', () => {
     expect(card?.body).toContain(RUNNING.slice(0, 12));
     expect(card?.body).toContain('make rollback-app');
     expect(world.calls).toEqual(['stage']);
+  });
+
+  it('names the switch by its label in Settings', async () => {
+    await make().tick();
+    expect(cards()[0]?.body).toContain('turn Update 10db by itself off and on in Settings');
   });
 
   it('raises no second card for the same commit however often it checks', async () => {

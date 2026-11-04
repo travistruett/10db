@@ -153,6 +153,7 @@ import {
   githubMainIsAhead,
   holdBoth,
   midSessionWork,
+  cannotUpdate,
   selfUpdateSetting,
   selfUpdateWaitMinutes,
   setSelfUpdateChoice,
@@ -1159,10 +1160,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
     }
   }
+  // What this install can never do, known now; a test's own installer needs no gh.
+  const cannotUpdateAtAll = cannotUpdate(
+    build,
+    ghBin !== null || opts.selfUpdate?.installer != null,
+  );
   const selfUpdateServices: SelfUpdateServices = {
     selfUpdateStatus: () => {
       const progress = selfUpdate?.status();
       return {
+        blocker: cannotUpdateAtAll ?? progress?.problem ?? null,
         ...selfUpdateSetting(state.db),
         runningCommit: build?.commit ?? null,
         availableCommit: progress?.availableCommit ?? null,

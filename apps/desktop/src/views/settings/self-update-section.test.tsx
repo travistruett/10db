@@ -18,6 +18,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     waitingSince: null,
     draining: false,
     drainingSince: null,
+    blocker: null,
     ...over,
   });
 }
@@ -126,6 +127,28 @@ describe('the self-update switch in Settings', () => {
     serving(status({ runningCommit: null }));
     renderApp('/settings/updates');
     expect(await screen.findByText(/running from source/i)).toBeTruthy();
+  });
+});
+
+describe('why the app cannot update itself, in Settings', () => {
+  it('shows nothing when it can', async () => {
+    serving(status());
+    renderApp('/settings/updates');
+    await screen.findByRole('switch', { name: 'Update 10db by itself' });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it.each([
+    ['not-in-applications', 'This copy is not the one in /Applications, so it is left as it is.'],
+    ['no-repository', 'This build knows no repository in build-info.json.'],
+    ['gh-missing', 'gh is not installed, so 10db cannot ask GitHub for builds.'],
+    ['unreachable', 'gh could not reach GitHub: it is signed out or offline.'],
+    ['failed', 'The update to 1a2b3c4d5e6f failed while downloading the build: connection reset.'],
+  ] as const)('shows the reason for %s under the switch', async (kind, message) => {
+    serving(status({ blocker: { kind, message } }));
+    renderApp('/settings/updates');
+    const alert = await screen.findByRole('alert', { name: 'Why 10db will not update itself' });
+    expect(alert.textContent).toContain(message);
   });
 });
 
