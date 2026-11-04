@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
-import { readImageHeader } from './image-check';
+import { webpImage } from '../../test/webp';
+import { readImageHeader, readImageSize } from './image-check';
 
 // A screenshot is checked by what its bytes are, never by what the window called them.
 
@@ -15,6 +16,30 @@ function jpeg(width: number, height: number): Buffer {
   frame.writeUInt16BE(width, 7);
   return Buffer.concat([Buffer.from([0xff, 0xd8]), app0, frame, Buffer.from([0xff, 0xd9])]);
 }
+
+describe('readImageSize', () => {
+  it('reads a PNG’s and a JPEG’s size', () => {
+    expect(readImageSize(PNG)).toEqual({ width: 1200, height: 900 });
+    expect(readImageSize(jpeg(800, 600))).toEqual({ width: 800, height: 600 });
+  });
+
+  it.each(['lossy', 'lossless', 'extended'] as const)('reads a %s WebP’s size', (kind) => {
+    expect(readImageSize(webpImage(kind, 2880, 1800))).toEqual({ width: 2880, height: 1800 });
+    expect(readImageSize(webpImage(kind, 1, 16383))).toEqual({ width: 1, height: 16383 });
+  });
+
+  it('knows nothing of a WebP cut short, or of something else in a RIFF', () => {
+    const whole = webpImage('lossy', 800, 600);
+    expect(readImageSize(whole.subarray(0, whole.length - 1))).toBeNull();
+    expect(readImageSize(whole.subarray(0, 24))).toBeNull();
+    expect(readImageSize(Buffer.from('RIFF....WAVE'))).toBeNull();
+  });
+
+  it('knows nothing of html, a cut PNG or nothing', () => {
+    for (const bytes of [Buffer.from('<html></html>'), PNG.subarray(0, 20), Buffer.alloc(0)])
+      expect(readImageSize(bytes)).toBeNull();
+  });
+});
 
 describe('readImageHeader', () => {
   it('reads a PNG’s size from its header', () => {

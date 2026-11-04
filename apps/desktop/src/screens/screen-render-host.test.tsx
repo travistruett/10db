@@ -1,4 +1,4 @@
-import { mintId, type ScreenRenderRequest } from '@10db/contracts';
+import { mintId, ScreenRefusalInput, type ScreenRenderRequest } from '@10db/contracts';
 import { waitFor } from '@testing-library/react';
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
@@ -65,6 +65,51 @@ describe('the window’s screen host', () => {
     await waitFor(() => {
       expect(answers.refuse).toEqual({ id: 'req-1', body: { reason: 'The Board failed to load' } });
     });
+  });
+
+  it('cuts a reason the daemon would refuse for its length, so the session hears it at once', async () => {
+    const answers: { refuse?: unknown } = {};
+    daemon(answers);
+    const long = 'The Board failed to load: ' + 'x'.repeat(2_000);
+    renderWithDaemon(
+      <ScreenRenderHost draw={() => Promise.resolve({ ok: false, reason: long })} />,
+    );
+    await waitFor(() => {
+      expect(answers.refuse).toBeDefined();
+    });
+    const { body } = answers.refuse as { body: { reason: string } };
+    expect(body.reason.length).toBeLessThanOrEqual(ScreenRefusalInput.shape.reason.maxLength ?? 0);
+    expect(ScreenRefusalInput.safeParse(body).success).toBe(true);
+    expect(body.reason.startsWith('The Board failed to load: xxx')).toBe(true);
+    expect(body.reason.endsWith('…')).toBe(true);
+  });
+
+  it('says so, in a reason that fits, when the daemon turns a refusal away anyway', async () => {
+    const refused: unknown[] = [];
+    let asks = 0;
+    server.use(
+      http.post(daemonUrl('/screens/claim'), async () => {
+        asks += 1;
+        if (asks === 1) return HttpResponse.json(request);
+        await delay('infinite');
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post(daemonUrl('/screens/:requestId/refuse'), async ({ request: req }) => {
+        refused.push(await req.json());
+        return refused.length === 1
+          ? HttpResponse.json({ error: 'bad_request' }, { status: 400 })
+          : new HttpResponse(null, { status: 204 });
+      }),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(
+      <ScreenRenderHost draw={() => Promise.resolve({ ok: false, reason: 'The Board broke' })} />,
+    );
+    await waitFor(() => {
+      expect(refused).toHaveLength(2);
+    });
+    expect(refused[0]).toEqual({ reason: 'The Board broke' });
+    expect(ScreenRefusalInput.safeParse(refused[1]).success).toBe(true);
   });
 
   it('refuses at once, drawing no frame, when the window is hidden, which pauses what a frame needs', async () => {

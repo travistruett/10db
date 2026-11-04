@@ -127,6 +127,24 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     () => call('Agent', { subagent_type: 'general-purpose', prompt: 'x' }),
   ],
   ['an Agent with no type', () => call('Agent', { prompt: 'x' })],
+  // isolation makes a worktree (a write) or runs the agent where this hook never sees its calls.
+  ...(['worktree', 'remote'] as const).flatMap((isolation) => [
+    ...['scope', 'engineering', 'rehearsal', 'general-purpose'].map(
+      (type) =>
+        [
+          `an Agent for ${type} with isolation ${isolation}`,
+          () => call('Agent', { subagent_type: type, prompt: 'x', isolation }),
+        ] as const,
+    ),
+    [
+      `an Agent for the researcher with isolation ${isolation}`,
+      () => call('Agent', { subagent_type: 'researcher', prompt: 'a question', isolation }),
+    ] as const,
+  ]),
+  [
+    'an Agent for a reviewer with an unknown isolation',
+    () => call('Agent', { subagent_type: 'scope', prompt: 'x', isolation: 'sandbox' }),
+  ],
   ['a lane tool, commit', () => call('mcp__10db__commit', { paths: ['a'] })],
   ['a lane tool, request_claim', () => call('mcp__10db__request_claim', { name: 'api' })],
   ['another server’s tool', () => call('mcp__elsewhere__tool', {})],

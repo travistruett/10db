@@ -3,6 +3,7 @@ import { useIsFetching, useQueryClient, type QueryClient } from '@tanstack/react
 import { Outlet, useRouterState } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { DaemonRequestError } from '../daemon/client';
+import { CRASH_ATTRIBUTE, CRASH_MESSAGE_ATTRIBUTE } from '../shell/view-boundary';
 import { SCREEN_LABEL, type FrameMessage } from './draw-screen';
 import { useRenderMode } from './render-context';
 
@@ -35,9 +36,16 @@ function judge(queryClient: QueryClient, label: string): Verdict {
       reason: `${label} failed to load: ${messageOf(failed.state.error)}`,
     };
   const text = document.body.textContent;
-  const crashed = /Something went wrong in [^.]*\./.exec(text)?.[0];
-  if (crashed !== undefined)
-    return { source: 'tendb-screen', kind: 'refused', reason: `${label} crashed: ${crashed}` };
+  // The boundary marks its own notice; text that merely quotes it (a task's title) is data to draw.
+  const crash = document.querySelector(`[${CRASH_ATTRIBUTE}]`);
+  if (crash !== null) {
+    const message = crash.getAttribute(CRASH_MESSAGE_ATTRIBUTE);
+    return {
+      source: 'tendb-screen',
+      kind: 'refused',
+      reason: `${label} crashed: Something went wrong in ${crash.getAttribute(CRASH_ATTRIBUTE) ?? 'a view'}.${message ? ` (${message})` : ''}`,
+    };
+  }
   // Nothing has been asked for yet, or what was asked for is still to be drawn.
   if (!queries.some((q) => q.state.status === 'success') || text.trim() === '') return 'wait';
   return { source: 'tendb-screen', kind: 'ready' };
