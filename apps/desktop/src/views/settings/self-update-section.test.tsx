@@ -23,6 +23,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     isDefault: true,
     runningCommit: RUNNING,
     availableCommit: null,
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: null,
     draining: false,
@@ -184,6 +185,7 @@ describe('a waiting update in Settings', () => {
     expect(waiting.textContent).toMatch(/since 2026-11-03/);
     expect(waiting.textContent).toMatch(/after 20 minutes/);
     expect(waiting.textContent).not.toMatch(/draining/i);
+    expect(screen.getByText('Update waiting')).toBeTruthy();
   });
 
   it('says the factory is draining, since when, and why lanes paused', async () => {
@@ -310,6 +312,38 @@ describe('a waiting update in Settings', () => {
     expect((await screen.findByRole('status', { name: 'Update status' })).textContent).toMatch(
       /draining since/i,
     );
+  });
+
+  it.each([
+    ['failed', /update to 9f8e7d6 failed.*off and on/i],
+    ['rolled-back', /rolled back from 9f8e7d6.*once main has a newer commit/i],
+  ] as const)(
+    'says why a head that is %s is not installing, and offers no Install Now',
+    async (notInstalling, text) => {
+      serving(status({ availableCommit: NEWER, notInstalling }));
+      renderApp('/settings/updates');
+      const note = await screen.findByRole('status', { name: 'Update status' });
+      expect(note.textContent).toMatch(text);
+      expect(note.textContent).not.toMatch(/is waiting/);
+      expect(screen.getByText('Update not installing')).toBeTruthy();
+      expect(screen.queryByText('Update waiting')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Install Now' })).toBeNull();
+    },
+  );
+
+  it('says a head has no build yet, and still takes Install Now for when it has', async () => {
+    serving(status({ availableCommit: NEWER, notInstalling: 'unbuilt' }));
+    renderApp('/settings/updates');
+    const note = await screen.findByRole('status', { name: 'Update status' });
+    expect(note.textContent).toMatch(/9f8e7d6 has no finished build yet/);
+    expect(note.textContent).not.toMatch(/is waiting/);
+    expect(screen.getByText('Update has no build yet')).toBeTruthy();
+    expect(screen.queryByText('Update waiting')).toBeNull();
+    // The daemon remembers it: the factory drains the moment the build is staged.
+    fireEvent.click(screen.getByRole('button', { name: 'Install Now' }));
+    await waitFor(() => {
+      expect(installNows.count).toBe(1);
+    });
   });
 
   it('offers no Install Now with the switch off', async () => {

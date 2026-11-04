@@ -36,6 +36,35 @@ describe('githubHeadOfMain', () => {
     await expect(githubHeadOfMain(gh.run, call)('--hostname=x/y')).rejects.toThrow('not a GitHub');
     expect(gh.args()).toEqual([]);
   });
+
+  it.each([
+    {
+      name: 'gh is signed out',
+      output: { exitCode: 4, stderr: 'To get started with GitHub CLI, please run: gh auth login' },
+      kind: 'signed_out',
+    },
+    {
+      name: 'the machine is offline',
+      output: { exitCode: 1, stderr: 'error connecting to api.github.com' },
+      kind: 'unreachable',
+    },
+    {
+      name: 'GitHub answers 404',
+      output: { exitCode: 1, stderr: 'gh: Not Found (HTTP 404)' },
+      kind: 'failed',
+    },
+    {
+      name: 'GitHub rate limits',
+      output: { exitCode: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)' },
+      kind: 'failed',
+    },
+    { name: 'it answers no commit', output: { stdout: '<html>' }, kind: 'failed' },
+  ])('rejects with gh’s own class of failure when $name', async ({ output, kind }) => {
+    await expect(githubHeadOfMain(exec(output).run, call)('o/10db')).rejects.toMatchObject({
+      name: 'GhError',
+      kind,
+    });
+  });
 });
 
 describe('githubMainIsAhead', () => {
@@ -60,6 +89,26 @@ describe('githubMainIsAhead', () => {
     { name: 'GitHub answers something else', output: { stdout: 'maybe' } },
   ])('rejects when $name, so the check is tried again', async ({ output }) => {
     await expect(githubMainIsAhead(exec(output).run, call)('o/10db', A, B)).rejects.toThrow();
+  });
+
+  it.each([
+    {
+      name: 'gh is signed out',
+      output: { exitCode: 4, stderr: 'gh auth login' },
+      kind: 'signed_out',
+    },
+    {
+      name: 'it cannot connect',
+      output: { exitCode: 1, stderr: 'dial tcp: i/o timeout' },
+      kind: 'unreachable',
+    },
+    { name: 'GitHub rate limits', output: { exitCode: 1, stderr: 'HTTP 403' }, kind: 'failed' },
+    { name: 'it answers no comparison', output: { stdout: 'maybe' }, kind: 'failed' },
+  ])('rejects with gh’s own class of failure when $name', async ({ output, kind }) => {
+    await expect(githubMainIsAhead(exec(output).run, call)('o/10db', A, B)).rejects.toMatchObject({
+      name: 'GhError',
+      kind,
+    });
   });
 
   it('rejects commits that are not full SHAs, without asking', async () => {

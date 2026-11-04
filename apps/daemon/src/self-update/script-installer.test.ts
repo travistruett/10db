@@ -204,9 +204,42 @@ describe('stage', () => {
     expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
   });
 
-  it('keeps nothing when the stage failed after it began replacing the kept build', async () => {
+  /** The script part way through copying a new build beside the kept one, as a full disk stops it. */
+  const copyingIn = 'mkdir -p "$stage.next" && echo partial > "$stage.next/new.dmg"';
+
+  it('leaves the kept build, and no second folder, when the copy of the new one fails', async () => {
     stagedBuild();
-    fakeScript(`rm -f "$stage/commit"\n${failedAt('stage')}`);
+    fakeScript(`${copyingIn}\n${failedAt('stage')}`);
+    expect(await installer.stage(TARGET, RUNNING, null, COMMIT)).toEqual({
+      ok: false,
+      step: 'stage',
+      message: 'gh: 502',
+      kept: true,
+    });
+    expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+    expect(existsSync(join(workDir, 'stage.next'))).toBe(false);
+  });
+
+  it('leaves the kept build, and no second folder, when the deadline kills the copy', async () => {
+    stagedBuild();
+    const quick = installerWith({ stageTimeoutMs: 300 });
+    fakeScript(`${copyingIn}\nexec sleep 30`);
+    const result = await quick.stage(TARGET, RUNNING, null, COMMIT);
+    expect(result).toMatchObject({ ok: false, step: 'stage', kept: true });
+    expect(readFileSync(join(workDir, 'stage', 'build.dmg'), 'utf8')).toBe('kept');
+    expect(existsSync(join(workDir, 'stage.next'))).toBe(false);
+  });
+
+  it('removes a second folder a stage killed along with the daemon left behind', async () => {
+    mkdirSync(join(workDir, 'stage.next'), { recursive: true });
+    fakeScript(stagedOk());
+    await installer.stage(TARGET, RUNNING);
+    expect(existsSync(join(workDir, 'stage.next'))).toBe(false);
+  });
+
+  it('keeps nothing when the stage died in the swap, with the kept build moved out', async () => {
+    stagedBuild();
+    fakeScript(`mv "$stage" "$TMPDIR/replaced"\n${failedAt('stage')}`);
     const result = await installer.stage(TARGET, RUNNING, null, COMMIT);
     expect(result).toEqual({ ok: false, step: 'stage', message: 'gh: 502' });
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
@@ -499,6 +532,7 @@ describe('outcome', () => {
   it('reads the status an install wrote, and forgets it with the staged build', () => {
     mkdirSync(join(workDir, 'stage'), { recursive: true });
     writeFileSync(join(workDir, 'stage', 'old.dmg'), 'old');
+    mkdirSync(join(workDir, 'stage.next'), { recursive: true });
     writeFileSync(
       join(workDir, 'status.json'),
       JSON.stringify({
@@ -518,6 +552,7 @@ describe('outcome', () => {
     installer.outcome.clear();
     expect(installer.outcome.read()).toBeNull();
     expect(existsSync(join(workDir, 'stage'))).toBe(false);
+    expect(existsSync(join(workDir, 'stage.next'))).toBe(false);
   });
 
   it('reads a status file that is not valid as no status', () => {

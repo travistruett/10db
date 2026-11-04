@@ -1,9 +1,11 @@
 import {
   ConflictError,
   InvalidError,
+  isSearch,
   KnowledgeScope,
   PrincipleKind,
   PrincipleStatus,
+  SearchMatch,
   SourceKind,
   targetColumns,
   topicKeyFrom,
@@ -125,14 +127,14 @@ export function knowledgeList(
   const wantDecisions = q.kind === undefined || q.kind === 'decision';
   const wantPrinciples = q.kind !== 'decision';
   const principleKind = Object.values(PrincipleKind).find((k) => k === q.kind);
-  if (q.q !== undefined && q.q !== '' && !search.available)
-    return { items: [], truncated: false, search };
+  const searching = isSearch(q.q ?? '');
+  if (searching && !search.available) return { items: [], truncated: false, search };
   const narrow = {
     projectId,
     ...(q.scope ? { scope: q.scope } : {}),
     ...(q.area ? { area: q.area } : {}),
   };
-  const searching = q.q !== undefined && q.q !== '';
+  const match = q.match ?? SearchMatch.AllPrefixes;
   // One more than the limit of each kind tells whether more matched.
   const take = q.limit + 1;
   let decisions: DecisionItem[] = [];
@@ -145,6 +147,7 @@ export function knowledgeList(
           ids: searchDecisionIds(db, {
             ...narrow,
             query: q.q ?? '',
+            match,
             limit: take,
             history: q.history,
           }),
@@ -163,6 +166,7 @@ export function knowledgeList(
             ...narrow,
             ...kind,
             query: q.q ?? '',
+            match,
             limit: take,
             history: q.history,
           }),
