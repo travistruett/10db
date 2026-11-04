@@ -79,7 +79,6 @@ import { buildDigest } from './digest';
 import {
   asImage,
   checkDroppedFile,
-  inlineBytesSpent,
   inlineImageIds,
   pathImageIds,
   shapeFilesDir,
@@ -108,7 +107,7 @@ import {
   unpinProposal as unpinRow,
 } from './rounds';
 import type { ShapeJev } from './jev';
-import type { ScreenService } from '../screens';
+import { inlineBytesSpent, type ScreenService } from '../screens';
 import { createShapeToolHandlers } from './tools';
 import { removeDraftGoalOf, withdrawConvertedDecision } from './undo';
 import { convertedStateLines } from './converted-state';
@@ -541,7 +540,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const takeIntake = (shapeId: ShapeId, rt: Runtime): Intake => ({
     notes: rt.notes.splice(0),
     files: listUntoldShapeFiles(state.db, shapeId),
-    spent: inlineBytesSpent(listShapeFiles(state.db, shapeId).filter((f) => f.toldAt !== null)),
+    spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
   /** Records that the turn just sent carried these files. */

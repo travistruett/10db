@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EventType,
   InvalidError,
+  ScreenName,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
@@ -10,9 +11,10 @@ import {
   type ShapeFileDto,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { pngImage } from '../../test/png';
+import { createScreens, INLINE_CONVERSATION_MAX_BYTES, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
-import { INLINE_CONVERSATION_MAX_BYTES } from './dropped-files';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
 // Shape spec §5.4 Dropped files and §5.6 Starting from a terminal.
@@ -225,6 +227,130 @@ describe('a large dropped image', () => {
     const turn = await nextTurn('One more');
     expect(turn.images).toEqual([]);
     expect(turn.message).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+  });
+
+  /** Spends the whole conversation total: nine 2 MiB images over three turns, each told. */
+  const spendTheTotal = async (): Promise<void> => {
+    for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+      for (let i = 0; i < 3; i += 1)
+        drop(`a${String(turnNo)}-${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn(`Turn ${String(turnNo)}`);
+    }
+  };
+
+  it('counts what the conversation spent when a session resumes after a restart', async () => {
+    await spendTheTotal();
+    await f.restart();
+    drop('tiny.png', PNG);
+    await nextTurn('One more');
+    const { spec } = must(f.adapter.shapeSessions[1], 'a resumed session');
+    expect(spec.resumeProviderSessionId).not.toBeNull();
+    expect(spec.images ?? []).toEqual([]);
+    expect(spec.prompt).toMatch(/tiny\.png\) — too large to show inline; Read it/);
+  });
+
+  it('sends inline again from zero in a fresh session, which resends no earlier image', async () => {
+    await spendTheTotal();
+    // Past 70% of the context the session is let go, so the next one starts from the digest.
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+    f.service.send(shapeId(), 'Full');
+    await f.service.settled(shapeId());
+    drop('tiny.png', PNG);
+    await nextTurn('One more');
+    const { spec } = must(f.adapter.shapeSessions[1], 'a fresh session');
+    expect(spec.resumeProviderSessionId).toBeNull();
+    expect(spec.prompt).toContain('continues in a fresh session');
+    expect(spec.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+    expect(spec.prompt).not.toMatch(/tiny\.png\) — too large/);
+  });
+
+  // see_screen answers a picture in a tool result, which a resumed session resends like any image block.
+  describe('beside the pictures see_screen takes', () => {
+    const window = { screen: ScreenName.Board, width: 1200, height: 900 } as const;
+    const drawn = (bytes: number): ScreenOutcome => {
+      const image = pngImage(1200, 900);
+      return {
+        ok: true,
+        image: {
+          mediaType: 'image/png',
+          data: pngImage(1200, 900, bytes - image.length - 12).toString('base64'),
+          width: 1200,
+          height: 900,
+        },
+      };
+    };
+    const screensOf = (outcome: ScreenOutcome) =>
+      createScreens({
+        state: f.state,
+        filesDir: f.filesDir,
+        broker: {
+          request: () => Promise.resolve(outcome),
+          claim: () => Promise.resolve(null),
+          deliver: () => false,
+          refuse: () => false,
+          tokenValid: () => false,
+        },
+      });
+    const kept = (): string[] => {
+      const dir = join(f.filesDir, shapeId(), 'screens');
+      return existsSync(dir) ? readdirSync(dir) : [];
+    };
+    const keptBytes = (): number =>
+      kept().reduce(
+        (sum, name) => sum + statSync(join(f.filesDir, shapeId(), 'screens', name)).size,
+        0,
+      );
+
+    it('takes the screens out of what is left for dropped images', async () => {
+      await nextTurn('Hello');
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+      // 16.8 MB of screens leaves about 2 MB: one more image fits, and a second does not.
+      drop('fits.png', sized(PNG, MB));
+      drop('over.png', sized(PNG, 1.5 * MB));
+      const turn = await nextTurn('Both');
+      expect(turn.images).toHaveLength(1);
+      expect(turn.message).toMatch(/over\.png\) — too large to show inline; Read it/);
+      expect(turn.message).not.toMatch(/fits\.png\) — too large/);
+    });
+
+    it('refuses a screen that would pass the total the dropped images left, saying why', async () => {
+      for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('One');
+      for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('Two');
+      for (let i = 0; i < 2; i += 1) drop(`c${String(i)}.png`, sized(PNG, 2 * MB));
+      await nextTurn('Three');
+      // 16 MiB told: a 1.5 MB screen fits once.
+      const screens = screensOf(drawn(1_500_000));
+      await screens.see(shapeId(), window);
+      await expect(screens.see(shapeId(), window)).rejects.toThrow(
+        /no room for another picture.*new conversation/,
+      );
+      expect(kept()).toHaveLength(1);
+      expect(
+        f.service.view(shapeId()).messages.filter((m) => m.kind === ShapeMessageKind.Screen),
+      ).toHaveLength(1);
+      expect(
+        f.service
+          .view(shapeId())
+          .messages.some((m) => m.body.startsWith('see_screen · refused · ')),
+      ).toBe(true);
+    });
+
+    it('keeps nine dropped images and twelve asked-for screens under the total', async () => {
+      const screens = screensOf(drawn(1_500_000));
+      await spendTheTotal();
+      for (let n = 0; n < 12; n += 1)
+        await expect(screens.see(shapeId(), window)).rejects.toThrow(/no room/);
+      drop('late.png', PNG);
+      const turn = await nextTurn('More');
+      expect(turn.images).toEqual([]);
+      const told = f.service.view(shapeId()).files.filter((file) => file.name !== 'late.png');
+      const images = told.reduce((sum, file) => sum + file.size, 0);
+      expect(images + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
   });
 
   it('is sent as a path to a session that has not started, and not as an image', async () => {

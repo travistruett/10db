@@ -302,10 +302,15 @@ files as a line naming the path, which the session reads with `Read`. **(spec's 
 
 The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every earlier
 image, so one oversize block would end every later turn. An image over 2 MiB, past 6 MiB of images in one
-message, or past 18 MiB of images across the whole conversation (24 MiB as base64, leaving the 32 MB request
-about 6 MB for text), therefore goes as a path line marked "too large to show inline; Read it", which `Read`
-resizes itself. The conversation total counts every image already told that fits the 2 MiB cap, an upper bound
-on what went inline; a session started fresh (from a digest) resends no earlier block, so it starts at zero.
+message, or past 18 MiB of pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request
+about 6 MB), therefore goes as a path line marked "too large to show inline; Read it", which `Read` resizes
+itself. The conversation total is one budget for every picture a resumed request resends that the daemon sends
+itself: it counts each image already told that fits the 2 MiB cap, an upper bound on what went inline, and each
+screen kept (§5.5), and `see_screen` refuses a picture that would pass it. Twelve screens at their 1.5 MB most
+fit inside the total, so it only limits them beside dropped images. A session started fresh (from a digest)
+resends no earlier block, so its first message starts at zero; later turns count the whole conversation again,
+which is the same upper bound. A picture Claude pulls in with `Read` is a tool result the daemon doesn't see and
+this budget doesn't count, so nothing here promises it fits in the 6 MB left over.
 The daemon sets these caps; it has not been checked with a live session whether Claude Code shrinks image blocks
 that arrive as SDK input, and does not rely on it. **(spec's call: the inline caps)**
 
@@ -369,7 +374,9 @@ not by the token.
   a data URL). A picture that is wrong or blank, a screen that fails to load or does not finish in 15 s, a crashed
   view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
   `see_screen · refused · …` line), never a blank image.
-- **Budget.** At most 12 screens a conversation; each is at most 1600 by 2000 px; the system prompt says to ask for
+- **Budget.** At most 12 screens a conversation, and fewer when dropped images took the room: screens share the
+  conversation's 18 MiB picture total (§5.4), and a picture that would pass it is refused with the reason and not
+  kept. Each is at most 1600 by 2000 px; the system prompt says to ask for
   the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
   (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
   not carried over.

@@ -8,6 +8,7 @@ import {
   shapeFileRefusal,
   type ShapeId,
 } from '@10db/contracts';
+import { INLINE_CONVERSATION_MAX_BYTES, INLINE_IMAGE_MAX_BYTES, isImageName } from '../screens';
 import type { ShapeImage } from '../sessions';
 
 // Shape spec §5.4. What a dropped file must be to reach the session, and where the daemon keeps it.
@@ -69,7 +70,7 @@ export function checkDroppedFile(file: {
 
 // The API refuses an image over about 5 MB (base64) and a request over 32 MB, and a resumed session
 // resends every earlier image with each request, so one oversize image would end every later turn.
-// An image over either cap goes as a path, which `Read` takes in and resizes itself.
+// An image over a cap goes as a path, which `Read` takes in and resizes itself.
 const MIB = 1024 * 1024;
 interface FileSize {
   readonly id: string;
@@ -77,40 +78,13 @@ interface FileSize {
   readonly size: number;
 }
 
-/** The largest image sent as a content block: 2 MiB is under 3 MB as base64. */
-export const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
 /** The most image bytes one message carries as content blocks. */
 export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
 
 /**
- * The most image bytes a whole conversation carries as content blocks. A resumed session resends every
- * earlier block with each request, and base64 grows them by 4/3: 18 MiB raw is 24 MiB (about 25 MB) on
- * the wire, leaving the API's 32 MB request limit about 6 MB for the text, tool results and the reply.
- */
-export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
-
-const isImageName = (name: string): boolean => {
-  const kind = shapeFileKind(name);
-  return kind !== null && isShapeImage(kind);
-};
-
-/**
- * The inline image bytes a conversation has already spent, from the files Claude was told of earlier.
- * Which of them went as blocks depends on how they were batched into turns, so every told image within
- * the per-image cap counts: an upper bound, never an undercount, so the resent request stays under the limit.
- */
-export function inlineBytesSpent(told: readonly FileSize[]): number {
-  return told.reduce(
-    (sum, file) =>
-      isImageName(file.name) && file.size <= INLINE_IMAGE_MAX_BYTES ? sum + file.size : sum,
-    0,
-  );
-}
-
-/**
  * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
  * cap, together within the per-message cap, and within what is left of the conversation's cap after
- * `spent` bytes sent earlier. Every other image goes as a path.
+ * `spent` bytes sent earlier (`inlineBytesSpent`). Every other image goes as a path.
  */
 export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<string> {
   const ids = new Set<string>();
