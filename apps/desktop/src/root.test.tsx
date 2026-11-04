@@ -83,8 +83,31 @@ describe('Root', () => {
     expect(reason).toContain('daemon=xxx');
   });
 
-  it('says nothing to its parent for a page that is not a frame', () => {
+  it('repeats at most the first 80 characters of a value, so a long value cannot take up the reason', async () => {
+    const value = `${'a'.repeat(40)}${'b'.repeat(40)}${'c'.repeat(40)}`;
+    render(<Root search={`?render=secret-token&daemon=${value}`} app={() => <div>the app</div>} />);
+    await waitFor(() => {
+      expect(heard).toHaveLength(1);
+    });
+    const reason = heard[0]?.reason ?? '';
+    expect(reason).toContain(`daemon=${value.slice(0, 80)}…`);
+    expect(reason).not.toContain(value.slice(0, 81));
+  });
+
+  it('says nothing to its parent for a page that is not a frame', async () => {
     render(<Root search="" app={() => <div>the app</div>} />);
+    // postMessage is delivered later, so wait for a message sent after the render: messages arrive in
+    // order, so anything Root posted would have arrived before it.
+    let arrived = false;
+    const mark = (event: MessageEvent): void => {
+      if ((event.data as { source?: string }).source === 'test-marker') arrived = true;
+    };
+    window.addEventListener('message', mark);
+    window.postMessage({ source: 'test-marker' }, window.location.origin);
+    await waitFor(() => {
+      expect(arrived).toBe(true);
+    });
+    window.removeEventListener('message', mark);
     expect(heard).toEqual([]);
   });
 
