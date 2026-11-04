@@ -171,6 +171,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const row = getWorkstreamRow(db, id);
     const task = getTask(db, row.taskId);
     if (row.state !== WorkstreamState.Failed || row.batchId === null) return;
+    // A closed or parked task can't start over either, so `retryWorkstream` says why, as it checks first.
+    if (task.status === TaskStatus.Cancelled || task.boardColumnId !== null) return;
     if (task.workstreamId !== id) return;
     const batch = getBatch(db, row.batchId);
     if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed) return;
