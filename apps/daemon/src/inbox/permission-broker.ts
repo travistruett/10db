@@ -342,6 +342,8 @@ export function createPermissionBroker(
       // file on the one answer, before either writes, and the second write would match neither record.
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
+      // The escalation is only in the detail, so without this an escalated and an ordinary ask would share a card.
+      escalated: req.escalated,
     });
     const result = await wait(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
