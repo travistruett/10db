@@ -107,10 +107,13 @@ describe('SelfUpdateStatusDto', () => {
     expect(SelfUpdateStatusDto.parse(status)).toEqual(status);
   });
 
-  it.each(['failed', 'rolled-back', 'unbuilt'])('says an update is not installing: %s', (why) => {
-    const held = { ...status, availableCommit: SHA, notInstalling: why };
-    expect(SelfUpdateStatusDto.parse(held)).toEqual(held);
-  });
+  it.each(['failed', 'rolled-back', 'unbuilt', 'fetching'])(
+    'says an update is not installing: %s',
+    (why) => {
+      const held = { ...status, availableCommit: SHA, notInstalling: why };
+      expect(SelfUpdateStatusDto.parse(held)).toEqual(held);
+    },
+  );
 
   it('refuses a reason it does not know', () => {
     expect(SelfUpdateStatusDto.safeParse({ ...status, notInstalling: 'sad' }).success).toBe(false);

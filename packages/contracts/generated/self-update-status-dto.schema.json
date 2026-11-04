@@ -37,7 +37,8 @@
           "enum": [
             "failed",
             "rolled-back",
-            "unbuilt"
+            "unbuilt",
+            "fetching"
           ]
         },
         {

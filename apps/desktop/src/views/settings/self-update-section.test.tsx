@@ -415,6 +415,22 @@ describe('a waiting update in Settings', () => {
     });
   });
 
+  it('says a head’s build is being fetched, not that it waits for an idle moment', async () => {
+    serving(status({ availableCommit: NEWER, notInstalling: 'fetching' }));
+    renderApp('/settings/updates');
+    const note = await screen.findByRole('status', { name: 'Update status' });
+    expect(note.textContent).toMatch(/fetching the build of 9f8e7d6/i);
+    expect(note.textContent).not.toMatch(/is waiting/);
+    expect(note.textContent).not.toMatch(/mid-session/);
+    expect(screen.getByText('Update being fetched')).toBeTruthy();
+    expect(screen.queryByText('Update waiting')).toBeNull();
+    // Install Now is remembered: the factory drains the moment the build is staged.
+    fireEvent.click(screen.getByRole('button', { name: 'Install Now' }));
+    await waitFor(() => {
+      expect(installNows.count).toBe(1);
+    });
+  });
+
   it('offers no Install Now with the switch off', async () => {
     serving(status({ enabled: false, isDefault: false, availableCommit: NEWER }));
     renderApp('/settings/updates');

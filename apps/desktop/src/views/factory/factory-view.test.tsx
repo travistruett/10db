@@ -1424,6 +1424,7 @@ describe('FactoryView waiting update', () => {
     ['the update failed with a drain still reported', { notInstalling: 'failed', draining: true }],
     ['the builder rolled back from the update', { notInstalling: 'rolled-back' }],
     ['the update has no finished build', { notInstalling: 'unbuilt' }],
+    ['the update’s build is being fetched', { notInstalling: 'fetching' }],
   ] as const)('says nothing is waiting when %s', async (_name, over) => {
     let asked = false;
     serve(

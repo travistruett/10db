@@ -1999,10 +1999,64 @@ describe('why an available update is not installing', () => {
     const tick = update.tick();
     await settled();
     expect(update.status().availableCommit).toBe(NEWER);
-    expect(update.status().notInstalling).toBeNull();
+    // Nothing of the old head's, but not idle-waiting either: its build is being fetched.
+    expect(update.status().notInstalling).toBe('fetching');
     finishStage({ ok: true, current: true, commit: RUNNING });
     expect(await tick).toBe('no-newer-build');
     expect(update.status().notInstalling).toBe('unbuilt');
+  });
+
+  describe('while the first build of a head is fetched or waited for', () => {
+    let finishStage: (result: StageResult) => void = () => undefined;
+    beforeEach(() => {
+      world.stage = () =>
+        new Promise((resolve) => {
+          finishStage = resolve;
+        });
+    });
+
+    it('says it is fetching, with nothing staged and nothing waiting', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      expect(update.status().availableCommit).toBe(NEW);
+      expect(update.status().waitingSince).toBeNull();
+      expect(update.status().notInstalling).toBe('fetching');
+      finishStage(STAGED_OK);
+      expect(await tick).toBe('applying');
+      expect(update.status().notInstalling).toBeNull();
+    });
+
+    it('says it again for a stage that fails, not that it waits', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      expect(update.status().notInstalling).toBe('fetching');
+      finishStage({ ok: false, step: 'download', message: 'reset' });
+      expect(await tick).toBe('failed');
+      expect(update.status().notInstalling).toBe('failed');
+    });
+
+    it('says it no more once the build is staged and waits for an idle moment', async () => {
+      world.busy = 1;
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      finishStage(STAGED_OK);
+      expect(await tick).toBe('busy');
+      expect(update.status().waitingSince).not.toBeNull();
+      expect(update.status().notInstalling).toBeNull();
+    });
+
+    it('says nothing of it when the switch is off', async () => {
+      const update = make();
+      const tick = update.tick();
+      await settled();
+      world.enabled = false;
+      expect(update.status().notInstalling).toBeNull();
+      finishStage(STAGED_OK);
+      await tick;
+    });
   });
 
   it('keeps the head’s reason through a stage for the same head', async () => {

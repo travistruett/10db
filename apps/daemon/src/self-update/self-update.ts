@@ -492,6 +492,11 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * Gone once the head changes or the builder asks again, which no check has to end for.
    */
   let notInstalling: SelfUpdateNotInstalling | null = null;
+  /**
+   * A check is fetching the build of a head with nothing staged yet, or waiting for GitHub to finish
+   * it: the update is not waiting for an idle moment, it has nothing to install.
+   */
+  let fetching = false;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -590,6 +595,10 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // The build the builder rolled back from is not fetched again, so a check while main's head
       // is still building costs a look at GitHub, not a download.
       const skip = rolledBackFrom();
+      // With a build already staged the update is waiting, whatever the stage looks for. With none,
+      // the stage is all there is: it fetches, or waits for GitHub's build, for many minutes. The
+      // flag lasts until the build is staged or the check ends.
+      fetching = staged === null;
       const result = await deps.stage(target, runningCommit, skip, keep);
       // The daemon stopped while the build was fetched: its database and log are closed.
       if (isStopped()) return TickResult.Working;
@@ -664,6 +673,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         return TickResult.NoNewerBuild;
       }
       staged = { dir: result.dir, commit: result.commit, head };
+      fetching = false;
       // A newer head restages while the update waits: the wait goes on from the first staging.
       waitingSince ??= deps.clock.now();
     }
@@ -851,6 +861,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       return result;
     } finally {
       working = false;
+      fetching = false;
     }
   }
 
@@ -953,7 +964,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           : // A failure outside a check (an install that ended, a start that settled it) counts too.
             failure !== null
             ? 'failed'
-            : notInstalling,
+            : (notInstalling ?? (fetching ? 'fetching' : null)),
     }),
   };
 }
