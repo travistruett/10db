@@ -874,8 +874,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
       const added = await addedTags(ctx.git, path, tip, merged.from, dropped);
       // A tag both sides added as different migrations is in no `dropped`: the merge took the base's
       // file. It is the branch's still, lost until the journal holds it beyond the base's.
-      const own = await ownMigrations(ctx.git, path, tip, merged.from);
-      const contested = own.kind === 'found' ? own.contested : [];
+      const { contested } = await ownMigrations(ctx.git, path, tip, merged.from);
       tags = await absentFrom(
         ctx.git,
         path,

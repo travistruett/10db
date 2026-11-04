@@ -544,6 +544,15 @@ describe('carrying a branch with several generated migrations over, each as its 
       expect(lostTags(batch)).toEqual(['0001_owner', '0002_note']);
     });
 
+    it('names the contested migration when the carry never starts, the later one being unreadable', async () => {
+      const batch = await bothSidesAdded(ownerThenNote, ADD_SHAPE_COLUMN);
+      await commitOnBatch(batch, new Map([[`${DB}/meta/0002_snapshot.json`, 'not a snapshot\n']]));
+
+      expect((await update(batch)).kind).toBe('uncarried');
+
+      expect(lostTags(batch)).toEqual(['0001_owner', '0002_note']);
+    });
+
     it("clears only once the journal holds the contested migration beyond the base's", async () => {
       const batch = await bothSidesAdded(ownerThenNote, ADD_SHAPE_COLUMN);
       await update(batch, 'note');

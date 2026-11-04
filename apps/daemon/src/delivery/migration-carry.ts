@@ -23,20 +23,23 @@ const META_MAX_BYTES = 16 * 1024 * 1024;
 /** A migration's SQL past this is not carried over. */
 const SQL_MAX_BYTES = 64 * 1024 * 1024;
 
-export type OwnMigrations =
-  /** `migrations` is what to re-create, in order, after `baseTags`; none when there is nothing to carry. */
-  | {
+export type OwnMigrations = {
+  /**
+   * The tags both sides added as different migrations: the merge took the base's file and lists
+   * nothing in `dropped`, but each is the branch's, to be made again after the base's. Known even when
+   * a later migration can't be read, since those stay lost all the same.
+   */
+  readonly contested: readonly string[];
+} & (
+  | /** `migrations` is what to re-create, in order, after `baseTags`; none when there is nothing to carry. */
+    {
       readonly kind: 'found';
       readonly migrations: readonly CarriedMigration[];
       readonly baseTags: readonly string[];
-      /**
-       * The tags both sides added as different migrations: the merge took the base's file and lists
-       * nothing in `dropped`, but the branch's is among `migrations`, to be made again after the base's.
-       */
-      readonly contested: readonly string[];
     }
-  /** The branch's migration `tag` can't be told apart, so it can't be re-created. */
-  | { readonly kind: 'unreadable'; readonly tag: string; readonly why: string };
+    /** The branch's migration `tag` can't be told apart, so it can't be re-created. */
+  | { readonly kind: 'unreadable'; readonly tag: string; readonly why: string }
+);
 
 const NONE: OwnMigrations = { kind: 'found', migrations: [], baseTags: [], contested: [] };
 
@@ -83,23 +86,25 @@ export async function ownMigrations(
       (await schemaAt(tip, number)) !== (await schemaAt(from, number))
     );
   };
-  const contested = new Set<string>();
+  const differing = new Set<string>();
   for (const tag of ours)
-    if (theirs.includes(tag) && !shared.includes(tag) && (await differs(tag))) contested.add(tag);
-  const held = theirs.filter((tag) => !contested.has(tag));
+    if (theirs.includes(tag) && !shared.includes(tag) && (await differs(tag))) differing.add(tag);
+  const contested = [...differing];
+  const held = theirs.filter((tag) => !differing.has(tag));
   for (const tag of ownTags(ours, held, shared)) {
     const parsed = parseTag(tag);
     if (parsed === null)
-      return { kind: 'unreadable', tag, why: 'its tag is not one drizzle-kit writes' };
+      return { kind: 'unreadable', tag, why: 'its tag is not one drizzle-kit writes', contested };
     const own = await snapshot(parsed.number);
     const schema = own === null ? null : schemaOf(own);
-    if (schema === null) return { kind: 'unreadable', tag, why: 'its snapshot could not be read' };
+    if (schema === null)
+      return { kind: 'unreadable', tag, why: 'its snapshot could not be read', contested };
     const before = parseTag(ours[ours.indexOf(tag) - 1] ?? '');
     const previous = before === null ? null : await snapshot(before.number);
     const custom = previous !== null && schemaOf(previous) === schema;
     migrations.push({ tag, name: parsed.name, custom });
   }
-  return { kind: 'found', migrations, baseTags: theirs, contested: [...contested] };
+  return { kind: 'found', migrations, baseTags: theirs, contested };
 }
 
 /** The file `drizzle-kit generate` reads the schema from, in the package that makes the migrations. */
