@@ -74,10 +74,23 @@ interface Step {
   readonly name: string;
   readonly schema: string;
   readonly sql?: string;
+  /** Takes the migration made last off first, as a task that deletes it and generates it again does. */
+  readonly redo?: boolean;
+}
+
+/** Takes the last migration out of the package in `dir`: its journal entry, SQL and snapshot. */
+function dropLast(dir: string): void {
+  const journal = join(dir, 'drizzle/meta/_journal.json');
+  const parsed = JSON.parse(readFileSync(journal, 'utf8')) as { entries: { tag: string }[] };
+  const tag = parsed.entries.pop()?.tag ?? '';
+  writeFileSync(journal, `${JSON.stringify(parsed, null, 2)}\n`);
+  rmSync(join(dir, 'drizzle', `${tag}.sql`));
+  rmSync(join(dir, 'drizzle/meta', `${tag.slice(0, 4)}_snapshot.json`));
 }
 
 /** The migration directory `drizzle-kit` keeps, outside any repository. */
-function generatedStep(dir: string, { name, schema, sql }: Step): void {
+function generatedStep(dir: string, { name, schema, sql, redo = false }: Step): void {
+  if (redo) dropLast(dir);
   writeFileSync(join(dir, 'src/schema.ts'), schema);
   drizzleGenerate(dir, name, sql !== undefined);
   if (sql === undefined) return;
@@ -362,6 +375,64 @@ describe('carrying a branch with several generated migrations over, each as its 
     expect(sqlOf(batch, '0004_owner')).toBe('ALTER TABLE `sessions` ADD `owner` text;');
     expect(statusOf(pathOf(batch))).toBe('');
     expect(h.only(getBatch(h.store.db, batch.id).notices).body).toContain('0001_note → 0003_note');
+  });
+
+  describe('a migration regenerated under the same name', () => {
+    const TAG = "  tag: text('tag'),";
+    const first: Step = { name: 'owner', schema: schemaFile({ columns: [NOTE, OWNER] }) };
+    const again: Step = {
+      name: 'owner',
+      schema: schemaFile({ columns: [NOTE, TAG] }),
+      redo: true,
+    };
+
+    it('is stepped from the schema of its last regeneration, not its first', async () => {
+      const batch = await bothSidesAdded([addNote, first, again], addLogs);
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual(['0000_init', '0001_logs', '0002_note', '0003_owner']);
+      expect(sqlOf(batch, '0002_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
+      expect(sqlOf(batch, '0003_owner')).toBe('ALTER TABLE `sessions` ADD `tag` text;');
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it('is still skipped as a Regenerate commit by the second catch-up', async () => {
+      const batch = await bothSidesAdded([addNote, first, again], addLogs);
+      await update(batch);
+      mainAdds({ name: 'shape', schema: schemaFile({ columns: [SHAPE], after: [LOGS] }) });
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual([
+        '0000_init',
+        '0001_logs',
+        '0002_shape',
+        '0003_note',
+        '0004_owner',
+      ]);
+      expect(sqlOf(batch, '0003_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
+      expect(sqlOf(batch, '0004_owner')).toBe('ALTER TABLE `sessions` ADD `tag` text;');
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
+
+    it("is not taken for the branch's when the base once had a migration of that name", async () => {
+      const batch = await bothSidesAdded([addNote, first], {
+        name: 'owner',
+        schema: schemaFile({ columns: [SHAPE] }),
+      });
+
+      expect((await update(batch)).kind).toBe('merged');
+
+      expect(h.cards()).toEqual([]);
+      expect(journalOf(batch)).toEqual(['0000_init', '0001_owner', '0002_note', '0003_owner']);
+      expect(sqlOf(batch, '0001_owner')).toBe('ALTER TABLE `sessions` ADD `shape_id` text;');
+      expect(sqlOf(batch, '0002_note')).toBe('ALTER TABLE `sessions` ADD `note` text;');
+      expect(sqlOf(batch, '0003_owner')).toBe('ALTER TABLE `sessions` ADD `owner` text;');
+      expect(statusOf(pathOf(batch))).toBe('');
+    });
   });
 
   it('carries a custom migration between the two in its place, byte for byte', async () => {
