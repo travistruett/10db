@@ -75,9 +75,10 @@ export const useKnowledgeDecisions = (f: KnowledgeFilter) =>
 const Proposals = z.array(ProposalDto);
 
 /** The project's pending proposals; the Proposals tab and its count share this query. */
-export function useProposals(projectId: ProjectId) {
+export function useProposals(projectId: ProjectId, enabled = true) {
   const { client } = useDaemon();
   return useQuery({
+    enabled,
     queryKey: knowledgeKeys.proposals(projectId),
     queryFn: async () =>
       readJson(

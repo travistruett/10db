@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  CARD_PROPOSED_PRINCIPLES,
   CARD_RESOLUTION,
   CheckChoice,
   ConflictError,
@@ -478,14 +479,20 @@ export function createInboxService(deps: {
         const parks = parksTask(item, answer);
         const closesDirectly =
           parks || (item.kind !== InboxKind.Question && item.kind !== InboxKind.Permission);
-        const updated = updateInboxItem(ctx, id, {
+        let updated = updateInboxItem(ctx, id, {
           state: closesDirectly ? InboxState.Resolved : InboxState.Answered,
           answer,
         });
         if (!parks && item.kind === InboxKind.Question) {
           // Inside this transaction: an area the project lacks refuses the answer and the card stays open.
           recordAnswerDecision(ctx, updated, answer, getProject(ctx.tx, item.projectId));
-          proposeStandingRules(ctx, updated, answer);
+          const proposed = proposeStandingRules(ctx, updated, answer);
+          // The resolved card says a principle was proposed and links to it.
+          if (proposed.length > 0) {
+            updated = updateInboxItem(ctx, id, {
+              detail: { ...updated.detail, [CARD_PROPOSED_PRINCIPLES]: proposed },
+            });
+          }
         }
         if (item.kind === InboxKind.Permission) applyPermissionChoice(ctx, updated, answer);
         if (item.kind === InboxKind.Proposal) applyProposalVerdict(ctx, updated, answer);

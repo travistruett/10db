@@ -1,6 +1,7 @@
 import type { ProjectViewDto } from '@10db/contracts';
 import { Badge, Group, Stack, Tabs, Text, Title, VisuallyHidden } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
+import { useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
 import {
   useProposals,
@@ -24,9 +25,9 @@ import { ProvenanceDrawer } from './provenance-drawer';
 /** Long enough to skip a request per keystroke, short enough to feel live. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-type Tab = 'principles' | 'decisions' | 'proposals';
+export type KnowledgeTab = 'principles' | 'decisions' | 'proposals';
 
-function isTab(value: string | null): value is Tab {
+export function isKnowledgeTab(value: string | null): value is KnowledgeTab {
   return value === 'principles' || value === 'decisions' || value === 'proposals';
 }
 
@@ -51,8 +52,14 @@ function ProposalsTab({ project }: { readonly project: ProjectViewDto }) {
   );
 }
 
-function ProjectKnowledge({ project }: { readonly project: ProjectViewDto }) {
-  const [tab, setTab] = useState<Tab>('principles');
+function ProjectKnowledge({
+  project,
+  initialTab,
+}: {
+  readonly project: ProjectViewDto;
+  readonly initialTab: KnowledgeTab;
+}) {
+  const [tab, setTab] = useState<KnowledgeTab>(initialTab);
   const [filters, setFilters] = useState<FilterState>(NO_FILTERS);
   const [q] = useDebouncedValue(filters.q, SEARCH_DEBOUNCE_MS);
   const [traced, setTraced] = useState<TracedRecord | null>(null);
@@ -68,7 +75,7 @@ function ProjectKnowledge({ project }: { readonly project: ProjectViewDto }) {
       <Tabs
         value={tab}
         onChange={(next) => {
-          if (isTab(next)) setTab(next);
+          if (isKnowledgeTab(next)) setTab(next);
         }}
         keepMounted={false}
       >
@@ -136,6 +143,7 @@ function ProjectKnowledge({ project }: { readonly project: ProjectViewDto }) {
  */
 export function KnowledgeView() {
   const { project } = useSelectedProject();
+  const { tab } = useSearch({ from: '/knowledge' });
   return (
     <Stack>
       <Stack gap={2}>
@@ -147,7 +155,7 @@ export function KnowledgeView() {
       </Stack>
       {project ? (
         // Keyed by project so filters, tab and an open provenance never carry into another one.
-        <ProjectKnowledge key={project.id} project={project} />
+        <ProjectKnowledge key={project.id} project={project} initialTab={tab ?? 'principles'} />
       ) : null}
     </Stack>
   );

@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  CARD_PROPOSED_PRINCIPLES,
   ConflictError,
   DEFAULT_HAZARDS,
   EventType,
@@ -11,6 +12,7 @@ import {
   InvalidError,
   mintId,
   PARK_TASK_CHOICE,
+  ProposedPrinciples,
   STOCK_HAZARD_REVISIONS,
   type InboxItemDto,
   type InboxTarget,
@@ -527,6 +529,30 @@ describe('knowledge capture', () => {
       speaker: 'me',
       sourceQuote: 'Never add Redis for queues.',
     });
+  });
+
+  it('keeps which principles an answer proposed on the answered card', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'other');
+    inbox.answer(item.id, {
+      choice: 'pg-boss',
+      note: 'Use pg-boss. Never add Redis for queues. Always keep jobs idempotent.',
+    });
+    const proposed = listInbox(state.db, { states: ['OPEN'] })
+      .filter((c) => c.kind === 'proposal')
+      .map((c) => c.detail);
+    const kept = ProposedPrinciples.parse(
+      getInboxItem(state.db, item.id).detail?.[CARD_PROPOSED_PRINCIPLES],
+    );
+    expect(kept).toHaveLength(2);
+    expect(kept).toEqual(proposed);
+  });
+
+  it('keeps nothing on a card whose answer proposed no principle', () => {
+    const ws = seedWorkstream(base);
+    const item = askIn(ws, 'other');
+    inbox.answer(item.id, { choice: 'pg-boss', note: 'Sounds good.' });
+    expect(getInboxItem(state.db, item.id).detail?.[CARD_PROPOSED_PRINCIPLES]).toBeUndefined();
   });
 
   it('proposes the formatter sentence from an answer, quoting it', () => {

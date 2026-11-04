@@ -12,6 +12,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type KnowledgeTarget,
+  type PrincipleId,
   type ProjectDto,
   type ProjectId,
   type ProposalId,
@@ -73,26 +74,26 @@ export function proposeStandingRules(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: InboxAnswer,
-): ProposalId[] {
+): { proposalId: ProposalId; principleId: PrincipleId }[] {
   if (item.kind !== InboxKind.Question || answer.note === undefined) return [];
   const rules = standingRules(answer.note);
   if (rules.length === 0) return [];
   const sourceId = insertSource(ctx, SourceKind.InboxAnswer, { inboxId: item.id });
-  return rules.map(
-    (statement) =>
-      proposePrinciple(ctx, {
-        projectId: item.projectId,
-        title: `Make this a principle? ${statement}`,
-        body: `You wrote this answering "${item.title}".`,
-        draft: {
-          statement,
-          kind: PrincipleKind.Policy,
-          topicKey: topicKeyFrom(statement),
-          scope: KnowledgeScope.Project,
-          quote: statement,
-        },
-        sourceId,
-        speaker: BUILDER_HANDLE,
-      }).proposalId,
-  );
+  return rules.map((statement) => {
+    const { proposalId, principle } = proposePrinciple(ctx, {
+      projectId: item.projectId,
+      title: `Make this a principle? ${statement}`,
+      body: `You wrote this answering "${item.title}".`,
+      draft: {
+        statement,
+        kind: PrincipleKind.Policy,
+        topicKey: topicKeyFrom(statement),
+        scope: KnowledgeScope.Project,
+        quote: statement,
+      },
+      sourceId,
+      speaker: BUILDER_HANDLE,
+    });
+    return { proposalId, principleId: principle.id };
+  });
 }
