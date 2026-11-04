@@ -43,7 +43,7 @@ export const ShapeConvertedDto = z.object({
   questionId: ShapeQuestionId.nullable().optional(),
   /** The converted decision or principle was withdrawn (Withdraw Decision…, Withdraw Principle…); absent for every other kind. */
   withdrawn: z.boolean().optional(),
-  /** The converted principle was replaced by a later one with its topic key and scope; absent for every other kind. */
+  /** The converted decision or principle was replaced by a later one that still stands; absent for every other kind. */
   superseded: z.boolean().optional(),
   /** The converted principle was retired from the Knowledge view; absent for every other kind. */
   retired: z.boolean().optional(),

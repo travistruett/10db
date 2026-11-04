@@ -320,6 +320,14 @@ describe('useEventStream', () => {
     expect(INVALIDATIONS['decision']).toEqual(expect.arrayContaining([['goals']]));
   });
 
+  it("refetches an open Plan view's conversations when a converted decision or principle changes", () => {
+    // A converted row reads 'Converted · in Knowledge' from the record's state, so a retire or
+    // withdraw from outside the view must reach it.
+    for (const entity of ['decision', 'principle']) {
+      expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['shapes']]));
+    }
+  });
+
   it('builds ws and wss stream URLs', () => {
     expect(eventStreamUrl({ url: 'http://127.0.0.1:4317', token: 't k' }, 7)).toBe(
       'ws://127.0.0.1:4317/events/stream?after=7&token=t+k',

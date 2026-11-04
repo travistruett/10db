@@ -4,6 +4,7 @@ import {
   KnowledgeItemKind,
   KnowledgeListDto,
   KnowledgeState,
+  isSearch,
   PrincipleItem,
   ProposalDto,
   ProvenanceDto,
@@ -45,6 +46,12 @@ export const knowledgeKeys = {
 /** The most the list route answers; past it the view says the list is cut short. */
 const LIST_LIMIT = 500;
 
+/**
+ * The list route's answer, and whether it answered a search. While a changed filter loads, the previous
+ * answer stands in, so what a list shows (its order, its empty state) follows the answer, not the new filter.
+ */
+export type KnowledgeAnswer = KnowledgeListDto & { readonly searched: boolean };
+
 function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
   const { client } = useDaemon();
   const q = f.q.trim();
@@ -54,8 +61,8 @@ function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
     // the new one lands. Another project's rows never stand in: the view starts afresh on a switch.
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2].projectId === f.projectId ? previous : undefined,
-    queryFn: async () =>
-      readJson(
+    queryFn: async (): Promise<KnowledgeAnswer> => ({
+      ...(await readJson(
         await client.projects[':projectId'].knowledge.$get({
           param: { projectId: f.projectId },
           query: {
@@ -68,7 +75,9 @@ function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
           },
         }),
         KnowledgeListDto,
-      ),
+      )),
+      searched: isSearch(f.q),
+    }),
   });
 }
 

@@ -1,8 +1,9 @@
 import { ActionIcon, Alert, Badge, Group, Loader, Text } from '@mantine/core';
 import { IconInfoCircle, IconSearchOff } from '@tabler/icons-react';
-import type { KnowledgeListDto, KnowledgeState } from '@10db/contracts';
+import type { KnowledgeState } from '@10db/contracts';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
+import type { KnowledgeAnswer } from '../../daemon/knowledge-queries';
 import { STATE_COLORS, STATE_LABELS } from './knowledge-labels';
 
 /** Every state is said, Current too: a decision has no kind, so this badge is all a row says about it. */
@@ -41,14 +42,12 @@ export function TraceButton({
 export function ListStates({
   query,
   what,
-  searching,
   empty,
   children,
 }: {
-  readonly query: UseQueryResult<KnowledgeListDto>;
+  readonly query: UseQueryResult<KnowledgeAnswer>;
   /** "principles" / "decisions", for the messages. */
   readonly what: string;
-  readonly searching: boolean;
   readonly empty: string;
   readonly children: ReactNode;
 }) {
@@ -59,7 +58,11 @@ export function ListStates({
       </Alert>
     );
   if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
-  const { items, truncated, search } = query.data;
+  const { items, truncated, search, searched: searching } = query.data;
+  // An empty answer to the previous filter says nothing about the new one: wait for it rather than
+  // claim that nothing exists or nothing matched.
+  if (query.isPlaceholderData && items.length === 0)
+    return <Loader size="sm" aria-label={`Loading ${what}`} />;
   return (
     <>
       {/* A damaged index clears only when 10db restarts, so it is a line, not an alert to act on. */}

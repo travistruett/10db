@@ -20,6 +20,7 @@ import {
 import { and, eq, sql, type SQL } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
+import { composed } from './compose';
 import type { DbReader, WriteContext } from './store';
 
 /** A confirmed successor of `p`: it names `p`, isn't withdrawn and was confirmed (spec §4). */
@@ -178,19 +179,20 @@ function insertRow(
 ): PrincipleId {
   const id = mintId('Principle');
   const confirmed = input.status === PrincipleStatus.Confirmed;
+  const topicKey = composed(input.topicKey);
   ctx.tx
     .insert(schema.principles)
     .values({
       id,
       ...targetColumns(input.target),
-      statement: input.statement,
+      statement: composed(input.statement),
       rationale: input.rationale ?? null,
       kind: input.kind,
-      topicKey: input.topicKey,
+      topicKey,
       status: input.status,
       supersedesId,
       sourceId: input.sourceId,
-      sourceQuote: input.sourceQuote,
+      sourceQuote: composed(input.sourceQuote),
       speaker: input.speaker,
       confirmedBy: confirmed ? input.confirmedBy : null,
       confirmedAt: confirmed ? ctx.now : null,
@@ -198,7 +200,7 @@ function insertRow(
       updatedAt: ctx.now,
     })
     .run();
-  saved(ctx, id, { status: input.status, topicKey: input.topicKey });
+  saved(ctx, id, { status: input.status, topicKey });
   return id;
 }
 
@@ -206,7 +208,7 @@ function insertRow(
 export function insertPrinciple(ctx: WriteContext, input: NewPrinciple): PrincipleDto {
   const previous =
     input.status === PrincipleStatus.Confirmed
-      ? currentPrincipleFor(ctx.tx, input.topicKey, input.target)
+      ? currentPrincipleFor(ctx.tx, composed(input.topicKey), input.target)
       : undefined;
   const id = insertRow(ctx, input, previous?.id ?? null);
   if (previous) saved(ctx, previous.id, { supersededBy: id });
@@ -234,13 +236,13 @@ export function confirmPrinciple(
     throw new ConflictError(
       `Principle ${id} is ${current.state}; only a proposed principle can be confirmed`,
     );
-  const topicKey = input.topicKey ?? current.topicKey;
+  const topicKey = composed(input.topicKey ?? current.topicKey);
   const previous = currentPrincipleFor(ctx.tx, topicKey, input.target);
   ctx.tx
     .update(schema.principles)
     .set({
       ...targetColumns(input.target),
-      statement: input.statement ?? current.statement,
+      statement: composed(input.statement ?? current.statement),
       kind: input.kind ?? current.kind,
       topicKey,
       status: PrincipleStatus.Confirmed,
@@ -287,7 +289,7 @@ export function supersedePrinciple(
       `Principle ${id} is ${old.state}; only a current principle can be superseded${currentOne(ctx.tx, old)}`,
     );
   const target = input.target ?? targetOf(old);
-  const topicKey = input.topicKey ?? old.topicKey;
+  const topicKey = composed(input.topicKey ?? old.topicKey);
   const clash = currentPrincipleFor(ctx.tx, topicKey, target);
   if (clash && clash.id !== id)
     throw new ConflictError(
