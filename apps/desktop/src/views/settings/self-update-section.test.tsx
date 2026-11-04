@@ -28,7 +28,7 @@ function status(over: Partial<SelfUpdateStatusDto> = {}): SelfUpdateStatusDto {
     waitingSince: null,
     draining: false,
     drainingSince: null,
-    midSession: { working: 0, waitingOnCard: 0, shapes: [] },
+    midSession: { working: 0, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [] },
     blocker: null,
     ...over,
   });
@@ -201,7 +201,7 @@ describe('a waiting update in Settings', () => {
     const draining = await screen.findByRole('status', { name: 'Update status' });
     expect(draining.textContent).toMatch(/draining since 2026-11-03/i);
     expect(draining.textContent).toMatch(/no new steps/i);
-    expect(draining.textContent).toMatch(/running steps finish/i);
+    expect(draining.textContent).toMatch(/what is running finishes/i);
     // Drained already: Install Now has nothing left to do.
     expect(screen.queryByRole('button', { name: 'Install Now' })).toBeNull();
   });
@@ -213,13 +213,62 @@ describe('a waiting update in Settings', () => {
         waitingSince: WAITING_SINCE,
         draining: true,
         drainingSince: DRAINING_SINCE,
-        midSession: { working: 1, waitingOnCard: 2, shapes: [] },
+        midSession: { working: 1, waitingOnCard: 2, batches: 0, jobs: 0, shapes: [] },
       }),
     );
     renderApp('/settings/updates');
     const draining = await screen.findByRole('status', { name: 'Update status' });
     expect(draining.textContent).toMatch(/waiting for 1 running step to finish/);
     expect(draining.textContent).toMatch(/Lanes waiting on a card \(2\) do not hold it/);
+  });
+
+  it.each([
+    [
+      'a batch being shipped',
+      { working: 1, batches: 1, jobs: 0 },
+      /waiting for 1 batch being cut or shipped to finish/,
+    ],
+    [
+      'a delivery job',
+      { working: 2, batches: 0, jobs: 2 },
+      /waiting for 2 delivery jobs to finish/,
+    ],
+    [
+      'a ship and a job beside a running step',
+      { working: 3, batches: 1, jobs: 1 },
+      /waiting for 1 running step, 1 batch being cut or shipped and 1 delivery job to finish/,
+    ],
+  ])('names %s, not a running step the Board lacks', async (_name, work, expected) => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { ...work, waitingOnCard: 0, shapes: [] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(expected);
+    if (work.working === work.batches + work.jobs)
+      expect(draining.textContent).not.toMatch(/running step/);
+  });
+
+  it('names the ship and the job that hold an update that waits', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        midSession: { working: 2, waitingOnCard: 0, batches: 1, jobs: 1, shapes: [] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const waiting = await screen.findByRole('status', { name: 'Update status' });
+    expect(waiting.textContent).toMatch(
+      /Holding it now: 1 batch being cut or shipped and 1 delivery job\./,
+    );
+    expect(waiting.textContent).not.toMatch(/running step/);
   });
 
   it('names the shaping conversation a drain waits for when no lane is running', async () => {
@@ -229,7 +278,7 @@ describe('a waiting update in Settings', () => {
         waitingSince: WAITING_SINCE,
         draining: true,
         drainingSince: DRAINING_SINCE,
-        midSession: { working: 1, waitingOnCard: 0, shapes: [DENSER] },
+        midSession: { working: 1, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [DENSER] },
       }),
     );
     renderApp('/settings/updates');
@@ -252,14 +301,32 @@ describe('a waiting update in Settings', () => {
         waitingSince: WAITING_SINCE,
         draining: true,
         drainingSince: DRAINING_SINCE,
-        midSession: { working: 2, waitingOnCard: 0, shapes: [DENSER] },
+        midSession: { working: 2, waitingOnCard: 0, batches: 0, jobs: 0, shapes: [DENSER] },
       }),
     );
     renderApp('/settings/updates');
     const draining = await screen.findByRole('status', { name: 'Update status' });
     expect(draining.textContent).toMatch(
-      /waiting for 2 running steps to finish, among them a turn in the shaping conversation “Denser board”/,
+      /waiting for 1 running step and a turn in the shaping conversation “Denser board” to finish/,
     );
+  });
+
+  it('names a conversation beside a ship, with no running step among them', async () => {
+    serving(
+      status({
+        availableCommit: NEWER,
+        waitingSince: WAITING_SINCE,
+        draining: true,
+        drainingSince: DRAINING_SINCE,
+        midSession: { working: 2, waitingOnCard: 0, batches: 1, jobs: 0, shapes: [DENSER] },
+      }),
+    );
+    renderApp('/settings/updates');
+    const draining = await screen.findByRole('status', { name: 'Update status' });
+    expect(draining.textContent).toMatch(
+      /waiting for 1 batch being cut or shipped and a turn in the shaping conversation “Denser board” to finish/,
+    );
+    expect(draining.textContent).not.toMatch(/running step/);
   });
 
   it('names what holds an update that waits', async () => {
@@ -267,7 +334,7 @@ describe('a waiting update in Settings', () => {
       status({
         availableCommit: NEWER,
         waitingSince: WAITING_SINCE,
-        midSession: { working: 0, waitingOnCard: 1, shapes: [] },
+        midSession: { working: 0, waitingOnCard: 1, batches: 0, jobs: 0, shapes: [] },
       }),
     );
     renderApp('/settings/updates');
@@ -283,6 +350,8 @@ describe('a waiting update in Settings', () => {
         midSession: {
           working: 3,
           waitingOnCard: 0,
+          batches: 0,
+          jobs: 0,
           shapes: [DENSER, { id: SHAPE_B, title: 'Login flow' }],
         },
       }),
@@ -340,6 +409,22 @@ describe('a waiting update in Settings', () => {
     expect(screen.getByText('Update has no build yet')).toBeTruthy();
     expect(screen.queryByText('Update waiting')).toBeNull();
     // The daemon remembers it: the factory drains the moment the build is staged.
+    fireEvent.click(screen.getByRole('button', { name: 'Install Now' }));
+    await waitFor(() => {
+      expect(installNows.count).toBe(1);
+    });
+  });
+
+  it('says a head’s build is being fetched, not that it waits for an idle moment', async () => {
+    serving(status({ availableCommit: NEWER, notInstalling: 'fetching' }));
+    renderApp('/settings/updates');
+    const note = await screen.findByRole('status', { name: 'Update status' });
+    expect(note.textContent).toMatch(/fetching the build of 9f8e7d6/i);
+    expect(note.textContent).not.toMatch(/is waiting/);
+    expect(note.textContent).not.toMatch(/mid-session/);
+    expect(screen.getByText('Update being fetched')).toBeTruthy();
+    expect(screen.queryByText('Update waiting')).toBeNull();
+    // Install Now is remembered: the factory drains the moment the build is staged.
     fireEvent.click(screen.getByRole('button', { name: 'Install Now' }));
     await waitFor(() => {
       expect(installNows.count).toBe(1);

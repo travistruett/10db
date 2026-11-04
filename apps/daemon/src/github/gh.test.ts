@@ -88,6 +88,30 @@ describe('createGh', () => {
       answer: { exitCode: 1, stderr: 'HTTP 502' },
       kind: 'failed',
     },
+    {
+      name: 'a certificate a proxy or captive portal swapped in',
+      answer: {
+        exitCode: 1,
+        stderr:
+          'Get "https://api.github.com/user": tls: failed to verify certificate: x509: certificate signed by unknown authority',
+      },
+      kind: 'unreachable',
+    },
+    {
+      name: 'a connection cut off before any answer',
+      answer: { exitCode: 1, stderr: 'Get "https://api.github.com/user": EOF' },
+      kind: 'unreachable',
+    },
+    {
+      name: 'a bare EOF',
+      answer: { exitCode: 1, stderr: 'EOF\n' },
+      kind: 'unreachable',
+    },
+    {
+      name: 'a rate limit GitHub answered with',
+      answer: { exitCode: 1, stderr: 'gh: API rate limit exceeded (HTTP 403)' },
+      kind: 'failed',
+    },
   ])('authLogin: $name', async ({ answer, expected, kind }) => {
     const { exec, seen } = scripted({ 'api user': answer });
     const login = createGh(exec).authLogin(CALL);

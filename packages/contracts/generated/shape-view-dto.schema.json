@@ -2161,13 +2161,17 @@
         },
         "rehearsing": {
           "type": "boolean"
+        },
+        "waitingForUpdate": {
+          "type": "boolean"
         }
       },
       "required": [
         "running",
         "queued",
         "proposing",
-        "rehearsing"
+        "rehearsing",
+        "waitingForUpdate"
       ]
     },
     "sizes": {

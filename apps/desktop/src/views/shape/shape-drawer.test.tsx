@@ -242,7 +242,13 @@ describe('Shape: the drawer layout', () => {
     );
     openNarrow({
       ...view,
-      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
     });
     await screen.findByRole('button', { name: 'Stop' });
     fireEvent.click(screen.getByRole('button', { name: 'Proposed' }));
