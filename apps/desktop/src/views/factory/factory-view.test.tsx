@@ -1396,6 +1396,32 @@ describe('FactoryView waiting update', () => {
     expect(screen.queryByRole('status', { name: 'Update waiting' })).toBeNull();
   });
 
+  it.each([
+    ['the update failed', { notInstalling: 'failed' }],
+    ['the update failed with a drain still reported', { notInstalling: 'failed', draining: true }],
+    ['the builder rolled back from the update', { notInstalling: 'rolled-back' }],
+    ['the update has no finished build', { notInstalling: 'unbuilt' }],
+  ] as const)('says nothing is waiting when %s', async (_name, over) => {
+    let asked = false;
+    serve(
+      http.get(daemonUrl('/settings/self-update'), () => {
+        asked = true;
+        return HttpResponse.json(
+          selfUpdateStatus({ drainingSince: '2026-11-03T12:15:00.000Z', ...over }),
+        );
+      }),
+    );
+    const { queryClient } = renderApp('/factory');
+
+    await screen.findByRole('heading', { name: 'Factory' });
+    await vi.waitFor(() => {
+      expect(asked).toBe(true);
+      expect(queryClient.isFetching({ queryKey: ['self-update'] })).toBe(0);
+    });
+    expect(screen.queryByRole('status', { name: 'Update draining the factory' })).toBeNull();
+    expect(screen.queryByRole('status', { name: 'Update waiting' })).toBeNull();
+  });
+
   describe('on a view left open', () => {
     /**
      * Serves the status the test last set, and counts how often it was asked. The event stream never
