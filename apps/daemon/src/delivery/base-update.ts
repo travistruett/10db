@@ -821,46 +821,22 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
 
   /**
    * Tells the builder, on one card, what kept the generated directories `merged` took from the base
-<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
    * from being regenerated, unless `card` is false: a caller that puts the merge back has nothing
    * for that card's instructions to act on, and says so on its own. Resolves with what the gate's
-   * note says of it.
-||||||| 84d0b7e
-   * from being regenerated. Resolves with what the gate's note says of it.
-=======
-   * from being regenerated, unless `card` is false. Resolves with what the gate's note says of it;
-   * with `lost` no gate will run, so it says nothing of one.
->>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
+   * note says of it; with `lost` no gate will run, so it says nothing of one.
    */
   function unregenerated(
     batch: BatchDto,
     path: string,
     merged: SettledMerge,
     problem: Unregenerated,
-<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
-    card = true,
-||||||| 84d0b7e
-=======
     { lost = false, card = true }: { readonly lost?: boolean; readonly card?: boolean } = {},
->>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
   ): string {
     const dirs = (merged.regenerate ?? []).map((r) => r.dir);
     ctx.logger.warn(
       { batchId: batch.id, dirs, reason: problem.why, logPath: problem.logPath },
       'generated files not regenerated after the base merged',
     );
-<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
-    if (card)
-      tell(batch, () => {
-        raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
-      });
-    return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${problem.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
-||||||| 84d0b7e
-    tell(batch, () => {
-      raise(ctx.inbox, batch.projectId, baseCards.regenerate(batch, path, dirs, problem));
-    });
-    return `10db couldn't regenerate ${named(dirs)} after merging origin/${batch.baseBranch}: ${problem.why}. This gate may see generated files that don't match their sources; the builder has a card.`;
-=======
     // A plain regeneration would make these again under a random name, or not at all.
     const dropped = (merged.regenerate ?? [])
       .flatMap((r) => r.dropped)
@@ -880,7 +856,6 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     return lost
       ? said
       : `${said} This gate may see generated files that don't match their sources; the builder has a card.`;
->>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
   }
 
   /**
@@ -1416,33 +1391,11 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
     const installed = await install(batch, project, path, signal);
     if (installed.kind === 'aborted' || stopped()) return stop();
     // The packages still do not resolve what the lockfile names, so the gate's tools would not even
-<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
     // start; the gate does not run, and the generated directories wait for a working install. A
     // pull request's catch-up only tests and pushes a merge, so with none the install stops nothing,
     // and a merge it does stop goes back, with the catch-up's own card saying so.
-    const forPullRequest = options.forPullRequest === true;
     if (installed.broken !== undefined && (!forPullRequest || merged.kind === 'merged')) {
       const left = (pending?.regenerate ?? []).map((r) => r.dir);
-      if (pending !== null)
-        unregenerated(
-          batch,
-          path,
-          pending,
-          { why: 'the install is broken', logPath: null, restored: false },
-          !forPullRequest,
-        );
-||||||| 84d0b7e
-    // start; the gate does not run, and the generated directories wait for a working install.
-    if (installed.broken !== undefined) {
-      if (pending !== null)
-        unregenerated(batch, path, pending, {
-          why: 'the install is broken',
-          logPath: null,
-          restored: false,
-        });
-=======
-    // start; the gate does not run, and the generated directories wait for a working install.
-    if (installed.broken !== undefined) {
       if (pending !== null) {
         const lost = await keepLost(batch, path, pending, forPullRequest);
         const putBack = forPullRequest && lost !== null;
@@ -1451,7 +1404,7 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
           path,
           pending,
           { why: 'the install is broken', logPath: null, restored: false },
-          { lost: putBack, card: !putBack },
+          { lost: putBack, card: !forPullRequest },
         );
         // A catch-up with no check would push the merge, and the merge lacks the migration.
         if (putBack)
@@ -1461,7 +1414,6 @@ export function createBaseUpdates(ctx: DeliveryContext): BaseUpdates {
             note: joined(note, lost.body) ?? lost.body,
           };
       }
->>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
       return {
         kind: 'install_broken',
         note:

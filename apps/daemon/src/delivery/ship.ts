@@ -1773,15 +1773,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
         update = await deps.baseUpdates.beforeGate(batchId, signal, { forPullRequest: true });
         // The head 10db wrote, the generators' commit included: read from the answer, not the branch,
         // since the install and the generators run long enough for the builder to commit meanwhile.
-<<<<<<< ea4ee8ce87ced9440c7011401e69ed39017eee54
-        if (update.kind === 'merged') wrote = update.head;
+        if (update.kind === 'merged' || update.kind === 'uncarried') wrote = update.head;
         // A broken install still left its merge on the branch: it goes back with the others.
         else if (update.kind === 'install_broken' && update.head !== undefined) wrote = update.head;
-||||||| 84d0b7e
-        if (update.kind === 'merged') wrote = update.head;
-=======
-        if (update.kind === 'merged' || update.kind === 'uncarried') wrote = update.head;
->>>>>>> 0a644ed2c68adddca8fe18e2998ed311231452b3
         return update.kind === 'merged';
       };
       const gate = await deps.baseUpdates.gate(batchId, signal, async () => {
