@@ -338,6 +338,8 @@ export function convertProposals(
         taskIds.set(key, id);
         ids.push(id);
         insertShapeLink(ctx, { shapeId, proposalId: row.id, key, taskId: id });
+        // A diagram on a goal's task, kept by its key, follows the task as one on a task row does.
+        linkShapeAttachments(ctx, shapeId, key, { taskId: id });
       }
       made.set(row.id, { goalId: written.goal.id, taskIds: ids });
       // The proposed eval is kept as an attachment on the goal, with the spec (§7).

@@ -433,10 +433,35 @@ export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): v
 }
 
 /**
+ * Gives a diagram, chart or mockup attached by goal or task id back to the proposal row it came from.
+ * attach() keys such a row by the id of the goal or task, which Remove Draft Goal deletes, so each
+ * row is keyed again by its link's key (the goal's or the task's proposal key) before the links go.
+ * Call it while the links still exist. A spec or eval is already keyed by its proposal.
+ */
+export function rekeyShapeAttachmentsToProposal(
+  ctx: WriteContext,
+  links: readonly Pick<ShapeLinkRow, 'shapeId' | 'key' | 'goalId' | 'taskId'>[],
+): void {
+  for (const link of links) {
+    const id = link.goalId ?? link.taskId;
+    if (id === null) continue;
+    ctx.tx
+      .update(schema.shapeAttachments)
+      .set({ key: link.key, updatedAt: ctx.now })
+      .where(
+        and(eq(schema.shapeAttachments.shapeId, link.shapeId), eq(schema.shapeAttachments.key, id)),
+      )
+      .run();
+  }
+}
+
+/**
  * Lets go of a goal and its tasks as they are removed (Shape spec §11). A question stored under any
  * of them is deleted with its link and its proposal is pending again, so it converts anew with the
  * goal; every other link to those tasks goes too, so no later Convert resolves a key to a removed task.
- * Attachments of the goal or its tasks are detached, not deleted.
+ * Attachments of the goal or its tasks are detached, not deleted: a spec or eval (keyed by its
+ * proposal) and a diagram keyed again by rekeyShapeAttachmentsToProposal stay with the conversation,
+ * attached to no goal or task, and Convert links them to the goal or task it makes anew.
  */
 export function releaseShapeLinksOfGoal(
   ctx: WriteContext,
@@ -462,8 +487,8 @@ export function releaseShapeLinksOfGoal(
     .delete(schema.shapeLinks)
     .where(inArray(schema.shapeLinks.taskId, [...taskIds]))
     .run();
-  // A spec, eval or diagram stays with the conversation, kept by the proposal's key and attached to
-  // no goal or task, so Convert links it to the new goal; it must not hold the goal row it leaves.
+  // Every attachment is now keyed by its proposal (see the doc above) and attached to no goal or
+  // task; it must not hold the goal or task row it leaves.
   ctx.tx
     .update(schema.shapeAttachments)
     .set({ goalId: null, updatedAt: ctx.now })

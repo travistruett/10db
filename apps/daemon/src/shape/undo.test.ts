@@ -28,6 +28,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { attach } from './attach';
 import { convertProposals } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { reconcileDraft } from './rounds';
@@ -169,6 +170,50 @@ describe('Remove Draft Goal', () => {
     expect(newGoalId).not.toBe(goalId);
     const again = listShapeAttachments(c.store.db, c.shape.id);
     expect(again.map((a) => [a.kind, a.goalId])).toEqual([['eval', newGoalId]]);
+  });
+
+  describe('with a diagram attached by id', () => {
+    const diagram = { kind: 'mermaid', source: 'graph TD; A-->B' } as const;
+
+    it.each(['goal', 'task'] as const)(
+      'returns a diagram attached by %s id to its proposal row, and relinks it on a new Convert',
+      (by) => {
+        const { goalId, taskIds } = convertedGoalAndDecision();
+        const id = by === 'goal' ? goalId : must(taskIds[0], 'the task id');
+        write((ctx) =>
+          attach(ctx, c.shape.id, {
+            target: by === 'goal' ? { goalId: goalId } : { taskId: id as TaskId },
+            attachment: diagram,
+          }),
+        );
+        expect(listShapeAttachments(c.store.db, c.shape.id).map((a) => a.key)).toEqual([id]);
+
+        write((ctx) => {
+          removeDraftGoalOf(ctx, c.shape.id, goalId);
+        });
+        // The diagram is keyed by the row it was attached to, and attached to no goal or task.
+        const wanted = by === 'goal' ? 'g' : 'g1';
+        expect(
+          listShapeAttachments(c.store.db, c.shape.id).map((a) => [a.key, a.goalId, a.taskId]),
+        ).toEqual([[wanted, null, null]]);
+
+        const pending = listShapeProposals(c.store.db, c.shape.id)
+          .filter((r) => r.state === ShapeProposalState.Pending)
+          .map((r) => r.id);
+        const second = write((ctx) => convertProposals(ctx, c.shape.id, pending));
+        if (!second.ok) throw new Error(second.errors.join('; '));
+        const goal = must(
+          second.results.find((r) => r.key === 'g'),
+          'the new goal',
+        );
+        const [a] = listShapeAttachments(c.store.db, c.shape.id);
+        expect(a).toMatchObject(
+          by === 'goal'
+            ? { key: 'g', goalId: goal.goalId, taskId: null }
+            : { key: 'g1', goalId: null, taskId: goal.taskIds[0] },
+        );
+      },
+    );
   });
 
   describe('with a question converted under it', () => {
