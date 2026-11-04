@@ -41,6 +41,7 @@ import { createEventBus, createStateStore } from '../events';
 import { convertProposals, type ConvertOutcome } from './convert';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { dropProposal, editProposal, reconcileDraft, restoreProposal } from './rounds';
+import { removeDraftGoalOf } from './undo';
 
 // Shape spec §11: Convert is one transaction, refuses a partial selection by name, is idempotent,
 // and starts nothing.
@@ -749,6 +750,52 @@ describe('additions, changes and removals', () => {
     expect(getTask(c.store.db, t1.id).title).toBe('Renamed');
     expect(getTask(c.store.db, t2.id).status).toBe(TaskStatus.Cancelled);
     expect(listGoalTasks(c.store.db, goalId).some((t) => t.title === 'Task g3')).toBe(true);
+  });
+
+  it('refuses by name a pending addition whose goal Remove Draft Goal took back, and writes nothing', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1'])] });
+    const goalId = must(converted('g').results[0]?.goalId, 'the goal');
+    const m2 = c.say('Add one.');
+    propose({
+      goals: [goalOf(m, 'g', ['g1'])],
+      additions: [{ ...loose(m2, 'g3'), goalId }],
+    });
+    write((ctx) => {
+      removeDraftGoalOf(ctx, c.shape.id, goalId);
+    });
+    const before = tasks().length;
+    const out = convert('g3');
+    expect(out.ok ? [] : out.errors).toEqual([
+      `g3 is added to goal ${goalId}, which no longer exists: state it again against the goal's current id, or drop it`,
+    ]);
+    expect(tasks().length).toBe(before);
+    expect(rowOf('g3').state).toBe(ShapeProposalState.Pending);
+  });
+
+  it('names the addition and writes nothing when one selected addition lost its goal beside others that did not', () => {
+    const m = c.say();
+    propose({ goals: [goalOf(m, 'g', ['g1']), goalOf(m, 'h', ['h1'])] });
+    const out0 = converted('g', 'h');
+    const gId = must(out0.results.find((r) => r.key === 'g')?.goalId, 'goal g');
+    const hId = must(out0.results.find((r) => r.key === 'h')?.goalId, 'goal h');
+    const m2 = c.say('Add two.');
+    propose({
+      goals: [goalOf(m, 'g', ['g1']), goalOf(m, 'h', ['h1'])],
+      additions: [
+        { ...loose(m2, 'to-g'), goalId: gId },
+        { ...loose(m2, 'to-h'), goalId: hId },
+      ],
+    });
+    write((ctx) => {
+      removeDraftGoalOf(ctx, c.shape.id, gId);
+    });
+    const before = tasks().length;
+    const out = convert('to-g', 'to-h');
+    expect(out.ok ? [] : out.errors).toEqual([
+      `to-g is added to goal ${gId}, which no longer exists: state it again against the goal's current id, or drop it`,
+    ]);
+    expect(tasks().length).toBe(before);
   });
 
   it('leaves no question attached to a task a removal cancels, and keeps it stored', () => {

@@ -262,7 +262,15 @@ export function convertProposals(
 
   // Records, questions, changes and removals are judged again as they stand now.
   for (const row of pending) {
-    if (row.kind === 'decision') {
+    if (row.kind === 'task') {
+      // An addition names its goal by id. Remove Draft Goal takes that goal back and a converted
+      // goal gets a new id, so the addition has to be stated again against it, or dropped.
+      const goalId = ShapeProposalBody.task.parse(row.body).goalId;
+      if (goalId !== undefined && !world.convertedGoals.has(goalId))
+        errors.push(
+          `${row.key} is added to goal ${goalId}, which no longer exists: state it again against the goal's current id, or drop it`,
+        );
+    } else if (row.kind === 'decision') {
       const record = ShapeProposalBody.decision.parse(row.body);
       const problem =
         record.supersedes === undefined ? null : world.decisionProblem(record.supersedes);
