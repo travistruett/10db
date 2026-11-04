@@ -51,6 +51,7 @@ describe('the self-update setting', () => {
     isDefault: true,
     runningCommit: COMMIT,
     availableCommit: null,
+    notInstalling: null,
     waitMinutes: 15,
     waitingSince: null,
     draining: false,
