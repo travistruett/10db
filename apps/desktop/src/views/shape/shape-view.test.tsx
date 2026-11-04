@@ -355,6 +355,194 @@ describe('Shape: the conversation', () => {
     expect(await within(conversation).findByText('No such conversation')).toBeTruthy();
   });
 
+  it('removes a refused Stop from the alert once the turn it targeted has ended', async () => {
+    const running = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
+    const ended = { ...running, turn: { ...running.turn, running: false } };
+    let current = running;
+    serve(
+      http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([running.shape])),
+      http.get(daemonUrl('/shapes/:shapeId'), () => HttpResponse.json(current)),
+      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+        HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        ),
+      ),
+    );
+    const { queryClient } = open(running);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+    // The turn ends by itself, and the builder sends nothing.
+    current = ended;
+    await act(() => queryClient.invalidateQueries({ queryKey: ['shapes'] }));
+    await waitFor(() => {
+      expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
+    });
+    expect(within(conversation).queryByText("Couldn't reach Claude")).toBeNull();
+  });
+
+  it('keeps a refused Stop in the alert while its turn is still running', async () => {
+    const view = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+        HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        ),
+      ),
+    );
+    const { queryClient } = open(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+    await act(() => queryClient.invalidateQueries({ queryKey: ['shapes'] }));
+    expect(within(conversation).getByText('The daemon is restarting')).toBeTruthy();
+  });
+
+  it('shows a load error from the conversation over an older refused Propose', async () => {
+    const view = proposed([looseTaskProposal('density')], { round: 1 });
+    let loadFails = false;
+    serve(
+      http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([view.shape])),
+      http.get(daemonUrl('/shapes/:shapeId'), () =>
+        loadFails
+          ? HttpResponse.json({ error: 'boom', message: 'The database is locked' }, { status: 500 })
+          : HttpResponse.json(view),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/propose'), () =>
+        HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        ),
+      ),
+    );
+    const { queryClient } = open(view);
+    const propose = await screen.findByRole('button', { name: 'Propose Again' });
+    await waitFor(() => {
+      expect(disabled(propose)).toBe(false);
+    });
+    fireEvent.click(propose);
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+    loadFails = true;
+    await act(() => queryClient.invalidateQueries({ queryKey: ['shapes'] }));
+    expect(await within(conversation).findByText('The database is locked')).toBeTruthy();
+    expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
+  });
+
+  it('still shows a Propose refused after a send succeeded while it was in flight', async () => {
+    const view = proposed([looseTaskProposal('density')], { round: 1 });
+    let refuse: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      refuse = resolve;
+    });
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/propose'), async () => {
+        await held;
+        return HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        );
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      ),
+    );
+    open(view);
+    const propose = await screen.findByRole('button', { name: 'Propose Again' });
+    await waitFor(() => {
+      expect(disabled(propose)).toBe(false);
+    });
+    fireEvent.click(propose);
+    await waitFor(() => {
+      expect(propose.getAttribute('data-loading')).toBe('true');
+    });
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    const input = within(conversation).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'One more thing.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect((input as HTMLTextAreaElement).value).toBe('');
+    });
+    // The send succeeded, and Propose is still waiting for the daemon.
+    expect(propose.getAttribute('data-loading')).toBe('true');
+    refuse();
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+  });
+
+  it('still shows a Stop refused after a send succeeded while it was in flight', async () => {
+    const view = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
+    let refuse: () => void = () => undefined;
+    const held = new Promise<void>((resolve) => {
+      refuse = resolve;
+    });
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/stop'), async () => {
+        await held;
+        return HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        );
+      }),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      ),
+    );
+    open(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    const input = within(conversation).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'One more thing.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect((input as HTMLTextAreaElement).value).toBe('');
+    });
+    refuse();
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+  });
+
+  it('removes a refused Stop from the alert once a later send succeeds', async () => {
+    const view = proposed([], {
+      round: 0,
+      turn: { running: true, queued: 0, proposing: false, rehearsing: false },
+    });
+    serve(
+      ...conversations(view),
+      http.post(daemonUrl('/shapes/:shapeId/stop'), () =>
+        HttpResponse.json(
+          { error: 'unavailable', message: 'The daemon is restarting' },
+          { status: 503 },
+        ),
+      ),
+      http.post(daemonUrl('/shapes/:shapeId/messages'), () =>
+        HttpResponse.json(shapeMessageDto(view.shape.id), { status: 202 }),
+      ),
+    );
+    open(view);
+    fireEvent.click(await screen.findByRole('button', { name: 'Stop' }));
+    const conversation = screen.getByRole('region', { name: 'Conversation' });
+    expect(await within(conversation).findByText('The daemon is restarting')).toBeTruthy();
+    const input = within(conversation).getByRole('textbox', { name: 'Message' });
+    fireEvent.change(input, { target: { value: 'Try again.' } });
+    fireEvent.keyDown(input, { key: 'Enter', metaKey: true });
+    await waitFor(() => {
+      expect(within(conversation).queryByText('The daemon is restarting')).toBeNull();
+    });
+  });
+
   it('puts the daemon’s words in a red alert above the input when the conversation fails to load, and keeps the input', async () => {
     serve(
       http.get(daemonUrl('/projects/:projectId/shapes'), () => HttpResponse.json([])),

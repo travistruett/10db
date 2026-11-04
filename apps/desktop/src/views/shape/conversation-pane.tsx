@@ -7,7 +7,7 @@ import {
 import { Box, Button, Group, Loader, Text, Title } from '@mantine/core';
 import { IconPlus } from '@tabler/icons-react';
 import { Link } from '@tanstack/react-router';
-import { useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import {
   useCreateShape,
   useProposeShape,
@@ -80,18 +80,34 @@ export function ConversationPane({
 
   const doPropose = (): void => {
     if (canPropose && !(view?.turn.proposing ?? false)) {
-      stop.reset();
+      // Only a refusal is cleared: resetting a pending Stop would lose its outcome.
+      if (stop.isError) stop.reset();
       propose.mutate(shapeId);
     }
   };
   const doStop = (): void => {
     if (shapeId !== null) {
-      propose.reset();
+      if (propose.isError) propose.reset();
       stop.mutate(shapeId);
     }
   };
-  // A refused Propose or Stop is the daemon's words in the same alert as a load failure.
-  const shownError = propose.error?.message ?? stop.error?.message ?? error;
+  // A refused Stop was about the turn that was running. Once that turn has ended the refusal is out
+  // of date, so it goes without a send; one still pending is left alone, since resetting it would
+  // detach the observer and lose its outcome.
+  const stopRefused = stop.isError;
+  const resetStop = stop.reset;
+  useEffect(() => {
+    if (stopRefused && !answering) resetStop();
+  }, [stopRefused, answering, resetStop]);
+  // The latest mutations, for a send that finishes after they changed.
+  const latest = useRef({ propose, stop });
+  useEffect(() => {
+    latest.current = { propose, stop };
+  });
+
+  // A load failure is what the screen is in now, so it comes first; a refused Propose or Stop is the
+  // daemon's words in the same alert.
+  const shownError = error ?? propose.error?.message ?? stop.error?.message ?? null;
   useShapeKeys({ onPropose: doPropose, onStop: doStop, answering });
 
   return (
@@ -171,8 +187,10 @@ export function ConversationPane({
           const id = await ensureId();
           await send.mutateAsync({ shapeId: id, text });
           // The daemon took the message, so an earlier refusal of Propose or Stop is out of date.
-          propose.reset();
-          stop.reset();
+          // Only a refusal that has arrived is cleared: a Propose or Stop still in flight keeps its
+          // observer, so its loading state lasts and a refusal that comes later is shown.
+          if (latest.current.propose.isError) latest.current.propose.reset();
+          if (latest.current.stop.isError) latest.current.stop.reset();
           if (shapeId === null) onOpened(id);
         }}
         onPropose={doPropose}
