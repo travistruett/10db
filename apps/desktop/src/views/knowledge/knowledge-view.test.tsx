@@ -155,6 +155,87 @@ describe('KnowledgeView', () => {
     });
   });
 
+  it('does not say nothing exists or matches while an empty answer stands in for a pending one', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
+        calls += 1;
+        if (new URL(request.url).searchParams.has('q')) {
+          await gate;
+          return HttpResponse.json(
+            knowledgeList([principleItem({ statement: 'Prefer small PRs' })]),
+          );
+        }
+        return HttpResponse.json(knowledgeList([]));
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    renderApp('/knowledge');
+    expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    await waitFor(() => {
+      expect(calls).toBeGreaterThan(1);
+    });
+    expect(await screen.findByLabelText('Loading principles')).toBeTruthy();
+    expect(screen.queryByText(/^No principles yet/)).toBeNull();
+    expect(screen.queryByText('No principles match.')).toBeNull();
+    release();
+    expect(await screen.findByText('Prefer small PRs')).toBeTruthy();
+    expect(screen.queryByLabelText('Loading principles')).toBeNull();
+  });
+
+  it('keeps the order of the rows that stand in for a pending answer', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
+        calls += 1;
+        if (new URL(request.url).searchParams.has('q')) await gate;
+        return HttpResponse.json(
+          knowledgeList([
+            principleItem({ statement: 'Prefer small PRs', principleKind: 'heuristic' }),
+            principleItem({ statement: 'Never sleep in tests', principleKind: 'policy' }),
+          ]),
+        );
+      }),
+      http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
+      ...baseHandlers(),
+    );
+    const order = () =>
+      within(screen.getByRole('table', { name: 'Principles' }))
+        .getAllByRole('row')
+        .slice(1)
+        .map((row) => row.textContent.slice(0, 20));
+    renderApp('/knowledge');
+    await screen.findByRole('table', { name: 'Principles' });
+    const before = order();
+    expect(before[0]).toContain('Never sleep');
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+      target: { value: 'sleep' },
+    });
+    await waitFor(() => {
+      expect(calls).toBeGreaterThan(1);
+    });
+    expect(order()).toEqual(before);
+    release();
+    // The answer to a search is the daemon's order: best match first, not grouped by kind.
+    await waitFor(() => {
+      expect(order()[0]).toContain('Prefer small');
+    });
+  });
+
   it('stops the search box at the 200 characters the route accepts', async () => {
     serve({ principles: [principleItem()] });
     renderApp('/knowledge');
