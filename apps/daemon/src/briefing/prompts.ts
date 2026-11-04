@@ -57,10 +57,41 @@ export interface PromptInput {
   readonly sandboxed?: boolean;
   /** Calls the builder denied for this workstream, in any of its sessions; every session is told. */
   readonly denials?: readonly Denial[];
+  /**
+   * The Inbox cards the builder already answered on this task, oldest first. Only a review step is
+   * shown them, so it checks a decision against them instead of asking the builder again.
+   */
+  readonly answeredCards?: readonly AnsweredCard[];
   /** What the batch's notice says of migrations a merge of its base renumbered, when any were. */
   readonly renumbered?: string | null;
   /** What the batch's notice says of migrations a merge of its base lost, while any are missing. */
   readonly uncarried?: string | null;
+}
+
+/** An Inbox card the builder answered, as a reviewer is shown it. */
+export interface AnsweredCard {
+  readonly id: string;
+  readonly kind: string;
+  readonly question: string;
+  readonly choice: string;
+  readonly note: string | null;
+}
+
+/**
+ * What a review step is told of the cards the builder already answered on its task: each with its
+ * id, question, choice and note. A decision one of them covers is not asked again; a decision none
+ * covers is still the reviewer's to raise.
+ */
+function renderAnsweredCards(cards: readonly AnsweredCard[]): string[] {
+  const lines = cards.map(
+    (c) =>
+      `- ${c.id} (${c.kind}): ${c.question} -> ${c.choice}${c.note ? ` (note: ${c.note})` : ''}`,
+  );
+  return [
+    'Inbox cards the builder already answered on this task:',
+    ...lines,
+    'Check a decision you are about to raise against these. When an answer here covers it (an acceptance criterion shipped unmeasured, an option chosen), the builder has decided: cite the card id, do not raise a card asking again, and do not reject for what the answer accepted. When no answer here covers it, raise the card as usual.',
+  ];
 }
 
 /** A call the builder denied, and the note they gave. */
@@ -482,6 +513,11 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Context pack:',
     renderKnowledge(input.contextPack),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
+    ...(input.answeredCards &&
+    input.answeredCards.length > 0 &&
+    REVIEW_ROLES.includes(input.step.role)
+      ? ['', ...renderAnsweredCards(input.answeredCards)]
+      : []),
     ...(input.renumbered ? ['', input.renumbered] : []),
     ...(input.uncarried ? ['', input.uncarried] : []),
     '',
