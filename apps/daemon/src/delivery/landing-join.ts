@@ -3,12 +3,14 @@ import {
   ConflictError,
   UNFINISHED_BATCH_STATES,
   type BatchDto,
+  type BatchId,
   type LandingGroupId,
   type Notice,
   type TaskDto,
 } from '@10db/contracts';
-import { getLandingGroup, landingBatches, type DbReader } from '@10db/db';
+import { getLandingGroup, landingBatches, listWorkstreams, type DbReader } from '@10db/db';
 import { landingNotices } from './notices';
+import { batchPlacement, placementWords } from './placement';
 
 // Shape spec §10.4. A landing group's tasks land in one pull request: a start puts the ones it
 // starts together in one batch (`groupByDependency`), and a task started later joins the landing's
@@ -24,13 +26,44 @@ export interface LandingPlan {
   readonly titles: ReadonlyMap<LandingGroupId, string>;
 }
 
+function unfinishedBatch(
+  db: DbReader,
+  groupId: LandingGroupId,
+  ending: BatchId | undefined,
+): BatchDto | undefined {
+  return landingBatches(db, groupId).find(
+    (b) => b.id !== ending && UNFINISHED_BATCH_STATES.includes(b.state),
+  );
+}
+
+/**
+ * Why a task can't leave `failed`, the batch of its failed run, for its own placement: its landing
+ * has a batch working somewhere else, and one pull request means one place. A batch that holds only
+ * the task's attempt holds no one else's work, so starting over ends it and frees the landing. Null
+ * when nothing holds the task.
+ */
+export function landingHold(db: DbReader, task: TaskDto, failed: BatchDto): string | null {
+  const groupId = task.landingGroupId;
+  if (groupId === null || groupId === undefined) return null;
+  const others = listWorkstreams(db, { batchId: failed.id }).some((w) => w.taskId !== task.id);
+  const batch = unfinishedBatch(db, groupId, others ? undefined : failed.id);
+  if (batch === undefined || batchPlacement(batch) === task.workspaceMode) return null;
+  const place = placementWords(batchPlacement(batch));
+  return `${task.title} lands with ${getLandingGroup(db, groupId).title} in one pull request, and that landing's batch "${batch.title}" works in ${place}, so the task can't run in ${placementWords(task.workspaceMode)}. Set it back to ${place} to run it there.`;
+}
+
 /**
  * Splits a start's tasks into those that join their landing's open batch and the rest. A landing
  * whose batch is cutting, shipping or failed can't take a task yet, and the start is refused saying
  * so; a landing whose batch has shipped starts the task in a batch of its own. Tasks of one landing
  * that would start in different places are refused too, since they could not share a pull request.
+ * `ending` is a batch the start is about to end, which no longer counts as the landing's.
  */
-export function planLandings(db: DbReader, tasks: readonly TaskDto[]): LandingPlan {
+export function planLandings(
+  db: DbReader,
+  tasks: readonly TaskDto[],
+  ending?: BatchId,
+): LandingPlan {
   const joins = new Map<BatchDto['id'], { batch: BatchDto; tasks: TaskDto[] }>();
   const rest: TaskDto[] = [];
   const titles = new Map<LandingGroupId, string>();
@@ -41,7 +74,7 @@ export function planLandings(db: DbReader, tasks: readonly TaskDto[]): LandingPl
       continue;
     }
     const group = getLandingGroup(db, groupId);
-    const open = landingBatches(db, groupId).find((b) => UNFINISHED_BATCH_STATES.includes(b.state));
+    const open = unfinishedBatch(db, groupId, ending);
     if (open === undefined) {
       titles.set(groupId, group.title);
       rest.push(task);
