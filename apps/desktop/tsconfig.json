@@ -3,7 +3,9 @@
   "compilerOptions": {
     "lib": ["es2024", "dom", "dom.iterable"],
     "jsx": "react-jsx",
+    // Vite's config loader wants a file extension on the config's own imports (vite.config.ts).
+    "allowImportingTsExtensions": true,
     "types": ["vite/client"]
   },
-  "include": ["src", "vite.config.ts", "vitest.config.ts"]
+  "include": ["src", "vite.config.ts", "vitest.config.ts", "window-csp.ts", "window-csp.test.ts"]
 }
