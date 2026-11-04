@@ -31,6 +31,7 @@ import {
 import {
   findOpenByFoldKey,
   getInboxItem,
+  areasForProposal,
   getProject,
   getProposal,
   getProposalDto,
@@ -311,9 +312,10 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
     rationale: answer.note ?? null,
   });
   if (accepted && proposal.kind === ProposalKind.NewTask) {
-    // A proposal names no areas, so it takes the project's default, by the same rule as any task. The
-    // risk tags its lane declared are kept on the card and the task carries them.
+    // The task is stored with the areas of the lane that raised it, so the placement rule sees those,
+    // as it does the risk tags the lane declared, which are kept on the card and the task carries.
     const riskTags = declaredRiskTags(item.detail);
+    const project = getProject(ctx.tx, proposal.projectId);
     insertTaskFromProposal(
       ctx,
       {
@@ -322,7 +324,10 @@ function applyProposalVerdict(ctx: WriteContext, item: InboxItemDto, answer: Inb
         ...taskFieldsFromProposal(proposal),
         riskTags,
       },
-      proposePlacement(getProject(ctx.tx, proposal.projectId), { areas: [], riskTags }),
+      proposePlacement(project, {
+        areas: areasForProposal(ctx.tx, proposal.id, project),
+        riskTags,
+      }),
     );
   }
 }

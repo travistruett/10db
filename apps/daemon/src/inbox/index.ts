@@ -1,6 +1,12 @@
 export { raiseGateHostCards } from './gate-host-card';
 export { requestMcpApproval } from './mcp-approval';
-export { fileProposalByItself, proposalCardBody, proposalFiling } from './proposal-task';
+export {
+  carriesRiskTags,
+  fileProposalByItself,
+  proposalCardBody,
+  proposalFiling,
+  raisedAsCardLine,
+} from './proposal-task';
 export { createParkAnswers } from './park-answer';
 export { createPermissionBroker, type WaitObserver } from './permission-broker';
 export { cardsResolvedByEvent, resolveStaleCards } from './resolve-cards';
