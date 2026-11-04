@@ -1360,26 +1360,31 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const notStarted = (why: string, answerable = true): void => {
       stopWith(leftOutCards.notStarted(batch, attempt, why, answerable));
     };
+    // A second answer, queued before the first job moved the batch on: nothing is left to leave out, so
+    // the answer has been carried out and a card saying it was not would be false.
+    const carriedOut = (state: BatchState): boolean =>
+      failed.length === 0 && leftOut(member) && state !== BatchState.Abandoned;
+    const answerable = batch.state === BatchState.Open || batch.state === BatchState.Failed;
+    if (!answerable && carriedOut(batch.state)) return;
     // Whatever changed since the card was answered, the answer no longer fits: nothing moves, and a card says why.
     const unfinished = unfinishedWork(batch);
-    const refusal: { readonly why: string; readonly answerable: boolean } | null =
-      batch.state !== BatchState.Open && batch.state !== BatchState.Failed
-        ? { why: `the batch is ${batch.state.toLowerCase()}`, answerable: false }
-        : member.state !== WorkstreamState.Failed
-          ? {
-              why: `${member.taskTitle} is ${member.state.toLowerCase()}, not failed`,
-              answerable: false,
-            }
-          : stopped()
-            ? { why: '10db was stopping', answerable: true }
-            : unfinished
-              ? { why: unfinished.message, answerable: true }
-              : deps.holdShips?.()
-                ? {
-                    why: 'a waiting update has paused new ships until it installs',
-                    answerable: true,
-                  }
-                : null;
+    const refusal: { readonly why: string; readonly answerable: boolean } | null = !answerable
+      ? { why: `the batch is ${batch.state.toLowerCase()}`, answerable: false }
+      : member.state !== WorkstreamState.Failed
+        ? {
+            why: `${member.taskTitle} is ${member.state.toLowerCase()}, not failed`,
+            answerable: false,
+          }
+        : stopped()
+          ? { why: '10db was stopping', answerable: true }
+          : unfinished
+            ? { why: unfinished.message, answerable: true }
+            : deps.holdShips?.()
+              ? {
+                  why: 'a waiting update has paused new ships until it installs',
+                  answerable: true,
+                }
+              : null;
     if (refusal) {
       notStarted(refusal.why, refusal.answerable);
       return;
@@ -1475,16 +1480,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
       });
       if (moved) {
         if (!stopped()) resume(batchId);
-      } else if (revert !== null) {
-        const now = getBatch(db, batchId);
+        return;
+      }
+      const { state } = getBatch(db, batchId);
+      if (revert !== null) {
         stopWith(
           leftOutCards.revertKept(
             batch,
             attempt,
             revert,
-            `The batch became ${now.state.toLowerCase()} while the revert ran, so its notices and its move to shipping were not written.`,
+            `The batch became ${state.toLowerCase()} while the revert ran, so its notices and its move to shipping were not written.`,
           ),
         );
+      } else if (!carriedOut(state)) {
+        notStarted(`the batch is ${state.toLowerCase()}`, false);
       }
     } catch (error) {
       if (revert !== null) {

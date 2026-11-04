@@ -490,6 +490,93 @@ describe('the failed workstream card', () => {
         expect(stopped.title).toMatch(/stopping/);
         expect(stopped.options.map((o) => o.label)).toContain('Ship without it');
       });
+
+      it('does not say the branch is unchanged when Ship anyway got there first', async () => {
+        const { card, batchId } = await failedInBatch('DONE', { 'src/api/alpha.txt': 'alpha\n' });
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        h.shipper.shipAnyway(batchId);
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        expect(stopped.title).toMatch(/the batch is shipping/);
+        expect(stopped.body).toMatch(/Ship without it changed nothing/);
+        expect(stopped.body).not.toMatch(/Nothing was shipped|branch is unchanged/);
+        expect(stopped.options).toEqual([]);
+      });
+
+      it('raises no card for a second answer the first one already carried out', async () => {
+        const { batchId, alpha, beta } = await twoFailedInBatch();
+        const alphaCard = failedCard(alpha, batchId);
+        const betaCard = failedCard(beta, batchId);
+
+        expect(inbox.answer(alphaCard.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+        expect(inbox.answer(betaCard.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+        await h.jobs.idle();
+
+        expect(getBatch(h.store.db, batchId).state).toBe('SHIPPED');
+        for (const id of [alpha, beta])
+          expect(getWorkstream(h.store.db, id).notice?.key).toBe('left-out');
+        expect(h.cards().filter((c) => c.title.includes('was not left out'))).toEqual([]);
+      });
+    });
+
+    describe('when the batch moves on during a job with nothing to revert', () => {
+      /** A harness that runs `harness.moveOn` once, in the job, after its first await. */
+      function movingOn() {
+        const harness = { moveOn: (): void => undefined };
+        h.close();
+        h = createDeliveryHarness(
+          {},
+          {
+            wrapGit: (git) => ({
+              ...git,
+              currentBranch: async (repo) => {
+                const current = await git.currentBranch(repo);
+                const { moveOn } = harness;
+                harness.moveOn = () => undefined;
+                moveOn();
+                return current;
+              },
+            }),
+          },
+        );
+        inbox = answering();
+        return harness;
+      }
+
+      it('raises a card naming the state, with no answer to give', async () => {
+        const harness = movingOn();
+        const { card, batchId } = await failedInBatch('DONE');
+        const tip = h.git$('rev-parse', 'HEAD');
+        harness.moveOn = () => {
+          h.state.write((w) =>
+            transitionBatch(w, batchId, { to: 'ABANDONED', reason: 'abandoned by a test' }),
+          );
+        };
+
+        expect(inbox.answer(card.id, { choice: 'Ship without it' }).state).toBe('RESOLVED');
+        await h.jobs.idle();
+
+        expect(h.git$('rev-parse', 'HEAD')).toBe(tip);
+        const stopped = h.only(h.cards().filter((c) => c.title.includes('was not left out')));
+        expect(stopped.title).toMatch(/the batch is abandoned/);
+        expect(stopped.options).toEqual([]);
+      });
+
+      it('raises no card when the run was left out already and the batch went on to ship', async () => {
+        const harness = movingOn();
+        const { card, batchId, failed } = await failedInBatch('DONE');
+        h.state.write((w) => setWorkstreamNotice(w, failed, leftOutNotices.nothingToRevert()));
+        harness.moveOn = () => {
+          h.state.write((w) => transitionBatch(w, batchId, { to: 'SHIPPING', reason: 'a test' }));
+        };
+
+        inbox.answer(card.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(h.cards().filter((c) => c.title.includes('was not left out'))).toEqual([]);
+      });
     });
 
     describe('once the revert commit is on the branch', () => {

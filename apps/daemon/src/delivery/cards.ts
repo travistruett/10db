@@ -1267,7 +1267,8 @@ const leftOutAgain = (attempt: LeftOutAttempt): string =>
 export const leftOutCards = {
   /**
    * The answer no longer fit, or the job could not begin, so nothing was reverted. `why` is a clause
-   * that follows "not left out". The answer is offered again only when it can still be given.
+   * that follows "not left out". The answer is offered again only when it can still be given; when
+   * it cannot, the batch may have shipped by another way, so the card speaks only of this answer.
    */
   notStarted: (
     batch: BatchDto,
@@ -1277,7 +1278,7 @@ export const leftOutCards = {
   ): Card => {
     const text = {
       title: `${leftOutSubject(attempt)}: ${why}`,
-      body: `Ship without it did not begin on ${leftOutNames(attempt)}: ${why}.\n\nNothing was shipped and the branch is unchanged. ${answerable ? `When that is settled, ${leftOutAgain(attempt)}` : 'Ship without it no longer applies to this batch.'}`,
+      body: `Ship without it did not begin on ${leftOutNames(attempt)}: ${why}.\n\n${answerable ? `Nothing was shipped and the branch is unchanged. When that is settled, ${leftOutAgain(attempt)}` : 'Ship without it changed nothing, and no longer applies to this batch.'}`,
     };
     return answerable
       ? leftOutCard(batch, attempt, text)
