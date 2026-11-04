@@ -346,6 +346,24 @@ describe('KnowledgeView', () => {
       expect(await screen.findByText('No proposal matches.')).toBeTruthy();
     });
 
+    it('reads a search with no word as no search on every tab', async () => {
+      const { asked } = serve({ proposals });
+      renderApp('/knowledge');
+      expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
+        target: { value: '-' },
+      });
+      await waitFor(() => {
+        expect(asked.at(-1)?.get('q')).toBe('-');
+      });
+      expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+      expect(screen.queryByText('No principles match.')).toBeNull();
+      fireEvent.click(screen.getByRole('tab', { name: 'Decisions' }));
+      expect(await screen.findByText(/^No decisions yet/)).toBeTruthy();
+      expect(screen.queryByText('No decisions match.')).toBeNull();
+      await openProposals();
+    });
+
     it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
       serve({ proposals });
       renderApp('/knowledge');

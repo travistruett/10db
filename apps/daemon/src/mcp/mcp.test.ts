@@ -643,6 +643,8 @@ describe('MCP tools', () => {
     });
     const { json } = await s.call('find_knowledge', { query: 'date library' });
     expect(json).toMatchObject({ empty: false, results: [{ choice: 'dayjs' }] });
+    const question = await s.call('find_knowledge', { query: 'which date library should we use' });
+    expect(question.json).toMatchObject({ empty: false, results: [{ choice: 'dayjs' }] });
   });
 
   it.each([

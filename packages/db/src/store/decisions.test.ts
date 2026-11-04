@@ -192,20 +192,9 @@ describe('decisions with derived state', () => {
     expect(() =>
       searchDecisions(store.db, project.id, `what's -the "deal" (NEAR OR`, 5),
     ).not.toThrow();
-    expect(searchDecisions(store.db, project.id, `what's -the "deal" (quotes`, 5)).toHaveLength(1);
+    expect(searchDecisions(store.db, project.id, `what's -the "deal" (NEAR OR`, 5)).toHaveLength(1);
     expect(() => findRecords(store.db, project.id, `what's -the "deal" (NEAR OR`, 5)).not.toThrow();
     expect(searchDecisions(store.db, project.id, '***', 5)).toEqual([]);
-  });
-
-  it('finds a record from a partly typed word, and narrows as words are added', () => {
-    const project = seedProject(store);
-    record(project.id, { question: 'Do tests sleep?', choice: 'Never sleep', rationale: 'Flaky' });
-    record(project.id, { question: 'Which queue library?', choice: 'BullMQ', rationale: 'Redis' });
-    expect(found(project.id, 'slee')).toEqual(['Never sleep']);
-    expect(found(project.id, 'tes slee')).toEqual(['Never sleep']);
-    expect(found(project.id, 'slee queue')).toEqual([]);
-    expect(found(project.id, 'eep')).toEqual([]);
-    expect(findRecords(store.db, project.id, 'slee', 5).map((r) => r.id)).toHaveLength(1);
   });
 
   it('detects an index out of step with its table and rebuilds it', () => {

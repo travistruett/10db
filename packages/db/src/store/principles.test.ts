@@ -1,4 +1,9 @@
-import type { KnowledgeTarget, PrincipleId, ProjectId } from '@10db/contracts';
+import {
+  SearchMatch,
+  type KnowledgeTarget,
+  type PrincipleId,
+  type ProjectId,
+} from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
@@ -376,11 +381,28 @@ describe('principles', () => {
   it('never throws on hostile search text for principles', () => {
     const p = seedProject(store);
     principle(project(p.id), { statement: "What's the deal with quotes?", topicKey: 'quotes' });
-    expect(found(p.id, `what's -the "deal" (quotes`)).toEqual(["What's the deal with quotes?"]);
-    expect(found(p.id, 'quo NEAR OR')).toEqual([]);
-    expect(found(p.id, 'quo')).toEqual(["What's the deal with quotes?"]);
+    expect(found(p.id, `what's -the "deal" (NEAR OR`)).toEqual(["What's the deal with quotes?"]);
     expect(found(p.id, '***')).toEqual([]);
     expect(checkKnowledgeIndex(store.db)).toEqual([]);
+  });
+
+  it('finds a principle from partly typed words, each added word narrowing', () => {
+    const p = seedProject(store);
+    const id = principle(project(p.id), {
+      statement: 'Never sleep in tests',
+      topicKey: 'testing.no-sleeps',
+    }).id;
+    const typed = (query: string) =>
+      searchPrincipleIds(store.db, {
+        projectId: p.id,
+        query,
+        limit: 5,
+        match: SearchMatch.AllPrefixes,
+      });
+    expect(typed('slee')).toEqual([id]);
+    expect(typed('slee test')).toEqual([id]);
+    expect(typed('slee queue')).toEqual([]);
+    expect(found(p.id, 'slee')).toEqual([]);
   });
 });
 

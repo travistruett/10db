@@ -626,6 +626,16 @@ describe('buildContextPack', () => {
     expect(pack.knowledge.empty).toBe(false);
   });
 
+  it('packs a decision sharing one word with the task, not a newer one sharing none', () => {
+    const { project, workstream } = seedWorkstream(store, {
+      title: 'Add retry to the queue worker',
+    });
+    recordDecision(project.id, 'Which queue library?', { choice: 'BullMQ' });
+    recordDecision(project.id, 'Unrelated zebra topic', { choice: 'stripes' });
+    const pack = buildContextPack(store.db, workstream);
+    expect(pack.knowledge.decisions.map((d) => d.question)).toEqual(['Which queue library?']);
+  });
+
   it('falls back to recent decisions when nothing matches the task', () => {
     const { project, workstream } = seedWorkstream(store, { title: 'Alpha' });
     recordDecision(project.id, 'Unrelated zebra topic', { choice: 'stripes' });

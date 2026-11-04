@@ -79,16 +79,17 @@ accepted` (or `rejected`).
 
 One call answers a project's decisions and principles together, **builder-wide (`you`) records included**.
 
-| Query     | Default | Meaning                                                                                                                                             |
-| --------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`       | none    | Search text. Words are matched anywhere in a decision's question, choice and rationale, or a principle's statement and topic key. Best match first. |
-| `kind`    | both    | `decision`, `principle`, or one principle kind (`policy`, `heuristic`, `belief`; this leaves decisions out).                                        |
-| `scope`   | all     | `you`, `project` or `area`.                                                                                                                         |
-| `area`    | all     | One area's records. An area the project lacks is a 400 naming it.                                                                                   |
-| `history` | `0`     | `1` also returns superseded, retired, withdrawn and proposed records. Default: current records only.                                                |
-| `limit`   | `100`   | 1 to 500.                                                                                                                                           |
+| Query     | Default        | Meaning                                                                                                                                                 |
+| --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`       | none           | Search text, read against a decision's question, choice and rationale, or a principle's statement and topic key. Best match first.                      |
+| `match`   | `all_prefixes` | `all_prefixes`: every word of `q` starts a word of the record, so `que lib` finds "queue library". `any_word`: the record shares any whole word of `q`. |
+| `kind`    | both           | `decision`, `principle`, or one principle kind (`policy`, `heuristic`, `belief`; this leaves decisions out).                                            |
+| `scope`   | all            | `you`, `project` or `area`.                                                                                                                             |
+| `area`    | all            | One area's records. An area the project lacks is a 400 naming it.                                                                                       |
+| `history` | `0`            | `1` also returns superseded, retired, withdrawn and proposed records. Default: current records only.                                                    |
+| `limit`   | `100`          | 1 to 500.                                                                                                                                               |
 
-Without `q` the newest come first; with `q` the best matches of each kind alternate, so neither buries the other.
+Without `q` the newest come first; with `q` the best matches of each kind alternate, so neither buries the other. A `q` with no letter or digit, such as `-`, is no search.
 
 ```json
 {

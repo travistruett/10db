@@ -3,6 +3,7 @@ import {
   KnowledgeHit,
   PrincipleId,
   RecordHit,
+  SearchMatch,
   searchTerms,
   type KnowledgeScope,
   type PrincipleDto,
@@ -19,19 +20,25 @@ import type { DbReader } from './store';
 // Every full-text query lives here, so the storage engine can change later (packages/db/AGENTS.md).
 
 /**
- * Turns free text into an FTS5 query of quoted prefix terms, all of which must match, so user text is
- * never parsed as syntax, a word still being typed finds its record, and each added word narrows.
- * The Proposals tab filters with the same rule (`matchesSearch` in @10db/contracts).
+ * Turns text into an FTS5 query of quoted terms, so user text is never parsed as syntax. `AnyWord`
+ * joins whole words with OR, so a long question or a task's description still finds what it shares.
+ * `AllPrefixes` makes every term a prefix that must match, so a word still being typed finds its
+ * record and each added word narrows, the rule the Proposals tab filters with (`matchesSearch`).
  */
-function ftsQuery(text: string): string | null {
+function ftsQuery(text: string, match: SearchMatch = SearchMatch.AnyWord): string | null {
   const terms = searchTerms(text);
-  return terms.length === 0 ? null : terms.map((t) => `"${t}"*`).join(' AND ');
+  if (terms.length === 0) return null;
+  return match === SearchMatch.AllPrefixes
+    ? terms.map((t) => `"${t}"*`).join(' AND ')
+    : terms.map((t) => `"${t}"`).join(' OR ');
 }
 
 export interface SearchQuery {
   readonly projectId: ProjectId;
   readonly query: string;
   readonly limit: number;
+  /** How the query's words select records; any word unless named. */
+  readonly match?: SearchMatch;
   readonly scope?: KnowledgeScope;
   readonly area?: string;
   /** Also superseded, retired, withdrawn and proposed records. */
@@ -53,7 +60,7 @@ const DecisionIdRows = z.array(z.object({ id: DecisionId }));
 
 /** Decisions matching the query, best first; current ones unless `history`. */
 export function searchDecisionIds(db: DbReader, q: SearchQuery): DecisionId[] {
-  const match = ftsQuery(q.query);
+  const match = ftsQuery(q.query, q.match);
   if (match === null) return [];
   const where = [sql`decisions_fts MATCH ${match}`, ...narrow('d', q)];
   if (!q.history) where.push(currentDecisionSql);
@@ -133,7 +140,7 @@ export function searchPrincipleIds(
   db: DbReader,
   q: SearchQuery & { readonly kind?: PrincipleKind },
 ): PrincipleId[] {
-  const match = ftsQuery(q.query);
+  const match = ftsQuery(q.query, q.match);
   if (match === null) return [];
   const where = [sql`principles_fts MATCH ${match}`, ...narrow('p', q)];
   if (q.kind) where.push(sql`p.kind = ${q.kind}`);

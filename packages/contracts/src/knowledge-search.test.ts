@@ -1,7 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { matchesSearch, searchTerms } from './knowledge-search';
+import { isSearch, matchesSearch, searchTerms } from './knowledge-search';
 
 describe('searchTerms', () => {
+  it.each([
+    { name: 'Hangul', text: '한글', term: '한글' },
+    { name: 'Hangul pasted decomposed', text: '한글'.normalize('NFD'), term: '한글' },
+    { name: 'Cyrillic й', text: 'чай', term: 'чай' },
+    { name: 'kana with dakuten', text: 'が', term: 'が' },
+    { name: 'an accented Latin word', text: 'Crème', term: 'creme' },
+    { name: 'a Latin letter with two accents', text: 'Việt', term: 'việt' },
+    { name: 'a Latin letter with no plain form', text: 'Søren', term: 'søren' },
+  ])('keeps what the tokenizer keeps: $name', ({ text, term }) => {
+    expect(searchTerms(text)).toEqual([term]);
+  });
+
   it('splits on anything that is not a letter or digit, lower-cased', () => {
     expect(searchTerms(`What's -the "Deal" (NEAR OR`)).toEqual([
       'what',
@@ -42,5 +54,19 @@ describe('matchesSearch', () => {
   it('matches everything when the query holds no word', () => {
     expect(matchesSearch('anything', '')).toBe(true);
     expect(matchesSearch('anything', '  ')).toBe(true);
+    expect(matchesSearch('anything', '***')).toBe(true);
+  });
+});
+
+describe('isSearch', () => {
+  it.each([
+    { query: '', searching: false },
+    { query: '  ', searching: false },
+    { query: '-', searching: false },
+    { query: '***', searching: false },
+    { query: 's', searching: true },
+    { query: '- 한', searching: true },
+  ])('$query: $searching', ({ query, searching }) => {
+    expect(isSearch(query)).toBe(searching);
   });
 });
