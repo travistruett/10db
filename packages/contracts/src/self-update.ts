@@ -75,12 +75,16 @@ export const SelfUpdateStatusDto = z.object({
    * and shaping turns. `waitingOnCard` is lanes parked on an unanswered permission or ask card with
    * a session still live: they hold the update only until the drain begins, because a restart ends
    * the session and recovery parks the lane on its card again, to resume with the answer.
-   * `shapes` names the shaping conversations whose turn is under way and counted in `working`: a
-   * builder with no lane running can then tell a conversation is what the update waits for.
+   * `batches` and `jobs` are the batches being cut or shipped and the delivery jobs (a queued ship,
+   * checkout return or cleanup) counted in `working`, and `shapes` names the shaping conversations
+   * whose turn is under way and counted there too: what remains of `working` is the lanes and gates
+   * on the Board. A builder can then be told where to look for what the update waits for.
    */
   midSession: z.object({
     working: z.number().int().min(0),
     waitingOnCard: z.number().int().min(0),
+    batches: z.number().int().min(0),
+    jobs: z.number().int().min(0),
     shapes: z.array(z.object({ id: ShapeId, title: z.string() })),
   }),
   /**

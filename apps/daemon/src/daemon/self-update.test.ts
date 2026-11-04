@@ -440,6 +440,8 @@ describe('self-update in the daemon', () => {
         expect((await selfUpdate(api)).midSession).toEqual({
           working: 0,
           waitingOnCard: 1,
+          batches: 0,
+          jobs: 0,
           shapes: [],
         });
       });
@@ -852,6 +854,8 @@ describe('self-update in the daemon', () => {
     expect(midSession).toEqual({
       working: 1,
       waitingOnCard: 0,
+      batches: 0,
+      jobs: 0,
       shapes: [{ id: shape.id, title: 'Denser board.' }],
     });
     release();

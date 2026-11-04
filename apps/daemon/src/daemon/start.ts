@@ -18,6 +18,7 @@ import {
 } from '@10db/contracts';
 import {
   addStockHazardCommands,
+  countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
   createStore,
@@ -1124,10 +1125,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // the quit tells the builder it went unanswered); one running finishes. A lane waiting on a card counts until the drain begins and not after: it runs nothing, the quit ends
   // its session and recovery parks it on its card again, so it must not hold the install, and every
   // lane behind it, for as long as the builder leaves the card.
-  // `shapes` names the conversations among `working`, so a drain only they hold can say so.
+  // `shapes`, `batches` and `jobs` are the kinds of work among `working` that are no lane or gate, so
+  // a drain only they hold can say where to look instead of naming a running step the Board lacks.
   const midSessionWaits = (): {
     working: number;
     waitingOnCard: number;
+    batches: number;
+    jobs: number;
     shapes: { id: ShapeId; title: string }[];
   } => {
     const waitingOnCard = countWaitingOnCard(state.db);
@@ -1137,7 +1141,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         updateDrain.parked() -
         installHold.parked(),
     );
-    return { working, waitingOnCard, shapes: shape.runningTurns() };
+    return {
+      working,
+      waitingOnCard,
+      batches: countBatchesInFlight(state.db),
+      jobs: deliveryJobs.pending(),
+      shapes: shape.runningTurns(),
+    };
   };
   const midSessionCount = (): number => {
     const { working, waitingOnCard } = midSessionWaits();

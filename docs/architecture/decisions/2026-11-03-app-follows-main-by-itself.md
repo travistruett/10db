@@ -130,10 +130,12 @@ factory (`self-update/drain.ts`) until the app has installed:
 - **Once the install is asked for** the switch no longer ends the drain, because the quit would cut off any lane it
   released. An install that then fails with this daemon still running ends it, as any failed install does.
 - **Seen:** `GET /settings/self-update` also says `waitMinutes`, `waitingSince` (when the build was staged),
-  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard }`, what the update waits for now
-  (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which hold it only
-  until the drain begins). Both notes say it: "waiting for N running steps", "Lanes waiting on a card (K) do not
-  hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
+  `draining` and `drainingSince`, and `midSession`: `{ working, waitingOnCard, batches, jobs, shapes }`, what the update
+  waits for now (running lanes, gates, batches, delivery jobs and shaping turns; and lanes parked on a card, which
+  hold it only until the drain begins). `batches`, `jobs` and `shapes` are the kinds of `working` that are no lane
+  or gate, so the notes name each by what it is and call only the rest "running steps", since the Board shows only
+  those. Both notes say it: "waiting for 1 running step, 1 batch being cut or shipped and 1 delivery job", "Lanes
+  waiting on a card (K) do not hold it", or, before the drain, "Holding it now: …". Settings > Updates shows an update status line, the wait limit and Install Now;
   the Factory view shows a note, with the time, while an update waits and while lanes are paused. No event says
   when either starts, so the status is polled every 15 s while an update is available and every minute otherwise,
   and not at all with the switch off or in a run from source, where nothing changes by itself.

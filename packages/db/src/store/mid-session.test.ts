@@ -10,6 +10,7 @@ import type { Store } from './store';
 import { insertTask } from './tasks';
 import { createTestStore, seedProject } from './test-support';
 import {
+  countBatchesInFlight,
   countMidSession,
   countWaitingOnCard,
   insertWorkstream,
@@ -139,5 +140,23 @@ describe('countMidSession', () => {
     expect(countMidSession(store.db)).toBe(0);
     store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Shipping }));
     expect(countMidSession(store.db)).toBe(1);
+  });
+});
+
+describe('countBatchesInFlight', () => {
+  it('counts the batches being cut or shipped, which countMidSession adds to its lanes', () => {
+    const project = seedProject(store);
+    const batch = store.write((ctx) =>
+      insertBatch(ctx, { projectId: project.id, title: 'B', baseBranch: 'main' }),
+    ).value;
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Open }));
+    expect(countBatchesInFlight(store.db)).toBe(0);
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: BatchState.Shipping }));
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    // A lane is no batch.
+    moveThrough(workstream(), [S.Starting]);
+    expect(countBatchesInFlight(store.db)).toBe(1);
+    expect(countMidSession(store.db)).toBe(2);
   });
 });

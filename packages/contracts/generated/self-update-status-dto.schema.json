@@ -90,6 +90,16 @@
           "minimum": 0,
           "maximum": 9007199254740991
         },
+        "batches": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jobs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "shapes": {
           "type": "array",
           "items": {
@@ -113,6 +123,8 @@
       "required": [
         "working",
         "waitingOnCard",
+        "batches",
+        "jobs",
         "shapes"
       ]
     },
