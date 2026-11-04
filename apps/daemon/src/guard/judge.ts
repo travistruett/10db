@@ -33,6 +33,12 @@ export interface GuardInput {
   readonly toolName: string;
   readonly toolInput: unknown;
   readonly repoPath: string;
+  /**
+   * The directory the call runs in, from the hook's `cwd`. Claude Code carries a `cd` from an earlier
+   * Bash call into the next, so after one it is not `repoPath`. Absent where the caller has no hook
+   * (tests), meaning `repoPath`.
+   */
+  readonly cwd?: string;
   readonly areas: readonly AreaDef[];
   readonly hazards: readonly HazardDef[];
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];

@@ -65,7 +65,12 @@ export interface SessionSpec {
     readonly toolTimeoutMs: number;
   };
   /** The workspace guard: runs before every tool call, before permission rules. */
-  preToolUse(req: { readonly toolName: string; readonly input: unknown }): GuardVerdict;
+  preToolUse(req: {
+    readonly toolName: string;
+    readonly input: unknown;
+    /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
+    readonly cwd?: string;
+  }): GuardVerdict;
   /** Called for questions and for tool calls no allow rule covers. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
 }
