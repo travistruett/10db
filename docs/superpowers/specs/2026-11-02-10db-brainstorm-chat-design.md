@@ -574,7 +574,8 @@ network:
   token, the Tauri IPC or the network.
 - **Charts** are Vega-Lite with inline `data.values` only; the zod schema refuses `data.url` and every URL-bearing
   field, and the loader refuses network loads.
-- **Mermaid** runs at `securityLevel: 'strict'`.
+- **Mermaid** runs at `securityLevel: 'strict'`. It draws into a temporary element in the live document, so only
+  known kinds are drawn, and one that names an image or a style `url()` is refused (`safe-render.ts`).
 - **Chat and row text** render Markdown without images or raw HTML; a link shows its URL and opens in the system
   browser only on click.
 - **Tests:** a mockup with a `<script>` and a `fetch`, a chart with `data.url` and a Mermaid `click` directive

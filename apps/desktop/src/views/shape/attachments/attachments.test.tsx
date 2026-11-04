@@ -421,6 +421,157 @@ describe('a Mermaid diagram', () => {
     expect(reached).toEqual([]);
   });
 
+  // Each of these would load a URL in the temporary element, or before it: none may reach the drawing.
+  it.each([
+    // The image shape's block is YAML: a `}` in a quoted string does not end it, and escapes decode.
+    [
+      'an image shape after a quoted }',
+      /has an image/,
+      'flowchart LR\n  A@{ label: "}", img: "https://evil.example/p.png" }',
+    ],
+    [
+      'an image shape with an escaped key',
+      /has an image/,
+      String.raw`flowchart LR
+  A@{ "\x69mg": "https://evil.example/p.png" }`,
+    ],
+    [
+      'a sequence actor icon',
+      /has an image/,
+      'sequenceDiagram\n  participant A\n  properties A: {"icon": "https://evil.example/p.png"}',
+    ],
+    [
+      'an architecture text icon, a kind that is not drawn',
+      /This kind of diagram/,
+      'architecture-beta\n  service a "<img src=https://evil.example/p.png>"[A]',
+    ],
+    ['a kind that is not drawn, C4', /This kind of diagram/, 'C4Context\n  Person(a, "A")'],
+    [
+      'a state classDef with a url()',
+      /style names a URL/,
+      'stateDiagram-v2\n  classDef bad mask-image:url(https://evil.example/m.png)\n  [*] --> A:::bad',
+    ],
+    [
+      // A flowchart's and an ER diagram's grammar has no bracket in a style: these never parse.
+      'a flowchart classDef with a url()',
+      /Parse error/,
+      'flowchart LR\n  classDef bad fill:url(https://evil.example/m.png)\n  A:::bad --> B',
+    ],
+    [
+      'a flowchart style with a url()',
+      /Parse error/,
+      'flowchart LR\n  A --> B\n  style A fill:url(https://evil.example/m.png)',
+    ],
+    [
+      'a linkStyle with a url()',
+      /Parse error/,
+      'flowchart LR\n  A --> B\n  linkStyle 0 stroke:url(https://evil.example/m.png)',
+    ],
+    [
+      'an ER style with a url()',
+      /Lexical error/,
+      'erDiagram\n  A ||--o{ B : has\n  style A fill:url(https://evil.example/m.png)',
+    ],
+    [
+      'a class style with a url()',
+      /style names a URL/,
+      'classDiagram\n  class A\n  style A fill:url(https://evil.example/m.png)',
+    ],
+    [
+      'a url() with a CSS escape',
+      /style names a URL/,
+      String.raw`stateDiagram-v2
+  classDef bad mask-image:\75 r\l(https://evil.example/m.png)
+  [*] --> A:::bad`,
+    ],
+    [
+      'an image-set()',
+      /style names a URL/,
+      'stateDiagram-v2\n  classDef bad mask-image:image-set("https://evil.example/m.png" 1x)\n  [*] --> A:::bad',
+    ],
+    [
+      'a url() split by a directive Mermaid removes',
+      /style names a URL/,
+      'stateDiagram-v2\n  classDef bad mask-image:ur%%{init: {}}%%l(https://evil.example/m.png)\n  [*] --> A:::bad',
+    ],
+  ])('with %s is not drawn and loads nothing', async (_name, why, source) => {
+    const stop = watchLoaders();
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="No" />);
+    expect((await screen.findByText(/couldn’t be drawn/)).textContent).toMatch(why);
+    expect(stop()).toEqual([]);
+    expect(reached).toEqual([]);
+  });
+
+  // These draw, with what would load left out of the temporary element.
+  it.each([
+    [
+      'KaTeX in a flowchart label',
+      'flowchart LR\n  A["$$x$$<img src=https://evil.example/p.png>"] --> B',
+    ],
+    [
+      'KaTeX in a class label',
+      'classDiagram\n  class A["$$x$$<img src=https://evil.example/p.png>"]',
+    ],
+    [
+      'KaTeX in a sequence message',
+      'sequenceDiagram\n  A->>B: $$x$$<img src=https://evil.example/p.png>',
+    ],
+    [
+      'KaTeX in a state description',
+      'stateDiagram-v2\n  A: $$x$$<img src=https://evil.example/p.png>',
+    ],
+    [
+      'a fontFamily directive',
+      '%%{init: {"fontFamily": "x;background:url(https://evil.example/f.png)"}}%%\nflowchart LR\n  A --> B',
+    ],
+    [
+      'a themeVariables directive',
+      '%%{init: {"themeVariables": {"fontFamily": "x;background:url(https://evil.example/f.png)"}}}%%\nflowchart LR\n  A --> B',
+    ],
+    [
+      'an escaped fontFamily in front-matter',
+      String.raw`---
+config:
+  fontFamily: "x;background:ur\x6c(https://evil.example/f.png)"
+---
+flowchart LR
+  A --> B`,
+    ],
+    [
+      'a directive that loosens the sanitizer',
+      '%%{init: {"dompurifyConfig": {"ALLOWED_TAGS": ["img"], "ALLOWED_ATTR": ["src"]}}}%%\nclassDiagram\n  class A["$$x$$<img src=https://evil.example/p.png>"]',
+    ],
+  ])('with %s draws and loads nothing', async (_name, source) => {
+    const stop = watchLoaders();
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Yes" />);
+    await screen.findByRole('img', { name: 'Diagram: Yes' });
+    expect(stop()).toEqual([]);
+    expect(reached).toEqual([]);
+  });
+
+  // Refusing is about what a diagram does, not what its words say.
+  it.each([
+    ['a shape whose label says img', 'flowchart LR\n  A@{ label: "An img tag" }'],
+    ['a shape from the shape list', 'flowchart LR\n  A@{ shape: rounded, label: "Hi" }'],
+    ['a label that mentions an image', 'flowchart LR\n  A["Resize the image (large)"] --> B'],
+    ['a plain style', 'flowchart LR\n  A --> B\n  style A fill:#f9f,stroke:#333'],
+    [
+      'a line break in a label',
+      String.raw`sequenceDiagram
+  A->>B: one\ntwo`,
+    ],
+    ['a sequence diagram', 'sequenceDiagram\n  A->>B: hello'],
+    ['a class diagram', 'classDiagram\n  class A {\n    +int id\n  }\n  A <|-- B'],
+    ['a state diagram', 'stateDiagram-v2\n  [*] --> A\n  A --> [*]'],
+    ['an old state diagram', 'stateDiagram\n  [*] --> A'],
+    ['an ER diagram', 'erDiagram\n  A ||--o{ B : has'],
+    ['a Gantt chart', 'gantt\n  title Plan\n  section One\n  Task :a1, 2026-01-01, 3d'],
+    ['a pie chart', 'pie title Load\n  "a" : 1\n  "b" : 2'],
+  ])('draws %s', async (_name, source) => {
+    renderWithDaemon(<AttachmentView attachment={{ kind: 'mermaid', source }} title="Fine" />);
+    expect(await screen.findByRole('img', { name: 'Diagram: Fine' })).toBeTruthy();
+  });
+
   it('says so when the source does not parse, and shows nothing it made', async () => {
     renderWithDaemon(
       <AttachmentView
