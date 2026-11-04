@@ -415,6 +415,51 @@ describe('the pictures a Shape session pulls in with Read', () => {
       expect(read('/nowhere/gone.pdf').decision).not.toBe('ask');
       expect(spent()).toBe(0);
     });
+
+    describe('whose Read Claude Code answers with only text', () => {
+      const after = (path: string, pages: string, response: unknown): void => {
+        must(
+          must(f.adapter.shapeSessions[0], 'a session').spec.postToolUse,
+          'a PostToolUse hook',
+        )({ toolName: 'Read', input: { file_path: path, pages }, response });
+      };
+      const refusal =
+        'This PDF has 50 pages, which is too many to read at once. Use the pages parameter.';
+
+      it.each([
+        ['a bare string', refusal],
+        ['a text result', { type: 'text', file: { filePath: '/a.pdf', content: refusal } }],
+        ['a string in a content block', [{ type: 'text', text: refusal }]],
+      ])('adds nothing to the total when the result is %s', async (_name, response) => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+        expect(spent()).toBe(3 * READ_CHARGE_MAX_BYTES);
+        after(doc.storedPath, '1-3', response);
+        expect(spent()).toBe(0);
+      });
+
+      it('lets the same PDF be read again by the page afterwards', async () => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        for (let i = 0; i < 10; i += 1) {
+          expect(readPages(doc.storedPath, '1-3')).toEqual({ decision: 'allow' });
+          after(doc.storedPath, '1-3', refusal);
+        }
+        expect(spent()).toBe(0);
+      });
+
+      it('keeps the charge of a result whose pages stayed on disk', async () => {
+        const doc = drop('small.pdf', tinyPdf());
+        await nextTurn('Hello');
+        readPages(doc.storedPath, '1-3');
+        after(doc.storedPath, '1-3', {
+          type: 'parts',
+          file: { filePath: doc.storedPath, count: 3 },
+        });
+        expect(spent()).toBe(3 * READ_CHARGE_MAX_BYTES);
+      });
+    });
   });
 
   it('count a path with a line break in it', () => {

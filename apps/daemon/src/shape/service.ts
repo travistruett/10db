@@ -85,6 +85,7 @@ import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   isFileUnchanged,
+  isTextOnly,
   measuredMediaBytes,
   noticeName,
   pagesCharged,
@@ -914,10 +915,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         if (path === null) return;
         // A measured 0 can't tell 'the bytes stayed on disk' (a `parts` result, which keeps its allowance)
         // from 'nothing was added' (`file_unchanged`: Claude Code answered that an earlier tool result still
-        // stands), so the result's type decides: the second gives its whole charge back.
-        const unchanged = isFileUnchanged(req.response);
-        const measured = unchanged ? 0 : measuredMediaBytes(req.response);
-        if (measured === 0 && !unchanged) return;
+        // stands), so the result's type decides: the second gives its whole charge back, and so does a result
+        // that is only text (a Read refused with a reason, such as a long PDF with no `pages`).
+        const measured = measuredMediaBytes(req.response);
+        const nothingAdded =
+          isFileUnchanged(req.response) || (measured === 0 && isTextOnly(req.response));
+        if (measured === 0 && !nothingAdded) return;
         // What the hook counted for this Read, from the transcript: the allowance can have grown since,
         // when another Read of the same message was measured first.
         const counted = unmeasuredRead(listShapeMessages(state.db, shapeId), path);

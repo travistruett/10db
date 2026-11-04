@@ -75,6 +75,23 @@ export function isFileUnchanged(response: unknown): boolean {
   );
 }
 
+/**
+ * Whether a Read's result is only text: a bare string, a `text` result (`SdkFileReadOutput`) or content blocks
+ * that are all `text`. A Read refused with a reason, such as a PDF over 10 pages with no `pages`, answers this
+ * way and carries no picture or document, so it adds nothing to the request however much it was counted for.
+ * A `parts` result is not text: its pages are files on disk the session may still Read, so it keeps its charge.
+ */
+export function isTextOnly(response: unknown): boolean {
+  if (typeof response === 'string') return true;
+  const isTextBlock = (item: unknown): boolean =>
+    typeof item === 'object' &&
+    item !== null &&
+    (item as Record<string, unknown>)['type'] === 'text';
+  return Array.isArray(response)
+    ? response.length > 0 && response.every(isTextBlock)
+    : isTextBlock(response);
+}
+
 /** The pictures Claude Code's `Read` turns into an image block. */
 const PICTURE_NAME = /\.(png|jpe?g|gif|webp)$/i;
 
