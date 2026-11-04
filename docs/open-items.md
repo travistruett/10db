@@ -9,7 +9,7 @@
 - [ ] Replace the placeholder app icon.
 - [ ] Post-MVP: backup export and import (spec §13 fast-follow).
 - [ ] Renovate bumps Rust in `mise.toml` but not `rust-toolchain.toml`; match them by hand in that PR (a repo test fails until they agree).
-- [ ] M2: "answered from D-n" lookup before a question reaches the inbox (spec §7).
+- [ ] Later: "answered from D-n" lookup before a question reaches the inbox (spec §7); it needs a fixed-key match, not similarity.
 - [x] M2: reviewer approval in flows with a review step before DONE (spec §5.4). (M2a: review, plan-review and QA steps give verdicts through `complete_step`.)
 - [ ] M2: per-workstream log files for the Factory detail view (spec §12; M1a has one shared daemon log, decision 31).
 - [ ] M2: diagnostics bundle export (spec §12; not built in M1a).
@@ -19,6 +19,12 @@
 - [ ] M2: inject the environment into `createGit(env)` instead of reading `process.env` in `git.ts` (M1b already calls `createGit()` with no arguments).
 - [ ] Spec §5.1: "Ready" does not yet check for an open blocking inbox item.
 - [x] Spec §9: the context pack uses FTS only; area match is not built. Built: the pack matches areas and fills a token budget by shelf (`decisions/2026-11-03-the-context-pack-is-budgeted-in-tokens-by-shelf.md`).
+- [x] M3: the context pack with principles, the Knowledge view and the capture flows (`docs/architecture/05-knowledge.md`).
+- [ ] Knowledge: the override review. Spec §9 asks for a "review this principle?" card after two recent signed overrides of a principle. Deferred: `report_deviation` takes no principle key and nothing counts deviations against a principle. Open: the threshold (two within 30 days was the plan's default), how a deviation names a principle (a topic key resolved like the pack resolves it), and the card's keep and retire options.
+- [ ] Facts: the table, the builder's writes, a Knowledge tab and the pack's facts shelf (spec §1.4 fast-follow, §9 "from the next slice"). The schema is not in the database yet.
+- [ ] M3: the legacy harness import, with bulk confirm in the Knowledge view and the uncommitted pilot acceptance script (its own plan; spec §4, §10, §12).
+- [ ] Knowledge: the PM agent proposes principles through `propose`, replacing the always/never word detector.
+- [ ] Knowledge: a `find_knowledge` result can't yet say which records are in the pack already; agents may re-read them.
 - [x] Spec §12: the fake adapter is typed at the `SessionEvent` seam, not with the SDK's message types; M1b's scripted query covers the SDK level.
 - [ ] Spec §4: the inbox delivery record, persona avatars and people's channels are not built yet.
 - [ ] A multi-question `AskUserQuestion` parked mid-sequence drops the earlier answers, so the agent re-asks. Fix: open all question cards up front, or include every card resolved for the workstream in the resume prompt.

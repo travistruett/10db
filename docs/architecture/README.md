@@ -2,6 +2,8 @@
 
 - `NN-*.md`: numbered sections. Each opens with Status (Draft | Locked), Scope and Summary. A
   Locked section changes only through a new decision that says what it supersedes.
+- `05-knowledge.md`: decisions and principles, the context pack, capture and the Knowledge view, as
+  built; the other sections are `01` to `04`.
 - `decisions/`: one file per decision, `YYYY-MM-DD-<slug>.md`; its README gives the format.
   `decisions.md` is the numbered log, closed at 133: never edit or renumber a row, and cite one by
   number.
