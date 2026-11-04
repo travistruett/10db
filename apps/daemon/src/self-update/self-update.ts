@@ -1004,8 +1004,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           : // A failure outside a check (an install that ended, a start that settled it) counts too.
             failure !== null
             ? 'failed'
-            : // However the build was lost: with GitHub away the next check can't stage another, and
-              // no check runs to fetch one.
+            : // However the build was lost or held back: with GitHub away the next check can't stage
+              // another, and no check runs to fetch one.
               (notInstalling ??
               (fetching
                 ? 'fetching'

@@ -1097,6 +1097,27 @@ describe('a waiting update drains the factory', () => {
       expect(update.status().draining).toBe(false);
     });
 
+    it.each(['find-commit', 'find-build'])(
+      'does not say a build staged for the failed head waits for an idle moment when main moves and the look fails at %s',
+      async (step) => {
+        world.busy = 1;
+        const update = make();
+        await update.tick();
+        world.busy = 0;
+        world.apply = () => ({ ok: false, step: 'start-install', message: 'spawn bash ENOENT' });
+        expect(await update.tick()).toBe('failed');
+        // The new head clears the failure, so only the staged build's head says it is held back.
+        world.head = NEWER;
+        world.stage = () => Promise.resolve({ ok: false, step, message: 'gh: 502', kept: true });
+        expect(await update.tick()).toBe('unreachable');
+        expect(world.calls.filter((call) => call === 'apply')).toEqual(['apply']);
+        const status = update.status();
+        expect(status.availableCommit).toBe(NEWER);
+        expect(status.problem?.kind).toBe('unreachable');
+        expect(status.notInstalling).toBe('unreachable');
+      },
+    );
+
     /** Drains for a build, then main moves on and the build fetched for it can't be compared. */
     async function drainedThenLostNewBuild() {
       world.busy = 1;

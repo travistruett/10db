@@ -35,8 +35,9 @@ export type SelfUpdateBlockerDto = z.infer<typeof SelfUpdateBlockerDto>;
  * tried again until main moves on or the builder touches the switch), `rolled-back` (the builder
  * rolled back from it), `unbuilt` (it has no finished build newer than the running one yet),
  * `fetching` (nothing is staged yet: its build is being fetched, or waited for while GitHub builds
- * it, which can take many minutes), `unreachable` (nothing is staged and no check is fetching: GitHub
- * could not be asked, so the build is fetched once it answers).
+ * it, which can take many minutes), `unreachable` (no staged build can install, because none is
+ * staged or the kept one is held back, and no check is fetching: GitHub could not be asked, so the
+ * build is fetched once it answers).
  */
 export const SelfUpdateNotInstalling = z.enum([
   'failed',
