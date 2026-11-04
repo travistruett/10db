@@ -1,16 +1,10 @@
-<<<<<<< 0741551d3b9319882889e4e27f30f13f67a77bc9
-import type { ProjectId, SelfUpdateBlockerDto, SelfUpdateNotInstalling } from '@10db/contracts';
-import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
-||||||| 8e2d93e
-import type { ProjectId, SelfUpdateBlockerDto } from '@10db/contracts';
-import { deleteAppSetting, getAppSetting, setAppSetting } from '@10db/db';
-=======
 import {
   SELF_UPDATE_SWITCH,
   SHAPE_HOLD_WAY_OUT,
   type InboxItemId,
   type ProjectId,
   type SelfUpdateBlockerDto,
+  type SelfUpdateNotInstalling,
   type ShapeId,
 } from '@10db/contracts';
 import {
@@ -20,7 +14,6 @@ import {
   listProjects,
   setAppSetting,
 } from '@10db/db';
->>>>>>> 12c93609224c3a2cb75e49657f2f111b03dce80b
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
