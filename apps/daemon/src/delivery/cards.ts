@@ -35,7 +35,7 @@ export interface Card {
   readonly body: string;
   /** An open card with the same key is reused instead of raising another. */
   readonly foldKey?: string;
-  /** A repeat that folds rewrites the open card with this one's body and detail. */
+  /** A repeat that folds replaces the open card's title, body, options and detail with this one's. */
   readonly refresh?: boolean;
   readonly detail?: Record<string, Json>;
   /** The answers the card offers; none for a card the builder only dismisses. */

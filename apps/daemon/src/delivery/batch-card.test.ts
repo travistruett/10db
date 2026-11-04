@@ -683,7 +683,9 @@ describe('the failed workstream card', () => {
       });
 
       it('shows its own title and offers no answer when a left-out card was open already', async () => {
+        let reverts = 0;
         revertThen(() => {
+          reverts += 1;
           vi.spyOn(h.state, 'write').mockImplementationOnce(() => {
             throw new Error('database is locked');
           });
@@ -712,6 +714,13 @@ describe('the failed workstream card', () => {
         expect(stopped.title).toMatch(/revert is on the branch/i);
         expect(stopped.options).toEqual([]);
         expect(h.cards().filter((c) => c.title.includes('conflicts'))).toEqual([]);
+
+        // A board that had not refetched still shows the old card: its answer must find nothing.
+        inbox.answer(stopped.id, { choice: 'Ship without it' });
+        await h.jobs.idle();
+
+        expect(reverts).toBe(1);
+        expect(stopped.detail).toBeNull();
       });
     });
 

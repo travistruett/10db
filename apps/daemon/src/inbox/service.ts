@@ -96,8 +96,8 @@ interface FlagInput {
   readonly detail?: Record<string, Json>;
   readonly foldKey?: string;
   /**
-   * A repeat that folds rewrites the open card's title, body, options and detail, which tells
-   * clients it changed.
+   * A repeat that folds replaces the open card's title, body, options and detail, so one with no
+   * options or detail clears them. That tells clients it changed.
    * Without it a repeat is a silent no-op, which callers that raise on every poll rely on.
    */
   readonly refresh?: boolean;
@@ -144,14 +144,15 @@ export function flagCard(ctx: WriteContext, input: FlagInput): InboxItemDto {
     const existing = findOpenByFoldKey(ctx.tx, input.projectId, input.foldKey);
     if (existing && !input.refresh) return existing;
     // The repeat says what is in the way now, and a board that watches the card learns the
-    // cause came back. Its title and answers are rewritten with the body: a card that folds into
-    // another with a different cause must not keep the old cause's title or offer its answers.
+    // cause came back. It replaces the whole card: one that folds into another with a different
+    // cause must not keep the old title or options, or the old detail its answers act on, which a
+    // client still showing the old card could otherwise answer.
     if (existing)
       return updateInboxItem(ctx, existing.id, {
         title: input.title,
         body: input.body,
         options: input.options ?? [],
-        ...(input.detail ? { detail: input.detail } : {}),
+        detail: input.detail ?? null,
       });
   }
   return insertInboxItem(ctx, {
