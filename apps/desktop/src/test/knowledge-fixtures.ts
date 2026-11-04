@@ -124,6 +124,7 @@ export function provenanceDto(overrides: Partial<ProvenanceDto> = {}): Provenanc
     withdrawn: null,
     inbox: null,
     session: null,
+    conversation: null,
     quote: null,
     speaker: null,
     confirmedBy: null,
