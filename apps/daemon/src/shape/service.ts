@@ -47,6 +47,7 @@ import {
   listShapes,
   listUntoldShapeFiles,
   markSessionStarted,
+  markShapeFilesInline,
   markShapeFilesTold,
   markShapeLinksSizeTold,
   patchShape,
@@ -60,6 +61,7 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
+import { stringField } from '../guard';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
@@ -68,6 +70,7 @@ import type {
   ShapeImage,
   ShapeSessionHandle,
   ShapeSessionSpec,
+  ShapeVerdict,
   TurnResult,
 } from '../sessions';
 import {
@@ -77,7 +80,19 @@ import {
   type TrackedFiles,
 } from './ceremony';
 import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
+<<<<<<< 772bd631075ba5c5994e95f461ac7c41a536313c
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
+||||||| 4075881
+import { convertProposals, type ConvertOutcome } from './convert';
+=======
+import { convertProposals, type ConvertOutcome } from './convert';
+import {
+  readPictureBytesSpent,
+  readPictureCharge,
+  readPictureLine,
+  readPictureRefusal,
+} from './read-budget';
+>>>>>>> 84d0b7e62e3320ff58249693cdf894a50a7d5196
 import { buildDigest } from './digest';
 import {
   asImage,
@@ -307,6 +322,12 @@ interface Intake {
   readonly converted: string | null;
   /** Inline image bytes the conversation's earlier turns spent, which a resumed session resends. */
   readonly spent: number;
+}
+
+/** The image blocks a turn carries, and the files they came from. */
+interface SentImages {
+  readonly images: ShapeImage[];
+  readonly ids: ShapeFileRow['id'][];
 }
 
 type TurnEnd =
@@ -568,19 +589,22 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[], spent: number): ShapeImage[] => {
+  const imagesOf = (files: readonly ShapeFileRow[], spent: number): SentImages => {
     const inline = inlineImageIds(files, spent);
-    return files.flatMap((file) => {
-      if (!inline.has(file.id)) return [];
+    const sent: SentImages = { images: [], ids: [] };
+    for (const file of files) {
+      if (!inline.has(file.id)) continue;
       try {
         const kind = shapeFileKind(file.name);
         const image = kind === null ? null : asImage(kind, readFileSync(file.storedPath));
-        return image === null ? [] : [image];
+        if (image === null) continue;
+        sent.images.push(image);
+        sent.ids.push(file.id);
       } catch (error) {
         log.warn({ err: error, file: file.name }, 'a dropped image could not be read');
-        return [];
       }
-    });
+    }
+    return sent;
   };
 
   /**
@@ -598,13 +622,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
-  /** Records that the turn just sent carried these files and these mis-sized tasks. */
-  const told = (files: readonly ShapeFileRow[], missized: UntoldMissized): void => {
+  /**
+   * Records that the turn just sent carried these files and these mis-sized tasks, and which of the
+   * files went as image blocks. A `fresh` session resends no earlier block, so it clears the others.
+   */
+  const told = (
+    shapeId: ShapeId,
+    files: readonly ShapeFileRow[],
+    missized: UntoldMissized,
+    inline: readonly ShapeFileRow['id'][],
+    fresh: boolean,
+  ): void => {
     state.write((ctx) => {
       markShapeFilesTold(
         ctx,
         files.map((f) => f.id),
       );
+      markShapeFilesInline(ctx, shapeId, inline, fresh);
       markShapeLinksSizeTold(ctx, missized.linkIds);
     });
   };
@@ -667,7 +701,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
-    const images = imagesOf(intake.files, budgeted.spent);
+    const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -697,7 +731,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       agents: SHAPE_AGENTS,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
       preToolUse: (req) => {
-        const verdict = judgeShapeCall(
+        let verdict: ShapeVerdict = judgeShapeCall(
           {
             toolName: req.toolName,
             toolInput: req.input,
@@ -706,6 +740,28 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           },
           access,
         );
+        // A picture the session itself Reads is resent with every later request (§5.4); a subagent's
+        // reaches the session as text, so only the session's own Reads are counted.
+        const picture =
+          verdict.decision === 'allow' && req.toolName === 'Read' && req.agentId === undefined
+            ? stringField(req.input, 'file_path')
+            : null;
+        const charge = picture === null ? 0 : readPictureCharge(picture, access);
+        if (picture !== null && charge > 0) {
+          const refusal = readPictureRefusal(
+            picture,
+            charge,
+            readPictureBytesSpent(listShapeMessages(state.db, shapeId)),
+          );
+          if (refusal !== null) verdict = { decision: 'deny', reason: refusal };
+          else
+            say(
+              shapeId,
+              ShapeMessageAuthor.Claude,
+              ShapeMessageKind.Tool,
+              readPictureLine(picture, charge),
+            );
+        }
         if (verdict.decision === 'deny')
           say(
             shapeId,
@@ -740,7 +796,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       done: Promise.resolve(),
     };
     rt.live = live;
-    told(files, intake.missized);
+    told(shapeId, files, intake.missized, inlineIds, resumeId === null);
     live.done = consume(shapeId, rt, live);
   };
 
@@ -796,11 +852,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       if (rt.live === null) start(shapeId, rt, turn, intake);
       else {
         const lines = intakeText(intake);
-        rt.live.handle.send(
-          lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`,
-          imagesOf(intake.files, intake.spent),
-        );
-        told(intake.files, intake.missized);
+        const { images, ids } = imagesOf(intake.files, intake.spent);
+        rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
+        told(shapeId, intake.files, intake.missized, ids, false);
       }
     } catch (error) {
       // The turn never reached Claude, so what was to go ahead of it waits for the next one; its

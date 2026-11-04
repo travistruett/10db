@@ -235,6 +235,14 @@ describe('a large dropped image', () => {
       { name: 'a tall JPEG', file: 'long.jpg', bytes: jpeg(1200, 12_000) },
       { name: 'a wide lossy WebP', file: 'wide.webp', bytes: webpLossy(9000, 600) },
       { name: 'an extended WebP', file: 'long.webp', bytes: webpExtended(800, 16_000) },
+      { name: 'a tall lossless WebP', file: 'long.webp', bytes: webpImage('lossless', 1200, 8001) },
+      { name: 'a wide lossless WebP', file: 'wide.webp', bytes: webpImage('lossless', 8001, 1200) },
+      // Both 14-bit fields at their largest: a mask or shift off by one would read these wrong.
+      {
+        name: 'a lossless WebP at 16384 px',
+        file: 'max.webp',
+        bytes: webpImage('lossless', 16_384, 16_384),
+      },
     ])('goes as a path to Read, not an image block: $name', async ({ file, bytes }) => {
       const stored = drop(file, bytes);
       const turn = await nextTurn('The whole page');
@@ -346,6 +354,37 @@ describe('a large dropped image', () => {
     expect(spec.prompt).not.toMatch(/tiny\.png\) — too large/);
   });
 
+  it('does not spend the total on images that went as paths because the message was full', async () => {
+    // Ten 1.9 MiB images: three fit a message, seven go as paths and are never resent.
+    for (let i = 0; i < 10; i += 1) drop(`shot${String(i)}.png`, wholePng(1.9 * MB));
+    const first = await nextTurn('Ten');
+    expect(first.images).toHaveLength(3);
+    // Only the 5.7 MiB that went inline counts: three more 1.9 MiB images still go inline.
+    for (let i = 0; i < 3; i += 1) drop(`next${String(i)}.png`, wholePng(1.9 * MB));
+    const second = await nextTurn('Three more');
+    expect(second.images).toHaveLength(3);
+    expect(second.message).not.toMatch(/too large to show/);
+  });
+
+  it('counts only the new session’s inline images after a digest start', async () => {
+    await spendTheTotal();
+    f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+    f.service.send(shapeId(), 'Full');
+    await f.service.settled(shapeId());
+    // The fresh session's first turn, then a second that is resumed within it.
+    drop('first.png', wholePng(2 * MB));
+    const first = await nextTurn('First');
+    expect(
+      must(f.adapter.shapeSessions[1], 'a fresh session').spec.resumeProviderSessionId,
+    ).toBeNull();
+    expect(first.images).toHaveLength(1);
+    for (let i = 0; i < 3; i += 1) drop(`later${String(i)}.png`, wholePng(2 * MB));
+    const later = await nextTurn('Later');
+    // 2 MiB sent in this session so far: the nine of the old session are not carried.
+    expect(later.images).toHaveLength(3);
+    expect(later.message).not.toMatch(/too large to show/);
+  });
+
   // see_screen answers a picture in a tool result, which a resumed session resends like any image block.
   describe('beside the pictures see_screen takes', () => {
     const window = { screen: ScreenName.Board, width: 1200, height: 900 } as const;
@@ -421,6 +460,51 @@ describe('a large dropped image', () => {
       ).toBe(true);
     });
 
+    describe('after a digest start, which carries no earlier picture', () => {
+      /** Keeps these screens, then moves the conversation on to a session started from the digest. */
+      const rollOverWith = async (count: number): Promise<void> => {
+        await nextTurn('Hello');
+        const screens = screensOf(drawn(1_500_000));
+        for (let n = 0; n < count; n += 1) await screens.see(shapeId(), window);
+        f.adapter.shapeBehaviour = () => Promise.resolve({ text: 'ok', contextPercent: 71 });
+        f.service.send(shapeId(), 'Full');
+        await f.service.settled(shapeId());
+      };
+
+      it('does not charge a later turn for the screens of the session before', async () => {
+        await rollOverWith(8);
+        drop('first.png', wholePng(2 * MB));
+        const first = await nextTurn('First');
+        expect(first.images).toHaveLength(1);
+        await f.restart();
+        for (let i = 0; i < 3; i += 1) drop(`later${String(i)}.png`, wholePng(2 * MB));
+        const later = await nextTurn('Later');
+        // About 2 MiB in this session, though the conversation keeps 11.4 MiB of older screens.
+        expect(later.images).toHaveLength(3);
+        expect(later.message).not.toMatch(/too large to show/);
+      });
+
+      it('does not refuse the screen the digest told Claude to take again', async () => {
+        await rollOverWith(11);
+        drop('first.png', wholePng(2 * MB));
+        await nextTurn('First');
+        await screensOf(drawn(1_500_000)).see(shapeId(), window);
+        expect(kept()).toHaveLength(12);
+      });
+
+      it('still charges the screens the new session took', async () => {
+        await rollOverWith(6);
+        await nextTurn('First');
+        const screens = screensOf(drawn(1_500_000));
+        for (let n = 0; n < 6; n += 1) await screens.see(shapeId(), window);
+        // 8.6 MiB of this session's screens leaves room for four more 2 MiB images, over two turns.
+        for (let i = 0; i < 3; i += 1) drop(`a${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn('Three')).images).toHaveLength(3);
+        for (let i = 0; i < 3; i += 1) drop(`b${String(i)}.png`, wholePng(2 * MB));
+        expect((await nextTurn('Three more')).images).toHaveLength(1);
+      });
+    });
+
     it('keeps nine dropped images and twelve asked-for screens under the total', async () => {
       const screens = screensOf(drawn(1_500_000));
       await spendTheTotal();
@@ -472,6 +556,40 @@ describe('a large dropped image', () => {
       expect(carried).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
     });
 
+    it('takes screens in a conversation whose told images all went as paths for their pixels', async () => {
+      // Nine long screenshots of about 2 MiB: told, but none sent as a block, so none is carried.
+      for (let turnNo = 0; turnNo < 3; turnNo += 1) {
+        for (let i = 0; i < 3; i += 1)
+          drop(`long${String(turnNo)}-${String(i)}.png`, pngOfSize(1200, 9000, 1.9 * MB));
+        const turn = await nextTurn(`Turn ${String(turnNo)}`);
+        expect(turn.images).toEqual([]);
+      }
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 12; n += 1) await screens.see(shapeId(), window);
+      expect(kept()).toHaveLength(12);
+      // A small image still fits beside the twelve screens.
+      drop('late.png', PNG);
+      const late = await nextTurn('One more');
+      expect(late.images).toEqual([{ mediaType: 'image/png', data: PNG.toString('base64') }]);
+    });
+
+    it('charges only the images that went as blocks when the message cap left some out', async () => {
+      // Twenty images of 1.9 MiB at 1000 px, each within the per-image caps, dropped in one turn: only
+      // three fit the 6 MiB message cap, and the other seventeen go as paths and are not carried.
+      for (let i = 0; i < 20; i += 1) drop(`m${String(i)}.png`, pngOfSize(1000, 800, 1.9 * MB));
+      const turn = await nextTurn('Twenty');
+      expect(turn.images).toHaveLength(3);
+      expect(turn.message.match(/too large to show/g)).toHaveLength(17);
+      const sentBytes = turn.images.reduce((sum, image) => sum + image.data.length * 0.75, 0);
+      // 5.7 MiB is carried, so 12.3 MiB remain: nine 1.4 MB (1.34 MiB) screens fit, the tenth does not.
+      // Charging all twenty (38 MiB) would have refused the first.
+      const screens = screensOf(drawn(1_400_000));
+      for (let n = 0; n < 9; n += 1) await screens.see(shapeId(), window);
+      await expect(screens.see(shapeId(), window)).rejects.toThrow(/no room for another picture/);
+      expect(kept()).toHaveLength(9);
+      expect(sentBytes + keptBytes()).toBeLessThanOrEqual(INLINE_CONVERSATION_MAX_BYTES);
+    });
+
     it('does not charge an image whose size cannot be read, which went as a path', async () => {
       const whole = pngOfSize(100, 80, 1.9 * MB);
       for (let i = 0; i < 9; i += 1) drop(`cut${String(i)}.png`, whole.subarray(0, -1));
@@ -520,6 +638,20 @@ describe('a dropped image over 2000 px a side', () => {
       { mediaType: 'image/png', data: pngOfSize(2000, 2000).toString('base64') },
     ]);
     expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+  });
+
+  // A lossless WebP keeps both sizes, less one, in 14 bits each of one word: the likely form of a screenshot.
+  it('goes as a block at exactly 2000 px, and as a path at 2001, for a lossless WebP too', async () => {
+    drop('edge.webp', webpImage('lossless', 2000, 2000));
+    drop('wide.webp', webpImage('lossless', 2001, 100));
+    drop('tall.webp', webpImage('lossless', 100, 2001));
+    const turn = await nextTurn('Edges');
+    expect(turn.images).toEqual([
+      { mediaType: 'image/webp', data: webpImage('lossless', 2000, 2000).toString('base64') },
+    ]);
+    expect(turn.message.match(/too large to show/g)).toHaveLength(2);
+    expect(turn.message).toMatch(/wide\.webp\) — too large to show/);
+    expect(turn.message).toMatch(/tall\.webp\) — too large to show/);
   });
 
   it('goes as a path when its size cannot be read, since a model would be sent it blind', async () => {

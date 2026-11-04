@@ -28,6 +28,7 @@ export {
   SandboxTempDirError,
 } from './temp-dir';
 export {
+  expandHome,
   fileAccessJudge,
   isOutsideCopy,
   outsideCopyRefusal,

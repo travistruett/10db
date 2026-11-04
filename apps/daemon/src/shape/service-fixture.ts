@@ -28,7 +28,13 @@ export interface ServiceFixture {
 }
 
 export function createServiceFixture(
+<<<<<<< 772bd631075ba5c5994e95f461ac7c41a536313c
   opts: { trackedFiles?: TrackedFiles; hold?: Hold; joiningProblem?: JoiningProblem } = {},
+||||||| 4075881
+  opts: { trackedFiles?: TrackedFiles; hold?: Hold } = {},
+=======
+  opts: { trackedFiles?: TrackedFiles; hold?: Hold; home?: string } = {},
+>>>>>>> 84d0b7e62e3320ff58249693cdf894a50a7d5196
 ): ServiceFixture {
   const c = seedConversation();
   const bus = createEventBus();
@@ -62,7 +68,7 @@ export function createServiceFixture(
         },
         access: {
           checkout: '/repo',
-          home: '/home',
+          home: opts.home ?? '/home',
           protectedReads: [],
           tempRoot: '/tmp/10db',
         },

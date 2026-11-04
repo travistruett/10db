@@ -231,6 +231,7 @@ export function insertShapeFile(
     id: mintId('ShapeFile'),
     ...input,
     toldAt: null,
+    inlineSent: false,
     createdAt: ctx.now,
   };
   ctx.tx.insert(schema.shapeFiles).values(row).run();
@@ -276,6 +277,30 @@ export function markShapeFilesTold(ctx: WriteContext, ids: readonly ShapeFileId[
     .update(schema.shapeFiles)
     .set({ toldAt: ctx.now })
     .where(and(inArray(schema.shapeFiles.id, [...ids]), isNull(schema.shapeFiles.toldAt)))
+    .run();
+}
+
+/**
+ * Records which files the turn just sent carried as image blocks. A `fresh` session starts with no
+ * earlier block, so it first clears the mark on every file of the conversation.
+ */
+export function markShapeFilesInline(
+  ctx: WriteContext,
+  shapeId: ShapeId,
+  ids: readonly ShapeFileId[],
+  fresh: boolean,
+): void {
+  if (fresh)
+    ctx.tx
+      .update(schema.shapeFiles)
+      .set({ inlineSent: false })
+      .where(eq(schema.shapeFiles.shapeId, shapeId))
+      .run();
+  if (ids.length === 0) return;
+  ctx.tx
+    .update(schema.shapeFiles)
+    .set({ inlineSent: true })
+    .where(inArray(schema.shapeFiles.id, [...ids]))
     .run();
 }
 

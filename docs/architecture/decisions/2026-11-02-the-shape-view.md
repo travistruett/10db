@@ -34,7 +34,9 @@
   `e2e/shape.spec.ts` checks 2,000 messages in WebKit; a sandboxed gate skips e2e, so CI is what runs it.
 - **The header shows the conversation's tokens** ("88k tokens", through the factory's `formatTokens`), from
   `ShapeViewDto.tokens`: the input and output tokens summed over the conversation's `sessions` rows
-  (`shapeTokens`), the rows per-project usage reads. Cached tokens are a subset of input, so they are not added.
+  (`shapeTokens`), the rows per-project usage reads. Cache reads (`cachedTokens`) are stored apart from input,
+  not inside it, and are left out on purpose: Settings usage and the goal digest leave them out too, and
+  repeated cache reads across turns would swamp the number.
   It is read with the rest of the view, and a turn's end announces `shape.changed` after its usage is written, so
   the header updates as turns finish. Nothing shows before the first turn.
 - **The Proposed summary counts what is pending**, with converted rows counted apart; the pull-request count is
