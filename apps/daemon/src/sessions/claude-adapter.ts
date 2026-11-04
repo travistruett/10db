@@ -11,7 +11,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { Provider, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, Provider, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
@@ -39,6 +39,7 @@ import { startShapeSession } from './claude-shape';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import { settleWithin } from './settle-within';
+import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-check';
 import {
   AccountProbeError,
   CompletionError,
@@ -54,13 +55,16 @@ import {
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
 /**
- * How long one start of Claude Code may take to report its account before the prompt is sent. A lane
- * runs at background priority, so on a busy Mac a start can be slow; a signed-out account is noticed
- * after this wait on each of `START_ATTEMPTS` starts.
+ * How long each start of Claude Code may take to report its account before the prompt is sent. A lane
+ * runs at background priority, so on a busy Mac a start can be slow: the wait grows with each start, and
+ * there are as many starts as waits. A start that gets no account makes the session ask `claude auth
+ * status`; only "not signed in" refuses the account at once, anything else starts again after a pause.
  */
-const BILLING_PREFLIGHT_MS = 30_000;
-/** How many times a session starts Claude Code before no account from it reads as a signed-out account. */
-const START_ATTEMPTS = 2;
+const START_WAITS_MS: readonly number[] = [30_000, 60_000, 120_000];
+/** The pause before the second start, and before the third. */
+const START_BACKOFF_MS: readonly number[] = [10_000, 30_000];
+/** How many times a session starts Claude Code before slow starts end in a refusal. */
+const START_ATTEMPTS = START_WAITS_MS.length;
 /** The latest stderr of one start that is kept to say what Claude Code printed. */
 const STDERR_KEPT_CHARS = 4_000;
 /** How long an identity probe waits for `accountInfo()`. */
@@ -101,6 +105,11 @@ export interface ClaudeAdapterOptions {
    * test sets it, to pin a mode whatever the app-wide setting says.
    */
   readonly lanePermissionMode?: LanePermissionMode;
+  /**
+   * Asks whether the account a session runs on is signed in, when a start gets no account. Defaults to
+   * `claude auth status` on `claudePath`; tests answer it so none of them runs the builder's claude.
+   */
+  readonly signInCheck?: SignInCheck;
 }
 
 /**
@@ -344,7 +353,9 @@ function failedServersNote(names: readonly string[]): string {
 interface StartAttempt {
   /** What each earlier start printed on stderr; one entry per earlier start that got no account. */
   readonly earlier: readonly string[];
-  /** More starts follow this one. */
+  /** How long this start waits for the account. */
+  readonly waitMs: number;
+  /** No start follows this one. */
   readonly last: boolean;
   /**
    * This start got no account and is closed without an `ended` event, so the session starts again:
@@ -361,6 +372,8 @@ function startSession(
 ): SessionHandle {
   const graceMs = opts.stopGraceMs ?? STOP_GRACE_MS;
   const clock = opts.clock ?? systemClock;
+  const signInCheck: SignInCheck =
+    opts.signInCheck ?? ((env) => claudeAuthStatus(opts.claudePath, env));
   const log = opts.logger.child({ sessionId: spec.sessionId, workstreamId: spec.workstreamId });
   const sandboxed = (spec.sandbox ?? null) !== null;
   // A sandboxed session loads no settings file, so only the account can be at fault.
@@ -432,6 +445,8 @@ function startSession(
   // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
   // A recorded failure halts too: nothing more reaches claude while its halting answer is delivered.
   const halted = (): boolean => ended || stopRequested || failure !== null;
+  /** The session ended or was refused while an await was pending. */
+  const over = (): boolean => ended || failure !== null;
   const endReason = (): SessionEndReason => {
     if (failure) return failureReason;
     if (stopRequested) return 'stopped';
@@ -506,14 +521,20 @@ function startSession(
    * function, not an IIFE: TypeScript reads an IIFE as running inline, and would narrow `ended` to false.
    */
   const preflight = async (): Promise<void> => {
-    account = await settleWithin(clock, q.accountInfo(), BILLING_PREFLIGHT_MS);
+    account = await settleWithin(clock, q.accountInfo(), attempt.waitMs);
     if (ended || failure) return;
     if (!account) {
-      if (!attempt.last && !stopRequested) {
+      // Silence is not a sign-out: a start under load can take minutes. Only `claude auth status`, asked
+      // of the account's own config directory, says the account is signed out. A keyed account has no
+      // sign-in to check, and a stop in the meantime wants no answer.
+      const checkable = spec.account.kind === AccountKind.ClaudeSubscription && !stopRequested;
+      const signIn: SignInState = checkable ? await signInCheck(spec.env) : 'unknown';
+      if (over()) return;
+      if (!attempt.last && !stopRequested && signIn !== 'signed_out') {
         // One slow start says nothing about the account: close this claude and let the session start another.
         // Nothing is logged of what it printed beyond its length; the refusal, if it comes, says it.
         log.warn(
-          { printedChars: stderrTail.length },
+          { printedChars: stderrTail.length, signIn },
           'claude reported no account; starting it again',
         );
         closedForRetry = true;
@@ -523,9 +544,12 @@ function startSession(
         attempt.unanswered(stderrTail, unsent);
         return;
       }
-      const { why, printed } = noAccountWhy(BILLING_PREFLIGHT_MS, [...attempt.earlier, stderrTail]);
+      const { why, printed } = noAccountWhy(START_WAITS_MS.slice(0, attempt.earlier.length + 1), [
+        ...attempt.earlier,
+        stderrTail,
+      ]);
       // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
-      const signedOut = missingAccountRefusal(spec.account, why, printed);
+      const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);
       if (signedOut)
         refuse(
           SessionEndReason.AccountRefused,
@@ -787,12 +811,24 @@ function startWithRetry(
   // Read through a function: TypeScript would otherwise keep the narrowing from the assignments.
   const closedStart = (): { readonly unsent: string[] } | null => pending;
   const stopAsked = (): boolean => stopRequested;
+  const clock = opts.clock ?? systemClock;
+  /** Wakes the pause between two starts early; a stop does. */
+  let wake: () => void = () => undefined;
+  const pause = (ms: number): Promise<void> =>
+    new Promise((resolve) => {
+      const timer = clock.setTimeout(resolve, ms);
+      wake = () => {
+        timer.cancel();
+        resolve();
+      };
+    });
   const settled = (async () => {
     let carried: readonly string[] = [];
     for (let number = 1; number <= START_ATTEMPTS; number += 1) {
       pending = null;
       const handle = startSession(spec, opts, runQuery, {
         earlier: [...printed],
+        waitMs: START_WAITS_MS[number - 1] ?? 0,
         last: number === START_ATTEMPTS,
         unanswered: (text, unsent) => {
           printed.push(text);
@@ -804,11 +840,16 @@ function startWithRetry(
       for await (const event of handle.events) events.push(event);
       const closed = closedStart();
       if (!closed) break;
+      if (!stopAsked()) {
+        // Back off before the next start: a Mac that is too loaded to start Claude Code in time needs a moment.
+        log.info({ starts: number }, 'claude session starts again');
+        await pause(START_BACKOFF_MS[number - 1] ?? 0);
+      }
       if (stopAsked()) {
         events.push({ type: 'ended', reason: SessionEndReason.Stopped, message: null });
         break;
       }
-      log.info({ starts: number }, 'claude session starts again');
+      // Read after the pause: a message sent during it waits in the same list.
       carried = closed.unsent;
     }
     events.end();
@@ -822,6 +863,7 @@ function startWithRetry(
     },
     async stop() {
       stopRequested = true;
+      wake();
       await current?.stop();
       await settled;
     },

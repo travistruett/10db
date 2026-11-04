@@ -76,6 +76,11 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
       return "Unlock the login Keychain, and allow 10db's access if macOS asks, then answer Resume.";
     case AccountProblem.CannotBill:
       return "Check the account's billing with its provider, then answer Resume.";
+    case AccountProblem.StartTimeout:
+      // Only a subscription is paused for this, but the card must not name a command that does not apply.
+      return account.kind === AccountKind.ClaudeSubscription
+        ? `Claude Code starts slowly when the Mac is under load, so answer Resume once the load settles. If the account is signed out after all, sign in with: ${signInCommand(account.configDir)} first.`
+        : 'Claude Code starts slowly when the Mac is under load, so answer Resume once the load settles.';
   }
 }
 

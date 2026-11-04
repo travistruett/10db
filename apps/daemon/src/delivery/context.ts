@@ -1,5 +1,6 @@
 import { CARD_RESOLVES_WHEN, type BatchId, type Notice, type ProjectId } from '@10db/contracts';
 import { clearBatchNotice, findOpenByFoldKey, setBatchNotice, type WriteContext } from '@10db/db';
+import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Git, NetworkCall } from '../git';
 import type { Gh, GhCall } from '../github';
@@ -39,6 +40,8 @@ export interface DeliveryContext {
   readonly inbox: InboxService;
   readonly jobs: DeliveryJobs;
   readonly logger: Logger;
+  /** Says when a repaired install happened, for the notice that tells the builder. */
+  readonly clock: Clock;
   readonly limits: DeliveryLimits;
   /** Where this daemon makes worktrees: the data dir's hashed level, made at the first worktree cut. */
   readonly worktreeRoot: string;

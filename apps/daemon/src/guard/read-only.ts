@@ -56,6 +56,8 @@ const WRITING_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   sort: ['-o', '--output', '--compress-program'],
   tree: ['-o', '-R'],
   rg: ['--pre', '--pre-glob', '--hostname-bin'],
+  // Read-only subcommands that still write a file (`--output`) or run a program (`--ext-diff`, `-O`).
+  git: ['--output', '--ext-diff', '--textconv', '--open-files-in-pager', '-O'],
 };
 
 /**
@@ -71,20 +73,42 @@ function usesOption(arg: string, option: string): boolean {
 const REFUSAL =
   'This step is read-only: the shell accepts only plain words, simple quoting and read-only commands (read-only git, cat, grep, ls, find and similar), with no redirection other than 2>&1, >/dev/null and 2>/dev/null. Describe the change in mcp__10db__complete_step.';
 
-/** Why a read-only step may not run this command, or null when every segment only reads. */
-export function readOnlyShellRefusal(command: string): string | null {
-  const segments = plainCommandWords(command);
-  if (segments === null) return REFUSAL;
+/** What a lane may run besides `READ_COMMANDS` without a card: `ps` prints the process table. */
+const LANE_EXTRA_COMMANDS: ReadonlySet<string> = new Set(['ps']);
+
+/** The segments' words when every one is a read-only command, else null. */
+function readOnlySegments(
+  command: string,
+  commands: ReadonlySet<string>,
+  optionGlobs: boolean,
+): string[][] | null {
+  const segments = plainCommandWords(command, { optionGlobs });
+  if (segments === null) return null;
   for (const [cmd = '', ...args] of segments) {
     // Only a bare command: no assignment, wrapper or path (those run something else).
-    if (cmd.includes('/')) return REFUSAL;
+    if (cmd.includes('/')) return null;
     if (cmd === 'git') {
-      if (!READ_GIT.has(args[0] ?? '')) return REFUSAL;
-      continue;
+      if (!READ_GIT.has(args[0] ?? '')) return null;
+    } else if (!commands.has(cmd)) {
+      return null;
     }
-    if (!READ_COMMANDS.has(cmd)) return REFUSAL;
     const writing = WRITING_OPTIONS[cmd] ?? [];
-    if (args.some((a) => writing.some((o) => usesOption(a, o)))) return REFUSAL;
+    if (args.some((a) => writing.some((o) => usesOption(a, o)))) return null;
   }
-  return null;
+  return segments;
+}
+
+/** Why a read-only step may not run this command, or null when every segment only reads. */
+export function readOnlyShellRefusal(command: string): string | null {
+  return readOnlySegments(command, READ_COMMANDS, false) === null ? REFUSAL : null;
+}
+
+/**
+ * The words of each segment of a lane's command line when every part (across `;`, `&&`, `||` and
+ * pipes) is a read-only command, judged as a read-only step's is, with `ps` added and a glob allowed
+ * in an option's value (`--include=*.ts`). Null when anything else is in it: a redirection to a
+ * file, a substitution, a variable, a background job, a writing option, another program.
+ */
+export function laneReadOnlyWords(command: string): string[][] | null {
+  return readOnlySegments(command, new Set([...READ_COMMANDS, ...LANE_EXTRA_COMMANDS]), true);
 }
