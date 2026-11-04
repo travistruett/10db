@@ -670,7 +670,7 @@ describe('dropping files', () => {
           expect(kept.value).toBe('Move density ahead, and thin the bars.');
         });
 
-        it('keeps the edits and shows why when the send fails', async () => {
+        it('keeps the edits, with the failed text ahead of them, and shows why when the send fails', async () => {
           const view = proposed([], {}, 0);
           const message = waiting();
           const upload = waiting();
@@ -685,7 +685,8 @@ describe('dropping files', () => {
           const kept = await editThenOpen(view, upload);
           message.release();
           expect(await screen.findByText('The daemon is restarting')).toBeTruthy();
-          expect(kept.value).toBe('Move density ahead, and thin the bars.');
+          // The edit is a text of its own, not the failed one: only a whole match counts as the same.
+          expect(kept.value).toBe('Move density ahead\n\nMove density ahead, and thin the bars.');
         });
       });
 
