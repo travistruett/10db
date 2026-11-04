@@ -1174,6 +1174,13 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         generators: generating({}),
       }).beforeGate(batch.id, signal);
       expect(update.kind).toBe('uncarried');
+      // The gate's note does not say the directory was regenerated, for it was not.
+      expect(update.kind === 'uncarried' && update.note).not.toContain(
+        'regenerated from its sources',
+      );
+      expect(update.kind === 'uncarried' && update.note).toContain(
+        `${DB}/ (taken from origin/main`,
+      );
       const card = h.only(h.cards());
       expect(card.title).toBe(`Batch "Alpha": 10db couldn't regenerate files after merging main`);
       expect(card.body).toContain(

@@ -787,13 +787,23 @@ export const shipCards = {
    * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
    * failure would have said nothing of the batch's code. Retry installs again before the gate.
    */
-  /** `note` names the migrations a merge of the base lost and says how to re-create them. */
-  migrationsLost: (batch: BatchDto, note: string): ShipFailure => ({
+  /**
+   * `note` names the migrations a merge of the base lost and says how to re-create them. An
+   * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again and
+   * only Abandon is offered.
+   */
+  migrationsLost: (
+    batch: BatchDto,
+    { note, unreadable }: { readonly note: string; readonly unreadable?: true },
+  ): ShipFailure => ({
     failure: BatchFailure.BaseConflict,
     card: {
       title: `${notShipped(batch)}: merging ${batch.baseBranch} lost a migration of the batch's`,
-      body: `${note}\n\nNo gate ran and nothing was pushed. Re-create the migration on the batch's branch and commit it.\n\n${RETRY}`,
-      detail: answers(batch),
+      body:
+        unreadable === true
+          ? `${note}\n\nNo gate ran and nothing was pushed. A Retry would stop here again. Abandon gives the batch up, which is the only way this ends.`
+          : `${note}\n\nNo gate ran and nothing was pushed. Re-create the migration on the batch's branch and commit it.\n\n${RETRY}`,
+      detail: unreadable === true ? { batchId: batch.id, actions: ['abandon'] } : answers(batch),
     },
   }),
   installBroken: (batch: BatchDto, note: string, noPnpm = false): ShipFailure => ({
