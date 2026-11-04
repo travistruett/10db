@@ -12,6 +12,7 @@ import {
   REVERTED_NOTICE_KEY,
   StepRole,
   TaskStatus,
+  WorkspaceMode,
   WorkstreamFailure,
   WorkstreamState,
   type BatchDto,
@@ -204,21 +205,33 @@ export function pullRequestClosed(batch: BatchDto | undefined): boolean {
 }
 
 /** The task fields `retryWorkstream` reads before it accepts a retry. */
-export type RetryTask = Pick<TaskDto, 'status' | 'boardColumnId' | 'workstreamId'>;
+export type RetryTask = Pick<
+  TaskDto,
+  'status' | 'boardColumnId' | 'workstreamId' | 'workspaceMode'
+>;
 
 /**
  * Whether the batch lets a retry through: only an open or failed one reopens, and a run with no batch
  * has none to refuse. A run with a batch that is not loaded yet, or failed to, is not known to pass.
+ * A retry stays in its batch, so a task set to work somewhere else than its batch does is refused
+ * (`refuseMovedRetry`); it is started over instead. A batch works in a copy when it has a worktree.
  */
-function batchAllowsRetry(workstream: WorkstreamDto, batch: BatchDto | undefined): boolean {
+function batchAllowsRetry(
+  task: Pick<TaskDto, 'workspaceMode'> | undefined,
+  workstream: WorkstreamDto,
+  batch: BatchDto | undefined,
+): boolean {
   if (!batch) return workstream.batchId === null;
+  if (task && (batch.worktreePath !== null) !== (task.workspaceMode === WorkspaceMode.Worktree))
+    return false;
   return batch.state === BatchState.Open || batch.state === BatchState.Failed;
 }
 
 /**
  * Whether `retryWorkstream` would accept a retry of this run: it failed, its task was not closed or
  * parked and has no newer run, and its batch is still open or failed (retry reopens it; a batch shipped
- * anyway never reopens, so that run is run again with a fresh Start instead). Every line or button that
+ * anyway never reopens, so that run is run again with a fresh Start instead), and the task is set to
+ * work where the batch does (a moved task is started over, not retried). Every line or button that
  * offers Retry asks this, so none promises what the daemon refuses.
  */
 export function canRetryRun(
@@ -231,7 +244,7 @@ export function canRetryRun(
     task.status !== TaskStatus.Cancelled &&
     task.boardColumnId === null &&
     task.workstreamId === workstream.id &&
-    batchAllowsRetry(workstream, batch)
+    batchAllowsRetry(task, workstream, batch)
   );
 }
 
@@ -432,7 +445,9 @@ function stateOf(
       return {
         line: failureLine(
           workstream,
-          task ? canRetryRun(task, workstream, batch) : batchAllowsRetry(workstream, batch),
+          task
+            ? canRetryRun(task, workstream, batch)
+            : batchAllowsRetry(undefined, workstream, batch),
         ),
         color: 'red',
         detail: workstream.failureReason,
