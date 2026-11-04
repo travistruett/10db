@@ -516,6 +516,12 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
    * it: the update is not waiting for an idle moment, it has nothing to install.
    */
   let fetching = false;
+  /**
+   * A stage fetched a build but GitHub could not say whether it is newer, so nothing is staged and
+   * the next check fetches again. Until a check ends otherwise the update has nothing to install,
+   * so it is not waiting for an idle moment either, though no check is fetching.
+   */
+  let stageLost = false;
 
   function fail(runningCommit: string, attempt: Attempt, step: string, message: string): void {
     state.write((ctx) => {
@@ -681,6 +687,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
         // The stage replaced the build it could have fallen back on, so no drain has anything to
         // install. The next check fetches again, and the update's wait goes on from where it was.
         endDrain();
+        stageLost = true;
         return TickResult.Unreachable;
       }
       if (isStopped()) return TickResult.Working;
@@ -875,6 +882,8 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
       // Working means the check ended early because the daemon is stopping: it learned nothing.
       if (result !== TickResult.Working) {
         unreachable = result === TickResult.Unreachable;
+        // Still lost while GitHub stays away; any other end of a check settles what it found.
+        if (!unreachable) stageLost = false;
         // Neither did a check that could not ask GitHub, so the last reason still holds.
         if (!unreachable) notInstalling = NOT_INSTALLING[result] ?? null;
       }
@@ -984,7 +993,7 @@ export function createSelfUpdate(deps: SelfUpdateDeps): SelfUpdate {
           : // A failure outside a check (an install that ended, a start that settled it) counts too.
             failure !== null
             ? 'failed'
-            : (notInstalling ?? (fetching ? 'fetching' : null)),
+            : (notInstalling ?? (fetching || stageLost ? 'fetching' : null)),
     }),
   };
 }

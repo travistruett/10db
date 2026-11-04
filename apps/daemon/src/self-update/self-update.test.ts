@@ -607,6 +607,28 @@ describe('tick', () => {
     world.head = NEW;
     expect(await update.tick()).toBe('applying');
   });
+
+  it('does not say the update waits for an idle moment when a stage left nothing staged and GitHub cannot compare it', async () => {
+    world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
+    world.stagedAhead = new Error('offline');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    const status = update.status();
+    expect(status.availableCommit).toBe(NEW);
+    expect(status.problem?.kind).toBe('unreachable');
+    expect(status.waitingSince).toBeNull();
+    expect(status.notInstalling).not.toBeNull();
+  });
+
+  it('says the same when GitHub then stops answering for the head too', async () => {
+    world.stage = () => Promise.resolve({ ...STAGED_OK, commit: 'e'.repeat(40) });
+    world.stagedAhead = new Error('offline');
+    const update = make();
+    expect(await update.tick()).toBe('unreachable');
+    world.head = new Error('offline');
+    expect(await update.tick()).toBe('unreachable');
+    expect(update.status().notInstalling).not.toBeNull();
+  });
 });
 
 describe('a drain that only shaping conversations hold', () => {
