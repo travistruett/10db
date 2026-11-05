@@ -688,6 +688,13 @@ export const WorkstreamDto = z.object({
   runNextAt: Timestamp.nullable(),
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
+  /**
+   * Whether a note told this run's session that its commits were reverted by Ship without it (a Retry
+   * or a start that joined the batch wrote it), and that revert still stands: false once Ship without
+   * it finds none on the branch. The notice slot can't say so: a joined run holds none, and a wait can
+   * replace one. The failure line reads it to say where Retry restarts the run.
+   */
+  revertTold: z.boolean().default(false),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -805,6 +812,30 @@ export const REVERTED_NOTICE_KEY = 'reverted-work';
 /** The start of the line on which these notices, and a retried run's note, name the revert commit. */
 export const REVERT_COMMIT_LINE = 'Revert commit: ';
 
+/** The full id of the revert commit a text names on its revert line; null when it names none. */
+export function revertCommitIn(text: string): string | null {
+  const line = text.split('\n').find((l) => l.startsWith(REVERT_COMMIT_LINE));
+  const sha = line?.slice(REVERT_COMMIT_LINE.length).trim() ?? '';
+  return /^[0-9a-f]{40,64}$/.test(sha) ? sha : null;
+}
+
+/**
+ * The revert commit a run's latest builder note told its session about, read from the run's evidence
+ * oldest first. Null when none did, or when a `no_revert` record came after: a Retry wrote that because
+ * the revert had left the branch. The notice shares one slot with the run's waits, so a wait can
+ * replace it; the notes are what lasts.
+ */
+export function lastRevertTold(
+  evidence: readonly { readonly kind: string; readonly summary: string }[],
+): string | null {
+  let found: string | null = null;
+  for (const row of evidence) {
+    if (row.kind === EvidenceKind.NoRevert) found = null;
+    else if (row.kind === EvidenceKind.Builder) found = revertCommitIn(row.summary) ?? found;
+  }
+  return found;
+}
+
 /**
  * The key of the batch notice that records 10db repaired a broken install by itself. It is history,
  * not a wait: a task's drawer keeps showing it after its run fails or its batch ends.
@@ -896,7 +927,10 @@ const EvidenceBase = {
   createdAt: Timestamp,
 };
 
-/** What a check left behind: a gate's or agent's command and exit code, or the builder's note. */
+/**
+ * What a check left behind: a gate's or agent's command and exit code, the builder's note, or 10db's
+ * record that no revert of the run stands.
+ */
 export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
@@ -913,6 +947,12 @@ export const EvidenceDto = z.discriminatedUnion('kind', [
   z.object({
     ...EvidenceBase,
     kind: z.literal(EvidenceKind.Builder),
+    command: z.null(),
+    exitCode: z.null(),
+  }),
+  z.object({
+    ...EvidenceBase,
+    kind: z.literal(EvidenceKind.NoRevert),
     command: z.null(),
     exitCode: z.null(),
   }),

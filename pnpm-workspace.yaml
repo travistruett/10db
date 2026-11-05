@@ -7,6 +7,10 @@ engineStrict: true
 # Supply chain: hold every version for a day after it is published, and run install scripts only
 # for packages listed in allowBuilds. An unlisted package with an install script fails the install.
 minimumReleaseAge: 1440
+overrides:
+  # The patched zod ships the same v3 API at zod/v3, the only entry sandbox-runtime imports:
+  # decisions/2026-11-04-sandbox-runtime-gets-the-patched-zod.md
+  '@anthropic-ai/sandbox-runtime>zod': 4.6.7
 strictDepBuilds: true
 allowBuilds:
   # Its install script fetches the platform binary.

@@ -156,6 +156,28 @@ describe('failureLine', () => {
       );
     });
 
+    it('hedges for a run told of a revert that holds no notice, as a joined run does', () => {
+      const line = failureLine({ failureKind: 'no_result', ...flow, revertTold: true }, true);
+      expect(line).toContain('Retry sends the work back to the build step');
+      expect(line).toContain('unless the run has committed since');
+    });
+
+    it('does not promise the build step to a run told of a revert whose notice names none', () => {
+      expect(
+        failureLine(
+          {
+            failureKind: 'no_result',
+            ...flow,
+            revertTold: true,
+            notice: notice(LEFT_OUT_NOTICE_KEY, 'It had no commits.'),
+          },
+          true,
+        ),
+      ).toBe(
+        'The review session stopped without reporting a result. Retry runs the review step again.',
+      );
+    });
+
     it('hedges for a retried run, which is sent back only if it has not committed since', () => {
       const line = failureLine(
         {
@@ -274,6 +296,30 @@ describe('canRetryRun', () => {
     const task = taskDto({ workstreamId: batched.id });
     expect(canRetryRun(task, batched, undefined)).toBe(false);
     expect(canRetryRun(task, batched, open)).toBe(true);
+  });
+
+  it('refuses a task set to work somewhere other than its batch, which the daemon refuses and says to start over', () => {
+    const inCopy = batchDto({ state: 'FAILED', worktreePath: '/copies/batch' });
+    const inFolder = batchDto({ state: 'FAILED', worktreePath: null });
+    const inCopyRun = workstreamDto({ state: 'FAILED', batchId: inCopy.id });
+    const inFolderRun = workstreamDto({ state: 'FAILED', batchId: inFolder.id });
+    const shared = (ws: typeof inCopyRun) =>
+      taskDto({ workstreamId: ws.id, workspaceMode: 'shared' });
+    const worktree = (ws: typeof inCopyRun) =>
+      taskDto({ workstreamId: ws.id, workspaceMode: 'worktree' });
+    expect(canRetryRun(shared(inCopyRun), inCopyRun, inCopy)).toBe(false);
+    expect(canRetryRun(worktree(inFolderRun), inFolderRun, inFolder)).toBe(false);
+    expect(canRetryRun(worktree(inCopyRun), inCopyRun, inCopy)).toBe(true);
+    expect(canRetryRun(shared(inFolderRun), inFolderRun, inFolder)).toBe(true);
+  });
+
+  it('says only what happened in the failure line of a task that moved', () => {
+    const inCopy = batchDto({ state: 'FAILED', worktreePath: '/copies/batch' });
+    const run = workstreamDto({ state: 'FAILED', batchId: inCopy.id });
+    const moved = taskDto({ workstreamId: run.id, workspaceMode: 'shared' });
+    expect(taskState(run, inCopy, null, undefined, undefined, moved)?.line).toBe(
+      failureLine(run, false),
+    );
   });
 
   it('refuses a run that is not failed, and a task that is closed, parked or has a newer run', () => {

@@ -6,6 +6,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  closeTask,
   getBatch,
   getInboxItem,
   getTask,
@@ -13,8 +14,10 @@ import {
   insertLandingGroup,
   insertToolOp,
   listBatches,
+  listBoardColumns,
   listWorkstreams,
   patchTask,
+  schema,
   transitionBatch,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -281,6 +284,47 @@ describe('a Retry of a task that moved out of the place its batch works in', () 
     h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Shared }));
 
     expect(h.starter.retry(ws.id)).toMatchObject({ id: ws.id, state: 'QUEUED', batchId });
+  });
+
+  it('answers a closed task that moved with the closed reason, not Start over', async () => {
+    const { alpha, batchId, ws } = await failedAlone();
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    h.state.write((w) => closeTask(w, alpha.id));
+
+    let refused: unknown;
+    try {
+      h.starter.retry(ws.id);
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(ConflictError);
+    expect(String(refused)).toMatch(/Alpha was closed/);
+    expect(String(refused)).not.toMatch(/Start over/);
+    expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
+  });
+
+  it('answers a parked task that moved with the parked reason, not Start over', async () => {
+    const { alpha, batchId, ws } = await failedAlone();
+    h.state.write((w) => patchTask(w, alpha.id, { workspaceMode: WorkspaceMode.Worktree }));
+    const [column] = listBoardColumns(h.store.db, h.project.id);
+    if (!column) throw new Error('a board column is expected');
+    // Alpha is the project's only task, so the update needs no filter.
+    h.store.db.update(schema.tasks).set({ boardColumnId: column.id }).run();
+
+    let refused: unknown;
+    try {
+      h.starter.retry(ws.id);
+    } catch (error) {
+      refused = error;
+    }
+
+    expect(refused).toBeInstanceOf(ConflictError);
+    expect(String(refused)).toMatch(/Alpha is parked; move it to Backlog or Ready/);
+    expect(String(refused)).not.toMatch(/Start over/);
+    expect(getWorkstream(h.store.db, ws.id).state).toBe('FAILED');
+    expect(getBatch(h.store.db, batchId).state).toBe('OPEN');
   });
 
   it("keeps the store's own refusal for a batch a retry can't run in", async () => {

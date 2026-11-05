@@ -20,15 +20,34 @@ export const BatchCardChoice = {
 } as const;
 export type BatchCardChoice = (typeof BatchCardChoice)[keyof typeof BatchCardChoice];
 
-/** `revert` is the revert commit an earlier Ship without it left on the branch, if it did. */
-const BatchCardDetail = z.object({
+/**
+ * `revert` is the revert commit an earlier Ship without it left on the branch, if it did, and `covers`
+ * the runs whose commits are undone there. `workstreamId` is only the run this card answers for: it
+ * may be a run the revert does not cover. The batch's other paths (Retry, a Ship without it answered
+ * on another card) read both from the batch's open left-out card (`keptRevertOf`).
+ */
+export const BatchCardDetail = z.object({
   batchId: BatchId,
   workstreamId: WorkstreamId,
   revert: z.string().optional(),
+  covers: z.array(WorkstreamId).optional(),
 });
 
+/** A revert commit Ship without it left on the branch without writing notices, and what it covers. */
+export interface KeptRevert {
+  readonly revert: string;
+  /** The runs whose commits are undone on the branch. Set by the answers that made a revert. */
+  readonly covers: readonly WorkstreamId[];
+}
+
 const OPTIONS: readonly InboxOption[] = [
-  { label: BatchCardChoice.Retry, description: 'Run this workstream again in its batch' },
+  {
+    label: BatchCardChoice.Retry,
+    // The card is not rewritten when the task's placement changes, and `BatchStarter.retry` refuses
+    // a task that moved, so the offer says so itself.
+    description:
+      "Run this workstream again in its batch. Refused if the task has since been set to work somewhere else: set it back, or start it over from the task's drawer",
+  },
   {
     label: BatchCardChoice.ShipAnyway,
     description:
@@ -46,8 +65,9 @@ const OPTIONS: readonly InboxOption[] = [
 ];
 
 /**
- * The options of a card whose Ship without it left its revert on the branch. No Retry: the run has no
- * left-out notice yet, so a retried session would not be told its commits are gone.
+ * The options of a card whose Ship without it left its revert on the branch. No Retry: the card asks
+ * how to finish that answer. A session retried from the task's drawer is told of the revert, so the
+ * card could offer Retry again.
  */
 const REVERTED_OPTIONS: readonly InboxOption[] = [
   {
@@ -69,18 +89,24 @@ const REVERTED_OPTIONS: readonly InboxOption[] = [
 
 /**
  * The failed-workstream card's options and detail when the workstream runs in a batch (spec §4).
- * `revert` is the revert commit an earlier Ship without it left on the branch: the answer needs it,
- * because reverting those commits again can conflict.
+ * `revert` is the revert commit an earlier Ship without it left on the branch: the answer reads what
+ * it undid from the branch, and needs this only so the cards it raises keep saying the revert is
+ * there. `covers` is the runs it undid.
  */
 export function batchCardFields(
   row: { readonly id: WorkstreamId; readonly batchId: BatchId | null },
   revert?: string | null,
+  covers?: readonly WorkstreamId[],
 ): { options: InboxOption[]; detail: Record<string, Json> } | null {
   if (row.batchId === null) return null;
   const card = { batchId: row.batchId, workstreamId: row.id };
   return {
     options: [...(revert ? REVERTED_OPTIONS : OPTIONS)],
-    detail: { [BATCH_CARD_DETAIL]: revert ? { ...card, revert } : card },
+    detail: {
+      [BATCH_CARD_DETAIL]: revert
+        ? { ...card, revert, ...(covers ? { covers: [...covers] } : {}) }
+        : card,
+    },
   };
 }
 
@@ -109,7 +135,13 @@ export function createBatchCardAnswers(deps: {
     } else if (answer.choice === BatchCardChoice.ShipAnyway)
       deps.shipper.shipAnyway(card.data.batchId);
     else if (answer.choice === BatchCardChoice.ShipWithout)
-      deps.shipper.shipWithout(card.data.batchId, card.data.workstreamId, card.data.revert);
+      deps.shipper.shipWithout(
+        card.data.batchId,
+        card.data.workstreamId,
+        card.data.revert === undefined
+          ? undefined
+          : { revert: card.data.revert, covers: card.data.covers ?? [] },
+      );
     // Later, or a label the inbox's own option check refuses next: nothing to do.
   };
 }

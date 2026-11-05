@@ -48,6 +48,7 @@ import { embeddedRepository, GitMode, isGitComponent } from './worktree-files';
 import { lockedBatchId, parseWorktreeList, type WorktreeEntry } from './worktree-list';
 
 const OP_TRAILER = '10db-Op';
+const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
 /**
@@ -422,6 +423,17 @@ export interface Git {
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** Whether the object store of `repo` holds commit `sha`. */
   hasCommit(repo: string, sha: string): Promise<boolean>;
+  /**
+   * The commits in the history of `branch` (the most recent 200 that mention `prefix`) whose message
+   * opens with it, oldest first, each with its whole message. How a caller finds what 10db's own
+   * commits say: a commit a session made through the commit tool is never one, whatever its message,
+   * because `commit` stamps each with the op trailer, and a message is the session's to write.
+   */
+  ownCommitsWithSubject(
+    repo: string,
+    branch: string,
+    prefix: string,
+  ): Promise<{ readonly sha: string; readonly message: string }[]>;
   /**
    * Fetches commit `sha` from origin's recorded fetch URL into the object store, naming no ref and
    * touching no branch or checkout: what GitHub made on a pull request (a branch update) and nobody
@@ -2604,6 +2616,37 @@ export function createGit(opts: GitOptions = {}): Git {
       return (
         OBJECT_ID.test(sha) && (await revParse(await pinned(repo), `${sha}^{commit}`)) !== null
       );
+    },
+    async ownCommitsWithSubject(repo, branch, prefix) {
+      const c = await pinned(repo);
+      // NUL between every field: it is the one byte a message cannot hold, and a session writes messages.
+      const out = await git(c, [
+        'log',
+        '-z',
+        '--no-show-signature',
+        '--no-mailmap',
+        '-n',
+        String(OP_SEARCH_DEPTH),
+        '--fixed-strings',
+        `--grep=${prefix}`,
+        '--format=%H%x00%B',
+        `refs/heads/${branch}`,
+        '--',
+      ]);
+      const fields = out.split('\0');
+      const found: { sha: string; message: string }[] = [];
+      for (let at = 0; at + 1 < fields.length; at += 2) {
+        const sha = fields[at]?.trim();
+        const message = fields[at + 1];
+        if (
+          sha &&
+          OBJECT_ID.test(sha) &&
+          message?.startsWith(prefix) &&
+          !OP_TRAILER_LINE.test(message)
+        )
+          found.push({ sha, message });
+      }
+      return found.reverse();
     },
     async fetchCommit(repo, sha, net) {
       return serialized(fetches, realpathSync(repo), () => fetchCommitOnce(repo, sha, net));

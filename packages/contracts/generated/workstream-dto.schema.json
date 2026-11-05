@@ -640,6 +640,10 @@
         }
       ]
     },
+    "revertTold": {
+      "default": false,
+      "type": "boolean"
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",

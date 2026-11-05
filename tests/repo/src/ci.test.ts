@@ -55,9 +55,10 @@ jobs:
 `;
 
 describe('CI workflow', () => {
-  it('has the five required checks as jobs', () => {
+  it('has the five required checks as jobs, and desktop-scope, which decides desktop', () => {
     expect(workflowJobNames(CI)).toEqual([
       'gate',
+      'desktop-scope',
       'desktop',
       'policy',
       'dependency-review',
@@ -120,11 +121,40 @@ describe('CI workflow', () => {
     // and the entry times out.
     const parsed = readWorkflow(CI);
     expect(parsed.on['merge_group']).toEqual({ types: ['checks_requested'] });
-    // No job may be limited to other events, except dependency-review (next test).
+    // No job may be limited to other events, except dependency-review (next test). desktop has an
+    // `if` too, but on desktop-scope's answer from the files, never on the event.
     const limited = Object.entries(parsed.jobs)
       .filter(([, job]) => job.if !== undefined)
       .map(([name]) => name);
-    expect(limited).toEqual(['dependency-review']);
+    expect(limited).toEqual(['desktop', 'dependency-review']);
+  });
+
+  it('skips desktop by the files of the pull request alone, never by the event', () => {
+    // A skipped required check counts as passing, so skipping on an `edited` event would replace an
+    // earlier red desktop result for the same commit. desktop-scope decides from the pull request's
+    // files, so a title edit decides as the last push did (see the note at the top of ci.yml).
+    const { jobs } = readWorkflow(CI);
+    expect(jobs['desktop']?.needs).toBe('desktop-scope');
+    // !cancelled() lets desktop run when desktop-scope failed, where a plain `if` would skip it
+    // with its need; only an explicit 'false' skips.
+    expect(jobs['desktop']?.if).toBe(
+      "${{ !cancelled() && needs.desktop-scope.outputs.desktop != 'false' }}",
+    );
+    expect(jobs['desktop']?.['runs-on']).toBe('macos-15');
+    const scope = jobs['desktop-scope'];
+    expect(scope?.['runs-on']).toBe('ubuntu-24.04');
+    expect(scope?.if).toBeUndefined();
+    expect(JSON.stringify(scope)).not.toContain('github.event.action');
+    expect(scope?.outputs).toEqual({ desktop: '${{ steps.scope.outputs.desktop }}' });
+    const step = scope?.steps?.find((candidate) => candidate.id === 'scope');
+    expect(step?.run).toBe('node scripts/desktop-scope.mjs');
+    expect(step?.env).toEqual({
+      EVENT_NAME: '${{ github.event_name }}',
+      REPOSITORY: '${{ github.repository }}',
+      PR_NUMBER: '${{ github.event.pull_request.number }}',
+      GH_TOKEN: '${{ github.token }}',
+    });
+    expect(scope?.permissions).toEqual({ contents: 'read', 'pull-requests': 'read' });
   });
 
   it('skips dependency-review off pull_request, which a merge queue would count as passing', () => {

@@ -1,5 +1,4 @@
 import {
-  EvidenceKind,
   findingNotes,
   REVIEW_ROLES,
   ToolAccess,
@@ -352,7 +351,7 @@ function failedStepsSection(output: string): string {
 
 /** A read-only step (one a retry restarted with the builder's note) has nothing to commit. */
 const gateFailure = (evidence: EvidenceDto, tools: ToolAccess): string =>
-  evidence.kind === EvidenceKind.Builder
+  evidence.command === null
     ? `The builder sent the work back: ${evidence.summary}\n${
         tools === ToolAccess.Edit
           ? 'Address it, commit, and end your turn.'

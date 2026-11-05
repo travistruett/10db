@@ -665,8 +665,8 @@ function StatusLine({
   const startOver = useStartTaskOver();
   const remove = useRemoveTask();
   const failed = workstream !== undefined && canRetry(workstream.state);
-  // A run the daemon would refuse to retry (shipped anyway, closed, parked, replaced) offers no Retry;
-  // once its pull request closed, the panel below closes it.
+  // A run the daemon would refuse to retry (shipped anyway, closed, parked, replaced, moved) offers no
+  // Retry; once its pull request closed, the panel below closes it.
   const retryable = workstream !== undefined && canRetryRun(task, workstream, batch);
   const startableOver = workstream !== undefined && canStartOver(task, workstream, batch);
   const closable =

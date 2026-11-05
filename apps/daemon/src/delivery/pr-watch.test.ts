@@ -1276,6 +1276,7 @@ describe('gh unavailable', () => {
       prRequiredChecks: (input) => h.gh.prRequiredChecks(input),
       jobLog: (input) => h.gh.jobLog(input),
       rerunFailed: (input) => h.gh.rerunFailed(input),
+      jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
       prStatus: () => Promise.reject(new GhError('failed', 'HTTP 502')),
     };
@@ -1374,6 +1375,7 @@ describe('restart and stop', () => {
       prRequiredChecks: (input) => h.gh.prRequiredChecks(input),
       jobLog: (input) => h.gh.jobLog(input),
       rerunFailed: (input) => h.gh.rerunFailed(input),
+      jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
       prStatus: (_input, call) =>
         new Promise((_resolve, reject) => {
@@ -2757,5 +2759,196 @@ describe('a required check GitHub cancelled', () => {
     await w.idle();
     await round(w);
     expect(h.gh.reruns).toEqual(['77']);
+  });
+});
+
+describe('a required job GitHub cancelled because no runner picked it up', () => {
+  const HEAD_A = 'a'.repeat(40);
+  const HEAD_B = 'b'.repeat(40);
+  const LIMIT = 3;
+
+  /** The `attempt`th run of the `desktop` job: a rerun makes a new job, so a new job id. */
+  const desktop = (attempt: number, runId: string | null = '77') => ({
+    name: 'desktop',
+    link: `https://github.com/acme/widgets/actions/runs/${runId ?? 'x'}/job/${String(900 + attempt)}`,
+    jobId: String(900 + attempt),
+    runId,
+    description: null,
+  });
+  const cancelledJobs = (...jobs: ReturnType<typeof desktop>[]) => ({
+    state: 'cancelled' as const,
+    failing: [],
+    pending: [],
+    cancelled: jobs,
+  });
+  /** GitHub cancelled this attempt of `desktop` with the not-acquired annotation. */
+  const noRunner = (attempt: number) => {
+    h.gh.noRunnerJobs.add(String(900 + attempt));
+    return desktop(attempt);
+  };
+
+  const stored = (id: BatchId) => getBatch(h.store.db, id);
+  const noticeOf = (id: BatchId, head = HEAD_A) =>
+    stored(id).notices.find((n) => n.key === `checks-no-runner:${head}`);
+
+  function watching(): { id: BatchId; prUrl: string; w: PrWatch } {
+    setup();
+    const made = shipped(h.project.id, 'Alpha');
+    h.gh.setHead(made.prUrl, HEAD_A);
+    return { ...made, w: watcher() };
+  }
+
+  it('runs its failed jobs again at the first read, with a notice and no card', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(h.cards()).toEqual([]);
+    const notice = noticeOf(id);
+    expect(notice?.tone).toBe('info');
+    expect(notice?.line).toContain('desktop');
+    expect(notice?.line).toContain('no runner');
+    expect(notice?.body).toContain('runner shortage');
+    expect(notice?.body).toContain('not a test failure');
+    // The ordinary cancelled-check path has nothing to say about it.
+    expect(stored(id).notices.map((n) => n.key)).toEqual([`checks-no-runner:${HEAD_A}`]);
+  });
+
+  it('does not run a cancelled job again that had a runner or steps, or that a person cancelled', async () => {
+    const { id, prUrl, w } = watching();
+    // The fake says no runner shortage for it: GitHub's job record has steps or a runner, or no annotation.
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(desktop(1)));
+    w.start();
+    await w.idle();
+    expect(h.gh.calls.some((c) => c.method === 'jobHadNoRunner')).toBe(true);
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+    // It stays the ordinary cancelled check: run again at the second read.
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+    expect(stored(id).notices.some((n) => n.key.startsWith('checks-no-runner:'))).toBe(false);
+  });
+
+  it('runs a job again once, while GitHub still lists the cancelled one', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    await round(w);
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('runs the new attempt again when it is cancelled the same way, up to the limit, then raises one card', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    for (let attempt = 2; attempt <= LIMIT; attempt++) {
+      h.gh.setRequiredChecks(prUrl, {
+        state: 'pending',
+        failing: [],
+        pending: [desktop(attempt)],
+        cancelled: [],
+      });
+      await round(w);
+      h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(attempt)));
+      await round(w);
+    }
+    expect(h.gh.reruns).toEqual(['77', '77', '77']);
+    expect(h.cards()).toEqual([]);
+
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(LIMIT + 1)));
+    await round(w);
+    expect(h.gh.reruns).toHaveLength(LIMIT);
+    const card = h.only(h.cards());
+    expect(card.title).toContain('desktop');
+    expect(card.title).toContain('no runner');
+    expect(card.body).toContain(`${String(LIMIT)} reruns`);
+    expect(card.body).toContain('desktop');
+    expect(card.body).toContain('runner shortage');
+    expect(noticeOf(id)?.line).toContain('stopped');
+
+    // One card, however many rounds follow.
+    await round(w);
+    await round(w);
+    expect(h.cards()).toHaveLength(1);
+    expect(h.gh.reruns).toHaveLength(LIMIT);
+  });
+
+  it('counts per head: a new push starts again from zero and takes the old head’s card back', async () => {
+    const { id, prUrl, w } = watching();
+    for (let attempt = 1; attempt <= LIMIT + 1; attempt++) {
+      h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(attempt)));
+      if (attempt === 1) {
+        w.start();
+        await w.idle();
+      } else await round(w);
+    }
+    expect(h.gh.reruns).toHaveLength(LIMIT);
+    expect(h.cards()).toHaveLength(1);
+
+    h.gh.setHead(prUrl, HEAD_B);
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(10)));
+    await round(w);
+    expect(h.gh.reruns).toHaveLength(LIMIT + 1);
+    expect(h.cards()).toEqual([]);
+    expect(noticeOf(id, HEAD_A)).toBeUndefined();
+    expect(noticeOf(id, HEAD_B)?.line).toContain('desktop');
+  });
+
+  it('keeps the count through a restart', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(2)));
+    await round(w);
+    expect(h.gh.reruns).toHaveLength(2);
+    await w.stop();
+
+    const second = watcher();
+    second.start();
+    await second.idle();
+    expect(h.gh.reruns).toHaveLength(2);
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(3)));
+    await round(second);
+    expect(h.gh.reruns).toHaveLength(3);
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(4)));
+    await round(second);
+    expect(h.gh.reruns).toHaveLength(3);
+    expect(h.only(h.cards()).title).toContain('no runner');
+  });
+
+  it('does not count a rerun GitHub refused because the run is still going, and asks again', async () => {
+    const { id, prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    h.gh.failRerunOf.set('77', new GhError('failed', 'run 77 cannot be rerun; already running'));
+    w.start();
+    await w.idle();
+    expect(h.gh.reruns).toEqual([]);
+    expect(noticeOf(id)).toBeUndefined();
+    await round(w);
+    expect(h.gh.reruns).toEqual(['77']);
+  });
+
+  it('leaves a pull request in the merge queue alone', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setInMergeQueue(prUrl, true);
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    expect(h.gh.reruns).toEqual([]);
+  });
+
+  it('asks gh about a cancelled job once, however many reads follow', async () => {
+    const { prUrl, w } = watching();
+    h.gh.setRequiredChecks(prUrl, cancelledJobs(noRunner(1)));
+    w.start();
+    await w.idle();
+    await round(w);
+    await round(w);
+    expect(h.gh.calls.filter((c) => c.method === 'jobHadNoRunner')).toHaveLength(1);
   });
 });

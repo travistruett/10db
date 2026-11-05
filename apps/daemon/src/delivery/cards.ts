@@ -12,9 +12,10 @@ import {
   type RequiredCheckJobDto,
   type TaskDto,
   type TaskId,
-  type WorkstreamId,
+  WorkstreamId,
 } from '@10db/contracts';
 import type { Json } from '@10db/db';
+import { z } from 'zod';
 import {
   checkoutSwitchCommand,
   GitNetworkError,
@@ -480,11 +481,51 @@ export const autoMergeRefusedKey = (batchId: BatchId): string => `auto-merge-ref
 /** The fold key of a batch's regeneration-failed card; the builder dismisses it once the files are regenerated. */
 export const baseRegenerateKey = (batchId: BatchId): string => `base-regenerate:${batchId}`;
 
+/** The answer of a card about a lost-migrations notice whose list could not be read. */
+export const LostChoice = { Clear: 'Clear the notice' } as const;
+export type LostChoice = (typeof LostChoice)[keyof typeof LostChoice];
+
+/** The `detail` key of such a card; it holds the batch id (`createLostMigrationsAnswers`). */
+export const LOST_MIGRATIONS_DETAIL = 'lostMigrations';
+
+/**
+ * What a card carries to let the builder end a lost-migrations notice with no readable list. The
+ * list is the only thing a gate checks the journal against, so with it gone nothing but the builder
+ * can say the migrations are back: the answer is the builder's word that they are.
+ */
+export function lostMigrationsOffer(batch: BatchDto): Pick<Card, 'options' | 'detail'> {
+  return {
+    options: [
+      {
+        label: LostChoice.Clear,
+        description:
+          "Remove the notice, so gates and a ship no longer stop on it. Only after you checked that the batch's journal holds every migration the base merge lost",
+      },
+    ],
+    detail: { batchId: batch.id, [LOST_MIGRATIONS_DETAIL]: { batchId: batch.id } },
+  };
+}
+
+/** What the builder checks before answering `LostChoice.Clear`, in words. */
+export const CHECK_THE_JOURNAL =
+  "To check: list the migrations the batch added (`git diff --name-only <base>...<branch>` on the package's drizzle directory, and the commits the notice names), and confirm each one's name is in the journal at the branch's HEAD, under a number after the base's, with its SQL intact. A migration still missing is re-created on the branch (generate --name <name>, or --custom --name <name> with the SQL copied back byte for byte) before the notice is cleared.";
+
 /**
  * What delivery tells the builder when a worktree batch's branch took its base but its generated files
  * could not be made again. A conflict or files in the way are notices instead (`notices.ts`).
  */
 export const baseCards = {
+  /**
+   * The batch's lost-migrations notice has no readable list, so no gate can tell whether the journal
+   * holds the migrations. It folds into `regenerate`'s card, and offers the one answer that ends it.
+   */
+  lostUnreadable: (batch: BatchDto, worktree: string): Card => ({
+    title: `Batch "${batch.title}": a merge of ${batch.baseBranch} lost migrations 10db can no longer list`,
+    body: `A merge of ${batch.baseBranch} lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice. 10db cannot tell whether the journal holds them, so no gate passes and nothing ships while the notice stands, and 10db never reads an unreadable list as all carried.\n\n${CHECK_THE_JOURNAL}\n\nThe batch's worktree is ${worktree}. Once the journal holds them all, answer "${LostChoice.Clear}" here: the next gate then runs, and a retry of a failed ship can pass. Abandoning the batch also ends it.`,
+    foldKey: baseRegenerateKey(batch.id),
+    refresh: true,
+    ...lostMigrationsOffer(batch),
+  }),
   /**
    * 10db merged the base, taking its version of the generated directories `dirs`, but couldn't
    * regenerate them. `why` is the reason; `restored` says it removed what a failed run wrote there.
@@ -782,14 +823,9 @@ export const shipCards = {
     },
   }),
   /**
-   * The copy's packages still did not resolve what its lockfile names after 10db installed again
-   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
-   * failure would have said nothing of the batch's code. Retry installs again before the gate.
-   */
-  /**
    * `note` names the migrations a merge of the base lost and says how to re-create them. An
-   * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again and
-   * only Abandon is offered.
+   * `unreadable` notice has no list a journal could satisfy, so a Retry would stop here again until
+   * the builder clears the notice after checking the journal (`LostChoice.Clear`); Abandon also ends it.
    */
   migrationsLost: (
     batch: BatchDto,
@@ -800,11 +836,20 @@ export const shipCards = {
       title: `${notShipped(batch)}: merging ${batch.baseBranch} lost a migration of the batch's`,
       body:
         unreadable === true
-          ? `${note}\n\nNo gate ran and nothing was pushed. A Retry would stop here again. Abandon gives the batch up, which is the only way this ends.`
+          ? `${note}\n\nNo gate ran and nothing was pushed. A Retry would stop here again until the notice is cleared.\n\n${CHECK_THE_JOURNAL}\n\nOnce the journal holds them all, answer "${LostChoice.Clear}" on this card and ${RETRY.charAt(0).toLowerCase()}${RETRY.slice(1)} Abandon gives the batch up instead.`
           : `${note}\n\nNo gate ran and nothing was pushed. Re-create the migration on the batch's branch and commit it.\n\n${RETRY}`,
-      detail: unreadable === true ? { batchId: batch.id, actions: ['abandon'] } : answers(batch),
+      detail:
+        unreadable === true
+          ? { ...lostMigrationsOffer(batch).detail, ...answers(batch) }
+          : answers(batch),
+      ...(unreadable === true ? { options: lostMigrationsOffer(batch).options } : {}),
     },
   }),
+  /**
+   * The copy's packages still did not resolve what its lockfile names after 10db installed again
+   * (`note` says which), so the shipping gate did not run: its tools could not have started, and a
+   * failure would have said nothing of the batch's code. Retry installs again before the gate.
+   */
   installBroken: (batch: BatchDto, note: string, noPnpm = false): ShipFailure => ({
     failure: BatchFailure.InstallBroken,
     card: {
@@ -999,6 +1044,8 @@ export const prCardKey = {
   ciStopped: (batchId: BatchId): string => `ci-stopped:${batchId}`,
   /** 10db could not bring the base into the conflicting pull request: the root batch's id. */
   catchUp: (batchId: BatchId): string => `pr-catch-up:${batchId}`,
+  /** A required job never got a runner, and 10db's reruns for the head ran out: the root batch's id. */
+  noRunner: (batchId: BatchId): string => `pr-no-runner:${batchId}`,
   /** One per daemon: gh being unavailable is the same problem for every pull request. */
   ghUnavailable: 'pr-watch-gh',
 } as const;
@@ -1123,6 +1170,24 @@ export const prCards = {
           }
         : {}),
       detail: { ...prDetail(root, link), [CI_RERUN_DETAIL]: { batchId: root.id } },
+    };
+  },
+  /**
+   * GitHub keeps cancelling a required job because no hosted runner picks it up, and 10db's reruns for
+   * this head are used up. `names` are the jobs, `attempts` the reruns made. One card per head.
+   */
+  noRunner: (root: BatchDto, names: readonly string[], attempts: number): Card => {
+    const prUrl = root.prUrl ?? '(no pull request)';
+    const list = names.join(', ') || 'a required job';
+    return {
+      title: `${list} got no runner on GitHub after ${String(attempts)} reruns: ${root.title}`,
+      body: [
+        `Pull request: ${prUrl}`,
+        `GitHub cancelled the required job ${list} because no hosted runner picked it up (a runner shortage, such as capacity limits on macOS arm64 runners), not because a test failed. 10db has made ${String(attempts)} reruns for this commit and the job never got a runner, so it reruns no more. No CI fix session is started: there is nothing in the code to fix.`,
+        `Rerun the job from the pull request's checks page (Re-run jobs) once runners are free, or push a commit to ${root.branch ?? 'the branch'}, which gives 10db a fresh count. 10db withdraws this card when the pull request gets a new commit, merges or closes.`,
+      ].join('\n\n'),
+      foldKey: prCardKey.noRunner(root.id),
+      detail: prDetail(root, prUrl),
     };
   },
   /** GitHub refused the rerun the stop card's Retry asked for. */
@@ -1251,13 +1316,36 @@ export const branchCards = {
 
 /**
  * The tasks a stopped Ship without it meant to leave out, the failed run it was answered on, and the
- * revert commit an earlier answer left on the branch, if one did.
+ * revert commit an earlier answer left on the branch, if one did. `titles` is what this answer tried
+ * and `covers` the runs that revert undid: a task named in `titles` may still have its commits on the
+ * branch, so only `covers` says whose commits are gone.
  */
 export interface LeftOutAttempt {
   readonly workstreamId: WorkstreamId;
   readonly titles: readonly string[];
   readonly revert?: string | null;
+  readonly covers?: readonly WorkstreamId[];
 }
+
+/**
+ * The `detail` key of a revert-kept card that waits for a ship to end and offers no answer: the
+ * attempt it was raised for, so the card can offer Ship without it if the ship fails.
+ */
+export const LEFT_OUT_KEPT_DETAIL = 'leftOutKept';
+
+/** What `LEFT_OUT_KEPT_DETAIL` holds. */
+export const LeftOutKept = z.object({
+  workstreamId: WorkstreamId,
+  titles: z.array(z.string()),
+  revert: z.string().min(1),
+  // A card raised before this field existed still parses.
+  covers: z.array(WorkstreamId).default([]),
+  why: z.string(),
+});
+export type LeftOutKept = z.infer<typeof LeftOutKept>;
+
+/** The fold key of a batch's left-out cards: one open at a time. */
+export const leftOutFoldKey = (batchId: BatchId): string => `left-out:${batchId}`;
 
 /**
  * What every card of a stopped revert shares: it folds per batch, goes when the batch ships, and
@@ -1272,10 +1360,14 @@ function leftOutCard(
 ): Card {
   return {
     ...card,
-    foldKey: `left-out:${batch.id}`,
+    foldKey: leftOutFoldKey(batch.id),
     refresh: true,
     resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
-    ...batchCardFields({ id: attempt.workstreamId, batchId: batch.id }, attempt.revert),
+    ...batchCardFields(
+      { id: attempt.workstreamId, batchId: batch.id },
+      attempt.revert,
+      attempt.covers,
+    ),
   };
 }
 
@@ -1318,7 +1410,7 @@ export const leftOutCards = {
     };
     return answerable
       ? leftOutCard(batch, attempt, text)
-      : { ...text, foldKey: `left-out:${batch.id}`, refresh: true };
+      : { ...text, foldKey: leftOutFoldKey(batch.id), refresh: true };
   },
   /**
    * The revert commit `revert` is on the batch's branch, but the notices and the move to shipping
@@ -1346,7 +1438,7 @@ export const leftOutCards = {
     const names = leftOutNames(attempt);
     const answerable = state === null || state === BatchState.Open || state === BatchState.Failed;
     const lead = `Ship without it reverted the commits of ${names} on the batch's branch (revert commit ${revert.slice(0, 9)}), and then could not finish:\n\n${why.slice(0, 1500)}\n\n`;
-    const fold = { foldKey: `left-out:${batch.id}`, refresh: true } as const;
+    const fold = { foldKey: leftOutFoldKey(batch.id), refresh: true } as const;
     if (answerable)
       return leftOutCard(
         batch,
@@ -1365,9 +1457,24 @@ export const leftOutCards = {
       };
     const body = `${lead}The batch is ${state.toLowerCase()}, so it went or goes on without ${its} changes: the revert is in the branch. The notices on ${names} were not written, so ${its} drawer does not say the work was left out. There is nothing to answer here.`;
     // A batch that shipped already will not ship again, so nothing would close the card.
-    return state === BatchState.Shipped || state === BatchState.Closed
-      ? { title, body, ...fold }
-      : { title, body, ...fold, resolvesWhen: { event: 'batch_shipped', batchId: batch.id } };
+    if (state === BatchState.Shipped || state === BatchState.Closed)
+      return { title, body, ...fold };
+    // The ship may still fail, and then the batch is answerable: the card keeps the attempt, so
+    // `settleLeftOutCards` can offer the answer then.
+    const kept: LeftOutKept = {
+      workstreamId: attempt.workstreamId,
+      titles: [...attempt.titles],
+      revert,
+      covers: [...(attempt.covers ?? [])],
+      why: why.slice(0, 1500),
+    };
+    return {
+      title,
+      body,
+      ...fold,
+      detail: { [LEFT_OUT_KEPT_DETAIL]: kept },
+      resolvesWhen: { event: 'batch_shipped', batchId: batch.id },
+    };
   },
   /** Later commits changed `paths` in ways that conflict with undoing the task's commits. */
   conflict: (batch: BatchDto, attempt: LeftOutAttempt, paths: readonly string[]): Card =>

@@ -57,6 +57,12 @@ export const NOTICE_KEY = {
    * restarted daemon reads that head as already asked and never runs it a second time.
    */
   checksRerun: 'checks-rerun',
+  /**
+   * GitHub cancelled a required job because no hosted runner picked it up, and 10db ran it again. The
+   * key ends in `:` and the head, and its record counts the reruns for that head, so a restart keeps
+   * the count and a new head starts from zero.
+   */
+  checksNoRunner: 'checks-no-runner',
   /** A task started over from a failed attempt whose commits are still on the batch's branch. */
   supersededAttempt: 'superseded-attempt',
   /** The install before a gate left the copy broken, and 10db removed node_modules and installed again. */
@@ -113,7 +119,7 @@ export const uncarriedIn = (notice: Notice | undefined): UncarriedMigration[] | 
  * could clear the notice, so its steps wouldn't either.
  */
 const UNREADABLE_LOST =
-  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. The notice's text may be cut short and may miss migrations lost since, so it is not the whole list. Re-creating migrations won't clear this notice, so don't: no gate passes and nothing ships while it stands, and the one thing that ends it is the builder abandoning the batch.";
+  "A merge of the base lost migrations of this batch's, and the list of them could not be read from the batch's lost-migrations notice, so 10db cannot tell whether the journal holds them. The notice's text may be cut short and may miss migrations lost since, so it is not the whole list. Re-creating migrations won't clear this notice, so don't: no gate passes and nothing ships while it stands. Only the builder ends it, by checking the journal and clearing the notice on the card 10db raised, or by abandoning the batch.";
 
 /** What the lost-migrations `notice` tells a lane or the builder: its text, while its list reads. */
 export const uncarriedSaid = (notice: Notice): string =>
@@ -225,14 +231,16 @@ export const leftOutNotices = {
     body: `This run failed, and you chose Ship without it. 10db reverted ${count === 1 ? 'its commit' : `its ${String(count)} commits`} on the batch's branch in one commit (${revert.slice(0, 9)}) before the batch shipped, so the pull request has none of this task's changes and all of the finished tasks'.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /**
-   * An earlier Ship without it reverted its commits in `revert`, a retry added none, and this answer
-   * had nothing left to revert. The revert line is what a Retry reads to tell the session again.
+   * The run's record names `revert`, which is still on the branch, but no revert on the branch lists
+   * a commit of the task and this answer reverted none of them. A run with a commit a revert lists
+   * gets `reverted` instead, naming that revert. Either kind of run may or may not have been retried,
+   * so the wording says nothing of a retry. The revert line is what a Retry reads to tell the session.
    */
   alreadyReverted: (revert: string): Notice => ({
     key: LEFT_OUT_NOTICE_KEY,
     tone: 'info',
     line: 'Left out of the pull request: its commits were already reverted',
-    body: `This run failed again, and you chose Ship without it. Its commits on the batch's branch were reverted by an earlier answer (${revert.slice(0, 9)}) and the retry added none, so 10db reverted nothing more, and the pull request has none of this task's changes.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
+    body: `This run failed, and you chose Ship without it. Its commits on the batch's branch were reverted by an earlier answer (${revert.slice(0, 9)}) and none has been added since, so 10db reverted nothing more, and the pull request has none of this task's changes.\n\nTo bring the work back, start the task again; it runs from the base, not from the reverted commits. A Retry keeps the revert on the branch and tells the session so; the task is in the pull request only if the retried run commits again.\n\n${revertCommitLine(revert)}`,
   }),
   /** It had no commit on the branch, so the pull request already lacked its work. */
   nothingToRevert: (): Notice => ({
@@ -662,6 +670,83 @@ export const rerunNotices = {
       line: `${one ? `Required check ${names} was` : `Required checks ${names} were`} cancelled; 10db ran ${one ? 'it' : 'them'} again`,
       body: `GitHub cancelled ${one ? 'a check' : 'checks'} that the base branch requires, so 10db ran ${one ? 'it' : 'them'} again once for this head (${head}). 10db runs it only once: if ${one ? 'it is' : 'they are'} cancelled again, a notice says so. ${rest}This notice goes when the pull request merges, closes or gets a new commit.`,
       record,
+    };
+  },
+};
+
+/** The key of the runner-shortage notice for one pull request head. */
+export const noRunnerNoticeKey = (head: string): string => `${NOTICE_KEY.checksNoRunner}:${head}`;
+
+/** The head a stored notice key counts runner-shortage reruns for; null for any other key. */
+export function noRunnerNoticeHead(key: string): string | null {
+  const prefix = `${NOTICE_KEY.checksNoRunner}:`;
+  return key.startsWith(prefix) ? key.slice(prefix.length) : null;
+}
+
+/** What 10db has done about cancelled-for-no-runner jobs on one pull request head. */
+export interface NoRunnerRecord {
+  /** Reruns made for the head: the count the limit is checked against. */
+  readonly attempts: number;
+  /** The cancelled Actions jobs (by job id) 10db has dealt with: GitHub lists one for a while after its rerun. */
+  readonly jobs: readonly string[];
+  /** The names of the checks that had no runner. */
+  readonly names: readonly string[];
+  /** The limit was reached and its one card is raised. */
+  readonly carded: boolean;
+}
+
+export const EMPTY_NO_RUNNER: NoRunnerRecord = { attempts: 0, jobs: [], names: [], carded: false };
+
+/** Reads a stored runner-shortage notice's record; null when it has none or cannot be read. */
+export function noRunnerRecord(notice: Notice): NoRunnerRecord | null {
+  if (notice.record === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(notice.record);
+    if (typeof parsed !== 'object' || parsed === null) return null;
+    const { attempts, jobs, names, carded } = parsed as Record<string, unknown>;
+    const strings = (v: unknown): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string');
+    if (typeof attempts !== 'number' || !strings(jobs) || !strings(names)) return null;
+    return { attempts, jobs, names, carded: carded === true };
+  } catch {
+    return null;
+  }
+}
+
+/** What delivery shows on a shipped batch's tasks when GitHub cancelled a required job for want of a runner. */
+export const noRunnerNotices = {
+  /**
+   * `ran`: 10db ran the job(s) again, attempt `attempts` of `limit`. `refused`: GitHub would not run
+   * them again. `stopped`: the limit is reached and 10db raised its card. It is a runner shortage,
+   * not a test failure, whatever the state says.
+   */
+  of: (
+    head: string,
+    record: NoRunnerRecord,
+    state: 'ran' | 'refused' | 'stopped',
+    limit: number,
+    detail = '',
+  ): Notice => {
+    const names = record.names.map((n) => `"${n}"`).join(', ');
+    const one = record.names.length === 1;
+    const it = one ? 'it' : 'them';
+    const what = `Required ${one ? 'check' : 'checks'} ${names}`;
+    const tail = {
+      ran: `10db ran ${it} again (attempt ${String(record.attempts)} of ${String(limit)}).`,
+      refused: `10db could not run ${it} again: GitHub refused (${detail.slice(0, 300)}).`,
+      stopped: `10db ran ${it} again ${String(record.attempts)} times and stopped; a card says so.`,
+    }[state];
+    const line = {
+      ran: `${what} had no runner; 10db ran ${it} again (attempt ${String(record.attempts)} of ${String(limit)})`,
+      refused: `${what} had no runner and 10db could not run ${it} again`,
+      stopped: `${what} still had no runner after ${String(record.attempts)} reruns; 10db stopped`,
+    }[state];
+    return {
+      key: noRunnerNoticeKey(head),
+      tone: state === 'ran' ? 'info' : 'warning',
+      line,
+      body: `GitHub cancelled ${one ? 'a job' : 'jobs'} that the base branch requires because no hosted runner picked ${it} up: a runner shortage, not a test failure, and nothing in the code is wrong. ${tail} 10db reruns a job like this up to ${String(limit)} times for each head of the pull request. This notice goes when the pull request merges, closes or gets a new commit.`,
+      record: JSON.stringify(record),
     };
   },
 };

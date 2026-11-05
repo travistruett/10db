@@ -264,8 +264,15 @@ function sandboxedSettings(
   };
 }
 
+/** How many calls' hook directories are kept for `canUseTool`: a call the hook allowed never reaches it. */
+const HOOK_CWDS_KEPT = 256;
+
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
+  // The PreToolUse hook is the only place Claude Code says where a call runs (its `cwd`, which an
+  // earlier Bash call's `cd` moves); `canUseTool` for the same call gets it by the tool use id, so the
+  // permission broker reads a relative path from the same directory the guard does.
+  const hookCwds = new Map<string, string>();
   return {
     cwd: spec.cwd,
     model: spec.model,
@@ -299,12 +306,15 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
+      const cwd = hookCwds.get(options.toolUseID);
+      hookCwds.delete(options.toolUseID);
       const decision = await spec.canUseTool({
         toolName,
         input,
         toolUseId: options.toolUseID,
         escalated: isClassifierEscalation(options),
         signal: options.signal,
+        ...(cwd === undefined ? {} : { cwd }),
       });
       // The session can be refused while the answer was pending.
       if (deps.isRefused())
@@ -320,6 +330,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
               if (!(await deps.billingVerified) || deps.isRefused())
                 return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
               try {
+                hookCwds.set(hookInput.tool_use_id, hookInput.cwd);
+                const oldest = hookCwds.keys().next();
+                if (hookCwds.size > HOOK_CWDS_KEPT && !oldest.done) hookCwds.delete(oldest.value);
                 return toHookOutput(
                   spec.preToolUse({
                     toolName: hookInput.tool_name,

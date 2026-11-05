@@ -153,6 +153,17 @@ export interface Gh {
     input: { readonly repo: string; readonly runId: string },
     call: GhCall,
   ): Promise<void>;
+  /**
+   * Whether GitHub cancelled the Actions job (`jobId` is a number as text) because no hosted runner
+   * picked it up: the job is cancelled with no runner and no steps, and its check run's annotation says
+   * "The job was not acquired by Runner of type hosted even after multiple attempts". A job that had a
+   * runner or ran a step, and one a person cancelled (no such annotation), answer false. Throws a
+   * GhError for any failure of the calls themselves.
+   */
+  jobHadNoRunner(
+    input: { readonly repo: string; readonly jobId: string },
+    call: GhCall,
+  ): Promise<boolean>;
   prCreate(
     input: {
       readonly repo: string;
@@ -320,6 +331,18 @@ export function createSystemGhExec(tools: GhTools): GhExec {
 const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
 /** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
 const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
+
+/** `GET /repos/{repo}/actions/jobs/{id}`: the fields that say a job never had a runner. */
+const ActionsJobView = z.object({
+  conclusion: z.string().nullable(),
+  runner_id: z.number().nullable().optional(),
+  runner_name: z.string().nullable().optional(),
+  steps: z.array(z.unknown()).optional(),
+});
+/** `GET /repos/{repo}/check-runs/{id}/annotations`. */
+const AnnotationsView = z.array(z.object({ message: z.string().nullable().optional() }));
+/** GitHub's annotation on a job that no hosted runner picked up before it cancelled the job. */
+const NOT_ACQUIRED = /was not acquired by runner of type hosted/i;
 
 /** The merge queue read: `isInMergeQueue` is the pull request's own field in GitHub's GraphQL schema. */
 const MergeQueueView = z.object({
@@ -695,6 +718,18 @@ export function createGh(exec: GhExec): Gh {
       const args = ['run', 'rerun', runId, '-R', repo, '--failed'];
       actionsId('run', runId, args);
       await ok(args, call);
+    },
+    async jobHadNoRunner({ repo, jobId }, call) {
+      const jobArgs = ['api', `repos/${repo}/actions/jobs/${jobId}`];
+      actionsId('job', jobId, jobArgs);
+      const job = parseOutput(ActionsJobView, jobArgs, await ok(jobArgs, call));
+      // GitHub reports a job that never got a runner as runner_id 0 and runner_name "" as
+      // often as null, so all three read as no runner.
+      const hadRunner = (job.runner_id ?? 0) !== 0 || (job.runner_name ?? '') !== '';
+      if (job.conclusion !== 'cancelled' || (job.steps ?? []).length > 0 || hadRunner) return false;
+      const noteArgs = ['api', `repos/${repo}/check-runs/${jobId}/annotations`];
+      const notes = parseOutput(AnnotationsView, noteArgs, await ok(noteArgs, call));
+      return notes.some((note) => NOT_ACQUIRED.test(note.message ?? ''));
     },
     async prCreate({ repo, base, head, title, bodyFile }, call) {
       const args = [

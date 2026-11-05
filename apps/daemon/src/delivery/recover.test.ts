@@ -20,6 +20,8 @@ import { ManualClock } from '../clock';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createScheduler } from '../scheduler';
+import { leftOutCards } from './cards';
+import { raise } from './context';
 import { cuttingTasksKey } from './cutting-tasks';
 import { batchBranchName, createBatchStarter, recoverBatches, type DeliveryJobs } from './index';
 
@@ -66,6 +68,34 @@ function onOrigin(branch: string | null): string | null {
 }
 
 describe('recoverBatches', () => {
+  it('offers Ship without it on a revert card that waited on a ship recovery fails', async () => {
+    h = createDeliveryHarness({}, { trigger: false });
+    const batch = await shippingAfterCrash();
+    const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
+    raise(
+      h.inbox,
+      h.project.id,
+      leftOutCards.revertKept(
+        batch,
+        { workstreamId: ws.id, titles: ['Alpha'] },
+        'a'.repeat(40),
+        'a test',
+        'SHIPPING',
+      ),
+    );
+    const waiting = h.only(h.cards().filter((c) => c.title.includes('revert')));
+    expect(waiting.options).toEqual([]);
+    h.git$('switch', '-q', 'main');
+
+    const report = await recover();
+
+    expect(report.failed).toEqual([batch.id]);
+    const again = h.only(h.cards().filter((c) => c.title.includes('revert')));
+    expect(again.id).toBe(waiting.id);
+    expect(again.body).not.toMatch(/nothing to answer/i);
+    expect(again.options.map((o) => o.label)).toContain('Ship without it');
+  });
+
   it('deletes a CUTTING row with a card, and leaves the branch a crash left behind; the next cut uses a new name', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const cutting = h.state.write((c) =>

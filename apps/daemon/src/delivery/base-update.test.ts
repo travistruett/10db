@@ -982,6 +982,121 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       expect(notice.body).toContain('drizzle-kit generate');
     });
 
+    describe('when the install is broken after a merge that settled a generated directory', () => {
+      /** Both sides changed the migrations, the lockfile names left-pad, and the copy then loses it. */
+      async function brokenAfterBothSidesChanged(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        h.commit('.gitignore', 'node_modules/\n');
+        h.commit(
+          'pnpm-lock.yaml',
+          [
+            'importers:',
+            '  .:',
+            '    dependencies:',
+            '      left-pad:',
+            '        specifier: 1.3.0',
+            '        version: 1.3.0',
+            '',
+          ].join('\n'),
+        );
+        mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+        const batch = await bothSidesChanged();
+        rmSync(join(pathOf(batch), 'node_modules', 'left-pad'), { recursive: true, force: true });
+        return batch;
+      }
+
+      it('says nothing of a directory regenerated from its sources on the install_broken answer', async () => {
+        const batch = await brokenAfterBothSidesChanged();
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('install_broken');
+        expect(run.ran).toBe(0);
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain('install in this copy is broken');
+        expect(note).not.toContain('regenerated from its sources');
+        expect(note).toContain(`${DB}/ (taken from origin/main`);
+        expect(update).toMatchObject({ unregenerated: [`${DB}/`] });
+      });
+
+      it("says nothing of a directory regenerated from its sources on a catch-up's uncarried answer", async () => {
+        const batch = await brokenAfterBothSidesChanged();
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, signal, { forPullRequest: true });
+        expect(update.kind).toBe('uncarried');
+        expect(run.ran).toBe(0);
+        const note = update.kind === 'uncarried' ? update.note : '';
+        expect(note).toContain(`${DB}/`);
+        expect(note).not.toContain('regenerated from its sources');
+        // The merge goes back, and no card names a worktree the catch-up removes.
+        expect(h.cards()).toEqual([]);
+      });
+    });
+
+    describe('when the install is broken after a merge that settled only kept lines', () => {
+      /** Both sides added a line to `src/index.ts`, the lockfile names left-pad, and the copy then loses it. */
+      async function brokenAfterKeptLines(): Promise<BatchDto> {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        h.commit('.gitignore', 'node_modules/\n');
+        h.commit(
+          'pnpm-lock.yaml',
+          [
+            'importers:',
+            '  .:',
+            '    dependencies:',
+            '      left-pad:',
+            '        specifier: 1.3.0',
+            '        version: 1.3.0',
+            '',
+          ].join('\n'),
+        );
+        mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
+        h.commit('src/index.ts', "import a from './a';\nexport {};\n");
+        h.git$('push', '-q', 'origin', 'main');
+        const { batch } = await opened();
+        await commitOnBatch(
+          batch,
+          'src/index.ts',
+          "import a from './a';\nimport b from './b';\nexport {};\n",
+        );
+        h.teammatePush(
+          'main',
+          'src/index.ts',
+          "import a from './a';\nimport c from './c';\nexport {};\n",
+        );
+        rmSync(join(pathOf(batch), 'node_modules', 'left-pad'), { recursive: true, force: true });
+        return batch;
+      }
+
+      it('points a gate to the merge commit that lists the files', async () => {
+        const batch = await brokenAfterKeptLines();
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
+        expect(update.kind).toBe('install_broken');
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain("src/index.ts (kept both sides' added lines)");
+        expect(note).toContain('The merge commit lists them.');
+      });
+
+      it("does not point a catch-up's card to a merge commit, or say where the merge went", async () => {
+        const batch = await brokenAfterKeptLines();
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal, {
+          forPullRequest: true,
+        });
+        expect(update.kind).toBe('install_broken');
+        const note = update.kind === 'install_broken' ? update.note : '';
+        expect(note).toContain("src/index.ts (kept both sides' added lines)");
+        expect(note).toContain('install in this copy is broken');
+        expect(note).not.toContain('The merge commit lists them');
+        expect(note).not.toContain('10db merged origin/main into this branch');
+        expect(note).not.toContain('put back');
+      });
+    });
+
     it('regenerates generated files from their sources and commits them after the merge', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       const batch = await bothSidesChanged();
@@ -1145,6 +1260,107 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       // The next gate finds the branch up to date and regenerates nothing: the card is all that says so.
       expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
       expect(state(path).status).toBe('');
+    });
+
+    it('raises no card for a catch-up stopped after its merge, and names the head its merge wrote', async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: () => {
+            writeFileSync(join(path, DB, '0002_half.sql'), 'alter table');
+            return Promise.resolve({ kind: 'aborted' });
+          },
+        },
+      }).beforeGate(batch.id, signal, { forPullRequest: true });
+      // The catch-up's worktree goes and its merge is put back: a card would name both.
+      expect(h.cards()).toEqual([]);
+      expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      expect(state(path).status).toBe('');
+    });
+
+    describe('when it is stopped during the install, after the merge', () => {
+      /** The install reads the lockfile at HEAD after the merge: the stop comes in that window. */
+      function stopsInInstall(): AbortSignal {
+        const stop = new AbortController();
+        const read = h.git.blobAt.bind(h.git);
+        vi.spyOn(h.git, 'blobAt').mockImplementation((repo, rev, file) => {
+          if (rev === 'HEAD' && file === 'pnpm-lock.yaml') stop.abort();
+          return read(repo, rev, file);
+        });
+        return stop.signal;
+      }
+
+      it('raises no card for a catch-up with a directory to regenerate, and names its merge', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const path = pathOf(batch);
+        const run = { ran: 0 };
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}, run),
+        }).beforeGate(batch.id, stopsInInstall(), { forPullRequest: true });
+        expect(run.ran).toBe(0);
+        expect(h.cards()).toEqual([]);
+        expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        );
+        expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      });
+
+      it('names the merge of a catch-up with nothing to regenerate', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const { batch } = await opened();
+        await commitOnBatch(batch, 'src/mine.ts');
+        h.teammatePush('main', 'src/theirs.ts', 'theirs\n');
+        const path = pathOf(batch);
+        const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, stopsInInstall(), {
+          forPullRequest: true,
+        });
+        expect(h.cards()).toEqual([]);
+        expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD')).toBe(
+          `Merge origin/main into ${batch.branch ?? ''}`,
+        );
+        expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      });
+
+      it('still says so on the card, and answers no head, for a batch that is not catching up', async () => {
+        h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+        const batch = await bothSidesChanged();
+        const update = await createBaseUpdates({
+          ...h.ctx,
+          generators: generating({}),
+        }).beforeGate(batch.id, stopsInInstall());
+        expect(update).toEqual({ kind: 'aborted' });
+        expect(h.only(h.cards()).body).toContain('10db stopped before it regenerated them');
+      });
+    });
+
+    it("names the generators' commit, not the merge, for a catch-up stopped while they ran", async () => {
+      h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
+      const batch = await bothSidesChanged();
+      const path = pathOf(batch);
+      const stop = new AbortController();
+      const generator = generating({
+        [`${DB}/meta/_journal.json`]: '["0000","0001_theirs","0002_mine"]\n',
+        [`${DB}/0002_mine.sql`]: MINE,
+      });
+      const update = await createBaseUpdates({
+        ...h.ctx,
+        generators: {
+          regenerate: (input) => {
+            stop.abort();
+            return generator.regenerate(input);
+          },
+        },
+      }).beforeGate(batch.id, stop.signal, { forPullRequest: true });
+      expect(gitIn(path, 'show', '-s', '--format=%s', 'HEAD^')).toBe(
+        `Merge origin/main into ${batch.branch ?? ''}`,
+      );
+      expect(update).toEqual({ kind: 'aborted', head: gitIn(path, 'rev-parse', 'HEAD') });
+      expect(h.cards()).toEqual([]);
     });
 
     it('leaves a conflict in a migration directory to the builder when the project has no package that generates it', async () => {

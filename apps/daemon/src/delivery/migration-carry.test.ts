@@ -14,10 +14,12 @@ import { getBatch, listWorkstreams, patchProject, patchWorkstream, setBatchNotic
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { isolatedGitEnv } from '../../test/fixtures';
+import { createInboxService } from '../inbox';
+import { LOST_MIGRATIONS_DETAIL, LostChoice } from './cards';
 import type { DeliveryContext } from './context';
-import { createBaseUpdates } from './index';
+import { createBaseUpdates, createLostMigrationsAnswers } from './index';
 import { addedTags } from './migration-carry';
-import { NOTICE_KEY } from './notices';
+import { NOTICE_KEY, uncarriedSaid } from './notices';
 import type { CarriedMigration } from './worktree-generated';
 
 vi.setConfig({ testTimeout: 120_000 });
@@ -338,12 +340,16 @@ describe('carrying a batch over when main and the batch both added migrations', 
       if (again.kind !== 'uncarried') throw new Error(`uncarried expected, got ${again.kind}`);
       expect(again.note).toContain('could not be read');
       expect(again.note).toContain("won't clear this notice");
+      expect(again.note).toContain('clearing the notice');
       expect(again.unreadable).toBe(true);
       expect(again.head).toBe(headOf(pathOf(batch)));
       expect(h.cards()).toHaveLength(1);
-      expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(
-        NOTICE_KEY.migrationsUncarried,
-      );
+      const shown = h.only(getBatch(h.store.db, batch.id).notices);
+      expect(shown.key).toBe(NOTICE_KEY.migrationsUncarried);
+      // What the builder reads says abandoning ends it, not the re-create steps of a list it lost.
+      expect(shown.body).toContain('abandoning the batch');
+      expect(shown.body).not.toContain('re-creates');
+      expect(shown.record).toBe(record);
     },
   );
 
@@ -368,6 +374,106 @@ describe('carrying a batch over when main and the batch both added migrations', 
       unreadable: true,
     });
     expect(h.only(getBatch(h.store.db, batch.id).notices).key).toBe(NOTICE_KEY.migrationsUncarried);
+  });
+
+  describe('the builder clearing a notice whose list could not be read', () => {
+    /** A batch stopped by a lost-migrations notice with no record, and the inbox that acts on answers. */
+    async function stoppedUnreadable(record?: string) {
+      const batch = await bothSidesAdded([
+        { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+      ]);
+      const updates = createBaseUpdates({
+        ...h.ctx,
+        generators: drizzle({ failAt: 'mine_backfill' }),
+      });
+      await updates.beforeGate(batch.id, signal);
+      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const bare = { key: stored.key, tone: stored.tone, line: stored.line, body: stored.body };
+      h.state.write((w) => {
+        setBatchNotice(w, batch.id, record === undefined ? bare : { ...bare, record });
+      });
+      const inbox = createInboxService({
+        state: h.state,
+        onParkedAnswer: () => undefined,
+        onFlagAnswer: createLostMigrationsAnswers(h.ctx),
+      });
+      return { batch, updates, inbox };
+    }
+
+    it('offers the one answer on the card, which every gate still stops at until it is given', async () => {
+      const { batch, updates } = await stoppedUnreadable();
+
+      for (let gate = 0; gate < 2; gate++) {
+        const again = await updates.beforeGate(batch.id, signal);
+        expect(again).toMatchObject({ kind: 'uncarried', unreadable: true });
+      }
+
+      const card = h.only(h.cards());
+      expect(card.options.map((o) => o.label)).toEqual([LostChoice.Clear]);
+      expect(card.body).toContain('journal');
+    });
+
+    it('lets a gate pass once the builder clears the notice, and not before', async () => {
+      const { batch, updates, inbox } = await stoppedUnreadable('not json');
+      expect(await updates.beforeGate(batch.id, signal)).toMatchObject({ kind: 'uncarried' });
+
+      inbox.answer(h.only(h.cards()).id, { choice: LostChoice.Clear });
+
+      expect(getBatch(h.store.db, batch.id).notices).toEqual([]);
+      expect(h.cards()).toEqual([]);
+      expect((await updates.beforeGate(batch.id, signal)).kind).toBe('up_to_date');
+    });
+
+    it('stops again when a merge loses a migration after the notice was cleared', async () => {
+      const { batch, updates, inbox } = await stoppedUnreadable();
+      await updates.beforeGate(batch.id, signal);
+      inbox.answer(h.only(h.cards()).id, { choice: LostChoice.Clear });
+      // The batch adds another migration, and the base takes that number too.
+      await commitOnBatch(batch, `${DB}/0002_more.sql`, 'update b;\n');
+      await commitOnBatch(batch, `${DB}/meta/0002_snapshot.json`, snapshot('more', 'a', 'c'));
+      await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_more'));
+      h.teammatePush('main', `${DB}/0002_theirs_too.sql`, 'alter table a add d;\n');
+      h.teammatePush('main', `${DB}/meta/0002_snapshot.json`, snapshot('too', 'a', 'c', 'd'));
+      h.teammatePush('main', JOURNAL, journal('0000_init', '0001_theirs', '0002_theirs_too'));
+
+      const merged = await createBaseUpdates({
+        ...h.ctx,
+        generators: drizzle({ failAt: 'more' }),
+      }).beforeGate(batch.id, signal);
+
+      expect(merged).toMatchObject({ kind: 'uncarried' });
+      expect(merged).not.toHaveProperty('unreadable');
+      expect(getBatch(h.store.db, batch.id).notices).toHaveLength(1);
+    });
+
+    it('refuses the answer for a notice whose list reads, which the journal alone clears', async () => {
+      const batch = await bothSidesAdded([
+        { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+      ]);
+      await createBaseUpdates({
+        ...h.ctx,
+        generators: drizzle({ failAt: 'mine_backfill' }),
+      }).beforeGate(batch.id, signal);
+      const inbox = createInboxService({
+        state: h.state,
+        onParkedAnswer: () => undefined,
+        onFlagAnswer: createLostMigrationsAnswers(h.ctx),
+      });
+      // A readable notice has no card with the answer; a card from before it was read is made by hand.
+      const stored = h.only(getBatch(h.store.db, batch.id).notices);
+      const flagged = inbox.flag({
+        projectId: h.project.id,
+        workstreamId: null,
+        title: 'Clear',
+        body: 'Clear',
+        detail: { [LOST_MIGRATIONS_DETAIL]: { batchId: batch.id } },
+        options: [{ label: LostChoice.Clear, description: 'Clear' }],
+      });
+
+      expect(() => inbox.answer(flagged.id, { choice: LostChoice.Clear })).toThrow();
+
+      expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual(stored);
+    });
   });
 
   it('leaves an unreadable lost-migrations notice as it is when a later merge loses another', async () => {
@@ -400,11 +506,59 @@ describe('carrying a batch over when main and the batch both added migrations', 
     expect(merged.note).toContain('could not be read');
     expect(merged.note).not.toContain(stored.body);
     expect(existsSync(join(pathOf(batch), DB, '0002_more.sql'))).toBe(false);
-    expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual(bare);
+    // The list stays as it was (unreadable); only the words the builder reads change.
+    expect(h.only(getBatch(h.store.db, batch.id).notices)).toEqual({
+      ...bare,
+      body: uncarriedSaid(bare),
+    });
     expect(await updates.beforeGate(batch.id, signal)).toMatchObject({
       kind: 'uncarried',
       unreadable: true,
     });
+  });
+
+  it("does not tell a later merge's note or card to re-create migrations while the notice is unreadable", async () => {
+    const batch = await bothSidesAdded([
+      { tag: '0001_mine_backfill', sql: 'update a;\n', custom: true },
+    ]);
+    await createBaseUpdates({
+      ...h.ctx,
+      generators: drizzle({ failAt: 'mine_backfill' }),
+    }).beforeGate(batch.id, signal);
+    const stored = h.only(getBatch(h.store.db, batch.id).notices);
+    h.state.write((w) => {
+      setBatchNotice(w, batch.id, {
+        key: stored.key,
+        tone: stored.tone,
+        line: stored.line,
+        body: stored.body,
+      });
+    });
+    await commitOnBatch(batch, `${DB}/0002_more.sql`, 'update b;\n');
+    await commitOnBatch(batch, `${DB}/meta/0002_snapshot.json`, snapshot('more', 'a', 'c'));
+    await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_theirs', '0002_more'));
+    h.teammatePush('main', `${DB}/0002_theirs_too.sql`, 'alter table a add d;\n');
+    h.teammatePush('main', `${DB}/meta/0002_snapshot.json`, snapshot('too', 'a', 'c', 'd'));
+    h.teammatePush('main', JOURNAL, journal('0000_init', '0001_theirs', '0002_theirs_too'));
+    // The generators fail for a reason that is not a carry: no migration is named by the failure.
+    const updates = createBaseUpdates({
+      ...h.ctx,
+      generators: { regenerate: () => Promise.reject(new Error('drizzle-kit is not installed')) },
+    });
+
+    const merged = await updates.beforeGate(batch.id, signal);
+
+    if (merged.kind !== 'uncarried') throw new Error(`uncarried expected, got ${merged.kind}`);
+    expect(merged.unreadable).toBe(true);
+    expect(merged.note).toContain('drizzle-kit is not installed');
+    expect(merged.note).not.toMatch(/to re-create/);
+    expect(merged.note).not.toContain('under the same name');
+    const cards = h.cards();
+    expect(cards.length).toBeGreaterThan(0);
+    for (const card of cards) {
+      expect(card.body).not.toMatch(/to re-create/);
+      expect(card.body).not.toContain('under the same name');
+    }
   });
 
   it('keeps refusing while one migration is back and another is not, and names only that one', async () => {

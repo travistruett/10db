@@ -26,6 +26,7 @@ export type GhMethod =
   | 'prInMergeQueue'
   | 'jobLog'
   | 'rerunFailed'
+  | 'jobHadNoRunner'
   | 'prCreate'
   | 'prAutoMerge'
   | 'prMerge';
@@ -65,6 +66,8 @@ export class FakeGh implements Gh {
   readonly reruns: string[] = [];
   /** One error per Actions run id, thrown by the next rerun of that run only. */
   readonly failRerunOf = new Map<string, GhError>();
+  /** The Actions jobs GitHub cancelled because no hosted runner picked them up (no runner, no steps). */
+  readonly noRunnerJobs = new Set<string>();
   private readonly required = new Map<string, RequiredChecks>();
   private readonly jobLogs = new Map<string, JobLog>();
   private readonly byRef = new Map<
@@ -169,6 +172,10 @@ export class FakeGh implements Gh {
       input,
       () => this.jobLogs.get(input.jobId) ?? ({ kind: 'not_yet' } as const),
     );
+  }
+
+  jobHadNoRunner(input: { readonly repo: string; readonly jobId: string }): Promise<boolean> {
+    return this.call('jobHadNoRunner', input, () => this.noRunnerJobs.has(input.jobId));
   }
 
   rerunFailed(input: { readonly repo: string; readonly runId: string }): Promise<void> {

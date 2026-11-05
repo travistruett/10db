@@ -42,9 +42,14 @@ migrations after the base's, in their journal order, instead of one plain run of
   with anything. Nothing then counts as carried: every gate answers `uncarried`, marked `unreadable`, and never clears
   the notice, because a journal can't satisfy a list that can't be read. A later merge that loses another migration
   leaves the notice as it stands: rewriting it would list only the new loss and let the next gate clear the rest.
-  Abandoning the batch is the one thing that ends this, so the gate's note and the session's brief say that in place
-  of the notice's text, which may be cut short or miss a later loss and whose steps can't help. The shipping gate's
-  card offers Abandon alone, not Retry.
+  Only the builder ends this, so the gate's note and the session's brief say that in place of the notice's text,
+  which may be cut short or miss a later loss and whose steps can't help. The builder's way out is a deliberate
+  answer, never a gate's: the regenerate card (a gate's) and the shipping gate's card carry one option, "Clear the
+  notice", which says the builder checked that the journal holds every migration the merge lost.
+  `createLostMigrationsAnswers` acts on it only while the notice's list still can't be read (a list that reads is
+  checked against the journal by the next gate, and the answer is refused), removes the notice and the regenerate
+  card, and the next gate runs. A later merge that loses a migration writes a fresh, readable notice. Abandoning the
+  batch also ends it. The shipping gate's card offers Retry beside the answer, since a Retry passes once it is given.
 - **Who does what with it:** a task's verify gate counts it as a failed gate, so a fix session re-creates the
   migration, told how by the note and the notice in its brief. The shipping gate fails the batch
   (`BatchFailure.BaseConflict`, whose flag card carries the detail, with no second regenerate card), and a Retry reads

@@ -647,3 +647,106 @@ describe('Gh.prRequiredChecks, Gh.jobLog and Gh.rerunFailed', () => {
     });
   });
 });
+
+describe('Gh.jobHadNoRunner', () => {
+  const NOT_ACQUIRED =
+    'The job was not acquired by Runner of type hosted even after multiple attempts';
+  const NOTICE =
+    'Due to capacity constraints, jobs targeting macOS arm64 runners may experience longer queue times.';
+  const cancelledJob = {
+    status: 'completed',
+    conclusion: 'cancelled',
+    runner_id: null,
+    runner_name: null,
+    steps: [],
+  };
+
+  /** gh at the two endpoints the read uses: the job, then its check run's annotations. */
+  const api = (job: unknown, annotations: unknown) => {
+    const seen: (readonly string[])[] = [];
+    const exec: GhExec = (args) => {
+      seen.push(args);
+      const path = args[1] ?? '';
+      const body = path.endsWith('/annotations') ? annotations : job;
+      return Promise.resolve(out(0, JSON.stringify(body)));
+    };
+    return { gh: createGh(exec), seen };
+  };
+
+  it('is true for a cancelled job with no runner and no steps whose annotation says it was not acquired', async () => {
+    const { gh: client, seen } = api(cancelledJob, [
+      { annotation_level: 'failure', message: NOT_ACQUIRED },
+      { annotation_level: 'notice', message: NOTICE },
+    ]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+    expect(seen).toEqual([
+      ['api', `repos/${REPO}/actions/jobs/2222`],
+      ['api', `repos/${REPO}/check-runs/2222/annotations`],
+    ]);
+  });
+
+  it('is true without the capacity notice', async () => {
+    const { gh: client } = api(cancelledJob, [{ message: NOT_ACQUIRED }]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+  });
+
+  it("is true for GitHub's empty runner values (runner_id 0, runner_name '')", async () => {
+    const { gh: client } = api(
+      { ...cancelledJob, runner_id: 0, runner_name: '', runner_group_id: 0, runner_group_name: '' },
+      [{ annotation_level: 'failure', message: NOT_ACQUIRED }],
+    );
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+  });
+
+  it('is true when the runner fields are missing', async () => {
+    const { gh: client } = api({ status: 'completed', conclusion: 'cancelled', steps: [] }, [
+      { message: NOT_ACQUIRED },
+    ]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(true);
+  });
+
+  it('is false for a job a person cancelled (no such annotation)', async () => {
+    const { gh: client } = api(cancelledJob, [{ message: 'The run was canceled by @octocat.' }]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+  });
+
+  it('is false for a job that ran steps, whatever its annotations say', async () => {
+    const { gh: client, seen } = api(
+      { ...cancelledJob, steps: [{ name: 'Set up job', conclusion: 'success' }] },
+      [{ message: NOT_ACQUIRED }],
+    );
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+    expect(seen).toHaveLength(1);
+  });
+
+  it('is false for a job that had a runner', async () => {
+    const { gh: client } = api(
+      { ...cancelledJob, runner_id: 12, runner_name: 'GitHub Actions 12' },
+      [{ message: NOT_ACQUIRED }],
+    );
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+    const named = api({ ...cancelledJob, runner_id: 0, runner_name: 'GitHub Actions 12' }, [
+      { message: NOT_ACQUIRED },
+    ]);
+    await expect(named.gh.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+  });
+
+  it('is false for a job that is not cancelled', async () => {
+    const { gh: client } = api({ ...cancelledJob, conclusion: 'failure' }, [
+      { message: NOT_ACQUIRED },
+    ]);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL)).resolves.toBe(false);
+  });
+
+  it('throws for a job id that is no number, and for output it cannot read', async () => {
+    const { gh: client, seen } = api(cancelledJob, []);
+    await expect(client.jobHadNoRunner({ repo: REPO, jobId: '--x' }, CALL)).rejects.toMatchObject({
+      kind: 'failed',
+    });
+    expect(seen).toEqual([]);
+    const garbled = api('nonsense', []);
+    await expect(
+      garbled.gh.jobHadNoRunner({ repo: REPO, jobId: '2222' }, CALL),
+    ).rejects.toMatchObject({ kind: 'failed' });
+  });
+});
