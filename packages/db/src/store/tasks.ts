@@ -44,7 +44,6 @@ import { getBoardColumn, listBoardColumns } from './board-columns';
 import { getFlow } from './flows';
 import { getProposal } from './knowledge';
 import { getProject } from './projects';
-import { detachShapeQuestionsOfTask } from './shape-state';
 import type { DbReader, WriteContext } from './store';
 import { transitionWorkstream } from './workstreams';
 
@@ -894,6 +893,23 @@ function refuseWhileOpenDependents(
       dependents.map((d) => d.title),
       how,
     );
+}
+
+/**
+ * Detaches the questions stored under a task that is being cancelled, so none points at a dead task.
+ * Each stays stored and linked, now about nothing. Every route that sets a task to Cancelled goes
+ * through `retireTask`, so through this: a plan removal (a converted remove_task), the Board's
+ * Remove, Close of a failed or finished task, Cancel task on a refused start card, and Remove Draft
+ * Goal. Remove Draft Goal finds nothing here: `releaseShapeLinksOfGoal` has already deleted the
+ * goal's questions before its tasks are cancelled, and must run first, because a question detached
+ * here would hide from it.
+ */
+function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): void {
+  ctx.tx
+    .update(schema.shapeQuestions)
+    .set({ taskId: null })
+    .where(eq(schema.shapeQuestions.taskId, taskId))
+    .run();
 }
 
 /**

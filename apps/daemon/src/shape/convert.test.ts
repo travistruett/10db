@@ -10,7 +10,6 @@ import {
 } from '@10db/contracts';
 import {
   cancelTask,
-  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getPrinciple,
@@ -870,7 +869,6 @@ describe('additions, changes and removals', () => {
       const task = taskTitled('Task seats');
       write((ctx) => {
         cancelTask(ctx, task.id);
-        detachShapeQuestionsOfTask(ctx, task.id);
       });
       return task;
     };
@@ -898,7 +896,6 @@ describe('additions, changes and removals', () => {
       });
       write((ctx) => {
         cancelTask(ctx, task.id);
-        detachShapeQuestionsOfTask(ctx, task.id);
       });
       const out = convert('who-pays');
       expect(out.ok ? [] : out.errors).toEqual([
@@ -915,7 +912,6 @@ describe('additions, changes and removals', () => {
       const task = taskTitled('Task g1');
       write((ctx) => {
         cancelTask(ctx, task.id);
-        detachShapeQuestionsOfTask(ctx, task.id);
       });
       return task;
     };

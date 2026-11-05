@@ -433,23 +433,6 @@ export function deleteShapeLinksOf(ctx: WriteContext, proposalId: ShapeProposalI
 }
 
 /**
- * Detaches the questions stored under a task that is being cancelled, so none points at a dead task.
- * Each stays stored and linked, now about nothing. Every route that sets a task to Cancelled goes
- * through it (`retireTask` in tasks.ts): a plan removal (a converted remove_task), the Board's
- * Remove, Close of a failed or finished task, Cancel task on a refused start card, and Remove Draft
- * Goal. Remove Draft Goal finds nothing here: `releaseShapeLinksOfGoal` has already deleted the
- * goal's questions before its tasks are cancelled, and must run first, because a question detached
- * here would hide from it.
- */
-export function detachShapeQuestionsOfTask(ctx: WriteContext, taskId: TaskId): void {
-  ctx.tx
-    .update(schema.shapeQuestions)
-    .set({ taskId: null })
-    .where(eq(schema.shapeQuestions.taskId, taskId))
-    .run();
-}
-
-/**
  * Takes back the questions a task removal detached from the tasks of a goal Remove Draft Goal is
  * about to remove: each is deleted with its link and its proposal is pending again, so it converts
  * anew with the goal, as for a question still attached. A detached question has neither a goal nor a
