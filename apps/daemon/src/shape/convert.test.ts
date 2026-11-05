@@ -10,7 +10,6 @@ import {
 } from '@10db/contracts';
 import {
   cancelTask,
-  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getPrinciple,
@@ -870,7 +869,6 @@ describe('additions, changes and removals', () => {
       const task = taskTitled('Task seats');
       write((ctx) => {
         cancelTask(ctx, task.id);
-        detachShapeQuestionsOfTask(ctx, task.id);
       });
       return task;
     };
@@ -898,13 +896,53 @@ describe('additions, changes and removals', () => {
       });
       write((ctx) => {
         cancelTask(ctx, task.id);
-        detachShapeQuestionsOfTask(ctx, task.id);
       });
       const out = convert('who-pays');
       expect(out.ok ? [] : out.errors).toEqual([
         expect.stringMatching(/who-pays is about seats, which was removed/),
       ]);
       expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
+    });
+
+    /** Goal g's task g1, converted and cancelled by the Remove action, with no remove_task proposal. */
+    const removedGoalTaskByAction = () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const task = taskTitled('Task g1');
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+      });
+      return task;
+    };
+
+    it('takes a question about the key a selected pending task reuses, on the new task, not the cancelled one', () => {
+      const removed = removedGoalTaskByAction();
+      const m = c.say('Bring it back, and who pays?');
+      propose({ looseTasks: [loose(m, 'g1')], questions: [whoPays(m, 'g1')] });
+
+      converted('g1', 'who-pays');
+      const [stored] = listShapeQuestions(c.store.db, c.shape.id);
+      const made = must(
+        tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+        'the new task',
+      );
+      expect(stored).toMatchObject({ key: 'who-pays', taskId: made.id });
+      expect(stored?.taskId).not.toBe(removed.id);
+      expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
+    });
+
+    it('takes a question about the key a goal reuses, on the goal, not the cancelled task', () => {
+      const removed = removedGoalTaskByAction();
+      const m = c.say('A goal for it, and who pays?');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])], questions: [whoPays(m, 'g1')] });
+
+      const out = converted('g1', 'who-pays');
+      const goalId = must(out.results.find((r) => r.key === 'g1')?.goalId, 'the goal');
+      const stored = listShapeQuestions(c.store.db, c.shape.id);
+      expect(stored).toMatchObject([{ key: 'who-pays', goalId, taskId: null }]);
+      expect(stored.some((q) => q.taskId === removed.id)).toBe(false);
+      expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
     });
   });
 
@@ -1151,6 +1189,82 @@ describe('additions, changes and removals', () => {
       });
       expect(refusals(c.say('Something after it.'))).toEqual(removedKeyRefusals);
     });
+  });
+
+  it('converts a goal whose task takes a removed task’s key, as a new task', () => {
+    const removed = removedGoalTask();
+    const m = c.say('A goal that reuses g1.');
+    propose({ goals: [goalOf(m, 'h', ['g1', 'g2'])] });
+
+    const out = converted('h');
+    const made = tasks().filter((t) => t.title === 'Task g1' && t.id !== removed.id);
+    expect(made).toHaveLength(1);
+    expect(out.results.find((r) => r.key === 'h')?.taskIds).toContain(made[0]?.id);
+    expect(getTask(c.store.db, removed.id).status).toBe(TaskStatus.Cancelled);
+  });
+
+  describe('a goal whose task takes the key of a converted task that is still live', () => {
+    it('is refused by name at propose when a converted loose task holds the key', () => {
+      const m = c.say('A task.');
+      propose({ looseTasks: [loose(m, 'a')] });
+      converted('a');
+      const m2 = c.say('A goal that reuses a.');
+      expect(() => {
+        propose({ goals: [goalOf(m2, 'h', ['a'])] });
+      }).toThrow(/Goal h, task 1, key: a is a task this conversation already converted/);
+      expect(tasks().filter((t) => t.title === 'Task a')).toHaveLength(1);
+    });
+
+    it('is refused by name at propose when a converted goal’s task holds the key', () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const m2 = c.say('Another goal that reuses g1.');
+      expect(() => {
+        propose({ goals: [goalOf(m2, 'h', ['g1'])] });
+      }).toThrow(/Goal h, task 1, key: g1 is a task this conversation already converted/);
+    });
+
+    it('is refused by name at Convert, not thrown, while the removal that frees the key is not selected', () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const old = taskTitled('Task g1');
+      const m2 = c.say('Drop g1, and a goal that reuses it.');
+      propose({
+        goals: [goalOf(m2, 'h', ['g1'])],
+        removals: [{ taskId: old.id, why: 'Not needed', sourceMessageIds: [m2] }],
+      });
+
+      const out = convert('h');
+      expect(out.ok ? [] : out.errors).toEqual([
+        expect.stringMatching(/h: its task g1 takes the key of a task this conversation converted/),
+      ]);
+      expect(tasks().filter((t) => t.title === 'Task g1')).toEqual([
+        expect.objectContaining({ id: old.id }),
+      ]);
+
+      converted('h', `remove:${old.id}`);
+      const made = tasks().filter((t) => t.title === 'Task g1' && t.id !== old.id);
+      expect(made).toHaveLength(1);
+      expect(getTask(c.store.db, old.id).status).toBe(TaskStatus.Cancelled);
+    });
+  });
+
+  it('resolves a task that waits on a removed key a goal took again to the goal’s new task', () => {
+    const removed = removedGoalTask();
+    const m = c.say('A goal that reuses g1, and a task after it.');
+    propose({
+      goals: [goalOf(m, 'h', ['g1'])],
+      looseTasks: [loose(m, 'after', { dependsOn: ['g1'] })],
+    });
+
+    converted('h', 'after');
+    const g1 = must(
+      tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+      'the new task',
+    );
+    expect(taskTitled('Task after').dependsOn).toEqual([g1.id]);
   });
 
   it('puts a question on a goal that took a removed task’s key, not on the cancelled task', () => {

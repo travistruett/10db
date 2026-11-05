@@ -13,7 +13,6 @@ import {
 } from '@10db/contracts';
 import {
   cancelTask,
-  detachShapeQuestionsOfTask,
   findRecords,
   getDecision,
   getGoal,
@@ -528,7 +527,6 @@ describe('Remove Draft Goal', () => {
         (taskId: TaskId) => {
           write((ctx) => {
             cancelTask(ctx, taskId);
-            detachShapeQuestionsOfTask(ctx, taskId);
           });
         },
       ],

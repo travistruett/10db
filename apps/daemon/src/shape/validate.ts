@@ -39,7 +39,7 @@ export interface PlanWorld {
   readonly citable: ReadonlySet<ShapeMessageId>;
   /** Tasks this conversation already converted, by the key they were proposed under. */
   readonly convertedTasks: ReadonlyMap<string, TaskId>;
-  /** Keys in `convertedTasks` whose task a converted removal cancelled. */
+  /** Keys in `convertedTasks` whose task is cancelled, by a converted remove_task or by the single-task Remove action. */
   readonly removedTasks: ReadonlySet<string>;
   readonly convertedGoals: ReadonlySet<GoalId>;
   /** Why this task cannot be a basis, or null when it is a finished task of the project. */
@@ -178,6 +178,25 @@ export function validatePlan(draft: PlanDraft, world: PlanWorld): string[] {
       else if (!knownTask(key)) errors.push(`${label}, ${field}: no proposal has the key ${key}`);
     }
   };
+
+  // A converted row the draft restates never reaches here, so a task key a live converted task
+  // holds is a second task under it: only a removed task's key may be taken again.
+  const takenKey = (label: string, key: string): void => {
+    if (world.convertedTasks.has(key) && !removed.has(key))
+      errors.push(
+        `${label}, key: ${key} is a task this conversation already converted; use another key`,
+      );
+  };
+  for (const goal of draft.goals)
+    goal.tasks.forEach((t, i) => {
+      takenKey(`Goal ${goal.key}, task ${String(i + 1)}`, t.key);
+    });
+  draft.looseTasks.forEach((t, i) => {
+    takenKey(`Loose task ${String(i + 1)}`, t.key);
+  });
+  draft.additions.forEach((t, i) => {
+    takenKey(`Addition ${String(i + 1)}`, t.key);
+  });
 
   // Goals: the adopt validator on each, then what crosses efforts.
   for (const goal of draft.goals) {

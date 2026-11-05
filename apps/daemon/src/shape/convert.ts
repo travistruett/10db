@@ -231,13 +231,23 @@ export function convertProposals(
       }
     }
   };
+  // Only a removed task's key may be taken again; a live one would get a second task under it.
+  const takenKey = (row: ShapeProposalRow, key: string): void => {
+    if (world.convertedTasks.has(key) && !removed.has(key))
+      errors.push(
+        `${row.key}: ${row.key === key ? 'it' : `its task ${key}`} takes the key of a task this conversation converted, which is still live; select its removal too, or propose the task under another key`,
+      );
+  };
   for (const row of efforts) {
     if (row.kind === 'goal')
-      for (const t of ShapeProposalBody.goal.parse(row.body).tasks)
+      for (const t of ShapeProposalBody.goal.parse(row.body).tasks) {
         needs(row, t.title, t.dependsOnOutside);
+        takenKey(row, t.key);
+      }
     else {
       const task = ShapeProposalBody.task.parse(row.body);
       needs(row, task.title, task.dependsOn);
+      takenKey(row, row.key);
     }
   }
 
@@ -359,10 +369,16 @@ export function convertProposals(
           .filter((t) => t.dependsOnOutside.length > 0)
           .map((t) => [t.key, t.dependsOnOutside]),
       );
+      // A goal task may take a removed task's key, which `taskIds` still maps to the cancelled task;
+      // that key is the brief's own, not an outside one. A live key stays outside, so the store
+      // still refuses a collision the check above missed rather than writing a second task.
+      const briefKeys = new Set(goal.tasks.map((t) => t.key));
       const written = insertGoal(ctx, project.id, {
         brief: goalBrief(goal),
         placeTask: (areas) => proposePlacement(project, { areas, riskTags: [] }),
-        outsideKeys: new Map(taskIds),
+        outsideKeys: new Map(
+          [...taskIds].filter(([key]) => !(briefKeys.has(key) && removed.has(key))),
+        ),
         dependsOnOutside: outside,
       });
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: row.key, goalId: written.goal.id });

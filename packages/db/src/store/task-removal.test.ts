@@ -7,6 +7,9 @@ import {
   TaskStatus,
   WorkstreamState as S,
   NotFoundError,
+  ShapeOrigin,
+  ShapeProposalKind,
+  ShapeProposalState,
   mintId,
   type TaskId,
   type WorkstreamState,
@@ -39,6 +42,14 @@ import {
   setTaskStatus,
 } from './tasks';
 import { insertSession } from './sessions';
+import {
+  insertShapeLink,
+  insertShapeProposal,
+  insertShapeQuestion,
+  listShapeLinks,
+  listShapeQuestions,
+} from './shape-state';
+import { insertShape } from './shapes';
 import { createTestStore, seedProject } from './test-support';
 import { insertWorkstream, listWorkstreams, transitionWorkstream } from './workstreams';
 
@@ -57,6 +68,51 @@ function seedTask(
   return store.write((ctx) =>
     insertTask(ctx, projectId, { title, acceptanceCriteria: ['x'], areas: ['api'], dependsOn }),
   ).value;
+}
+
+/** Stores an accepted, linked question about `taskId`, as Convert leaves one. */
+function seedQuestionOf(projectId: ReturnType<typeof seedProject>['id'], taskId: TaskId) {
+  return store.write((ctx) => {
+    const shape = insertShape(ctx, projectId, { title: 'Density', origin: ShapeOrigin.App });
+    const proposal = insertShapeProposal(ctx, {
+      shapeId: shape.id,
+      key: 'who-pays',
+      kind: ShapeProposalKind.Question,
+      state: ShapeProposalState.Accepted,
+      round: 1,
+      createdRound: 1,
+      pinned: [],
+      body: {},
+      taskHashes: {},
+      sourceMessageIds: [],
+    });
+    const question = insertShapeQuestion(ctx, {
+      shapeId: shape.id,
+      proposalId: proposal.id,
+      key: 'who-pays',
+      text: 'Who pays?',
+      forWho: 'finance',
+      sourceMessageIds: [],
+      taskId,
+    });
+    insertShapeLink(ctx, {
+      shapeId: shape.id,
+      proposalId: proposal.id,
+      key: 'who-pays',
+      questionId: question.id,
+    });
+    return { shapeId: shape.id, questionId: question.id };
+  }).value;
+}
+
+/** The question stays stored and linked, now about no task. */
+function expectDetached(seeded: ReturnType<typeof seedQuestionOf>) {
+  expect(listShapeQuestions(store.db, seeded.shapeId)).toMatchObject([
+    { id: seeded.questionId, taskId: null },
+  ]);
+  expect(listShapeLinks(store.db, seeded.shapeId).map((l) => l.questionId)).toEqual([
+    seeded.questionId,
+  ]);
 }
 
 /** Walks a workstream along the state machine to `to`. */
@@ -211,6 +267,27 @@ describe('cancelTask', () => {
 });
 
 describe('cancelRefusedStartTask', () => {
+  it('detaches a question stored under the task it cancels, keeping the question and its link', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
+    const seeded = seedQuestionOf(project.id, task.id);
+    store.write((ctx) => cancelRefusedStartTask(ctx, task.id));
+    expectDetached(seeded);
+  });
+
+  it('detaches a question when it closes a task whose latest run failed', () => {
+    const project = seedProject(store);
+    const task = seedTask(project.id);
+    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    for (const to of PATHS['FAILED'] ?? [])
+      store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
+    const seeded = seedQuestionOf(project.id, task.id);
+    store.write((ctx) => cancelRefusedStartTask(ctx, task.id));
+    expectDetached(seeded);
+  });
+
   it('removes a task whose only run was cancelled before it had a session, as a refused cut leaves it', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
@@ -327,6 +404,14 @@ describe('closeTask', () => {
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     return { task, ws };
   }
+
+  it('detaches a question stored under the task it closes, keeping the question and its link', () => {
+    const project = seedProject(store);
+    const { task } = failedTask(project.id);
+    const seeded = seedQuestionOf(project.id, task.id);
+    store.write((ctx) => closeTask(ctx, task.id));
+    expectDetached(seeded);
+  });
 
   it('closes a task whose latest run failed: cancelled, off the list, run history kept', () => {
     const project = seedProject(store);
