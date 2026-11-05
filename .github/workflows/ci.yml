@@ -30,7 +30,7 @@ concurrency:
 jobs:
   gate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     permissions:
       contents: read
     # Microsoft's Playwright image for the version pnpm-lock.yaml pins ships WebKit and its system
