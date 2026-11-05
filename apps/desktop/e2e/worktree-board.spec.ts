@@ -209,6 +209,11 @@ test.describe('the Board with several open batches', () => {
     await request.dispose();
   });
 
+  // A test can end with the app's /system read still in the route; drop it rather than fail.
+  test.afterEach(async ({ page }) => {
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  });
+
   async function openBoard(page: Page, size: { width: number; height: number }): Promise<void> {
     await page.setViewportSize(size);
     await claudeIsInstalled(page);

@@ -54,7 +54,11 @@ export function GoalRow({ title, line, news, color, expanded, onToggle, children
         py="xs"
         aria-expanded={expanded}
         aria-controls={regionId}
-        onClick={onToggle}
+        onClick={() => {
+          onToggle();
+          // macOS WebKit, the app's window, gives a clicked button no focus, and Escape needs it here.
+          button.current?.focus();
+        }}
         style={{ borderRadius: 'var(--mantine-radius-md)' }}
       >
         <Group gap="sm" wrap="nowrap" align="baseline">
