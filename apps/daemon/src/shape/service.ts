@@ -434,8 +434,11 @@ type TurnEnd =
 interface Live {
   readonly handle: ShapeSessionHandle;
   readonly sessionId: SessionId;
-  /** Ends what the session was prepared with: its cards are withdrawn and its sandbox removed. */
-  release(): void;
+  /**
+   * Ends what the session was prepared with: its cards are withdrawn, what its commands left running is
+   * stopped and its sandbox removed. Runs once, however often it is called.
+   */
+  release(): Promise<void>;
   /** Watches what runs under its Claude Code process, whose pid its start reports. */
   track(pid: number): void;
   /** When the AWS credentials its servers were given expire (ISO), or null. */
@@ -651,13 +654,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
         break;
       case 'ended':
-        try {
-          state.write((ctx) => {
-            endSession(ctx, live.sessionId, live.endReason ?? event.reason);
-          });
-        } finally {
-          live.release();
-        }
+        // What it was prepared with goes once its events end (consume), which closing waits for.
+        state.write((ctx) => {
+          endSession(ctx, live.sessionId, live.endReason ?? event.reason);
+        });
         if (running) rt.live = null;
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
@@ -675,6 +675,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       for await (const event of live.handle.events) onEvent(shapeId, rt, live, event);
     } catch (error) {
       log.error({ err: error, shapeId }, 'shape session events failed');
+    } finally {
+      // Its sandbox's sealed files can hold AWS credentials: closing (and the daemon's stop) waits for them to go.
+      await live.release();
     }
   };
 
@@ -954,16 +957,22 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       throw error;
     }
     const ready = prepared;
-    const release = (): void => {
-      ending.abort();
-      ready?.release().catch((error: unknown) => {
-        log.warn({ err: error, shapeId }, 'a shape session’s sandbox could not be removed');
-      });
+    let released: Promise<void> | null = null;
+    const release = (): Promise<void> => {
+      released ??= (async () => {
+        ending.abort();
+        try {
+          await ready?.release();
+        } catch (error) {
+          log.warn({ err: error, shapeId }, 'a shape session’s sandbox could not be removed');
+        }
+      })();
+      return released;
     };
     // The service closed, or the builder pressed Stop, while the session was prepared: neither could
     // reach a session that wasn't live yet, so none starts now.
     if (isClosed() || rt.interrupted) {
-      release();
+      await release();
       state.write((ctx) => {
         endSession(ctx, row.id, 'start_failed');
       });
@@ -1121,7 +1130,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       state.write((ctx) => {
         endSession(ctx, row.id, 'start_failed');
       });
-      release();
+      await release();
       throw error;
     }
     const live: Live = {

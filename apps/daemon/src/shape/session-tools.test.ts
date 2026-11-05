@@ -74,9 +74,10 @@ function preparing(credentialsExpireAt: string | null = null) {
       trackProcesses: (pid) => {
         tracked.push(pid);
       },
-      release: () => {
+      // Removing a sandbox takes a while: its processes are given time to end.
+      release: async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
         disposed += 1;
-        return Promise.resolve();
       },
     });
   };
