@@ -906,6 +906,48 @@ describe('additions, changes and removals', () => {
       ]);
       expect(listShapeQuestions(c.store.db, c.shape.id)).toEqual([]);
     });
+
+    /** Goal g's task g1, converted and cancelled by the Remove action, with no remove_task proposal. */
+    const removedGoalTaskByAction = () => {
+      const m = c.say();
+      propose({ goals: [goalOf(m, 'g', ['g1'])] });
+      converted('g');
+      const task = taskTitled('Task g1');
+      write((ctx) => {
+        cancelTask(ctx, task.id);
+        detachShapeQuestionsOfTask(ctx, task.id);
+      });
+      return task;
+    };
+
+    it('takes a question about the key a selected pending task reuses, on the new task, not the cancelled one', () => {
+      const removed = removedGoalTaskByAction();
+      const m = c.say('Bring it back, and who pays?');
+      propose({ looseTasks: [loose(m, 'g1')], questions: [whoPays(m, 'g1')] });
+
+      converted('g1', 'who-pays');
+      const [stored] = listShapeQuestions(c.store.db, c.shape.id);
+      const made = must(
+        tasks().find((t) => t.title === 'Task g1' && t.id !== removed.id),
+        'the new task',
+      );
+      expect(stored).toMatchObject({ key: 'who-pays', taskId: made.id });
+      expect(stored?.taskId).not.toBe(removed.id);
+      expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
+    });
+
+    it('takes a question about the key a goal reuses, on the goal, not the cancelled task', () => {
+      const removed = removedGoalTaskByAction();
+      const m = c.say('A goal for it, and who pays?');
+      propose({ goals: [goalOf(m, 'g1', ['g2'])], questions: [whoPays(m, 'g1')] });
+
+      const out = converted('g1', 'who-pays');
+      const goalId = must(out.results.find((r) => r.key === 'g1')?.goalId, 'the goal');
+      const stored = listShapeQuestions(c.store.db, c.shape.id);
+      expect(stored).toMatchObject([{ key: 'who-pays', goalId, taskId: null }]);
+      expect(stored.some((q) => q.taskId === removed.id)).toBe(false);
+      expect(rowOf('who-pays').state).toBe(ShapeProposalState.Accepted);
+    });
   });
 
   const whoPays = (m: string, about: string) => ({

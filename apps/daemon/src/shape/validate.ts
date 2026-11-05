@@ -39,7 +39,7 @@ export interface PlanWorld {
   readonly citable: ReadonlySet<ShapeMessageId>;
   /** Tasks this conversation already converted, by the key they were proposed under. */
   readonly convertedTasks: ReadonlyMap<string, TaskId>;
-  /** Keys in `convertedTasks` whose task a converted removal cancelled. */
+  /** Keys in `convertedTasks` whose task is cancelled, by a converted remove_task or by the single-task Remove action. */
   readonly removedTasks: ReadonlySet<string>;
   readonly convertedGoals: ReadonlySet<GoalId>;
   /** Why this task cannot be a basis, or null when it is a finished task of the project. */
