@@ -723,8 +723,9 @@ project's code and talks with the builder; the builder accepts its plan before a
   `disown` and `dangerouslyDisableSandbox` are refused too, and agents run in the foreground. A command naming a
   protected path is carded and then refused by the kernel. With no sandbox it has no `Bash`.
 - **Project MCP servers.** It gets the project's approved servers as a lane does (§4.6), expanded from the project
-  env and never the session's, which holds the account's key; a remote one on this Mac or its network is left
-  out. Only the session calls them, and each call is carded unless the builder allowed that tool always; every
+  env and never the session's, which holds the account's key; a remote one on this Mac or its network, by name
+  or by the addresses its name resolves to when the session starts, is left out (a name that rebinds later is
+  not caught: Claude Code makes the connection). Only the session calls them, and each call is carded unless the builder allowed that tool always; every
   call shows in the conversation.
 - **Who reaches the network.** The session itself now does, which the researcher split used to rule out. Its
   commands reach only the project's allowed hosts and a server only its approved ones, every call carded or shown,

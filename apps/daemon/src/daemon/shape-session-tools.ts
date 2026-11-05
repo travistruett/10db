@@ -1,3 +1,5 @@
+import { lookup as dnsLookup } from 'node:dns/promises';
+import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
@@ -22,6 +24,45 @@ import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '
 const INSTEAD = 'Work without them, and tell the builder when the plan needs one.';
 
 const NO_MCP: ProjectMcp = { servers: {}, warnings: [], pending: [], denied: [], failures: [] };
+
+/** Addresses on this Mac or its network: loopback, private, link-local, shared and unique-local ones. */
+const PRIVATE_ADDRESSES = (() => {
+  const list = new BlockList();
+  for (const [net, prefix] of [
+    ['0.0.0.0', 8],
+    ['10.0.0.0', 8],
+    ['100.64.0.0', 10],
+    ['127.0.0.0', 8],
+    ['169.254.0.0', 16],
+    ['172.16.0.0', 12],
+    ['192.168.0.0', 16],
+  ] as const)
+    list.addSubnet(net, prefix, 'ipv4');
+  for (const [net, prefix] of [
+    ['::', 128],
+    ['::1', 128],
+    ['fc00::', 7],
+    ['fe80::', 10],
+  ] as const)
+    list.addSubnet(net, prefix, 'ipv6');
+  return list;
+})();
+
+/** Whether an address is on this Mac or its network, an IPv4 address mapped into IPv6 included. */
+function isPrivateAddress(address: string): boolean {
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
+  if (mapped !== undefined) return PRIVATE_ADDRESSES.check(mapped, 'ipv4');
+  return PRIVATE_ADDRESSES.check(address, isIPv6(address) ? 'ipv6' : 'ipv4');
+}
+
+/** Every address the system resolves a host name to; none when it can't. */
+async function systemLookup(host: string): Promise<readonly string[]> {
+  try {
+    return (await dnsLookup(host, { all: true })).map((a) => a.address);
+  } catch {
+    return [];
+  }
+}
 
 /** The earliest expiry among the AWS credentials handed to the project's servers, or null. */
 function earliestExpiry(mcp: ProjectMcp): string | null {
@@ -51,6 +92,8 @@ export function createShapePreparer(deps: {
   readonly protectedPaths: readonly ProtectedPath[];
   /** The login env with every billing switch and account secret stripped, as a lane's servers get. */
   readonly projectEnv: () => Readonly<Record<string, string>>;
+  /** Resolves a remote server's host to its addresses; the system's resolver by default. */
+  readonly lookup?: (host: string) => Promise<readonly string[]>;
   readonly exportAwsCredentials: AwsCredentialsExporter;
 }): (input: ShapePrepareInput) => Promise<ShapePrepared> {
   const { state, inbox, logger } = deps;
@@ -91,12 +134,20 @@ export function createShapePreparer(deps: {
     const { mcp: projectMcp, problem } = await readServers(project);
     const servers = splitProjectMcp(projectMcp.servers);
     // A remote server is a connection Claude Code makes outside every sandbox: one on this Mac or its
-    // network could reach 10db's own window, so a conversation gets only those on the public web.
-    const remote = Object.fromEntries(
-      Object.entries(servers.remote).filter(
-        ([, server]) => privateHostProblem(server.url) === null,
-      ),
+    // network could reach 10db's own window, so a conversation gets only those on the public web, by
+    // name and by every address the name resolves to now. A name that resolves elsewhere later is not
+    // caught: Claude Code makes the connection, so the address can't be pinned.
+    const lookup = deps.lookup ?? systemLookup;
+    const publicRemote = await Promise.all(
+      Object.entries(servers.remote).map(async ([name, server]) => {
+        if (privateHostProblem(server.url) !== null) return null;
+        const addresses = await lookup(new URL(server.url).hostname);
+        return addresses.length > 0 && !addresses.some(isPrivateAddress)
+          ? ([name, server] as const)
+          : null;
+      }),
     );
+    const remote = Object.fromEntries(publicRemote.filter((entry) => entry !== null));
     const offMac = Object.keys(servers.remote).filter((name) => !(name in remote));
     let session: LaneSession;
     try {
@@ -149,7 +200,10 @@ export function createShapePreparer(deps: {
           failures: [
             ...projectMcp.failures,
             ...sandboxed.mcpFailures,
-            ...offMac.map((name) => ({ name, message: 'it is on this Mac or its network' })),
+            ...offMac.map((name) => ({
+              name,
+              message: 'it is on this Mac or its network, or its name does not resolve',
+            })),
           ],
         },
         [],

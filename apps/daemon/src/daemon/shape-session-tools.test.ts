@@ -88,7 +88,16 @@ function conversation(
   return { projectId: project.id, shapeId: shape.id };
 }
 
-function preparer(laneSandbox: LaneSandbox = realSandbox()) {
+/** DNS as the tests see it: every name public, but those listed. */
+const lookupWith =
+  (names: Readonly<Record<string, readonly string[]>> = {}) =>
+  (host: string): Promise<readonly string[]> =>
+    Promise.resolve(names[host] ?? ['93.184.216.34']);
+
+function preparer(
+  laneSandbox: LaneSandbox = realSandbox(),
+  lookup: (host: string) => Promise<readonly string[]> = lookupWith(),
+) {
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const profiles: string[] = [];
   const prepare = createShapePreparer({
@@ -100,6 +109,7 @@ function preparer(laneSandbox: LaneSandbox = realSandbox()) {
     protectedPaths: [],
     // The project env: the login shell's, with every billing switch and account secret stripped.
     projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: join(root, 'home') }),
+    lookup,
     exportAwsCredentials: (profile) => {
       profiles.push(profile);
       return Promise.resolve({
@@ -217,6 +227,33 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
   });
+
+  it.each([
+    ['resolves to this Mac', ['127.0.0.1']],
+    ['resolves to the builder’s network', ['192.168.1.20']],
+    ['resolves to a link-local address', ['169.254.169.254']],
+    ['resolves to a private IPv6 address', ['fd00::1']],
+    ['resolves to one public and one private address', ['93.184.216.34', '10.0.0.5']],
+    ['does not resolve', []],
+  ] as const)(
+    'leaves out a remote server whose public-looking name %s',
+    async (_name, addresses) => {
+      const owner = conversation({
+        mcpServers: {
+          rebound: { type: 'http', url: 'https://tools.example.org/mcp' },
+          docs: { type: 'http', url: 'https://docs.example.com/mcp' },
+        },
+      });
+      const { prepare } = preparer(realSandbox(), lookupWith({ 'tools.example.org': addresses }));
+      const prepared = await prepare(inputFor(owner));
+      try {
+        expect(Object.keys(prepared.projectMcpServers)).toEqual(['docs']);
+        expect(prepared.note).toContain('rebound');
+      } finally {
+        await prepared.release();
+      }
+    },
+  );
 
   it('starts with no project server, and says why, when the repo’s MCP config cannot be read', async () => {
     const owner = conversation('{"mcpServers": {');

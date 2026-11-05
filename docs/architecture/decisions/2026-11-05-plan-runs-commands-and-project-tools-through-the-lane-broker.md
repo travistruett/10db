@@ -44,8 +44,11 @@ mechanism, the one lanes already have, not a second one built for Plan:
   `Monitor` stays disallowed.
 - **What it is given.** The project's servers are resolved from the project env (the login env with every
   billing switch and account secret stripped), as a lane's are, never from the session's own env, which holds the
-  account's key. A remote server on this Mac or its network (an address, `localhost`, a `.local` name) is left
-  out of a Plan session, since Claude Code connects to it outside every sandbox. An agent runs only on a model the
+  account's key. A remote server on this Mac or its network is left out of a Plan session, since Claude Code
+  connects to it outside every sandbox: by its name (an address, `localhost`, a `.local` name) and by every
+  address the name resolves to when the session starts (loopback, private, link-local, shared, unique-local, or
+  none). A name that resolves elsewhere later is not caught, since Claude Code makes the connection and the
+  address can't be pinned; each call is still carded. An agent runs only on a model the
   project's account offers. A conversation's card never folds, not even with its own: two calls made at once wait
   on a card each, and a card goes with its call when Claude Code cancels the call. A session whose servers' AWS
   credentials expire within five minutes gives way at the next turn to a fresh session, resumed, with new ones.
