@@ -887,8 +887,8 @@ Expected: skipped
 
 **Files:**
 
-- Create: `docs/architecture/decisions/2026-11-05-chatgpt-plan-through-the-codex-app-server.md`,
-  `docs/architecture/decisions/2026-11-05-codex-lanes-use-codex-sandbox-and-hooks.md`
+- Create: two files in `docs/architecture/decisions/`, `2026-11-05-chatgpt-plan-through-the-codex-app-server.md` and
+  `2026-11-05-codex-lanes-use-codex-sandbox-and-hooks.md`
 - Modify: `docs/architecture/open-questions.md`, `docs/architecture/04-accounts.md`,
   `docs/architecture/03-trust-boundaries.md`, `docs/open-items.md`, `apps/daemon/AGENTS.md`
 
