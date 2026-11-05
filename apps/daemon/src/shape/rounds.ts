@@ -258,6 +258,14 @@ export function reconcileDraft(
       converted.push(unit.key);
       continue;
     }
+    // A goal's tasks have no row of their own, so a dropped row's key reused as one is found here.
+    if (unit.kind === 'goal') {
+      const nested = Array.isArray(unit.body['tasks']) ? unit.body['tasks'].map(asRecord) : [];
+      const dropped = nested
+        .map((t) => byKey.get(String(t['key'])))
+        .filter((r) => r?.state === ShapeProposalState.Rejected);
+      for (const r of dropped) if (r !== undefined) errors.push(droppedMessage(r.key, r.kind));
+    }
     if (row?.state === ShapeProposalState.Rejected) {
       const sameChange =
         unit.kind === 'change_task' && hashOf(unit.body) === hashOf(asRecord(row.body));

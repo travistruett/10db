@@ -189,6 +189,32 @@ describe('a round', () => {
     expect(rows()).toEqual(before);
   });
 
+  it('refuses a dropped loose task restated as a task inside a goal, writing nothing', () => {
+    const m = c.say();
+    propose(looseDraft(m, 'a', 'b'));
+    write((ctx) => {
+      dropProposal(ctx, row('b').id);
+    });
+    const before = rows();
+    const out = propose({
+      goals: [
+        {
+          key: 'g',
+          title: 'Goal',
+          objective: 'Do it.',
+          ceremony: 'direct',
+          sourceMessageIds: [m],
+          tasks: [{ key: 'b', title: 'Dropped work, back', areas: ['api'], size: 'S' }],
+        },
+      ],
+    });
+    expect(out.ok ? [] : out.errors).toEqual([
+      'b: the builder dropped this row; do not propose it again. Raise it in chat as a question if it matters.',
+    ]);
+    expect(rows()).toEqual(before);
+    expect(getShape(c.store.db, c.shape.id).round).toBe(1);
+  });
+
   it('writes nothing for an invalid draft, and says every error', () => {
     const m = c.say();
     const out = propose({
