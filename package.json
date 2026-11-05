@@ -12,7 +12,7 @@
     "prepare": "lefthook install",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint --max-warnings=0 .",
+    "lint": "NODE_OPTIONS=--max-old-space-size=6144 eslint --max-warnings=0 .",
     "typecheck": "tsc --noEmit -p tsconfig.json && pnpm -r --parallel run typecheck",
     "test": "vitest run",
     "build": "pnpm -r --if-present run build",
