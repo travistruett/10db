@@ -9,6 +9,7 @@ import {
   type InboxOption,
   type ProjectId,
   type SessionId,
+  type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
@@ -51,9 +52,13 @@ export interface WaitObserver {
   onWaitEnd(item: InboxItemDto): void;
 }
 
-interface BrokerContext {
+/** Whose session asks: a lane's workstream, or a Plan conversation, which offers no workstream rule. */
+type BrokerOwner =
+  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
+  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+
+type BrokerContext = BrokerOwner & {
   readonly projectId: ProjectId;
-  readonly workstreamId: WorkstreamId;
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
   readonly signal: AbortSignal;
@@ -73,8 +78,13 @@ interface BrokerContext {
   readonly sandbox?: {
     readonly fileAccess: FileAccessContext;
     readonly hazards: readonly HazardDef[];
+    /**
+     * Every command that reaches the broker is asked about, hazard or not: a Plan conversation's
+     * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
+     */
+    readonly commandsAsk?: boolean;
   };
-}
+};
 
 const ALLOWING: readonly string[] = [
   PermissionChoice.AllowOnce,
@@ -231,12 +241,37 @@ export function createPermissionBroker(
   ctx: BrokerContext,
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
+  const owner: BrokerOwner =
+    ctx.workstreamId === null
+      ? { workstreamId: null, shapeId: ctx.shapeId }
+      : { workstreamId: ctx.workstreamId };
+  // A conversation has no workstream, so it is never offered a rule for one.
+  const optionsFor = (storable: boolean): InboxOption[] =>
+    permissionOptions(storable).filter(
+      (o) => ctx.workstreamId !== null || o.label !== PermissionChoice.AllowWorkstream,
+    );
 
   async function wait(item: InboxItemDto, answer: Promise<InboxAnswer>): Promise<InboxAnswer> {
     ctx.observer.onWaitStart(item);
     const result = await answer;
     ctx.observer.onWaitEnd(item);
     return result;
+  }
+
+  /**
+   * A conversation that stops waiting withdraws its card: no lane resumes on a late answer, and the
+   * next session asks again. A lane's card stays for its parked workstream.
+   */
+  async function waitOrWithdraw(
+    item: InboxItemDto,
+    answer: Promise<InboxAnswer>,
+  ): Promise<InboxAnswer> {
+    try {
+      return await wait(item, answer);
+    } catch (error) {
+      if (error instanceof ParkedError && ctx.workstreamId === null) deps.inbox.withdraw(item.id);
+      throw error;
+    }
   }
 
   async function askQuestions(req: ToolRequest): Promise<ToolDecision> {
@@ -251,7 +286,7 @@ export function createPermissionBroker(
     for (const q of parsed.data.questions) {
       const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,
-        workstreamId: ctx.workstreamId,
+        ...owner,
         sessionId: ctx.sessionId,
         kind: 'question',
         title: q.question,
@@ -277,6 +312,8 @@ export function createPermissionBroker(
    * can't be read) records nothing, and its write is carded.
    */
   function recordAllowedWrite(cardId: InboxItemId, req: ToolRequest, ask: Ask | null): void {
+    const lane = ctx.workstreamId;
+    if (lane === null) return;
     const path = editedPath(req, ask);
     if (path === null) return;
     const hash = allowedWriteHash(req.toolName, req.input, path);
@@ -288,7 +325,7 @@ export function createPermissionBroker(
         updateInboxItem(w, cardId, {
           detail: {
             ...detail,
-            [ALLOWED_WRITES_KEY]: { ...allowedWritesIn(detail), [ctx.workstreamId]: hash },
+            [ALLOWED_WRITES_KEY]: { ...allowedWritesIn(detail), [lane]: hash },
           },
         });
       });
@@ -321,13 +358,13 @@ export function createPermissionBroker(
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
-      workstreamId: ctx.workstreamId,
+      ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
       title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
-      options: onceOnly ? ONCE_OPTIONS : permissionOptions(storable),
+      options: onceOnly ? ONCE_OPTIONS : optionsFor(storable),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
@@ -342,10 +379,12 @@ export function createPermissionBroker(
       // file on the one answer, before either writes, and the second write would match neither record.
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
+      // A conversation's card goes with its call: Claude Code cancels the call when the turn is stopped.
+      ...(ctx.workstreamId === null ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
       // The escalation is only in the detail, so without this an escalated and an ordinary ask would share a card.
       escalated: req.escalated,
     });
-    const result = await wait(item, answer);
+    const result = await waitOrWithdraw(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
       recordAllowedWrite(item.id, req, ask);
@@ -388,9 +427,9 @@ export function createPermissionBroker(
       await takeFoundHostsReading(deps, ctx.projectId);
       // A project file that needs the host is a reason to allow it, not a grant.
       const file = foundHostFile(deps.state.db, ctx.projectId, host);
-      const { answer } = deps.inbox.ask({
+      const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,
-        workstreamId: ctx.workstreamId,
+        ...owner,
         sessionId: ctx.sessionId,
         kind: 'permission',
         title: `Allow network access to ${host}?`,
@@ -404,6 +443,14 @@ export function createPermissionBroker(
         detail: { toolName: NETWORK_TOOL, summary: host },
         signal: ctx.signal,
       });
+      // A conversation's host card goes when the conversation stops waiting: no lane resumes on it.
+      if (ctx.workstreamId === null) {
+        const withdraw = (): void => {
+          deps.inbox.withdraw(item.id);
+        };
+        if (ctx.signal.aborted) withdraw();
+        else ctx.signal.addEventListener('abort', withdraw, { once: true });
+      }
       // The lane keeps working while the card is open, so nothing waits on it and the workstream
       // never enters WAITING_HUMAN. A parked or cancelled card adds nothing.
       void answer.then(
@@ -449,6 +496,7 @@ export function createPermissionBroker(
     ) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
+    if (sandbox.commandsAsk === true) return { summary: command };
     if (hit === null && !req.escalated && unread === null && unreadable === null)
       return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'

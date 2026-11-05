@@ -1,14 +1,17 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpServerReview } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
+import { AwsCredentialsError, type AwsCredentialsExporter } from '../environment';
 import {
   ProjectMcpError,
   readRepoMcp,
   resolveProjectMcp,
   skippedServersNote,
   TENDB_MCP_SERVER,
+  withAwsCredentials,
   type McpApproval,
 } from './project-mcp';
 import { REPO_CONFIG_MAX_BYTES } from './repo-config-file';
@@ -201,6 +204,32 @@ describe('readRepoMcp', () => {
       original,
     );
     expect(hashOf({ command: 'tool', env: { A: '1', B: '${B}' } })).not.toBe(original);
+  });
+
+  it('asks again for a server granted AWS credentials, and keeps the hash of one that is not', () => {
+    // The config as an approval made before 10db exported AWS credentials hashed it.
+    const before = (env: Record<string, string>) =>
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            transport: 'stdio',
+            command: 'uvx',
+            args: ['billing@0.0.44'],
+            env: Object.entries(env).sort(([a], [b]) => a.localeCompare(b)),
+          }),
+        )
+        .digest('hex');
+    const hashOf = (env: Record<string, string>) => {
+      writeMcp({ mcpServers: { billing: { command: 'uvx', args: ['billing@0.0.44'], env } } });
+      return readRepoMcp(repo.path).servers[0]?.review.configHash;
+    };
+    const granted = { AWS_PROFILE: 'orgtools-prod', AWS_REGION: 'us-east-1' };
+    expect(hashOf(granted)).not.toBe(before(granted));
+    expect(hashOf({ ...granted, AWS_PROFILE: 'orgtools-dev' })).not.toBe(hashOf(granted));
+    // `${AWS_PROFILE}` reads the project env and is granted nothing, so its approval stands.
+    const expanded = { AWS_PROFILE: '${AWS_PROFILE}', AWS_REGION: 'us-east-1' };
+    expect(hashOf(expanded)).toBe(before(expanded));
+    expect(hashOf({ AWS_REGION: 'us-east-1' })).toBe(before({ AWS_REGION: 'us-east-1' }));
   });
 
   it('keeps 10db the owner of its name: drops "10db", any "10db…" name and any name with "__", with a warning each', () => {
@@ -555,5 +584,138 @@ describe('resolveProjectMcp', () => {
     );
     writeMcp({ mcpServers: { d: { command: 'd' } } });
     expect(skippedServersNote(resolve({ d: approved() }))).toBeNull();
+  });
+});
+
+describe('withAwsCredentials', () => {
+  const CREDENTIALS = {
+    AWS_ACCESS_KEY_ID: 'AKIAFAKE',
+    AWS_SECRET_ACCESS_KEY: 'fake-secret',
+    AWS_SESSION_TOKEN: 'fake-token',
+  };
+  const billing = {
+    command: 'uvx',
+    args: ['awslabs.billing-cost-management-mcp-server@0.0.44'],
+    env: { AWS_PROFILE: 'orgtools-prod', AWS_REGION: 'us-east-1', FASTMCP_LOG_LEVEL: 'ERROR' },
+  };
+
+  /** Resolves the repo's servers, all approved, and runs the credential step with a fake exporter. */
+  async function swapped(servers: Record<string, unknown>, exporter: AwsCredentialsExporter) {
+    writeMcp({ mcpServers: servers });
+    const repoMcp = readRepoMcp(repo.path);
+    const approvals = Object.fromEntries(
+      repoMcp.servers.map((s) => [s.name, approved('AWS_PROFILE')]),
+    );
+    const mcp = resolveProjectMcp({
+      repo: repoMcp,
+      env: { ...ENV, AWS_PROFILE: 'login-shell' },
+      approvalFor: (review) => approvals[review.name] ?? null,
+    });
+    return withAwsCredentials({ mcp, repo: repoMcp, env: ENV, exportAwsCredentials: exporter });
+  }
+  const exporter =
+    (calls: string[]): AwsCredentialsExporter =>
+    (profile) => {
+      calls.push(profile);
+      return Promise.resolve(CREDENTIALS);
+    };
+
+  it("gives a server that declares a literal AWS_PROFILE that profile's credentials in place of the name", async () => {
+    const calls: string[] = [];
+    const mcp = await swapped({ 'aws-billing': billing }, exporter(calls));
+    expect(calls).toEqual(['orgtools-prod']);
+    expect(mcp.failures).toEqual([]);
+    expect(mcp.servers['aws-billing']).toEqual({
+      type: 'stdio',
+      command: 'uvx',
+      args: ['awslabs.billing-cost-management-mcp-server@0.0.44'],
+      env: {
+        PATH: '/usr/bin:/bin',
+        HOME: '/h',
+        AWS_REGION: 'us-east-1',
+        FASTMCP_LOG_LEVEL: 'ERROR',
+        ...CREDENTIALS,
+      },
+      hosts: [],
+    });
+  });
+
+  it('drops AWS_DEFAULT_PROFILE from a server it gives credentials', async () => {
+    const mcp = await swapped(
+      { s: { command: 's', env: { AWS_PROFILE: 'p', AWS_DEFAULT_PROFILE: 'q' } } },
+      exporter([]),
+    );
+    expect(envKeys(mcp.servers['s'])).not.toContain('AWS_DEFAULT_PROFILE');
+    expect(envKeys(mcp.servers['s'])).not.toContain('AWS_PROFILE');
+  });
+
+  it('exports once for two servers that name the same profile', async () => {
+    const calls: string[] = [];
+    await swapped(
+      {
+        a: { command: 'a', env: { AWS_PROFILE: 'p' } },
+        b: { command: 'b', env: { AWS_PROFILE: 'p' } },
+      },
+      exporter(calls),
+    );
+    expect(calls).toEqual(['p']);
+  });
+
+  it.each([
+    { name: 'a profile read from the project env', value: '${AWS_PROFILE}' },
+    { name: 'a profile with a default', value: '${AWS_PROFILE:-dev}' },
+  ])('leaves a server alone whose AWS_PROFILE is $name', async ({ value }) => {
+    const calls: string[] = [];
+    const mcp = await swapped(
+      { s: { command: 's', env: { AWS_PROFILE: value } } },
+      exporter(calls),
+    );
+    expect(calls).toEqual([]);
+    expect(mcp.servers['s']).toMatchObject({ env: { AWS_PROFILE: 'login-shell' } });
+  });
+
+  it('leaves a server that sets no AWS_PROFILE untouched', async () => {
+    const calls: string[] = [];
+    const mcp = await swapped(
+      { s: { command: 's', env: { AWS_REGION: 'us-east-1' } } },
+      exporter(calls),
+    );
+    expect(calls).toEqual([]);
+    expect(envKeys(mcp.servers['s'])).toEqual(['AWS_REGION', 'HOME', 'PATH']);
+  });
+
+  it("moves a server whose export failed to failures with the error's message, and keeps the others", async () => {
+    const failing: AwsCredentialsExporter = (profile) =>
+      profile === 'bad'
+        ? Promise.reject(
+            new AwsCredentialsError('Run aws sso login --profile bad, then try again.', true),
+          )
+        : Promise.resolve(CREDENTIALS);
+    const mcp = await swapped(
+      {
+        a: { command: 'a', env: { AWS_PROFILE: 'bad' } },
+        b: { command: 'b', env: { AWS_PROFILE: 'good' } },
+        c: { command: 'c' },
+      },
+      failing,
+    );
+    expect(Object.keys(mcp.servers).sort()).toEqual(['b', 'c']);
+    expect(mcp.failures).toEqual([
+      { name: 'a', message: 'Run aws sso login --profile bad, then try again.' },
+    ]);
+  });
+
+  it('leaves a remote server and the other results alone', async () => {
+    writeMcp({ mcpServers: { r: { type: 'http', url: 'https://docs.example/mcp' } } });
+    const repoMcp = readRepoMcp(repo.path);
+    const mcp = resolveProjectMcp({ repo: repoMcp, env: ENV, approvalFor: () => approved() });
+    expect(
+      await withAwsCredentials({
+        mcp,
+        repo: repoMcp,
+        env: ENV,
+        exportAwsCredentials: exporter([]),
+      }),
+    ).toEqual(mcp);
   });
 });

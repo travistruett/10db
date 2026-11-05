@@ -23,6 +23,7 @@ import {
   type ShapeMessageDto,
   type ShapeMessageId,
   type ShapeProposalId,
+  type ShapeModelsDto,
   type ShapeViewDto,
   type SessionId,
   type StartShapeInput,
@@ -62,17 +63,21 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
-import { expandHome } from '../sandbox';
+import { expandHome, type LaneSandboxSpec } from '../sandbox';
 import { stringField } from '../guard';
+import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
 import type {
   SessionAdapter,
   SessionEvent,
+  SessionMcpServer,
   ShapeImage,
   ShapeSessionHandle,
   ShapeSessionSpec,
   ShapeVerdict,
+  ToolDecision,
+  ToolRequest,
   TurnResult,
 } from '../sessions';
 import {
@@ -81,7 +86,7 @@ import {
   oneWayNamesOf,
   type TrackedFiles,
 } from './ceremony';
-import { judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
+import { commandLine, judgeShapeCall, researchLine, type ShapeAccess } from './confinement';
 import { convertProposals, type ConvertOutcome, type JoiningProblem } from './convert';
 import {
   isFileUnchanged,
@@ -117,11 +122,9 @@ import { dropNote, editNote, restoreNote, rowLabel, unpinNote } from './edit-not
 import {
   proposeNote,
   rehearseNote,
-  SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
-  SHAPE_BUILT_IN_TOOLS,
-  SHAPE_DISALLOWED_TOOLS,
   SHAPE_SYSTEM_PROMPT,
+  shapeToolset,
 } from './policy';
 import {
   dismissFinding as dismissRow,
@@ -163,14 +166,57 @@ export interface ShapeLaunch {
   readonly access: Omit<ShapeAccess, 'filesDir'>;
 }
 
+/** What a session's commands and project tools are prepared from: the conversation and who asks. */
+export interface ShapePrepareInput {
+  readonly projectId: ProjectId;
+  readonly shapeId: ShapeId;
+  readonly sessionId: SessionId;
+  /** The session's launch env, which the sandbox and the project's servers are built from. */
+  readonly env: Readonly<Record<string, string>>;
+  readonly resumeProviderSessionId: string | null;
+  /** Aborts when the session ends: a card it still waits on is withdrawn. */
+  readonly signal: AbortSignal;
+  /** Told when a call waits on the builder's card. */
+  readonly observer: WaitObserver;
+}
+
+/** A session's read-only sandbox, the project's approved MCP servers and its permission broker. */
+export interface ShapePrepared {
+  /** Null when the sandbox could not be built: the session then runs no command and has no project server. */
+  readonly sandbox: LaneSandboxSpec | null;
+  /** How the PreToolUse hook judges the session's commands; present with the sandbox. */
+  readonly commands?: NonNullable<ShapeAccess['commands']>;
+  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
+  /** A line for the prompt naming what was left out (servers, the sandbox) and why, or null. */
+  readonly note: string | null;
+  /** When the first AWS credentials a server was given expire (ISO), or null: the session moves on before. */
+  readonly credentialsExpireAt: string | null;
+  /** The lanes' permission broker, for this conversation. */
+  canUseTool(req: ToolRequest): Promise<ToolDecision>;
+  /** Watches what runs under the session's Claude Code process, so its commands end with it. */
+  trackProcesses(pid: number): void;
+  /** Stops what the session's commands left running, then removes the sandbox; once the session has ended. */
+  release(): Promise<void>;
+}
+
 export interface ShapeServiceDeps {
   readonly state: StateStore;
   readonly adapter: SessionAdapter;
   readonly clock: Clock;
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
-  /** Resolves a project's launch; throws when its account can't start a session. */
-  launch(projectId: ProjectId): ShapeLaunch;
+  /**
+   * Resolves a project's launch, on `model` (an alias the account offers) or, with null, on the `plan`
+   * role's; throws when its account can't start a session.
+   */
+  launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  /** The models a conversation of the project may run on (§5.1); none offered without it. */
+  readonly models?: (projectId: ProjectId) => ShapeModelsDto;
+  /**
+   * Prepares a session's commands and project tools (§5.2). Absent (a daemon with no sandbox, tests),
+   * the session runs no command and has 10db's tools only.
+   */
+  readonly prepare?: (input: ShapePrepareInput) => Promise<ShapePrepared>;
   /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
   readonly filesDir: string;
   /** The starter's read of a pending join, which Convert refuses a change of areas over. */
@@ -257,6 +303,12 @@ export interface ShapeService {
   dismissFinding(shapeId: ShapeId, findingId: ShapeFindingId, how?: string): void;
   /** Interrupts the turn that is running; the queue runs next. */
   stop(shapeId: ShapeId): Promise<void>;
+  /**
+   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null (§5.1).
+   * Throws InvalidError for a model the account doesn't offer and ConflictError while a turn runs or
+   * waits; an idle session closes, and the next turn resumes it on the new model.
+   */
+  chooseModel(shapeId: ShapeId, model: string | null): ShapeDto;
   /** Everything the screen renders for the conversation, with where its session is. */
   view(shapeId: ShapeId): ShapeViewDto;
   /** The project's conversations, the one touched last first. */
@@ -303,6 +355,29 @@ export interface ShapeService {
 
 /** A conversation's name until its first message gives it one. */
 export const DEFAULT_SHAPE_TITLE = 'New conversation';
+
+/** The service closed while a session was being prepared for a turn, so the turn never ran. */
+class ShapeClosedError extends Error {
+  override readonly name = 'ShapeClosedError';
+  constructor() {
+    super('10db closed before the session started');
+  }
+}
+
+/** The builder pressed Stop while a session was being prepared for a turn. */
+class ShapeStoppedError extends Error {
+  override readonly name = 'ShapeStoppedError';
+  constructor() {
+    super('The turn was stopped before its session started');
+  }
+}
+
+/** How long before its AWS credentials expire a session gives way to a fresh one, which gets new ones. */
+const CREDENTIALS_MARGIN_MS = 5 * 60_000;
+
+/** What a session with nothing prepared answers a call it would have asked about: it has no broker. */
+const NOTHING_TO_ASK =
+  'This planning session has no sandbox, so it runs no command and asks for nothing.';
 const TITLE_MAX = 60;
 
 /** The first non-empty line of a message, cut to fit a title. */
@@ -359,6 +434,12 @@ type TurnEnd =
 interface Live {
   readonly handle: ShapeSessionHandle;
   readonly sessionId: SessionId;
+  /** Ends what the session was prepared with: its cards are withdrawn and its sandbox removed. */
+  release(): void;
+  /** Watches what runs under its Claude Code process, whose pid its start reports. */
+  track(pid: number): void;
+  /** When the AWS credentials its servers were given expire (ISO), or null. */
+  readonly expiresAt: string | null;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
   endReason: string | null;
   /** Resolves when its events have ended: the session has ended and its row says so. */
@@ -476,6 +557,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         areas: project.areas,
         hazards: project.hazards,
       }),
+      ...(deps.models === undefined ? {} : { models: deps.models(projectId) }),
     };
   };
   const worldOfShape = (shapeId: ShapeId): ViewWorld =>
@@ -532,6 +614,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           markSessionStarted(ctx, live.sessionId, event.providerSessionId, event.pid);
           patchShape(ctx, shapeId, { sdkSessionId: event.providerSessionId });
         });
+        // What its commands start is watched from its own process, and stopped when it ends.
+        if (event.pid !== null) live.track(event.pid);
         break;
       case 'context':
         rt.contextPct = event.percentage;
@@ -567,9 +651,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
         break;
       case 'ended':
-        state.write((ctx) => {
-          endSession(ctx, live.sessionId, live.endReason ?? event.reason);
-        });
+        try {
+          state.write((ctx) => {
+            endSession(ctx, live.sessionId, live.endReason ?? event.reason);
+          });
+        } finally {
+          live.release();
+        }
         if (running) rt.live = null;
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
@@ -743,13 +831,21 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   /** Starts the conversation's session with `prompt` as its first message. */
-  const start = (shapeId: ShapeId, rt: Runtime, turn: Turn, intake: Intake): void => {
+  const start = async (
+    shapeId: ShapeId,
+    rt: Runtime,
+    turn: Turn,
+    intake: Intake,
+  ): Promise<void> => {
     const shape = getShape(state.db, shapeId);
-    const launch = deps.launch(shape.projectId);
+    const launch = deps.launch(shape.projectId, shape.model);
     // Only this conversation's files: another conversation's, in the same project or not, stay unread.
-    const access: ShapeAccess = {
+    // An agent the session launches runs only on a model the project's account offers.
+    const offered = deps.models?.(shape.projectId).offered;
+    const fileAccess: ShapeAccess = {
       ...launch.access,
       filesDir: shapeFilesDir(deps.filesDir, shapeId),
+      ...(offered === undefined ? {} : { agentModels: offered }),
     };
     const resumeId = getShapeSdkSessionId(state.db, shapeId);
     const transcript = listShapeMessages(state.db, shapeId);
@@ -825,23 +921,82 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         mcpTokenHash: hash,
       }),
     );
+    // Its sandbox, the project's servers and its broker; a card it waits on is withdrawn when it ends.
+    const ending = new AbortController();
+    let prepared: ShapePrepared | null;
+    try {
+      prepared =
+        deps.prepare === undefined
+          ? null
+          : await deps.prepare({
+              projectId: shape.projectId,
+              shapeId,
+              sessionId: row.id,
+              env: launch.env,
+              resumeProviderSessionId: resumeId,
+              signal: ending.signal,
+              observer: {
+                onWaitStart: (item) => {
+                  say(
+                    shapeId,
+                    ShapeMessageAuthor.Claude,
+                    ShapeMessageKind.Tool,
+                    `${item.title} · waiting for your answer in the Inbox`,
+                  );
+                },
+                onWaitEnd: () => undefined,
+              },
+            });
+    } catch (error) {
+      state.write((ctx) => {
+        endSession(ctx, row.id, 'start_failed');
+      });
+      throw error;
+    }
+    const ready = prepared;
+    const release = (): void => {
+      ending.abort();
+      ready?.release().catch((error: unknown) => {
+        log.warn({ err: error, shapeId }, 'a shape session’s sandbox could not be removed');
+      });
+    };
+    // The service closed, or the builder pressed Stop, while the session was prepared: neither could
+    // reach a session that wasn't live yet, so none starts now.
+    if (isClosed() || rt.interrupted) {
+      release();
+      state.write((ctx) => {
+        endSession(ctx, row.id, 'start_failed');
+      });
+      throw isClosed() ? new ShapeClosedError() : new ShapeStoppedError();
+    }
+    const commands = ready?.commands;
+    const access: ShapeAccess = commands === undefined ? fileAccess : { ...fileAccess, commands };
+    const toolset = shapeToolset(commands !== undefined);
+    // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
+    const skipped = ready?.note ?? null;
     const spec: ShapeSessionSpec = {
       sessionId: row.id,
       shapeId,
       cwd: launch.cwd,
       systemPrompt: SHAPE_SYSTEM_PROMPT,
-      prompt,
+      prompt: skipped === null ? prompt : `${skipped}\n\n${prompt}`,
       ...(images.length === 0 ? {} : { images }),
       model: launch.model,
       effort: launch.effort,
       resumeProviderSessionId: resumeId,
       env: launch.env,
       account: launch.account,
-      tools: [...SHAPE_BUILT_IN_TOOLS],
+      tools: [...toolset.tools],
       allowedTools: SHAPE_ALLOWED_TOOLS,
-      disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
-      agents: SHAPE_AGENTS,
+      disallowedTools: [...toolset.disallowedTools],
+      agents: toolset.agents,
       mcp: { url: deps.mcp.url, token, toolTimeoutMs: deps.mcp.toolTimeoutMs },
+      sandbox: ready?.sandbox ?? null,
+      projectMcpServers: ready?.projectMcpServers ?? {},
+      canUseTool: (req) =>
+        ready === null
+          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK })
+          : ready.canUseTool(req),
       preToolUse: (req) => {
         let verdict: ShapeVerdict = judgeShapeCall(
           {
@@ -849,6 +1004,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             toolInput: req.input,
             agentId: req.agentId,
             agentType: req.agentType,
+            cwd: req.cwd,
           },
           access,
         );
@@ -902,8 +1058,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           );
         else {
           // Research (§5.2): the question and every search and fetch shows, so the builder sees
-          // what left the machine.
-          const line = researchLine(req.toolName, req.input);
+          // what left the machine; so does every command and project tool call, and who made it.
+          const line =
+            researchLine(req.toolName, req.input) ??
+            commandLine(req.toolName, req.input, req.agentType);
           if (line !== null) say(shapeId, ShapeMessageAuthor.Claude, ShapeMessageKind.Tool, line);
         }
         return verdict;
@@ -963,11 +1121,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       state.write((ctx) => {
         endSession(ctx, row.id, 'start_failed');
       });
+      release();
       throw error;
     }
     const live: Live = {
       handle,
       sessionId: row.id,
+      release,
+      track: (pid) => {
+        ready?.trackProcesses(pid);
+      },
+      expiresAt: ready?.credentialsExpireAt ?? null,
       endReason: null,
       done: Promise.resolve(),
     };
@@ -1019,6 +1183,15 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rt.proposed = false;
     rt.refused = 0;
     rt.interrupted = false;
+    // A session whose servers' AWS credentials are about to expire gives way; the next one, resumed,
+    // gets fresh ones.
+    const expires = rt.live?.expiresAt ?? null;
+    if (
+      rt.live !== null &&
+      expires !== null &&
+      clock.now().getTime() >= Date.parse(expires) - CREDENTIALS_MARGIN_MS
+    )
+      void closeLive(rt, 'credentials expiring');
     // The turn counts as running (rt.current) while the last session finishes closing.
     if (rt.live === null && rt.closing !== null) await rt.closing;
     // close() ran while this turn waited: it emptied the queue before this turn was told, and no
@@ -1032,7 +1205,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     });
     const intake = takeIntake(shapeId, rt);
     try {
-      if (rt.live === null) start(shapeId, rt, turn, intake);
+      if (rt.live === null) await start(shapeId, rt, turn, intake);
       else {
         const lines = intakeText(intake);
         const { images, ids } = imagesOf(intake.files, intake.spent);
@@ -1046,6 +1219,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       // files and mis-sized tasks were never marked told.
       rt.notes.unshift(...intake.notes);
       rt.waiting = null;
+      if (error instanceof ShapeClosedError) {
+        notice(shapeId, turn.neverRan);
+        return;
+      }
+      // Stopped before it started: the turn ends as a stopped one does.
+      if (error instanceof ShapeStoppedError) return;
       log.warn({ err: error, shapeId }, 'shape session could not start');
       notice(
         shapeId,
@@ -1354,6 +1533,24 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         return body;
       });
       runtimeOf(shapeId).notes.push(note);
+    },
+
+    chooseModel(shapeId, model) {
+      const { projectId } = getShape(state.db, shapeId);
+      const offered = deps.models?.(projectId).offered ?? [];
+      if (model !== null && !offered.includes(model))
+        throw new InvalidError(
+          `${model} is not a model this project's account offers; choose one of ${offered.join(', ') || 'none'}.`,
+        );
+      const rt = runtimes.get(shapeId);
+      if (rt !== undefined && (rt.current !== null || rt.queue.length > 0))
+        throw new ConflictError(
+          'The model changes between turns: wait for the turn to end, or stop it, then choose again.',
+        );
+      const shape = state.write((ctx) => patchShape(ctx, shapeId, { model }));
+      // A live session runs on the model it started with; the next turn resumes it on the new one.
+      if (rt?.live) void closeLive(rt, 'model changed');
+      return shape;
     },
 
     view(shapeId) {

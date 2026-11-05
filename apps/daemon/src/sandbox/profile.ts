@@ -183,6 +183,8 @@ export interface LaneProfileInput {
   denyWrites: readonly string[];
   loopback: boolean;
   deniedEnvNames: readonly string[];
+  /** Mach services the profile opens beyond FSEvents; none for a lane's own commands. */
+  machLookups?: readonly string[];
 }
 
 /** A path and, when it differs and exists, its real path, so a link and its target compare alike. */
@@ -292,7 +294,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     network: {
       allowedDomains: [...input.allowedDomains],
       ...(input.loopback ? { allowLocalBinding: true } : {}),
-      allowMachLookup: ['com.apple.FSEvents'],
+      allowMachLookup: ['com.apple.FSEvents', ...(input.machLookups ?? [])],
       allowUnixSockets: [input.tmpDir],
     },
     credentials: {

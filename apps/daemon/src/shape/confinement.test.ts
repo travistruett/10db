@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fileAccessJudge } from '../sandbox';
 import {
   judgeShapeCall,
   RESEARCH_QUERY_LIMIT,
@@ -378,7 +379,17 @@ describe('judgeShapeCall', () => {
   });
 
   it.each(ALLOWED)('allows %s', (_name, make) => {
-    expect(judgeShapeCall(make(), access)).toEqual({ decision: 'allow' });
+    const made = make();
+    const verdict = judgeShapeCall(made, access);
+    // An agent is launched in the foreground, so it ends within the turn that launched it.
+    expect(verdict).toEqual(
+      made.toolName === 'Agent'
+        ? {
+            decision: 'allow',
+            updatedInput: Object.assign({}, made.toolInput, { run_in_background: false }),
+          }
+        : { decision: 'allow' },
+    );
   });
 
   it.each(['scope', 'engineering', 'rehearsal'])(
@@ -427,5 +438,211 @@ describe('judgeShapeCall', () => {
     const verdict = judgeShapeCall(call('Edit', { file_path: path('checkout/src/a.ts') }), access);
     expect(verdict).toMatchObject({ decision: 'deny' });
     expect('reason' in verdict && verdict.reason).toMatch(/read-only/i);
+  });
+});
+
+// Shape spec §5.2: in its read-only sandbox a session runs read-only commands without asking and asks
+// about any other, through the lanes' broker; the code researchers it fans out do the same. Its
+// project MCP servers' tools are the conversation's own, and each call is asked about.
+describe('judgeShapeCall in the read-only sandbox', () => {
+  let sandboxed: ShapeAccess;
+  beforeEach(() => {
+    sandboxed = {
+      ...access,
+      commands: {
+        protectedPaths: [{ path: dataDir, refusal: `${dataDir} is 10db's data.` }],
+        fileAccess: fileAccessJudge({
+          checkout: access.checkout,
+          home: access.home,
+          protectedReads: access.protectedReads,
+          readList: [],
+          systemDocRoots: [],
+          configDir: join(access.tempRoot, 'no-claude-config'),
+          providerSessionId: null,
+          sandboxTemp: { root: access.tempRoot, own: join(access.tempRoot, '10db-ownabc') },
+        }),
+      },
+    };
+  });
+
+  const researcher = { agentId: 'agent-1', agentType: 'code-researcher' };
+  const bash = (command: string, extra: Partial<ShapeCall> = {}, more: object = {}): ShapeCall =>
+    call('Bash', { command, ...more }, extra);
+
+  const READS: readonly (readonly [string, () => ShapeCall])[] = [
+    ['git log', () => bash('git log --oneline -5')],
+    ['git blame of a file', () => bash('git blame src/a.ts')],
+    ['rg over the checkout', () => bash('rg -n TODO src')],
+    ['ls of a directory', () => bash('ls src')],
+    ['a read-only pipeline', () => bash('git log --oneline | head -3')],
+    ['git log from a code researcher', () => bash('git log -3', researcher)],
+    ['wc from a code researcher', () => bash('wc -l src/a.ts', researcher)],
+  ];
+
+  const ASKED: readonly (readonly [string, () => ShapeCall])[] = [
+    ['a test run', () => bash('pnpm test')],
+    ['a script', () => bash('node scripts/report.mjs')],
+    ['a request', () => bash('curl https://example.com')],
+    ['a read under the home by ~', () => bash('ls ~/.ssh')],
+    ['a cd, after which a relative path means somewhere else', () => bash('cd src && ls')],
+    ['a build from a code researcher', () => bash('make check', researcher)],
+    [
+      'a tool of a project MCP server',
+      () => call('mcp__aws-billing__cost-explorer', { operation: 'getCostAndUsage' }),
+    ],
+    ['a read-only command chained to one that is not', () => bash('git status && pnpm install')],
+    // Under srt a project server never reaches loopback, so 10db's own window is out of its reach.
+    [
+      'a browser tool of a project server',
+      () => call('mcp__playwright__browser_navigate', { url: 'https://example.com' }),
+    ],
+  ];
+
+  const REFUSED_HERE: readonly (readonly [string, () => ShapeCall])[] = [
+    ['a push', () => bash('git push origin HEAD')],
+    ['a command outside the sandbox', () => bash('ls', {}, { dangerouslyDisableSandbox: true })],
+    ['a command in the background', () => bash('git log', {}, { run_in_background: true })],
+    ['a job put in the background with &', () => bash('pnpm dev &')],
+    ['a job in the background inside a subshell', () => bash('(sleep 100 &) && ls')],
+    ['a job in the background inside a substitution', () => bash('echo $(sleep 100 &)')],
+    ['a job handed to nohup', () => bash('nohup node server.js')],
+    ['a job handed to setsid', () => bash('setsid node server.js')],
+    ['a job disowned', () => bash('node server.js & disown')],
+    ['a command that brings its own hosts', () => bash('ls', {}, { allowed_domains: ['x.io'] })],
+    ['a Monitor call', () => call('Monitor', { command: 'tail -f x' })],
+    ['Bash from the web researcher', () => bash('ls', { agentId: 'a', agentType: 'researcher' })],
+    ['Bash from a scope reviewer', () => bash('ls', { agentId: 'a', agentType: 'scope' })],
+    ['Bash from a rehearsal', () => bash('ls', { agentId: 'a', agentType: 'rehearsal' })],
+    [
+      'a project MCP tool from a code researcher',
+      () => call('mcp__aws-billing__cost-explorer', {}, researcher),
+    ],
+    [
+      'a project MCP tool from a reviewer',
+      () => call('mcp__aws-billing__cost-explorer', {}, { agentId: 'a', agentType: 'scope' }),
+    ],
+    ['an MCP resource read', () => call('ReadMcpResourceTool', { server: 'aws-billing' })],
+    [
+      'a WebFetch from a code researcher',
+      () => call('WebFetch', { url: 'https://a.io' }, researcher),
+    ],
+    ['a WebSearch from a code researcher', () => call('WebSearch', { query: 'x' }, researcher)],
+    ['propose_plan from a code researcher', () => call('mcp__10db__propose_plan', {}, researcher)],
+    [
+      'report_finding from a code researcher',
+      () => call('mcp__10db__report_finding', {}, researcher),
+    ],
+    [
+      'an Agent from a code researcher',
+      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }, researcher),
+    ],
+    [
+      'a code researcher on a model 10db does not know',
+      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model: 'gpt-9' }),
+    ],
+    [
+      'a code researcher in a worktree',
+      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', isolation: 'worktree' }),
+    ],
+    [
+      'a Read outside the checkout from a code researcher',
+      () => call('Read', { file_path: path('outside/notes.txt') }, researcher),
+    ],
+    [
+      'a Read of the data directory from a code researcher',
+      () => call('Read', { file_path: join(dataDir, 'db.sqlite') }, researcher),
+    ],
+    ['an Edit', () => call('Edit', { file_path: path('checkout/src/a.ts') })],
+    ['a Write', () => call('Write', { file_path: path('checkout/new.ts'), content: 'x' })],
+  ];
+
+  const LAUNCHED: readonly (readonly [string, () => ShapeCall])[] = [
+    [
+      'a code researcher on the session’s model',
+      () => call('Agent', { subagent_type: 'code-researcher', prompt: 'Map the billing code' }),
+    ],
+    ...(['opus', 'fable', 'sonnet', 'haiku'] as const).map(
+      (model) =>
+        [
+          `a code researcher on ${model}`,
+          () => call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model }),
+        ] as const,
+    ),
+    [
+      'a Read of a checkout file from a code researcher',
+      () => call('Read', { file_path: path('checkout/src/a.ts') }, researcher),
+    ],
+    [
+      'a Grep of the source from a code researcher',
+      () => call('Grep', { pattern: 'a', path: path('checkout/src') }, researcher),
+    ],
+  ];
+
+  it.each(READS)('runs %s without asking', (_name, make) => {
+    const verdict = judgeShapeCall(make(), sandboxed);
+    expect(verdict.decision).toBe('allow');
+    expect('settled' in verdict && typeof verdict.settled).toBe('string');
+  });
+
+  it.each(ASKED)('asks the builder about %s', (_name, make) => {
+    expect(judgeShapeCall(make(), sandboxed).decision).toBe('ask');
+  });
+
+  it.each(REFUSED_HERE)('refuses %s', (_name, make) => {
+    expect(judgeShapeCall(make(), sandboxed).decision).toBe('deny');
+  });
+
+  it.each(LAUNCHED)('allows %s', (_name, make) => {
+    expect(judgeShapeCall(make(), sandboxed).decision).toBe('allow');
+  });
+
+  it('launches an agent in the foreground whatever the call asks, so none runs past its turn', () => {
+    const verdict = judgeShapeCall(
+      call('Agent', { subagent_type: 'code-researcher', prompt: 'x', run_in_background: true }),
+      sandboxed,
+    );
+    expect(verdict).toEqual({
+      decision: 'allow',
+      updatedInput: { subagent_type: 'code-researcher', prompt: 'x', run_in_background: false },
+    });
+  });
+
+  it.each([
+    ['a model the account does not offer', 'opus', 'deny'],
+    ['a model it offers', 'sonnet', 'allow'],
+  ] as const)('runs an agent on %s: %s', (_name, model, decision) => {
+    const limited: ShapeAccess = { ...sandboxed, agentModels: ['haiku', 'sonnet'] };
+    expect(
+      judgeShapeCall(
+        call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model }),
+        limited,
+      ).decision,
+    ).toBe(decision);
+  });
+
+  it('still refuses with no card what it refused outside the sandbox, but for Bash and project MCP', () => {
+    const projectTool = (name: string): boolean =>
+      name.startsWith('mcp__') && !name.startsWith('mcp__10db__');
+    for (const [name, make] of REFUSED) {
+      const made = make();
+      // The session's own: a project tool has no agent id here, and asks.
+      if (made.toolName === 'Bash' || (projectTool(made.toolName) && made.agentId === undefined))
+        continue;
+      expect([name, judgeShapeCall(made, sandboxed).decision]).toEqual([name, 'deny']);
+    }
+  });
+
+  it('runs no command and calls no project MCP tool when it has no sandbox', () => {
+    expect(judgeShapeCall(bash('git log'), access).decision).toBe('deny');
+    expect(judgeShapeCall(call('mcp__aws-billing__x', {}), access).decision).toBe('deny');
+    expect(
+      judgeShapeCall(call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }), access)
+        .decision,
+    ).toBe('allow');
+  });
+
+  it('says a refused background command runs in the foreground instead', () => {
+    const verdict = judgeShapeCall(bash('git log', {}, { run_in_background: true }), sandboxed);
+    expect('reason' in verdict && verdict.reason).toMatch(/foreground/i);
   });
 });

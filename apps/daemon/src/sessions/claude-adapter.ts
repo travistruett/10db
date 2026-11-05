@@ -162,10 +162,15 @@ interface QueryDeps {
 function spawnClaude(
   options: SpawnOptions,
   deps: Pick<QueryDeps, 'onSpawn' | 'onStderr'>,
+  priority: 'lane' | 'interactive' = 'lane',
 ): SpawnedProcess {
   // The SDK's forwarded signal fires after its graceful stdin-close path, so it is not handed to spawn().
-  // Background priority for the session and everything it starts: the lane's commands, its repo MCP servers.
-  const launch = atPriority('lane', options.command, options.args);
+  // Background priority for a lane and everything it starts: its commands, its repo MCP servers. A Plan
+  // conversation is the builder's to wait on, so it runs at the priority the daemon does.
+  const launch =
+    priority === 'lane'
+      ? atPriority('lane', options.command, options.args)
+      : { file: options.command, args: options.args };
   const child = spawn(launch.file, [...launch.args], {
     cwd: options.cwd,
     env: options.env,
@@ -1066,6 +1071,17 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
         claudePath: opts.claudePath,
         logger: opts.logger,
         query: runQuery,
+        spawn: (options, onSpawn) =>
+          spawnClaude(
+            options,
+            {
+              onSpawn,
+              onStderr: (chunk) => {
+                opts.logger.debug({ stderr: chunk.slice(0, 500) }, 'plan claude stderr');
+              },
+            },
+            'interactive',
+          ),
         ...(opts.stopGraceMs === undefined ? {} : { stopGraceMs: opts.stopGraceMs }),
         ...(opts.clock === undefined ? {} : { clock: opts.clock }),
       }),

@@ -92,13 +92,21 @@ import { McpToolInputs, McpToolName, McpToolOutputs } from './mcp-tools';
 import { ModelProfileDto, ModelProfilePatch } from './model-profiles';
 import { PickerProposalDto } from './picker';
 import { RunNextResult } from './run-next';
-import { PlanDraft, ShapeDto, ShapeMessageDto, ShapeToolInputs, ShapeToolName } from './shape';
+import {
+  PlanDraft,
+  ShapeDto,
+  ShapeMessageDto,
+  ShapeModelInput,
+  ShapeToolInputs,
+  ShapeToolName,
+} from './shape';
 import {
   ShapeConvertError,
   ShapeConvertInput,
   ShapeConvertResult,
   ShapeInput,
   ShapeMessageInput,
+  ShapeModelsDto,
   ShapeOfDto,
   ShapeProposeResult,
   ShapeResumeInput,
@@ -277,6 +285,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-rehearse-input': ShapeRehearseInput,
   'shape-rehearse-result': ShapeRehearseResult,
   'shape-dismiss-input': ShapeDismissInput,
+  'shape-model-input': ShapeModelInput,
+  'shape-models-dto': ShapeModelsDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

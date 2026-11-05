@@ -467,6 +467,15 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     forms). Their URLs carry srt's proxy token, which srt itself passes to `env` on a command line for the
     instant before it execs; the inner `env -i` passes them the same way, for no longer. The token stays in the
     server's env for its life (Residuals).
+  - **AWS credentials, never `~/.aws`.** A server whose declared env sets a literal `AWS_PROFILE` gets, in place of
+    the profile, that one profile's short-lived credentials, which the daemon exports outside the sandbox with the
+    `aws` of the fixed install prefixes (`environment/aws-credentials.ts`). `~/.aws` stays unreadable to it: the
+    SSO token there gets credentials for every role the builder holds. The grant is in the config hash, so an
+    approval given before it asks again, and the card says what the server gets. The credentials live in its
+    sealed env file and last the role's session (an hour on the Orgtools permission sets).
+  - **configd.** A server's profile opens the Mach service `com.apple.SystemConfiguration.configd` (a lane's
+    commands don't get it): uv's HTTP client reads the system proxy settings through it and crashes without. It
+    tells the server how the Mac's network is set up, and opens no route past srt's proxy.
   - **Package fetching.** A server that downloads its package when it starts (`npx -y <package>`, `uvx`,
     `pnpm dlx`) reaches the registry only when `.10db/mcp-hosts.json` names it (`registry.npmjs.org` for
     `npx`); otherwise it fails to connect unless the repo installs the package. 10db doesn't recognise such
@@ -697,6 +706,35 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - **`TENDB_JUDGE=off`** keeps a daemon from reading the key and from calling OpenRouter. The e2e web server, the live acceptance daemon and `pnpm dev` set it (`tests/repo/src/benchmarks-off.test.ts` checks).
 - **A model answer can only skip a review.** The diff is text a lane wrote, and a System One model does not treat its state as hostile, so a steered lane could write a diff that talks the model into `skip`. The decision it feeds is limited to that: the gate has already passed, CI still runs, and the pull request still waits for the builder's merge. Every fallback (off, no key, timeout, error, an answer that does not parse or is under the floor) keeps today's rule. A model's answer never loosens the sandbox, the guard, a claim or a hazard.
 - **Every call is logged** and shown in Settings, with what 10db did with the answer. Rows are deleted after 30 days.
+
+### 4.13 A Plan conversation's session
+
+**Built** (`decisions/2026-11-05-plan-runs-commands-and-project-tools-through-the-lane-broker.md`, Shape spec
+§5.2). A Plan (Shape) session is a Claude Code session in `default` mode with no lane, claim or area. It holds the
+project's code and talks with the builder; the builder accepts its plan before any lane runs a task from it.
+
+- **Files.** Its file tools read only the checkout and the conversation's files directory; the hook refuses the
+  rest with no card. Protected paths are refused to the file tools by the hook and to commands by the kernel.
+- **Commands.** With the daemon's lane sandbox, its `Bash` runs in a lane sandbox with the whole checkout in
+  `denyWrite`: a command writes only its own temp dir, whatever a card allows, and reaches only the project's
+  allowed hosts. The lanes' guard judges each command; a read-only one runs at once and any other is carded by the
+  lanes' broker, owned by the conversation (no workstream, project rules only). The daemon spawns its Claude Code
+  and the sandbox stops what runs under it when the session ends, as a lane's; background jobs, `nohup`, `setsid`,
+  `disown` and `dangerouslyDisableSandbox` are refused too, and agents run in the foreground. A command naming a
+  protected path is carded and then refused by the kernel. With no sandbox it has no `Bash`.
+- **Project MCP servers.** It gets the project's approved servers as a lane does (§4.6), expanded from the project
+  env and never the session's, which holds the account's key; a remote one on this Mac or its network is left
+  out. Only the session calls them, and each call is carded unless the builder allowed that tool always; every
+  call shows in the conversation.
+- **Who reaches the network.** The session itself now does, which the researcher split used to rule out. Its
+  commands reach only the project's allowed hosts and a server only its approved ones, every call carded or shown,
+  so code leaves the machine only for a destination the builder approved. The open web stays with the web
+  researcher, which holds no project file. The code researchers read the code and run its commands; they have no
+  web tool and no MCP server, and their commands reach only the project's allowed hosts, after a card or a stored
+  rule.
+- **Untrusted input.** A web page, a command's output and an MCP server's result (an AWS resource name, a tag, a
+  log line) are data, never instructions; the prompts say so. The checks behind the prompt are the builder's
+  acceptance of the plan and the sandbox that keeps every command off the checkout.
 
 ## 5. What the daemon reads, runs or sends for a lane
 

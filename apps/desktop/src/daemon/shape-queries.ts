@@ -178,6 +178,23 @@ export function useStopShape() {
   });
 }
 
+/** Sets the model the conversation's next turn runs on; null runs it on the `plan` role's. */
+export function useChooseShapeModel() {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { readonly shapeId: ShapeId; readonly model: string | null }) =>
+      readJson(
+        await client.shapes[':shapeId'].model.$put({
+          param: { shapeId: input.shapeId },
+          json: { model: input.model },
+        }),
+        ShapeDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: shapeKeys.all }),
+  });
+}
+
 /**
  * Rehearse (§7): the session has the rehearsal reviewer read each proposed task with no mark at its
  * current content. Opening the Convert modal asks for it too, for the proposals about to be converted.

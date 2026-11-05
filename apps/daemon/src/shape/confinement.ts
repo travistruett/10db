@@ -1,16 +1,38 @@
 import { isIP } from 'node:net';
 import { join } from 'node:path';
 import { ShapeToolName } from '@10db/contracts';
-import { isOverLongPath, OVER_LONG_PATH_REFUSAL, stringField, type GuardVerdict } from '../guard';
+import { z } from 'zod';
+import {
+  isOverLongPath,
+  judgePreToolUse,
+  OVER_LONG_PATH_REFUSAL,
+  runsInBackground,
+  splitCommand,
+  stringField,
+  type FileAccessJudge,
+  type GuardVerdict,
+  type ProtectedPath,
+} from '../guard';
 import { readAccess, readPathsOf, type FileAccessContext } from '../sandbox';
 import type { ShapeVerdict } from '../sessions';
 
-// Shape spec §5.2. A Shape session reads the project's checkout and its conversation's dropped
-// files, and nothing else. It runs no command, so there is no sandbox to hold one; this judge is the
-// confinement. It answers `deny` where a lane's judge answers `ask`, so nothing reaches the broker.
+// Shape spec §5.2. A Shape session's file tools read the project's checkout and its conversation's
+// dropped files, and nothing else; this judge refuses the rest with no card. In its read-only lane
+// sandbox it also runs commands: a read-only one without asking, any other through the lanes'
+// permission broker (`ask`), as the conversation's calls to the project's MCP servers are. The
+// sandbox, not this judge, keeps every command from writing the checkout.
 
 /** The reviewers a Shape session may launch with `Agent` (§7). */
 export const SHAPE_REVIEWERS = ['scope', 'engineering', 'rehearsal'] as const;
+
+/**
+ * The agent that reads the code for the session (§5.2): file tools and, in the sandbox, the same
+ * commands. It touches neither the web nor an MCP server and launches nothing.
+ */
+export const SHAPE_CODE_RESEARCHER = 'code-researcher';
+
+/** The models a session may name for an agent it launches: the Agent tool's own aliases. */
+export const SHAPE_AGENT_MODELS = ['opus', 'fable', 'sonnet', 'haiku'] as const;
 
 /**
  * The agent that reaches the web (§5.2). It is not a reviewer: it reports no finding and has no file
@@ -36,6 +58,16 @@ export interface ShapeAccess {
   readonly filesDir: string;
   /** The sandbox temp root, where other sessions' directories and ledgers are. */
   readonly tempRoot: string;
+  /**
+   * Present when the session runs in its read-only lane sandbox: its commands are judged by the
+   * guard, as a lane's are. Absent, it runs no command and calls no MCP server but 10db's.
+   */
+  readonly commands?: {
+    readonly protectedPaths: readonly ProtectedPath[];
+    readonly fileAccess: FileAccessJudge;
+  };
+  /** The model aliases the project's account offers, which an agent may be launched on; any known one when absent. */
+  readonly agentModels?: readonly string[];
 }
 
 /** One tool call as the PreToolUse hook sees it; the SDK sets `agentId` only inside a subagent. */
@@ -44,17 +76,103 @@ export interface ShapeCall {
   readonly toolInput: unknown;
   readonly agentId?: string | undefined;
   readonly agentType?: string | undefined;
+  /** Where the call runs, from the hook; absent means the checkout. */
+  readonly cwd?: string | undefined;
 }
 
 const READ_TOOLS: ReadonlySet<string> = new Set(['Read', 'Grep', 'Glob']);
 const WEB_TOOLS: ReadonlySet<string> = new Set(['WebSearch', 'WebFetch']);
 const MCP_PREFIX = 'mcp__10db__';
+const COMMAND_TOOLS: ReadonlySet<string> = new Set(['Bash']);
 const SHAPE_TOOLS: ReadonlySet<string> = new Set(Object.values(ShapeToolName));
 /** The tool only a reviewer calls; every other Shape tool is the main session's. */
 const REVIEWER_TOOL: string = ShapeToolName.ReportFinding;
 
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
+const ask = (reason: string): GuardVerdict => ({ decision: 'ask', reason });
 const ALLOW: GuardVerdict = { decision: 'allow' };
+
+/** The agents that may run a command: the session itself, and the code researchers it launches. */
+const runsCommands = (call: ShapeCall): boolean =>
+  call.agentId === undefined || call.agentType === SHAPE_CODE_RESEARCHER;
+
+const BACKGROUND_REFUSAL =
+  'A planning session runs its commands in the foreground only, so each ends before the turn does. Run it without run_in_background.';
+const UNSANDBOXED_REFUSAL =
+  'A planning session runs commands only inside its read-only sandbox. Run it without dangerouslyDisableSandbox.';
+const NOT_READ_ONLY =
+  'This command is not one 10db reads as read-only, so the builder decides whether it runs. It runs in a sandbox that cannot change the checkout.';
+
+/** Programs whose job is to outlive the command that starts them. */
+const DETACHERS: ReadonlySet<string> = new Set(['nohup', 'setsid', 'disown']);
+
+/**
+ * Whether a command puts a job in the background, nested scripts included: a planning session's
+ * process is not watched as a lane's is, so nothing it starts may outlive the command.
+ */
+function startsBackgroundJob(command: string): boolean {
+  return splitCommand(command).some(
+    (segment) => segment.separator === '&' || DETACHERS.has(segment.words[0] ?? ''),
+  );
+}
+
+/** A command's input, as far as its flags go; anything else in it is the guard's to read. */
+const CommandFlags = z.looseObject({});
+
+/** A flag set in a command's input: any value but an absent, null or false one counts. */
+function flagged(input: unknown, key: 'run_in_background' | 'dangerouslyDisableSandbox'): boolean {
+  const parsed = CommandFlags.safeParse(input);
+  if (!parsed.success) return false;
+  return key === 'run_in_background'
+    ? runsInBackground(parsed.data)
+    : runsInBackground({ run_in_background: parsed.data[key] });
+}
+
+/**
+ * A command, by the guard a lane's commands meet: what it refuses stays refused, a read-only command
+ * runs without asking, and anything else is the builder's call through the broker.
+ */
+function judgeCommand(call: ShapeCall, access: ShapeAccess): GuardVerdict {
+  const { commands } = access;
+  if (commands === undefined)
+    return deny(
+      `${call.toolName} is not available: this planning session has no sandbox to run a command in.`,
+    );
+  if (!runsCommands(call))
+    return deny(
+      `${call.toolName} is not available to the ${call.agentType ?? 'this'} agent: only the session and its code researchers run commands.`,
+    );
+  if (flagged(call.toolInput, 'dangerouslyDisableSandbox')) return deny(UNSANDBOXED_REFUSAL);
+  if (flagged(call.toolInput, 'run_in_background')) return deny(BACKGROUND_REFUSAL);
+  const command = stringField(call.toolInput, 'command');
+  if (command !== null && startsBackgroundJob(command)) return deny(BACKGROUND_REFUSAL);
+  const verdict = judgePreToolUse({
+    toolName: call.toolName,
+    toolInput: call.toolInput,
+    repoPath: access.checkout,
+    ...(call.cwd === undefined ? {} : { cwd: call.cwd }),
+    // A conversation claims nothing and holds no hazard; every command that is not read-only asks.
+    areas: [],
+    hazards: [],
+    claims: [],
+    readOnly: false,
+    protectedPaths: commands.protectedPaths,
+    fileAccess: commands.fileAccess,
+  });
+  if (verdict.decision === 'allow' && verdict.settled === undefined) return ask(NOT_READ_ONLY);
+  return verdict;
+}
+
+/** A tool of one of the project's approved MCP servers: the conversation's own, asked about on each call. */
+function judgeProjectTool(call: ShapeCall, access: ShapeAccess): GuardVerdict {
+  if (access.commands === undefined)
+    return deny(`${call.toolName} is not available: this planning session has 10db's tools only.`);
+  if (call.agentId !== undefined)
+    return deny(
+      `${call.toolName} is the conversation's to call: an agent it launches reaches no MCP server.`,
+    );
+  return ask(`${call.toolName} reaches a project MCP server; 10db judges every call.`);
+}
 
 function fileAccessContext(access: ShapeAccess): FileAccessContext {
   return {
@@ -93,7 +211,21 @@ function judgeRead(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   return ALLOW;
 }
 
-function judgeAgent(call: ShapeCall): GuardVerdict {
+/**
+ * An agent the session launches. It runs in the foreground whatever the call asks, so it ends within
+ * the turn that launched it, and only on a model the project's account offers.
+ */
+function judgeAgent(call: ShapeCall, access: ShapeAccess): ShapeVerdict {
+  const verdict = judgeAgentType(call, access);
+  if (verdict.decision !== 'allow') return verdict;
+  const parsed = CommandFlags.safeParse(call.toolInput);
+  return {
+    decision: 'allow',
+    updatedInput: { ...(parsed.success ? parsed.data : {}), run_in_background: false },
+  };
+}
+
+function judgeAgentType(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   if (call.agentId !== undefined) return deny('A subagent cannot launch another agent.');
   // `isolation` makes a git worktree of the checkout (a write) or runs the agent in a cloud
   // environment where this hook never sees its calls; either breaks the confinement below.
@@ -105,6 +237,13 @@ function judgeAgent(call: ShapeCall): GuardVerdict {
   )
     return deny('A Shape session launches its agents in place, with no isolation set.');
   const type = stringField(call.toolInput, 'subagent_type');
+  const model = stringField(call.toolInput, 'model');
+  const offered: readonly string[] = access.agentModels ?? SHAPE_AGENT_MODELS;
+  if (model !== null && !offered.includes(model))
+    return deny(
+      `An agent runs on a model this project's account offers (${offered.join(', ')}), or on the session's model.`,
+    );
+  if (type === SHAPE_CODE_RESEARCHER) return ALLOW;
   if (type === SHAPE_RESEARCHER) {
     // The question is the only thing that reaches the researcher, and the researcher can send
     // requests: bounding it bounds what the session can hand across (§5.2).
@@ -120,7 +259,7 @@ function judgeAgent(call: ShapeCall): GuardVerdict {
   return type !== null && (SHAPE_REVIEWERS as readonly string[]).includes(type)
     ? ALLOW
     : deny(
-        `A Shape session launches only its reviewers (${SHAPE_REVIEWERS.join(', ')}) and the researcher.`,
+        `A Shape session launches only its reviewers (${SHAPE_REVIEWERS.join(', ')}), the researcher and the code researcher.`,
       );
 }
 
@@ -129,6 +268,24 @@ const isResearcher = (call: ShapeCall): boolean =>
 
 /** Hosts that name a machine of the builder's own network, not the public web. */
 const LOCAL_SUFFIXES = ['.localhost', '.local', '.internal', '.lan', '.home.arpa', '.intranet'];
+
+/**
+ * Why a URL names no host on the public web (an address, `localhost`, a `.local` name and the like,
+ * which reach this Mac or its network), or null when it names one.
+ */
+export function privateHostProblem(raw: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return `${raw} is not a URL.`;
+  }
+  const host = url.hostname.toLowerCase().replace(/\.$/, '');
+  if (isIP(host.replace(/^\[|\]$/g, '')) !== 0) return `${host} is an address, not a named host.`;
+  if (!host.includes('.') || host === 'localhost' || LOCAL_SUFFIXES.some((s) => host.endsWith(s)))
+    return `${host} is not on the public web; the daemon and the builder's network are out of reach.`;
+  return null;
+}
 
 /** Why a URL is not a public web page the researcher may fetch, or null when it is one. */
 function publicPageProblem(raw: string): string | null {
@@ -143,12 +300,9 @@ function publicPageProblem(raw: string): string | null {
   if (url.protocol !== 'https:') return 'The researcher fetches https pages only.';
   if (url.username !== '' || url.password !== '') return 'A URL with a login in it is refused.';
   if (url.port !== '' && url.port !== '443') return 'The researcher fetches port 443 only.';
-  const host = url.hostname.toLowerCase().replace(/\.$/, '');
-  if (isIP(host.replace(/^\[|\]$/g, '')) !== 0)
+  if (isIP(url.hostname.replace(/^\[|\]$/g, '')) !== 0)
     return 'The researcher fetches a named host, not an address.';
-  if (!host.includes('.') || host === 'localhost' || LOCAL_SUFFIXES.some((s) => host.endsWith(s)))
-    return `${host} is not on the public web; the daemon and the builder's network are out of reach.`;
-  return null;
+  return privateHostProblem(raw);
 }
 
 /**
@@ -160,6 +314,33 @@ export function researchLine(toolName: string, toolInput: unknown): string | nul
   if (toolName === 'WebFetch') return `WebFetch · ${stringField(toolInput, 'url') ?? ''}`;
   if (toolName === 'Agent' && stringField(toolInput, 'subagent_type') === SHAPE_RESEARCHER)
     return `${SHAPE_RESEARCHER} · asked · ${stringField(toolInput, 'prompt') ?? ''}`;
+  return null;
+}
+
+/** Most characters of a command or a tool's input that its dimmed line shows. */
+const LINE_LIMIT = 300;
+const clip = (text: string): string =>
+  text.length > LINE_LIMIT ? `${text.slice(0, LINE_LIMIT)}…` : text;
+
+/** A tool of a project MCP server: `mcp__<server>__<tool>`, any server but 10db's. */
+const isProjectTool = (toolName: string): boolean =>
+  toolName.startsWith('mcp__') &&
+  !toolName.startsWith(MCP_PREFIX) &&
+  toolName.split('__').length >= 3;
+
+/**
+ * The dimmed line for a command or a project tool call the hook let through or sent to the builder,
+ * naming the agent that made it when one did; null for any other call.
+ */
+export function commandLine(
+  toolName: string,
+  toolInput: unknown,
+  agentType: string | undefined,
+): string | null {
+  const by = agentType === undefined ? '' : `${agentType} · `;
+  if (COMMAND_TOOLS.has(toolName))
+    return `${by}Bash · ${clip(stringField(toolInput, 'command') ?? '')}`;
+  if (isProjectTool(toolName)) return `${by}${toolName} · ${clip(JSON.stringify(toolInput ?? {}))}`;
   return null;
 }
 
@@ -201,8 +382,9 @@ function judgeShapeTool(call: ShapeCall): ShapeVerdict {
 }
 
 /**
- * The PreToolUse answer for a Shape session's tool call, or its subagent's: `allow` or `deny`, never
- * `ask`. Anything not listed is refused, so a tool a later Claude Code adds is too.
+ * The PreToolUse answer for a Shape session's tool call, or its subagent's. Only a command and a
+ * project MCP tool may answer `ask`, and only in the sandbox; anything not listed is refused, so a
+ * tool a later Claude Code adds is too.
  */
 export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdict {
   if (READ_TOOLS.has(call.toolName))
@@ -212,8 +394,11 @@ export function judgeShapeCall(call: ShapeCall, access: ShapeAccess): ShapeVerdi
         )
       : judgeRead(call, access);
   if (WEB_TOOLS.has(call.toolName)) return judgeWeb(call);
-  if (call.toolName === 'Agent') return judgeAgent(call);
+  if (call.toolName === 'Agent') return judgeAgent(call, access);
   if (call.toolName.startsWith(MCP_PREFIX)) return judgeShapeTool(call);
+  if (COMMAND_TOOLS.has(call.toolName)) return judgeCommand(call, access);
+  // A server 10db registered, so one the builder approved for the project.
+  if (isProjectTool(call.toolName)) return judgeProjectTool(call, access);
   return deny(
     `${call.toolName} is not available: a Shape session is read-only. It reads the project and talks; it changes nothing.`,
   );

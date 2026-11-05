@@ -165,6 +165,9 @@ function sandboxOne(
     // through them the hosts an approval withholds.
     loopback: false,
     deniedEnvNames: [],
+    // A server's HTTP client reads the system's proxy settings through configd as it starts; uv
+    // crashes without it. It answers what the network is set to and opens no route out of the proxy.
+    machLookups: ['com.apple.SystemConfiguration.configd'],
   });
   const settingsFile = createSealedFile(
     tmpRoot,

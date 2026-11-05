@@ -31,7 +31,6 @@ import {
   type InboxItemId,
   type InboxTarget,
   type NextAction,
-  type ProjectDto,
   type ProjectId,
   type ReviewCardDetail,
   type SessionId,
@@ -50,7 +49,6 @@ import {
   getJudgeConfig,
   getEvidence,
   getInboxItem,
-  getMcpApproval,
   getPersona,
   getProject,
   getSessionByProviderId,
@@ -134,6 +132,7 @@ import type { StateStore } from '../events';
 import {
   AccountLaunchError,
   KeychainError,
+  type AwsCredentialsExporter,
   type Launcher,
   type SessionLaunch,
 } from '../environment';
@@ -143,7 +142,8 @@ import type { Judge } from '../judge';
 import {
   createPermissionBroker,
   raiseGateHostCards,
-  requestMcpApproval,
+  createProjectMcpReader,
+  flagMcpFailure,
   type InboxService,
   type WaitObserver,
 } from '../inbox';
@@ -160,14 +160,9 @@ import {
   type LaneSession,
 } from '../sandbox';
 import {
-  ProjectMcpError,
-  readRepoMcp,
-  resolveProjectMcp,
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
-  type ProjectMcp,
-  type RepoMcp,
   type SessionAdapter,
   type SessionHandle,
   type TurnResult,
@@ -252,6 +247,8 @@ export interface RunnerOptions {
   readonly migrationsBase?: MigrationsBase;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** Gives a repo MCP server that names an AWS profile that profile's short-lived credentials. */
+  readonly exportAwsCredentials: AwsCredentialsExporter;
   readonly dataDir: string;
   readonly live: LiveSessions;
   readonly limits: RunnerLimits;
@@ -616,6 +613,12 @@ function gateSummary(note: string | null, tail: string): string {
 
 export function createRunner(opts: RunnerOptions): Runner {
   const db = opts.state.db;
+  const projectMcpReader = createProjectMcpReader({
+    state: opts.state,
+    inbox: opts.inbox,
+    logger: opts.logger,
+    exportAwsCredentials: opts.exportAwsCredentials,
+  });
   const active = new Map<WorkstreamId, Control>();
   let idleWaiters: (() => void)[] = [];
   const identify = (pid: number | null): Promise<string | null> =>
@@ -1120,83 +1123,6 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
   }
 
-  /** A flag for an approved server 10db can't run as written; it folds per server. */
-  function flagMcpFailure(
-    projectId: ProjectId,
-    id: WorkstreamId,
-    failure: { readonly name: string; readonly message: string },
-  ): void {
-    opts.inbox.flag({
-      projectId,
-      workstreamId: id,
-      title: `The repo's MCP server "${failure.name}" can't run as written`,
-      body: failure.message,
-      foldKey: `project-mcp-failure:${projectId}:${failure.name}`,
-    });
-  }
-
-  /**
-   * The repo's MCP servers for one session. Only servers the builder approved for
-   * their exact config are passed; the session starts either way. A server with no verdict gets an approval
-   * card, one 10db can't run as written gets a flag naming the variable, and a reserved name gets a warning
-   * flag. Every card folds, so a retried session adds none. A file 10db can't parse raises a flag that says
-   * why, then throws, so the session fails before its row is written.
-   */
-  function readProjectMcp(
-    project: ProjectDto,
-    checkout: string,
-    id: WorkstreamId,
-    env: Readonly<Record<string, string>>,
-  ): ProjectMcp {
-    let repo: RepoMcp;
-    try {
-      repo = readRepoMcp(checkout);
-    } catch (error) {
-      if (error instanceof ProjectMcpError) {
-        opts.inbox.flag({
-          projectId: project.id,
-          workstreamId: id,
-          title: "The repo's MCP config stops sessions from starting",
-          body: error.message,
-          foldKey: `project-mcp-error:${project.id}`,
-        });
-      }
-      throw error;
-    }
-    const mcp = resolveProjectMcp({
-      repo,
-      env,
-      approvalFor: (review) => getMcpApproval(db, project.id, review.name, review.configHash),
-    });
-    for (const warning of mcp.warnings) {
-      opts.inbox.flag({
-        projectId: project.id,
-        workstreamId: id,
-        title: "Check the repo's MCP config",
-        body: warning,
-        foldKey: `project-mcp-warning:${project.id}`,
-      });
-    }
-    for (const review of mcp.pending) requestMcpApproval(opts.inbox, project.id, review);
-    for (const failure of mcp.failures) flagMcpFailure(project.id, id, failure);
-    // Names only, never values. The live acceptance check reads this line by its message and field names.
-    opts.logger.info(
-      {
-        workstreamId: id,
-        passed: Object.entries(mcp.servers).map(([name, server]) => ({
-          name,
-          transport: server.type,
-          envKeys: server.type === 'stdio' ? Object.keys(server.env).sort() : [],
-        })),
-        pending: mcp.pending.map((r) => r.name),
-        denied: mcp.denied,
-        failed: mcp.failures.map((f) => f.name),
-      },
-      'project mcp servers',
-    );
-    return mcp;
-  }
-
   /**
    * Parks on `inboxId`, whatever state the workstream reached meanwhile. An answer that landed while
    * the session was stopping is already on the card, so the workstream re-queues with it right away.
@@ -1492,7 +1418,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
     // The repo's MCP servers expand from the project env: an account's credential never reaches them.
     // A file 10db can't parse fails here too.
-    const projectMcp = readProjectMcp(project, checkout, id, opts.launcher.projectEnv());
+    const projectMcp = await projectMcpReader.read({
+      project,
+      checkout,
+      workstreamId: id,
+      env: opts.launcher.projectEnv(),
+    });
     const mcpServers = splitProjectMcp(projectMcp.servers);
     // A resumed session continues its conversation, so it keeps whether that conversation began from
     // a briefing and the briefing's baseline. A fresh session is briefed only when its prompt carries
@@ -1537,7 +1468,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A stdio server runs only under the lane sandbox; with none, or with a sandbox it can't have,
     // it is left out and named.
     const sandboxFailures = laneSession?.mcpFailures ?? [];
-    for (const failure of sandboxFailures) flagMcpFailure(project.id, id, failure);
+    for (const failure of sandboxFailures) flagMcpFailure(opts.inbox, project.id, id, failure);
     const mcpNote = skippedServersNote(
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),

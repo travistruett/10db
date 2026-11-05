@@ -104,6 +104,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     sendShapeMessage: track('sendShapeMessage'),
     proposeShape: track('proposeShape'),
     stopShape: track('stopShape'),
+    chooseShapeModel: track('chooseShapeModel'),
     convertShape: track('convertShape'),
     removeDraftGoal: track('removeDraftGoal'),
     withdrawShapeDecision: track('withdrawShapeDecision'),
@@ -1077,6 +1078,7 @@ describe('shape routes', () => {
     origin: 'app',
     proposeUnlocked: false,
     round: 0,
+    model: null,
     createdAt: AT,
     updatedAt: AT,
   } as const;
@@ -1245,6 +1247,7 @@ describe('shape routes', () => {
   it('answers a conversation’s view, 404 for an unknown one', async () => {
     const view = {
       shape,
+      models: { default: 'opus', offered: ['opus', 'fable'] },
       messages: [],
       proposals: [],
       heard: [],
@@ -1327,6 +1330,31 @@ describe('shape routes', () => {
     const res = await app(services).request(`/shapes/${shapeId}/stop`, post({}));
     expect(res.status).toBe(204);
     expect(stopped).toEqual([shapeId]);
+  });
+
+  it('runs the conversation on the model chosen, refuses one malformed (400), and a change mid-turn (409)', async () => {
+    const chosen: (string | null)[] = [];
+    const services = stubServices({
+      chooseShapeModel: (_id, model) => {
+        if (model === 'opus') throw new ConflictError('a turn runs');
+        chosen.push(model);
+        return { ...shape, model };
+      },
+    });
+    const put = (body: unknown) =>
+      app(services).request(`/shapes/${shapeId}/model`, {
+        method: 'PUT',
+        headers: { ...auth.headers, 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const ok = await put({ model: 'fable' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ...shape, model: 'fable' });
+    expect((await put({ model: null })).status).toBe(200);
+    expect((await put({ model: 'Fable 5.1' })).status).toBe(400);
+    expect((await put({})).status).toBe(400);
+    expect((await put({ model: 'opus' })).status).toBe(409);
+    expect(chosen).toEqual(['fable', null]);
   });
 
   describe('Convert', () => {

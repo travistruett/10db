@@ -231,7 +231,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
               allowedDomains: [],
               deniedDomains: [],
               strictAllowlist: true,
-              allowMachLookup: ['com.apple.FSEvents'],
+              allowMachLookup: ['com.apple.FSEvents', 'com.apple.SystemConfiguration.configd'],
               allowUnixSockets: [tmp],
             },
           }),
@@ -261,11 +261,14 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
             allowedDomains: hosts,
             deniedDomains: [],
             strictAllowlist: true,
-            allowMachLookup: ['com.apple.FSEvents'],
+            // configd answers the system proxy lookup uv and other HTTP clients make as they start.
+            allowMachLookup: ['com.apple.FSEvents', 'com.apple.SystemConfiguration.configd'],
             allowUnixSockets: [tmp],
           },
         }),
       );
+      // The session's own commands look up no more than they did.
+      expect(session.spec.settings.network.allowMachLookup).toEqual(['com.apple.FSEvents']);
       // Another server's hosts are its own.
       expect(launchOf(session, 'other').settings).toMatchObject({
         network: { allowedDomains: [] },

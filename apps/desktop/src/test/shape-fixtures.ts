@@ -21,6 +21,7 @@ export function shapeDto(overrides: Partial<ShapeDto> = {}): ShapeDto {
     origin: 'app',
     proposeUnlocked: false,
     round: 0,
+    model: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -177,6 +178,7 @@ export function shapeViewDto(
   const shape = shapeDto(shapeOverrides);
   return ShapeViewDto.parse({
     shape,
+    models: { default: 'opus', offered: ['haiku', 'sonnet', 'opus', 'fable'] },
     messages: [],
     proposals: [],
     heard: [],
