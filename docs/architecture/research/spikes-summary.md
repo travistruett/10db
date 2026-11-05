@@ -16,6 +16,7 @@
 | 9   | caffeinate -w tied to daemon pid                      | VERIFIED | M1b keep-awake: `caffeinate -i -w` on the daemon pid, self-releases in about 50 ms                                                                                                                                           | [spike-09](spike-09-caffeinate.md)            |
 | 10  | claude --bg surface (optional)                        | PARTIAL  | none for M1                                                                                                                                                                                                                  | [spike-10](spike-10-bg-daemon.md)             |
 | 13  | Bash sandbox (`Options.sandbox`) as the lane boundary | PARTIAL  | Engages through the SDK and holds every file-read route and the Keychain; Read tool, hooks and MCP stay outside it; unlisted hosts ask `canUseTool`; `make gate` cannot fully pass inside it (`ps`, git repos under the cwd) | [spike-13](spike-13-sandbox.md)               |
+| 16  | `codex app-server` on a ChatGPT plan                  | VERIFIED | One more adapter: a `PreToolUse` hook runs the guard, and a home of the account's own, pinned `untrusted`, holds the sandbox                                                                                                 |
 
 ## Constants for M1b
 

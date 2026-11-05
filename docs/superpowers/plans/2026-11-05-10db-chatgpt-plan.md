@@ -94,7 +94,6 @@ Expected: PASS
 
 - Modify: `packages/contracts/src/states.ts:45`, `packages/contracts/src/accounts.ts`, `packages/contracts/generated/*`
   (generated)
-- Modify: `packages/db/src/store/accounts.ts:158`
 - Modify: `apps/daemon/src/environment/launch.ts`, `apps/daemon/src/environment/index.ts`
 - Modify: `apps/daemon/src/sessions/account-check.ts`, `apps/daemon/src/sessions/fake-adapter.ts:51`
 - Modify: `apps/daemon/src/accounts/readiness.ts:6`
@@ -113,7 +112,9 @@ Expected: PASS
 - Produces in `environment`: `codexSignInCommand(home: string): string`;
   `signInCommandFor(account: { kind: SupportedAccountKind; configDir: string | null }): string`;
   `sessionConfigDir(env: Readonly<Record<string, string>>, home: string): string`.
-- Produces in `sessions`: a `SeenAccount` with `apiProvider: 'chatgpt'` means a ChatGPT sign-in.
+- Produces in `sessions`: a `SeenAccount` with `apiProvider: 'chatgpt'` means a ChatGPT sign-in, and its `organization`
+  holds the workspace ID. A ChatGPT account's identity is `codexIdentity(email: string, workspace: string): string`,
+  which is `${email} · ${workspace}`.
 
 - [ ] **Step 1: Write the failing tests.**
 
@@ -136,8 +137,11 @@ for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX
 expect(launcher.projectEnv()).toHaveProperty('OPENAI_API_KEY'); // the shared env keeps it
 expect(codexSignInCommand('/a b/codex')).toBe("CODEX_HOME='/a b/codex' codex login");
 
-// account-check.test.ts, table on checkAccount with kind codex_signin and identity 'a@b.c'
-// chatgpt, plan, a@b.c -> null; chatgpt, plan, other email -> IdentityMismatch with seenIdentity;
+// account-check.test.ts, table on checkAccount with kind codex_signin and identity 'a@b.c · w1'
+// chatgpt, plan, a@b.c, workspace w1 -> null
+// chatgpt, plan, a@b.c, workspace w2 -> IdentityMismatch, seenIdentity 'a@b.c · w2' (same email, another workspace)
+// chatgpt, plan, other email, w1 -> IdentityMismatch with seenIdentity
+// chatgpt, plan, a@b.c, no workspace reported -> IdentityMismatch, seenIdentity 'a@b.c'
 // apiKey -> WrongCredentials; nothing reported -> SignedOut
 ```
 
@@ -157,8 +161,11 @@ Expected: FAIL, `providerOf` undefined.
   - `account-check.ts`: `NEEDS` entry "a ChatGPT sign-in"; `credentialsMatch` is
     `seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType)`; lines 89, 108 and 129 use `signsInWithLogin`.
     Every message in this file names the tool by kind ("Codex", `codex login status`), so a ChatGPT card never says
-    "Claude Code" or `claude auth status`. `modelMatches` is unchanged.
-  - `readiness.ts:6` and `store/accounts.ts:158` use `signsInWithLogin`.
+    "Claude Code" or `claude auth status`. `modelMatches` is unchanged. In `checkAccount`, a `codex_signin` account's
+    `reported` is `codexIdentity(seen.email, seen.organization)`, or the email alone when no workspace was reported, so
+    the existing Confirm and mismatch cards carry the workspace with no new field.
+  - `readiness.ts:6` uses `signsInWithLogin`. `store/accounts.ts:158` stays Claude-only, since this identity isn't a bare
+    email.
   - `fake-adapter.ts:51`, in `expectedSeen`: `{ ...NOTHING_SEEN, email: expect.identity ?? FAKE_ACCOUNT_EMAIL,
     subscriptionType: 'pro', apiProvider: 'chatgpt' }`.
   - Desktop: the label "ChatGPT plan", `settingsOf` returns `choice`, `secretLabel` returns `Secret`.
@@ -348,6 +355,7 @@ export function codexLoginStatus(codexPath: string, env: Readonly<Record<string,
 // codex-adapter.test.ts, on fakeAppServer
 it('reads who the account is from account/read', ...);
 // { type: 'chatgpt', email, planType: 'pro' } -> seen.apiProvider 'chatgpt', email, subscriptionType 'pro'
+// account/rateLimits/read's accountId -> seen.organization
 // models from model/list, leaving hidden models out
 it('reports nothing for a signed-out home', ...); // account: null -> checkAccount says SignedOut
 it('rejects with AccountProbeError when the app-server does not answer', ...);
@@ -377,8 +385,9 @@ Run: `pnpm --filter @10db/daemon exec vitest run src/sessions/codex-adapter.test
 Expected: FAIL, modules missing.
 
 - [ ] **Step 3: Implement.**
-  - `probeAccount` spawns with the probe's env, runs `initialize`, `initialized`, `account/read`, `model/list`, closes.
-    A deadline of 30 s, as `AccountProbeError`. Log nothing from `account`.
+  - `probeAccount` spawns with the probe's env, runs `initialize`, `initialized`, `account/read`,
+    `account/rateLimits/read`, `model/list`, closes. A failed usage read leaves `organization` unset. A deadline of 30 s,
+    as `AccountProbeError`. Log nothing from `account`.
   - `codexLoginStatus` mirrors `claudeAuthStatus`: `codex login status`, exit 0 `signed_in`, exit 1 with "Not logged in"
     `signed_out`, anything else `unknown`.
   - `start` and `startShape` return a handle that ends with `SessionEndReason.Error` for now; Task 6 replaces `start`.
@@ -429,7 +438,8 @@ Run: `pnpm --filter @10db/desktop exec vitest run src/views/settings/accounts sr
 Expected: FAIL
 
 - [ ] **Step 3: Implement.** Replace `AccountKind.ClaudeSubscription` with `signsInWithLogin(kind)` in those three
-      account files, at all four places. `SignInSteps` shows the DTO's command and uses "Codex" for this kind. `IdentityCheck` lists
+      account files, at all four places. `SignInSteps` shows the DTO's command, uses "Codex" for this kind, and adds:
+      "Sign-in asks which workspace to use. Pick the one whose plan should pay for this account's work." `IdentityCheck` lists
       `models` when there are any. The Model map field is unchanged.
 
 - [ ] **Step 4: Run them to see them pass.**
@@ -467,6 +477,7 @@ Expected: PASS
 ```ts
 it.each([
   ['the expected account is not reported', { 'account/read': otherEmail }, 'account_refused'],
+  ['the same email is in another workspace', { 'account/rateLimits/read': otherWorkspace }, 'account_refused'],
   ['the account is signed out', { 'account/read': { account: null } }, 'account_refused'],
   ['the project layer is enabled', { 'config/read': projectLayerOn }, 'sandbox_refused'],
   ['the hook is missing', { 'hooks/list': noHooks }, 'sandbox_refused'],

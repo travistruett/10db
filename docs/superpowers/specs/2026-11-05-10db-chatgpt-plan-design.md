@@ -73,18 +73,20 @@ Both already send project content past the project's account. Neither is plan sp
 ### Account and login
 
 - `codex_signin` joins `SUPPORTED_ACCOUNT_KINDS`, with settings holding `modelChoice` only. Not metered: `costUsd`
-  stays null and no monthly cap applies. That holds for Ampsio's plan, which the first spike saw as `pro`. The first
-  step under Order checks `credits` in the real rate-limit report, because purchased credits could make running past
-  a window cost money.
-- No workspace pin. Identity is the email the builder confirms, as on a Claude subscription.
+  stays null and no monthly cap applies. That holds for Ampsio's plan, a `pro` plan with no purchased credits in the
+  first step's real report.
+- Sign-in asks which workspace to use, and that choice decides which plan pays. Codex keeps it in the home, so every
+  session there bills it. One email can hold several workspaces, so the email alone can't tell them apart.
 - Its home is `<dataDir>/accounts/<id>/codex`, mode 700, like a Claude account's directory.
 - Settings shows the sign-in command, `CODEX_HOME='<dir>' codex login`, as it shows `claude /login` today. Codex
   writes its own login there. 10db never reads, copies or stores it.
 - `~/.codex` isn't used for lanes: it would load Travis's MCP servers, and `thread/start` writes trust entries into
   the `config.toml` of the home it runs on.
-- The probe is `account/read`. It must report `type: chatgpt`. `email` is the identity, confirmed by the existing
-  card, and the plan's name is never compared. `codex login status` answers the signed-out question, as
-  `claude auth status` does.
+- The probe is `account/read` and `account/rateLimits/read`. It must report `type: chatgpt`. The identity is the email
+  and the workspace together, `<email> · <accountId>`, where `accountId` is the workspace ID from the usage read. The
+  existing card confirms it and the existing mismatch card catches a change, so a sign-in to another workspace on the
+  same email is refused rather than billed. The plan's name is never compared. `codex login status` answers the
+  signed-out question, as `claude auth status` does.
 - `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and `CODEX_HOME` are stripped from a
   Codex launch only, in `launch.ts`. The shared `projectEnv()` keeps them, so no existing project's gate changes.
 - `forced_login_method = "chatgpt"` in the home keeps an API key from billing instead.
@@ -121,7 +123,7 @@ A session starts like this. Any failure ends it with `sandbox_refused` or `accou
 
 1. Pin `[projects."<real checkout path>"] trust_level = "untrusted"` in the home's `config.toml`.
 2. Start the process, `initialize`, and warn if the version isn't the verified one.
-3. `account/read`: the expected account.
+3. `account/read` and `account/rateLimits/read`: the expected account and workspace.
 4. `config/read` with `includeLayers`: the project layer is absent or has a `disabledReason`.
 5. `hooks/list`: the guard hook is `trusted` and enabled.
 6. `thread/start` or `thread/resume` with `cwd`, `model`, `approvalPolicy: "never"` and per-lane `config`.
