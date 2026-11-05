@@ -134,9 +134,9 @@ during `thread/start`. A `-c` flag doesn't beat that entry; an `untrusted` entry
 session, a second session and a resume, and on a linked worktree. Step 4 sees a mistake before anything has started.
 So a Codex lane ignores a repository's `.codex/`, Ampsio's included.
 
-Per-lane values travel in `thread/start`'s `config`, over stdin, never on a command line: `permissions.lane` and
-`shell_environment_policy.set`. MCP servers pass as `-c` flags or in `config`, whichever the plan proves; the 10db
-server's token is `bearer_token_env_var`, set on the child and out of commands' reach (`inherit = "none"`).
+Per-lane values travel in `thread/start`'s `config`, over stdin, never on a command line: `permissions.lane`,
+`shell_environment_policy.set` and `mcp_servers`. The 10db server's token is `bearer_token_env_var`, set on the child
+and out of commands' reach (`inherit = "none"`).
 
 Mapping to `SessionEvent`:
 
@@ -181,8 +181,8 @@ Codex hooks fail open. A crash, a timeout, garbage or an `ask` all let the call 
 So:
 
 - The hook is a short script in the account's home: `/bin/sh` and `/usr/bin/curl`, sending the hook's input to a Unix
-  socket the adapter opens for that session under the account's directory. The data directory is closed to lanes, so
-  the socket needs no token.
+  socket the adapter opens for that session in `~/.10db/run/`, because a socket path under the data directory is past
+  macOS's 104-byte limit. A lane couldn't reach it in the spike, so the socket needs no token.
 - The answer is empty to allow, or `deny` JSON. If `curl` fails for any reason, the script exits 2.
 - `ask` is the socket holding the request open while `spec.canUseTool` raises its card. A hook held for 8 s then
   answered both ways in the spike; a real card can take much longer, which the plan tests.
