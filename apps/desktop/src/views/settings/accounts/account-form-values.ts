@@ -68,6 +68,7 @@ function settingsOf(values: AccountFormValues): Record<string, unknown> {
   switch (values.kind) {
     case AccountKind.ClaudeSubscription:
     case AccountKind.AnthropicApiKey:
+    case AccountKind.CodexSignin:
       return choice;
     case AccountKind.Bedrock:
       return {

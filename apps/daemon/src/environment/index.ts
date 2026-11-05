@@ -12,11 +12,14 @@ export {
 export {
   ACCOUNT_NAMES_VERIFIED_ON,
   AccountLaunchError,
+  codexSignInCommand,
   createLauncher,
   type AccountExpectation,
   type Launcher,
   type SessionLaunch,
+  sessionConfigDir,
   signInCommand,
+  signInCommandFor,
 } from './launch';
 export { captureLoginEnv, LOGIN_ENV_MARKER, parseEnvBlock, type LoginEnv } from './login-env';
 export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from './session-env';

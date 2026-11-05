@@ -76,6 +76,13 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
         apiKeySource: 'none',
         tokenSource: 'ANTHROPIC_AUTH_TOKEN',
       };
+    case AccountKind.CodexSignin:
+      return {
+        ...NOTHING_SEEN,
+        email: expect.identity ?? FAKE_ACCOUNT_EMAIL,
+        subscriptionType: 'pro',
+        apiProvider: 'chatgpt',
+      };
   }
 }
 

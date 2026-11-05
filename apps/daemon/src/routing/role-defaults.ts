@@ -20,11 +20,7 @@ const effortLevel = (effort: Effort): number => EFFORTS.indexOf(effort);
 
 /** The profiles a role default may run: enabled, of the provider, on one of Claude Code's models. */
 function usable(profiles: readonly ModelProfileDto[], provider: Provider): ModelProfileDto[] {
-  return profiles.filter(
-    (p) =>
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
-      p.enabled && p.provider === provider && strength(p.model) >= 0,
-  );
+  return profiles.filter((p) => p.enabled && p.provider === provider && strength(p.model) >= 0);
 }
 
 /** The strongest model offered in the tier, else in the nearest tier, the stronger on a tie. */

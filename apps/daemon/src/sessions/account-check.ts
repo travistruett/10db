@@ -2,6 +2,7 @@ import {
   AccountKind,
   AccountProblem,
   MODEL_ALIAS_PATTERN,
+  signsInWithLogin,
   type AccountRefusal,
   type SupportedAccountKind,
 } from '@10db/contracts';
@@ -41,7 +42,22 @@ const NEEDS: Readonly<Record<SupportedAccountKind, string>> = {
   [AccountKind.AnthropicApiKey]: 'an Anthropic API key',
   [AccountKind.Bedrock]: 'Bedrock',
   [AccountKind.Gateway]: 'a gateway token',
+  [AccountKind.CodexSignin]: 'a ChatGPT sign-in',
 };
+
+/** The tool a kind's sessions run on, and its own sign-in status command, so a card names the right one. */
+const TOOL: Readonly<Record<SupportedAccountKind, { name: string; status: string }>> = {
+  [AccountKind.ClaudeSubscription]: { name: 'Claude Code', status: 'claude auth status' },
+  [AccountKind.AnthropicApiKey]: { name: 'Claude Code', status: 'claude auth status' },
+  [AccountKind.Bedrock]: { name: 'Claude Code', status: 'claude auth status' },
+  [AccountKind.Gateway]: { name: 'Claude Code', status: 'claude auth status' },
+  [AccountKind.CodexSignin]: { name: 'Codex', status: 'codex login status' },
+};
+
+/** A ChatGPT account's identity: the email and the workspace, since one email can sign in to several. */
+export function codexIdentity(email: string, workspace: string): string {
+  return `${email} · ${workspace}`;
+}
 
 const noKey = (source: string | undefined): boolean => source === undefined || source === 'none';
 
@@ -74,19 +90,32 @@ function credentialsMatch(kind: SupportedAccountKind, seen: SeenAccount): boolea
         seen.apiProvider === 'firstParty' &&
         noKey(seen.apiKeySource)
       );
+    case AccountKind.CodexSignin:
+      return seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType);
   }
+}
+
+/** The email and workspace a ChatGPT sign-in reported; the email alone when it reported no workspace. */
+function chatgptIdentity(seen: SeenAccount): string | undefined {
+  if (seen.email === undefined) return undefined;
+  return seen.organization === undefined
+    ? seen.email
+    : codexIdentity(seen.email, seen.organization);
 }
 
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();
 
-/** Before the prompt (accounts spec §5): who Claude Code is, and the credential it bills. */
+/** Before the prompt (accounts spec §5): who the agent is, and the credential it bills. */
 export function checkAccount(expect: AccountExpectation, seen: SeenAccount): AccountRefusal | null {
   const who = `account "${expect.label}"`;
   // A third-party provider or a gateway token reports no email or plan either, and signing in cannot fix
   // that: only a first-party report with nothing in it is a signed-out directory.
-  const firstParty = seen.apiProvider === undefined || seen.apiProvider === 'firstParty';
+  const tool = TOOL[expect.kind].name;
+  const codex = expect.kind === AccountKind.CodexSignin;
+  const providerOfLogin = codex ? 'chatgpt' : 'firstParty';
+  const firstParty = seen.apiProvider === undefined || seen.apiProvider === providerOfLogin;
   if (
-    expect.kind === AccountKind.ClaudeSubscription &&
+    signsInWithLogin(expect.kind) &&
     firstParty &&
     seen.tokenSource !== 'ANTHROPIC_AUTH_TOKEN' &&
     !seen.email &&
@@ -95,22 +124,23 @@ export function checkAccount(expect: AccountExpectation, seen: SeenAccount): Acc
   )
     return {
       problem: AccountProblem.SignedOut,
-      message: `Claude Code is not signed in for ${who}`,
+      message: `${tool} is not signed in for ${who}`,
       seenIdentity: null,
     };
   if (!credentialsMatch(expect.kind, seen))
     return {
       problem: AccountProblem.WrongCredentials,
-      message: `${who} needs ${NEEDS[expect.kind]} but Claude Code reported ${described(seen)}`,
+      message: `${who} needs ${NEEDS[expect.kind]} but ${tool} reported ${described(seen)}`,
       seenIdentity: null,
     };
   if (expect.identity === null) return null;
-  const subscription = expect.kind === AccountKind.ClaudeSubscription;
-  const reported = subscription ? seen.email : seen.organization;
+  const login = signsInWithLogin(expect.kind);
+  const reported = codex ? chatgptIdentity(seen) : login ? seen.email : seen.organization;
   if (reported !== undefined && same(reported, expect.identity)) return null;
+  const what = codex ? 'ChatGPT sign-in' : login ? 'email' : 'organization';
   return {
     problem: AccountProblem.IdentityMismatch,
-    message: `Claude Code reported a different ${subscription ? 'email' : 'organization'} than the one confirmed for ${who}`,
+    message: `${tool} reported a different ${what} than the one confirmed for ${who}`,
     seenIdentity: reported ?? null,
   };
 }
@@ -126,17 +156,16 @@ export function missingAccountRefusal(
   printed?: string,
   signIn?: SignInState,
 ): AccountRefusal | null {
-  if (expect.kind !== AccountKind.ClaudeSubscription) return null;
+  if (!signsInWithLogin(expect.kind)) return null;
+  const { status } = TOOL[expect.kind];
   const tail = printed ? `. ${printed}` : '';
   const who = `${why} for account "${expect.label}"`;
-  // `claude auth status` settles it: only "not signed in" is a sign-out. Anything else is a slow start.
+  // The tool's status command settles it: only "not signed in" is a sign-out. Anything else is a slow start.
   if (signIn === 'signed_in' || signIn === 'unknown')
     return {
       problem: AccountProblem.StartTimeout,
       message: `${who}, but ${
-        signIn === 'signed_in'
-          ? 'claude auth status says it is signed in'
-          : 'claude auth status gave no answer'
+        signIn === 'signed_in' ? `${status} says it is signed in` : `${status} gave no answer`
       }, so its starts kept timing out${tail}`,
       seenIdentity: null,
     };
@@ -144,7 +173,7 @@ export function missingAccountRefusal(
     problem: AccountProblem.SignedOut,
     message:
       signIn === 'signed_out'
-        ? `${who}, and claude auth status says it is not signed in, so it looks signed out${tail}`
+        ? `${who}, and ${status} says it is not signed in, so it looks signed out${tail}`
         : `${who}, which looks signed out${tail}`,
     seenIdentity: null,
   };
@@ -168,17 +197,19 @@ function oneLine(raw: string): string {
 /**
  * What a session start that got no account from Claude Code says: how long it waited, how many starts
  * got nothing, and what they printed, so the builder can tell a slow start from a real sign-out.
- * `printed` holds one entry per start, the text its stderr held.
+ * `printed` holds one entry per start, the text its stderr held; `kind` picks the tool the text names.
  */
 export function noAccountWhy(
   waitMs: number | readonly number[],
   printed: readonly string[],
+  kind: SupportedAccountKind = AccountKind.ClaudeSubscription,
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
   const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];
   const seconds = waits.map((ms) => `${String(ms / 1_000)} s`);
   const last = seconds.pop();
-  const said = `Claude Code reported no account`;
+  const tool = TOOL[kind].name;
+  const said = `${tool} reported no account`;
   const wait =
     seconds.length === 0
       ? `${said} within ${last ?? '0 s'}`
@@ -188,8 +219,8 @@ export function noAccountWhy(
     why: starts > 1 && seconds.length === 0 ? `${wait} on each of ${String(starts)} starts` : wait,
     printed:
       seen.length === 0
-        ? 'Claude Code printed nothing'
-        : `Claude Code printed: ${seen.map((line) => `"${line}"`).join('; ')}`,
+        ? `${tool} printed nothing`
+        : `${tool} printed: ${seen.map((line) => `"${line}"`).join('; ')}`,
   };
 }
 
@@ -204,7 +235,7 @@ export function checkInitCredentials(
     ? null
     : {
         problem: AccountProblem.WrongCredentials,
-        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but Claude Code started with ${described(seen)}`,
+        message: `account "${expect.label}" needs ${NEEDS[expect.kind]} but ${TOOL[expect.kind].name} started with ${described(seen)}`,
         seenIdentity: null,
       };
 }

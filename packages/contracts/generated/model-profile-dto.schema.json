@@ -9,7 +9,8 @@
     "provider": {
       "type": "string",
       "enum": [
-        "claude"
+        "claude",
+        "codex"
       ]
     },
     "model": {

@@ -1,9 +1,10 @@
 import { z } from 'zod';
 import { AccountId, ProjectId } from './ids';
+import { Provider } from './states';
 
 type ValueOf<T> = T[keyof T];
 
-/** Who pays for a project's sessions (accounts spec §4). The Codex kinds are reserved until the Codex adapter exists. */
+/** Who pays for a project's sessions (accounts spec §4). `openai_api_key` is reserved until a Codex API-key adapter exists. */
 export const AccountKind = {
   ClaudeSubscription: 'claude_subscription',
   AnthropicApiKey: 'anthropic_api_key',
@@ -20,8 +21,27 @@ export const SUPPORTED_ACCOUNT_KINDS = [
   AccountKind.AnthropicApiKey,
   AccountKind.Bedrock,
   AccountKind.Gateway,
+  AccountKind.CodexSignin,
 ] as const;
 export type SupportedAccountKind = (typeof SUPPORTED_ACCOUNT_KINDS)[number];
+
+/** The agent that runs a session on the kind. */
+export function providerOf(kind: SupportedAccountKind): Provider {
+  switch (kind) {
+    case AccountKind.ClaudeSubscription:
+    case AccountKind.AnthropicApiKey:
+    case AccountKind.Bedrock:
+    case AccountKind.Gateway:
+      return Provider.Claude;
+    case AccountKind.CodexSignin:
+      return Provider.Codex;
+  }
+}
+
+/** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
+export function signsInWithLogin(kind: SupportedAccountKind): boolean {
+  return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;
+}
 
 const METERED: readonly AccountKind[] = [
   AccountKind.AnthropicApiKey,
@@ -131,6 +151,7 @@ const SETTINGS_BY_KIND = {
   [AccountKind.AnthropicApiKey]: ApiKeySettings,
   [AccountKind.Bedrock]: BedrockSettings,
   [AccountKind.Gateway]: GatewaySettings,
+  [AccountKind.CodexSignin]: SubscriptionSettings,
 } as const satisfies Record<SupportedAccountKind, z.ZodType>;
 
 /** Stored or submitted settings, checked against the account's own kind. */
@@ -142,6 +163,7 @@ export function parseAccountSettings(kind: SupportedAccountKind, raw: unknown): 
 export function needsSecret(kind: SupportedAccountKind, settings: AccountSettings): boolean {
   switch (kind) {
     case AccountKind.ClaudeSubscription:
+    case AccountKind.CodexSignin:
       return false;
     case AccountKind.AnthropicApiKey:
     case AccountKind.Gateway:
@@ -199,10 +221,15 @@ export const AccountInput = z.discriminatedUnion(
       ...metered,
       settings: GatewaySettings,
     }),
+    z.strictObject({
+      kind: z.literal(AccountKind.CodexSignin),
+      ...common,
+      settings: SubscriptionSettings.default({}),
+    }),
   ],
   {
     error:
-      'Choose claude_subscription, anthropic_api_key, bedrock or gateway; openai_api_key and codex_signin are reserved until the Codex adapter exists',
+      'Choose claude_subscription, anthropic_api_key, bedrock, gateway or codex_signin; openai_api_key is reserved until a Codex API-key adapter exists',
   },
 );
 export type AccountInput = z.input<typeof AccountInput>;

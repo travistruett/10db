@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AccountExpectation } from '../environment';
 import {
   checkAccount,
+  codexIdentity,
   checkInitCredentials,
   credentialProblem,
   missingAccountRefusal,
@@ -28,6 +29,12 @@ const expect_ = (
   kind,
   identity,
 });
+const CHATGPT: Partial<SeenAccount> = {
+  email: 'a@b.c',
+  organization: 'w1',
+  subscriptionType: 'pro',
+  apiProvider: 'chatgpt',
+};
 const SUB: Partial<SeenAccount> = {
   email: 'a@example.com',
   subscriptionType: 'Claude Max',
@@ -172,6 +179,47 @@ describe('checkAccount', () => {
     if (refusal) expect(refusal.message).toContain('Company A');
   });
 
+  it.each<{
+    name: string;
+    seen: Partial<SeenAccount>;
+    problem: AccountProblem | null;
+    seenIdentity?: string | null;
+  }>([
+    { name: 'the confirmed ChatGPT sign-in', seen: CHATGPT, problem: null },
+    {
+      name: 'the same email in another workspace',
+      seen: { ...CHATGPT, organization: 'w2' },
+      problem: 'identity_mismatch',
+      seenIdentity: 'a@b.c · w2',
+    },
+    {
+      name: 'another email in the same workspace',
+      seen: { ...CHATGPT, email: 'other@b.c' },
+      problem: 'identity_mismatch',
+      seenIdentity: 'other@b.c · w1',
+    },
+    {
+      name: 'a sign-in reporting no workspace',
+      seen: { ...CHATGPT, organization: undefined },
+      problem: 'identity_mismatch',
+      seenIdentity: 'a@b.c',
+    },
+    {
+      name: 'an API key where the sign-in should be',
+      seen: { apiKeySource: 'OPENAI_API_KEY', apiProvider: 'apikey' },
+      problem: 'wrong_credentials',
+    },
+    { name: 'nothing reported', seen: {}, problem: 'signed_out' },
+  ])('a ChatGPT sign-in expecting a@b.c · w1 meets $name', ({ seen, problem, seenIdentity }) => {
+    const refusal = checkAccount(expect_('codex_signin', 'a@b.c · w1'), { ...NONE, ...seen });
+    expect(refusal?.problem ?? null).toBe(problem);
+    if (seenIdentity !== undefined) expect(refusal?.seenIdentity ?? null).toBe(seenIdentity);
+    if (refusal) {
+      expect(refusal.message).toContain('Company A');
+      expect(refusal.message).not.toMatch(/Claude|claude/);
+    }
+  });
+
   it('re-checks the key source at init with the provider the preflight saw', () => {
     const expected = expect_('anthropic_api_key');
     const preflight: SeenAccount = {
@@ -201,6 +249,7 @@ describe('modelMatches', () => {
 describe('missingAccountRefusal', () => {
   it.each<[SupportedAccountKind, AccountProblem | null]>([
     ['claude_subscription', 'signed_out'],
+    ['codex_signin', 'signed_out'],
     ['anthropic_api_key', null],
     ['bedrock', null],
     ['gateway', null],
@@ -324,5 +373,25 @@ describe('credentialProblem', () => {
     [undefined, null],
   ])('%s → %s', (error, problem) => {
     expect(credentialProblem(error)).toBe(problem);
+  });
+});
+
+describe('codexIdentity', () => {
+  it('joins the email and the workspace', () => {
+    expect(codexIdentity('a@b.c', 'w1')).toBe('a@b.c · w1');
+  });
+});
+
+describe('missingAccountRefusal for a ChatGPT sign-in', () => {
+  it('names Codex and codex login status, never Claude Code', () => {
+    const refusal = missingAccountRefusal(
+      expect_('codex_signin'),
+      'Codex reported no account within 30 s',
+      'Codex printed nothing',
+      'signed_in',
+    );
+    expect(refusal?.problem).toBe('start_timeout');
+    expect(refusal?.message).toContain('codex login status');
+    expect(refusal?.message).not.toMatch(/Claude|claude/);
   });
 });

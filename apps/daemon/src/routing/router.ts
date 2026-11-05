@@ -55,7 +55,6 @@ function measured(
 ): ModelProfileDto[] {
   return profiles.filter(
     (p) =>
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
       p.enabled && p.provider === provider && score(p, kind) !== null && p.costPerTaskUsd !== null,
   );
 }
@@ -79,7 +78,6 @@ function comparedOn(input: RouteInput, own: ScoreKind): ScoreKind {
   const gap = input.profiles.some(
     (p) =>
       p.enabled &&
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
       p.provider === input.provider &&
       p.costPerTaskUsd !== null &&
       score(p, ScoreKind.Intelligence) !== null &&

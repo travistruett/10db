@@ -15,9 +15,13 @@ import {
   needsSecret,
   parseAccountSettings,
   ProjectPatch,
+  providerOf,
+  signsInWithLogin,
   USAGE_HANDOFF_AT,
   USAGE_HANDOFF_MAX,
   USAGE_HANDOFF_MIN,
+  type Provider,
+  type SupportedAccountKind,
 } from './index';
 
 describe('AccountInput', () => {
@@ -61,6 +65,7 @@ describe('AccountInput', () => {
         settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku', 'sonnet'] },
       },
     },
+    { name: 'a ChatGPT sign-in', input: { kind: 'codex_signin', label: 'ChatGPT Pro' } },
   ])('accepts $name', ({ input }) => {
     expect(AccountInput.safeParse(input).success).toBe(true);
   });
@@ -69,12 +74,7 @@ describe('AccountInput', () => {
     {
       name: 'a reserved OpenAI kind',
       input: { kind: 'openai_api_key', label: 'x' },
-      message: /reserved until the Codex adapter exists/,
-    },
-    {
-      name: 'a reserved Codex kind',
-      input: { kind: 'codex_signin', label: 'x' },
-      message: /reserved until the Codex adapter exists/,
+      message: /openai_api_key is reserved/,
     },
     {
       name: 'a monthly cap on a subscription',
@@ -162,6 +162,31 @@ describe('AccountInput', () => {
 });
 
 describe('account kinds', () => {
+  it.each<[SupportedAccountKind, Provider]>([
+    ['claude_subscription', 'claude'],
+    ['anthropic_api_key', 'claude'],
+    ['bedrock', 'claude'],
+    ['gateway', 'claude'],
+    ['codex_signin', 'codex'],
+  ])('%s runs on %s', (kind, provider) => {
+    expect(providerOf(kind)).toBe(provider);
+  });
+
+  it.each<[SupportedAccountKind, boolean]>([
+    ['claude_subscription', true],
+    ['codex_signin', true],
+    ['anthropic_api_key', false],
+    ['bedrock', false],
+    ['gateway', false],
+  ])('%s signs in with a login: %s', (kind, login) => {
+    expect(signsInWithLogin(kind)).toBe(login);
+  });
+
+  it('is not metered for a ChatGPT sign-in, and needs no secret', () => {
+    expect(isMetered(AccountKind.CodexSignin)).toBe(false);
+    expect(needsSecret('codex_signin', parseAccountSettings('codex_signin', {}))).toBe(false);
+  });
+
   it.each<[AccountKind, boolean]>([
     [AccountKind.ClaudeSubscription, false],
     [AccountKind.AnthropicApiKey, true],
