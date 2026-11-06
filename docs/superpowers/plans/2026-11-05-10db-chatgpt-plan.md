@@ -277,7 +277,7 @@ it('makes guard-hook.sh executable and the home mode 700', ...);
 Run: `pnpm --filter @10db/daemon exec vitest run src/sessions/codex-rpc.test.ts src/sessions/codex-home.test.ts`
 Expected: FAIL, modules missing.
 
-- [ ] **Step 3: Implement.** One `readline` over stdout. `prepare` resolves the real path of the checkout, parses the
+- [ ] **Step 3: Implement.** Split stdout on `\n` only, with a `StringDecoder` and a buffer: `readline` also breaks on U+2028 and U+2029, which are legal in JSON. `prepare` resolves the real path of the checkout, parses the
       existing file with smol-toml, overlays the template, keeps `projects` and `hooks.state`, and renames a temp file
       over `config.toml`. Writes for one home run in one promise chain. `guard-hook.sh` is exactly:
 
