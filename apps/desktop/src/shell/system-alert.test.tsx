@@ -74,3 +74,25 @@ describe('SystemAlert benchmark sync', () => {
     },
   );
 });
+
+describe('SystemAlert Codex version', () => {
+  it('shows the Codex version warning', async () => {
+    server.use(
+      http.get(daemonUrl('/system'), () =>
+        HttpResponse.json(
+          SystemCheckDto.parse({
+            loginEnv: { source: 'login_shell', warning: null },
+            claudeCode: { verifiedOn: '2.1.0', warning: null },
+            codex: { verifiedOn: '0.154.0', warning: 'Codex 0.200.0 is newer than 0.154.0.' },
+            tools: [],
+            benchmarkSync: null,
+          }),
+        ),
+      ),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(<SystemAlert />);
+    expect(await screen.findByText("This Codex is newer than 10db's account checks")).toBeTruthy();
+    expect(screen.getByText('Codex 0.200.0 is newer than 0.154.0.')).toBeTruthy();
+  });
+});

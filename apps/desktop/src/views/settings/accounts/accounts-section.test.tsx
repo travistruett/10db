@@ -168,6 +168,26 @@ describe('AccountsSection', () => {
     expect(bar.getAttribute('style')).toContain('orange');
   });
 
+  it('shows no dollars for a ChatGPT plan account', async () => {
+    const chatgpt = accountDto({
+      label: 'ChatGPT Pro',
+      kind: 'codex_signin',
+      expectedIdentity: 'me@example.com · ws_123',
+    });
+    serve([DEFAULT_ACCOUNT, chatgpt]);
+    const row = await rowOf('ChatGPT Pro');
+    expect(within(row).getByText('ChatGPT plan')).toBeTruthy();
+    expect(within(row).getByText('Ready')).toBeTruthy();
+    expect(await within(row).findByText('2K tokens')).toBeTruthy();
+    expect(within(row).queryByText(/\$/)).toBeNull();
+  });
+
+  it('shows a ChatGPT plan account that is not confirmed as needing sign-in', async () => {
+    serve([DEFAULT_ACCOUNT, accountDto({ label: 'ChatGPT Pro', kind: 'codex_signin' })]);
+    const row = await rowOf('ChatGPT Pro');
+    expect(within(row).getByText('Needs sign-in')).toBeTruthy();
+  });
+
   it('puts an archived account only under Archived (1), with its label and kind', async () => {
     const archived = accountDto({ label: 'Old client', kind: 'gateway', archived: true });
     serve([DEFAULT_ACCOUNT, archived]);

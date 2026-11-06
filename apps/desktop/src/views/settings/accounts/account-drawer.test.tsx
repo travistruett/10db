@@ -206,6 +206,82 @@ describe('AccountDrawer', () => {
     expect(within(dialog).getByText(/Sign in as the email this account should use/)).toBeTruthy();
   });
 
+  it('adds a ChatGPT plan account and shows its sign-in command', async () => {
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const account = accountDto({ label: 'ChatGPT Pro', kind: 'codex_signin' });
+    const command = 'CODEX_HOME=/data/accounts/c/codex codex login';
+    serve([DEFAULT_ACCOUNT, account]);
+    server.use(
+      http.get(daemonUrl('/accounts/:accountId/signin'), ({ params }) =>
+        HttpResponse.json(
+          accountSignInDto({ accountId: AccountId.parse(params['accountId']), command }),
+        ),
+      ),
+    );
+    const dialog = await openDrawer('ChatGPT Pro');
+    expect(await within(dialog).findByText(command)).toBeTruthy();
+    expect(within(dialog).getByText(/Sign-in asks which workspace to use/)).toBeTruthy();
+    expect(within(dialog).getByText(/Pick the one whose plan should pay/)).toBeTruthy();
+    expect(within(dialog).queryByText(/claude/i)).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Copy command' }));
+    await waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith(command);
+    });
+  });
+
+  it('offers Confirm for the email and workspace the probe saw', async () => {
+    const account = accountDto({ label: 'ChatGPT Pro', kind: 'codex_signin' });
+    const seen = 'me@example.com · ws_123';
+    const served = serve([DEFAULT_ACCOUNT, account], {
+      identity: {
+        [account.id]: accountIdentityDto({
+          accountId: account.id,
+          email: 'me@example.com',
+          refusal: {
+            problem: 'unconfirmed',
+            message: 'ChatGPT Pro has no identity recorded yet.',
+            seenIdentity: seen,
+          },
+        }),
+      },
+    });
+    const dialog = await openDrawer('ChatGPT Pro');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: `Confirm ${seen}` }));
+    await waitFor(() => {
+      expect(served.patches).toEqual([{ id: account.id, body: { expectedIdentity: seen } }]);
+    });
+  });
+
+  it('lists the models the account offers', async () => {
+    const account = accountDto({
+      label: 'ChatGPT Pro',
+      kind: 'codex_signin',
+      expectedIdentity: 'me@example.com · ws_123',
+    });
+    serve([DEFAULT_ACCOUNT, account], {
+      identity: {
+        [account.id]: accountIdentityDto({
+          accountId: account.id,
+          email: 'me@example.com',
+          models: ['gpt-5.5', 'gpt-5.5-mini'],
+        }),
+      },
+    });
+    const dialog = await openDrawer('ChatGPT Pro');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+    expect(await within(dialog).findByText('gpt-5.5')).toBeTruthy();
+    expect(within(dialog).getByText('gpt-5.5-mini')).toBeTruthy();
+  });
+
+  it('lists no models when the account offers none', async () => {
+    serve([DEFAULT_ACCOUNT]);
+    const dialog = await openDrawer('Claude plan');
+    fireEvent.click(await within(dialog).findByRole('button', { name: 'Check sign-in' }));
+    await within(dialog).findByText('Signed in as builder@example.com');
+    expect(within(dialog).queryByText(/Models/)).toBeNull();
+  });
+
   it('says the default account’s login is the one 10db already uses', async () => {
     serve([DEFAULT_ACCOUNT]);
     const dialog = await openDrawer('Claude plan');

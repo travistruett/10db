@@ -1,11 +1,12 @@
-import type { AccountDto } from '@10db/contracts';
+import { AccountKind, type AccountDto } from '@10db/contracts';
 import { ActionIcon, Code, CopyButton, Group, Stack, Text, Tooltip } from '@mantine/core';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { useAccountSignIn } from '../../../daemon/account-queries';
 
-/** How to sign a subscription in with the unmodified `claude`; the check itself is `IdentityCheck`. */
+/** How to sign a subscription in with the unmodified `claude` or `codex`; the check itself is `IdentityCheck`. */
 export function SignInSteps({ account }: { readonly account: AccountDto }) {
   const signIn = useAccountSignIn(account.id, true);
+  const isCodex = account.kind === AccountKind.CodexSignin;
   return (
     <Stack gap="xs">
       {account.isDefault ? (
@@ -49,6 +50,12 @@ export function SignInSteps({ account }: { readonly account: AccountDto }) {
         </Group>
       )}
       <Text size="sm">2. Sign in as the email this account should use</Text>
+      {isCodex ? (
+        <Text size="sm">
+          Sign-in asks which workspace to use. Pick the one whose plan should pay for this
+          account&apos;s work.
+        </Text>
+      ) : null}
       <Text size="sm">3. Check sign-in</Text>
     </Stack>
   );

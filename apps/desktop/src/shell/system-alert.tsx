@@ -16,7 +16,9 @@ export function SystemAlert() {
   const benchmarkSync =
     check.benchmarkSync && syncNeedsBuilder(check.benchmarkSync) ? check.benchmarkSync : null;
   const versionWarning = check.claudeCode.warning;
-  if (missing.length === 0 && !warning && !benchmarkSync && !versionWarning) return null;
+  const codexWarning = check.codex.warning;
+  if (missing.length === 0 && !warning && !benchmarkSync && !versionWarning && !codexWarning)
+    return null;
   const icon = <IconAlertTriangle size={20} stroke={1.5} />;
   const versionAlert = versionWarning ? (
     <Alert color="yellow" icon={icon} title="This Claude Code is newer than 10db's account checks">
@@ -49,6 +51,11 @@ export function SystemAlert() {
         </Alert>
       )}
       {versionAlert}
+      {codexWarning ? (
+        <Alert color="yellow" icon={icon} title="This Codex is newer than 10db's account checks">
+          {codexWarning}
+        </Alert>
+      ) : null}
     </Stack>
   );
 }

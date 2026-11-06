@@ -1,4 +1,4 @@
-import { AccountKind, needsSecret, type AccountDto } from '@10db/contracts';
+import { needsSecret, signsInWithLogin, type AccountDto } from '@10db/contracts';
 
 export const AccountStatus = {
   Ready: 'ready',
@@ -22,7 +22,7 @@ export const ACCOUNT_STATUS_LABEL: Readonly<Record<AccountStatus, string>> = {
  */
 export function accountStatus(account: AccountDto): AccountStatus {
   if (account.archived) return AccountStatus.Archived;
-  if (account.kind === AccountKind.ClaudeSubscription && account.expectedIdentity === null)
+  if (signsInWithLogin(account.kind) && account.expectedIdentity === null)
     return AccountStatus.NeedsSignIn;
   if (needsSecret(account.kind, account.settings) && !account.secretSet)
     return AccountStatus.NeedsSecret;
