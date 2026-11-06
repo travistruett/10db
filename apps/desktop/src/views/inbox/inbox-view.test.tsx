@@ -199,7 +199,7 @@ describe('InboxView', () => {
     renderApp('/inbox');
     await screen.findByText('Which badge color?');
     key('Enter');
-    expect(await screen.findByText('Choose an option first (1–4).')).toBeTruthy();
+    expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
     expect(answers).toEqual([]);
   });
 
@@ -238,6 +238,37 @@ describe('InboxView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
     await waitFor(() => {
       expect(answers).toEqual([{ id: permission.id, body: { choice: 'allow_workstream' } }]);
+    });
+  });
+
+  it('names the server on the project MCP tool card’s extra choice and sends its value', async () => {
+    const GRANT = {
+      name: 'aws-billing',
+      configHash: 'a'.repeat(64),
+      tools: ['mcp__aws-billing__credits'],
+    };
+    const permission = inboxItemDto({
+      kind: 'permission',
+      title: 'Allow mcp__aws-billing__credits?',
+      body: '{}',
+      category: 'environment',
+      options: [
+        { label: 'allow_once', description: 'Allow this call once' },
+        { label: 'allow_project', description: 'Always allow in this project' },
+        { label: 'allow_mcp_server', description: 'Always allow every aws-billing tool' },
+        { label: 'deny', description: 'Deny' },
+      ],
+      detail: { toolName: 'mcp__aws-billing__credits', summary: '{}', mcpToolGrant: GRANT },
+    });
+    const { answers } = inbox([permission]);
+    renderApp('/inbox');
+    await screen.findByText('Allow mcp__aws-billing__credits?');
+    fireEvent.click(
+      screen.getByRole('radio', { name: /Always allow every aws-billing tool in this project/ }),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: permission.id, body: { choice: 'allow_mcp_server' } }]);
     });
   });
 
@@ -603,7 +634,7 @@ describe('InboxView', () => {
       await screen.findByText('Which badge color?');
       key('4');
       key('Enter');
-      expect(await screen.findByText('Choose an option first (1–4).')).toBeTruthy();
+      expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
       expect(answers).toEqual([]);
     });
   });

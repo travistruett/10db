@@ -81,6 +81,7 @@ function conversation(project = seedProject(base)): {
 function shapeBroker(
   owner: ReturnType<typeof conversation>,
   signal: AbortSignal = new AbortController().signal,
+  mcpApproved?: Record<string, string>,
 ) {
   return createPermissionBroker(
     { state, inbox, git: NO_GIT, logger: silentLogger },
@@ -94,6 +95,7 @@ function shapeBroker(
         onWaitEnd: (item) => waits.push(`end ${item.title}`),
       },
       signal,
+      ...(mcpApproved === undefined ? {} : { mcpApproved }),
       sandbox: { fileAccess, hazards: [], commandsAsk: true },
     },
   );
@@ -176,6 +178,42 @@ describe('a Plan conversation asks through the permission broker', () => {
     ).toEqual([['mcp__aws-billing__cost-explorer', null, null]]);
     const again = await shapeBroker(owner)(request('mcp__aws-billing__cost-explorer', { a: 2 }));
     expect(again).toEqual({ behavior: 'allow' });
+    expect(openCards()).toEqual([]);
+  });
+
+  it('offers the server choice on a project tool only, and it covers the next conversation', async () => {
+    const hash = 'e'.repeat(64);
+    const listed = ['mcp__aws-billing__cost-explorer', 'mcp__aws-billing__credits'];
+    const owner = conversation();
+    // A command is not a project tool: no server choice.
+    void shapeBroker(owner, undefined, { 'aws-billing': hash })({
+      ...request('Bash', { command: 'pnpm test' }),
+      listedTools: listed,
+    }).catch(() => undefined);
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.AllowProject,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.Deny });
+    await settle();
+
+    const first = shapeBroker(owner, undefined, { 'aws-billing': hash })({
+      ...request('mcp__aws-billing__cost-explorer', { a: 1 }),
+      listedTools: listed,
+    });
+    expect(onlyOpenCard().options.map((o) => o.label)).toEqual([
+      PermissionChoice.AllowOnce,
+      PermissionChoice.AllowProject,
+      PermissionChoice.AllowMcpServer,
+      PermissionChoice.Deny,
+    ]);
+    inbox.answer(onlyOpenCard().id, { choice: PermissionChoice.AllowMcpServer });
+    expect(await first).toEqual({ behavior: 'allow' });
+    const next = await shapeBroker(owner, undefined, { 'aws-billing': hash })(
+      request('mcp__aws-billing__credits', {}),
+    );
+    expect(next).toEqual({ behavior: 'allow' });
     expect(openCards()).toEqual([]);
   });
 

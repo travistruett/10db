@@ -121,6 +121,8 @@ export interface McpApproval {
 export interface ProjectMcp {
   /** Approved servers, ready to pass to a managed session next to 10db's own. */
   readonly servers: Readonly<Record<string, ProjectMcpServer>>;
+  /** The config hash the builder approved for each server in `servers`: what the session runs. */
+  readonly configHashes: Readonly<Record<string, string>>;
   readonly warnings: readonly string[];
   /** Servers with no verdict for their current config: each needs an approval card. */
   readonly pending: readonly McpServerReview[];
@@ -409,6 +411,7 @@ export function resolveProjectMcp(input: {
   readonly approvalFor: (review: McpServerReview) => McpApproval | null;
 }): ProjectMcp {
   const servers: Record<string, ProjectMcpServer> = {};
+  const configHashes: Record<string, string> = {};
   const pending: McpServerReview[] = [];
   const denied: string[] = [];
   const failures: { name: string; message: string }[] = [];
@@ -425,13 +428,14 @@ export function resolveProjectMcp(input: {
           { env: input.env, approved: new Set(approval.variables) },
           approval.hosts,
         );
+        configHashes[server.name] = server.review.configHash;
       } catch (error) {
         if (!(error instanceof ProjectMcpError)) throw error;
         failures.push({ name: server.name, message: error.message });
       }
     }
   }
-  return { servers, warnings: input.repo.warnings, pending, denied, failures };
+  return { servers, configHashes, warnings: input.repo.warnings, pending, denied, failures };
 }
 
 /** The AWS profile a stdio server's `env` block names as a literal, else null: a `${` is read from the project env. */

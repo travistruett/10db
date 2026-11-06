@@ -10,6 +10,9 @@ import {
   commandPrefix,
   matchesAllowedTool,
   matchPermissionRule,
+  mcpGrantRules,
+  mcpServerPattern,
+  mcpToolGrant,
   storableRule,
 } from './index';
 
@@ -755,6 +758,205 @@ describe('matchPermissionRule', () => {
 
   it('does not apply a rule to another tool', () => {
     expect(match('Read', bash('docker compose up'), [rule('Bash', 'docker compose')])).toBe(false);
+  });
+});
+
+describe('a project rule for every tool an approved MCP server listed', () => {
+  const HASH_A = 'a'.repeat(64);
+  const HASH_B = 'b'.repeat(64);
+  const rule = (toolName: string, pattern: string | null): PermissionRuleDto => ({
+    id: mintId('PermissionRule'),
+    projectId: mintId('Project'),
+    workstreamId: null,
+    toolName,
+    pattern,
+    sourceInboxId: null,
+    foundIn: null,
+    createdAt: '2026-11-05T12:00:00.000Z',
+  });
+  const COST = 'mcp__aws-billing__cost-explorer';
+  const granted = [
+    rule(COST, mcpServerPattern('aws-billing', HASH_A)),
+    rule('mcp__aws-billing__credits', mcpServerPattern('aws-billing', HASH_A)),
+  ];
+  const runs = (
+    toolName: string,
+    rules: PermissionRuleDto[],
+    approved?: Record<string, string>,
+    paths?: { realPaths: string[] },
+  ): boolean => matchPermissionRule({ toolName, input: {} }, rules, paths, approved) !== undefined;
+
+  it.each<
+    [
+      string,
+      string,
+      PermissionRuleDto[],
+      Record<string, string> | undefined,
+      { realPaths: string[] } | undefined,
+      boolean,
+    ]
+  >([
+    ['a listed tool, config unchanged', COST, granted, { 'aws-billing': HASH_A }, undefined, true],
+    [
+      'another listed tool of the server',
+      'mcp__aws-billing__credits',
+      granted,
+      { 'aws-billing': HASH_A },
+      undefined,
+      true,
+    ],
+    [
+      'in a sandboxed lane (real paths in hand)',
+      COST,
+      granted,
+      { 'aws-billing': HASH_A },
+      { realPaths: [] },
+      true,
+    ],
+    [
+      'a tool the server added after the answer',
+      'mcp__aws-billing__session-sql',
+      granted,
+      { 'aws-billing': HASH_A },
+      undefined,
+      false,
+    ],
+    ['the approved config changed', COST, granted, { 'aws-billing': HASH_B }, undefined, false],
+    ['the server is not approved in this session', COST, granted, {}, undefined, false],
+    ['no approvals given', COST, granted, undefined, undefined, false],
+    [
+      'another server with the same tool name',
+      'mcp__other__cost-explorer',
+      granted,
+      { 'aws-billing': HASH_A, other: HASH_A },
+      undefined,
+      false,
+    ],
+    [
+      'a rule whose pattern names a different server than its tool',
+      'mcp__other__x',
+      [rule('mcp__other__x', mcpServerPattern('aws-billing', HASH_A))],
+      { 'aws-billing': HASH_A, other: HASH_A },
+      undefined,
+      false,
+    ],
+    [
+      'a rule whose pattern is not a server grant',
+      COST,
+      [rule(COST, '/etc')],
+      { 'aws-billing': HASH_A },
+      undefined,
+      false,
+    ],
+    [
+      'a legacy single-tool rule with no pattern still allows its tool',
+      COST,
+      [rule(COST, null)],
+      undefined,
+      undefined,
+      true,
+    ],
+    [
+      'a legacy single-tool rule does not cover a sibling tool',
+      'mcp__aws-billing__credits',
+      [rule(COST, null)],
+      { 'aws-billing': HASH_A },
+      undefined,
+      false,
+    ],
+  ])('%s -> %s', (_name, tool, rules, approved, paths, expected) => {
+    expect(runs(tool, rules, approved, paths)).toBe(expected);
+  });
+
+  it('never lets a grant pattern allow a non-MCP tool', () => {
+    const forBash = [rule('Bash', mcpServerPattern('aws-billing', HASH_A))];
+    expect(
+      matchPermissionRule({ toolName: 'Bash', input: { command: 'ls' } }, forBash, undefined, {
+        'aws-billing': HASH_A,
+      }),
+    ).toBeUndefined();
+  });
+
+  describe('mcpToolGrant: what a card offers', () => {
+    const approved = { 'aws-billing': HASH_A, other: HASH_B, a: HASH_A, a__b: HASH_B };
+    const listed = [
+      'Bash',
+      'Read',
+      'mcp__10db__commit',
+      'mcp__aws-billing__cost-explorer',
+      'mcp__aws-billing__credits',
+      'mcp__other__cost-explorer',
+    ];
+
+    it.each<[string, string, string[], ReturnType<typeof mcpToolGrant>]>([
+      [
+        'a tool of an approved server gets every tool the server listed',
+        COST,
+        listed,
+        {
+          name: 'aws-billing',
+          configHash: HASH_A,
+          tools: ['mcp__aws-billing__cost-explorer', 'mcp__aws-billing__credits'],
+        },
+      ],
+      ['a tool the server did not list gets no grant', 'mcp__aws-billing__new', listed, null],
+      ['Bash gets no grant', 'Bash', listed, null],
+      ['a file tool gets no grant', 'Read', listed, null],
+      ['a network ask gets no grant', 'SandboxNetworkAccess', listed, null],
+      ["10db's own server gets no grant", 'mcp__10db__commit', listed, null],
+      [
+        'a server with no approval in the session gets no grant',
+        'mcp__stranger__x',
+        ['mcp__stranger__x'],
+        null,
+      ],
+      ['a bare server prefix is not a tool', 'mcp__aws-billing__', ['mcp__aws-billing__'], null],
+      [
+        'the longest server name wins',
+        'mcp__a__b__x',
+        ['mcp__a__b__x', 'mcp__a__y'],
+        { name: 'a__b', configHash: HASH_B, tools: ['mcp__a__b__x'] },
+      ],
+    ])('%s', (_name, tool, tools, expected) => {
+      expect(mcpToolGrant(tool, tools, approved)).toEqual(expected);
+    });
+
+    it('reads a server name as Claude Code writes it in a tool name', () => {
+      expect(
+        mcpToolGrant('mcp__my_server__go', ['mcp__my_server__go', 'mcp__my_server__stop'], {
+          'my server': HASH_A,
+        }),
+      ).toEqual({
+        name: 'my server',
+        configHash: HASH_A,
+        tools: ['mcp__my_server__go', 'mcp__my_server__stop'],
+      });
+    });
+  });
+
+  describe('mcpGrantRules: the rules an answer stores', () => {
+    it('is one project rule per listed tool, each tied to the config hash', () => {
+      expect(
+        mcpGrantRules({
+          name: 'aws-billing',
+          configHash: HASH_A,
+          tools: [COST, 'mcp__aws-billing__credits'],
+        }),
+      ).toEqual([
+        { toolName: COST, pattern: mcpServerPattern('aws-billing', HASH_A) },
+        { toolName: 'mcp__aws-billing__credits', pattern: mcpServerPattern('aws-billing', HASH_A) },
+      ]);
+    });
+
+    it('drops a name that is not in the server', () => {
+      expect(
+        mcpGrantRules({
+          name: 'aws-billing',
+          configHash: HASH_A,
+          tools: ['mcp__other__x', 'Bash'],
+        }),
+      ).toEqual([]);
+    });
   });
 });
 

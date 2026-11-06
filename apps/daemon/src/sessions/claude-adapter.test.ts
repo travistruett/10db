@@ -565,6 +565,29 @@ describe('buildQueryOptions', () => {
     expect(result).toEqual({ behavior: 'deny', message: 'Parked', interrupt: true });
   });
 
+  it('hands canUseTool an MCP tool call the tool names the session lists as of the call, and no other call', async () => {
+    const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    let listed: string[] = ['Bash'];
+    const options = buildQueryOptions(spec({ canUseTool }), {
+      ...deps,
+      listedTools: () => Promise.resolve(listed),
+    });
+    const signal = new AbortController().signal;
+    const ask = (tool: string) =>
+      options.canUseTool?.(tool, {}, { signal, toolUseID: 'toolu_8', requestId: 'req_2' });
+    await ask('mcp__s__t');
+    listed = ['Bash', 'mcp__s__t'];
+    await ask('mcp__s__t');
+    await ask('Bash');
+    expect(canUseTool.mock.calls.map(([req]) => req.listedTools)).toEqual([
+      ['Bash'],
+      ['Bash', 'mcp__s__t'],
+      undefined,
+    ]);
+  });
+
   it('hands canUseTool the directory the hook gave for the same call', async () => {
     const canUseTool = vi.fn<SessionSpec['canUseTool']>(() =>
       Promise.resolve({ behavior: 'allow' }),

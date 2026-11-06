@@ -36,6 +36,7 @@ import {
   userMessage,
 } from './claude-mapping';
 import { startShapeSession } from './claude-shape';
+import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import { settleWithin } from './settle-within';
@@ -156,6 +157,8 @@ interface QueryDeps {
   readonly isRefused: () => boolean;
   /** The mode a sandboxed session runs in, over its spec's; `LANE_PERMISSION_MODE` when neither names one. */
   readonly lanePermissionMode?: LanePermissionMode;
+  /** The tool names the session has now, asked for a call to an MCP tool and handed to `canUseTool` with it. */
+  readonly listedTools?: () => Promise<readonly string[]>;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -313,6 +316,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
       const cwd = hookCwds.get(options.toolUseID);
       hookCwds.delete(options.toolUseID);
+      const listedTools = toolName.startsWith('mcp__') ? await deps.listedTools?.() : undefined;
       const decision = await spec.canUseTool({
         toolName,
         input,
@@ -320,6 +324,7 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
         escalated: isClassifierEscalation(options),
         signal: options.signal,
         ...(cwd === undefined ? {} : { cwd }),
+        ...(listedTools === undefined ? {} : { listedTools }),
       });
       // The session can be refused while the answer was pending.
       if (deps.isRefused())
@@ -427,6 +432,8 @@ function startSession(
   let started = false;
   /** The permission mode the first init reported; a later init that reports another is logged. */
   let firstInitMode: SDKSystemMessage['permissionMode'];
+  /** The tool names the latest init message listed. Repo MCP servers arrive after init, so they are asked for later. */
+  let initTools: readonly string[] = [];
   let ended = false;
   let stopRequested = false;
   let promptSent = false;
@@ -500,6 +507,14 @@ function startSession(
       pluginDir: opts.pluginDir,
       abortController,
       billingVerified,
+      listedTools: () =>
+        currentToolNames(
+          () => q.mcpServerStatus(),
+          initTools,
+          (error) => {
+            log.debug({ err: String(error) }, 'mcp server tool list unavailable');
+          },
+        ),
       ...(opts.lanePermissionMode === undefined
         ? {}
         : { lanePermissionMode: opts.lanePermissionMode }),
@@ -744,6 +759,7 @@ function startSession(
           }
         }
         if (msg.type === 'system' && msg.subtype === 'init') {
+          initTools = msg.tools;
           if (started) {
             // A later init (after a compaction or restart) is not checked again, but a mode other than the
             // first init's is logged, so a lane that left auto mode shows up.

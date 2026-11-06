@@ -535,6 +535,18 @@ describe('resolveProjectMcp', () => {
     });
   });
 
+  it('names the config hash of each approved server, and of no other', () => {
+    writeMcp({
+      mcpServers: { a: { command: 'a-mcp' }, b: { command: 'b-mcp' }, c: { command: 'c' } },
+    });
+    const hashes = Object.fromEntries(
+      readRepoMcp(repo.path).servers.map((s) => [s.name, s.review.configHash]),
+    );
+    const mcp = resolve({ a: approved(), b: { verdict: 'denied', variables: [], hosts: [] } });
+    expect(mcp.configHashes).toEqual({ a: hashes['a'] });
+    expect(Object.keys(mcp.servers)).toEqual(['a']);
+  });
+
   it('leaves a denied server out, without asking again', () => {
     writeMcp({ mcpServers: { mantine: { command: 'npx' } } });
     expect(resolve({ mantine: { verdict: 'denied', variables: [], hosts: [] } })).toMatchObject({
