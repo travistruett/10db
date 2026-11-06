@@ -516,7 +516,9 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     try {
       await mkdir(socketDir, { recursive: true, mode: SOCKET_DIR_MODE });
       const path = guardSocketPath(socketDir, spec.sessionId);
-      const socket = await openGuardSocket(path, judgeCall);
+      const socket = await openGuardSocket(path, judgeCall, (code) => {
+        log.error({ code }, 'the guard socket reported an error');
+      });
       if (done) {
         await socket.close();
         throw new SessionOver();

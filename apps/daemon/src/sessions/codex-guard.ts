@@ -20,36 +20,60 @@ export interface GuardCall {
 }
 
 const InputRecord = z.record(z.string(), z.unknown());
+const BashInput = z.looseObject({ command: z.string() });
 const PatchInput = z.looseObject({ command: z.string() });
 
 const PATCH_HEADERS = ['*** Add File: ', '*** Update File: ', '*** Delete File: ', '*** Move to: '];
 
+/** Lines of a patch that carry no path. */
+const PATCH_MARKERS = ['*** Begin Patch', '*** End Patch', '*** End of File'];
+
+/** Codex trims a line before it reads a hunk header, and its trim strips U+0085 where JavaScript's does not. */
+const edgeSpace = /^[\s\u0085]+|[\s\u0085]+$/g;
+
+interface ReadPatch {
+  readonly paths: readonly string[];
+  /** A line starts with `***` and is no marker Codex defines, so 10db cannot say what it does. */
+  readonly unknownMarker: boolean;
+}
+
+function readPatch(patch: string): ReadPatch {
+  const paths: string[] = [];
+  let unknownMarker = false;
+  for (const raw of patch.split('\n')) {
+    const line = raw.replace(edgeSpace, '');
+    if (!line.startsWith('***')) continue;
+    const header = PATCH_HEADERS.find((prefix) => line.startsWith(prefix));
+    if (header !== undefined) {
+      const path = line.slice(header.length).replace(edgeSpace, '');
+      if (path !== '') paths.push(path);
+    } else if (!PATCH_MARKERS.includes(line)) unknownMarker = true;
+  }
+  return { paths, unknownMarker };
+}
+
 /** Every path a patch adds, updates, deletes or moves, in order. */
 export function patchPaths(patch: string): readonly string[] {
-  const paths: string[] = [];
-  for (const line of patch.split('\n')) {
-    const header = PATCH_HEADERS.find((prefix) => line.startsWith(prefix));
-    if (header === undefined) continue;
-    const path = line.slice(header.length).trim();
-    if (path !== '') paths.push(path);
-  }
-  return paths;
+  return readPatch(patch).paths;
 }
 
 /**
  * The calls the guard judges for one hook call. A patch is one `Edit` per path, resolved against the
- * hook's `cwd`; `null` is a tool 10db doesn't know (or input it cannot read), which is refused.
+ * hook's `cwd`; `null` is a tool 10db doesn't know, input it cannot read or a patch it cannot read
+ * fully, which is refused.
  */
 export function guardCalls(hook: HookInput): readonly GuardCall[] | null {
   const name = hook.tool_name;
   if (name === 'Bash') {
-    const input = InputRecord.safeParse(hook.tool_input);
+    const input = BashInput.safeParse(hook.tool_input);
     return input.success ? [{ toolName: name, input: input.data }] : null;
   }
   if (name === 'apply_patch') {
     const input = PatchInput.safeParse(hook.tool_input);
     if (!input.success) return null;
-    return patchPaths(input.data.command).map((path) => ({
+    const { paths, unknownMarker } = readPatch(input.data.command);
+    if (unknownMarker) return null;
+    return paths.map((path) => ({
       toolName: 'Edit',
       input: { file_path: hook.cwd === undefined ? path : resolve(hook.cwd, path) },
     }));
@@ -65,9 +89,12 @@ export type GuardAnswer =
   | { readonly allow: true }
   | { readonly allow: false; readonly reason: string; readonly interrupt: boolean };
 
+const NO_REASON = '10db refused this call.';
+
+/** Codex runs a call whose `deny` has no reason, so a refusal always carries one. */
 const refuse = (reason: string, interrupt = false): GuardAnswer => ({
   allow: false,
-  reason,
+  reason: reason.trim() === '' ? NO_REASON : reason,
   interrupt,
 });
 
@@ -160,6 +187,7 @@ function denyBody(reason: string): string {
 export async function openGuardSocket(
   path: string,
   judge: (hook: HookInput, signal: AbortSignal) => Promise<GuardAnswer>,
+  onError: (code: string) => void = () => undefined,
 ): Promise<GuardSocket> {
   const closed = new AbortController();
 
@@ -191,6 +219,10 @@ export async function openGuardSocket(
       server.off('error', fail);
       done();
     });
+  });
+  // A failed accept (too many open files) emits `error`; unhandled it would end the daemon.
+  server.on('error', (error: NodeJS.ErrnoException) => {
+    onError(error.code ?? error.name);
   });
   try {
     await chmod(path, MODE_SOCKET);
