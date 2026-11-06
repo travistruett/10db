@@ -132,6 +132,7 @@ export async function createTestEngine(
       RunnerOptions,
       | 'afterSession'
       | 'logger'
+      | 'skillBody'
       | 'launcher'
       | 'laneSandbox'
       | 'identifyProcess'

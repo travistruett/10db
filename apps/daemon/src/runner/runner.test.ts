@@ -4639,6 +4639,30 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(seen?.env['CODEX_HOME']).toBe(seen?.configDir);
   });
 
+  it('warns once per skill a ChatGPT lane is briefed without, naming it', async () => {
+    const logs = captureLogs();
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        logger: logs.logger,
+        skillBody: (name) => (name === 'handoff' ? null : readSkillBody(name)),
+      },
+      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const warned = logs.lines().filter((l) => String(l['msg']).includes('skill'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({ level: 40, skill: 'handoff', workstreamId: workstream.id });
+    const prompt = engine.adapter.prompts[0]?.prompt ?? '';
+    expect(prompt).toContain(readSkillBody('test-first') ?? 'missing');
+    expect(prompt).not.toContain(readSkillBody('handoff') ?? 'missing');
+  });
+
   it.each([
     { kind: 'codex_signin' as const, provider: 'codex' },
     { kind: 'claude_subscription' as const, provider: 'claude' },

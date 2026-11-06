@@ -15,6 +15,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
+  type ProjectId,
   type ShapeId,
   type SystemCheckDto,
   type WorkstreamId,
@@ -869,6 +870,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     broker: screenBroker,
     filesDir: join(opts.dataDir, 'shapes'),
   });
+  // Judged on the account the conversation runs on, which can differ from the project's provider.
+  const brainstormRefusal = (projectId: ProjectId): string | null =>
+    providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
+      ? BRAINSTORM_REFUSED_ON_CHATGPT
+      : null;
   const shape = createShapeService({
     state,
     adapter,
@@ -892,12 +898,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
       toolTimeoutMs: SHAPE_TOOL_TIMEOUT_MS,
     },
+    brainstormRefusal,
     launch(projectId) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
-      // Judged on the account the conversation runs on, which can differ from the project's provider.
-      if (providerOf(row.kind) === Provider.Codex)
-        throw new InvalidError(BRAINSTORM_REFUSED_ON_CHATGPT);
+      const refusal = brainstormRefusal(projectId);
+      if (refusal !== null) throw new InvalidError(refusal);
       const profile = roleDefault({
         provider: project.provider,
         role: StepRole.Plan,

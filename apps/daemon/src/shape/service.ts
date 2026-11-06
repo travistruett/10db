@@ -1,7 +1,6 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
-  BRAINSTORM_REFUSED_ON_CHATGPT,
   ConflictError,
   EventType,
   InvalidError,
@@ -179,6 +178,11 @@ export interface ShapeServiceDeps {
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /** Resolves a project's launch; throws when its account can't start a session. */
   launch(projectId: ProjectId): ShapeLaunch;
+  /**
+   * Why a project's account can't run a conversation, or null. Reads the project and its account row
+   * only, so asking costs no Keychain read.
+   */
+  brainstormRefusal(projectId: ProjectId): string | null;
   /** Where each conversation's dropped files are kept: `<filesDir>/<shape>/files/`. */
   readonly filesDir: string;
   /** The starter's read of a pending join, which Convert refuses a change of areas over. */
@@ -526,12 +530,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
    * can't be resolved is left to the start that follows.
    */
   const refuseChatGptAccount = (projectId: ProjectId): void => {
-    try {
-      deps.launch(projectId);
-    } catch (error) {
-      if (error instanceof InvalidError && error.message === BRAINSTORM_REFUSED_ON_CHATGPT)
-        throw error;
-    }
+    const why = deps.brainstormRefusal(projectId);
+    if (why !== null) throw new InvalidError(why);
   };
   /** The limits a conversation's pictures are held to: its live session's, or the next one's. */
   const limitsOf = (shapeId: ShapeId, rt: Runtime): PictureLimits =>
@@ -1406,6 +1406,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     propose(shapeId) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       if (rt.current?.kind === 'propose' || rt.queue.some((t) => t.kind === 'propose'))
         return { status: 'ignored' };
@@ -1430,6 +1431,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     rehearse(shapeId, proposalIds) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };

@@ -1473,7 +1473,14 @@ export function createRunner(opts: RunnerOptions): Runner {
           ? {
               skillBodies: skills.flatMap((name) => {
                 const body = opts.skillBody(name);
-                return body === null ? [] : [body];
+                if (body === null) {
+                  opts.logger.warn(
+                    { workstreamId: id, skill: name },
+                    'a skill has no text to brief a Codex session with',
+                  );
+                  return [];
+                }
+                return [body];
               }),
             }
           : {}),

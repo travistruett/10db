@@ -287,8 +287,12 @@ function sandboxRulesFor(provider: Provider): readonly string[] {
 
 /** The rules, with Codex's edit tool in the edit rule when the session runs on Codex. */
 function rulesFor(provider: Provider, rules: readonly string[]): readonly string[] {
-  if (provider === Provider.Claude) return rules;
-  return rules.map((rule) => (rule === EDIT_RULE ? CODEX_EDIT_RULE : rule));
+  switch (provider) {
+    case Provider.Claude:
+      return rules;
+    case Provider.Codex:
+      return rules.map((rule) => (rule === EDIT_RULE ? CODEX_EDIT_RULE : rule));
+  }
 }
 
 /** The rules with the sandbox's lines after the commands line, when the session is sandboxed. */
@@ -516,12 +520,11 @@ function stepSection(input: PromptInput): string[] {
     `Your step: ${String(step.index + 1)} of ${String(step.count)}, ${step.role}, as ${step.personaName}.`,
   ];
   if (step.skills.length > 0) lines.push(`Skills to use: ${step.skills.join(', ')}.`);
+  const codex = input.provider === Provider.Codex;
   // A Codex session has no plugin, so the skills it names are in the briefing itself.
-  if (input.provider === Provider.Codex) {
-    for (const body of step.skillBodies ?? []) lines.push('', body);
-  }
+  if (codex) for (const body of step.skillBodies ?? []) lines.push('', body);
   if (step.instructions) lines.push('', `How you work:\n${step.instructions}`);
-  if (input.provider === Provider.Codex) lines.push('', CODEX_TOOL_NAMES);
+  if (codex) lines.push('', CODEX_TOOL_NAMES);
   if (input.priorResults.length > 0) {
     lines.push('', 'Earlier steps:');
     for (const prior of input.priorResults) {

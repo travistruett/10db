@@ -1,5 +1,7 @@
 import {
+  AccountCreatedDto,
   BatchDto,
+  BRAINSTORM_REFUSED_ON_CHATGPT,
   BoardColumnDto,
   BUILDER_INSTRUCTIONS,
   BuilderToolName,
@@ -976,6 +978,26 @@ describe('the builder MCP endpoint', () => {
       });
       expect(result.isError).toBe(true);
       expect(result.text).toMatch(says);
+      const listed = await fetch(`${daemon.url}/projects/${project.id}/shapes`, {
+        headers: { Authorization: `Bearer ${daemon.token}` },
+      });
+      expect(await listed.json()).toEqual([]);
+    });
+
+    it('refuses a project on a ChatGPT account with the daemon’s words, creating nothing', async () => {
+      const project = await seedProject();
+      const { account } = await api().post('/accounts', AccountCreatedDto, {
+        kind: 'codex_signin',
+        label: 'ChatGPT plan',
+      });
+      await api().patch(`/projects/${project.id}`, ProjectDto, { accountId: account.id });
+      const result = await call('start_shape', {
+        projectId: project.id,
+        title: 'Board polish',
+        summary: 'Summary',
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain(BRAINSTORM_REFUSED_ON_CHATGPT);
       const listed = await fetch(`${daemon.url}/projects/${project.id}/shapes`, {
         headers: { Authorization: `Bearer ${daemon.token}` },
       });
